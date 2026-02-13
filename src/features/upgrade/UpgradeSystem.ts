@@ -265,6 +265,14 @@ export class PlayerStats {
   }
 
   /**
+   * 获取精度（用于射击扰动）
+   */
+  public getAccuracy(): number {
+    // 基础精度 0.9（可以通过未来升级提升）
+    return 0.9;
+  }
+
+  /**
    * 获取升级管理器
    */
   public getUpgrades(): PlayerUpgrades {

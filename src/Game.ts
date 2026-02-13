@@ -785,6 +785,12 @@ export class Game {
 
     this.audioManager.playShoot();
 
+    // 添加射击扰动（模拟不完美瞄准）
+    const accuracy = this.playerStats.getAccuracy();
+    const perturbationStrength = (1 - accuracy) * 0.12; // 根据玩家精度计算扰动强度
+    const perturbationAngle = (Math.random() - 0.5) * perturbationStrength;
+    forward.applyAxisAngle(new THREE.Vector3(0, 1, 0), perturbationAngle);
+
     // 检查多重射击
     if (this.powerUpManager.hasEffect(PowerUpType.MULTISHOT)) {
       // 发射三发

@@ -119,15 +119,23 @@ export class EnemyAI {
 
     // 计算roll：根据yaw变化自动倾斜（模拟真实飞机转向）
     // 左转时向左倾斜（负roll），右转时向右倾斜（正roll）
+    // 限制roll在合理范围内（±20度 ≈ ±0.35弧度）
+    const maxRoll = 0.35;
     let targetRollValue = 0;
+
     if (Math.abs(yawDiff) > 0.01) {
       // yaw改变越大，倾斜越明显
-      targetRollValue = Math.max(-0.4, Math.min(0.4, yawDiff * 0.8));
+      // 使用归一化后的yawDiff，避免剧烈翻滚
+      const normalizedYawDiff = Math.max(-0.5, Math.min(0.5, yawDiff));
+      targetRollValue = normalizedYawDiff * 0.5; // 减小系数，避免过度倾斜
     }
 
-    // 平滑更新roll
+    // 钳制roll值
+    targetRollValue = Math.max(-maxRoll, Math.min(maxRoll, targetRollValue));
+
+    // 平滑更新roll，使用较小的平滑系数
     let rollDiff = targetRollValue - euler.z;
-    const newRoll = euler.z + rollDiff * 0.15;
+    const newRoll = euler.z + rollDiff * 0.08;
 
     // 应用新的旋转
     this.mesh.rotation.set(newPitch, newYaw, newRoll);
@@ -160,6 +168,9 @@ export class EnemyAI {
 
     const distance = this.mesh.position.distanceTo(playerPosition);
 
+    // 记录当前状态，用于检测状态切换
+    const previousState = this.fsm.getState();
+
     // 更新状态机
     this.fsm.update(
       deltaTime,
@@ -167,6 +178,15 @@ export class EnemyAI {
       this.health.getCurrentHealth(),
       this.health.getMaxHealth()
     );
+
+    // 检测状态切换，重置目标角度避免突然转向
+    const currentState = this.fsm.getState();
+    if (previousState !== currentState) {
+      // 状态切换了，重置目标角度到当前角度
+      const euler = new THREE.Euler().setFromQuaternion(this.mesh.quaternion);
+      this.targetYaw = euler.y;
+      this.targetPitch = euler.x;
+    }
 
     // 根据状态执行行为
     switch (this.fsm.getState()) {
