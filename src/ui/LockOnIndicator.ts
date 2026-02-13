@@ -159,7 +159,7 @@ export class LockOnIndicator {
    * @param enemies 敌人列表
    * @param camera 相机
    * @param deltaTime 时间增量
-   * @param enemyScreenPos 敌人UI屏幕位置（未使用，保留兼容性）
+   * @param _enemyScreenPos 敌人UI屏幕位置（未使用，保留兼容性）
    * @returns 锁定是否完成
    */
   public update(
@@ -167,7 +167,7 @@ export class LockOnIndicator {
     enemies: THREE.Object3D[],
     camera: THREE.Camera,
     deltaTime: number,
-    enemyScreenPos: { x: number; y: number } | null
+    _enemyScreenPos: { x: number; y: number } | null
   ): boolean {
     if (!this.isLockingOn) {
       return false;

@@ -6,9 +6,9 @@ import * as THREE from 'three';
  */
 export class SpawnBalloon {
   private group: THREE.Group;
-  private glowSphere: THREE.Mesh;
-  private ring: THREE.Mesh;
-  private starParticles: THREE.Points;
+  private glowSphere!: THREE.Mesh;
+  private ring!: THREE.Mesh;
+  private starParticles!: THREE.Points;
 
   private lifetime: number = 0;
   private maxLifetime: number = 2; // 2秒生成时间

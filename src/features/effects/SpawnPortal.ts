@@ -6,13 +6,13 @@ import * as THREE from 'three';
  */
 export class SpawnPortal {
   private group: THREE.Group;
-  private ring1: THREE.Mesh;
-  private ring2: THREE.Mesh;
-  private ring3: THREE.Mesh;
-  private coreSphere: THREE.Mesh;
-  private outerGlow: THREE.Mesh;
+  private ring1!: THREE.Mesh;
+  private ring2!: THREE.Mesh;
+  private ring3!: THREE.Mesh;
+  private coreSphere!: THREE.Mesh;
+  private outerGlow!: THREE.Mesh;
 
-  private particleSystem: THREE.Points;
+  private particleSystem!: THREE.Points;
   private particleCount: number = 100;
   private particleSpeeds: number[] = [];
 

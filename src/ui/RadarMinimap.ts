@@ -166,7 +166,7 @@ export class RadarMinimap {
 
       // 转换到雷达坐标系（向上为正，即 Y 轴负方向）
       const dx = rotatedX * scale;
-      const dy = rotatedZ * scale; // 修正：Z轴正方向对应屏幕Y负方向（向上）
+      const dy = -rotatedZ * scale; // 修正：Z轴正方向对应屏幕Y负方向（向上），需要取反
 
       // 绘制敌人点
       if (enemy.isSpawning) {
@@ -223,7 +223,7 @@ export class RadarMinimap {
 
       // 转换到雷达坐标系（向上为正，即 Y 轴负方向）
       const dx = rotatedX * scale;
-      const dy = rotatedZ * scale; // 修正：Z轴正方向对应屏幕Y负方向（向上）
+      const dy = -rotatedZ * scale; // 修正：Z轴正方向对应屏幕Y负方向（向上），需要取反
 
       // 绘制气球点（青色/亮蓝色）
       this.ctx.beginPath();

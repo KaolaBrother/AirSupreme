@@ -15,9 +15,9 @@ export class HUD {
   private livesDisplay: HTMLDivElement;
   private missilesDisplay: HTMLDivElement;
   private powerUpDisplay: HTMLDivElement;  // 道具提示显示
+  private gameOverDisplay: HTMLDivElement; // 游戏结束显示
 
   private powerUpTimer: number = 0;  // 道具提示显示计时器
-  private activePowerUpType: string = '';  // 当前激活的道具类型
   private activePowerUpDuration: number = 0;  // 道具持续时间
 
   constructor() {
@@ -125,6 +125,42 @@ export class HUD {
     `;
     this.powerUpDisplay.textContent = '';
 
+    // 游戏结束显示（居中覆盖层）
+    this.gameOverDisplay = document.createElement('div');
+    this.gameOverDisplay.style.cssText = `
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      background: rgba(0, 0, 0, 0.8);
+      z-index: 100;
+      opacity: 0;
+      transition: opacity 0.5s;
+      pointer-events: none;
+    `;
+    this.gameOverDisplay.innerHTML = `
+      <div style="
+        text-align: center;
+        color: #ff3333;
+        font-size: ${isMobile ? '48px' : '72px'};
+        font-weight: bold;
+        text-shadow: 0 0 20px rgba(255, 0, 0, 0.8), 4px 4px 8px rgba(0, 0, 0, 1);
+        margin-bottom: 30px;
+        animation: pulse 1s ease-in-out infinite;
+      ">GAME OVER</div>
+      <div id="final-score" style="
+        color: #ffdd00;
+        font-size: ${isMobile ? '24px' : '36px'};
+        font-weight: bold;
+        text-shadow: 2px 2px 4px rgba(0, 0, 0, 1);
+      "></div>
+    `;
+
     this.container.appendChild(this.healthBarContainer);
     this.container.appendChild(this.healthText);
     this.container.appendChild(this.scoreDisplay);
@@ -134,6 +170,7 @@ export class HUD {
     this.container.appendChild(this.missilesDisplay);
     this.container.appendChild(this.powerUpDisplay);
     document.body.appendChild(this.container);
+    document.body.appendChild(this.gameOverDisplay);
   }
 
   /**
@@ -275,7 +312,6 @@ export class HUD {
    * @param duration 持续时间（秒），0表示永久
    */
   public showPowerUp(name: string, icon: string, duration: number = 0): void {
-    this.activePowerUpType = name;
     this.activePowerUpDuration = duration;
     this.powerUpDisplay.textContent = `${icon} ${name}`;
     this.powerUpDisplay.style.opacity = '1';
@@ -305,7 +341,6 @@ export class HUD {
    */
   public hidePowerUp(): void {
     this.powerUpDisplay.style.opacity = '0';
-    this.activePowerUpType = '';
     this.activePowerUpDuration = 0;
     this.powerUpTimer = 0;
   }
@@ -322,5 +357,25 @@ export class HUD {
    */
   public show(): void {
     this.container.style.display = 'block';
+  }
+
+  /**
+   * 显示游戏结束
+   */
+  public showGameOver(finalScore: number): void {
+    const scoreElement = this.gameOverDisplay.querySelector('#final-score');
+    if (scoreElement) {
+      scoreElement.textContent = `最终得分: ${finalScore}`;
+    }
+    this.gameOverDisplay.style.opacity = '1';
+    this.gameOverDisplay.style.pointerEvents = 'auto';
+  }
+
+  /**
+   * 隐藏游戏结束
+   */
+  public hideGameOver(): void {
+    this.gameOverDisplay.style.opacity = '0';
+    this.gameOverDisplay.style.pointerEvents = 'none';
   }
 }

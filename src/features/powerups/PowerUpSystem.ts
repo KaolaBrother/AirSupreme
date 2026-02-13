@@ -196,6 +196,9 @@ export class PowerUpManager {
         effect.dispose();
       }
     }
+
+    // 更新活跃道具计时器
+    this.updateActivePowerUps(deltaTime);
   }
 
   /**
@@ -326,6 +329,59 @@ export class PowerUpManager {
     if (index !== -1) {
       balloon.dispose(this.scene);
       this.balloons.splice(index, 1);
+    }
+  }
+
+  /**
+   * 添加活跃道具效果（手动触发，比如气球被打破时）
+   */
+  public addActivePowerUp(type: PowerUpType, config: PowerUpConfig): void {
+    const now = Date.now();
+
+    // 检查是否已有此效果
+    if (this.activePowerUps.some(p => p.type === type)) {
+      // 刷新已有效果的持续时间
+      const existing = this.activePowerUps.find(p => p.type === type);
+      if (existing && config.duration > 0) {
+        existing.remainingTime = config.duration;
+        existing.startTime = now;
+        console.log(`刷新道具效果: ${config.name}`);
+      }
+      return;
+    }
+
+    // 添加新效果
+    const activePowerUp: ActivePowerUp = {
+      type,
+      config,
+      remainingTime: config.duration,
+      startTime: now,
+    };
+    this.activePowerUps.push(activePowerUp);
+    console.log(`激活道具效果: ${config.name}, 持续时间: ${config.duration}秒`);
+
+    // 触发回调
+    this.onPowerUpCollected?.(type, config);
+  }
+
+  /**
+   * 更新活跃道具计时器
+   */
+  public updateActivePowerUps(deltaTime: number): void {
+    for (let i = this.activePowerUps.length - 1; i >= 0; i--) {
+      const powerUp = this.activePowerUps[i];
+
+      if (powerUp.config.duration > 0) {
+        // 减少剩余时间
+        powerUp.remainingTime -= deltaTime;
+
+        if (powerUp.remainingTime <= 0) {
+          // 效果过期
+          console.log(`道具效果过期: ${powerUp.config.name}`);
+          this.onPowerUpExpired?.(powerUp.type);
+          this.activePowerUps.splice(i, 1);
+        }
+      }
     }
   }
 }

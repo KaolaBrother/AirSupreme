@@ -6,7 +6,7 @@ import { GAME_CONSTANTS } from '@/config';
  * 导弹类
  */
 export class Missile {
-  public mesh: THREE.Mesh;
+  public mesh: THREE.Group;
   public velocity: THREE.Vector3;
   public target: THREE.Object3D | null;
   public active: boolean = true;
@@ -30,21 +30,23 @@ export class Missile {
     // 记录发射位置
     this.startPosition = position.clone();
 
-    // 导弹模型（增大尺寸）
-    const geometry = new THREE.ConeGeometry(0.4, 2.5, 16);
-    const material = new THREE.MeshStandardMaterial({
+    // 导弹模型 - 使用父容器来正确控制朝向
+    this.mesh = new THREE.Group();
+
+    // 创建锥体（导弹弹头）
+    const coneGeometry = new THREE.ConeGeometry(0.4, 2.5, 16);
+    const coneMaterial = new THREE.MeshStandardMaterial({
       color: 0xff4444,
       emissive: 0xff0000,
       emissiveIntensity: 0.5,
       metalness: 0.8,
       roughness: 0.2,
     });
-    this.mesh = new THREE.Mesh(geometry, material);
-    this.mesh.rotation.x = Math.PI / 2; // 指向前方
-    this.mesh.castShadow = true;
-    this.mesh.position.copy(position);
+    const cone = new THREE.Mesh(coneGeometry, coneMaterial);
+    cone.rotation.x = -Math.PI / 2; // 旋转锥体让尖头朝 Z+ 方向（向前）
+    this.mesh.add(cone);
 
-    // 增强尾焰效果（更大更明显）
+    // 增强尾焰效果
     const trailGeometry = new THREE.ConeGeometry(0.25, 2, 16);
     const trailMaterial = new THREE.MeshBasicMaterial({
       color: 0xffdd00,
@@ -55,6 +57,9 @@ export class Missile {
     this.trail.rotation.x = -Math.PI / 2;
     this.trail.position.z = 1.5;
     this.mesh.add(this.trail);
+
+    // 设置导弹位置为发射位置
+    this.mesh.position.copy(position);
 
     scene.add(this.mesh);
     this.velocity = new THREE.Vector3();
@@ -69,6 +74,12 @@ export class Missile {
     } else {
       // 没有目标时，向前发射
       this.velocity.set(0, 0, -this.speed);
+    }
+
+    // 立即设置导弹朝向（与速度方向一致）
+    if (this.velocity.length() > 0) {
+      const lookTarget = this.mesh.position.clone().add(this.velocity);
+      this.mesh.lookAt(lookTarget);
     }
   }
 
@@ -100,7 +111,7 @@ export class Missile {
     }
 
     // 如果目标被摧毁，尝试寻找新目标
-    if (!this.target || !this.target.parent) {
+    if (!this.target || (this.target && !this.target.parent)) {
       if (!this.hasRetargeted) {
         // 尝试重新锁定目标
         const newTarget = this.findNearestEnemy();
@@ -120,10 +131,18 @@ export class Missile {
     // 移动导弹
     this.mesh.position.add(this.velocity.clone().multiplyScalar(deltaTime));
 
-    // 更新朝向
-    if (this.velocity.length() > 0.1) {
-      const lookTarget = this.mesh.position.clone().add(this.velocity);
-      this.mesh.lookAt(lookTarget);
+    // 更新朝向（使用四元数直接指向速度方向）
+    if (this.velocity.length() > 0) {
+      // 创建目标位置
+      const targetPos = this.mesh.position.clone().add(this.velocity);
+
+      // 创建临时对象来计算正确的四元数
+      const dummy = new THREE.Object3D();
+      dummy.position.copy(this.mesh.position);
+      dummy.lookAt(targetPos);
+
+      // 平滑插值到目标朝向（避免突然转向）
+      this.mesh.quaternion.slerp(dummy.quaternion, 0.3);
     }
 
     // 创建尾焰粒子效果（每帧生成）

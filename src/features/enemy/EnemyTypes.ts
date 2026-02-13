@@ -55,7 +55,7 @@ export const ENEMY_CONFIGS: Record<EnemyType, EnemyConfig> = {
     damage: 10,
     detectionRange: 120,
     attackRange: 25,
-    attackCooldown: 2.0,    // 增加冷却: 1.5 -> 2.0
+    attackCooldown: 0.4,    // 增加冷却: 1.5 -> 2.0 -> 0.4（提高攻击频率5倍）
     evasionChance: 0.3,     // 降低闪避: 0.6 -> 0.3
     accuracy: 0.4,          // 降低精度: 0.5 -> 0.4
     turnSpeed: 1.5,         // 降低转向: 3.0 -> 1.5
@@ -74,7 +74,7 @@ export const ENEMY_CONFIGS: Record<EnemyType, EnemyConfig> = {
     damage: 15,
     detectionRange: 100,
     attackRange: 30,
-    attackCooldown: 2.5,    // 增加冷却: 2.0 -> 2.5
+    attackCooldown: 0.5,    // 增加冷却: 2.0 -> 2.5 -> 0.5（提高攻击频率5倍）
     evasionChance: 0.15,    // 降低闪避: 0.3 -> 0.15
     accuracy: 0.5,          // 降低精度: 0.7 -> 0.5
     turnSpeed: 1.0,         // 降低转向: 2.0 -> 1.0
@@ -93,7 +93,7 @@ export const ENEMY_CONFIGS: Record<EnemyType, EnemyConfig> = {
     damage: 30,
     detectionRange: 80,
     attackRange: 40,
-    attackCooldown: 4.0,    // 增加冷却: 3.0 -> 4.0
+    attackCooldown: 0.8,    // 增加冷却: 3.0 -> 4.0 -> 0.8（提高攻击频率5倍）
     evasionChance: 0.02,    // 降低闪避: 0.05 -> 0.02
     accuracy: 0.6,          // 降低精度: 0.9 -> 0.6
     turnSpeed: 0.4,         // 降低转向: 0.8 -> 0.4
@@ -112,7 +112,7 @@ export const ENEMY_CONFIGS: Record<EnemyType, EnemyConfig> = {
     damage: 40,
     detectionRange: 200,
     attackRange: 80,
-    attackCooldown: 5.0,    // 增加冷却: 4.0 -> 5.0
+    attackCooldown: 1.0,    // 增加冷却: 4.0 -> 5.0 -> 1.0（提高攻击频率5倍）
     evasionChance: 0.2,     // 降低闪避: 0.4 -> 0.2
     accuracy: 0.7,          // 降低精度: 0.95 -> 0.7
     turnSpeed: 0.8,         // 降低转向: 1.5 -> 0.8
@@ -131,7 +131,7 @@ export const ENEMY_CONFIGS: Record<EnemyType, EnemyConfig> = {
     damage: 25,
     detectionRange: 150,
     attackRange: 35,
-    attackCooldown: 2.0,    // 增加冷却: 1.2 -> 2.0
+    attackCooldown: 0.4,    // 增加冷却: 1.2 -> 2.0 -> 0.4（提高攻击频率5倍）
     evasionChance: 0.4,     // 降低闪避: 0.8 -> 0.4
     accuracy: 0.6,          // 降低精度: 0.85 -> 0.6
     turnSpeed: 2.0,         // 降低转向: 4.0 -> 2.0

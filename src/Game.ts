@@ -75,8 +75,7 @@ export class Game {
   private isRespawning: boolean = false;
   private respawnTimer: number = 0;
   private respawnDelay: number = 2;
-  private invincibleTimer: number = 0;
-  private invincibleDuration: number = 3;
+  private deathPosition?: THREE.Vector3; // 存储死亡位置
 
   // 音频初始化标志
   private audioInitialized: boolean = false;
@@ -91,7 +90,7 @@ export class Game {
 
     // 创建玩家
     this.playerAircraft = this.createPlayerAircraft();
-    this.playerController = new PlayerController(this.playerAircraft);
+    this.playerController = new PlayerController(this.playerAircraft, this.gameScene.scene);
     this.playerHealth = new HealthSystem(this.playerStats.getMaxHealth());
 
     // 设置相机
@@ -152,7 +151,7 @@ export class Game {
   private setupCallbacks(): void {
     // 玩家生命值回调
     this.playerHealth.onDamage = () => {
-      if (!this.shieldActive && !this.isRespawning && this.invincibleTimer <= 0) {
+      if (!this.shieldActive && !this.isRespawning) {
         this.audioManager.playHit();
         this.particleSystem.createHit(this.playerAircraft.position);
       }
@@ -202,6 +201,9 @@ export class Game {
           this.missileCount++;
           this.hud.updateMissiles(this.missileCount);
         }
+
+        // 清理敌人资源
+        enemy.dispose();
       };
     };
 
@@ -242,7 +244,7 @@ export class Game {
   /**
    * 气球销毁处理方法
    */
-  private onBalloonDestroyed(balloon: BalloonPowerUp, _type: PowerUpType, config: PowerUpConfig): void {
+  private onBalloonDestroyed(_balloon: BalloonPowerUp, _type: PowerUpType, config: PowerUpConfig): void {
     console.log(`气球被打破: ${config.name}`);
 
     // 播放气球打破音效
@@ -258,12 +260,15 @@ export class Game {
   private onPlayerDeath(): void {
     this.lives--;
 
+    // 存储死亡位置（用于原地复活）
+    this.deathPosition = this.playerAircraft.position.clone();
+
     // 停止引擎声
     this.audioManager.stopEngine();
 
     // 播放爆炸效果
     this.audioManager.playExplosion();
-    this.particleSystem.createExplosion(this.playerAircraft.position, 2);
+    this.particleSystem.createExplosion(this.playerAircraft.position.clone(), 2);
 
     // 取消导弹锁定
     this.lockOnIndicator.cancelLockOn();
@@ -272,9 +277,10 @@ export class Game {
     this.playerAircraft.visible = false;
 
     if (this.lives <= 0) {
-      // 游戏结束
+      // 游戏结束 - 显示游戏结束画面
       this.gameState.setStatus(GameStatus.GAME_OVER);
       this.audioManager.playGameOver();
+      this.hud.showGameOver(this.gameState.getScore());
       console.log('游戏结束！最终得分:', this.gameState.getScore());
     } else {
       // 开始复活
@@ -291,10 +297,17 @@ export class Game {
     // 重置生命值
     this.playerHealth.reset();
 
-    // 重置位置到原点附近
-    this.playerAircraft.position.set(0, 0, 0);
+    // 在死亡位置重生（不重置位置到原点）
+    if (this.deathPosition) {
+      this.playerAircraft.position.copy(this.deathPosition);
+    }
+
+    // 重置旋转（让飞机保持水平）
     this.playerAircraft.rotation.set(0, 0, 0);
     this.playerAircraft.quaternion.set(0, 0, 0, 1);
+
+    // 播放重生动画效果（光柱效果）
+    this.particleSystem.createExplosion(this.playerAircraft.position.clone(), 1.5);
 
     // 显示飞机
     this.playerAircraft.visible = true;
@@ -303,14 +316,15 @@ export class Game {
     this.missileCount = GAME_CONSTANTS.MISSILE.STARTING_MISSILES;
     this.hud.updateMissiles(this.missileCount);
 
-    // 开始无敌时间
-    this.invincibleTimer = this.invincibleDuration;
-    this.isRespawning = false;
+    // 自动激活10秒护盾
+    this.powerUpManager.addActivePowerUp(PowerUpType.SHIELD, POWER_UP_CONFIGS[PowerUpType.SHIELD]);
 
     // 重新开始引擎声
     this.audioManager.startEngine();
 
-    console.log('复活成功！');
+    this.isRespawning = false;
+
+    console.log('原地复活成功！');
   }
 
   /**
@@ -448,18 +462,7 @@ export class Game {
       if (this.respawnTimer <= 0) {
         this.respawnPlayer();
       }
-      return;
-    }
-
-    // 更新无敌时间
-    if (this.invincibleTimer > 0) {
-      this.invincibleTimer -= deltaTime;
-      // 闪烁效果
-      if (this.playerAircraft.visible) {
-        this.playerAircraft.visible = Math.floor(this.invincibleTimer * 10) % 2 === 0;
-      }
-    } else {
-      this.playerAircraft.visible = true;
+      // 不要 return - 继续更新镜头和粒子系统，让爆炸动画播放完
     }
 
     // 更新敌人指示器
@@ -475,31 +478,34 @@ export class Game {
 
     const input = this.inputHandler.getState();
 
-    // 更新玩家
-    this.playerController.update(deltaTime, input);
+    // 只在非复活期间更新玩家控制
+    if (!this.isRespawning) {
+      // 更新玩家
+      this.playerController.update(deltaTime, input);
 
-    // 检测坠机（撞击地面）
-    const playerPos = this.playerController.getPosition();
-    const GROUND_LEVEL = -45; // 地面高度阈值
-    if (playerPos.y < GROUND_LEVEL && this.gameState.isPlaying()) {
-      // 玩家撞击地面 - 立即死亡
-      this.playerHealth.takeDamage(1000); // 造成致命伤害
-      this.audioManager.playExplosion();
-      this.particleSystem.createExplosion(playerPos.clone(), 3);
+      // 检测坠机（撞击地面）
+      const playerPos = this.playerController.getPosition();
+      const GROUND_LEVEL = -45; // 地面高度阈值
+      if (playerPos.y < GROUND_LEVEL && this.gameState.isPlaying()) {
+        // 玩家撞击地面 - 立即死亡
+        this.playerHealth.takeDamage(1000); // 造成致命伤害
+        this.audioManager.playExplosion();
+        this.particleSystem.createExplosion(playerPos.clone(), 3);
+      }
+
+      // 更新射击冷却
+      const fireRate = this.playerStats.getFireRate();
+      this.fireCooldown = Math.max(0, this.fireCooldown - deltaTime);
+
+      // 玩家射击
+      if (input.fire && this.fireCooldown <= 0) {
+        this.playerFire();
+        this.fireCooldown = fireRate;
+      }
+
+      // 导弹锁定和发射逻辑
+      this.handleMissileInput(input, enemies);
     }
-
-    // 更新射击冷却
-    const fireRate = this.playerStats.getFireRate();
-    this.fireCooldown = Math.max(0, this.fireCooldown - deltaTime);
-
-    // 玩家射击
-    if (input.fire && this.fireCooldown <= 0) {
-      this.playerFire();
-      this.fireCooldown = fireRate;
-    }
-
-    // 导弹锁定和发射逻辑
-    this.handleMissileInput(input, enemies);
 
     // 更新子弹
     this.playerProjectilePool.update(deltaTime);
@@ -554,7 +560,7 @@ export class Game {
     );
 
     // 检查敌人子弹碰撞玩家
-    if (!this.shieldActive && this.invincibleTimer <= 0) {
+    if (!this.shieldActive) {
       this.enemyProjectilePool.checkCollisions(
         [this.playerAircraft],
         () => {
@@ -580,7 +586,7 @@ export class Game {
     // 检测玩家与气球的碰撞
     this.powerUpManager.checkPlayerCollisions(
       this.playerController.getPosition(),
-      (type, config) => {
+      (_type, config) => {
         console.log(`收集到道具: ${config.name}`);
         // 触发道具效果（气球已在 checkPlayerCollisions 中移除）
         // 气球已在 PowerUpSystem.checkPlayerCollisions 中移除，无需重复移除
@@ -742,11 +748,13 @@ export class Game {
     const position = this.playerController.getPosition().clone();
     const quaternion = this.playerController.getQuaternion();
 
+    // 座舱在本地坐标系中的位置 (机头位置)
+    const cockpitOffset = new THREE.Vector3(0, 0.3, -0.5);
+    cockpitOffset.applyQuaternion(quaternion);
+    position.add(cockpitOffset);
+
     const forward = new THREE.Vector3(0, 0, -1);
     forward.applyQuaternion(quaternion);
-
-    // 从飞机前方发射
-    position.add(forward.clone().multiplyScalar(2));
 
     // 发射导弹
     this.missileSystem.fire(position, forward, target);

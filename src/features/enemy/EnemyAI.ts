@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { EnemyFSM, AIState } from './EnemyFSM';
 import { EnemyConfig, EnemyType } from './EnemyTypes';
 import { HealthSystem } from '@/features/combat/HealthSystem';
+import { ParticleTrailRenderer } from '@/features/effects/ParticleTrailRenderer';
 
 /**
  * 敌人 AI - 升级版
@@ -17,24 +18,19 @@ export class EnemyAI {
   private circleAngle: number = 0;
 
   // 智能AI参数
-  private targetPosition: THREE.Vector3 | null = null; // 预测目标位置
   private lastVelocity: THREE.Vector3 = new THREE.Vector3(); // 记录上一帧速度用于平滑
-  private flightTimer: number = 0; // 飞行计时器
-  private turnTimer: number = 0; // 转弯计时器
-
-  // 随机游荡偏移
-  private wanderOffset: THREE.Vector3 = new THREE.Vector3();
-  private wanderTimer: number = 0;
-  private wanderChangeInterval: number = 2; // 每2秒改变一次游荡方向
 
   // 攻击参数
   private attackCooldown: number = 0;
+
+  // 尾迹系统
+  private trail: ParticleTrailRenderer;
 
   // 回调
   public onFire?: (position: THREE.Vector3, direction: THREE.Vector3, damage: number) => void;
   public onDestroy?: (position: THREE.Vector3) => void;
 
-  constructor(mesh: THREE.Group, config: EnemyConfig) {
+  constructor(mesh: THREE.Group, config: EnemyConfig, scene: THREE.Scene) {
     this.mesh = mesh;
     this.config = config;
     this.fsm = new EnemyFSM(config);
@@ -42,15 +38,36 @@ export class EnemyAI {
     this.patrolAngle = Math.random() * Math.PI * 2;
 
     // 初始化智能AI参数
-    this.targetPosition = null;
     this.lastVelocity = new THREE.Vector3();
-    this.flightTimer = 0;
-    this.turnTimer = 0;
 
-    // 设置生命值回调
+    // 创建尾迹效果（根据敌机类型选择颜色）
+    const trailColor = this.getTrailColor(config.type);
+    this.trail = new ParticleTrailRenderer(scene, mesh, trailColor);
+
+    // 设置死亡回调
     this.health.onDeath = () => {
       this.onDestroy?.(this.mesh.position.clone());
     };
+  }
+
+  /**
+   * 获取尾迹颜色（根据敌机类型）
+   */
+  private getTrailColor(type: EnemyType): number {
+    switch (type) {
+      case EnemyType.SCOUT:
+        return 0x6b7b8e; // 蓝色
+      case EnemyType.FIGHTER:
+        return 0xd773020; // 橙色
+      case EnemyType.HEAVY:
+        return 0x8b8787; // 暗灰色
+      case EnemyType.SNIPER:
+        return 0x9b30ff; // 紫金色
+      case EnemyType.ACE:
+        return 0xff0000; // 红色
+      default:
+        return 0xff6600; // 橙红色（默认）
+    }
   }
 
   /**
@@ -106,6 +123,9 @@ export class EnemyAI {
 
     // 更新攻击冷却
     this.attackCooldown = Math.max(0, this.attackCooldown - deltaTime);
+
+    // 更新尾迹
+    this.trail.update(deltaTime);
   }
 
   /**
@@ -131,114 +151,110 @@ export class EnemyAI {
     );
 
     // 平滑速度更新（避免突然停止）
-    const newDirection = targetPos.clone().sub(this.mesh.position).normalize();
-    const smoothFactor = 6.0; // 增加响应速度，避免过度平滑
-    // 平滑插值当前速度到目标速度
-    const targetVelocity = newDirection.clone().multiplyScalar(this.config.speed);
-    this.lastVelocity.lerp(targetVelocity, Math.min(1, smoothFactor * deltaTime));
+    const direction = new THREE.Vector3().subVectors(targetPos, this.mesh.position);
+    direction.normalize();
+
+    const speed = this.config.speed * 0.5; // 巡逻时速度减半
+    const velocity = direction.multiplyScalar(speed);
+
+    // 混合新旧速度（30% 旧速度，70% 新速度）
+    this.lastVelocity.lerp(velocity, 0.7 * deltaTime * 60);
     this.mesh.position.addScaledVector(this.lastVelocity, deltaTime);
 
     // 朝向移动方向（平滑转向）
-    const lookTarget = new THREE.Vector3(
-      this.mesh.position.x + Math.cos(this.patrolAngle + 0.1) * this.config.wanderRadius,
-      this.mesh.position.y + wanderY,
-      this.mesh.position.z + Math.sin(this.patrolAngle + 0.1) * this.config.wanderRadius
-    );
-    this.smoothLookAt(lookTarget, deltaTime);
+    if (this.lastVelocity.length() > 0.1) {
+      const lookTarget = this.mesh.position.clone().add(this.lastVelocity);
+      this.mesh.lookAt(lookTarget);
+    }
+
+    // 添加尾迹点（从飞机尾部/引擎位置发出）
+    const engineOffset = new THREE.Vector3(0, 0, 2);
+    engineOffset.applyQuaternion(this.mesh.quaternion);
+    this.trail.addPoint(this.mesh.position.clone(), engineOffset);
   }
 
   /**
-   * 追击行为 - 改进版：智能预测、更平滑
+   * 追逐行为
    */
   private updatePursuit(deltaTime: number, playerPosition: THREE.Vector3): void {
-    // 更新游荡偏移
-    this.wanderTimer += deltaTime;
-    if (this.wanderTimer > this.wanderChangeInterval) {
-      this.wanderTimer = 0;
-      // 随机生成新的偏移方向
-      this.wanderOffset.set(
-        (Math.random() - 0.5) * 80, // X方向偏移 ±40
-        (Math.random() - 0.5) * 30, // Y方向偏移 ±15
-        (Math.random() - 0.5) * 80  // Z方向偏移 ±40
-      );
-    }
+    // 计算到玩家的方向
+    const direction = new THREE.Vector3().subVectors(playerPosition, this.mesh.position);
+    direction.normalize();
 
-    // 智能预测：根据玩家速度预测未来位置
-    this.targetPosition = playerPosition.clone();
+    // 追逐速度比巡逻快
+    const speed = this.config.speed * 0.8;
+    const velocity = direction.multiplyScalar(speed);
 
-    // 添加游荡偏移
-    this.targetPosition.add(this.wanderOffset);
-
-    // 计算方向
-    const direction = this.targetPosition.clone().sub(this.mesh.position).normalize();
-
-    // 平滑速度更新（让飞行更连贯）
-    const smoothFactor = 4.0; // 追击时更灵敏
-    // 平滑插值当前速度到目标速度
-    const targetVelocity = direction.clone().multiplyScalar(this.config.speed);
-    this.lastVelocity.lerp(targetVelocity, Math.min(1, smoothFactor * deltaTime));
+    // 平滑更新
+    this.lastVelocity.lerp(velocity, 0.5 * deltaTime * 60);
     this.mesh.position.addScaledVector(this.lastVelocity, deltaTime);
 
-    // 平滑转向目标
-    this.smoothLookAt(this.targetPosition, deltaTime * 0.8);
+    // 朝向玩家
+    const lookTarget = this.mesh.position.clone().add(this.lastVelocity);
+    this.mesh.lookAt(lookTarget);
   }
 
   /**
    * 攻击行为
    */
   private updateAttack(deltaTime: number, playerPosition: THREE.Vector3): void {
-    // 根据敌人类型选择攻击方式
-    if (this.config.type === EnemyType.SNIPER) {
-      // 狙击手：保持瞄准，但有小幅移动
-      this.smoothLookAt(playerPosition, deltaTime * 0.5);
-      // 添加小幅随机游荡
-      const strafeOffset = Math.sin(this.fsm.getStateTime() * 2) * 10;
-      this.mesh.position.x += strafeOffset * deltaTime;
-    } else if (this.config.type === EnemyType.ACE) {
-      // 王牌：大幅机动同时攻击
-      const offset = Math.sin(this.fsm.getStateTime() * 5) * 1.5;
-      this.mesh.position.x += offset * deltaTime;
-      const verticalMove = Math.cos(this.fsm.getStateTime() * 3) * 0.8;
-      this.mesh.position.y += verticalMove * deltaTime;
-      this.smoothLookAt(playerPosition, deltaTime);
+    // 保持距离并射击
+    const direction = new THREE.Vector3().subVectors(playerPosition, this.mesh.position);
+    const distance = direction.length();
+
+    // 理想攻击距离
+    const idealDistance = 80;
+    if (distance > idealDistance) {
+      // 靠近
+      direction.normalize();
+      const velocity = direction.multiplyScalar(this.config.speed * 0.6);
+      this.lastVelocity.lerp(velocity, 0.3 * deltaTime * 60);
+    } else if (distance < idealDistance * 0.6) {
+      // 太近了，后退
+      direction.normalize().multiplyScalar(-1);
+      const velocity = direction.multiplyScalar(this.config.speed * 0.4);
+      this.lastVelocity.lerp(velocity, 0.3 * deltaTime * 60);
     } else {
-      // 其他：正常攻击，但添加随机游动
-      const wanderX = Math.sin(this.fsm.getStateTime() * 1.5 + this.mesh.id) * 8;
-      const wanderY = Math.cos(this.fsm.getStateTime() * 2) * 5;
-      this.mesh.position.x += wanderX * deltaTime;
-      this.mesh.position.y += wanderY * deltaTime;
-      this.smoothLookAt(playerPosition, deltaTime);
+      // 距离理想，减速
+      this.lastVelocity.multiplyScalar(0.95);
     }
 
-    // 发射子弹
+    this.mesh.position.addScaledVector(this.lastVelocity, deltaTime);
+
+    // 射击
     if (this.attackCooldown <= 0) {
-      const direction = playerPosition.clone().sub(this.mesh.position);
-
-      // 添加精度误差
-      const errorAngle = (1 - this.config.accuracy) * Math.PI * 0.2;
-      direction.x += (Math.random() - 0.5) * errorAngle;
-      direction.y += (Math.random() - 0.5) * errorAngle;
-      direction.z += (Math.random() - 0.5) * errorAngle;
-      direction.normalize();
-
-      this.onFire?.(this.mesh.position.clone(), direction, this.config.damage);
+      this.fire(playerPosition);
       this.attackCooldown = this.config.attackCooldown;
     }
+
+    // 朝向玩家
+    const lookTarget = this.mesh.position.clone().add(this.lastVelocity);
+    this.mesh.lookAt(lookTarget);
   }
 
   /**
-   * 闪避行为
+   * 躲避行为
    */
   private updateEvade(deltaTime: number, playerPosition: THREE.Vector3): void {
-    // 远离玩家
-    const away = this.mesh.position.clone().sub(playerPosition).normalize();
+    // 计算远离玩家的方向
+    const direction = new THREE.Vector3().subVectors(this.mesh.position, playerPosition);
+    direction.normalize();
 
-    // 添加随机性
-    away.x += (Math.random() - 0.5) * 2;
-    away.z += (Math.random() - 0.5) * 2;
-    away.normalize();
+    // 添加随机偏移（难以预测）
+    direction.x += (Math.random() - 0.5) * 0.5;
+    direction.y += (Math.random() - 0.5) * 0.3;
+    direction.z += (Math.random() - 0.5) * 0.5;
+    direction.normalize();
 
-    this.mesh.position.addScaledVector(away, this.config.speed * 1.5 * deltaTime);
+    const speed = this.config.speed * 0.9;
+    const velocity = direction.multiplyScalar(speed);
+
+    this.lastVelocity.lerp(velocity, 0.6 * deltaTime * 60);
+    this.mesh.position.addScaledVector(this.lastVelocity, deltaTime);
+
+    // 朝向移动方向（但稍微看向玩家）
+    const lookTarget = this.mesh.position.clone().add(this.lastVelocity);
+    this.mesh.lookAt(lookTarget);
   }
 
   /**
@@ -247,126 +263,97 @@ export class EnemyAI {
   private updateCircle(deltaTime: number, playerPosition: THREE.Vector3): void {
     this.circleAngle += deltaTime * 1.5;
 
-    const radius = this.config.attackRange * 0.7;
-    const targetX = playerPosition.x + Math.cos(this.circleAngle) * radius;
-    const targetZ = playerPosition.z + Math.sin(this.circleAngle) * radius;
+    // 计算环绕位置
+    const offset = new THREE.Vector3(
+      Math.cos(this.circleAngle) * 60,
+      0,
+      Math.sin(this.circleAngle) * 60
+    );
 
-    const targetPos = new THREE.Vector3(targetX, this.mesh.position.y, targetZ);
-    const direction = targetPos.clone().sub(this.mesh.position).normalize();
+    const targetPos = playerPosition.clone().add(offset);
 
-    this.mesh.position.addScaledVector(direction, this.config.speed * deltaTime);
+    // 移动到目标位置
+    const direction = new THREE.Vector3().subVectors(targetPos, this.mesh.position);
+    direction.normalize();
 
-    // 狙击手在环绕时也会射击
-    if (this.config.type === EnemyType.SNIPER && this.attackCooldown <= 0) {
-      const fireDir = playerPosition.clone().sub(this.mesh.position).normalize();
-      this.onFire?.(this.mesh.position.clone(), fireDir, this.config.damage);
-      this.attackCooldown = this.config.attackCooldown;
-    }
+    const speed = this.config.speed * 0.7;
+    const velocity = direction.multiplyScalar(speed);
+
+    this.lastVelocity.lerp(velocity, 0.4 * deltaTime * 60);
+    this.mesh.position.addScaledVector(this.lastVelocity, deltaTime);
+
+    // 朝向玩家
+    this.mesh.lookAt(playerPosition);
   }
 
   /**
-   * 俯冲攻击
+   * 俯冲行为
    */
   private updateDive(deltaTime: number, playerPosition: THREE.Vector3): void {
-    const direction = playerPosition.clone().sub(this.mesh.position).normalize();
+    // 快速接近玩家
+    const direction = new THREE.Vector3().subVectors(playerPosition, this.mesh.position);
+    direction.y -= 0.3; // 倾向下
+    direction.normalize();
 
-    // 快速俯冲
-    this.mesh.position.addScaledVector(direction, this.config.speed * 2 * deltaTime);
-    this.smoothLookAt(playerPosition, deltaTime * 2);
+    const speed = this.config.speed * 1.2;
+    const velocity = direction.multiplyScalar(speed);
+
+    this.lastVelocity.lerp(velocity, 0.5 * deltaTime * 60);
+    this.mesh.position.addScaledVector(this.lastVelocity, deltaTime);
 
     // 俯冲时射击
     if (this.attackCooldown <= 0) {
-      this.onFire?.(this.mesh.position.clone(), direction, this.config.damage);
-      this.attackCooldown = this.config.attackCooldown * 0.5;
+      this.fire(playerPosition);
+      this.attackCooldown = this.config.attackCooldown * 0.7; // 快速射击
     }
+
+    // 朝向玩家
+    this.mesh.lookAt(playerPosition);
   }
 
   /**
    * 撤退行为
    */
   private updateRetreat(deltaTime: number, playerPosition: THREE.Vector3): void {
-    const away = this.mesh.position.clone().sub(playerPosition).normalize();
-    this.mesh.position.addScaledVector(away, this.config.speed * 0.8 * deltaTime);
+    // 远离玩家
+    const direction = new THREE.Vector3().subVectors(this.mesh.position, playerPosition);
+    direction.normalize();
+
+    // 获得高度
+    direction.y = Math.max(direction.y, 0.3);
+
+    const speed = this.config.speed * 0.85;
+    const velocity = direction.multiplyScalar(speed);
+
+    this.lastVelocity.lerp(velocity, 0.5 * deltaTime * 60);
+    this.mesh.position.addScaledVector(this.lastVelocity, deltaTime);
+
+    // 朝向远离方向
+    const lookTarget = this.mesh.position.clone().add(this.lastVelocity);
+    this.mesh.lookAt(lookTarget);
   }
 
   /**
-   * 平滑转向
+   * 射击
    */
-  private smoothLookAt(target: THREE.Vector3, deltaTime: number): void {
-    const direction = target.clone().sub(this.mesh.position);
-    if (direction.length() < 0.1) return;
+  private fire(playerPosition: THREE.Vector3): void {
+    // 计算射击方向
+    const direction = new THREE.Vector3().subVectors(playerPosition, this.mesh.position);
+    direction.normalize();
 
-    const targetQuat = new THREE.Quaternion();
-    const lookMatrix = new THREE.Matrix4();
-    lookMatrix.lookAt(this.mesh.position, target, new THREE.Vector3(0, 1, 0));
-    targetQuat.setFromRotationMatrix(lookMatrix);
+    // 添加随机扰动（让瞄准不准确）
+    // 扰动范围根据敌人的 accuracy 调整（精度越低，扰动越大）
+    const perturbationStrength = (1 - this.config.accuracy) * 0.4;
+    const anglePerturbation = (Math.random() - 0.5) * perturbationStrength;
 
-    this.mesh.quaternion.slerp(targetQuat, Math.min(1, this.config.turnSpeed * deltaTime));
-  }
+    // 使用四元数在Y轴上应用随机旋转
+    const quaternion = new THREE.Quaternion();
+    quaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), anglePerturbation);
+    direction.applyQuaternion(quaternion);
+    direction.normalize();
 
-  /**
-   * 受到伤害
-   */
-  public takeDamage(amount: number): void {
-    this.health.takeDamage(amount);
-  }
-
-  /**
-   * 获取位置
-   */
-  public getPosition(): THREE.Vector3 {
-    return this.mesh.position;
-  }
-
-  /**
-   * 获取网格对象
-   */
-  public getMesh(): THREE.Group {
-    return this.mesh;
-  }
-
-  /**
-   * 获取配置
-   */
-  public getConfig(): EnemyConfig {
-    return this.config;
-  }
-
-  /**
-   * 是否存活
-   */
-  public isAlive(): boolean {
-    const alive = !this.health.isEntityDead();
-
-    // 如果死亡，隐藏mesh
-    if (!alive && this.mesh.visible) {
-      this.mesh.visible = false;
-    }
-
-    return alive;
-  }
-
-  /**
-   * 重置敌人
-   */
-  public reset(position: THREE.Vector3): void {
-    this.mesh.position.copy(position);
-    this.health.reset();
-    this.attackCooldown = 0;
-    this.patrolAngle = Math.random() * Math.PI * 2;
-    this.wanderOffset.set(0, 0, 0);
-    this.wanderTimer = 0;
-
-    // 重置智能AI参数
-    this.targetPosition = null;
-    // 初始化速度为当前速度方向，避免从零开始加速
-    const initialDir = new THREE.Vector3(Math.random() - 0.5, (Math.random() - 0.5) * 0.3, Math.random() - 0.5).normalize();
-    this.lastVelocity = initialDir.multiplyScalar(this.config.speed * 0.5); // 初始速度为正常速度的一半
-    this.mesh.visible = true; // 重要：确保敌人可见
-
-    // 确保朝向正确（基于初始速度方向）
-    const lookAtPos = position.clone().add(initialDir.multiplyScalar(10));
-    this.mesh.lookAt(lookAtPos);
+    // 触发回调
+    this.onFire?.(this.mesh.position.clone(), direction, this.config.damage);
   }
 
   /**
@@ -384,5 +371,84 @@ export class EnemyAI {
    */
   public getHealthSystem(): HealthSystem {
     return this.health;
+  }
+
+  /**
+   * 获取配置
+   */
+  public getConfig(): EnemyConfig {
+    return this.config;
+  }
+
+  /**
+   * 获取网格
+   */
+  public getMesh(): THREE.Group {
+    return this.mesh;
+  }
+
+  /**
+   * 是否存活
+   */
+  public isAlive(): boolean {
+    return this.health.getCurrentHealth() > 0;
+  }
+
+  /**
+   * 受到伤害
+   */
+  public takeDamage(damage: number): void {
+    this.health.takeDamage(damage);
+  }
+
+  /**
+   * 获取位置
+   */
+  public getPosition(): THREE.Vector3 {
+    return this.mesh.position.clone();
+  }
+
+  /**
+   * 获取速度
+   */
+  public getVelocity(): THREE.Vector3 {
+    return this.lastVelocity;
+  }
+
+  /**
+   * 重置敌人（用于生成时初始化位置和状态）
+   */
+  public reset(position: THREE.Vector3): void {
+    this.mesh.position.copy(position);
+    this.mesh.visible = false;
+    this.health.reset();
+  }
+
+  /**
+   * 清理资源
+   */
+  public dispose(): void {
+    // 隐藏 mesh
+    this.mesh.visible = false;
+
+    // 移除mesh（如果已添加到场景）
+    if (this.mesh.parent) {
+      this.mesh.parent.remove(this.mesh);
+    }
+
+    // 清理尾迹
+    this.trail.dispose();
+
+    // 清理 mesh 的所有子对象
+    while (this.mesh.children.length > 0) {
+      const child = this.mesh.children[0];
+      this.mesh.remove(child);
+      if (child instanceof THREE.Mesh) {
+        child.geometry.dispose();
+        if (child.material instanceof THREE.Material) {
+          child.material.dispose();
+        }
+      }
+    }
   }
 }
