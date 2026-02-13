@@ -85,8 +85,8 @@ export class EnemyFSM {
   }
 
   private updatePatrolState(distance: number): void {
+    // 发现玩家，根据敌人类型选择策略
     if (distance < this.config.detectionRange) {
-      // 根据敌人类型选择不同的进入策略
       if (this.config.type === EnemyType.SNIPER) {
         this.transition(AIState.CIRCLE);
       } else if (this.config.type === EnemyType.HEAVY) {
@@ -94,12 +94,14 @@ export class EnemyFSM {
       } else {
         this.transition(AIState.PURSUIT);
       }
+      return;
     }
 
-    // 偶尔随机切换到环绕或撤退状态，增加多样性
-    if (this.stateTime > 5.0 && Math.random() < 0.005) {
+    // 偶尔随机性：低概率切换状态，增加多样性
+    // 但不能太频繁，至少巡逻5秒后才考虑切换
+    if (this.stateTime > 5.0 && Math.random() < 0.002) {
       const randomChoice = Math.random();
-      if (randomChoice < 0.5) {
+      if (randomChoice < 0.4) {
         this.transition(AIState.CIRCLE);
       } else {
         this.transition(AIState.RETREAT);
@@ -108,35 +110,41 @@ export class EnemyFSM {
   }
 
   private updatePursuitState(distance: number, currentHealth: number, maxHealth: number): void {
-    // 血量低时考虑撤退或闪避
-    if (currentHealth < maxHealth * 0.3) {
-      if (Math.random() < this.config.evasionChance) {
-        this.transition(AIState.EVADE);
-        return;
-      }
-    }
-
+    // 进入攻击范围，切换到攻击
     if (distance < this.config.attackRange) {
-      // 王牌飞行员使用高级战术
       if (this.config.type === EnemyType.ACE && Math.random() < 0.3) {
         this.transition(AIState.DIVE);
       } else {
         this.transition(AIState.ATTACK);
       }
-    } else if (distance > this.config.detectionRange * 1.5) {
-      this.transition(AIState.PATROL);
-    } else if (this.config.type === EnemyType.SNIPER && distance < this.config.attackRange * 0.5) {
-      // 狙击手保持距离
-      this.transition(AIState.RETREAT);
+      return;
     }
 
-    // 添加随机行为：有时脱离追击去巡逻或环绕
-    // 这会让敌人不那么聚集
-    if (this.stateTime > 3.0 && Math.random() < 0.008) {
+    // 距离太远，返回巡逻
+    if (distance > this.config.detectionRange * 1.5) {
+      this.transition(AIState.PATROL);
+      return;
+    }
+
+    // 血量低时考虑闪避
+    if (currentHealth < maxHealth * 0.3) {
+      if (Math.random() < this.config.evasionChance * 0.5) {
+        this.transition(AIState.EVADE);
+        return;
+      }
+    }
+
+    // 狙击手保持距离，低概率撤退
+    if (this.config.type === EnemyType.SNIPER && distance < this.config.attackRange * 0.6) {
+      if (Math.random() < 0.01) {
+        this.transition(AIState.RETREAT);
+      }
+    }
+
+    // 低概率随机行为（避免太聚集）
+    if (this.stateTime > 4.0 && Math.random() < 0.003) {
       const randomChoice = Math.random();
-      if (randomChoice < 0.3) {
-        this.transition(AIState.PATROL);
-      } else if (randomChoice < 0.6) {
+      if (randomChoice < 0.4) {
         this.transition(AIState.CIRCLE);
       } else {
         this.transition(AIState.RETREAT);
@@ -145,31 +153,38 @@ export class EnemyFSM {
   }
 
   private updateAttackState(distance: number, currentHealth: number, maxHealth: number): void {
-    // 血量低时闪避
-    if (currentHealth < maxHealth * 0.4 && Math.random() < this.config.evasionChance) {
-      this.transition(AIState.EVADE);
+    // 距离太远，切换到追击
+    if (distance > this.config.attackRange * 1.3) {
+      this.transition(AIState.PURSUIT);
       return;
     }
 
-    if (distance > this.config.attackRange * 1.3) {
-      this.transition(AIState.PURSUIT);
-    } else if (this.stateTime > 4.0) {
-      // 攻击太久，变换战术 - 更频繁的切换
+    // 血量低时高概率闪避
+    if (currentHealth < maxHealth * 0.4) {
+      if (Math.random() < this.config.evasionChance * 0.8) {
+        this.transition(AIState.EVADE);
+        return;
+      }
+    }
+
+    // 攻击一段时间后，低概率变换战术（避免太频繁）
+    // 至少攻击6秒后才考虑切换
+    if (this.stateTime > 6.0 && Math.random() < 0.005) {
       const randomChoice = Math.random();
       if (this.config.type === EnemyType.ACE) {
         // 王牌飞行员更多样化战术
-        if (randomChoice < 0.4) {
+        if (randomChoice < 0.35) {
           this.transition(AIState.CIRCLE);
-        } else if (randomChoice < 0.7) {
+        } else if (randomChoice < 0.6) {
           this.transition(AIState.DIVE);
         } else {
           this.transition(AIState.PURSUIT);
         }
       } else {
         // 其他敌人也有随机行为
-        if (randomChoice < 0.4) {
+        if (randomChoice < 0.3) {
           this.transition(AIState.CIRCLE);
-        } else if (randomChoice < 0.7) {
+        } else if (randomChoice < 0.6) {
           this.transition(AIState.RETREAT);
         } else {
           this.transition(AIState.PURSUIT);
@@ -179,9 +194,9 @@ export class EnemyFSM {
   }
 
   private updateEvadeState(): void {
-    // 闪避2秒后重新评估
-    if (this.stateTime > 2.0) {
-      if (Math.random() < 0.6) {
+    // 闪避持续2-3秒后重新评估
+    if (this.stateTime > 2.5) {
+      if (Math.random() < 0.5) {
         this.transition(AIState.RETREAT);
       } else {
         this.transition(AIState.PURSUIT);
@@ -190,24 +205,37 @@ export class EnemyFSM {
   }
 
   private updateCircleState(distance: number): void {
-    if (distance > this.config.attackRange) {
+    // 距离太远，停止环绕
+    if (distance > this.config.attackRange * 1.2) {
       this.transition(AIState.PURSUIT);
-    } else if (this.stateTime > 8.0) {
-      // 环绕太久，直接攻击
+      return;
+    }
+
+    // 环绕一段时间后，低概率切换到攻击
+    if (this.stateTime > 7.0 && Math.random() < 0.01) {
       this.transition(AIState.ATTACK);
     }
   }
 
-  private updateDiveState(distance: number): void {
-    // 俯冲攻击后退出
-    if (this.stateTime > 2.0 || distance < 10) {
-      this.transition(AIState.EVADE);
+  private updateDiveState(_distance: number): void {
+    // 俯冲2-3秒后退出
+    if (this.stateTime > 2.5) {
+      if (Math.random() < 0.7) {
+        this.transition(AIState.EVADE);
+      } else {
+        this.transition(AIState.PURSUIT);
+      }
     }
   }
 
   private updateRetreatState(distance: number): void {
-    if (distance > this.config.attackRange * 0.8) {
-      this.transition(AIState.CIRCLE);
+    // 撤退到合适距离后，根据情况决定下一步
+    if (distance > this.config.attackRange * 0.9) {
+      if (Math.random() < 0.6) {
+        this.transition(AIState.CIRCLE);
+      } else {
+        this.transition(AIState.PURSUIT);
+      }
     }
   }
 
@@ -217,6 +245,8 @@ export class EnemyFSM {
   private transition(newState: AIState): void {
     this.currentState = newState;
     this.stateTime = 0;
+    // 重置目标角度，避免切换时突然转向
+    // targetYaw 和 targetPitch 会在 EnemyAI 中自然更新
   }
 
   /**

@@ -76,7 +76,6 @@ export class EnemyAI {
     speed: number,
     targetYaw?: number,
     targetPitch?: number,
-    targetRoll?: number,
     lookAtTarget?: THREE.Vector3
   ): void {
     // 如果有指定目标点，计算朝向该点的yaw/pitch
@@ -118,10 +117,17 @@ export class EnemyAI {
     let pitchDiff = this.targetPitch - euler.x;
     const newPitch = euler.x + Math.max(-0.3, Math.min(0.3, pitchDiff)) * 0.1;
 
-    // 计算roll（自动回正到0）
-    const targetRollCalc = targetRoll !== undefined ? targetRoll : 0;
-    let rollDiff = targetRollCalc - euler.z;
-    const newRoll = euler.z + rollDiff * 0.1;
+    // 计算roll：根据yaw变化自动倾斜（模拟真实飞机转向）
+    // 左转时向左倾斜（负roll），右转时向右倾斜（正roll）
+    let targetRollValue = 0;
+    if (Math.abs(yawDiff) > 0.01) {
+      // yaw改变越大，倾斜越明显
+      targetRollValue = Math.max(-0.4, Math.min(0.4, yawDiff * 0.8));
+    }
+
+    // 平滑更新roll
+    let rollDiff = targetRollValue - euler.z;
+    const newRoll = euler.z + rollDiff * 0.15;
 
     // 应用新的旋转
     this.mesh.rotation.set(newPitch, newYaw, newRoll);
@@ -168,7 +174,7 @@ export class EnemyAI {
         this.updatePatrol(deltaTime);
         break;
       case AIState.PURSUIT:
-        this.updatePursuit(deltaTime, playerPosition);
+        this.updateApproach(deltaTime, playerPosition);
         break;
       case AIState.ATTACK:
         this.updateAttack(deltaTime, playerPosition);
@@ -195,63 +201,63 @@ export class EnemyAI {
   }
 
   /**
-   * 巡逻行为 - 改进版：向前飞行，蛇形摆动
+   * 巡逻行为：蛇形飞行，低风险
    */
   private updatePatrol(deltaTime: number): void {
     // 每个敌人有不同的巡逻速度
-    const patrolSpeed = 0.2 + (this.mesh.id % 5) * 0.1;
+    const patrolSpeed = 0.3 + (this.mesh.id % 5) * 0.1;
     this.patrolAngle += deltaTime * patrolSpeed;
 
-    // 蛇形摆动幅度
-    const yawWander = Math.sin(this.patrolAngle) * 0.3; // 左右偏航
-    const pitchWander = Math.sin(this.patrolAngle * 2) * 0.15; // 轻微上下
+    // 蛇形摆动幅度（更平滑）
+    const yawWander = Math.sin(this.patrolAngle) * 0.25; // 左右偏航
+    const pitchWander = Math.sin(this.patrolAngle * 2) * 0.1; // 轻微上下
 
-    // 设置目标角度
-    this.targetYaw += yawWander * deltaTime * 60;
-    this.targetPitch += pitchWander * deltaTime * 60;
+    // 设置目标角度（累积到targetYaw/pitch，而不是直接设置）
+    this.targetYaw += yawWander * deltaTime * 30;
+    this.targetPitch += pitchWander * deltaTime * 30;
 
     // 限制 pitch 角度（避免倒着飞）
-    this.targetPitch = Math.max(-0.3, Math.min(0.3, this.targetPitch));
+    this.targetPitch = Math.max(-0.25, Math.min(0.25, this.targetPitch));
 
-    // 应用旋转并向前移动
-    this.applyMovement(deltaTime, this.config.speed * 0.5);
+    // 巡逻速度较慢
+    const patrolSpeedValue = this.config.speed * 0.4;
+
+    // 应用移动（不传targetRoll，避免翻滚）
+    this.applyMovement(deltaTime, patrolSpeedValue, this.targetYaw, this.targetPitch);
   }
 
   /**
-   * 追逐行为
+   * 接近行为：从远处接近玩家
    */
-  private updatePursuit(deltaTime: number, playerPosition: THREE.Vector3): void {
-    // 计算到玩家的方向并追击
-    const speed = this.config.speed * 0.8;
-    this.applyMovement(deltaTime, speed, undefined, undefined, undefined, playerPosition);
+  private updateApproach(deltaTime: number, playerPosition: THREE.Vector3): void {
+    // 计算到玩家的方向
+    const speed = this.config.speed * 0.7;
+
+    // 朝向玩家飞行（但不攻击）
+    this.applyMovement(deltaTime, speed, undefined, undefined, playerPosition);
   }
 
   /**
-   * 攻击行为
+   * 攻击行为：保持攻击距离并射击
    */
   private updateAttack(deltaTime: number, playerPosition: THREE.Vector3): void {
     const distance = this.mesh.position.distanceTo(playerPosition);
     const idealDistance = 80;
 
-    // 决定飞行方向（始终使用正速度，不能后退）
+    // 决定飞行方向（始终使用正速度）
     let targetPos: THREE.Vector3 | undefined;
     let speed = this.config.speed * 0.6;
 
     if (distance > idealDistance * 1.2) {
-      // 距离太远：直接朝向玩家飞
+      // 距离太远：朝向玩家接近
       targetPos = playerPosition;
       speed = this.config.speed * 0.7;
     } else if (distance < idealDistance * 0.7) {
-      // 距离太近：不后退，而是转向侧面飞，自然拉大距离
-      // 计算从玩家到敌机的方向
+      // 距离太近：转向侧面飞，自然拉大距离（不后退）
       const awayDir = new THREE.Vector3().subVectors(this.mesh.position, playerPosition).normalize();
-
-      // 转向90度（侧向），让敌机绕着玩家飞
-      // 根据敌机ID决定左转或右转，避免所有敌机都往同一方向
+      // 侧向90度
       const sideOffset = (this.mesh.id % 2 === 0) ? 1 : -1;
       const sideDir = new THREE.Vector3(-awayDir.z * sideOffset, 0, awayDir.x * sideOffset).normalize();
-
-      // 目标位置：从玩家位置向侧向偏移
       targetPos = playerPosition.clone().add(sideDir.multiplyScalar(idealDistance));
       speed = this.config.speed * 0.7;
     } else {
@@ -265,12 +271,12 @@ export class EnemyAI {
       this.attackCooldown = this.config.attackCooldown;
     }
 
-    // 始终向前飞（不后退），通过转向来调整位置
-    this.applyMovement(deltaTime, speed, undefined, undefined, undefined, targetPos);
+    // 向前飞（不传targetRoll，避免翻滚）
+    this.applyMovement(deltaTime, speed, undefined, undefined, targetPos);
   }
 
   /**
-   * 躲避行为
+   * 躲避行为：快速机动，难以预测
    */
   private updateEvade(deltaTime: number, playerPosition: THREE.Vector3): void {
     // 远离玩家
@@ -278,71 +284,80 @@ export class EnemyAI {
 
     // 添加随机偏移（难以预测）
     const randomOffset = new THREE.Vector3(
-      (Math.random() - 0.5) * 0.6,
-      (Math.random() - 0.5) * 0.4,
-      (Math.random() - 0.5) * 0.6
+      (Math.random() - 0.5) * 0.8,
+      (Math.random() - 0.5) * 0.5,
+      (Math.random() - 0.5) * 0.8
     );
 
     // 计算目标方向
     const targetDirection = awayDirection.add(randomOffset).normalize();
 
-    // 计算目标yaw
+    // 计算目标yaw/pitch
     this.targetYaw = Math.atan2(targetDirection.x, targetDirection.z);
-
-    // 计算目标pitch（限制范围）
     this.targetPitch = Math.asin(targetDirection.y);
     this.targetPitch = Math.max(-0.3, Math.min(0.3, this.targetPitch));
 
-    // 添加随机滚转
-    const targetRollCalc = (Math.random() - 0.5) * 0.5;
+    // 移动速度（快速）
+    const speed = this.config.speed * 0.85;
 
-    // 移动
-    const speed = this.config.speed * 0.9;
-    this.applyMovement(deltaTime, speed, undefined, undefined, targetRollCalc);
+    // 不传targetRoll，避免主动翻滚
+    this.applyMovement(deltaTime, speed, this.targetYaw, this.targetPitch);
   }
 
   /**
-   * 环绕行为
+   * 环绕行为：高级战术，绕着玩家飞
    */
   private updateCircle(deltaTime: number, playerPosition: THREE.Vector3): void {
-    this.circleAngle += deltaTime * 1.5;
+    this.circleAngle += deltaTime * 1.2;
 
-    // 计算环绕位置
+    // 计算环绕位置（水平圆周）
     const offset = new THREE.Vector3(
-      Math.cos(this.circleAngle) * 60,
+      Math.cos(this.circleAngle) * 70,
       0,
-      Math.sin(this.circleAngle) * 60
+      Math.sin(this.circleAngle) * 70
     );
 
     const targetPos = playerPosition.clone().add(offset);
 
-    // 移动速度
-    const speed = this.config.speed * 0.7;
-    this.applyMovement(deltaTime, speed, undefined, undefined, undefined, targetPos);
-  }
+    // 移动速度（略慢于攻击速度）
+    const speed = this.config.speed * 0.65;
 
-  /**
-   * 俯冲行为
-   */
-  private updateDive(deltaTime: number, playerPosition: THREE.Vector3): void {
-    // 俯冲时射击
+    // 射击（频率略低）
     if (this.attackCooldown <= 0) {
       this.fire(playerPosition);
-      this.attackCooldown = this.config.attackCooldown * 0.7; // 快速射击
+      this.attackCooldown = this.config.attackCooldown * 1.3;
     }
 
-    // 快速接近玩家，轻微俯冲
-    const speed = this.config.speed * 1.2;
-    this.applyMovement(deltaTime, speed, undefined, -0.2, undefined, playerPosition); // pitch = -0.2 向下
+    // 不传targetRoll，避免翻滚
+    this.applyMovement(deltaTime, speed, undefined, undefined, targetPos);
   }
 
   /**
-   * 撤退行为
+   * 俯冲行为：快速俯冲攻击
+   */
+  private updateDive(deltaTime: number, playerPosition: THREE.Vector3): void {
+    // 快速接近玩家，轻微俯冲
+    const speed = this.config.speed * 1.1;
+
+    // 俯冲时射击（频率略高）
+    if (this.attackCooldown <= 0) {
+      this.fire(playerPosition);
+      this.attackCooldown = this.config.attackCooldown * 0.8;
+    }
+
+    // 俯冲pitch = -0.25
+    this.applyMovement(deltaTime, speed, undefined, -0.25, playerPosition);
+  }
+
+  /**
+   * 撤退行为：战术撤退，爬升远离
    */
   private updateRetreat(deltaTime: number, playerPosition: THREE.Vector3): void {
-    // 远离玩家，爬升
-    const speed = this.config.speed * 0.85;
-    this.applyMovement(deltaTime, speed, undefined, 0.2, undefined, playerPosition); // pitch = 0.2 向上爬升
+    // 远离玩家并爬升
+    const speed = this.config.speed * 0.8;
+
+    // 不传targetRoll，pitch = 0.15 向上爬升
+    this.applyMovement(deltaTime, speed, undefined, 0.15, playerPosition);
   }
 
   /**
