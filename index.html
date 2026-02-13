@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="theme-color" content="#000000">
+  <title>Air Supreme - 3D 空战游戏</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      overflow: hidden;
+      touch-action: none;
+      background: #000;
+      font-family: 'Arial', sans-serif;
+      -webkit-tap-highlight-color: transparent;
+      -webkit-touch-callout: none;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+
+    canvas {
+      display: block;
+    }
+
+    /* 加载画面 */
+    #loading-screen {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      z-index: 1000;
+    }
+
+    #loading-screen h1 {
+      font-size: 48px;
+      margin-bottom: 20px;
+      text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+    }
+
+    #loading-screen p {
+      font-size: 18px;
+      opacity: 0.8;
+    }
+
+    .loading-spinner {
+      width: 50px;
+      height: 50px;
+      border: 4px solid rgba(255,255,255,0.3);
+      border-top-color: white;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+      margin-top: 30px;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    /* 移动端虚拟控制器 */
+    .mobile-controls {
+      display: none;
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      width: 100%;
+      height: 35%;
+      pointer-events: none;
+      z-index: 100;
+    }
+
+    @media (max-width: 768px), (pointer: coarse) {
+      .mobile-controls {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-end;
+        padding: 20px;
+      }
+    }
+
+    /* 虚拟摇杆 */
+    #joystick {
+      width: 140px;
+      height: 140px;
+      background: rgba(255, 255, 255, 0.15);
+      border-radius: 50%;
+      border: 3px solid rgba(255, 255, 255, 0.4);
+      pointer-events: auto;
+      position: relative;
+    }
+
+    #joystick-knob {
+      width: 56px;
+      height: 56px;
+      background: rgba(255, 255, 255, 0.7);
+      border-radius: 50%;
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+    }
+
+    /* 按钮容器 */
+    .button-container {
+      display: flex;
+      flex-direction: column;
+      gap: 15px;
+      pointer-events: auto;
+    }
+
+    /* 开火按钮 */
+    #fire-button {
+      width: 80px;
+      height: 80px;
+      background: radial-gradient(circle, rgba(255,50,50,0.9) 0%, rgba(200,0,0,0.8) 100%);
+      border-radius: 50%;
+      border: 3px solid rgba(255, 255, 255, 0.9);
+      color: white;
+      font-size: 16px;
+      font-weight: bold;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      pointer-events: auto;
+      box-shadow: 0 4px 15px rgba(255,0,0,0.5);
+      text-shadow: 1px 1px 2px rgba(0,0,0,0.5);
+    }
+
+    #fire-button:active {
+      transform: scale(0.92);
+      box-shadow: 0 2px 10px rgba(255,0,0,0.6);
+    }
+
+    /* 加速按钮 */
+    #throttle-button {
+      width: 70px;
+      height: 70px;
+      background: radial-gradient(circle, rgba(50,255,50,0.9) 0%, rgba(0,180,0,0.8) 100%);
+      border-radius: 50%;
+      border: 3px solid rgba(255, 255, 255, 0.9);
+      color: white;
+      font-size: 14px;
+      font-weight: bold;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      pointer-events: auto;
+      box-shadow: 0 4px 15px rgba(0,255,0,0.4);
+      text-shadow: 1px 1px 2px rgba(0,0,0,0.5);
+    }
+
+    #throttle-button:active {
+      transform: scale(0.92);
+      box-shadow: 0 2px 10px rgba(0,255,0,0.5);
+    }
+
+    /* 导弹按钮 */
+    #missile-button {
+      width: 70px;
+      height: 70px;
+      background: radial-gradient(circle, rgba(255,100,0,0.9) 0%, rgba(200,50,0,0.8) 100%);
+      border-radius: 50%;
+      border: 3px solid rgba(255, 255, 255, 0.9);
+      color: white;
+      font-size: 14px;
+      font-weight: bold;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      pointer-events: auto;
+      box-shadow: 0 4px 15px rgba(255,100,0,0.4);
+      text-shadow: 1px 1px 2px rgba(0,0,0,0.5);
+    }
+
+    #missile-button:active {
+      transform: scale(0.92);
+      box-shadow: 0 2px 10px rgba(255,100,0,0.5);
+    }
+
+    /* 隐藏加载屏幕的类 */
+    .hidden {
+      display: none !important;
+    }
+  </style>
+</head>
+<body>
+  <!-- 加载画面 -->
+  <div id="loading-screen">
+    <h1>✈️ Air Supreme</h1>
+    <p>加载中...</p>
+    <div class="loading-spinner"></div>
+  </div>
+
+  <!-- 移动端虚拟控制器 -->
+  <div class="mobile-controls" id="mobile-controls">
+    <!-- 左侧：虚拟摇杆 -->
+    <div id="joystick">
+      <div id="joystick-knob"></div>
+    </div>
+
+    <!-- 右侧：按钮 -->
+    <div class="button-container">
+      <button id="throttle-button">加速</button>
+      <button id="fire-button">开火</button>
+      <button id="missile-button">导弹</button>
+    </div>
+  </div>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>
