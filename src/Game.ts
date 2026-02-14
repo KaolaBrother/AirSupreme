@@ -10,7 +10,6 @@ import { MissileSystem } from '@/features/combat/MissileSystem';
 import { HUD } from '@/ui/HUD';
 import { StartMenu } from '@/ui/StartMenu';
 import { EnemyHealthBars } from '@/ui/EnemyHealthBars';
-import { RadarMinimap } from '@/ui/RadarMinimap';
 import { LockOnIndicator } from '@/ui/LockOnIndicator';
 import { GameState, GameStatus } from '@/core/GameState';
 import { GAME_CONSTANTS } from '@/config';
@@ -49,7 +48,6 @@ export class Game {
   // UI
   private hud: HUD;
   private startMenu: StartMenu;
-  private radarMinimap: RadarMinimap;
   private lockOnIndicator: LockOnIndicator;
   private enemyHealthBars: EnemyHealthBars;
 
@@ -61,6 +59,7 @@ export class Game {
   private missileCount: number = 2;
   private maxMissiles: number = 10;
   private missileFiringScheduled: boolean = false; // 防止重复发射
+  private missileRespawnTimer: number = 0; // 导弹补给计时器
 
   // 关卡进度
   private currentLevelId: number = 1;
@@ -118,9 +117,6 @@ export class Game {
 
     // 创建敌人血条系统
     this.enemyHealthBars = new EnemyHealthBars();
-
-    // 创建雷达小地图
-    this.radarMinimap = new RadarMinimap();
 
     // 初始化开始菜单
     this.startMenu = new StartMenu();
@@ -196,11 +192,11 @@ export class Game {
           this.powerUpManager.spawn(enemyPos);
         }
 
-        // 恢复一枚导弹
-        if (this.missileCount < this.maxMissiles) {
-          this.missileCount++;
-          this.hud.updateMissiles(this.missileCount);
-        }
+        // 恢复一枚导弹（已取消）
+        // if (this.missileCount < this.maxMissiles) {
+        //   this.missileCount++;
+        //   this.hud.updateMissiles(this.missileCount);
+        // }
 
         // 清理敌人资源
         enemy.dispose();
@@ -470,9 +466,6 @@ export class Game {
       .filter(e => e.isAlive())
       .map(e => e.getMesh());
 
-    // 更新雷达小地图
-    this.updateRadarMinimap();
-
     // 更新敌人血条
     this.updateEnemyHealthBars(enemies);
 
@@ -529,6 +522,9 @@ export class Game {
     const enemyMeshes = this.levelManager.getEnemies()
       .filter(e => e.isAlive())
       .map(e => e.getMesh());
+
+    // 更新导弹系统的敌人列表（用于导弹重新锁定目标）
+    this.missileSystem.updateEnemies(enemyMeshes);
 
     const damageMultiplier = this.powerUpManager.hasEffect(PowerUpType.DAMAGE)
       ? POWER_UP_CONFIGS[PowerUpType.DAMAGE].value
@@ -626,31 +622,21 @@ export class Game {
     const remainingEnemies = this.levelManager.getTotalEnemyCount() - this.levelManager.getSpawnedEnemyCount();
     this.hud.updateRemainingEnemies(remainingEnemies);
     this.hud.updateLives(this.lives);
-  }
 
-  /**
-   * 更新雷达小地图
-   */
-  private updateRadarMinimap(): void {
-    const playerPosition = this.playerController.getPosition();
+    // 更新导弹补给计时器
+    if (this.missileCount < GAME_CONSTANTS.MISSILE.MAX_RESPAWN_MISSILES) {
+      this.missileRespawnTimer += deltaTime;
+      if (this.missileRespawnTimer >= GAME_CONSTANTS.MISSILE.MISSILE_RESPAWN_TIME) {
+        // 时间到，增加一个导弹
+        this.missileCount++;
+        this.hud.updateMissiles(this.missileCount);
+        this.missileRespawnTimer = 0;
+        console.log(`导弹补给！当前: ${this.missileCount}/${GAME_CONSTANTS.MISSILE.MAX_RESPAWN_MISSILES}`);
+      }
+    }
 
-    // 获取敌人信息和位置
-    const enemies = this.levelManager.getEnemies();
-    const aliveEnemies = enemies.filter(e => e.isAlive());
-
-    // 构建雷达敌人信息数组（检查传送门状态来判断是否正在生成）
-    const enemyRadarInfo = aliveEnemies.map(enemy => ({
-      position: enemy.getPosition(),
-      isSpawning: this.levelManager.isEnemySpawning(enemy) // 传送门活跃表示正在生成（5秒动画中）
-    }));
-
-    // 获取气球信息
-    const balloons = this.powerUpManager.getBalloons();
-    const balloonRadarInfo = balloons.map(balloon => ({
-      position: balloon.getMesh().position
-    }));
-
-    this.radarMinimap.update(playerPosition, enemyRadarInfo, balloonRadarInfo, this.playerController.getQuaternion());
+    // 更新导弹补给进度条
+    this.hud.updateMissileProgress(this.missileRespawnTimer / GAME_CONSTANTS.MISSILE.MISSILE_RESPAWN_TIME);
   }
 
   /**
@@ -865,7 +851,6 @@ export class Game {
     this.levelManager.clear();
     this.particleSystem.clear();
     this.powerUpManager.clear();
-    this.radarMinimap.dispose();
     this.gameScene.dispose();
   }
 }

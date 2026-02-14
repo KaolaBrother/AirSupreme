@@ -20,7 +20,6 @@ export class Missile {
   private startPosition: THREE.Vector3; // 记录发射位置
   private maxFlightDistance: number = GAME_CONSTANTS.MISSILE.MAX_FLIGHT_DISTANCE; // 最大飞行距离
   private enemies: THREE.Object3D[] = []; // 敌人列表，用于重新锁定目标
-  private hasRetargeted: boolean = false; // 是否已经重新锁定过（避免频繁切换）
 
   constructor(scene: THREE.Scene, position: THREE.Vector3, target: THREE.Object3D | null, particleSystem: ParticleSystem, enemies: THREE.Object3D[] = []) {
     this.particleSystem = particleSystem;
@@ -112,14 +111,11 @@ export class Missile {
 
     // 如果目标被摧毁，尝试寻找新目标
     if (!this.target || (this.target && !this.target.parent)) {
-      if (!this.hasRetargeted) {
-        // 尝试重新锁定目标
-        const newTarget = this.findNearestEnemy();
-        if (newTarget) {
-          this.target = newTarget;
-          this.hasRetargeted = true;
-          console.log('导弹重新锁定目标');
-        }
+      // 尝试重新锁定目标
+      const newTarget = this.findNearestEnemy();
+      if (newTarget) {
+        this.target = newTarget;
+        console.log('导弹重新锁定目标');
       }
     }
 

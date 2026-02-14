@@ -158,10 +158,19 @@ export class LevelManager {
     }
 
     // 更新波次延迟
-    if (this.waveDelayTimer > 0) {
+    if (this.waveDelayTimer > 0 && this.currentLevel) {
       this.waveDelayTimer -= deltaTime;
       if (this.waveDelayTimer <= 0) {
-        this.startNextWave();
+        // 检查是否是最后一波
+        if (this.currentWave >= this.currentLevel.totalWaves) {
+          // 关卡完成
+          this.state = LevelState.LEVEL_COMPLETE;
+          console.log(`[Level ${this.currentLevel.id}] Complete! All waves defeated.`);
+          this.onLevelComplete?.(this.currentLevel.id);
+        } else {
+          // 开始下一波
+          this.startNextWave(playerPosition);
+        }
       }
     }
 
@@ -269,7 +278,7 @@ export class LevelManager {
   /**
    * 开始下一波
    */
-  private startNextWave(): void {
+  private startNextWave(playerPosition: THREE.Vector3): void {
     if (!this.currentLevel) return;
 
     this.currentWave++;
@@ -277,19 +286,14 @@ export class LevelManager {
     this.enemiesSpawnedThisWave = 0; // 重置生成计数
     this.spawnTimer = 0; // 重置生成计时器
 
-    // 计算并保存当前波次的敌人群中心
-    const playerPos = this.enemies.length > 0
-      ? this.enemies[0].getPosition() // 如果有敌人，使用第一个敌人的位置作为参考
-      : new THREE.Vector3(0, 0, 0); // 否则使用原点
-
-    // 随机选择一个方向和距离（600-800m）
+    // 计算并保存当前波次的敌人群中心（使用玩家位置作为参考）
     const angle = Math.random() * Math.PI * 2;
-    const distance = 600 + Math.random() * 200;
+    const distance = 600 + Math.random() * 200; // 600-800m
 
     this.waveGroupCenter = new THREE.Vector3(
-      playerPos.x + Math.cos(angle) * distance,
-      playerPos.y,
-      playerPos.z + Math.sin(angle) * distance
+      playerPosition.x + Math.cos(angle) * distance,
+      playerPosition.y,
+      playerPosition.z + Math.sin(angle) * distance
     );
 
     this.onWaveStart?.(this.currentWave);

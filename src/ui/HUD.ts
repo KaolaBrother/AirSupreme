@@ -14,6 +14,8 @@ export class HUD {
   private remainingEnemiesDisplay: HTMLDivElement; // 剩余敌人数量
   private livesDisplay: HTMLDivElement;
   private missilesDisplay: HTMLDivElement;
+  private missileProgressDisplay: HTMLDivElement; // 导弹补给进度条背景
+  private missileProgressFill: HTMLDivElement; // 导弹补给进度条填充
   private powerUpDisplay: HTMLDivElement;  // 道具提示显示
   private gameOverDisplay: HTMLDivElement; // 游戏结束显示
 
@@ -109,6 +111,30 @@ export class HUD {
     `;
     this.missilesDisplay.textContent = '导弹: 🚀🚀';
 
+    // 导弹补给进度条（导弹UI下方）
+    const progressTop = isMobile ? 120 : 144;
+    this.missileProgressDisplay = document.createElement('div');
+    this.missileProgressDisplay.style.cssText = `
+      position: absolute;
+      top: ${progressTop}px;
+      right: ${padding};
+      width: ${isMobile ? '100px' : '120px'};
+      height: 6px;
+      background: rgba(255, 255, 255, 0.2);
+      border-radius: 3px;
+      overflow: hidden;
+      border: 1px solid rgba(255, 255, 255, 0.5);
+    `;
+
+    this.missileProgressFill = document.createElement('div');
+    this.missileProgressFill.style.cssText = `
+      width: 0%;
+      height: 100%;
+      background: linear-gradient(90deg, #ffffff, #e0e0e0);
+      transition: width 0.5s ease-out;
+    `;
+    this.missileProgressDisplay.appendChild(this.missileProgressFill);
+
     // 道具提示显示（右上角）
     this.powerUpDisplay = document.createElement('div');
     this.powerUpDisplay.style.cssText = `
@@ -168,6 +194,7 @@ export class HUD {
     this.container.appendChild(this.enemiesDisplay);
     this.container.appendChild(this.livesDisplay);
     this.container.appendChild(this.missilesDisplay);
+    this.container.appendChild(this.missileProgressDisplay);
     this.container.appendChild(this.powerUpDisplay);
     document.body.appendChild(this.container);
     document.body.appendChild(this.gameOverDisplay);
@@ -303,6 +330,16 @@ export class HUD {
     const maxMissiles = 10; // 假设最多10发
     const icons = '🚀'.repeat(Math.max(0, count)) + '⬜'.repeat(Math.max(0, maxMissiles - count));
     this.missilesDisplay.textContent = `导弹: ${icons}`;
+  }
+
+  /**
+   * 更新导弹补给进度条
+   * @param progress 进度（0-1）
+   */
+  public updateMissileProgress(progress: number): void {
+    // 限制在0-1范围
+    const clampedProgress = Math.max(0, Math.min(1, progress));
+    this.missileProgressFill.style.width = `${clampedProgress * 100}%`;
   }
 
   /**

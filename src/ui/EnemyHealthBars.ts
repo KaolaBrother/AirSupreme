@@ -138,7 +138,11 @@ export class EnemyHealthBars {
         barData.arrow.style.display = 'block';
         // 计算敌人到玩家的距离（不是到原点的距离）
         const distance = playerPosition.distanceTo(enemy.mesh.position);
-        this.updateArrowIndicator(barData.arrow, screenPos, distance);
+        // 计算敌人在玩家视角中的左右位置（使用3D空间，避免camera旋转导致跳跃）
+        const toEnemy = enemy.mesh.position.clone().sub(playerPosition);
+        const playerRight = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
+        const isOnRight = playerRight.dot(toEnemy) > 0; // 正值表示在右边
+        this.updateArrowIndicator(barData.arrow, screenPos, distance, isOnRight);
       }
     }
   }
@@ -251,40 +255,47 @@ export class EnemyHealthBars {
   /**
    * 更新箭头指示器位置和方向
    */
-  private updateArrowIndicator(arrow: HTMLDivElement, screenPos: { x: number; y: number; z: number }, distance: number): void {
+  private updateArrowIndicator(
+    arrow: HTMLDivElement,
+    screenPos: { x: number; y: number; z: number },
+    distance: number,
+    isOnRight: boolean // 敌人在玩家视角的右边
+  ): void {
     // 计算屏幕中心
     const centerX = 0.5;
     const centerY = 0.5;
 
-    // 计算从中心到敌人的方向
+    // 计算从中心到敌人的方向（用于确定箭头Y位置）
     const dx = screenPos.x - centerX;
     const dy = screenPos.y - centerY;
 
-    // 计算箭头角度（从中心指向敌人）
-    // 箭头默认向下（CSS border-bottom创建），需要指向敌人
-    let angleDeg = Math.atan2(dy, dx) * (180 / Math.PI);
-
-    // 判断敌人偏左还是偏右，箭头只能在左边或右边
     const edgePadding = 0.08;
     let arrowX: number;
     let arrowY: number;
 
-    if (dx >= 0) {
-      // 敌人在右边（包括右上、右中、右下）→ 箭头在右边
+    // 使用3D空间中的相对位置判断箭头在左边还是右边（避免camera旋转导致跳跃）
+    if (isOnRight) {
+      // 敌人在玩家视角右边 → 箭头在右边缘
       arrowX = 1 - edgePadding;
       // Y 根据敌人位置，但限制在屏幕范围内
       arrowY = Math.max(edgePadding, Math.min(1 - edgePadding, centerY + dy));
     } else {
-      // 敌人在左边（包括左上、左中、左下）→ 箭头在左边
+      // 敌人在玩家视角左边 → 箭头在左边缘
       arrowX = edgePadding;
+      // Y 根据敌人位置，但限制在屏幕范围内
       arrowY = Math.max(edgePadding, Math.min(1 - edgePadding, centerY + dy));
     }
+
+    // 计算从屏幕中心到箭头的方向（用于旋转角度）
+    const toArrowX = arrowX - centerX;
+    const toArrowY = arrowY - centerY;
+    const angleDeg = Math.atan2(toArrowY, toArrowX) * (180 / Math.PI);
 
     // 设置箭头位置和旋转
     arrow.style.left = `${arrowX * 100}%`;
     arrow.style.top = `${arrowY * 100}%`;
-    // 旋转：箭头默认向下（border-bottom），需要调整角度指向敌人
-    // atan2(dy, dx) 返回的角度是以X轴正向为0度，逆时针为正
+    // 箭头默认向下（border-bottom），需要调整角度指向箭头位置
+    // atan2(toArrowY, toArrowX) 返回的角度是以X轴正向为0度，逆时针为正
     // 箭头默认向下（-90度），所以需要 +90度修正
     arrow.style.transform = `translate(-50%, -50%) rotate(${angleDeg + 90}deg)`;
 

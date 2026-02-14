@@ -58,7 +58,7 @@ export const GAME_CONSTANTS = {
     ROLL_SPEED: 3.0,       // 翻滚速度
     BASE_SPEED: 25,        // 基础速度（减半）
     MAX_SPEED: 50,         // 最大速度（减半）
-    BASE_HEALTH: 100,      // 基础生命值
+    BASE_HEALTH: 200,      // 基础生命值（翻倍）
     BASE_DAMAGE: 25,       // 基础伤害
     BASE_FIRE_RATE: 0.15,  // 基础射击间隔
   },
@@ -102,13 +102,16 @@ export const GAME_CONSTANTS = {
   // 导弹参数
   MISSILE: {
     SPEED: 80,             // 导弹速度
-    DAMAGE: 100,           // 导弹伤害（较高）
+    DAMAGE: 50,            // 导弹伤害（减半）
     TURN_SPEED: 2.0,       // 转向速度（弧度/秒）
     MAX_LIFETIME: 10,      // 最大寿命（秒）
     LOCK_TIME: 3.0,        // 锁定所需时间（秒）
     LOCK_BOX_SIZE: 0.15,   // 锁定框大小（屏幕比例）
     MAX_LOCK_DISTANCE: 600, // 最大锁定距离
-    MAX_FLIGHT_DISTANCE: 1200, // 最大飞行距离（是锁定距离的2倍）
+    MAX_FLIGHT_DISTANCE: 2400, // 最大飞行距离（是锁定距离的4倍）
     STARTING_MISSILES: 2,  // 初始导弹数量
+    MAX_MISSILES: 10,       // 最大导弹数量
+    MISSILE_RESPAWN_TIME: 7.5, // 导弹补给时间（秒）
+    MAX_RESPAWN_MISSILES: 10, // 导弹补给上限
   },
 };

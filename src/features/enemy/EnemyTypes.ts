@@ -73,7 +73,7 @@ export const ENEMY_CONFIGS: Record<EnemyType, EnemyConfig> = {
   [EnemyType.SCOUT]: {
     type: EnemyType.SCOUT,
     name: '侦察机',
-    health: 30,
+    health: 60,
     speed: 40,              // 基于导弹（80）的一半
     damage: 10,
     detectionRange: 120,
@@ -101,7 +101,7 @@ export const ENEMY_CONFIGS: Record<EnemyType, EnemyConfig> = {
   [EnemyType.FIGHTER]: {
     type: EnemyType.FIGHTER,
     name: '战斗机',
-    health: 50,
+    health: 100,
     speed: 55,              // 比导弹慢30%
     damage: 15,
     detectionRange: 100,
@@ -129,7 +129,7 @@ export const ENEMY_CONFIGS: Record<EnemyType, EnemyConfig> = {
   [EnemyType.HEAVY]: {
     type: EnemyType.HEAVY,
     name: '重型轰炸机',
-    health: 150,
+    health: 300,
     speed: 35,              // 慢速但转向慢
     damage: 30,
     detectionRange: 80,
@@ -157,7 +157,7 @@ export const ENEMY_CONFIGS: Record<EnemyType, EnemyConfig> = {
   [EnemyType.SNIPER]: {
     type: EnemyType.SNIPER,
     name: '狙击机',
-    health: 40,
+    health: 80,
     speed: 45,              // 中等速度
     damage: 40,
     detectionRange: 200,
@@ -185,7 +185,7 @@ export const ENEMY_CONFIGS: Record<EnemyType, EnemyConfig> = {
   [EnemyType.ACE]: {
     type: EnemyType.ACE,
     name: '王牌飞行员',
-    health: 80,
+    health: 160,
     speed: 70,              // 接近导弹速度
     damage: 25,
     detectionRange: 150,
