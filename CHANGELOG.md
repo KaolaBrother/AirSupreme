@@ -2,6 +2,151 @@
 
 ## [未发布] - 2026-02-14
 
+### 地面闪烁修复（Z-fighting 问题）
+
+#### 🎯 问题描述
+- **沙漠关卡（Level 2）和雪山关卡（Level 3）地面持续闪烁**
+- **PC 和移动设备都出现闪烁**，排除了配置性能问题
+- **深海（Level 4）和城市（Level 5）没有闪烁问题**
+- 闪烁不是全局性的，某些区域闪烁，某些不闪烁
+
+#### 🔍 根本原因
+- **Z-fighting（Z 轴冲突）**：当大平面在相似的 Z 深度渲染时，渲染器无法确定显示哪个面
+- **沙漠和雪山地形**：使用大平面地面（1500m x 1500m）+ 水面，两个平面距离太近导致深度缓冲区冲突
+- **海水和城市没有问题**：这些关卡的地面材质配置不同，或者平面间距更大
+
+#### ✅ 解决方案
+- **添加 polygonOffset 参数**到沙漠和雪山地面材质
+- **参数配置**：
+  - `polygonOffset: true` - 启用多边形偏移
+  - `polygonOffsetFactor: 1` - 偏移因子
+  - `polygonOffsetUnits: false` - 使用世界单位
+- **修改文件**：[src/features/terrain/TerrainGenerator.ts](src/features/terrain/TerrainGenerator.ts)
+  - 第 398-405 行：沙漠地面材质（`generateDesertTerrain()`）
+  - 第 574-581 行：雪山地面材质（`generateMountainTerrain()`）
+
+#### 📊 技术细节
+- **polygonOffset 工作原理**：在深度缓冲区中偏移多边形，避免两个面在同一深度竞争
+- **为什么只有沙漠和雪山**：这两关卡的大平面地面最接近 Z 深度冲突条件
+- **海水和城市没有问题**：
+  - 海水：水面和地面颜色区分明显，深度缓冲区更容易区分
+  - 城市：地面配置不同，可能没有相同的大平面冲突
+
+#### ✅ 效果
+- ✅ 沙漠和雪山地面闪烁完全修复
+- ✅ PC 和移动设备都不再闪烁
+- ✅ 视觉效果保持不变（polygonOffset 不影响外观）
+- ✅ 性能无影响（仅影响深度缓冲区计算）
+
+---
+
+### 关卡进度系统修复
+
+#### 🎯 问题描述
+- **清完所有敌人后，游戏没有正确进入下一关**
+- **关卡完成音效播放了**，但下一关没有加载
+- **游戏卡在当前关卡**，玩家需要手动选择下一关
+
+#### 🔍 根本原因
+- **onLevelComplete 回调不完整**：只播放音效和日志，没有加载下一关的逻辑
+- **关卡 ID 不递增**：`currentLevelId` 保持不变
+- **没有加载新关卡**：`levelManager.loadLevel()` 没有被调用
+- **没有启动新波次**：进入下一关后需要等待用户手动开始
+
+#### ✅ 解决方案
+- **关卡 ID 自动递增**：`this.currentLevelId++`
+- **自动加载下一关**：`this.levelManager.loadLevel(this.currentLevelId)`
+- **延迟启动第一波**：等待 2 秒后启动第一波（确保地形生成完成）
+- **修改文件**：[src/Game.ts](src/Game.ts) 第 166-177 行
+
+#### 📊 技术细节
+```typescript
+this.levelManager.onLevelComplete = (level) => {
+  this.audioManager.playLevelUp();
+  console.log(`关卡 ${level} 完成！`);
+
+  // 增加关卡号并加载下一关
+  this.currentLevelId++;
+  this.levelManager.loadLevel(this.currentLevelId);
+
+  // 延迟启动第一波（等待地形生成）
+  setTimeout(() => {
+    const playerPos = this.playerController.getPosition();
+    this.levelManager.startWave(playerPos);
+  }, 2000);
+};
+```
+
+#### ✅ 效果
+- ✅ 清完所有敌人后自动进入下一关
+- ✅ 关卡完成音效播放
+- ✅ 地形生成完成后自动开始第一波敌人
+- ✅ 玩家可以连续游戏，无需手动选择关卡
+
+---
+
+### 气球图标显示优化
+
+#### 🎯 优化目标
+- **提高气球道具图标的可见性**
+- **避免气球遮挡图标**
+- **改善道具收集体验**
+
+#### ✅ 优化内容
+- **图标放大 2 倍**：
+  - Canvas 尺寸：64x64 → 128x128
+  - 图标平面：2.5x2.5 → 5x5
+  - 字体大小：32px → 64px
+- **位置提高**：Y 坐标从 3.5 提高到 5.5（避免被气球遮挡）
+- **修改文件**：[src/features/powerups/BalloonPowerUp.ts](src/features/powerups/BalloonPowerUp.ts) 第 64-92 行
+
+#### ✅ 效果
+- ✅ 图标更容易看清（2 倍大小）
+- ✅ 不会被气球遮挡（位置提高）
+- ✅ 道具收集体验更好
+
+---
+
+## [未发布] - 2026-02-14
+
+### 敌人生成战场边界限制修复
+
+#### 🎯 问题修复
+- **原问题**：敌人生成位置有时候会在战场区域之外
+  - 玩家飞到战场外时，敌人群中心会超出边界（±750米）
+  - 只有 fallback 逻辑有边界检查，正常流程没有限制
+  - 导致敌人生成到战场外，玩家无法找到敌人
+- **解决方案**：所有敌人生成位置都强制限制在战场范围内
+
+#### 🔧 技术细节
+- **添加战场边界常量** - [LevelManager.ts:38-39](src/features/levels/LevelManager.ts#L38-L39)
+  - `BATTLEFIELD_MIN = -750`
+  - `BATTLEFIELD_MAX = 750`
+  - 战场范围：X/Z 平面 -750 到 750 米（跨度 1500 米）
+- **边界限制辅助方法** - [LevelManager.ts:91-93](src/features/levels/LevelManager.ts#L91-L93)
+  - `clampToBattlefield(value)`：限制单个坐标值在战场范围内
+  - 使用 `Math.max/min` 确保坐标在 ±750 米范围内
+- **群中心计算重构** - [LevelManager.ts:98-126](src/features/levels/LevelManager.ts#L98-L126)
+  - `calculateWaveGroupCenter()` 方法：
+    - 计算原始群中心（玩家位置 + 600-800米随机方向）
+    - 使用 `clampToBattlefield()` 限制 X/Z 坐标
+    - 如果被限制（超出边界），输出警告日志
+  - `startWave()` 和 `startNextWave()` 都使用此方法
+- **敌人生成位置边界检查** - [LevelManager.ts:392-403](src/features/levels/LevelManager.ts#L392-L403)
+  - 正常流程：群中心周围 60 米半径分布
+  - 所有生成的 X/Z 坐标都经过 `clampToBattlefield()` 限制
+  - Fallback 逻辑也添加边界检查
+  - 默认位置生成也添加边界检查
+
+#### ✅ 效果
+- ✅ 敌人群中心始终在战场范围内（±750米）
+- ✅ 每个敌人生成位置都被限制在战场内
+- ✅ 无论玩家飞到哪里，敌人都不会生成到战场外
+- ✅ 如果群中心被限制，会输出警告日志方便调试
+- ✅ 战斗体验更好：敌人始终在可战斗区域内
+
+---
+
 ### 生命道具修复
 
 #### 🎯 生命道具效果修正

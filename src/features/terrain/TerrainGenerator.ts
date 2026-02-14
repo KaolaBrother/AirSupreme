@@ -25,8 +25,12 @@ export class TerrainGenerator {
    * 生成关卡地形
    */
   public generateTerrain(config: LevelConfig): void {
+    console.log(`[TerrainGenerator] Generating terrain: ${config.terrain}`);
+
     // 清除旧地形
     this.clearTerrain();
+
+    console.log(`[TerrainGenerator] After clear, terrainGroup children: ${this.terrainGroup.children.length}`);
 
     // 设置天空
     this.createSky(config.skyColors);
@@ -379,7 +383,7 @@ export class TerrainGenerator {
    */
   private generateDesertTerrain(config: LevelConfig): void {
     // 沙漠地面 - 沙丘效果
-    const groundGeometry = new THREE.PlaneGeometry(2000, 2000, 150, 150);
+    const groundGeometry = new THREE.PlaneGeometry(2000, 2000, 200, 200); // 提高细节到200x200
     const positions = groundGeometry.attributes.position;
 
     for (let i = 0; i < positions.count; i++) {
@@ -399,6 +403,9 @@ export class TerrainGenerator {
       color: config.groundColor,
       roughness: 1,
       metalness: 0,
+      polygonOffset: true, // 修复Z-fighting闪烁
+      polygonOffsetFactor: 1, // 偏移因子
+      polygonOffsetUnits: false // 使用世界单位
     });
 
     const ground = new THREE.Mesh(groundGeometry, groundMaterial);
@@ -575,6 +582,9 @@ export class TerrainGenerator {
       color: config.groundColor,
       roughness: 0.8,
       metalness: 0,
+      polygonOffset: true, // 修复Z-fighting闪烁
+      polygonOffsetFactor: 1, // 偏移因子
+      polygonOffsetUnits: false, // 使用世界单位
     });
 
     const ground = new THREE.Mesh(groundGeometry, groundMaterial);
@@ -1109,7 +1119,7 @@ export class TerrainGenerator {
   public update(deltaTime: number): void {
     this.time += deltaTime;
 
-    if (this.waterMesh) {
+    if (this.waterMesh && this.waterMesh.geometry) {
       // 水面波动
       const positions = this.waterMesh.geometry.attributes.position;
 
@@ -1135,10 +1145,27 @@ export class TerrainGenerator {
    * 清除地形
    */
   public clearTerrain(): void {
+    const childrenCount = this.terrainGroup.children.length;
+    console.log(`[TerrainGenerator] clearTerrain: Starting with ${childrenCount} children`);
+
+    // 立即清空 waterMesh 引用（避免 update() 访问旧对象）
+    this.waterMesh = undefined;
+
+    // 清理天空纹理
+    if (this.scene.background instanceof THREE.Texture) {
+      this.scene.background.dispose();
+      this.scene.background = null;
+    }
+
+    // 清理雾
+    this.scene.fog = null;
+
+    // 清理 terrainGroup 的所有子对象
     while (this.terrainGroup.children.length > 0) {
       const child = this.terrainGroup.children[0];
       this.terrainGroup.remove(child);
 
+      // 清理 Mesh
       if (child instanceof THREE.Mesh) {
         child.geometry.dispose();
         if (Array.isArray(child.material)) {
@@ -1147,6 +1174,27 @@ export class TerrainGenerator {
           child.material.dispose();
         }
       }
+      // 清理 InstancedMesh（草地、花）
+      else if (child instanceof THREE.InstancedMesh) {
+        child.geometry.dispose();
+        child.material.dispose();
+      }
+      // 清理 Group（树木、云朵等）
+      else if (child instanceof THREE.Group) {
+        child.traverse((obj) => {
+          if (obj instanceof THREE.Mesh) {
+            obj.geometry.dispose();
+            if (Array.isArray(obj.material)) {
+              obj.material.forEach(m => m.dispose());
+            } else {
+              obj.material.dispose();
+            }
+          } else if (obj instanceof THREE.InstancedMesh) {
+            obj.geometry.dispose();
+            obj.material.dispose();
+            }
+        });
+      }
     }
 
     this.trees = [];
@@ -1154,5 +1202,7 @@ export class TerrainGenerator {
     this.waterMesh = undefined;
     this.grass = null;
     this.rocks = [];
+
+    console.log(`[TerrainGenerator] clearTerrain: Complete, remaining children: ${this.terrainGroup.children.length}`);
   }
 }

@@ -31,8 +31,12 @@ export class LevelManager {
   } = {
     maxHeight: 150,      // 最大高度（敌人不能超过）
     minHeight: -20,       // 最小高度（敌人不能低于）
-    horizontalDistance: 750 // 水平边界（离玩家中心，留出边距）
+    horizontalDistance: 750 // 水平边界（离战场中心的距离，±750米）
   };
+
+  // 战场边界常量
+  private readonly BATTLEFIELD_MIN = -750;
+  private readonly BATTLEFIELD_MAX = 750;
 
   private currentLevel: LevelConfig | null = null;
   private currentWave: number = 0;
@@ -79,10 +83,52 @@ export class LevelManager {
     this.currentWave = 0;
     this.state = LevelState.IDLE;
 
+    console.log(`[LevelManager] Loading level ${levelId}: ${config.name}, terrain: ${config.terrain}`);
+
     // 生成地形
     this.terrainGenerator.generateTerrain(config);
 
     console.log(`Loaded level ${levelId}: ${config.name}`);
+  }
+
+  /**
+   * 限制坐标在战场范围内
+   */
+  private clampToBattlefield(value: number): number {
+    return Math.max(this.BATTLEFIELD_MIN, Math.min(this.BATTLEFIELD_MAX, value));
+  }
+
+  /**
+   * 计算敌人群中心，确保在战场范围内
+   */
+  private calculateWaveGroupCenter(playerPosition: THREE.Vector3): THREE.Vector3 {
+    // 计算相对于玩家的方向和距离（600-800m）
+    const angle = Math.random() * Math.PI * 2;
+    const distance = 600 + Math.random() * 200;
+
+    // 计算原始群中心位置
+    const rawCenter = new THREE.Vector3(
+      playerPosition.x + Math.cos(angle) * distance,
+      playerPosition.y,
+      playerPosition.z + Math.sin(angle) * distance
+    );
+
+    // 限制在战场范围内（±750米）
+    const clampedCenter = new THREE.Vector3(
+      this.clampToBattlefield(rawCenter.x),
+      rawCenter.y,
+      this.clampToBattlefield(rawCenter.z)
+    );
+
+    // 如果被限制（说明超出边界），向战场中心调整
+    if (clampedCenter.x !== rawCenter.x || clampedCenter.z !== rawCenter.z) {
+      console.warn('[LevelManager] 群中心超出战场，已调整到边界内', {
+        original: { x: rawCenter.x, z: rawCenter.z },
+        clamped: { x: clampedCenter.x, z: clampedCenter.z }
+      });
+    }
+
+    return clampedCenter;
   }
 
   /**
@@ -95,15 +141,8 @@ export class LevelManager {
 
     // 第一次调用：设置第一波
     if (this.currentWave === 0 && playerPosition && !isNextWave) {
-      // 计算并保存第一波的敌人群中心
-      const angle = Math.random() * Math.PI * 2;
-      const distance = 600 + Math.random() * 200; // 600-800m
-
-      this.waveGroupCenter = new THREE.Vector3(
-        playerPosition.x + Math.cos(angle) * distance,
-        playerPosition.y,
-        playerPosition.z + Math.sin(angle) * distance
-      );
+      // 计算并保存第一波的敌人群中心（确保在战场内）
+      this.waveGroupCenter = this.calculateWaveGroupCenter(playerPosition);
 
       this.state = LevelState.WAVE_ACTIVE;
       this.enemiesSpawnedThisWave = 0;
@@ -311,15 +350,8 @@ export class LevelManager {
     // 增加波次
     this.currentWave++;
 
-    // 计算并保存新波次的敌人群中心
-    const angle = Math.random() * Math.PI * 2;
-    const distance = 600 + Math.random() * 200; // 600-800m
-
-    this.waveGroupCenter = new THREE.Vector3(
-      playerPosition.x + Math.cos(angle) * distance,
-      playerPosition.y,
-      playerPosition.z + Math.sin(angle) * distance
-    );
+    // 计算并保存新波次的敌人群中心（确保在战场内）
+    this.waveGroupCenter = this.calculateWaveGroupCenter(playerPosition);
 
     // 调用 startWave 完成状态设置和事件触发
     this.startWave(undefined, true); // isNextWave = true
@@ -352,8 +384,12 @@ export class LevelManager {
         // 降级：如果没有群中心，使用玩家位置作为参考
         const fallbackDistance = minGroupDistanceFromPlayer + Math.random() * (maxGroupDistanceFromPlayer - minGroupDistanceFromPlayer);
         const fallbackAngle = Math.random() * Math.PI * 2;
-        const groupCenterX = playerPosition.x + Math.cos(fallbackAngle) * fallbackDistance;
-        const groupCenterZ = playerPosition.z + Math.sin(fallbackAngle) * fallbackDistance;
+        let groupCenterX = playerPosition.x + Math.cos(fallbackAngle) * fallbackDistance;
+        let groupCenterZ = playerPosition.z + Math.sin(fallbackAngle) * fallbackDistance;
+
+        // 限制在战场范围内
+        groupCenterX = this.clampToBattlefield(groupCenterX);
+        groupCenterZ = this.clampToBattlefield(groupCenterZ);
 
         let finalCenterX = groupCenterX;
         let finalCenterZ = groupCenterZ;
@@ -368,8 +404,13 @@ export class LevelManager {
 
         const distAngle = Math.random() * Math.PI * 2;
         const distFromCenter = Math.random() * distributionRadius;
-        const x = finalCenterX + Math.cos(distAngle) * distFromCenter;
-        const z = finalCenterZ + Math.sin(distAngle) * distFromCenter;
+        let x = finalCenterX + Math.cos(distAngle) * distFromCenter;
+        let z = finalCenterZ + Math.sin(distAngle) * distFromCenter;
+
+        // 限制在战场范围内
+        x = this.clampToBattlefield(x);
+        z = this.clampToBattlefield(z);
+
         const spawnY = Math.max(minHeight, Math.min(maxHeight, playerPosition.y + (Math.random() - 0.5) * 30));
         bestPosition = new THREE.Vector3(x, spawnY, z);
         break;
@@ -380,10 +421,15 @@ export class LevelManager {
       const distAngle = Math.random() * Math.PI * 2;
       const distFromCenter = Math.random() * distributionRadius;
 
-      const x = groupCenter.x + Math.cos(distAngle) * distFromCenter;
-      const z = groupCenter.z + Math.sin(distAngle) * distFromCenter;
+      // 计算原始位置
+      let x = groupCenter.x + Math.cos(distAngle) * distFromCenter;
+      let z = groupCenter.z + Math.sin(distAngle) * distFromCenter;
 
-      // 计算位置（同时检查高度和水平边界）
+      // 限制在战场范围内
+      x = this.clampToBattlefield(x);
+      z = this.clampToBattlefield(z);
+
+      // 计算位置（检查高度）
       const spawnY = Math.max(minHeight, Math.min(maxHeight, playerPosition.y + (Math.random() - 0.5) * 30));
 
       const position = new THREE.Vector3(x, spawnY, z);
@@ -412,11 +458,14 @@ export class LevelManager {
     // 如果找不到完美位置，使用默认位置
     if (!bestPosition) {
       const defaultY = Math.max(minHeight, Math.min(maxHeight, playerPosition.y));
-      bestPosition = new THREE.Vector3(
-        playerPosition.x + (Math.random() - 0.5) * 200,
-        defaultY,
-        playerPosition.z + (Math.random() - 0.5) * 200
-      );
+      let x = playerPosition.x + (Math.random() - 0.5) * 200;
+      let z = playerPosition.z + (Math.random() - 0.5) * 200;
+
+      // 限制在战场范围内
+      x = this.clampToBattlefield(x);
+      z = this.clampToBattlefield(z);
+
+      bestPosition = new THREE.Vector3(x, defaultY, z);
     }
 
     return bestPosition;

@@ -166,6 +166,16 @@ export class Game {
     this.levelManager.onLevelComplete = (level) => {
       this.audioManager.playLevelUp();
       console.log(`关卡 ${level} 完成！`);
+
+      // 增加关卡号并加载下一关
+      this.currentLevelId++;
+      this.levelManager.loadLevel(this.currentLevelId);
+
+      // 延迟开始第一波（等待地形生成）
+      setTimeout(() => {
+        const playerPos = this.playerController.getPosition();
+        this.levelManager.startWave(playerPos);
+      }, 2000);
     };
 
     this.levelManager.onEnemySpawned = (enemy) => {
