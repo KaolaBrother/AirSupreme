@@ -707,7 +707,7 @@ export class TerrainGenerator {
    */
   private generateOceanTerrain(config: LevelConfig): void {
     // 海面 - 波浪效果
-    const oceanGeometry = new THREE.PlaneGeometry(3000, 3000, 200, 200);
+    const oceanGeometry = new THREE.PlaneGeometry(2000, 2000, 200, 200);
     const positions = oceanGeometry.attributes.position;
 
     for (let i = 0; i < positions.count; i++) {
@@ -744,8 +744,8 @@ export class TerrainGenerator {
    */
   private createTropicalIslands(count: number): void {
     for (let i = 0; i < count; i++) {
-      const x = (Math.random() - 0.5) * 2000;
-      const z = (Math.random() - 0.5) * 2000;
+      const x = (Math.random() - 0.5) * 1800;
+      const z = (Math.random() - 0.5) * 1800;
 
       const island = new THREE.Group();
 

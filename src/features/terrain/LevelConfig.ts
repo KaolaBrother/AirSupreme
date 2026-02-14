@@ -55,7 +55,7 @@ export const LEVELS: LevelConfig[] = [
     fogColor: 0xadd8e6,
     skyColors: ['#1e3c72', '#2a5298', '#87ceeb', '#ffffff'],
     totalWaves: 5,
-    enemiesPerWave: [2, 3, 3, 4, 4],
+    enemiesPerWave: [2, 3, 4, 5, 6],
     enemyTypes: [
       { type: 'SCOUT', minWave: 1, maxCount: 2 },
       { type: 'FIGHTER', minWave: 2, maxCount: 2 },
@@ -74,8 +74,8 @@ export const LEVELS: LevelConfig[] = [
     groundColor: 0xc2b280,
     fogColor: 0xf4a460,
     skyColors: ['#ff6b35', '#ff8c42', '#ffd166', '#fff8dc'],
-    totalWaves: 6,
-    enemiesPerWave: [3, 3, 4, 4, 5, 5],
+    totalWaves: 5,
+    enemiesPerWave: [3, 4, 5, 6, 7],
     enemyTypes: [
       { type: 'SCOUT', minWave: 1, maxCount: 2 },
       { type: 'FIGHTER', minWave: 1, maxCount: 3 },
