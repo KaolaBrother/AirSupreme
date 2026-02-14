@@ -7,8 +7,8 @@ import * as THREE from 'three';
 export class ParticleTrailRenderer {
   private scene: THREE.Scene;
   private particles: Particle[] = [];
-  private maxParticles: number = 25;
-  private spawnInterval: number = 0.2; // 每0.2秒生成一个粒子
+  private maxParticles: number = 50; // 增加到50（2倍密度）
+  private spawnInterval: number = 0.1; // 每0.1秒生成一个粒子（2倍频率）
   private spawnTimer: number = 0;
 
   // 粒子材质（复用）

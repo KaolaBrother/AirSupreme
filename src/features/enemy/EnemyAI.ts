@@ -62,23 +62,10 @@ export class EnemyAI {
   }
 
   /**
-   * 获取尾迹颜色（根据敌机类型）
+   * 获取尾迹颜色（统一白色，符合真实）
    */
-  private getTrailColor(type: EnemyType): number {
-    switch (type) {
-      case EnemyType.SCOUT:
-        return 0x6b7b8e; // 蓝色
-      case EnemyType.FIGHTER:
-        return 0xd773020; // 橙色
-      case EnemyType.HEAVY:
-        return 0x8b8787; // 暗灰色
-      case EnemyType.SNIPER:
-        return 0x9b30ff; // 紫金色
-      case EnemyType.ACE:
-        return 0xff0000; // 红色
-      default:
-        return 0xff6600; // 橙红色（默认）
-    }
+  private getTrailColor(_type: EnemyType): number {
+    return 0xffffff; // 白色（符合真实飞机尾迹）
   }
 
   /**

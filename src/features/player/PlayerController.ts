@@ -1,7 +1,6 @@
 import * as THREE from 'three';
 import type { InputState } from '@/core/Input/InputHandler';
 import { GAME_CONSTANTS } from '@/config';
-import { ParticleTrailRenderer } from '@/features/effects/ParticleTrailRenderer';
 
 /**
  * 玩家控制器
@@ -17,16 +16,81 @@ export class PlayerController {
   // 自动回中速度（弧度/秒）
   private readonly autoLevelSpeed: number = 2.0;
 
-  // 尾迹系统
-  private trail: ParticleTrailRenderer;
+  // 发动机火焰效果（使用Sprite）
+  private flameSprite: THREE.Sprite;
+  private readonly normalFlameSize: number = 3.0;  // 正常火焰大小
+  private readonly boostFlameSize: number = 5.0;    // 加速火焰大小
+  private currentFlameSize: number = 3.0;
+  private readonly normalFlameColor = new THREE.Color(0xff8844);  // 正常火焰颜色（橙黄）
+  private readonly boostFlameColor = new THREE.Color(0xffaa00);    // 加速火焰颜色（金黄）
+  private readonly flameColor = new THREE.Color();
 
-  constructor(aircraft: THREE.Group, scene: THREE.Scene) {
+  constructor(aircraft: THREE.Group, _scene: THREE.Scene) {
     this.aircraft = aircraft;
     this.currentSpeed = GAME_CONSTANTS.PLAYER.BASE_SPEED;
     this.forward = new THREE.Vector3();
 
-    // 创建尾迹效果（青色）
-    this.trail = new ParticleTrailRenderer(scene, aircraft, 0x00ffff);
+    // 创建火焰Sprite效果
+    const flameTexture = this.createFlameTexture();
+    const flameMaterial = new THREE.SpriteMaterial({
+      map: flameTexture,
+      color: 0xff8844,              // 橙黄色
+      transparent: true,
+      opacity: 0.8,
+      blending: THREE.AdditiveBlending,  // 加性混合实现发光效果
+      depthWrite: false,                // 不写入深度缓冲
+    });
+
+    this.flameSprite = new THREE.Sprite(flameMaterial);
+
+    // 设置初始大小
+    this.flameSprite.scale.set(this.normalFlameSize, this.normalFlameSize, 1);
+
+    // 放置在引擎位置（飞机尾部后方）
+    this.flameSprite.position.set(0, -0.2, 2.8);
+
+    // 添加到飞机对象
+    this.aircraft.add(this.flameSprite);
+  }
+
+  /**
+   * 创建火焰纹理（径向渐变）
+   */
+  private createFlameTexture(): THREE.CanvasTexture {
+    const size = 128;
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    const context = canvas.getContext('2d');
+
+    if (!context) {
+      throw new Error('Failed to get 2D context for flame texture');
+    }
+
+    // 创建径向渐变（中心亮白，边缘透明）
+    const centerX = size / 2;
+    const centerY = size / 2;
+    const maxRadius = size / 2;
+
+    const gradient = context.createRadialGradient(centerX, centerY, 0, centerX, centerY, maxRadius);
+
+    // 中心白色（高亮）
+    gradient.addColorStop(0, 'rgba(255, 255, 255, 1)');
+    // 内圈橙黄色
+    gradient.addColorStop(0.15, 'rgba(255, 200, 100, 0.9)');
+    // 中圈橙色
+    gradient.addColorStop(0.4, 'rgba(255, 120, 0, 0.6)');
+    // 外圈深橙色
+    gradient.addColorStop(0.7, 'rgba(200, 50, 0, 0.3)');
+    // 边缘透明
+    gradient.addColorStop(1, 'rgba(100, 0, 0, 0)');
+
+    context.fillStyle = gradient;
+    context.fillRect(0, 0, size, size);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.needsUpdate = true;
+    return texture;
   }
 
   /**
@@ -102,12 +166,22 @@ export class PlayerController {
     this.forward.applyQuaternion(this.aircraft.quaternion);
     this.aircraft.position.addScaledVector(this.forward, this.currentSpeed * deltaTime);
 
-    // 添加尾迹点（从飞机尾部/引擎位置发出）
-    // 引擎在本地坐标系中的位置是 (0, 0, 2)
-    const engineOffset = new THREE.Vector3(0, 0, 2);
-    engineOffset.applyQuaternion(this.aircraft.quaternion);
-    this.trail.addPoint(this.aircraft.position.clone(), engineOffset);
-    this.trail.update(deltaTime);
+    // 根据油门状态调整火焰效果
+    const targetSize = input.throttle ? this.boostFlameSize : this.normalFlameSize;
+    const targetColor = input.throttle ? this.boostFlameColor : this.normalFlameColor;
+
+    // 平滑过渡大小（lerp）
+    this.currentFlameSize += (targetSize - this.currentFlameSize) * 8 * deltaTime;
+
+    // 更新火焰颜色（lerp）
+    this.flameColor.lerp(targetColor, 5 * deltaTime);
+
+    // 应用大小和颜色
+    this.flameSprite.scale.set(this.currentFlameSize, this.currentFlameSize, 1);
+
+    if (this.flameSprite.material instanceof THREE.SpriteMaterial) {
+      this.flameSprite.material.color.copy(this.flameColor);
+    }
   }
 
   /**
@@ -142,6 +216,12 @@ export class PlayerController {
    * 清理资源
    */
   public dispose(): void {
-    this.trail.dispose();
+    // 移除火焰Sprite
+    if (this.flameSprite) {
+      this.aircraft.remove(this.flameSprite);
+      if (this.flameSprite.material instanceof THREE.Material) {
+        this.flameSprite.material.dispose();
+      }
+    }
   }
 }

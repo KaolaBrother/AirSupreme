@@ -11,7 +11,6 @@ export class EnemyHealthBars {
     background: HTMLDivElement;
     targetName: HTMLSpanElement;
     arrow: HTMLDivElement | null;
-    box: HTMLDivElement | null;  // 2D包围盒
     screenPos: { x: number; y: number } | null;  // 缓存屏幕位置
   }> = new Map();
 
@@ -89,20 +88,18 @@ export class EnemyHealthBars {
                    screenPos.z < 1;
 
     if (!barData) {
-      // 创建新血条、包围盒或箭头
+      // 创建新血条、箭头
       const bar = this.createHealthBar();
       const background = this.createBackgroundBar(60);
       const targetName = this.createTargetName();
       const arrow = this.createArrowIndicator();
-      const box = this.createBox2D();
 
       bar.appendChild(background);
       bar.appendChild(targetName);
       this.container.appendChild(bar);
       this.container.appendChild(arrow);
-      this.container.appendChild(box);
 
-      barData = { bar, background, targetName, arrow, box, screenPos: null };
+      barData = { bar, background, targetName, arrow, screenPos: null };
       this.healthBars.set(id, barData);
     }
 
@@ -111,16 +108,13 @@ export class EnemyHealthBars {
     const color = this.getHealthColor(healthPercent);
 
     if (inView) {
-      // 敌人在视野内 - 显示血条和包围盒
+      // 敌人在视野内 - 显示血条
       const barWidth = 60;
       const barHeight = 6;
 
       barData.bar.style.display = 'block';
       if (barData.arrow) {
         barData.arrow.style.display = 'none';
-      }
-      if (barData.box) {
-        barData.box.style.display = 'block';
       }
 
       // 更新血条位置和内容
@@ -133,18 +127,13 @@ export class EnemyHealthBars {
 
       const enemyName = this.getEnemyName(enemy.mesh);
       barData.targetName.textContent = enemyName;
-      // 颜色已在 createTargetName 中设置为白色，无需重复设置
-
-      // 更新2D包围盒
-      if (barData.box) {
-        this.updateBox2D(barData.box, enemy.mesh, camera);
-      }
+      // 动态计算文字居中位置
+      const textWidth = barData.targetName.offsetWidth;
+      const centeredLeft = (barWidth - textWidth) / 2;
+      barData.targetName.style.left = `${centeredLeft}px`;
     } else {
       // 敌人在视野外 - 显示箭头指示器
       barData.bar.style.display = 'none';
-      if (barData.box) {
-        barData.box.style.display = 'none';
-      }
       if (barData.arrow) {
         barData.arrow.style.display = 'block';
         // 计算敌人到玩家的距离（不是到原点的距离）
@@ -201,100 +190,13 @@ export class EnemyHealthBars {
       white-space: nowrap;
       position: absolute;
       bottom: 100%; /* 在血条上方 */
-      left: 0;
-      right: 0; /* 使用左右都为0，然后text-align居中 */
-      text-align: center;
+      left: 0; /* 将由 JavaScript 动态计算居中 */
       margin-bottom: 4px; /* 距离血条4px */
       color: #ffffff; /* 白色字体 */
       text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.9), /* 更强的阴影 */
                    -1px -1px 2px rgba(0, 0, 0, 0.8);
     `;
     return name;
-  }
-
-  /**
-   * 创建2D包围盒（用于包住敌人）
-   */
-  private createBox2D(): HTMLDivElement {
-    const box = document.createElement('div');
-    box.className = 'enemy-box-2d';
-    box.style.cssText = `
-      position: absolute;
-      pointer-events: none;
-      border: 2px solid rgba(0, 255, 0, 0.6);
-      border-radius: 4px;
-      box-shadow: 0 0 10px rgba(0, 255, 0, 0.3);
-    `;
-    return box;
-  }
-
-  /**
-   * 更新2D包围盒
-   */
-  private updateBox2D(box: HTMLDivElement, enemyMesh: THREE.Object3D, camera: THREE.Camera): void {
-    // 获取3D包围盒
-    const boundingBox3D = new THREE.Box3();
-    boundingBox3D.setFromObject(enemyMesh);
-
-    // 获取包围盒的8个角点
-    const corners = [
-      new THREE.Vector3(boundingBox3D.min.x, boundingBox3D.min.y, boundingBox3D.min.z),
-      new THREE.Vector3(boundingBox3D.max.x, boundingBox3D.min.y, boundingBox3D.min.z),
-      new THREE.Vector3(boundingBox3D.min.x, boundingBox3D.max.y, boundingBox3D.min.z),
-      new THREE.Vector3(boundingBox3D.max.x, boundingBox3D.max.y, boundingBox3D.min.z),
-      new THREE.Vector3(boundingBox3D.min.x, boundingBox3D.min.y, boundingBox3D.max.z),
-      new THREE.Vector3(boundingBox3D.max.x, boundingBox3D.min.y, boundingBox3D.max.z),
-      new THREE.Vector3(boundingBox3D.min.x, boundingBox3D.max.y, boundingBox3D.max.z),
-      new THREE.Vector3(boundingBox3D.max.x, boundingBox3D.max.y, boundingBox3D.max.z),
-    ];
-
-    // 将每个角点投影到屏幕空间
-    const screenPoints = corners.map(corner => {
-      const screenPos = corner.clone().project(camera);
-      return {
-        x: (screenPos.x + 1) / 2,
-        y: 1 - (screenPos.y + 1) / 2, // 反转 Y 轴
-        z: screenPos.z
-      };
-    });
-
-    // 检查是否所有点都在相机后面
-    const allBehind = screenPoints.every(p => p.z > 1);
-    if (allBehind) {
-      box.style.display = 'none';
-      return;
-    }
-
-    // 过滤掉相机后面的点，只保留前面的点
-    const visiblePoints = screenPoints.filter(p => p.z <= 1);
-
-    // 如果没有可见点，隐藏包围盒
-    if (visiblePoints.length === 0) {
-      box.style.display = 'none';
-      return;
-    }
-
-    // 计算2D包围盒的min/max
-    const xs = visiblePoints.map(p => p.x);
-    const ys = visiblePoints.map(p => p.y);
-
-    const minX = Math.min(...xs);
-    const maxX = Math.max(...xs);
-    const minY = Math.min(...ys);
-    const maxY = Math.max(...ys);
-
-    // 转换为屏幕像素坐标
-    const left = minX * window.innerWidth;
-    const top = minY * window.innerHeight;
-    const right = maxX * window.innerWidth;
-    const bottom = maxY * window.innerHeight;
-
-    // 设置2D包围盒
-    box.style.left = `${left}px`;
-    box.style.top = `${top}px`;
-    box.style.width = `${right - left}px`;
-    box.style.height = `${bottom - top}px`;
-    box.style.display = 'block';
   }
 
   /**
@@ -485,9 +387,6 @@ export class EnemyHealthBars {
       barData.bar.remove();
       if (barData.arrow) {
         barData.arrow.remove();
-      }
-      if (barData.box) {
-        barData.box.remove();
       }
       this.healthBars.delete(id);
     }
