@@ -1,31 +1,35 @@
 import * as THREE from 'three';
-import { EnemyFSM, AIState } from './EnemyFSM';
-import { EnemyConfig, EnemyType } from './EnemyTypes';
+import { EnemyConfig, EnemyType, EnemyAIState } from './EnemyTypes';
 import { HealthSystem } from '@/features/combat/HealthSystem';
 import { ParticleTrailRenderer } from '@/features/effects/ParticleTrailRenderer';
 
 /**
- * 敌人 AI - 升级版
+ * 新的敌人AI系统 - 基于导弹设计
+ *
+ * 核心特性：
+ * - 类似导弹的运动方式（velocity + turnSpeed）
+ * - 三种行为状态：追逐、固定方向飞行、盘旋
+ * - 状态概率分布决定敌机攻击性
+ * - 状态持续4-8秒后重新随机选择
  */
 export class EnemyAI {
   private mesh: THREE.Group;
-  private fsm: EnemyFSM;
-  private health: HealthSystem;
   private config: EnemyConfig;
+  private health: HealthSystem;
+  private trail: ParticleTrailRenderer;
 
-  // 移动参数
-  private patrolAngle: number;
-  private circleAngle: number = 0;
+  // 基于导弹的运动系统
+  public velocity: THREE.Vector3;
+  private targetPosition: THREE.Vector3 | null;  // 玩家位置（不是Object3D）
 
-  // 飞机朝向（用于平滑转向）
-  private targetYaw: number = 0;
-  private targetPitch: number = 0;
+  // 状态机
+  private currentState: EnemyAIState = EnemyAIState.CHASE;  // 默认状态
+  private stateTimer: number = 0;          // 当前状态持续时间
+  private fixedDirection: THREE.Vector3;      // 固定方向
+  private circleAngle: number = 0;            // 盘旋角度
 
   // 攻击参数
   private attackCooldown: number = 0;
-
-  // 尾迹系统
-  private trail: ParticleTrailRenderer;
 
   // 回调
   public onFire?: (position: THREE.Vector3, direction: THREE.Vector3, damage: number) => void;
@@ -34,13 +38,22 @@ export class EnemyAI {
   constructor(mesh: THREE.Group, config: EnemyConfig, scene: THREE.Scene) {
     this.mesh = mesh;
     this.config = config;
-    this.fsm = new EnemyFSM(config);
     this.health = new HealthSystem(config.health);
-    this.patrolAngle = Math.random() * Math.PI * 2;
+    this.targetPosition = null;
+
+    // 初始化速度（向前）
+    this.velocity = new THREE.Vector3(0, 0, -config.speed);
+
+    // 初始化固定方向（随机）
+    this.fixedDirection = this.randomDirection();
 
     // 创建尾迹效果（根据敌机类型选择颜色）
     const trailColor = this.getTrailColor(config.type);
     this.trail = new ParticleTrailRenderer(scene, mesh, trailColor);
+
+    // 选择初始状态
+    this.selectNewState();
+    this.stateTimer = this.randomStateDuration();
 
     // 设置死亡回调
     this.health.onDeath = () => {
@@ -69,149 +82,58 @@ export class EnemyAI {
   }
 
   /**
-   * 应用移动：旋转飞机并向前飞
-   */
-  private applyMovement(
-    deltaTime: number,
-    speed: number,
-    targetYaw?: number,
-    targetPitch?: number,
-    lookAtTarget?: THREE.Vector3
-  ): void {
-    // 如果有指定目标点，计算朝向该点的yaw/pitch
-    if (lookAtTarget !== undefined) {
-      const direction = new THREE.Vector3().subVectors(lookAtTarget, this.mesh.position);
-      direction.normalize();
-
-      // 计算目标yaw（绕Y轴）
-      this.targetYaw = Math.atan2(direction.x, direction.z);
-
-      // 计算目标pitch（绕X轴，限制在合理范围内）
-      const distance = direction.length();
-      this.targetPitch = Math.asin(direction.y / distance);
-      this.targetPitch = Math.max(-0.4, Math.min(0.4, this.targetPitch)); // 限制pitch
-    }
-
-    // 平滑转向目标yaw
-    if (targetYaw !== undefined) {
-      this.targetYaw = targetYaw;
-    }
-
-    // 平滑转向目标pitch
-    if (targetPitch !== undefined) {
-      this.targetPitch = targetPitch;
-    }
-
-    // 获取当前欧拉角
-    const euler = new THREE.Euler().setFromQuaternion(this.mesh.quaternion);
-
-    // 平滑更新yaw
-    let yawDiff = this.targetYaw - euler.y;
-    // 标准化角度差到 -PI 到 PI 范围
-    while (yawDiff > Math.PI) yawDiff -= Math.PI * 2;
-    while (yawDiff < -Math.PI) yawDiff += Math.PI * 2;
-
-    const newYaw = euler.y + yawDiff * 0.1; // 0.1 = 平滑系数
-
-    // 平滑更新pitch（限制范围）
-    let pitchDiff = this.targetPitch - euler.x;
-    const newPitch = euler.x + Math.max(-0.3, Math.min(0.3, pitchDiff)) * 0.1;
-
-    // 计算roll：根据yaw变化自动倾斜（模拟真实飞机转向）
-    // 左转时向左倾斜（负roll），右转时向右倾斜（正roll）
-    // 限制roll在合理范围内（±20度 ≈ ±0.35弧度）
-    const maxRoll = 0.35;
-    let targetRollValue = 0;
-
-    if (Math.abs(yawDiff) > 0.01) {
-      // yaw改变越大，倾斜越明显
-      // 使用归一化后的yawDiff，避免剧烈翻滚
-      const normalizedYawDiff = Math.max(-0.5, Math.min(0.5, yawDiff));
-      targetRollValue = normalizedYawDiff * 0.5; // 减小系数，避免过度倾斜
-    }
-
-    // 钳制roll值
-    targetRollValue = Math.max(-maxRoll, Math.min(maxRoll, targetRollValue));
-
-    // 平滑更新roll，使用较小的平滑系数
-    let rollDiff = targetRollValue - euler.z;
-    const newRoll = euler.z + rollDiff * 0.08;
-
-    // 应用新的旋转
-    this.mesh.rotation.set(newPitch, newYaw, newRoll);
-
-    // 向前移动（沿着飞机当前的朝向）
-    const forward = new THREE.Vector3(0, 0, -1);
-    forward.applyQuaternion(this.mesh.quaternion);
-
-    this.mesh.position.addScaledVector(forward, speed * deltaTime);
-
-    // 添加尾迹点（从飞机尾部/引擎位置发出）
-    const engineOffset = new THREE.Vector3(0, 0, 2);
-    engineOffset.applyQuaternion(this.mesh.quaternion);
-    this.trail.addPoint(this.mesh.position.clone(), engineOffset);
-  }
-
-  /**
    * 更新敌人
    */
   public update(deltaTime: number, playerPosition: THREE.Vector3): void {
-    // 安全检查：确保位置有效（兼容性更好的方式）
+    // 安全检查：确保位置有效
     const pos = this.mesh.position;
     if (!isFinite(pos.x) || !isFinite(pos.y) || !isFinite(pos.z)) {
       console.error('Enemy position is NaN or Infinity, resetting to origin', {
         position: { x: pos.x, y: pos.y, z: pos.z }
       });
       this.mesh.position.set(0, 0, 0);
-      return; // 跳过本帧更新
+      return;
     }
 
-    const distance = this.mesh.position.distanceTo(playerPosition);
+    // 更新目标引用
+    this.targetPosition = playerPosition;
 
-    // 记录当前状态，用于检测状态切换
-    const previousState = this.fsm.getState();
-
-    // 更新状态机
-    this.fsm.update(
-      deltaTime,
-      distance,
-      this.health.getCurrentHealth(),
-      this.health.getMaxHealth()
-    );
-
-    // 检测状态切换，重置目标角度避免突然转向
-    const currentState = this.fsm.getState();
-    if (previousState !== currentState) {
-      // 状态切换了，重置目标角度到当前角度
-      const euler = new THREE.Euler().setFromQuaternion(this.mesh.quaternion);
-      this.targetYaw = euler.y;
-      this.targetPitch = euler.x;
+    // 更新状态计时器
+    this.stateTimer -= deltaTime;
+    if (this.stateTimer <= 0) {
+      this.selectNewState();
+      this.stateTimer = this.randomStateDuration();
     }
 
-    // 根据状态执行行为
-    switch (this.fsm.getState()) {
-      case AIState.PATROL:
-        this.updatePatrol(deltaTime);
+    // 根据当前状态执行行为
+    switch (this.currentState) {
+      case EnemyAIState.CHASE:
+        this.updateChase(deltaTime);
         break;
-      case AIState.PURSUIT:
-        this.updateApproach(deltaTime, playerPosition);
+      case EnemyAIState.FIXED_DIRECTION:
+        this.updateFixedDirection(deltaTime);
         break;
-      case AIState.ATTACK:
-        this.updateAttack(deltaTime, playerPosition);
-        break;
-      case AIState.EVADE:
-        this.updateEvade(deltaTime, playerPosition);
-        break;
-      case AIState.CIRCLE:
-        this.updateCircle(deltaTime, playerPosition);
-        break;
-      case AIState.DIVE:
-        this.updateDive(deltaTime, playerPosition);
-        break;
-      case AIState.RETREAT:
-        this.updateRetreat(deltaTime, playerPosition);
+      case EnemyAIState.CIRCLE:
+        this.updateCircle(deltaTime);
         break;
     }
+
+    // 移动敌机
+    this.mesh.position.add(this.velocity.clone().multiplyScalar(deltaTime));
+
+    // 更新朝向（使用四元数直接指向速度方向）
+    if (this.velocity.length() > 0) {
+      const targetPos = this.mesh.position.clone().add(this.velocity);
+      const dummy = new THREE.Object3D();
+      dummy.position.copy(this.mesh.position);
+      dummy.lookAt(targetPos);
+      this.mesh.quaternion.slerp(dummy.quaternion, 0.3);
+    }
+
+    // 添加尾迹点（引擎位置在local坐标系 (0, 0, 2)）
+    const engineLocalPos = new THREE.Vector3(0, 0, 2);
+    const engineWorldPos = engineLocalPos.applyMatrix4(this.mesh.matrixWorld);
+    this.trail.addPoint(engineWorldPos);
 
     // 更新攻击冷却
     this.attackCooldown = Math.max(0, this.attackCooldown - deltaTime);
@@ -221,175 +143,181 @@ export class EnemyAI {
   }
 
   /**
-   * 巡逻行为：蛇形飞行，低风险
+   * 追逐状态更新
    */
-  private updatePatrol(deltaTime: number): void {
-    // 每个敌人有不同的巡逻速度
-    const patrolSpeed = 0.3 + (this.mesh.id % 5) * 0.1;
-    this.patrolAngle += deltaTime * patrolSpeed;
+  private updateChase(deltaTime: number): void {
+    if (!this.targetPosition) return;
 
-    // 蛇形摆动幅度（更平滑）
-    const yawWander = Math.sin(this.patrolAngle) * 0.25; // 左右偏航
-    const pitchWander = Math.sin(this.patrolAngle * 2) * 0.1; // 轻微上下
+    // 计算到目标的方向
+    const targetDirection = new THREE.Vector3()
+      .subVectors(this.targetPosition, this.mesh.position)
+      .normalize();
 
-    // 设置目标角度（累积到targetYaw/pitch，而不是直接设置）
-    this.targetYaw += yawWander * deltaTime * 30;
-    this.targetPitch += pitchWander * deltaTime * 30;
+    // 获取当前速度方向
+    const currentDirection = this.velocity.clone().normalize();
 
-    // 限制 pitch 角度（避免倒着飞）
-    this.targetPitch = Math.max(-0.25, Math.min(0.25, this.targetPitch));
+    // 计算转向角度（限制转向速度）
+    const turnAngle = this.config.turnSpeed * deltaTime;
+    const targetRotation = Math.atan2(targetDirection.x, targetDirection.z);
+    const currentRotation = Math.atan2(currentDirection.x, currentDirection.z);
 
-    // 巡逻速度较慢
-    const patrolSpeedValue = this.config.speed * 0.4;
+    // 计算需要旋转的角度（选择最短路径）
+    let rotationDiff = targetRotation - currentRotation;
+    while (rotationDiff > Math.PI) rotationDiff -= Math.PI * 2;
+    while (rotationDiff < -Math.PI) rotationDiff += Math.PI * 2;
 
-    // 应用移动（不传targetRoll，避免翻滚）
-    this.applyMovement(deltaTime, patrolSpeedValue, this.targetYaw, this.targetPitch);
-  }
+    // 限制转向速度
+    rotationDiff = Math.max(-turnAngle, Math.min(turnAngle, rotationDiff));
 
-  /**
-   * 接近行为：从远处接近玩家
-   */
-  private updateApproach(deltaTime: number, playerPosition: THREE.Vector3): void {
-    // 计算到玩家的方向
-    const speed = this.config.speed * 0.7;
-
-    // 朝向玩家飞行（但不攻击）
-    this.applyMovement(deltaTime, speed, undefined, undefined, playerPosition);
-  }
-
-  /**
-   * 攻击行为：保持攻击距离并射击
-   */
-  private updateAttack(deltaTime: number, playerPosition: THREE.Vector3): void {
-    const distance = this.mesh.position.distanceTo(playerPosition);
-    const idealDistance = 80;
-
-    // 决定飞行方向（始终使用正速度）
-    let targetPos: THREE.Vector3 | undefined;
-    let speed = this.config.speed * 0.6;
-
-    if (distance > idealDistance * 1.2) {
-      // 距离太远：朝向玩家接近
-      targetPos = playerPosition;
-      speed = this.config.speed * 0.7;
-    } else if (distance < idealDistance * 0.7) {
-      // 距离太近：转向侧面飞，自然拉大距离（不后退）
-      const awayDir = new THREE.Vector3().subVectors(this.mesh.position, playerPosition).normalize();
-      // 侧向90度
-      const sideOffset = (this.mesh.id % 2 === 0) ? 1 : -1;
-      const sideDir = new THREE.Vector3(-awayDir.z * sideOffset, 0, awayDir.x * sideOffset).normalize();
-      targetPos = playerPosition.clone().add(sideDir.multiplyScalar(idealDistance));
-      speed = this.config.speed * 0.7;
-    } else {
-      // 距离合适：继续朝向玩家（保持攻击态势）
-      targetPos = playerPosition;
-    }
-
-    // 射击
-    if (this.attackCooldown <= 0) {
-      this.fire(playerPosition);
-      this.attackCooldown = this.config.attackCooldown;
-    }
-
-    // 向前飞（不传targetRoll，避免翻滚）
-    this.applyMovement(deltaTime, speed, undefined, undefined, targetPos);
-  }
-
-  /**
-   * 躲避行为：快速机动，难以预测
-   */
-  private updateEvade(deltaTime: number, playerPosition: THREE.Vector3): void {
-    // 远离玩家
-    const awayDirection = new THREE.Vector3().subVectors(this.mesh.position, playerPosition).normalize();
-
-    // 添加随机偏移（难以预测）
-    const randomOffset = new THREE.Vector3(
-      (Math.random() - 0.5) * 0.8,
-      (Math.random() - 0.5) * 0.5,
-      (Math.random() - 0.5) * 0.8
+    // 应用新的旋转
+    const newRotation = currentRotation + rotationDiff;
+    this.velocity.set(
+      Math.sin(newRotation) * this.config.speed,
+      targetDirection.y * this.config.speed,
+      Math.cos(newRotation) * this.config.speed
     );
 
-    // 计算目标方向
-    const targetDirection = awayDirection.add(randomOffset).normalize();
+    // 追逐状态可以射击（只有当机头朝向玩家时）
+    if (this.attackCooldown <= 0 && this.targetPosition) {
+      // 检查机头是否朝向玩家（圆锥区域检测）
+      const toPlayer = new THREE.Vector3().subVectors(this.targetPosition, this.mesh.position).normalize();
+      const forward = this.velocity.clone().normalize();
+      const dot = toPlayer.dot(forward); // 点积：1.0 = 正对准，0.0 = 垂直
 
-    // 计算目标yaw/pitch
-    this.targetYaw = Math.atan2(targetDirection.x, targetDirection.z);
-    this.targetPitch = Math.asin(targetDirection.y);
-    this.targetPitch = Math.max(-0.3, Math.min(0.3, this.targetPitch));
+      // 机头朝向圆锥区域：30度角内（cos(30°) ≈ 0.866）
+      const fireAngle = Math.cos(30 * Math.PI / 180);
 
-    // 移动速度（快速）
-    const speed = this.config.speed * 0.85;
-
-    // 不传targetRoll，避免主动翻滚
-    this.applyMovement(deltaTime, speed, this.targetYaw, this.targetPitch);
+      if (dot > fireAngle) {
+        // 机头朝向玩家，可以射击
+        this.fire(this.targetPosition);
+        this.attackCooldown = this.config.attackCooldown;
+      }
+    }
   }
 
   /**
-   * 环绕行为：高级战术，绕着玩家飞
+   * 固定方向飞行状态更新
    */
-  private updateCircle(deltaTime: number, playerPosition: THREE.Vector3): void {
-    this.circleAngle += deltaTime * 1.2;
+  private updateFixedDirection(_deltaTime: number): void {
+    // 固定方向：只需保持当前方向，不进行转向
+    // 速度已经朝向固定方向，不需要改变
+  }
 
-    // 计算环绕位置（水平圆周）
-    const offset = new THREE.Vector3(
-      Math.cos(this.circleAngle) * 70,
+  /**
+   * 盘旋状态更新
+   */
+  private updateCircle(deltaTime: number): void {
+    if (!this.targetPosition) return;
+
+    // 更新盘旋角度
+    const angularSpeed = this.config.speed / this.config.circleRadius;
+    this.circleAngle += angularSpeed * deltaTime;
+
+    // 计算盘旋目标位置（围绕玩家）
+    const playerPos = this.targetPosition;
+    const targetX = playerPos.x + Math.cos(this.circleAngle) * this.config.circleRadius;
+    const targetZ = playerPos.z + Math.sin(this.circleAngle) * this.config.circleRadius;
+    const targetY = playerPos.y + this.config.circleHeight;
+
+    const targetPos = new THREE.Vector3(targetX, targetY, targetZ);
+
+    // 计算到目标位置的方向
+    const targetDirection = new THREE.Vector3()
+      .subVectors(targetPos, this.mesh.position)
+      .normalize();
+
+    // 获取当前速度方向
+    const currentDirection = this.velocity.clone().normalize();
+
+    // 计算转向角度（限制转向速度）
+    const turnAngle = this.config.turnSpeed * deltaTime;
+    const targetRotation = Math.atan2(targetDirection.x, targetDirection.z);
+    const currentRotation = Math.atan2(currentDirection.x, currentDirection.z);
+
+    // 计算需要旋转的角度
+    let rotationDiff = targetRotation - currentRotation;
+    while (rotationDiff > Math.PI) rotationDiff -= Math.PI * 2;
+    while (rotationDiff < -Math.PI) rotationDiff += Math.PI * 2;
+
+    // 限制转向速度
+    rotationDiff = Math.max(-turnAngle, Math.min(turnAngle, rotationDiff));
+
+    // 应用新的旋转
+    const newRotation = currentRotation + rotationDiff;
+    this.velocity.set(
+      Math.sin(newRotation) * this.config.speed,
+      targetDirection.y * this.config.speed,
+      Math.cos(newRotation) * this.config.speed
+    );
+
+    // 盘旋时偶尔射击（仅重型轰炸机可以，因为它们有侧向火力）
+    if (this.attackCooldown <= 0 && this.config.type === 'HEAVY') {
+      this.fire(this.targetPosition);
+      this.attackCooldown = this.config.attackCooldown * 1.5; // 重型机盘旋时射击频率更低
+    }
+  }
+
+  /**
+   * 选择新状态（基于概率分布）
+   */
+  private selectNewState(): void {
+    const rand = Math.random();
+    const probs = this.config.stateProbabilities;
+
+    let cumulative = 0;
+    cumulative += probs[EnemyAIState.CHASE];
+    if (rand < cumulative) {
+      this.currentState = EnemyAIState.CHASE;
+      return;
+    }
+
+    cumulative += probs[EnemyAIState.FIXED_DIRECTION];
+    if (rand < cumulative) {
+      this.currentState = EnemyAIState.FIXED_DIRECTION;
+      // 重新随机固定方向
+      this.fixedDirection = this.randomDirection();
+      // 更新速度朝向固定方向
+      this.velocity.copy(this.fixedDirection).multiplyScalar(this.config.speed);
+      return;
+    }
+
+    this.currentState = EnemyAIState.CIRCLE;
+    // 重置盘旋角度
+    this.circleAngle = 0;
+  }
+
+  /**
+   * 生成随机方向（水平面上）
+   */
+  private randomDirection(): THREE.Vector3 {
+    // 在水平面上随机方向（忽略Y轴）
+    const angle = Math.random() * Math.PI * 2;
+    const dir = new THREE.Vector3(
+      Math.cos(angle),
       0,
-      Math.sin(this.circleAngle) * 70
-    );
+      Math.sin(angle)
+    ).normalize();
 
-    const targetPos = playerPosition.clone().add(offset);
-
-    // 移动速度（略慢于攻击速度）
-    const speed = this.config.speed * 0.65;
-
-    // 射击（频率略低）
-    if (this.attackCooldown <= 0) {
-      this.fire(playerPosition);
-      this.attackCooldown = this.config.attackCooldown * 1.3;
-    }
-
-    // 不传targetRoll，避免翻滚
-    this.applyMovement(deltaTime, speed, undefined, undefined, targetPos);
+    return dir;
   }
 
   /**
-   * 俯冲行为：快速俯冲攻击
+   * 生成随机状态持续时间
    */
-  private updateDive(deltaTime: number, playerPosition: THREE.Vector3): void {
-    // 快速接近玩家，轻微俯冲
-    const speed = this.config.speed * 1.1;
-
-    // 俯冲时射击（频率略高）
-    if (this.attackCooldown <= 0) {
-      this.fire(playerPosition);
-      this.attackCooldown = this.config.attackCooldown * 0.8;
-    }
-
-    // 俯冲pitch = -0.25
-    this.applyMovement(deltaTime, speed, undefined, -0.25, playerPosition);
-  }
-
-  /**
-   * 撤退行为：战术撤退，爬升远离
-   */
-  private updateRetreat(deltaTime: number, playerPosition: THREE.Vector3): void {
-    // 远离玩家并爬升
-    const speed = this.config.speed * 0.8;
-
-    // 不传targetRoll，pitch = 0.15 向上爬升
-    this.applyMovement(deltaTime, speed, undefined, 0.15, playerPosition);
+  private randomStateDuration(): number {
+    const [min, max] = this.config.stateDurationRange;
+    return min + Math.random() * (max - min);
   }
 
   /**
    * 射击
    */
-  private fire(playerPosition: THREE.Vector3): void {
+  private fire(targetPosition: THREE.Vector3): void {
     // 计算射击方向
-    const direction = new THREE.Vector3().subVectors(playerPosition, this.mesh.position);
+    const direction = new THREE.Vector3().subVectors(targetPosition, this.mesh.position);
     direction.normalize();
 
     // 添加随机扰动（让瞄准不准确）
-    // 扰动范围根据敌人的 accuracy 调整（精度越低，扰动越大）
     const perturbationStrength = (1 - this.config.accuracy) * 0.4;
     const anglePerturbation = (Math.random() - 0.5) * perturbationStrength;
 
@@ -459,9 +387,7 @@ export class EnemyAI {
    * 获取速度（当前前进方向）
    */
   public getVelocity(): THREE.Vector3 {
-    const forward = new THREE.Vector3(0, 0, -1);
-    forward.applyQuaternion(this.mesh.quaternion);
-    return forward;
+    return this.velocity.clone();
   }
 
   /**
@@ -471,6 +397,13 @@ export class EnemyAI {
     this.mesh.position.copy(position);
     this.mesh.visible = false;
     this.health.reset();
+
+    // 重置速度（向前）
+    this.velocity = new THREE.Vector3(0, 0, -this.config.speed);
+
+    // 重置状态
+    this.selectNewState();
+    this.stateTimer = this.randomStateDuration();
   }
 
   /**

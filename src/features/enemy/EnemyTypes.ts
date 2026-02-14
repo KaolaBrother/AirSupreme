@@ -10,6 +10,15 @@ export enum EnemyType {
 }
 
 /**
+ * 敌人AI状态枚举
+ */
+export enum EnemyAIState {
+  CHASE = 'chase',                      // 追逐玩家
+  FIXED_DIRECTION = 'fixed_direction',   // 固定方向飞行
+  CIRCLE = 'circle'                      // 盘旋
+}
+
+/**
  * 敌人配置接口
  */
 export interface EnemyConfig {
@@ -33,6 +42,20 @@ export interface EnemyConfig {
   maxRollAngle: number;       // 最大翻滚角度
   wanderRadius: number;       // 巡逻半径
 
+  // 状态概率分布（基于导弹的新AI系统）
+  stateProbabilities: {
+    [EnemyAIState.CHASE]: number;
+    [EnemyAIState.FIXED_DIRECTION]: number;
+    [EnemyAIState.CIRCLE]: number;
+  };
+
+  // 状态持续时间范围（秒）
+  stateDurationRange: [number, number];
+
+  // 盘旋特定配置
+  circleRadius: number;        // 盘旋半径（米）
+  circleHeight: number;        // 盘旋高度偏移（米）
+
   // 分数
   scoreValue: number;
 
@@ -51,16 +74,25 @@ export const ENEMY_CONFIGS: Record<EnemyType, EnemyConfig> = {
     type: EnemyType.SCOUT,
     name: '侦察机',
     health: 30,
-    speed: 25,              // 进一步降低速度: 40 -> 25
+    speed: 40,              // 基于导弹（80）的一半
     damage: 10,
     detectionRange: 120,
     attackRange: 25,
-    attackCooldown: 0.4,    // 增加冷却: 1.5 -> 2.0 -> 0.4（提高攻击频率5倍）
-    evasionChance: 0.3,     // 降低闪避: 0.6 -> 0.3
-    accuracy: 0.4,          // 降低精度: 0.5 -> 0.4
-    turnSpeed: 1.5,         // 降低转向: 3.0 -> 1.5
+    attackCooldown: 0.4,
+    evasionChance: 0.3,
+    accuracy: 0.4,
+    turnSpeed: 1.5,         // 比导弹（2.5）慢很多
     maxRollAngle: Math.PI / 4,
     wanderRadius: 80,
+    // 新AI状态概率
+    stateProbabilities: {
+      [EnemyAIState.CHASE]: 0.25,          // 25% 追逐（降低）
+      [EnemyAIState.FIXED_DIRECTION]: 0.50,  // 50% 固定方向（提高）
+      [EnemyAIState.CIRCLE]: 0.25            // 25% 盘旋
+    },
+    stateDurationRange: [4, 8],    // 4-8秒
+    circleRadius: 150,               // 150米半径
+    circleHeight: 30,                // 30米高度差
     scoreValue: 50,
     color: 0x44ff44,
     scale: 0.7,
@@ -70,16 +102,25 @@ export const ENEMY_CONFIGS: Record<EnemyType, EnemyConfig> = {
     type: EnemyType.FIGHTER,
     name: '战斗机',
     health: 50,
-    speed: 20,              // 进一步降低速度: 30 -> 20
+    speed: 55,              // 比导弹慢30%
     damage: 15,
     detectionRange: 100,
     attackRange: 30,
-    attackCooldown: 0.5,    // 增加冷却: 2.0 -> 2.5 -> 0.5（提高攻击频率5倍）
-    evasionChance: 0.15,    // 降低闪避: 0.3 -> 0.15
-    accuracy: 0.5,          // 降低精度: 0.7 -> 0.5
-    turnSpeed: 1.0,         // 降低转向: 2.0 -> 1.0
+    attackCooldown: 0.5,
+    evasionChance: 0.15,
+    accuracy: 0.5,
+    turnSpeed: 2.0,         // 中等转向速度
     maxRollAngle: Math.PI / 4,
     wanderRadius: 60,
+    // 新AI状态概率
+    stateProbabilities: {
+      [EnemyAIState.CHASE]: 0.325,          // 32.5% 追逐（减半）
+      [EnemyAIState.FIXED_DIRECTION]: 0.475,  // 47.5% 固定方向（提高）
+      [EnemyAIState.CIRCLE]: 0.20            // 20% 盘旋
+    },
+    stateDurationRange: [4, 8],    // 4-8秒
+    circleRadius: 120,               // 120米半径
+    circleHeight: 40,                // 40米高度差
     scoreValue: 100,
     color: 0xff4444,  // 红色
     scale: 1.0,
@@ -89,16 +130,25 @@ export const ENEMY_CONFIGS: Record<EnemyType, EnemyConfig> = {
     type: EnemyType.HEAVY,
     name: '重型轰炸机',
     health: 150,
-    speed: 10,              // 进一步降低速度: 15 -> 10
+    speed: 35,              // 慢速但转向慢
     damage: 30,
     detectionRange: 80,
     attackRange: 40,
-    attackCooldown: 0.8,    // 增加冷却: 3.0 -> 4.0 -> 0.8（提高攻击频率5倍）
-    evasionChance: 0.02,    // 降低闪避: 0.05 -> 0.02
-    accuracy: 0.6,          // 降低精度: 0.9 -> 0.6
-    turnSpeed: 0.4,         // 降低转向: 0.8 -> 0.4
+    attackCooldown: 0.8,
+    evasionChance: 0.02,
+    accuracy: 0.6,
+    turnSpeed: 0.8,         // 转向慢
     maxRollAngle: Math.PI / 10,
     wanderRadius: 40,
+    // 新AI状态概率
+    stateProbabilities: {
+      [EnemyAIState.CHASE]: 0.35,          // 35% 追逐（减半）
+      [EnemyAIState.FIXED_DIRECTION]: 0.45,  // 45% 固定方向（提高）
+      [EnemyAIState.CIRCLE]: 0.20            // 20% 盘旋
+    },
+    stateDurationRange: [5, 9],    // 5-9秒（稍长，重型机反应慢）
+    circleRadius: 100,               // 100米半径
+    circleHeight: 20,                // 20米高度差
     scoreValue: 200,
     color: 0x884400,
     scale: 1.8,
@@ -108,16 +158,25 @@ export const ENEMY_CONFIGS: Record<EnemyType, EnemyConfig> = {
     type: EnemyType.SNIPER,
     name: '狙击机',
     health: 40,
-    speed: 15,              // 进一步降低速度: 20 -> 15
+    speed: 45,              // 中等速度
     damage: 40,
     detectionRange: 200,
     attackRange: 80,
-    attackCooldown: 1.0,    // 增加冷却: 4.0 -> 5.0 -> 1.0（提高攻击频率5倍）
-    evasionChance: 0.2,     // 降低闪避: 0.4 -> 0.2
-    accuracy: 0.7,          // 降低精度: 0.95 -> 0.7
-    turnSpeed: 0.8,         // 降低转向: 1.5 -> 0.8
+    attackCooldown: 1.0,
+    evasionChance: 0.2,
+    accuracy: 0.7,
+    turnSpeed: 1.2,         // 中等转向
     maxRollAngle: Math.PI / 8,
     wanderRadius: 100,
+    // 新AI状态概率
+    stateProbabilities: {
+      [EnemyAIState.CHASE]: 0.30,          // 30% 追逐（减半）
+      [EnemyAIState.FIXED_DIRECTION]: 0.50,  // 50% 固定方向（提高）
+      [EnemyAIState.CIRCLE]: 0.20            // 20% 盘旋
+    },
+    stateDurationRange: [4, 8],    // 4-8秒
+    circleRadius: 180,               // 180米半径（狙击机保持距离）
+    circleHeight: 50,                // 50米高度差
     scoreValue: 150,
     color: 0x8800ff,
     scale: 0.9,
@@ -127,16 +186,25 @@ export const ENEMY_CONFIGS: Record<EnemyType, EnemyConfig> = {
     type: EnemyType.ACE,
     name: '王牌飞行员',
     health: 80,
-    speed: 22,              // 进一步降低速度: 35 -> 22
+    speed: 70,              // 接近导弹速度
     damage: 25,
     detectionRange: 150,
     attackRange: 35,
-    attackCooldown: 0.4,    // 增加冷却: 1.2 -> 2.0 -> 0.4（提高攻击频率5倍）
-    evasionChance: 0.4,     // 降低闪避: 0.8 -> 0.4
-    accuracy: 0.6,          // 降低精度: 0.85 -> 0.6
-    turnSpeed: 2.0,         // 降低转向: 4.0 -> 2.0
+    attackCooldown: 0.4,
+    evasionChance: 0.4,
+    accuracy: 0.6,
+    turnSpeed: 2.4,         // 接近导弹的转向速度
     maxRollAngle: Math.PI / 3,
     wanderRadius: 60,
+    // 新AI状态概率
+    stateProbabilities: {
+      [EnemyAIState.CHASE]: 0.40,          // 40% 追逐（减半）
+      [EnemyAIState.FIXED_DIRECTION]: 0.45,  // 45% 固定方向（提高）
+      [EnemyAIState.CIRCLE]: 0.15            // 15% 盘旋
+    },
+    stateDurationRange: [3, 7],    // 3-7秒（反应快，状态切换频繁）
+    circleRadius: 100,               // 100米半径
+    circleHeight: 50,                // 50米高度差
     scoreValue: 500,
     color: 0xffdd00,  // 金色
     scale: 1.2,
