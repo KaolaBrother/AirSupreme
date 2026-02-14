@@ -172,6 +172,7 @@ export class Game {
     this.levelManager.onEnemySpawned = (enemy) => {
       enemy.onFire = (position: THREE.Vector3, direction: THREE.Vector3, damage: number) => {
         this.fireAIProjectile(position, direction, Faction.ENEMY, damage); // 标记为敌军子弹，传入伤害
+        this.audioManager.playShoot(); // 播放射击音效
       };
 
       enemy.onDestroy = () => {
@@ -264,8 +265,8 @@ export class Game {
       }
     }
 
-    // 发射子弹，传入发射者和伤害
-    this.enemyProjectilePool.fire(position, direction, damage, owner);
+    // 发射子弹，传入发射者、伤害和阵营
+    this.enemyProjectilePool.fire(position, direction, damage, owner, fromFaction);
   }
 
   /**
@@ -493,6 +494,7 @@ export class Game {
     // 设置射击回调（使用 fireAIProjectile 以标记友军子弹和伤害）
     friendly['enemy'].onFire = (position: THREE.Vector3, direction: THREE.Vector3, damage: number) => {
       this.fireAIProjectile(position, direction, Faction.FRIENDLY, damage); // 标记为友军子弹，传入伤害
+      this.audioManager.playShoot(); // 播放射击音效
     };
 
     // 设置敌人AI内部的死亡回调，用于清理友军
@@ -882,9 +884,9 @@ export class Game {
     // 检查AI子弹碰撞
     this.enemyProjectilePool.checkCollisions(
       allTargets.map(t => t.mesh),
-      (hitObject, _projectileMesh, damage) => {
-        // 找到命中的子弹（不检查 active，因为 checkCollisions 已将其设为 inactive）
-        const projectile = this.enemyProjectilePool['pool'].find((p: any) => p.mesh === hitObject);
+      (hitObject, projectileMesh, damage) => {
+        // 找到命中的子弹（使用 projectileMesh 而非 hitObject）
+        const projectile = this.enemyProjectilePool['pool'].find((p: any) => p.mesh === projectileMesh);
         if (!projectile) return;
 
         const fromFaction = projectile.mesh.userData.faction;
@@ -893,7 +895,7 @@ export class Game {
           return;
         }
 
-        // 找到命中的目标
+        // 找到命中的目标（hitObject 是目标，不是子弹）
         const target = allTargets.find(t => t.mesh === hitObject);
         if (!target) return;
 
@@ -903,14 +905,17 @@ export class Game {
           if (target.faction === Faction.NEUTRAL && !this.shieldActive) {
             // 命中玩家
             this.playerHealth.takeDamage(damage);
+            console.log(`[碰撞检测] 敌人子弹命中玩家，伤害: ${damage}`);
           } else if (target.faction === Faction.ENEMY) {
             // 命中敌军
             target.ai.takeDamage(damage);
+            console.log(`[碰撞检测] 友军子弹命中敌军，伤害: ${damage}`);
           } else if (target.faction === Faction.FRIENDLY) {
             // 命中友军
             const friendlyAI = this.friendlyAIs.find(f => f.getMesh() === hitObject);
             if (friendlyAI && friendlyAI.isAlive()) {
               friendlyAI.takeDamage(damage);
+              console.log(`[碰撞检测] 敌人子弹命中友军，伤害: ${damage}`);
             }
           }
         }

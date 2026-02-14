@@ -2,6 +2,84 @@
 
 ## [未发布] - 2026-02-14
 
+### 战斗系统与阵营系统修复
+
+#### ✈️ 友军AI系统（BOMB道具效果）
+- **BOMB道具重构**：从"清屏炸弹"改为"召唤友军"
+  - 道具名称：'清屏炸弹' → '召唤友军'
+  - 道具描述：'消灭屏幕上所有敌人' → '召唤一架友军飞机协助战斗'
+  - 道具图标：💣 → ✈️
+- **友军AI实现**：
+  - 复用敌人AI和模型（随机5种敌机类型）
+  - 自动寻找并锁定最近敌方敌人（不攻击玩家）
+  - AI行为与敌人一致（追逐、固定方向、盘旋）
+  - 伤害和武器属性与敌人相同
+  - 被击败后消失，不掉落道具
+- **碰撞检测与伤害过滤**：
+  - 友军mesh设置 `userData.isFriendly = true`
+  - 子弹标识：`fireEnemyProjectile()` 支持 `isFriendly` 参数
+  - 碰撞过滤：友军子弹命中玩家时仅移除子弹而不造成伤害
+- **血条与UI**：
+  - 与敌人相同的血条系统
+  - 黄色大字"FRIENDLY"显示在血条上方
+  - 箭头指示器显示友军位置和距离
+
+#### 🔧 阵营系统实现
+- **三个阵营枚举** - [src/core/Faction.ts](src/core/Faction.ts)：
+  - `ENEMY`: 敌军阵营
+  - `FRIENDLY`: 友军阵营（协助玩家）
+  - `NEUTRAL`: 中立阵营（玩家）
+- **敌对关系判断**：
+  - 友军和中立（玩家）不互相伤害
+  - 其他所有组合都敌对（包括敌军vs友军、敌军vs玩家）
+
+#### 🐛 AI子弹伤害系统修复
+- **问题诊断**：
+  - 子弹发射正常，但碰撞后不造成伤害
+  - 碰撞检测逻辑错误，参数使用混乱
+  - 伤害值传递链断裂
+- **修复1：阵营标识** - [ProjectilePool.ts:63-76](src/features/combat/ProjectilePool.ts#L63-L76)：
+  - `fire()` 方法添加 `faction` 参数
+  - 设置 `projectile.mesh.userData.faction = faction`
+  - `Game.ts` 的 `fireAIProjectile()` 传递 `fromFaction` 参数
+- **修复2：碰撞检测逻辑** - [Game.ts:885-921](src/Game.ts#L885-L921)：
+  - **错误**：使用 `hitObject`（目标）在子弹池中找子弹
+  - **正确**：使用 `projectileMesh`（子弹）在子弹池中找子弹
+  - 回调参数正确理解：
+    - `hitObject`: 被击中的目标 mesh
+    - `projectileMesh`: 子弹的 mesh
+    - `damage`: 伤害值
+- **修复3：伤害值传递**：
+  - `Projectile` 接口添加 `damage: number` 字段
+  - `fire()` 方法接受并存储伤害值
+  - `checkCollisions()` 回调传递 `projectile.damage`
+  - 完整的伤害值传递链：EnemyAI → Game → ProjectilePool → Collision
+
+#### 🔊 射击音效添加
+- **AI子弹音效** - [Game.ts:174-176](src/Game.ts#L174-L176) & [Game.ts:496-498](src/Game.ts#L496-L498)：
+  - 敌人射击时播放 `audioManager.playShoot()`
+  - 友军射击时播放 `audioManager.playShoot()`
+  - 统一音效，提升战斗反馈感
+
+#### 📝 调试日志与追踪
+- 添加碰撞检测调试日志：
+  - `[碰撞检测] 敌人子弹命中玩家，伤害: XX`
+  - `[碰撞检测] 友军子弹命中敌军，伤害: XX`
+  - `[碰撞检测] 敌人子弹命中友军，伤害: XX`
+
+**技术细节**：
+- **对象池模式**：子弹复用，避免频繁创建/销毁
+- **阵营标识**：`userData.faction` 存储阵营信息
+- **发射者追踪**：`owner` 字段防止子弹立即碰撞到发射者
+- **伤害验证**：
+  - ✅ 敌军子弹 → 玩家（Faction.NEUTRAL）
+  - ✅ 敌军子弹 → 友军（Faction.FRIENDLY）
+  - ✅ 友军子弹 → 敌军（Faction.ENEMY）
+
+---
+
+### 关卡系统重构
+
 ### 关卡系统重构
 
 #### 🎯 敌人生成系统优化

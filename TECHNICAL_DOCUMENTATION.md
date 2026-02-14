@@ -300,6 +300,67 @@ src/
 
 ## 最近更新记录
 
+### 2026-02-14: 战斗系统与阵营系统修复
+**主要变更**:
+
+1. **友军AI系统实现** - BOMB道具重构为召唤友军
+   - `FriendlyAI.ts`: 友军AI包装类，复用EnemyAI逻辑
+   - 友军使用敌人AI和模型，自动攻击敌方敌人
+   - AI行为与敌人一致（追逐、固定方向、盘旋三种状态）
+   - 被击败后消失，不掉落道具
+   - 位置：玩家附近随机偏移（±100m X/Z, ±50m Y）
+   - 目标选择：`findNearestEnemy()` 寻找最近敌方敌人
+
+2. **阵营系统实现** - [core/Faction.ts](src/core/Faction.ts)
+   - 定义三个阵营枚举：
+     - `ENEMY`: 敌军阵营
+     - `FRIENDLY`: 友军阵营（协助玩家）
+     - `NEUTRAL`: 中立阵营（玩家）
+   - `areHostile()` 函数：判断两个阵营是否敌对
+     - 友军和中立（玩家）不互相伤害
+     - 其他组合都敌对（敌军vs友军、敌军vs玩家）
+
+3. **AI子弹伤害系统修复** - [Game.ts:885-921](src/Game.ts#L885-L921)
+   - **问题1**: 子弹没有阵营标识
+     - 修复：`ProjectilePool.fire()` 添加 `faction` 参数
+     - 修复：设置 `projectile.mesh.userData.faction = faction`
+     - 修复：`fireAIProjectile()` 传递 `fromFaction` 参数
+
+   - **问题2**: 碰撞检测逻辑错误
+     - 错误：使用 `hitObject`（目标）在子弹池中找子弹
+     - 正确：使用 `projectileMesh`（子弹）在子弹池中找子弹
+     - 修复回调参数理解：
+       - `hitObject`: 被击中的目标 mesh（玩家/敌人/友军）
+       - `projectileMesh`: 子弹的 mesh
+       - `damage`: 伤害值
+
+   - **问题3**: 伤害值传递链断裂
+     - `Projectile` 接口添加 `damage: number` 字段
+     - `fire()` 方法接受 `damage` 参数并存储
+     - `checkCollisions()` 回调传递 `projectile.damage`
+     - `Game.ts` 所有调用传递正确的伤害值
+
+4. **射击音效添加** - [Game.ts:174-176](src/Game.ts#L174-L176) & [Game.ts:496-498](src/Game.ts#L496-L498)
+   - 敌人射击时播放 `audioManager.playShoot()`
+   - 友军射击时播放 `audioManager.playShoot()`
+   - 统一音效，提升战斗反馈感
+
+5. **碰撞检测完善**
+   - 子弹发射者追踪：`owner` 字段防止子弹立即碰撞到发射者
+   - 阵营判断：使用 `areHostile()` 判断是否造成伤害
+   - 目标伤害：
+     - 敌军子弹 → 玩家（NEUTRAL）和友军（FRIENDLY）
+     - 友军子弹 → 敌军（ENEMY）
+   - 添加调试日志：`[碰撞检测] XX子弹命中XX，伤害: XX`
+
+**技术细节**:
+- **对象池模式**: 子弹复用，避免频繁创建/销毁
+- **阵营标识**: `userData.faction` 存储阵营信息
+- **发射者追踪**: `owner` 字段用于防碰撞检测
+- **伤害传递**: 完整的 damage 传递链：EnemyAI → Game → ProjectilePool → Collision
+
+---
+
 ### 2026-02-14: 视觉效果优化
 **主要变更**:
 

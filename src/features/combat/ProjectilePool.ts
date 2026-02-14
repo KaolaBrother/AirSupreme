@@ -60,8 +60,9 @@ export class ProjectilePool {
    * @param direction 发射方向
    * @param damage 伤害值
    * @param owner 发射者（用于防止立即碰撞）
+   * @param faction 子弹阵营（用于伤害检测）
    */
-  public fire(origin: THREE.Vector3, direction: THREE.Vector3, damage: number, owner?: THREE.Object3D): void {
+  public fire(origin: THREE.Vector3, direction: THREE.Vector3, damage: number, owner?: THREE.Object3D, faction?: string): void {
     // 找到未激活的子弹
     const projectile = this.pool.find(p => !p.active);
     if (!projectile) return;
@@ -71,6 +72,7 @@ export class ProjectilePool {
     projectile.startPosition.copy(origin);
     projectile.damage = damage; // 设置伤害
     projectile.owner = owner; // 记录发射者
+    projectile.mesh.userData.faction = faction; // 设置阵营
     projectile.mesh.visible = true;
     projectile.active = true;
   }
