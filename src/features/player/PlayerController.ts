@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { InputState } from '@/core/Input/InputHandler';
 import { GAME_CONSTANTS } from '@/config';
+import { PlayerStats } from '@/features/upgrade/UpgradeSystem';
 
 /**
  * 玩家控制器
@@ -9,6 +10,7 @@ import { GAME_CONSTANTS } from '@/config';
 export class PlayerController {
   private aircraft: THREE.Group;
   private currentSpeed: number;
+  private playerStats: PlayerStats;
 
   // 缓存向量（避免每帧创建）
   private forward: THREE.Vector3;
@@ -25,9 +27,10 @@ export class PlayerController {
   private readonly boostFlameColor = new THREE.Color(0xffaa00);    // 加速火焰颜色（金黄）
   private readonly flameColor = new THREE.Color();
 
-  constructor(aircraft: THREE.Group, _scene: THREE.Scene) {
+  constructor(aircraft: THREE.Group, _scene: THREE.Scene, playerStats: PlayerStats) {
     this.aircraft = aircraft;
-    this.currentSpeed = GAME_CONSTANTS.PLAYER.BASE_SPEED;
+    this.playerStats = playerStats;
+    this.currentSpeed = playerStats.getMaxSpeed() * 0.5; // 初始速度为最大速度的一半
     this.forward = new THREE.Vector3();
 
     // 创建火焰Sprite效果
@@ -102,14 +105,17 @@ export class PlayerController {
                       input.rollLeft || input.rollRight;
 
     // 速度控制
+    const maxSpeed = this.playerStats.getMaxSpeed();
+    const minSpeed = maxSpeed * 0.5; // 最小速度为最大速度的一半
+
     if (input.throttle) {
       this.currentSpeed = Math.min(
-        GAME_CONSTANTS.PLAYER.MAX_SPEED,
+        maxSpeed,
         this.currentSpeed + 20 * deltaTime
       );
     } else {
       this.currentSpeed = Math.max(
-        GAME_CONSTANTS.PLAYER.BASE_SPEED * 0.5,
+        minSpeed,
         this.currentSpeed - 10 * deltaTime
       );
     }

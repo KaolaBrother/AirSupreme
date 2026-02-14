@@ -224,25 +224,8 @@ export class LevelManager {
 
     // 更新敌人
     for (const enemy of this.enemies) {
-      // 如果有友军，根据距离选择最近的目标（玩家或友军）
-      if (friendlyMeshes && friendlyMeshes.length > 0) {
-        let nearestTarget = playerPosition;
-        let minDistance = enemy.getPosition().distanceTo(playerPosition);
-
-        // 寻找最近的目标
-        for (const friendlyMesh of friendlyMeshes) {
-          const distance = enemy.getPosition().distanceTo(friendlyMesh.position);
-          if (distance < minDistance) {
-            minDistance = distance;
-            nearestTarget = friendlyMesh.position;
-          }
-        }
-
-        enemy.update(deltaTime, nearestTarget);
-      } else {
-        // 没有友军，只追踪玩家
-        enemy.update(deltaTime, playerPosition);
-      }
+      // 传入玩家位置和友军列表（EnemyAI内部会判断盘旋目标）
+      enemy.update(deltaTime, playerPosition, friendlyMeshes);
     }
 
     // 清理已死亡的敌人

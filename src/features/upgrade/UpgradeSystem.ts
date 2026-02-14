@@ -1,3 +1,5 @@
+import { GAME_CONSTANTS } from '@/config';
+
 /**
  * 升级类型
  */
@@ -217,11 +219,16 @@ export class PlayerUpgrades {
  */
 export class PlayerStats {
   private upgrades: PlayerUpgrades;
-  private baseHealth: number = 100;
-  private baseDamage: number = 12.5;  // 伤害减半
-  private baseFireRate: number = 0.3;   // 射击速度降低一半（0.15 → 0.3）
-  private baseSpeed: number = 100;
+  private baseHealth: number = GAME_CONSTANTS.PLAYER.BASE_HEALTH;  // 使用配置文件（200）
+  private baseDamage: number = GAME_CONSTANTS.PLAYER.BASE_DAMAGE;  // 使用配置文件（12.5）
+  private baseFireRate: number = GAME_CONSTANTS.PLAYER.BASE_FIRE_RATE;  // 使用配置文件（0.3）
+  private baseSpeed: number = GAME_CONSTANTS.PLAYER.MAX_SPEED;  // 使用配置文件（50，不是硬编码的100）
   private baseShieldDuration: number = 10;
+
+  // 道具倍数
+  private speedMultiplier: number = 1;           // 速度道具倍数
+  private damageMultiplier: number = 1;          // 伤害道具倍数
+  private multiShotCount: number = 1;             // 多重射击子弹数量
 
   constructor() {
     this.upgrades = new PlayerUpgrades();
@@ -239,7 +246,21 @@ export class PlayerStats {
    */
   public getDamage(multiplier: number = 1): number {
     const baseDamage = this.baseDamage + this.upgrades.getEffectValue(UpgradeType.DAMAGE);
-    return baseDamage * multiplier;
+    return baseDamage * multiplier * this.damageMultiplier;
+  }
+
+  /**
+   * 设置伤害倍数（道具效果）
+   */
+  public setDamageMultiplier(value: number): void {
+    this.damageMultiplier = value;
+  }
+
+  /**
+   * 重置伤害倍数
+   */
+  public resetDamageMultiplier(): void {
+    this.damageMultiplier = 1;
   }
 
   /**
@@ -254,7 +275,22 @@ export class PlayerStats {
    * 获取最大速度
    */
   public getMaxSpeed(): number {
-    return this.baseSpeed + this.upgrades.getEffectValue(UpgradeType.SPEED);
+    const baseSpeed = this.baseSpeed + this.upgrades.getEffectValue(UpgradeType.SPEED);
+    return baseSpeed * this.speedMultiplier;
+  }
+
+  /**
+   * 设置速度倍数（道具效果）
+   */
+  public setSpeedMultiplier(value: number): void {
+    this.speedMultiplier = value;
+  }
+
+  /**
+   * 重置速度倍数
+   */
+  public resetSpeedMultiplier(): void {
+    this.speedMultiplier = 1;
   }
 
   /**
@@ -270,6 +306,27 @@ export class PlayerStats {
   public getAccuracy(): number {
     // 基础精度 0.9（可以通过未来升级提升）
     return 0.9;
+  }
+
+  /**
+   * 获取多重射击子弹数量
+   */
+  public getMultiShotCount(): number {
+    return this.multiShotCount;
+  }
+
+  /**
+   * 设置多重射击子弹数量（道具效果）
+   */
+  public setMultiShotCount(value: number): void {
+    this.multiShotCount = value;
+  }
+
+  /**
+   * 重置多重射击
+   */
+  public resetMultiShot(): void {
+    this.multiShotCount = 1;
   }
 
   /**
@@ -291,5 +348,9 @@ export class PlayerStats {
    */
   public reset(): void {
     this.upgrades.reset();
+    // 重置所有道具倍数
+    this.speedMultiplier = 1;
+    this.damageMultiplier = 1;
+    this.multiShotCount = 1;
   }
 }

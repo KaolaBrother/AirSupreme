@@ -25,11 +25,18 @@ export class EnemyAI {
   // 状态机
   private currentState: EnemyAIState = EnemyAIState.CHASE;  // 默认状态
   private stateTimer: number = 0;          // 当前状态持续时间
-  private fixedDirection: THREE.Vector3;      // 固定方向
+  private fixedDirectionTarget: THREE.Vector3; // 固定方向飞行状态的虚拟追踪点
   private circleAngle: number = 0;            // 盘旋角度
+
+  // 盘旋随机参数（每次进入盘旋状态时重新生成）
+  private currentCircleRadius: number = 0;   // 当前盘旋半径（配置值 + 随机20-60米）
+  private currentCircleHeight: number = 0;   // 当前高度差（随机0-50米）
 
   // 攻击参数
   private attackCooldown: number = 0;
+
+  // 友军列表（用于盘旋状态判断目标）
+  private friendlyMeshes: THREE.Object3D[] = [];
 
   // 回调
   public onFire?: (position: THREE.Vector3, direction: THREE.Vector3, damage: number) => void;
@@ -44,8 +51,8 @@ export class EnemyAI {
     // 初始化速度（向前）
     this.velocity = new THREE.Vector3(0, 0, -config.speed);
 
-    // 初始化固定方向（随机）
-    this.fixedDirection = this.randomDirection();
+    // 初始化固定方向虚拟追踪点（随机）
+    this.fixedDirectionTarget = this.generateFixedDirectionTarget();
 
     // 创建尾迹效果（根据敌机类型选择颜色）
     const trailColor = this.getTrailColor(config.type);
@@ -71,7 +78,7 @@ export class EnemyAI {
   /**
    * 更新敌人
    */
-  public update(deltaTime: number, playerPosition: THREE.Vector3): void {
+  public update(deltaTime: number, playerPosition: THREE.Vector3, friendlyMeshes?: THREE.Object3D[]): void {
     // 安全检查：确保位置有效
     const pos = this.mesh.position;
     if (!isFinite(pos.x) || !isFinite(pos.y) || !isFinite(pos.z)) {
@@ -82,8 +89,13 @@ export class EnemyAI {
       return;
     }
 
-    // 更新目标引用
+    // 更新目标引用（盘旋状态时会重新判断玩家和友军哪个更近）
     this.targetPosition = playerPosition;
+
+    // 存储友军列表（用于盘旋状态）
+    if (friendlyMeshes) {
+      this.friendlyMeshes = friendlyMeshes;
+    }
 
     // 更新状态计时器
     this.stateTimer -= deltaTime;
@@ -184,10 +196,37 @@ export class EnemyAI {
 
   /**
    * 固定方向飞行状态更新
+   * 敌机平滑转向固定方向（虚拟追踪点）
    */
-  private updateFixedDirection(_deltaTime: number): void {
-    // 固定方向：只需保持当前方向，不进行转向
-    // 速度已经朝向固定方向，不需要改变
+  private updateFixedDirection(deltaTime: number): void {
+    // 计算到虚拟追踪点的方向
+    const targetDirection = new THREE.Vector3()
+      .subVectors(this.fixedDirectionTarget, this.mesh.position)
+      .normalize();
+
+    // 获取当前速度方向
+    const currentDirection = this.velocity.clone().normalize();
+
+    // 计算转向角度（限制转向速度）
+    const turnAngle = this.config.turnSpeed * deltaTime;
+    const targetRotation = Math.atan2(targetDirection.x, targetDirection.z);
+    const currentRotation = Math.atan2(currentDirection.x, currentDirection.z);
+
+    // 计算需要旋转的角度（选择最短路径）
+    let rotationDiff = targetRotation - currentRotation;
+    while (rotationDiff > Math.PI) rotationDiff -= Math.PI * 2;
+    while (rotationDiff < -Math.PI) rotationDiff += Math.PI * 2;
+
+    // 限制转向速度
+    rotationDiff = Math.max(-turnAngle, Math.min(turnAngle, rotationDiff));
+
+    // 应用新的旋转
+    const newRotation = currentRotation + rotationDiff;
+    this.velocity.set(
+      Math.sin(newRotation) * this.config.speed,
+      targetDirection.y * this.config.speed,
+      Math.cos(newRotation) * this.config.speed
+    );
   }
 
   /**
@@ -196,15 +235,28 @@ export class EnemyAI {
   private updateCircle(deltaTime: number): void {
     if (!this.targetPosition) return;
 
-    // 更新盘旋角度
-    const angularSpeed = this.config.speed / this.config.circleRadius;
+    // 判断盘旋目标：玩家或友军中更近的
+    let circleTarget = this.targetPosition; // 默认玩家
+    let minDistance = this.mesh.position.distanceTo(this.targetPosition);
+
+    // 遍历所有友军，找到最近的
+    for (const friendlyMesh of this.friendlyMeshes) {
+      const distToFriendly = this.mesh.position.distanceTo(friendlyMesh.position);
+
+      if (distToFriendly < minDistance) {
+        minDistance = distToFriendly;
+        circleTarget = friendlyMesh.position;
+      }
+    }
+
+    // 更新盘旋角度（使用随机半径）
+    const angularSpeed = this.config.speed / this.currentCircleRadius;
     this.circleAngle += angularSpeed * deltaTime;
 
-    // 计算盘旋目标位置（围绕玩家）
-    const playerPos = this.targetPosition;
-    const targetX = playerPos.x + Math.cos(this.circleAngle) * this.config.circleRadius;
-    const targetZ = playerPos.z + Math.sin(this.circleAngle) * this.config.circleRadius;
-    const targetY = playerPos.y + this.config.circleHeight;
+    // 计算盘旋目标位置（围绕最近的目标，使用随机半径和高度）
+    const targetX = circleTarget.x + Math.cos(this.circleAngle) * this.currentCircleRadius;
+    const targetZ = circleTarget.z + Math.sin(this.circleAngle) * this.currentCircleRadius;
+    const targetY = circleTarget.y + this.currentCircleHeight;
 
     const targetPos = new THREE.Vector3(targetX, targetY, targetZ);
 
@@ -261,31 +313,75 @@ export class EnemyAI {
     cumulative += probs[EnemyAIState.FIXED_DIRECTION];
     if (rand < cumulative) {
       this.currentState = EnemyAIState.FIXED_DIRECTION;
-      // 重新随机固定方向
-      this.fixedDirection = this.randomDirection();
-      // 更新速度朝向固定方向
-      this.velocity.copy(this.fixedDirection).multiplyScalar(this.config.speed);
+      // 重新生成虚拟追踪点
+      this.fixedDirectionTarget = this.generateFixedDirectionTarget();
+      // 不直接修改velocity，让updateFixedDirection()平滑转向
       return;
     }
 
     this.currentState = EnemyAIState.CIRCLE;
     // 重置盘旋角度
     this.circleAngle = 0;
+
+    // 生成随机盘旋参数
+    // 半径：配置值 + 随机20-60米
+    this.currentCircleRadius = this.config.circleRadius + 20 + Math.random() * 40;
+    // 高度差：随机0-50米
+    this.currentCircleHeight = Math.random() * 50;
   }
 
   /**
-   * 生成随机方向（水平面上）
+   * 生成固定方向飞行状态的虚拟追踪点
+   * 在战场范围内（距离玩家100-300米）随机生成
    */
-  private randomDirection(): THREE.Vector3 {
-    // 在水平面上随机方向（忽略Y轴）
-    const angle = Math.random() * Math.PI * 2;
-    const dir = new THREE.Vector3(
-      Math.cos(angle),
-      0,
-      Math.sin(angle)
-    ).normalize();
+  private generateFixedDirectionTarget(): THREE.Vector3 {
+    // 战场边界
+    const BATTLEFIELD_MIN = -750;
+    const BATTLEFIELD_MAX = 750;
+    const BATTLEFIELD_SIZE = 1500;
 
-    return dir;
+    // 需要玩家位置来生成追踪点
+    if (!this.targetPosition) {
+      // 如果没有玩家位置，返回默认位置（敌机前方100米）
+      return this.mesh.position.clone().add(new THREE.Vector3(0, 0, -100));
+    }
+
+    // 尝试次数（避免无限循环）
+    const maxAttempts = 10;
+
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      // 随机距离：100-300米（距离玩家）
+      const distance = 100 + Math.random() * 200;
+
+      // 随机方向（水平面上）
+      const angle = Math.random() * Math.PI * 2;
+
+      // 计算追踪点位置（以玩家位置为中心）
+      const target = new THREE.Vector3(
+        this.targetPosition.x + Math.cos(angle) * distance,
+        this.targetPosition.y,
+        this.targetPosition.z + Math.sin(angle) * distance
+      );
+
+      // 检查是否在战场边界内
+      if (target.x >= BATTLEFIELD_MIN && target.x <= BATTLEFIELD_MAX &&
+          target.z >= BATTLEFIELD_MIN && target.z <= BATTLEFIELD_MAX) {
+        return target;
+      }
+
+      // 如果超出边界，尝试在战场内随机生成
+      if (attempt === maxAttempts - 1) {
+        // 最后一次尝试：直接在战场内随机位置
+        return new THREE.Vector3(
+          BATTLEFIELD_MIN + Math.random() * BATTLEFIELD_SIZE,
+          this.targetPosition.y,
+          BATTLEFIELD_MIN + Math.random() * BATTLEFIELD_SIZE
+        );
+      }
+    }
+
+    // 默认返回：玩家位置前方100米
+    return this.targetPosition.clone().add(new THREE.Vector3(0, 0, -100));
   }
 
   /**

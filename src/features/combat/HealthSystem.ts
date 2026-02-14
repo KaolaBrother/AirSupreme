@@ -46,6 +46,14 @@ export class HealthSystem {
   }
 
   /**
+   * 补满到最大生命值
+   */
+  public healToMax(): void {
+    if (this.isDead) return;
+    this.currentHealth = this.maxHealth;
+  }
+
+  /**
    * 获取生命值百分比
    */
   public getHealthPercent(): number {

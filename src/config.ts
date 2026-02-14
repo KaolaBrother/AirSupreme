@@ -56,8 +56,8 @@ export const GAME_CONSTANTS = {
     PITCH_SPEED: 2.0,      // 俯仰速度
     YAW_SPEED: 1.5,        // 偏航速度
     ROLL_SPEED: 3.0,       // 翻滚速度
-    BASE_SPEED: 25,        // 基础速度（减半）
-    MAX_SPEED: 50,         // 最大速度（减半）
+    BASE_SPEED: 45,        // 基础速度
+    MAX_SPEED: 45,         // 最大速度（与狙击机相同）
     BASE_HEALTH: 200,      // 基础生命值（翻倍）
     BASE_DAMAGE: 12.5,     // 基础伤害（减半）
     BASE_FIRE_RATE: 0.3,   // 基础射击间隔（加倍，降低射速）

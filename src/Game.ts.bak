@@ -989,7 +989,7 @@ export class Game {
     this.updateEnemyHealthBars(enemies);
 
     // 更新 HUD
-    this.hud.updateHealth(this.playerHealth.getHealthPercent());
+    this.hud.updateHealth(this.playerHealth.getHealthPercent() / (this.playerStats.getMaxHealth() / 100));
     this.hud.updateSpeed(this.playerController.getSpeed());
     this.hud.updateScore(this.gameState.getScore());
     this.hud.updateEnemies(this.levelManager.getAliveEnemyCount());
@@ -1194,23 +1194,22 @@ export class Game {
     forward.applyAxisAngle(new THREE.Vector3(0, 1, 0), perturbationAngle);
 
     // 检查多重射击
+    const damageMultiplier = this.powerUpManager.hasEffect(PowerUpType.DAMAGE)
+      ? POWER_UP_CONFIGS[PowerUpType.DAMAGE].value
+      : 1;
 
-    const multiShotCount = this.playerStats.getMultiShotCount();
-    if (multiShotCount > 1) {
-      // 多重射击：发射 multiShotCount 发子弹
-      const spreadAngle = 0.3; // 扩大一倍
+    if (this.powerUpManager.hasEffect(PowerUpType.MULTISHOT)) {
+      // 发射三发
+      const spreadAngle = 0.3;  // 扩大一倍
 
-      for (let i = 0; i < multiShotCount; i++) {
+      for (let i = -1; i <= 1; i++) {
         const offsetForward = forward.clone();
-        // 计算偏移角度（确保子弹均匀分布）
-        const angleOffset = (i - (multiShotCount - 1) / 2) * spreadAngle;
-        offsetForward.applyAxisAngle(new THREE.Vector3(0, 1, 0), angleOffset);
-        this.playerProjectilePool.fire(position.clone(), offsetForward.normalize(), this.playerStats.getDamage());
+        offsetForward.applyAxisAngle(new THREE.Vector3(0, 1, 0), i * spreadAngle);
+        this.playerProjectilePool.fire(position.clone(), offsetForward.normalize(), this.playerStats.getDamage(damageMultiplier));
       }
     } else {
-      this.playerProjectilePool.fire(position, forward, this.playerStats.getDamage());
+      this.playerProjectilePool.fire(position, forward, this.playerStats.getDamage(damageMultiplier));
     }
-
   }
 
   /**
@@ -1225,9 +1224,6 @@ export class Game {
    */
   public start(): void {
     this.gameState.setStatus(GameStatus.PLAYING);
-
-    // 重置生命值到满血
-    this.playerHealth.reset();
 
     // 初始化音频（需要用户交互后）
     if (!this.audioInitialized) {
