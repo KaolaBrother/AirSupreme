@@ -75,7 +75,7 @@ export const ENEMY_CONFIGS: Record<EnemyType, EnemyConfig> = {
     name: '侦察机',
     health: 60,
     speed: 40,              // 基于导弹（80）的一半
-    damage: 10,
+    damage: 5,              // 伤害减半
     detectionRange: 120,
     attackRange: 25,
     attackCooldown: 0.4,
@@ -103,7 +103,7 @@ export const ENEMY_CONFIGS: Record<EnemyType, EnemyConfig> = {
     name: '战斗机',
     health: 100,
     speed: 55,              // 比导弹慢30%
-    damage: 15,
+    damage: 7.5,            // 伤害减半
     detectionRange: 100,
     attackRange: 30,
     attackCooldown: 0.5,
@@ -131,7 +131,7 @@ export const ENEMY_CONFIGS: Record<EnemyType, EnemyConfig> = {
     name: '重型轰炸机',
     health: 300,
     speed: 35,              // 慢速但转向慢
-    damage: 30,
+    damage: 15,             // 伤害减半
     detectionRange: 80,
     attackRange: 40,
     attackCooldown: 0.8,
@@ -159,7 +159,7 @@ export const ENEMY_CONFIGS: Record<EnemyType, EnemyConfig> = {
     name: '狙击机',
     health: 80,
     speed: 45,              // 中等速度
-    damage: 40,
+    damage: 20,             // 伤害减半
     detectionRange: 200,
     attackRange: 80,
     attackCooldown: 1.0,
@@ -187,7 +187,7 @@ export const ENEMY_CONFIGS: Record<EnemyType, EnemyConfig> = {
     name: '王牌飞行员',
     health: 160,
     speed: 70,              // 接近导弹速度
-    damage: 25,
+    damage: 12.5,           // 伤害减半
     detectionRange: 150,
     attackRange: 35,
     attackCooldown: 0.4,
@@ -220,9 +220,11 @@ export function getEnemyTypesForWave(level: number, wave: number): EnemyType[] {
   // 根据关卡和波次决定出现什么类型的敌人
   if (level === 1) {
     // 第一关：主要是侦察机和战斗机
-    if (wave <= 2) {
+    if (wave === 1) {
       types.push(EnemyType.SCOUT);
-    } else {
+    } else if (wave === 2) {
+      types.push(EnemyType.SCOUT, EnemyType.FIGHTER);
+    } else if (wave >= 3) {
       types.push(EnemyType.SCOUT, EnemyType.FIGHTER);
     }
   } else if (level === 2) {

@@ -87,19 +87,45 @@ export class LevelManager {
 
   /**
    * 开始当前波次
+   * @param playerPosition 玩家位置（第一次调用时必需，用于计算群中心）
+   * @param isNextWave 是否是下一波（波次完成后的开始）
    */
-  public startWave(): void {
-    if (!this.currentLevel || this.state !== LevelState.IDLE) return;
+  public startWave(playerPosition?: THREE.Vector3, isNextWave: boolean = false): void {
+    if (!this.currentLevel) return;
+
+    // 第一次调用：设置第一波
+    if (this.currentWave === 0 && playerPosition && !isNextWave) {
+      // 计算并保存第一波的敌人群中心
+      const angle = Math.random() * Math.PI * 2;
+      const distance = 600 + Math.random() * 200; // 600-800m
+
+      this.waveGroupCenter = new THREE.Vector3(
+        playerPosition.x + Math.cos(angle) * distance,
+        playerPosition.y,
+        playerPosition.z + Math.sin(angle) * distance
+      );
+
+      this.state = LevelState.WAVE_ACTIVE;
+      this.enemiesSpawnedThisWave = 0;
+      this.spawnTimer = 0;
+      this.onWaveStart?.(this.currentWave); // 传递 0（第一波）
+
+      // 清除已死亡的敌人
+      this.enemies = this.enemies.filter(e => e.isAlive());
+      return;
+    }
+
+    // 后续调用：由波次完成后的 startNextWave 触发
+    // 允许从 IDLE 或 WAVE_COMPLETE 状态转换到 WAVE_ACTIVE
+    if (this.state !== LevelState.IDLE && this.state !== LevelState.WAVE_COMPLETE) return;
 
     this.state = LevelState.WAVE_ACTIVE;
     this.enemiesSpawnedThisWave = 0;
-    this.spawnTimer = 0; // 重置生成计时器
+    this.spawnTimer = 0;
     this.onWaveStart?.(this.currentWave);
 
     // 清除已死亡的敌人
     this.enemies = this.enemies.filter(e => e.isAlive());
-
-    // 不重置totalEnemiesSpawned，因为它要累计整个关卡的所有已生成敌人
   }
 
   /**
@@ -294,17 +320,15 @@ export class LevelManager {
   }
 
   /**
-   * 开始下一波
+   * 开始下一波（波次完成后的调用）
    */
   private startNextWave(playerPosition: THREE.Vector3): void {
     if (!this.currentLevel) return;
 
+    // 增加波次
     this.currentWave++;
-    this.state = LevelState.WAVE_ACTIVE;
-    this.enemiesSpawnedThisWave = 0; // 重置生成计数
-    this.spawnTimer = 0; // 重置生成计时器
 
-    // 计算并保存当前波次的敌人群中心（使用玩家位置作为参考）
+    // 计算并保存新波次的敌人群中心
     const angle = Math.random() * Math.PI * 2;
     const distance = 600 + Math.random() * 200; // 600-800m
 
@@ -314,7 +338,8 @@ export class LevelManager {
       playerPosition.z + Math.sin(angle) * distance
     );
 
-    this.onWaveStart?.(this.currentWave);
+    // 调用 startWave 完成状态设置和事件触发
+    this.startWave(undefined, true); // isNextWave = true
   }
 
   /**

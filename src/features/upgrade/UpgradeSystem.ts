@@ -218,8 +218,8 @@ export class PlayerUpgrades {
 export class PlayerStats {
   private upgrades: PlayerUpgrades;
   private baseHealth: number = 100;
-  private baseDamage: number = 25;
-  private baseFireRate: number = 0.15;
+  private baseDamage: number = 12.5;  // 伤害减半
+  private baseFireRate: number = 0.3;   // 射击速度降低一半（0.15 → 0.3）
   private baseSpeed: number = 100;
   private baseShieldDuration: number = 10;
 

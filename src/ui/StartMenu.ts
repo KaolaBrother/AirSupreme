@@ -11,6 +11,7 @@ export class StartMenu {
     difficulty: 1,      // 1-5
     soundVolume: 0.7,
     playerLives: 3,
+    startLevel: 1,      // 起始关卡（1-5）
   };
 
   constructor() {
@@ -220,8 +221,25 @@ export class StartMenu {
     );
     livesRow.id = 'lives-row';
 
+    // 选关设置
+    const levelRow = this.createSettingRow(
+      '起始关卡',
+      `第${this.settings.startLevel}关`,
+      () => {
+        this.settings.startLevel = Math.max(1, this.settings.startLevel - 1);
+        this.updateDisplay();
+      },
+      () => {
+        this.settings.startLevel = Math.min(5, this.settings.startLevel + 1);
+        this.updateDisplay();
+      }
+    );
+    levelRow.id = 'level-row';
+
     panel.appendChild(difficultyRow);
     panel.appendChild(soundRow);
+    panel.appendChild(livesRow);
+    panel.appendChild(levelRow);
     panel.appendChild(livesRow);
 
     // 开始按钮
@@ -315,10 +333,12 @@ export class StartMenu {
     const difficultyValue = document.getElementById('难度-value') || document.querySelector('#difficulty-row .setting-value');
     const soundValue = document.getElementById('音效音量-value') || document.querySelector('#sound-row .setting-value');
     const livesValue = document.getElementById('生命数-value') || document.querySelector('#lives-row .setting-value');
+    const levelValue = document.getElementById('起始关卡-value') || document.querySelector('#level-row .setting-value');
 
     if (difficultyValue) difficultyValue.textContent = this.getDifficultyText(this.settings.difficulty);
     if (soundValue) soundValue.textContent = `${Math.round(this.settings.soundVolume * 100)}%`;
     if (livesValue) livesValue.textContent = `${this.settings.playerLives}`;
+    if (levelValue) levelValue.textContent = `第${this.settings.startLevel}关`;
   }
 
   private startGame(): void {
@@ -343,4 +363,5 @@ export interface GameSettings {
   difficulty: number;
   soundVolume: number;
   playerLives: number;
+  startLevel: number;    // 起始关卡（1-5）
 }

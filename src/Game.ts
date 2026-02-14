@@ -66,7 +66,6 @@ export class Game {
 
   // 关卡进度
   private currentLevelId: number = 1;
-  private waveDelayTimer: number = 0;
 
   // 护盾效果
   private shieldMesh?: THREE.Mesh;
@@ -131,6 +130,7 @@ export class Game {
     this.startMenu.setOnStart((settings) => {
       this.lives = settings.playerLives;
       this.audioManager.setSFXVolume(settings.soundVolume);
+      this.currentLevelId = settings.startLevel;  // 使用选择的起始关卡
       // 实际开始游戏
       this.gameState.start();
       this.start();
@@ -161,7 +161,6 @@ export class Game {
 
     this.levelManager.onWaveComplete = (wave) => {
       console.log(`第 ${wave} 波完成！`);
-      this.waveDelayTimer = GAME_CONSTANTS.LEVEL.WAVE_DELAY;
     };
 
     this.levelManager.onLevelComplete = (level) => {
@@ -808,14 +807,6 @@ export class Game {
     // 更新友军
     this.updateFriendlyAIs(deltaTime, enemies);
 
-    // 波次延迟
-    if (this.waveDelayTimer > 0) {
-      this.waveDelayTimer -= deltaTime;
-      if (this.waveDelayTimer <= 0) {
-        this.levelManager.startWave();
-      }
-    }
-
     // 检查玩家子弹碰撞
     const enemyMeshes = this.levelManager.getEnemies()
       .filter(e => e.isAlive())
@@ -1131,7 +1122,7 @@ export class Game {
     // 发射导弹（1发或3发）
     if (missileCount === 3) {
       // 多重射击：3发导弹，有轻微角度偏移
-      const spreadAngle = 0.15;
+      const spreadAngle = 0.3;  // 扩大一倍
 
       for (let i = -1; i <= 1; i++) {
         const offsetForward = forward.clone();
@@ -1171,7 +1162,7 @@ export class Game {
 
     // 添加射击扰动（模拟不完美瞄准）
     const accuracy = this.playerStats.getAccuracy();
-    const perturbationStrength = (1 - accuracy) * 0.12; // 根据玩家精度计算扰动强度
+    const perturbationStrength = (1 - accuracy) * 0.24; // 扩大一倍（0.12 → 0.24）
     const perturbationAngle = (Math.random() - 0.5) * perturbationStrength;
     forward.applyAxisAngle(new THREE.Vector3(0, 1, 0), perturbationAngle);
 
@@ -1182,7 +1173,7 @@ export class Game {
 
     if (this.powerUpManager.hasEffect(PowerUpType.MULTISHOT)) {
       // 发射三发
-      const spreadAngle = 0.15;
+      const spreadAngle = 0.3;  // 扩大一倍
 
       for (let i = -1; i <= 1; i++) {
         const offsetForward = forward.clone();
@@ -1216,9 +1207,10 @@ export class Game {
     // 加载第一关
     this.levelManager.loadLevel(this.currentLevelId);
 
-    // 延迟开始第一波
+    // 延迟开始第一波（传入玩家位置用于计算敌人群中心）
     setTimeout(() => {
-      this.levelManager.startWave();
+      const playerPos = this.playerController.getPosition();
+      this.levelManager.startWave(playerPos);
     }, GAME_CONSTANTS.LEVEL.START_DELAY * 1000);
 
     // 初始化导弹显示
@@ -1236,11 +1228,11 @@ export class Game {
 
     console.log('游戏开始！');
 
-    // 测试模式：1秒后自动召唤友军（仅在点击"开始游戏"后执行）
+    // 初始福利：游戏开始1秒后自动召唤友军
     setTimeout(() => {
       this.spawnFriendlyAI();
       this.hud.showPowerUpBig('✈️', '召唤友军');
-      console.log('测试模式：自动召唤友军');
+      console.log('初始福利：自动召唤友军');
     }, 1000);
   }
 
