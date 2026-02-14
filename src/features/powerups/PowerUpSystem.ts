@@ -71,20 +71,20 @@ export const POWER_UP_CONFIGS: Record<PowerUpType, PowerUpConfig> = {
   [PowerUpType.MULTISHOT]: {
     type: PowerUpType.MULTISHOT,
     name: '多重射击',
-    description: '同时发射 3 发子弹，持续 12 秒',
+    description: '同时发射 3 发子弹，持续 20 秒',
     color: 0xff00ff,
-    duration: 12,
+    duration: 20,
     value: 3,
     icon: '🎯',
   },
   [PowerUpType.BOMB]: {
     type: PowerUpType.BOMB,
-    name: '清屏炸弹',
-    description: '消灭屏幕上所有敌人',
+    name: '召唤友军',
+    description: '召唤一架友军飞机协助战斗',
     color: 0xff8800,
     duration: 0,
     value: 1,
-    icon: '💣',
+    icon: '✈️',
   },
 };
 
@@ -362,6 +362,11 @@ export class PowerUpManager {
 
     // 触发回调
     this.onPowerUpCollected?.(type, config);
+
+    // 如果是 BOMB 道具（召唤友军），触发特殊回调
+    if (type === PowerUpType.BOMB) {
+      this.onBombUsed?.();
+    }
   }
 
   /**

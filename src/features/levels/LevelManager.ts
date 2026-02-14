@@ -144,7 +144,7 @@ export class LevelManager {
   /**
    * 更新关卡管理器
    */
-  public update(deltaTime: number, playerPosition: THREE.Vector3): void {
+  public update(deltaTime: number, playerPosition: THREE.Vector3, friendlyMeshes?: THREE.Object3D[]): void {
     // 更新传送门动画
     for (let i = this.activePortals.length - 1; i >= 0; i--) {
       const portal = this.activePortals[i];
@@ -198,7 +198,25 @@ export class LevelManager {
 
     // 更新敌人
     for (const enemy of this.enemies) {
-      enemy.update(deltaTime, playerPosition);
+      // 如果有友军，根据距离选择最近的目标（玩家或友军）
+      if (friendlyMeshes && friendlyMeshes.length > 0) {
+        let nearestTarget = playerPosition;
+        let minDistance = enemy.getPosition().distanceTo(playerPosition);
+
+        // 寻找最近的目标
+        for (const friendlyMesh of friendlyMeshes) {
+          const distance = enemy.getPosition().distanceTo(friendlyMesh.position);
+          if (distance < minDistance) {
+            minDistance = distance;
+            nearestTarget = friendlyMesh.position;
+          }
+        }
+
+        enemy.update(deltaTime, nearestTarget);
+      } else {
+        // 没有友军，只追踪玩家
+        enemy.update(deltaTime, playerPosition);
+      }
     }
 
     // 清理已死亡的敌人

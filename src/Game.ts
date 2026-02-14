@@ -19,6 +19,9 @@ import { AudioManager } from '@/core/Audio/AudioManager';
 import { PowerUpManager, PowerUpType, POWER_UP_CONFIGS, PowerUpConfig } from '@/features/powerups/PowerUpSystem';
 import { BalloonPowerUp } from '@/features/powerups/BalloonPowerUp';
 import { PlayerStats } from '@/features/upgrade/UpgradeSystem';
+import { FriendlyAI } from '@/features/enemy/FriendlyAI';
+import { EnemyType, ENEMY_CONFIGS } from '@/features/enemy/EnemyTypes';
+import { Faction, areHostile } from '@/core/Faction';
 
 /**
  * 主游戏类 - 完整版
@@ -44,6 +47,7 @@ export class Game {
   private particleSystem: ParticleSystem;
   private audioManager: AudioManager;
   private powerUpManager: PowerUpManager;
+  private friendlyAIs: FriendlyAI[] = []; // 友军列表
 
   // UI
   private hud: HUD;
@@ -57,7 +61,6 @@ export class Game {
   // 导弹系统
   private missileSystem: MissileSystem;
   private missileCount: number = 2;
-  private maxMissiles: number = 10;
   private missileFiringScheduled: boolean = false; // 防止重复发射
   private missileRespawnTimer: number = 0; // 导弹补给计时器
 
@@ -128,13 +131,6 @@ export class Game {
     this.startMenu.setOnStart((settings) => {
       this.lives = settings.playerLives;
       this.audioManager.setSFXVolume(settings.soundVolume);
-      this.start();
-    });
-
-    // 开始游戏回调
-    this.startMenu.setOnStart((settings) => {
-      this.lives = settings.playerLives;
-      this.audioManager.setSFXVolume(settings.soundVolume);
       // 实际开始游戏
       this.gameState.start();
       this.start();
@@ -174,8 +170,8 @@ export class Game {
     };
 
     this.levelManager.onEnemySpawned = (enemy) => {
-      enemy.onFire = (position, direction) => {
-        this.enemyProjectilePool.fire(position, direction);
+      enemy.onFire = (position: THREE.Vector3, direction: THREE.Vector3, damage: number) => {
+        this.fireAIProjectile(position, direction, Faction.ENEMY, damage); // 标记为敌军子弹，传入伤害
       };
 
       enemy.onDestroy = () => {
@@ -226,25 +222,321 @@ export class Game {
     };
 
     this.powerUpManager.onBombUsed = () => {
-      // 清除所有敌人
-      const enemies = this.levelManager.getEnemies();
-      for (const enemy of enemies) {
-        if (enemy.isAlive()) {
-          enemy.takeDamage(9999);
+      // 召唤友军
+      this.spawnFriendlyAI();
+      console.log('召唤友军！');
+    };
+  }
+
+  /**
+   * 发射AI子弹（敌军或友军）
+   * @param position 发射位置
+   * @param direction 射击方向
+   * @param fromFaction 子弹来源阵营
+   * @param damage 伤害值
+   */
+  private fireAIProjectile(
+    position: THREE.Vector3,
+    direction: THREE.Vector3,
+    fromFaction: Faction,
+    damage: number = 10
+  ): void {
+    // 找到发射者（根据position推断）
+    let owner: THREE.Object3D | undefined;
+    const minDist = 10; // 10米内认为是发射者
+
+    if (fromFaction === Faction.FRIENDLY) {
+      // 从友军中找
+      for (const friendly of this.friendlyAIs) {
+        if (friendly.isAlive() && friendly.getMesh().position.distanceTo(position) < minDist) {
+          owner = friendly.getMesh();
+          break;
         }
       }
-      console.log('炸弹清屏！');
+    } else if (fromFaction === Faction.ENEMY) {
+      // 从敌人中找
+      const enemies = this.levelManager.getEnemies();
+      for (const enemy of enemies) {
+        if (enemy.isAlive() && enemy.getMesh().position.distanceTo(position) < minDist) {
+          owner = enemy.getMesh();
+          break;
+        }
+      }
+    }
+
+    // 发射子弹，传入发射者和伤害
+    this.enemyProjectilePool.fire(position, direction, damage, owner);
+  }
+
+  /**
+   * 更新友军
+   */
+  private updateFriendlyAIs(deltaTime: number, enemyMeshes: THREE.Object3D[]): void {
+    console.log(`[Game] updateFriendlyAIs 被调用, 友军数量: ${this.friendlyAIs.length}, 敌人数: ${enemyMeshes.length}`);
+
+    for (let i = this.friendlyAIs.length - 1; i >= 0; i--) {
+      const friendly = this.friendlyAIs[i];
+
+      if (friendly.isAlive()) {
+        // 更新友军AI
+        friendly.update(deltaTime, enemyMeshes);
+      } else {
+        // 移除已死亡的友军
+        this.friendlyAIs.splice(i, 1);
+      }
+    }
+  }
+
+  /**
+   * 创建飞机模型（复用LevelManager逻辑）
+   */
+  private createAircraftMesh(config: any): THREE.Group {
+    const group = new THREE.Group();
+
+    // 根据敌人类型定义配色和尺寸
+    let bodyColor: number, wingColor: number, accentColor: number;
+    let bodySize = 1.6, bodyLength = 6, wingSpan = 3, tailSize = 0.8;
+    let scaleMultiplier = 1;
+
+    switch (config.type) {
+      case EnemyType.SCOUT:
+        bodyColor = 0x4a5584;
+        wingColor = 0x6b7b8e;
+        accentColor = 0x3d5a87;
+        bodySize = 1.2;
+        bodyLength = 5;
+        wingSpan = 2.2;
+        scaleMultiplier = 0.85;
+        break;
+      case EnemyType.FIGHTER:
+        bodyColor = 0xcc3300;
+        wingColor = 0xe63900;
+        accentColor = 0x8b2500;
+        bodySize = 1.8;
+        bodyLength = 7;
+        wingSpan = 3.5;
+        scaleMultiplier = 1.1;
+        break;
+      case EnemyType.HEAVY:
+        bodyColor = 0x2c2c2c;
+        wingColor = 0x3a3a3a;
+        accentColor = 0x1a1a1a;
+        bodySize = 2.2;
+        bodyLength = 8;
+        wingSpan = 4.2;
+        scaleMultiplier = 1.3;
+        break;
+      case EnemyType.SNIPER:
+        bodyColor = 0x4a235a;
+        wingColor = 0x6b4c7a;
+        accentColor = 0x7c3aed;
+        bodySize = 1.6;
+        bodyLength = 7.5;
+        wingSpan = 2.8;
+        scaleMultiplier = 0.95;
+        break;
+      case EnemyType.ACE:
+        bodyColor = 0x8b0000;
+        wingColor = 0xffd700;
+        accentColor = 0xff4500;
+        bodySize = 1.9;
+        bodyLength = 7;
+        wingSpan = 3.3;
+        scaleMultiplier = 1.15;
+        break;
+      default:
+        bodyColor = config.color;
+        wingColor = config.color;
+        accentColor = config.color;
+    }
+
+    // 应用整体缩放
+    group.scale.set(scaleMultiplier, scaleMultiplier, scaleMultiplier);
+
+    // 创建机身
+    const bodyGeometry = new THREE.CylinderGeometry(bodySize * 0.4, bodySize * 0.3, bodyLength, 8);
+    const bodyMaterial = new THREE.MeshStandardMaterial({
+      color: bodyColor,
+      metalness: 0.7,
+      roughness: 0.3
+    });
+    const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
+    body.rotation.x = Math.PI / 2;
+    body.rotation.z = Math.PI / 2;
+    body.castShadow = true;
+    group.add(body);
+
+    // 创建机头锥
+    const noseGeometry = new THREE.ConeGeometry(bodySize * 0.3, bodyLength * 0.25, 8);
+    const noseMaterial = new THREE.MeshStandardMaterial({
+      color: accentColor,
+      metalness: 0.8,
+      roughness: 0.2
+    });
+    const nose = new THREE.Mesh(noseGeometry, noseMaterial);
+    nose.rotation.x = Math.PI / 2;
+    nose.rotation.z = Math.PI / 2;
+    nose.position.set(0, 0, bodyLength / 2 + 0.5);
+    nose.castShadow = true;
+    group.add(nose);
+
+    // 创建主翼
+    const wingGeometry = new THREE.BoxGeometry(wingSpan, 0.15, 1.2);
+    const wingMaterial = new THREE.MeshStandardMaterial({
+      color: wingColor,
+      metalness: 0.6,
+      roughness: 0.4
+    });
+    const wings = new THREE.Mesh(wingGeometry, wingMaterial);
+    wings.position.set(0, 0, -0.8);
+    wings.castShadow = true;
+    group.add(wings);
+
+    // 创建座舱盖
+    const cockpitGeometry = new THREE.SphereGeometry(bodySize * 0.35, 8, 8);
+    const cockpitMaterial = new THREE.MeshStandardMaterial({
+      color: accentColor,
+      metalness: 0.9,
+      roughness: 0.1,
+      emissive: accentColor,
+      emissiveIntensity: 0.3
+    });
+    const cockpit = new THREE.Mesh(cockpitGeometry, cockpitMaterial);
+    cockpit.position.set(0, bodySize * 0.25, 0.5);
+    cockpit.castShadow = true;
+    group.add(cockpit);
+
+    // 创建尾翼
+    const tailGeometry = new THREE.BoxGeometry(tailSize, 0.12, 1);
+    const tailMaterial = new THREE.MeshStandardMaterial({
+      color: wingColor,
+      metalness: 0.6,
+      roughness: 0.4
+    });
+    const tail = new THREE.Mesh(tailGeometry, tailMaterial);
+    tail.position.set(0, 0, -bodyLength / 2 - 0.3);
+    tail.castShadow = true;
+    group.add(tail);
+
+    // 创建垂直尾翼
+    const vStabGeometry = new THREE.BoxGeometry(0.15, 1.2, 0.8);
+    const vStab = new THREE.Mesh(vStabGeometry, tailMaterial);
+    vStab.position.set(0, 0.6, -bodyLength / 2 + 0.1);
+    vStab.castShadow = true;
+    group.add(vStab);
+
+    // 创建引擎喷口
+    const engineGeometry = new THREE.CylinderGeometry(bodySize * 0.2, bodySize * 0.15, 0.5, 8);
+    const engineMaterial = new THREE.MeshBasicMaterial({
+      color: 0xff6600,
+      transparent: true,
+      opacity: 0.8
+    });
+    const engine = new THREE.Mesh(engineGeometry, engineMaterial);
+    engine.rotation.x = Math.PI / 2;
+    engine.position.set(0, 0, -bodyLength / 2 - 0.8);
+    group.add(engine);
+
+    // 设置名称（友军标记）
+    switch (config.type) {
+      case EnemyType.SCOUT:
+        group.name = 'Scout-Friendly';
+        break;
+      case EnemyType.FIGHTER:
+        group.name = 'Fighter-Friendly';
+        break;
+      case EnemyType.HEAVY:
+        group.name = 'Heavy-Friendly';
+        break;
+      case EnemyType.SNIPER:
+        group.name = 'Sniper-Friendly';
+        break;
+      case EnemyType.ACE:
+        group.name = 'Ace-Friendly';
+        break;
+    }
+
+    return group;
+  }
+
+  /**
+   * 召唤友军飞机
+   */
+  private spawnFriendlyAI(): void {
+    console.log('[DEBUG] spawnFriendlyAI() 被调用！当前友军数量:', this.friendlyAIs.length);
+    console.trace('[DEBUG] 调用栈追踪：');
+
+    // 随机选择一种敌人类型
+    const enemyTypes = Object.values(EnemyType);
+    const randomType = enemyTypes[Math.floor(Math.random() * enemyTypes.length)];
+    const config = ENEMY_CONFIGS[randomType];
+
+    // 创建友军飞机模型
+    const mesh = this.createAircraftMesh(config);
+    console.log('[友军] 创建飞机模型，config:', config.name);
+    const friendly = new FriendlyAI(mesh, config, this.gameScene.scene);
+    console.log('[友军] 友军AI实例创建完成');
+
+    // 设置友军位置（在玩家附近）
+    const playerPos = this.playerController.getPosition();
+    const offset = new THREE.Vector3(
+      (Math.random() - 0.5) * 100,
+      (Math.random() - 0.5) * 50,
+      (Math.random() - 0.5) * 100
+    );
+    mesh.position.copy(playerPos).add(offset);
+
+    // 添加到场景
+    this.gameScene.scene.add(mesh);
+    this.friendlyAIs.push(friendly);
+
+    // 设置射击回调（使用 fireAIProjectile 以标记友军子弹和伤害）
+    friendly['enemy'].onFire = (position: THREE.Vector3, direction: THREE.Vector3, damage: number) => {
+      this.fireAIProjectile(position, direction, Faction.FRIENDLY, damage); // 标记为友军子弹，传入伤害
+    };
+
+    // 设置敌人AI内部的死亡回调，用于清理友军
+    const enemyAI = friendly['enemy'] as any;
+    const originalOnDeath = enemyAI.health.onDeath;
+    enemyAI.health.onDeath = () => {
+      // 调用原始死亡回调
+      if (originalOnDeath) originalOnDeath();
+
+      // 移除友军
+      const index = this.friendlyAIs.indexOf(friendly);
+      if (index !== -1) {
+        this.friendlyAIs.splice(index, 1);
+      }
+      friendly.dispose(this.gameScene.scene);
+
+      // 播放爆炸效果
+      this.particleSystem.createExplosion(mesh.position.clone(), 1);
+      this.audioManager.playExplosion();
+
+      console.log('友军被击落');
     };
   }
 
   /**
    * 气球销毁处理方法
    */
-  private onBalloonDestroyed(_balloon: BalloonPowerUp, _type: PowerUpType, config: PowerUpConfig): void {
+  private onBalloonDestroyed(_balloon: BalloonPowerUp, type: PowerUpType, config: PowerUpConfig): void {
     console.log(`气球被打破: ${config.name}`);
 
     // 播放气球打破音效
     this.audioManager.playBalloonPop();
+
+    // 先显示UI（确保总是显示）
+    // 屏幕中央大字提示（至少显示1秒）
+    this.hud.showPowerUpBig(config.icon, config.name, 1);
+
+    // 右上角也显示提示（仅持续效果道具）
+    if (config.duration > 0) {
+      this.hud.showPowerUp(config.name, config.icon, config.duration);
+    }
+
+    // 再激活道具效果
+    this.powerUpManager.addActivePowerUp(type, config);
 
     // 爆炸效果已在 PowerUpSystem.checkProjectileCollisions 中创建，避免重复
     // 气球已在 PowerUpSystem.checkProjectileCollisions 中移除，无需重复移除
@@ -507,8 +799,12 @@ export class Game {
     // 更新导弹
     this.missileSystem.update(deltaTime);
 
-    // 更新关卡
-    this.levelManager.update(deltaTime, this.playerController.getPosition());
+    // 更新关卡（传入友军meshes让敌机可以选择目标）
+    const friendlyMeshes = this.friendlyAIs.map(f => f.getMesh());
+    this.levelManager.update(deltaTime, this.playerController.getPosition(), friendlyMeshes);
+
+    // 更新友军
+    this.updateFriendlyAIs(deltaTime, enemies);
 
     // 波次延迟
     if (this.waveDelayTimer > 0) {
@@ -547,23 +843,79 @@ export class Game {
       (target) => {
         const enemy = this.levelManager.getEnemies().find(e => e.getMesh() === target);
         if (enemy) {
-          // 导弹伤害较高
-          enemy.takeDamage(GAME_CONSTANTS.MISSILE.DAMAGE);
+          // 导弹伤害也受到伤害加强道具的影响
+          const missileDamageMultiplier = this.powerUpManager.hasEffect(PowerUpType.DAMAGE)
+            ? POWER_UP_CONFIGS[PowerUpType.DAMAGE].value
+            : 1;
+          const missileDamage = GAME_CONSTANTS.MISSILE.DAMAGE * missileDamageMultiplier;
+          enemy.takeDamage(missileDamage);
           this.audioManager.playMissileExplosion();
           this.particleSystem.createExplosion(target.position.clone(), 2);
         }
       }
     );
 
-    // 检查敌人子弹碰撞玩家
-    if (!this.shieldActive) {
-      this.enemyProjectilePool.checkCollisions(
-        [this.playerAircraft],
-        () => {
-          this.playerHealth.takeDamage(10);
+    // ========================================
+    // AI子弹碰撞检测（统一阵营系统）
+    // ========================================
+
+    // 获取所有AI目标
+    const playerTarget = { mesh: this.playerAircraft, faction: Faction.NEUTRAL };
+    const enemyTargets = this.levelManager.getEnemies().map(e => ({
+      mesh: e.getMesh(),
+      faction: Faction.ENEMY,
+      ai: e
+    } as any));
+    const friendlyTargets = this.friendlyAIs.map(f => ({
+      mesh: f.getMesh(),
+      faction: Faction.FRIENDLY,
+      ai: f
+    } as any));
+
+    // 合并所有目标
+    const allTargets: any[] = [
+      playerTarget,
+      ...enemyTargets,
+      ...friendlyTargets
+    ];
+
+    // 检查AI子弹碰撞
+    this.enemyProjectilePool.checkCollisions(
+      allTargets.map(t => t.mesh),
+      (hitObject, _projectileMesh, damage) => {
+        // 找到命中的子弹（不检查 active，因为 checkCollisions 已将其设为 inactive）
+        const projectile = this.enemyProjectilePool['pool'].find((p: any) => p.mesh === hitObject);
+        if (!projectile) return;
+
+        const fromFaction = projectile.mesh.userData.faction;
+        if (!fromFaction) {
+          console.warn('AI子弹没有阵营标识，忽略碰撞');
+          return;
         }
-      );
-    }
+
+        // 找到命中的目标
+        const target = allTargets.find(t => t.mesh === hitObject);
+        if (!target) return;
+
+        // 检查敌对关系
+        if (areHostile(fromFaction, target.faction)) {
+          // 敌对关系，造成伤害
+          if (target.faction === Faction.NEUTRAL && !this.shieldActive) {
+            // 命中玩家
+            this.playerHealth.takeDamage(damage);
+          } else if (target.faction === Faction.ENEMY) {
+            // 命中敌军
+            target.ai.takeDamage(damage);
+          } else if (target.faction === Faction.FRIENDLY) {
+            // 命中友军
+            const friendlyAI = this.friendlyAIs.find(f => f.getMesh() === hitObject);
+            if (friendlyAI && friendlyAI.isAlive()) {
+              friendlyAI.takeDamage(damage);
+            }
+          }
+        }
+      }
+    );
 
     // 更新道具
     this.powerUpManager.update(deltaTime);
@@ -623,6 +975,9 @@ export class Game {
     this.hud.updateRemainingEnemies(remainingEnemies);
     this.hud.updateLives(this.lives);
 
+    // 更新道具倒计时和大字提示（添加缺失的 update 调用）
+    this.hud.update(deltaTime);
+
     // 更新导弹补给计时器
     if (this.missileCount < GAME_CONSTANTS.MISSILE.MAX_RESPAWN_MISSILES) {
       this.missileRespawnTimer += deltaTime;
@@ -640,15 +995,18 @@ export class Game {
   }
 
   /**
-   * 更新敌人血条
+   * 更新敌人血条（包括友军）
    */
   private updateEnemyHealthBars(_enemyMeshes: THREE.Object3D[]): void {
     // 获取敌人 AI 实例
     const enemies = this.levelManager.getEnemies();
     const aliveEnemies = enemies.filter(e => e.isAlive());
 
-    // 构建血条更新数据，包含 inView 信息
-    const healthData = aliveEnemies.map(enemy => {
+    // 获取友军 AI 实例
+    const aliveFriendlies = this.friendlyAIs.filter(f => f.isAlive());
+
+    // 构建敌人血条更新数据
+    const enemyHealthData = aliveEnemies.map(enemy => {
       const health = enemy.getHealth();
       const config = enemy.getConfig();
       const mesh = enemy.getMesh();
@@ -660,8 +1018,25 @@ export class Game {
       };
     });
 
-    // 更新血条系统（传入完整的 inView 信息）
-    this.enemyHealthBars.update(healthData, this.gameScene.camera, this.playerController.getPosition());
+    // 构建友军血条更新数据
+    const friendlyHealthData = aliveFriendlies.map(friendly => {
+      const health = friendly.getHealth();
+      const mesh = friendly.getMesh();
+
+      return {
+        mesh,
+        currentHealth: health.current,
+        maxHealth: health.max
+      };
+    });
+
+    // 更新血条系统（敌人和友军）
+    this.enemyHealthBars.update(
+      enemyHealthData,
+      friendlyHealthData,
+      this.gameScene.camera,
+      this.playerController.getPosition()
+    );
   }
 
   /**
@@ -742,14 +1117,32 @@ export class Game {
     const forward = new THREE.Vector3(0, 0, -1);
     forward.applyQuaternion(quaternion);
 
-    // 发射导弹
-    this.missileSystem.fire(position, forward, target);
+    // 检查多重射击
+    const missileCount = this.powerUpManager.hasEffect(PowerUpType.MULTISHOT) ? 3 : 1;
+
+    // 检查导弹数量是否足够
+    if (this.missileCount < missileCount) return;
+
+    // 发射导弹（1发或3发）
+    if (missileCount === 3) {
+      // 多重射击：3发导弹，有轻微角度偏移
+      const spreadAngle = 0.15;
+
+      for (let i = -1; i <= 1; i++) {
+        const offsetForward = forward.clone();
+        offsetForward.applyAxisAngle(new THREE.Vector3(0, 1, 0), i * spreadAngle);
+        this.missileSystem.fire(position.clone(), offsetForward.normalize(), target);
+      }
+    } else {
+      // 单发导弹
+      this.missileSystem.fire(position, forward, target);
+    }
 
     // 播放导弹发射音效
     this.audioManager.playMissileLaunch();
 
     // 减少导弹数量
-    this.missileCount--;
+    this.missileCount -= missileCount;
     this.hud.updateMissiles(this.missileCount);
 
     // 隐藏锁定指示器
@@ -778,6 +1171,10 @@ export class Game {
     forward.applyAxisAngle(new THREE.Vector3(0, 1, 0), perturbationAngle);
 
     // 检查多重射击
+    const damageMultiplier = this.powerUpManager.hasEffect(PowerUpType.DAMAGE)
+      ? POWER_UP_CONFIGS[PowerUpType.DAMAGE].value
+      : 1;
+
     if (this.powerUpManager.hasEffect(PowerUpType.MULTISHOT)) {
       // 发射三发
       const spreadAngle = 0.15;
@@ -785,10 +1182,10 @@ export class Game {
       for (let i = -1; i <= 1; i++) {
         const offsetForward = forward.clone();
         offsetForward.applyAxisAngle(new THREE.Vector3(0, 1, 0), i * spreadAngle);
-        this.playerProjectilePool.fire(position.clone(), offsetForward.normalize());
+        this.playerProjectilePool.fire(position.clone(), offsetForward.normalize(), this.playerStats.getDamage(damageMultiplier));
       }
     } else {
-      this.playerProjectilePool.fire(position, forward);
+      this.playerProjectilePool.fire(position, forward, this.playerStats.getDamage(damageMultiplier));
     }
   }
 
@@ -833,6 +1230,13 @@ export class Game {
     this.audioManager.startEngine();
 
     console.log('游戏开始！');
+
+    // 测试模式：1秒后自动召唤友军（仅在点击"开始游戏"后执行）
+    setTimeout(() => {
+      this.spawnFriendlyAI();
+      this.hud.showPowerUpBig('✈️', '召唤友军');
+      console.log('测试模式：自动召唤友军');
+    }, 1000);
   }
 
   /**

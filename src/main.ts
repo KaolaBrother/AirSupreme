@@ -68,9 +68,7 @@ async function main(): Promise<void> {
     console.log('  Shift - 加速');
     console.log('');
     console.log('📱 移动端: 使用虚拟摇杆和按钮控制');
-
-    // 开始游戏
-    game.start();
+    console.log('⏳️ 请在菜单中选择"开始游戏"以开始');
 
     // 页面卸载时清理
     window.addEventListener('beforeunload', () => {

@@ -10,6 +10,8 @@ interface Projectile {
   speed: number;
   active: boolean;
   startPosition: THREE.Vector3;
+  damage: number; // 伤害值
+  owner?: THREE.Object3D; // 发射者，用于防止子弹立即碰撞到发射者
 }
 
 /**
@@ -47,14 +49,19 @@ export class ProjectilePool {
         speed: GAME_CONSTANTS.PROJECTILE.SPEED,
         active: false,
         startPosition: new THREE.Vector3(),
+        damage: 10, // 默认伤害
       });
     }
   }
 
   /**
    * 发射子弹
+   * @param origin 发射位置
+   * @param direction 发射方向
+   * @param damage 伤害值
+   * @param owner 发射者（用于防止立即碰撞）
    */
-  public fire(origin: THREE.Vector3, direction: THREE.Vector3): void {
+  public fire(origin: THREE.Vector3, direction: THREE.Vector3, damage: number, owner?: THREE.Object3D): void {
     // 找到未激活的子弹
     const projectile = this.pool.find(p => !p.active);
     if (!projectile) return;
@@ -62,6 +69,8 @@ export class ProjectilePool {
     projectile.mesh.position.copy(origin);
     projectile.direction.copy(direction).normalize();
     projectile.startPosition.copy(origin);
+    projectile.damage = damage; // 设置伤害
+    projectile.owner = owner; // 记录发射者
     projectile.mesh.visible = true;
     projectile.active = true;
   }
@@ -92,7 +101,7 @@ export class ProjectilePool {
    */
   public checkCollisions(
     targets: THREE.Object3D[],
-    onHit: (target: THREE.Object3D, projectile: THREE.Mesh) => void
+    onHit: (target: THREE.Object3D, projectile: THREE.Mesh, damage: number) => void
   ): void {
     for (const projectile of this.pool) {
       if (!projectile.active) continue;
@@ -100,11 +109,14 @@ export class ProjectilePool {
       for (const target of targets) {
         if (!target.visible) continue;
 
+        // 跳过发射者自己，防止子弹立即碰撞到发射者
+        if (projectile.owner && target === projectile.owner) continue;
+
         const distance = projectile.mesh.position.distanceTo(target.position);
         const collisionThreshold = 5; // 碰撞距离
 
         if (distance < collisionThreshold) {
-          onHit(target, projectile.mesh);
+          onHit(target, projectile.mesh, projectile.damage);
           this.deactivate(projectile);
           break;
         }

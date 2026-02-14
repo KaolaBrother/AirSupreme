@@ -61,35 +61,35 @@ export class BalloonPowerUp {
     this.string = new THREE.Mesh(stringGeometry, stringMaterial);
     this.string.position.y = -2.5;
 
-    // 气球道具图标/问号（使用文本纹理）
+    // 气球道具图标/问号（使用文本纹理）- 放大并提高位置避免被气球遮挡
     const iconCanvas = document.createElement('canvas');
-    iconCanvas.width = 64;
-    iconCanvas.height = 64;
+    iconCanvas.width = 128; // 放大一倍（64 → 128）
+    iconCanvas.height = 128;
     const ctx = iconCanvas.getContext('2d')!;
 
     // 绘制背景（白色圆形）
     ctx.fillStyle = '#ffffff';
     ctx.beginPath();
-    ctx.arc(32, 32, 28, 0, Math.PI * 2);
+    ctx.arc(64, 64, 60, 0, Math.PI * 2); // 放大一倍
     ctx.fill();
 
-    // 绘制图标/问号
+    // 绘制图标/问号 - 放大字体
     ctx.fillStyle = '#333333';
-    ctx.font = 'bold 32px Arial';
+    ctx.font = 'bold 64px Arial'; // 放大一倍（32 → 64）
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(config.icon, 32, 32);
+    ctx.fillText(config.icon, 64, 64);
 
     // 创建纹理
     const iconTexture = new THREE.CanvasTexture(iconCanvas);
-    const iconGeometry = new THREE.PlaneGeometry(2.5, 2.5);
+    const iconGeometry = new THREE.PlaneGeometry(5, 5); // 放大一倍（2.5 → 5）
     const iconMaterial = new THREE.MeshBasicMaterial({
       map: iconTexture,
       transparent: true,
       side: THREE.DoubleSide,
     });
     const icon = new THREE.Mesh(iconGeometry, iconMaterial);
-    icon.position.y = 3.5;
+    icon.position.y = 5.5; // 提高位置（3.5 → 5.5）避免被气球遮挡
 
     // 组装气球
     this.mesh.add(this.string);

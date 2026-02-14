@@ -32,6 +32,7 @@ export class EnemyHealthBars {
   /**
    * 更新敌人血条
    * @param enemies 敌人列表，包含位置、血量等信息
+   * @param friendlies 友军列表，包含位置、血量等信息
    * @param camera 相机
    * @param playerPosition 玩家位置
    */
@@ -41,10 +42,17 @@ export class EnemyHealthBars {
       currentHealth: number;
       maxHealth: number;
     }>,
+    friendlies: Array<{
+      mesh: THREE.Object3D;
+      currentHealth: number;
+      maxHealth: number;
+    }>,
     camera: THREE.Camera,
     playerPosition: THREE.Vector3
   ): void {
-    const activeIds = new Set(enemies.map(e => e.mesh.uuid));
+    const enemyIds = new Set(enemies.map(e => e.mesh.uuid));
+    const friendlyIds = new Set(friendlies.map(f => f.mesh.uuid));
+    const activeIds = new Set([...enemyIds, ...friendlyIds]);
 
     // 移除不存在的血条
     for (const [id] of this.healthBars) {
@@ -53,9 +61,14 @@ export class EnemyHealthBars {
       }
     }
 
-    // 更新或创建血条
+    // 更新或创建敌人血条
     for (const enemy of enemies) {
-      this.updateOrCreateHealthBar(enemy, camera, playerPosition);
+      this.updateOrCreateHealthBar(enemy, camera, playerPosition, false);
+    }
+
+    // 更新或创建友军血条
+    for (const friendly of friendlies) {
+      this.updateOrCreateHealthBar(friendly, camera, playerPosition, true);
     }
   }
 
@@ -69,7 +82,8 @@ export class EnemyHealthBars {
       maxHealth: number;
     },
     camera: THREE.Camera,
-    playerPosition: THREE.Vector3
+    playerPosition: THREE.Vector3,
+    isFriendly: boolean = false
   ): void {
     const id = enemy.mesh.uuid;
     let barData = this.healthBars.get(id);
@@ -88,16 +102,18 @@ export class EnemyHealthBars {
                    screenPos.z < 1;
 
     if (!barData) {
-      // 创建新血条、箭头
+      // 创建新血条、箭头（友军不需要箭头）
       const bar = this.createHealthBar();
       const background = this.createBackgroundBar(60);
-      const targetName = this.createTargetName();
-      const arrow = this.createArrowIndicator();
+      const targetName = this.createTargetName(isFriendly);
+      const arrow = isFriendly ? null : this.createArrowIndicator();
 
       bar.appendChild(background);
       bar.appendChild(targetName);
       this.container.appendChild(bar);
-      this.container.appendChild(arrow);
+      if (arrow) {
+        this.container.appendChild(arrow);
+      }
 
       barData = { bar, background, targetName, arrow, screenPos: null };
       this.healthBars.set(id, barData);
@@ -125,14 +141,14 @@ export class EnemyHealthBars {
       barData.background.style.background = color;
       barData.background.style.width = `${barWidth * healthPercent}px`;
 
-      const enemyName = this.getEnemyName(enemy.mesh);
-      barData.targetName.textContent = enemyName;
+      const name = this.getTargetName(enemy.mesh, isFriendly);
+      barData.targetName.textContent = name;
       // 动态计算文字居中位置
       const textWidth = barData.targetName.offsetWidth;
       const centeredLeft = (barWidth - textWidth) / 2;
       barData.targetName.style.left = `${centeredLeft}px`;
     } else {
-      // 敌人在视野外 - 显示箭头指示器
+      // 敌人在视野外 - 显示箭头指示器（友军不显示箭头）
       barData.bar.style.display = 'none';
       if (barData.arrow) {
         barData.arrow.style.display = 'block';
@@ -183,9 +199,9 @@ export class EnemyHealthBars {
   }
 
   /**
-   * 创建敌人名称标签
+   * 创建目标名称标签
    */
-  private createTargetName(): HTMLSpanElement {
+  private createTargetName(isFriendly: boolean = false): HTMLSpanElement {
     const name = document.createElement('span');
     name.className = 'enemy-name';
     name.style.cssText = `
@@ -196,7 +212,7 @@ export class EnemyHealthBars {
       bottom: 100%; /* 在血条上方 */
       left: 0; /* 将由 JavaScript 动态计算居中 */
       margin-bottom: 4px; /* 距离血条4px */
-      color: #ffffff; /* 白色字体 */
+      color: ${isFriendly ? '#ffff00' : '#ffffff'}; /* 友军黄色，敌人白色 */
       text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.9), /* 更强的阴影 */
                    -1px -1px 2px rgba(0, 0, 0, 0.8);
     `;
@@ -266,7 +282,6 @@ export class EnemyHealthBars {
     const centerY = 0.5;
 
     // 计算从中心到敌人的方向（用于确定箭头Y位置）
-    const dx = screenPos.x - centerX;
     const dy = screenPos.y - centerY;
 
     const edgePadding = 0.08;
@@ -363,6 +378,26 @@ export class EnemyHealthBars {
     if (name.includes('Sniper')) return 'SNIPER';
     if (name.includes('Ace')) return 'ACE';
     return 'ENEMY';
+  }
+
+  /**
+   * 获取目标名称（敌人和友军）
+   */
+  private getTargetName(mesh: THREE.Object3D, isFriendly: boolean): string {
+    if (isFriendly) {
+      // 友军：提取类型名称（mesh.name 格式为 'Scout-friendly', 'Fighter-friendly' 等）
+      const name = mesh.name || '';
+      // 移除 '-friendly' 后缀
+      const baseName = name.replace('-friendly', '');
+      // 检查飞机类型
+      if (baseName.includes('Scout')) return 'SCOUT';
+      if (baseName.includes('Fighter')) return 'FIGHTER';
+      if (baseName.includes('Heavy')) return 'HEAVY';
+      if (baseName.includes('Sniper')) return 'SNIPER';
+      if (baseName.includes('Ace')) return 'ACE';
+      return baseName || 'UNKNOWN';
+    }
+    return this.getEnemyName(mesh);
   }
 
   /**

@@ -74,9 +74,11 @@ AirSupreme 采用**模块化功能架构**，每个系统独立工作并通过�
 - **LockOnIndicator.ts**: 导弹锁定系统
 
 #### 7. 道具系统 (`src/features/powerups/`)
-**职责**: 能力道具、炸弹、导弹补给
-- **7种道具**: 生命恢复、护盾、加速、伤害倍增、多重射击、炸弹、导弹补给
+**职责**: 能力道具、友军召唤
+- **7种道具**: 生命恢复、护盾、加速、伤害倍增、多重射击、召唤友军、导弹补给
 - **掉落**: 40%概率从被击败敌人掉落
+- **召唤友军**: 召唤一架友军飞机（使用敌机AI和模型），自动攻击敌方敌人
+- **友军特性**: 与敌人AI行为一致，攻击敌军而非玩家，被击败后不掉落道具
 
 ### 核心系统 (`src/core/`)
 - **GameLoop.ts**: 固定时间步长循环，目标60FPS，性能降级
@@ -95,21 +97,38 @@ AirSupreme 采用**模块化功能架构**，每个系统独立工作并通过�
 
 ### 敌人配置 (`src/features/enemy/EnemyTypes.ts`)
 **用途**: 敌人类型定义和AI概率配置
-- **5种类型**:
-  - SCOUT（侦察机）: 40 m/s, 弱攻击性（25%追逐）
-  - FIGHTER（战斗机）: 55 m/s, 中等攻击性（32.5%追逐）
-  - HEAVY（重型机）: 35 m/s, 慢转向（35%追逐）
-  - SNIPER（狙击机）: 45 m/s, 远距离（30%追逐）
-  - ACE（王牌）: 70 m/s, 强攻击性（40%追逐）
-- **平衡参数**:
-  - `speed`: 飞行速度（参考导弹80 m/s）
-  - `turnSpeed`: 转向速度（参考导弹2.5 rad/s）
-  - `stateProbabilities`: 三种状态的概率分布
-  - `accuracy`: 射击精度（影响扰动角度）
+
+#### 5种敌人类型 - AI概率配置
+
+**三种AI状态**:
+1. **CHASE（追逐）**: 飞机使用平滑转向追踪玩家/友军
+2. **FIXED_DIRECTION（固定方向飞行）**: 飞机平滑飞向战场内的虚拟追踪点（距离200-600米，-750到750范围）
+3. **CIRCLE（盘旋）**: 飞机围绕目标盘旋飞行
+
+| 类型 | 速度 | 追逐 | 固定方向 | 盘旋 | 追逐/盘旋时间 | 固定方向时间 | 特点 |
+|------|------|-------|-----------|------|---------------|---------------|------|
+| SCOUT（侦察机） | 40 m/s | 25% | **50%** | 25% | 4-8秒 | **2-4秒** | 弱攻击性，固定方向为主 |
+| FIGHTER（战斗机） | 55 m/s | 32.5% | 47.5% | 20% | 4-8秒 | **2-4秒** | 平衡型，中等攻击性 |
+| HEAVY（重型机） | 35 m/s | 35% | 45% | 20% | 5-9秒 | **2.5-4.5秒** | 慢速转向，持续时间稍长 |
+| SNIPER（狙击机） | 45 m/s | 30% | **50%** | 20% | 4-8秒 | **2-4秒** | 保持距离，固定方向为主 |
+| ACE（王牌） | 70 m/s | **40%** | 45% | 15% | 3-7秒 | **1.5-3.5秒** | 强攻击性，状态切换快 |
+
+**注**: 固定方向飞行状态持续时间会**减半**（0.5倍），使其更频繁地改变行为。
+
+#### 平衡参数
+- `speed`: 飞行速度（参考导弹80 m/s）
+- `turnSpeed`: 转向速度（参考导弹2.5 rad/s）
+- `stateProbabilities`: 三种状态的概率分布
+- `accuracy`: 射击精度（影响扰动角度）
 
 ### 关卡配置 (`src/features/terrain/LevelConfig.ts`)
 **用途**: 关卡定义和地形参数
 - **5种地形**: 每种有独特的视觉效果和飞行高度限制
+
+### 战场范围
+- **平面范围 (X/Z)**: -750 到 750（跨度1500米）
+- **高度范围 (Y)**: 50-300米（飞机飞行高度）
+- **固定方向飞行的虚拟追踪点**: 在战场范围内随机生成，距离当前位置200-600米
 
 ## 开发约定
 
@@ -330,7 +349,7 @@ window.game.levelManager    // 查看关卡状态
     - 狙击机（SNIPER）：40 → 80
     - 王牌（ACE）：80 → 160
 
-#### 导弹补给系统（已取消）
+#### 导弹补给系统
 - **自动补给**: 每7.5秒自动补充1个导弹（最多10个）
 - **UI显示**: 右上角白色进度条显示到下一个导弹的进度
 - **进度更新**: 基于 `updateMissileProgress()` 实时更新进度条宽度
@@ -340,5 +359,164 @@ window.game.levelManager    // 查看关卡状态
 
 ---
 
-**最后更新**: 2025-02-14
+### 道具系统更新（2025-02-14）
+
+#### BOMB道具变更：清屏炸弹 → 召唤友军
+- **道具类型**：`PowerUpType.BOMB` 从"清屏炸弹"改为"召唤友军"
+- **效果变更**：从消灭所有敌人改为召唤一架友军飞机协助战斗
+- **图标更新**：从 💣 改为 ✈️
+- **描述更新**：从"消灭屏幕上所有敌人"改为"召唤一架友军飞机协助战斗"
+- **配置文件**：[PowerUpSystem.ts:80-88](src/features/powerups/PowerUpSystem.ts#L80-L88)
+
+#### 气球图标显示优化
+- **图标放大**：Canvas尺寸从64x64增加到128x128（**2倍**）
+- **字体放大**：图标字体从32px增加到64px（**2倍**）
+- **平面放大**：图标平面从2.5x2.5增加到5x5（**2倍**）
+- **位置提高**：图标位置从y=3.5提高到y=5.5（**避免被气球遮挡**）
+- **文件**: [BalloonPowerUp.ts:64-92](src/features/powerups/BalloonPowerUp.ts#L64-L92)
+
+#### 道具效果激活
+- **自动激活**：气球被打破时立即激活道具效果（通过`addActivePowerUp()`）
+- **即时效果**：生命恢复立即恢复30点生命值，护盾立即激活10秒无敌
+- **持续效果**：速度提升（50%，15秒）、伤害提升（100%，20秒）、多重射击（3发，20秒）
+- **召唤友军**：召唤一架友军飞机协助战斗（替代原清屏炸弹）
+- **文件**: [Game.ts:232-236](src/Game.ts#L232-L236)
+
+#### 友军AI系统（BOMB道具效果）
+- **核心特性**：使用敌人AI和模型，攻击敌方敌人而不是玩家
+- **AI行为**：与敌人一致（追逐、固定方向、盘旋状态），伤害和AI行为与敌人相同
+- **目标锁定**：自动寻找并攻击最近的敌方敌人（不攻击玩家）
+- **碰撞检测**：友军子弹不会伤害玩家（通过`userData.isFriendly`标识）
+- **血条显示**：与敌人相同的血条系统，显示友军血量和状态
+- **名称标识**：黄色大字"FRIENDLY"显示在血条上方，与敌人白色名称区分
+- **视野外指示**：箭头指示器显示友军位置和距离
+- **销毁处理**：被击败后消失，不掉落道具
+- **生成位置**：在玩家附近随机位置生成（±100m范围）
+- **文件**：
+  - [FriendlyAI.ts](src/features/enemy/FriendlyAI.ts)：友军AI包装类
+  - [Game.ts:314-347](src/Game.ts#L314-L347)：`spawnFriendlyAI()`生成逻辑
+  - [Game.ts:242-259](src/Game.ts#L242-L259)：`fireEnemyProjectile()`友军标识
+  - [Game.ts:635-658](src/Game.ts#L635-L658)：碰撞检测过滤友军子弹
+  - [EnemyHealthBars.ts](src/ui/EnemyHealthBars.ts)：扩展支持友军血条显示
+  - [Game.ts:975-1027](src/Game.ts#L975-L1027)：`updateEnemyHealthBars()`传递友军数据
+
+#### 测试模式（自动获得友军道具）
+- **自动触发**：游戏开始1秒后自动召唤一架友军飞机
+- **UI反馈**：显示屏幕中央大字提示（✈️ 召唤友军）
+- **调试用途**：方便测试友军AI系统，无需寻找和打破气球
+- **实现位置**：[Game.ts:964-970](src/Game.ts#L964-L970)
+- **禁用方法**：移除或注释`setTimeout`代码块即可恢复正常游戏
+
+#### 屏幕中央大字提示UI
+- **新增元素**：`powerUpBigDisplay`全屏覆盖层，z-index为80（HUD之上）
+- **UI设计**：
+  - 大图标（120-150px）：弹跳动画效果
+  - 道具名称（48-64px）：黄色发光文字（#ffff00）
+  - "获得道具！"副标题（24-32px）：白色文字
+- **显示时长**：至少显示1秒（`minDisplayTime = 1`）
+- **自动隐藏**：时间到后通过`hidePowerUpBig()`隐藏
+- **文件**: [HUD.ts:20-280](src/ui/HUD.ts#L20-L280)
+
+#### 双重提示系统
+- **右上角提示**（`powerUpDisplay`）：显示道具名称和图标，用于持续效果的倒计时显示
+- **屏幕中央提示**（`powerUpBigDisplay`）：大字提示，至少显示1秒，强调获得道具
+- **触发逻辑**：
+  - 气球被打破 → 激活道具效果 → 屏幕中央大字提示（1秒） → 右上角提示（如有持续时间）
+- **文件**: [HUD.ts:324-380](src/ui/HUD.ts#L324-L380)
+
+---
+
+### 友军AI系统（2025-02-14）
+
+#### BOMB道具变更：清屏炸弹 → 召唤友军
+- **道具重构**：`PowerUpType.BOMB` 从"清屏炸弹"完全重构为"召唤友军"
+- **核心改变**：不再消灭所有敌人，改为召唤友军飞机协助战斗
+- **设计理念**：增加战术深度而非简单清屏，提供持续战斗支援
+- **配置更新**：[PowerUpSystem.ts:80-88](src/features/powerups/PowerUpSystem.ts#L80-L88)
+  - 名称：'清屏炸弹' → '召唤友军'
+  - 描述：'消灭屏幕上所有敌人' → '召唤一架友军飞机协助战斗'
+  - 图标：💣 → ✈️
+
+#### 友军AI实现
+- **架构设计**：`FriendlyAI`包装类（wrapper）包裹`EnemyAI`，复用完整AI行为
+- **关键特性**：
+  - 使用敌人AI和模型（随机选择5种敌机类型）
+  - 自动寻找并锁定最近的敌方敌人（不攻击玩家）
+  - AI行为与敌人完全一致（追逐、固定方向、盘旋三种状态）
+  - 伤害和武器属性与敌人相同
+  - 被击败后消失，不掉落道具（不干扰经济平衡）
+- **文件**：
+  - [FriendlyAI.ts](src/features/enemy/FriendlyAI.ts)：友军AI包装类实现
+  - [Game.ts:314-347](src/Game.ts#L314-L347)：`spawnFriendlyAI()`生成逻辑
+  - [Game.ts:293-309](src/Game.ts#L293-L309)：`updateFriendlyAIs()`更新循环
+
+#### 碰撞检测与友军伤害过滤
+- **问题**：防止友军子弹误伤玩家
+- **解决方案**：三层过滤系统
+  1. **友军标识**：友军mesh设置`userData.isFriendly = true`
+  2. **子弹标识**：`fireEnemyProjectile()`支持`isFriendly`参数，标记子弹来源
+  3. **碰撞过滤**：检测子弹`userData.isFriendly`，友军子弹命中玩家时仅移除子弹而不造成伤害
+- **文件**：
+  - [Game.ts:242-259](src/Game.ts#L242-L259)：`fireEnemyProjectile()`友军标识
+  - [Game.ts:635-658](src/Game.ts#L635-L658)：碰撞检测过滤逻辑
+  - [FriendlyAI.ts:25](src/features/enemy/FriendlyAI.ts#L25)：mesh友军标识
+
+#### 测试模式（自动获得友军道具）
+- **调试辅助**：游戏开始1秒后自动召唤一架友军飞机
+- **UI反馈**：显示屏幕中央大字提示（✈️ 召唤友军）
+- **用途**：无需寻找和打破气球即可测试友军AI系统
+- **实现**：[Game.ts:964-970](src/Game.ts#L964-L970)
+- **禁用方法**：移除`setTimeout`代码块（964-970行）即可恢复正常游戏
+
+#### 友军AI行为细节
+- **生成位置**：玩家附近随机偏移（X/Z: ±100m, Y: ±50m）
+- **目标选择**：`findNearestEnemy()`寻找最近敌方敌人（排除友军自己）
+- **状态管理**：完全继承`EnemyAI`的三种状态（CHASE, FIXED_DIRECTION, CIRCLE）
+- **死亡处理**：`onDeath`回调清理友军列表并触发爆炸效果
+- **性能优化**：使用对象池复用，无额外内存开销
+
+---
+
+### 友军AI伤害系统修复（2026-02-14）
+
+#### 问题修复
+- **友军开火问题**: 修复友军无法攻击敌人的问题
+  - **原因**: ProjectilePool.fire() 方法缺少 damage 参数，导致伤害信息丢失
+  - **解决**: 在 Projectile 接口添加 `damage: number` 字段
+  - **修改文件**: [ProjectilePool.ts](src/features/combat/ProjectilePool.ts)
+    - 修改 Projectile 接口（第 8-13 行）
+    - 修改 fire() 方法签名（第 57 行）：`fire(origin, direction, damage = 10)`
+    - 修改 checkCollisions 回调签名（第 93-96 行）：传入 `damage` 参数
+    - 修改碰撞检测调用（第 107 行）：`onHit(target, projectile.mesh, projectile.damage)`
+
+- **敌人子弹对友军伤害问题**: 修复敌人子弹无法伤害友军的问题
+  - **原因**: Game.ts 第 882 行使用 `!projectile.mesh.userData.isFriendly` 检查非友军子弹，但敌人子弹的 `isFriendly` 为 `undefined`（未设置），导致 `!undefined === true`，所有子弹都跳过伤害逻辑
+  - **解决**: 改为精确检查 `isFriendly !== true`
+  - **修改文件**: [Game.ts](src/Game.ts)
+    - 第 882 行：`if (projectile && projectile.mesh.userData.isFriendly !== true)`
+    - 第 858 行：`if (projectile && projectile.mesh.userData.isFriendly === true)`
+
+#### 伤害系统改进
+- **伤害值传递链**:
+  1. EnemyAI.fire() 调用 `this.onFire?.(position, direction, this.config.damage)` → 传入配置的伤害值
+  2. Game.ts spawnFriendlyAI() 设置 `friendly['enemy'].onFire = (pos, dir, damage) => { this.fireEnemyProjectile(pos, dir, true, damage); }` → 传递 damage 参数
+  3. Game.ts fireEnemyProjectile() 调用 `this.enemyProjectilePool.fire(position, direction, damage)` → 传入伤害值
+  4. ProjectilePool.fire() 设置 `projectile.damage = damage` → 存储伤害值
+  5. ProjectilePool.checkCollisions() 触发 `onHit(target, projectile.mesh, projectile.damage)` → 传递给碰撞回调
+  6. Game.ts 碰撞检测回调使用 `enemy.takeDamage(damage)` → 应用正确的伤害值
+
+#### 修复的文件
+- [src/features/combat/ProjectilePool.ts](src/features/combat/ProjectilePool.ts)
+  - Projectile 接口添加 damage 字段
+  - fire() 方法添加 damage 参数
+  - checkCollisions 回调传递 damage 参数
+- [src/Game.ts](src/Game.ts)
+  - fireEnemyProjectile() 添加 damage 参数并传递给 ProjectilePool
+  - spawnFriendlyAI() 中 onFire 回调传递 damage 参数
+  - 碰撞检测逻辑使用正确的 damage 值（非友军子弹 vs 友军、友军子弹 vs 敌人）
+  - 修复 `isFriendly` 检查逻辑（`!== true` 而非 `!`）
+
+---
+
+**最后更新**: 2026-02-14
 **项目版本**: 1.0.0

@@ -17,10 +17,12 @@ export class HUD {
   private missileProgressDisplay: HTMLDivElement; // 导弹补给进度条背景
   private missileProgressFill: HTMLDivElement; // 导弹补给进度条填充
   private powerUpDisplay: HTMLDivElement;  // 道具提示显示
+  private powerUpBigDisplay: HTMLDivElement; // 道具大字提示（屏幕中央）
   private gameOverDisplay: HTMLDivElement; // 游戏结束显示
 
   private powerUpTimer: number = 0;  // 道具提示显示计时器
   private activePowerUpDuration: number = 0;  // 道具持续时间
+  private powerUpBigTimer: number = 0;  // 大字提示显示计时器
 
   constructor() {
     this.container = document.createElement('div');
@@ -151,6 +153,47 @@ export class HUD {
     `;
     this.powerUpDisplay.textContent = '';
 
+    // 道具大字提示显示（屏幕中央）
+    this.powerUpBigDisplay = document.createElement('div');
+    this.powerUpBigDisplay.style.cssText = `
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      z-index: 80;
+      opacity: 0;
+      transition: opacity 0.3s;
+      pointer-events: none;
+    `;
+    this.powerUpBigDisplay.innerHTML = `
+      <div class="powerup-big-icon" style="
+        font-size: ${isMobile ? '120px' : '150px'};
+        text-shadow: 0 0 30px rgba(255, 215, 0, 0.8), 0 0 60px rgba(255, 215, 0, 0.4);
+        margin-bottom: 20px;
+        animation: bounce 0.5s ease-out;
+      "></div>
+      <div class="powerup-big-text" style="
+        font-size: ${isMobile ? '48px' : '64px'};
+        font-weight: bold;
+        color: #ffff00;
+        text-shadow: 0 0 20px rgba(255, 215, 0, 0.8), 4px 4px 8px rgba(0, 0, 0, 1);
+        white-space: nowrap;
+      "></div>
+      <div class="powerup-big-subtext" style="
+        font-size: ${isMobile ? '24px' : '32px'};
+        font-weight: bold;
+        color: #ffffff;
+        text-shadow: 2px 2px 4px rgba(0, 0, 0, 1);
+        margin-top: 10px;
+        white-space: nowrap;
+      ">获得道具！</div>
+    `;
+
     // 游戏结束显示（居中覆盖层）
     this.gameOverDisplay = document.createElement('div');
     this.gameOverDisplay.style.cssText = `
@@ -197,6 +240,7 @@ export class HUD {
     this.container.appendChild(this.missileProgressDisplay);
     this.container.appendChild(this.powerUpDisplay);
     document.body.appendChild(this.container);
+    document.body.appendChild(this.powerUpBigDisplay);
     document.body.appendChild(this.gameOverDisplay);
   }
 
@@ -346,17 +390,20 @@ export class HUD {
    * 显示道具提示
    * @param name 道具名称
    * @param icon 道具图标
-   * @param duration 持续时间（秒），0表示永久
+   * @param duration 持续时间（秒），0表示即时效果（如生命恢复、炸弹）
    */
   public showPowerUp(name: string, icon: string, duration: number = 0): void {
-    this.activePowerUpDuration = duration;
-    this.powerUpDisplay.textContent = `${icon} ${name}`;
-    this.powerUpDisplay.style.opacity = '1';
-
-    // 如果有持续时间，显示倒计时
-    if (duration > 0) {
-      this.powerUpTimer = duration;
+    // 即时效果道具（duration <= 0）不显示在右上角
+    if (duration <= 0) {
+      this.hidePowerUp();
+      return;
     }
+
+    // 只有持续效果的道具才显示在右上角
+    this.activePowerUpDuration = duration;
+    this.powerUpTimer = duration;
+    this.powerUpDisplay.style.opacity = '1';
+    this.powerUpDisplay.textContent = `${icon} ${name} ${Math.ceil(duration)}`;
   }
 
   /**
@@ -366,9 +413,26 @@ export class HUD {
     // 更新道具倒计时
     if (this.activePowerUpDuration > 0 && this.powerUpTimer > 0) {
       this.powerUpTimer -= deltaTime;
+
+      // 显示道具名称 + 剩余时间（向上取整）
+      const remainingTime = Math.max(0, Math.ceil(this.powerUpTimer));
+      const spaceIndex = this.powerUpDisplay.textContent.lastIndexOf(' ');
+      if (spaceIndex !== -1) {
+        this.powerUpDisplay.textContent = this.powerUpDisplay.textContent.substring(0, spaceIndex) + ' ' + remainingTime;
+      }
+
       if (this.powerUpTimer <= 0) {
         // 时间到，隐藏道具提示
         this.hidePowerUp();
+      }
+    }
+
+    // 更新大字提示计时器
+    if (this.powerUpBigTimer > 0) {
+      this.powerUpBigTimer -= deltaTime;
+      if (this.powerUpBigTimer <= 0) {
+        // 时间到，隐藏大字提示
+        this.hidePowerUpBig();
       }
     }
   }
@@ -380,6 +444,31 @@ export class HUD {
     this.powerUpDisplay.style.opacity = '0';
     this.activePowerUpDuration = 0;
     this.powerUpTimer = 0;
+  }
+
+  /**
+   * 显示道具大字提示（屏幕中央）
+   * @param icon 道具图标
+   * @param name 道具名称
+   * @param minDisplayTime 最小显示时间（秒），默认1秒
+   */
+  public showPowerUpBig(icon: string, name: string, minDisplayTime: number = 1): void {
+    const iconElement = this.powerUpBigDisplay.querySelector('.powerup-big-icon') as HTMLDivElement;
+    const textElement = this.powerUpBigDisplay.querySelector('.powerup-big-text') as HTMLDivElement;
+
+    if (iconElement) iconElement.textContent = icon;
+    if (textElement) textElement.textContent = name;
+
+    this.powerUpBigDisplay.style.opacity = '1';
+    this.powerUpBigTimer = minDisplayTime;
+  }
+
+  /**
+   * 隐藏道具大字提示
+   */
+  private hidePowerUpBig(): void {
+    this.powerUpBigDisplay.style.opacity = '0';
+    this.powerUpBigTimer = 0;
   }
 
   /**
