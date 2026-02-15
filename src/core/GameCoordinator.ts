@@ -18,6 +18,7 @@ import { HUD } from '@/ui/HUD';
 import { StartMenu } from '@/ui/StartMenu';
 import { EnemyHealthBars } from '@/ui/EnemyHealthBars';
 import { LockOnIndicator } from '@/ui/LockOnIndicator';
+import { ThirdPersonCamera } from '@/features/camera/ThirdPersonCamera';
 import { GAME_CONSTANTS } from '@/config';
 
 export class GameCoordinator {
@@ -27,6 +28,7 @@ export class GameCoordinator {
   private inputHandler: InputHandler;
   private audioManager: AudioManager;
   private particleSystem: ParticleSystem;
+  private thirdPersonCamera: ThirdPersonCamera;
 
   private playerSystem: PlayerSystem;
   private combatSystem: CombatSystem;
@@ -59,6 +61,11 @@ export class GameCoordinator {
 
     this.playerAircraft = this.createPlayerAircraft();
     this.gameScene.scene.add(this.playerAircraft);
+
+    this.thirdPersonCamera = new ThirdPersonCamera(
+      this.gameScene.camera,
+      this.playerAircraft
+    );
 
     this.playerSystem = new PlayerSystem(
       this.gameScene.scene,
@@ -670,6 +677,7 @@ export class GameCoordinator {
   }
 
   private render(): void {
+    this.thirdPersonCamera.update();
     this.gameScene.render();
   }
 
