@@ -7,12 +7,12 @@ import { SpawnBalloon } from '@/features/effects/SpawnBalloon';
  * 道具类型
  */
 export enum PowerUpType {
-  HEALTH = 'HEALTH',           // 恢复生命
-  SHIELD = 'SHIELD',           // 护盾
-  SPEED = 'SPEED',             // 速度提升
-  DAMAGE = 'DAMAGE',           // 伤害提升
-  MULTISHOT = 'MULTISHOT',     // 多重射击
-  BOMB = 'BOMB',               // 清屏炸弹
+  HEALTH = 'HEALTH', // 恢复生命
+  SHIELD = 'SHIELD', // 护盾
+  SPEED = 'SPEED', // 速度提升
+  DAMAGE = 'DAMAGE', // 伤害提升
+  MULTISHOT = 'MULTISHOT', // 多重射击
+  BOMB = 'BOMB', // 清屏炸弹
 }
 
 /**
@@ -23,9 +23,9 @@ export interface PowerUpConfig {
   name: string;
   description: string;
   color: number;
-  duration: number;    // 持续时间（秒），-1 表示永久
-  value: number;       // 效果值
-  icon: string;        // 图标
+  duration: number; // 持续时间（秒），-1 表示永久
+  value: number; // 效果值
+  icon: string; // 图标
 }
 
 /**
@@ -37,7 +37,7 @@ export const POWER_UP_CONFIGS: Record<PowerUpType, PowerUpConfig> = {
     name: '生命恢复',
     description: '恢复 30 点生命值',
     color: 0x00ff00,
-    duration: 0,  // 即时效果
+    duration: 0, // 即时效果
     value: 30,
     icon: '❤️',
   },
@@ -70,8 +70,8 @@ export const POWER_UP_CONFIGS: Record<PowerUpType, PowerUpConfig> = {
   },
   [PowerUpType.MULTISHOT]: {
     type: PowerUpType.MULTISHOT,
-    name: '多重射击',
-    description: '同时发射 3 发子弹，持续 20 秒',
+    name: '快速射击',
+    description: '射速提升3倍，子弹扩散，导弹连发3枚',
     color: 0xff00ff,
     duration: 20,
     value: 3,
@@ -279,7 +279,7 @@ export class PowerUpManager {
    * 检查是否有某种效果
    */
   public hasEffect(type: PowerUpType): boolean {
-    return this.activePowerUps.some(p => p.type === type);
+    return this.activePowerUps.some((p) => p.type === type);
   }
 
   /**
@@ -292,7 +292,11 @@ export class PowerUpManager {
   /**
    * 气球被销毁时的回调
    */
-  public onBalloonDestroyed?: (balloon: BalloonPowerUp, type: PowerUpType, config: PowerUpConfig) => void;
+  public onBalloonDestroyed?: (
+    balloon: BalloonPowerUp,
+    type: PowerUpType,
+    config: PowerUpConfig
+  ) => void;
 
   /**
    * 清除所有道具
@@ -339,9 +343,9 @@ export class PowerUpManager {
     const now = Date.now();
 
     // 检查是否已有此效果
-    if (this.activePowerUps.some(p => p.type === type)) {
+    if (this.activePowerUps.some((p) => p.type === type)) {
       // 刷新已有效果的持续时间
-      const existing = this.activePowerUps.find(p => p.type === type);
+      const existing = this.activePowerUps.find((p) => p.type === type);
       if (existing && config.duration > 0) {
         existing.remainingTime = config.duration;
         existing.startTime = now;

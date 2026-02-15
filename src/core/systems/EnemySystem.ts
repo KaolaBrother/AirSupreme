@@ -24,6 +24,7 @@ export class EnemySystem implements IGameSystem {
           direction,
           damage,
           faction: Faction.ENEMY,
+          owner: enemy.getMesh(),
         });
       };
 
@@ -126,6 +127,7 @@ export class EnemySystem implements IGameSystem {
         direction,
         damage,
         faction: Faction.FRIENDLY,
+        owner: friendly.getMesh(),
       });
     };
 

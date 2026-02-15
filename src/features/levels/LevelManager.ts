@@ -1,6 +1,11 @@
 import * as THREE from 'three';
 import { LevelConfig, getLevelConfig } from '@/features/terrain/LevelConfig';
-import { EnemyType, ENEMY_CONFIGS, getRandomEnemyType, getEnemyTypesForWave } from '@/features/enemy/EnemyTypes';
+import {
+  EnemyType,
+  ENEMY_CONFIGS,
+  getRandomEnemyType,
+  getEnemyTypesForWave,
+} from '@/features/enemy/EnemyTypes';
 import { EnemyAI } from '@/features/enemy/EnemyAI';
 import { TerrainGenerator } from '@/features/terrain/TerrainGenerator';
 import { SpawnPortal } from '@/features/effects/SpawnPortal';
@@ -29,9 +34,9 @@ export class LevelManager {
     minHeight: number;
     horizontalDistance: number;
   } = {
-    maxHeight: 150,      // 最大高度（敌人不能超过）
-    minHeight: -20,       // 最小高度（敌人不能低于）
-    horizontalDistance: 750 // 水平边界（离战场中心的距离，±750米）
+    maxHeight: 150, // 最大高度（敌人不能超过）
+    minHeight: -20, // 最小高度（敌人不能低于）
+    horizontalDistance: 750, // 水平边界（离战场中心的距离，±750米）
   };
 
   // 战场边界常量
@@ -82,8 +87,12 @@ export class LevelManager {
     this.currentLevel = config;
     this.currentWave = 0;
     this.state = LevelState.IDLE;
+    this.totalEnemiesSpawned = 0; // 重置已生成敌人数计数器（关卡切换时必须重置）
+    this.enemiesSpawnedThisWave = 0; // 重置当前波次已生成计数
 
-    console.log(`[LevelManager] Loading level ${levelId}: ${config.name}, terrain: ${config.terrain}`);
+    console.log(
+      `[LevelManager] Loading level ${levelId}: ${config.name}, terrain: ${config.terrain}`
+    );
 
     // 生成地形
     this.terrainGenerator.generateTerrain(config);
@@ -124,7 +133,7 @@ export class LevelManager {
     if (clampedCenter.x !== rawCenter.x || clampedCenter.z !== rawCenter.z) {
       console.warn('[LevelManager] 群中心超出战场，已调整到边界内', {
         original: { x: rawCenter.x, z: rawCenter.z },
-        clamped: { x: clampedCenter.x, z: clampedCenter.z }
+        clamped: { x: clampedCenter.x, z: clampedCenter.z },
       });
     }
 
@@ -147,10 +156,16 @@ export class LevelManager {
       this.state = LevelState.WAVE_ACTIVE;
       this.enemiesSpawnedThisWave = 0;
       this.spawnTimer = 0;
-      this.onWaveStart?.(this.currentWave); // 传递 0（第一波）
+      this.onWaveStart?.(this.currentWave);
 
-      // 清除已死亡的敌人
-      this.enemies = this.enemies.filter(e => e.isAlive());
+      // 清理已死亡的敌人（调用 dispose 清理尾迹和资源）
+      for (let i = this.enemies.length - 1; i >= 0; i--) {
+        const enemy = this.enemies[i];
+        if (!enemy.isAlive()) {
+          enemy.dispose();
+          this.enemies.splice(i, 1);
+        }
+      }
       return;
     }
 
@@ -163,8 +178,14 @@ export class LevelManager {
     this.spawnTimer = 0;
     this.onWaveStart?.(this.currentWave);
 
-    // 清除已死亡的敌人
-    this.enemies = this.enemies.filter(e => e.isAlive());
+    // 清理已死亡的敌人（调用 dispose 清理尾迹和资源）
+    for (let i = this.enemies.length - 1; i >= 0; i--) {
+      const enemy = this.enemies[i];
+      if (!enemy.isAlive()) {
+        enemy.dispose();
+        this.enemies.splice(i, 1);
+      }
+    }
   }
 
   /**
@@ -209,7 +230,11 @@ export class LevelManager {
   /**
    * 更新关卡管理器
    */
-  public update(deltaTime: number, playerPosition: THREE.Vector3, friendlyMeshes?: THREE.Object3D[]): void {
+  public update(
+    deltaTime: number,
+    playerPosition: THREE.Vector3,
+    friendlyMeshes?: THREE.Object3D[]
+  ): void {
     // 更新传送门动画
     for (let i = this.activePortals.length - 1; i >= 0; i--) {
       const portal = this.activePortals[i];
@@ -226,8 +251,8 @@ export class LevelManager {
     if (this.waveDelayTimer > 0 && this.currentLevel) {
       this.waveDelayTimer -= deltaTime;
       if (this.waveDelayTimer <= 0) {
-        // 检查是否是最后一波
-        if (this.currentWave >= this.currentLevel.totalWaves) {
+        // 检查是否还有下一波（当前波次索引 + 1 >= 总波次数）
+        if (this.currentWave + 1 >= this.currentLevel.totalWaves) {
           // 关卡完成
           this.state = LevelState.LEVEL_COMPLETE;
           console.log(`[Level ${this.currentLevel.id}] Complete! All waves defeated.`);
@@ -242,7 +267,7 @@ export class LevelManager {
     // 生成敌人
     if (this.state === LevelState.WAVE_ACTIVE && this.currentLevel) {
       const maxEnemies = this.currentLevel.enemiesPerWave[this.currentWave] || 0;
-      const aliveEnemies = this.enemies.filter(e => e.isAlive()).length;
+      const aliveEnemies = this.enemies.filter((e) => e.isAlive()).length;
 
       // 只要还没达到最大生成数量，就继续生成
       if (this.enemiesSpawnedThisWave < maxEnemies) {
@@ -251,7 +276,11 @@ export class LevelManager {
           this.spawnTimer = 0;
           this.spawnEnemy(playerPosition);
         }
-      } else if (this.activePortals.length === 0 && aliveEnemies === 0 && this.enemiesSpawnedThisWave >= maxEnemies) {
+      } else if (
+        this.activePortals.length === 0 &&
+        aliveEnemies === 0 &&
+        this.enemiesSpawnedThisWave >= maxEnemies
+      ) {
         // 当前波次完成（必须等待所有传送门完成且所有敌人都被消灭）
         console.log(`[Wave ${this.currentWave}] Complete! All enemies defeated.`);
         this.state = LevelState.WAVE_COMPLETE;
@@ -267,8 +296,14 @@ export class LevelManager {
       enemy.update(deltaTime, playerPosition, friendlyMeshes);
     }
 
-    // 清理已死亡的敌人
-    this.enemies = this.enemies.filter(e => e.isAlive());
+    // 清理已死亡的敌人（从场景中移除，清理尾迹）
+    for (let i = this.enemies.length - 1; i >= 0; i--) {
+      const enemy = this.enemies[i];
+      if (!enemy.isAlive()) {
+        enemy.dispose();
+        this.enemies.splice(i, 1);
+      }
+    }
   }
 
   /**
@@ -284,7 +319,7 @@ export class LevelManager {
   public isEnemySpawning(enemy: EnemyAI): boolean {
     // 检查是否有活跃传送门在敌人位置附近
     const enemyPos = enemy.getPosition();
-    const hasPortalNearby = this.activePortals.some(portal => {
+    const hasPortalNearby = this.activePortals.some((portal) => {
       const portalPos = portal.getMesh().position;
       return portalPos.distanceTo(enemyPos) < 1; // 1单位内认为是同一个位置
     });
@@ -300,7 +335,7 @@ export class LevelManager {
    * 获取活着的敌人数量
    */
   public getAliveEnemyCount(): number {
-    return this.enemies.filter(e => e.isAlive()).length;
+    return this.enemies.filter((e) => e.isAlive()).length;
   }
 
   /**
@@ -382,7 +417,9 @@ export class LevelManager {
       if (!this.waveGroupCenter) {
         console.warn('[Wave Manager] No group center set, using fallback position');
         // 降级：如果没有群中心，使用玩家位置作为参考
-        const fallbackDistance = minGroupDistanceFromPlayer + Math.random() * (maxGroupDistanceFromPlayer - minGroupDistanceFromPlayer);
+        const fallbackDistance =
+          minGroupDistanceFromPlayer +
+          Math.random() * (maxGroupDistanceFromPlayer - minGroupDistanceFromPlayer);
         const fallbackAngle = Math.random() * Math.PI * 2;
         let groupCenterX = playerPosition.x + Math.cos(fallbackAngle) * fallbackDistance;
         let groupCenterZ = playerPosition.z + Math.sin(fallbackAngle) * fallbackDistance;
@@ -394,7 +431,10 @@ export class LevelManager {
         let finalCenterX = groupCenterX;
         let finalCenterZ = groupCenterZ;
 
-        const distFromCenterToPlayer = Math.sqrt(Math.pow(groupCenterX - playerPosition.x, 2) + Math.pow(groupCenterZ - playerPosition.z, 2));
+        const distFromCenterToPlayer = Math.sqrt(
+          Math.pow(groupCenterX - playerPosition.x, 2) +
+            Math.pow(groupCenterZ - playerPosition.z, 2)
+        );
 
         if (distFromCenterToPlayer > horizontalDistance - distributionRadius) {
           const ratio = (horizontalDistance - distributionRadius) / distFromCenterToPlayer;
@@ -411,7 +451,10 @@ export class LevelManager {
         x = this.clampToBattlefield(x);
         z = this.clampToBattlefield(z);
 
-        const spawnY = Math.max(minHeight, Math.min(maxHeight, playerPosition.y + (Math.random() - 0.5) * 30));
+        const spawnY = Math.max(
+          minHeight,
+          Math.min(maxHeight, playerPosition.y + (Math.random() - 0.5) * 30)
+        );
         bestPosition = new THREE.Vector3(x, spawnY, z);
         break;
       }
@@ -430,7 +473,10 @@ export class LevelManager {
       z = this.clampToBattlefield(z);
 
       // 计算位置（检查高度）
-      const spawnY = Math.max(minHeight, Math.min(maxHeight, playerPosition.y + (Math.random() - 0.5) * 30));
+      const spawnY = Math.max(
+        minHeight,
+        Math.min(maxHeight, playerPosition.y + (Math.random() - 0.5) * 30)
+      );
 
       const position = new THREE.Vector3(x, spawnY, z);
 
@@ -476,7 +522,7 @@ export class LevelManager {
    */
   private getOrCreateEnemy(type: EnemyType): EnemyAI {
     // 尝试从池中获取相同类型的敌人
-    const pooledIndex = this.enemyPool.findIndex(e => e.getConfig().type === type);
+    const pooledIndex = this.enemyPool.findIndex((e) => e.getConfig().type === type);
 
     if (pooledIndex !== -1) {
       const enemy = this.enemyPool.splice(pooledIndex, 1)[0];
@@ -514,7 +560,10 @@ export class LevelManager {
 
     // 根据敌人类型定义配色和尺寸
     let bodyColor: number, wingColor: number, accentColor: number;
-    let bodySize = 1.6, bodyLength = 6, wingSpan = 3, tailSize = 0.8;
+    let bodySize = 1.6,
+      bodyLength = 6,
+      wingSpan = 3,
+      tailSize = 0.8;
     let scaleMultiplier = 1;
 
     switch (config.type) {
@@ -588,7 +637,7 @@ export class LevelManager {
     const bodyMaterial = new THREE.MeshStandardMaterial({
       color: bodyColor,
       metalness: 0.7,
-      roughness: 0.3
+      roughness: 0.3,
     });
     const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
     body.rotation.x = Math.PI / 2; // 使圆柱水平放置
@@ -601,7 +650,7 @@ export class LevelManager {
     const noseMaterial = new THREE.MeshStandardMaterial({
       color: accentColor,
       metalness: 0.8,
-      roughness: 0.2
+      roughness: 0.2,
     });
     const nose = new THREE.Mesh(noseGeometry, noseMaterial);
     nose.rotation.x = Math.PI / 2;
@@ -615,7 +664,7 @@ export class LevelManager {
     const wingMaterial = new THREE.MeshStandardMaterial({
       color: wingColor,
       metalness: 0.6,
-      roughness: 0.4
+      roughness: 0.4,
     });
     const wings = new THREE.Mesh(wingGeometry, wingMaterial);
     wings.position.set(0, 0, -0.8);
@@ -629,7 +678,7 @@ export class LevelManager {
       metalness: 0.9,
       roughness: 0.1,
       emissive: accentColor,
-      emissiveIntensity: 0.3
+      emissiveIntensity: 0.3,
     });
     const cockpit = new THREE.Mesh(cockpitGeometry, cockpitMaterial);
     cockpit.position.set(0, bodySize * 0.25, 0.5);
@@ -641,7 +690,7 @@ export class LevelManager {
     const tailMaterial = new THREE.MeshStandardMaterial({
       color: wingColor,
       metalness: 0.6,
-      roughness: 0.4
+      roughness: 0.4,
     });
     const tail = new THREE.Mesh(tailGeometry, tailMaterial);
     tail.position.set(0, 0, -bodyLength / 2 - 0.3);
@@ -660,7 +709,7 @@ export class LevelManager {
     const engineMaterial = new THREE.MeshBasicMaterial({
       color: 0xff6600, // 橙色发光
       transparent: true,
-      opacity: 0.8
+      opacity: 0.8,
     });
     const engine = new THREE.Mesh(engineGeometry, engineMaterial);
     engine.rotation.x = Math.PI / 2;

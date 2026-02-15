@@ -24,11 +24,7 @@ export class PlayerSystem implements IGameSystem {
 
   private fireCooldown: number = 0;
 
-  constructor(
-    scene: THREE.Scene,
-    mesh: THREE.Group,
-    stats: PlayerStats
-  ) {
+  constructor(scene: THREE.Scene, mesh: THREE.Group, stats: PlayerStats) {
     this.mesh = mesh;
     this.stats = stats;
     this.controller = new PlayerController(mesh, scene, stats);
@@ -92,8 +88,6 @@ export class PlayerSystem implements IGameSystem {
       this.mesh.position.copy(this.deathPosition);
     }
 
-    this.mesh.rotation.set(0, 0, 0);
-    this.mesh.quaternion.set(0, 0, 0, 1);
     this.mesh.visible = true;
 
     this.isRespawning = false;
@@ -156,7 +150,15 @@ export class PlayerSystem implements IGameSystem {
     forward.applyQuaternion(quaternion);
     position.add(forward.clone().multiplyScalar(2));
 
-    this.fireCooldown = this.stats.getFireRate();
+    const baseFireRate = this.stats.getFireRate();
+    this.fireCooldown = baseFireRate / this.stats.getRapidFireMultiplier();
+
+    const spreadAngle = this.stats.getSpreadAngle();
+    if (spreadAngle > 0) {
+      const spreadRad = ((spreadAngle / 2) * Math.PI) / 180;
+      const randomAngle = (Math.random() - 0.5) * 2 * spreadRad;
+      forward.applyAxisAngle(new THREE.Vector3(0, 1, 0), randomAngle);
+    }
 
     EventBus.emit(GameEventType.PLAYER_FIRED, {
       position,
@@ -205,6 +207,11 @@ export class PlayerSystem implements IGameSystem {
 
   setLives(lives: number): void {
     this.lives = lives;
+  }
+
+  syncMaxHealth(): void {
+    const newMax = this.stats.getMaxHealth();
+    this.health.setMaxHealth(newMax);
   }
 
   getFireCooldown(): number {

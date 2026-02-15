@@ -40,6 +40,10 @@ export class PowerUpSystem implements IGameSystem {
     this.manager.clear();
   }
 
+  clear(): void {
+    this.manager.clear();
+  }
+
   getManager(): PowerUpManager {
     return this.manager;
   }

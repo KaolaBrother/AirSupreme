@@ -51,6 +51,7 @@ export interface GameEventPayloads {
     direction: THREE.Vector3;
     damage: number;
     faction: Faction;
+    owner?: THREE.Object3D;
   };
   [GameEventType.ENEMY_HIT]: {
     enemyId: string;
@@ -69,6 +70,7 @@ export interface GameEventPayloads {
     direction: THREE.Vector3;
     damage: number;
     faction: Faction;
+    owner?: THREE.Object3D;
   };
   [GameEventType.FRIENDLY_DEATH]: { friendlyId: string; position: THREE.Vector3 };
 

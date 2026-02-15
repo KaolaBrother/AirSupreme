@@ -17,7 +17,7 @@ export interface LevelConfig {
   totalWaves: number;
   enemiesPerWave: number[];
   enemyTypes: EnemyTypeConfig[];
-  waveInterval: number;  // 波次间隔（秒）
+  waveInterval: number; // 波次间隔（秒）
 
   // 道具配置
   powerUpFrequency: number; // 道具出现频率（0-1）
@@ -95,8 +95,8 @@ export const LEVELS: LevelConfig[] = [
     groundColor: 0xffffff,
     fogColor: 0xdcdcdc,
     skyColors: ['#2c3e50', '#4ca1af', '#c4e0e5', '#ffffff'],
-    totalWaves: 7,
-    enemiesPerWave: [3, 4, 4, 5, 5, 6, 6],
+    totalWaves: 6,
+    enemiesPerWave: [4, 4, 5, 5, 6, 6],
     enemyTypes: [
       { type: 'FIGHTER', minWave: 1, maxCount: 3 },
       { type: 'HEAVY', minWave: 2, maxCount: 2 },
@@ -117,8 +117,8 @@ export const LEVELS: LevelConfig[] = [
     waterColor: 0x006994,
     fogColor: 0x87ceeb,
     skyColors: ['#0f0c29', '#302b63', '#24243e', '#0f0c29'],
-    totalWaves: 8,
-    enemiesPerWave: [4, 4, 5, 5, 6, 6, 7, 8],
+    totalWaves: 6,
+    enemiesPerWave: [5, 5, 6, 6, 6, 7],
     enemyTypes: [
       { type: 'FIGHTER', minWave: 1, maxCount: 4 },
       { type: 'HEAVY', minWave: 2, maxCount: 2 },
@@ -139,8 +139,8 @@ export const LEVELS: LevelConfig[] = [
     groundColor: 0x3d3d3d,
     fogColor: 0x696969,
     skyColors: ['#1a1a2e', '#16213e', '#0f3460', '#533483'],
-    totalWaves: 10,
-    enemiesPerWave: [4, 5, 5, 6, 6, 7, 7, 8, 8, 10],
+    totalWaves: 7,
+    enemiesPerWave: [5, 5, 5, 6, 6, 6, 7],
     enemyTypes: [
       { type: 'SCOUT', minWave: 1, maxCount: 3 },
       { type: 'FIGHTER', minWave: 1, maxCount: 4 },
@@ -159,5 +159,5 @@ export const LEVELS: LevelConfig[] = [
  * 获取关卡配置
  */
 export function getLevelConfig(levelId: number): LevelConfig | undefined {
-  return LEVELS.find(l => l.id === levelId);
+  return LEVELS.find((l) => l.id === levelId);
 }

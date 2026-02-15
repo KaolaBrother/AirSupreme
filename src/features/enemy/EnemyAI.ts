@@ -137,6 +137,20 @@ export class EnemyAI {
     // 更新攻击冷却
     this.attackCooldown = Math.max(0, this.attackCooldown - deltaTime);
 
+    // 所有状态下都可以尝试射击（只要机头朝向目标）
+    if (this.attackCooldown <= 0 && this.targetPosition) {
+      const toPlayer = new THREE.Vector3().subVectors(this.targetPosition, this.mesh.position).normalize();
+      const forward = this.velocity.clone().normalize();
+      const dot = toPlayer.dot(forward);
+
+      const fireAngle = Math.cos(this.config.fireSpreadAngle * Math.PI / 180);
+
+      if (dot > fireAngle) {
+        this.fire(this.targetPosition);
+        this.attackCooldown = this.config.attackCooldown;
+      }
+    }
+
     // 更新尾迹
     this.trail.update(deltaTime);
   }
@@ -175,23 +189,6 @@ export class EnemyAI {
       targetDirection.y * this.config.speed,
       Math.cos(newRotation) * this.config.speed
     );
-
-    // 追逐状态可以射击（只有当机头朝向玩家时）
-    if (this.attackCooldown <= 0 && this.targetPosition) {
-      // 检查机头是否朝向玩家（圆锥区域检测）
-      const toPlayer = new THREE.Vector3().subVectors(this.targetPosition, this.mesh.position).normalize();
-      const forward = this.velocity.clone().normalize();
-      const dot = toPlayer.dot(forward); // 点积：1.0 = 正对准，0.0 = 垂直
-
-      // 机头朝向圆锥区域：30度角内（cos(30°) ≈ 0.866）
-      const fireAngle = Math.cos(30 * Math.PI / 180);
-
-      if (dot > fireAngle) {
-        // 机头朝向玩家，可以射击
-        this.fire(this.targetPosition);
-        this.attackCooldown = this.config.attackCooldown;
-      }
-    }
   }
 
   /**
@@ -288,12 +285,6 @@ export class EnemyAI {
       targetDirection.y * this.config.speed,
       Math.cos(newRotation) * this.config.speed
     );
-
-    // 盘旋时偶尔射击（仅重型轰炸机可以，因为它们有侧向火力）
-    if (this.attackCooldown <= 0 && this.config.type === 'HEAVY') {
-      this.fire(this.targetPosition);
-      this.attackCooldown = this.config.attackCooldown * 1.5; // 重型机盘旋时射击频率更低
-    }
   }
 
   /**

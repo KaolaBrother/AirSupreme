@@ -50,7 +50,7 @@ export class CombatSystem implements IGameSystem {
         payload.position,
         payload.direction,
         payload.damage,
-        undefined,
+        payload.owner,
         payload.faction
       );
     });
@@ -60,7 +60,7 @@ export class CombatSystem implements IGameSystem {
         payload.position,
         payload.direction,
         payload.damage,
-        undefined,
+        payload.owner,
         payload.faction
       );
     });
@@ -118,16 +118,14 @@ export class CombatSystem implements IGameSystem {
     this.enemyProjectilePool.checkCollisions(
       targets.map((t) => t.mesh),
       (hitObject, projectileMesh, damage) => {
-        const projectile = (this.enemyProjectilePool as unknown as { pool: unknown[] }).pool.find(
-          (p: unknown) => (p as { mesh: THREE.Mesh }).mesh === projectileMesh
-        ) as { mesh: THREE.Mesh; faction?: Faction } | undefined;
+        const projectileFaction = projectileMesh.userData.faction as Faction | undefined;
 
-        if (!projectile?.faction) return;
+        if (!projectileFaction) return;
 
         const target = targets.find((t) => t.mesh === hitObject);
         if (!target) return;
 
-        if (areHostile(projectile.faction, target.faction)) {
+        if (areHostile(projectileFaction, target.faction)) {
           if (target.faction === Faction.NEUTRAL) {
             onPlayerHit(damage);
           } else if (target.faction === Faction.ENEMY) {

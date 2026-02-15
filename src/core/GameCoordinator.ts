@@ -9,6 +9,7 @@ import { EnemySystem } from '@/core/systems/EnemySystem';
 import { PowerUpSystem } from '@/core/systems/PowerUpSystem';
 import { InputHandler } from '@/core/Input/InputHandler';
 import { AudioManager } from '@/core/Audio/AudioManager';
+import { MusicSystem, LevelMusic } from '@/core/Audio/MusicSystem';
 import { ParticleSystem } from '@/features/effects/ParticleSystem';
 import { PlayerStats } from '@/features/upgrade/UpgradeSystem';
 import { FriendlyAI } from '@/features/enemy/FriendlyAI';
@@ -27,6 +28,7 @@ export class GameCoordinator {
   private gameState: GameState;
   private inputHandler: InputHandler;
   private audioManager: AudioManager;
+  private musicSystem: MusicSystem;
   private particleSystem: ParticleSystem;
   private thirdPersonCamera: ThirdPersonCamera;
 
@@ -46,6 +48,7 @@ export class GameCoordinator {
   private missileCount: number = GAME_CONSTANTS.MISSILE.STARTING_MISSILES;
   private missileRespawnTimer: number = 0;
   private missileFiringScheduled: boolean = false;
+  private multiShotActive: boolean = false;
 
   private currentLevelId: number = 1;
   private audioInitialized: boolean = false;
@@ -56,16 +59,14 @@ export class GameCoordinator {
     this.inputHandler = new InputHandler();
     this.gameState = new GameState();
     this.audioManager = new AudioManager();
+    this.musicSystem = new MusicSystem();
     this.particleSystem = new ParticleSystem(this.gameScene.scene);
     this.playerStats = new PlayerStats();
 
     this.playerAircraft = this.createPlayerAircraft();
     this.gameScene.scene.add(this.playerAircraft);
 
-    this.thirdPersonCamera = new ThirdPersonCamera(
-      this.gameScene.camera,
-      this.playerAircraft
-    );
+    this.thirdPersonCamera = new ThirdPersonCamera(this.gameScene.camera, this.playerAircraft);
 
     this.playerSystem = new PlayerSystem(
       this.gameScene.scene,
@@ -81,10 +82,7 @@ export class GameCoordinator {
 
     this.enemySystem = new EnemySystem(this.gameScene.scene);
 
-    this.powerUpSystem = new PowerUpSystem(
-      this.gameScene.scene,
-      this.particleSystem
-    );
+    this.powerUpSystem = new PowerUpSystem(this.gameScene.scene, this.particleSystem);
 
     this.hud = new HUD();
     this.lockOnIndicator = new LockOnIndicator();
@@ -121,6 +119,7 @@ export class GameCoordinator {
       if (this.playerSystem.getLives() <= 0) {
         this.gameState.setStatus(GameStatus.GAME_OVER);
         this.audioManager.playGameOver();
+        this.musicSystem.stopMusic();
         this.hud.showGameOver(this.gameState.getScore());
       }
     });
@@ -131,6 +130,9 @@ export class GameCoordinator {
       this.missileCount = GAME_CONSTANTS.MISSILE.STARTING_MISSILES;
       this.hud.updateMissiles(this.missileCount);
       this.audioManager.startEngine();
+
+      this.playerSystem.activateShield(this.gameScene.scene);
+      this.powerUpSystem.addActivePowerUp(PowerUpType.SHIELD, POWER_UP_CONFIGS[PowerUpType.SHIELD]);
     });
 
     EventBus.on(GameEventType.ENEMY_FIRED, () => {
@@ -138,6 +140,10 @@ export class GameCoordinator {
     });
 
     EventBus.on(GameEventType.FRIENDLY_FIRED, () => {
+      this.audioManager.playShoot();
+    });
+
+    EventBus.on(GameEventType.PLAYER_FIRED, () => {
       this.audioManager.playShoot();
     });
 
@@ -158,10 +164,25 @@ export class GameCoordinator {
 
     EventBus.on(GameEventType.LEVEL_COMPLETE, () => {
       this.audioManager.playLevelUp();
+
+      // 清理当前关卡残留
+      this.combatSystem.getPlayerProjectilePool().clear();
+      this.combatSystem.getEnemyProjectilePool().clear();
+      this.particleSystem.clear();
+      this.powerUpSystem.clear();
+
+      // 停止当前音乐，准备切换
+      this.musicSystem.stopMusic();
+
       this.currentLevelId++;
       this.enemySystem.loadLevel(this.currentLevelId);
 
+      // 更新 HUD 显示新关卡的敌人数量
+      this.hud.updateRemainingEnemies(this.enemySystem.getTotalEnemyCount());
+
       setTimeout(() => {
+        // 播放新关卡的音乐
+        this.musicSystem.playLevelMusic(this.getLevelMusic(this.currentLevelId));
         this.enemySystem.startWave(this.playerSystem.getPosition());
       }, 2000);
     });
@@ -176,22 +197,21 @@ export class GameCoordinator {
     EventBus.on(GameEventType.POWERUP_EXPIRED, ({ payload }) => {
       this.handlePowerUpExpired(payload.type);
     });
-
-    EventBus.on(GameEventType.SHIELD_ACTIVATED, () => {
-      this.playerSystem.activateShield(this.gameScene.scene);
-    });
-
-    EventBus.on(GameEventType.SHIELD_DEACTIVATED, () => {
-      this.playerSystem.deactivateShield();
-    });
   }
 
-  private handlePowerUpEffect(type: PowerUpType, config: typeof POWER_UP_CONFIGS[PowerUpType]): void {
+  private handlePowerUpEffect(
+    type: PowerUpType,
+    config: (typeof POWER_UP_CONFIGS)[PowerUpType]
+  ): void {
     switch (type) {
       case PowerUpType.HEALTH:
         this.playerSystem.setLives(this.playerSystem.getLives() + 1);
+        this.playerSystem.syncMaxHealth();
         this.playerSystem.getHealth().healToMax();
         this.hud.updateLives(this.playerSystem.getLives());
+        break;
+      case PowerUpType.SHIELD:
+        this.playerSystem.activateShield(this.gameScene.scene);
         break;
       case PowerUpType.SPEED:
         this.playerStats.setSpeedMultiplier(config.value);
@@ -201,7 +221,8 @@ export class GameCoordinator {
         this.combatSystem.setDamageMultiplier(config.value);
         break;
       case PowerUpType.MULTISHOT:
-        this.playerStats.setMultiShotCount(config.value);
+        this.playerStats.setRapidFire(3, 30);
+        this.multiShotActive = true;
         break;
       case PowerUpType.BOMB:
         this.spawnFriendlyAI();
@@ -211,6 +232,9 @@ export class GameCoordinator {
 
   private handlePowerUpExpired(type: PowerUpType): void {
     switch (type) {
+      case PowerUpType.SHIELD:
+        this.playerSystem.deactivateShield();
+        break;
       case PowerUpType.SPEED:
         this.playerStats.resetSpeedMultiplier();
         break;
@@ -219,7 +243,8 @@ export class GameCoordinator {
         this.combatSystem.setDamageMultiplier(1);
         break;
       case PowerUpType.MULTISHOT:
-        this.playerStats.resetMultiShot();
+        this.playerStats.resetRapidFire();
+        this.multiShotActive = false;
         break;
     }
   }
@@ -311,7 +336,7 @@ export class GameCoordinator {
     return group;
   }
 
-  private createAircraftMesh(config: typeof ENEMY_CONFIGS[EnemyType]): THREE.Group {
+  private createAircraftMesh(config: (typeof ENEMY_CONFIGS)[EnemyType]): THREE.Group {
     const group = new THREE.Group();
 
     let bodyColor: number, wingColor: number, accentColor: number;
@@ -447,7 +472,7 @@ export class GameCoordinator {
     engine.position.set(0, 0, -bodyLength / 2 - 0.8);
     group.add(engine);
 
-    group.name = `${config.type}-Friendly`;
+    group.name = config.type;
     return group;
   }
 
@@ -578,25 +603,35 @@ export class GameCoordinator {
   private fireMissile(target?: THREE.Object3D): void {
     if (this.missileCount <= 0) return;
 
-    const position = this.playerSystem.getPosition().clone();
-    const quaternion = this.playerSystem.getQuaternion();
+    const missileCount = this.multiShotActive ? Math.min(3, this.missileCount) : 1;
 
-    const cockpitOffset = new THREE.Vector3(0, 0.3, -0.5);
-    cockpitOffset.applyQuaternion(quaternion);
-    position.add(cockpitOffset);
+    for (let i = 0; i < missileCount; i++) {
+      setTimeout(() => {
+        if (this.missileCount <= 0) return;
 
-    const forward = new THREE.Vector3(0, 0, -1);
-    forward.applyQuaternion(quaternion);
+        const position = this.playerSystem.getPosition().clone();
+        const quaternion = this.playerSystem.getQuaternion();
 
-    this.combatSystem.getMissileSystem().fire(position, forward, target);
-    this.audioManager.playMissileLaunch();
+        const cockpitOffset = new THREE.Vector3(0, 0.3, -0.5);
+        cockpitOffset.applyQuaternion(quaternion);
+        position.add(cockpitOffset);
 
-    this.missileCount--;
-    this.hud.updateMissiles(this.missileCount);
-    this.lockOnIndicator.onMissileFired();
+        const forward = new THREE.Vector3(0, 0, -1);
+        forward.applyQuaternion(quaternion);
+
+        this.combatSystem.getMissileSystem().fire(position, forward, target);
+        this.audioManager.playMissileLaunch();
+
+        this.missileCount--;
+        this.hud.updateMissiles(this.missileCount);
+        this.lockOnIndicator.onMissileFired();
+      }, i * 100);
+    }
   }
 
   private handleBalloonCollisions(): void {
+    if (this.playerSystem.isPlayerRespawning()) return;
+
     const projectiles = this.combatSystem.getPlayerProjectilePool().getActiveProjectiles();
     const projectilePositions = projectiles.map((p) => p.position);
 
@@ -624,8 +659,11 @@ export class GameCoordinator {
     this.hud.updateScore(this.gameState.getScore());
     this.hud.updateEnemies(this.enemySystem.getAliveEnemyCount());
 
-    const remaining =
-      this.enemySystem.getTotalEnemyCount() - this.enemySystem.getSpawnedEnemyCount();
+    const totalEnemies = this.enemySystem.getTotalEnemyCount();
+    const spawnedEnemies = this.enemySystem.getSpawnedEnemyCount();
+    const aliveEnemies = this.enemySystem.getAliveEnemyCount();
+    const killedEnemies = spawnedEnemies - aliveEnemies;
+    const remaining = totalEnemies - killedEnemies;
     this.hud.updateRemainingEnemies(remaining);
     this.hud.updateLives(this.playerSystem.getLives());
     this.hud.update(this.gameState.getStatus() === GameStatus.PLAYING ? 0.016 : 0);
@@ -687,6 +725,7 @@ export class GameCoordinator {
 
     if (!this.audioInitialized) {
       this.audioManager.resume();
+      this.musicSystem.resume();
       this.audioInitialized = true;
     }
 
@@ -699,8 +738,12 @@ export class GameCoordinator {
     this.missileCount = GAME_CONSTANTS.MISSILE.STARTING_MISSILES;
     this.hud.updateMissiles(this.missileCount);
 
-    this.gameLoop.start((dt) => this.update(dt), () => this.render());
+    this.gameLoop.start(
+      (dt) => this.update(dt),
+      () => this.render()
+    );
     this.audioManager.startEngine();
+    this.musicSystem.playLevelMusic(this.getLevelMusic(this.currentLevelId));
 
     // 初始福利：游戏开始1秒后自动召唤友军
     setTimeout(() => {
@@ -713,6 +756,18 @@ export class GameCoordinator {
   public stop(): void {
     this.gameLoop.stop();
     this.audioManager.stopEngine();
+    this.musicSystem.stopMusic();
+  }
+
+  private getLevelMusic(levelId: number): LevelMusic {
+    const levelMusicMap: Record<number, LevelMusic> = {
+      1: LevelMusic.LAKE,
+      2: LevelMusic.DESERT,
+      3: LevelMusic.SNOW,
+      4: LevelMusic.OCEAN,
+      5: LevelMusic.CITY,
+    };
+    return levelMusicMap[levelId] || LevelMusic.LAKE;
   }
 
   public dispose(): void {
@@ -721,6 +776,7 @@ export class GameCoordinator {
     this.particleSystem.clear();
     this.powerUpSystem.dispose();
     this.gameScene.dispose();
+    this.musicSystem.dispose();
     EventBus.clear();
   }
 }

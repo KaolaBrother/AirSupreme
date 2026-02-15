@@ -35,6 +35,7 @@ export class ParticleSystem {
   private particles: Particle[] = [];
   private particleMeshes: THREE.Group;
   private maxParticles: number;
+  private pendingTimeouts: Set<ReturnType<typeof setTimeout>> = new Set();
 
   // 几何体和材质缓存
   private geometries: Map<ParticleType, THREE.BufferGeometry> = new Map();
@@ -58,41 +59,56 @@ export class ParticleSystem {
   private initAssets(): void {
     // 爆炸粒子 - 球体
     this.geometries.set(ParticleType.EXPLOSION, new THREE.SphereGeometry(0.5, 8, 8));
-    this.materials.set(ParticleType.EXPLOSION, new THREE.MeshBasicMaterial({
-      color: 0xff6600,
-      transparent: true,
-      opacity: 1,
-    }));
+    this.materials.set(
+      ParticleType.EXPLOSION,
+      new THREE.MeshBasicMaterial({
+        color: 0xff6600,
+        transparent: true,
+        opacity: 1,
+      })
+    );
 
     // 烟雾粒子 - 大球体
     this.geometries.set(ParticleType.SMOKE, new THREE.SphereGeometry(1, 8, 8));
-    this.materials.set(ParticleType.SMOKE, new THREE.MeshBasicMaterial({
-      color: 0x888888,
-      transparent: true,
-      opacity: 0.6,
-    }));
+    this.materials.set(
+      ParticleType.SMOKE,
+      new THREE.MeshBasicMaterial({
+        color: 0x888888,
+        transparent: true,
+        opacity: 0.6,
+      })
+    );
 
     // 火花粒子 - 小球体
     this.geometries.set(ParticleType.SPARK, new THREE.SphereGeometry(0.1, 4, 4));
-    this.materials.set(ParticleType.SPARK, new THREE.MeshBasicMaterial({
-      color: 0xffff00,
-      transparent: true,
-      opacity: 1,
-    }));
+    this.materials.set(
+      ParticleType.SPARK,
+      new THREE.MeshBasicMaterial({
+        color: 0xffff00,
+        transparent: true,
+        opacity: 1,
+      })
+    );
 
     // 火焰粒子
     this.geometries.set(ParticleType.FIRE, new THREE.SphereGeometry(0.3, 8, 8));
-    this.materials.set(ParticleType.FIRE, new THREE.MeshBasicMaterial({
-      color: 0xff4400,
-      transparent: true,
-      opacity: 0.9,
-    }));
+    this.materials.set(
+      ParticleType.FIRE,
+      new THREE.MeshBasicMaterial({
+        color: 0xff4400,
+        transparent: true,
+        opacity: 0.9,
+      })
+    );
 
     // 碎片粒子 - 方块
     this.geometries.set(ParticleType.DEBRIS, new THREE.BoxGeometry(0.3, 0.3, 0.3));
-    this.materials.set(ParticleType.DEBRIS, new THREE.MeshBasicMaterial({
-      color: 0x666666,
-    }));
+    this.materials.set(
+      ParticleType.DEBRIS,
+      new THREE.MeshBasicMaterial({
+        color: 0x666666,
+      })
+    );
   }
 
   /**
@@ -143,7 +159,8 @@ export class ParticleSystem {
     }
 
     // 烟雾（延迟）
-    setTimeout(() => {
+    const timeoutId = setTimeout(() => {
+      this.pendingTimeouts.delete(timeoutId);
       for (let i = 0; i < particleCount * 0.3; i++) {
         this.spawnParticle(ParticleType.SMOKE, position.clone(), {
           speed: 5 * scale,
@@ -153,6 +170,7 @@ export class ParticleSystem {
         });
       }
     }, 100);
+    this.pendingTimeouts.add(timeoutId);
   }
 
   /**
@@ -299,6 +317,13 @@ export class ParticleSystem {
    * 清除所有粒子
    */
   public clear(): void {
+    // 首先取消所有待处理的超时
+    for (const timeoutId of this.pendingTimeouts) {
+      clearTimeout(timeoutId);
+    }
+    this.pendingTimeouts.clear();
+
+    // 然后清除现有粒子
     for (const particle of this.particles) {
       if (particle.mesh) {
         this.particleMeshes.remove(particle.mesh);

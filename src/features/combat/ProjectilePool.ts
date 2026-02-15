@@ -134,12 +134,16 @@ export class ProjectilePool {
     projectile.active = false;
   }
 
-  /**
-   * 获取所有活跃的子弹
-   */
   public getActiveProjectiles(): THREE.Mesh[] {
     return this.pool
       .filter(p => p.active)
       .map(p => p.mesh);
+  }
+
+  public clear(): void {
+    for (const projectile of this.pool) {
+      projectile.mesh.visible = false;
+      projectile.active = false;
+    }
   }
 }

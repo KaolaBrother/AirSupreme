@@ -85,7 +85,7 @@ export class PlayerUpgrades {
 
   constructor() {
     // 初始化所有升级等级为 0
-    Object.values(UpgradeType).forEach(type => {
+    Object.values(UpgradeType).forEach((type) => {
       this.upgradeLevels.set(type, 0);
     });
   }
@@ -175,7 +175,7 @@ export class PlayerUpgrades {
    * 重置升级
    */
   public reset(): void {
-    Object.values(UpgradeType).forEach(type => {
+    Object.values(UpgradeType).forEach((type) => {
       this.upgradeLevels.set(type, 0);
     });
     this.totalScore = 0;
@@ -219,16 +219,17 @@ export class PlayerUpgrades {
  */
 export class PlayerStats {
   private upgrades: PlayerUpgrades;
-  private baseHealth: number = GAME_CONSTANTS.PLAYER.BASE_HEALTH;  // 使用配置文件（200）
-  private baseDamage: number = GAME_CONSTANTS.PLAYER.BASE_DAMAGE;  // 使用配置文件（12.5）
-  private baseFireRate: number = GAME_CONSTANTS.PLAYER.BASE_FIRE_RATE;  // 使用配置文件（0.3）
-  private baseSpeed: number = GAME_CONSTANTS.PLAYER.MAX_SPEED;  // 使用配置文件（50，不是硬编码的100）
+  private baseHealth: number = GAME_CONSTANTS.PLAYER.BASE_HEALTH; // 使用配置文件（200）
+  private baseDamage: number = GAME_CONSTANTS.PLAYER.BASE_DAMAGE; // 使用配置文件（12.5）
+  private baseFireRate: number = GAME_CONSTANTS.PLAYER.BASE_FIRE_RATE; // 使用配置文件（0.3）
+  private baseSpeed: number = GAME_CONSTANTS.PLAYER.MAX_SPEED; // 使用配置文件（50，不是硬编码的100）
   private baseShieldDuration: number = 10;
 
   // 道具倍数
-  private speedMultiplier: number = 1;           // 速度道具倍数
-  private damageMultiplier: number = 1;          // 伤害道具倍数
-  private multiShotCount: number = 1;             // 多重射击子弹数量
+  private speedMultiplier: number = 1; // 速度道具倍数
+  private damageMultiplier: number = 1; // 伤害道具倍数
+  private rapidFireMultiplier: number = 1; // 射速倍数
+  private spreadAngle: number = 0; // 子弹扩散角度（度）
 
   constructor() {
     this.upgrades = new PlayerUpgrades();
@@ -309,24 +310,33 @@ export class PlayerStats {
   }
 
   /**
-   * 获取多重射击子弹数量
+   * 获取射速倍数
    */
-  public getMultiShotCount(): number {
-    return this.multiShotCount;
+  public getRapidFireMultiplier(): number {
+    return this.rapidFireMultiplier;
   }
 
   /**
-   * 设置多重射击子弹数量（道具效果）
+   * 获取子弹扩散角度（度）
    */
-  public setMultiShotCount(value: number): void {
-    this.multiShotCount = value;
+  public getSpreadAngle(): number {
+    return this.spreadAngle;
   }
 
   /**
-   * 重置多重射击
+   * 设置快速射击（道具效果）
    */
-  public resetMultiShot(): void {
-    this.multiShotCount = 1;
+  public setRapidFire(multiplier: number, spreadAngle: number): void {
+    this.rapidFireMultiplier = multiplier;
+    this.spreadAngle = spreadAngle;
+  }
+
+  /**
+   * 重置快速射击
+   */
+  public resetRapidFire(): void {
+    this.rapidFireMultiplier = 1;
+    this.spreadAngle = 0;
   }
 
   /**
@@ -348,9 +358,9 @@ export class PlayerStats {
    */
   public reset(): void {
     this.upgrades.reset();
-    // 重置所有道具倍数
     this.speedMultiplier = 1;
     this.damageMultiplier = 1;
-    this.multiShotCount = 1;
+    this.rapidFireMultiplier = 1;
+    this.spreadAngle = 0;
   }
 }

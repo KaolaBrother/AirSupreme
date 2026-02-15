@@ -36,6 +36,7 @@ export interface EnemyConfig {
   attackCooldown: number;
   evasionChance: number;      // 闪避概率 0-1
   accuracy: number;           // 命中精度 0-1
+  fireSpreadAngle: number;    // 开火角度（度数）- 机头朝向目标在此角度范围内即可开火
 
   // 移动参数
   turnSpeed: number;          // 转向速度
@@ -81,6 +82,7 @@ export const ENEMY_CONFIGS: Record<EnemyType, EnemyConfig> = {
     attackCooldown: 0.4,
     evasionChance: 0.3,
     accuracy: 0.4,
+    fireSpreadAngle: 50,
     turnSpeed: 1.5,         // 比导弹（2.5）慢很多
     maxRollAngle: Math.PI / 4,
     wanderRadius: 80,
@@ -109,6 +111,7 @@ export const ENEMY_CONFIGS: Record<EnemyType, EnemyConfig> = {
     attackCooldown: 0.5,
     evasionChance: 0.15,
     accuracy: 0.5,
+    fireSpreadAngle: 45,
     turnSpeed: 2.0,         // 中等转向速度
     maxRollAngle: Math.PI / 4,
     wanderRadius: 60,
@@ -137,6 +140,7 @@ export const ENEMY_CONFIGS: Record<EnemyType, EnemyConfig> = {
     attackCooldown: 0.8,
     evasionChance: 0.02,
     accuracy: 0.6,
+    fireSpreadAngle: 35,
     turnSpeed: 0.8,         // 转向慢
     maxRollAngle: Math.PI / 10,
     wanderRadius: 40,
@@ -165,6 +169,7 @@ export const ENEMY_CONFIGS: Record<EnemyType, EnemyConfig> = {
     attackCooldown: 1.0,
     evasionChance: 0.2,
     accuracy: 0.7,
+    fireSpreadAngle: 60,
     turnSpeed: 1.2,         // 中等转向
     maxRollAngle: Math.PI / 8,
     wanderRadius: 100,
@@ -193,6 +198,7 @@ export const ENEMY_CONFIGS: Record<EnemyType, EnemyConfig> = {
     attackCooldown: 0.4,
     evasionChance: 0.4,
     accuracy: 0.6,
+    fireSpreadAngle: 55,
     turnSpeed: 2.4,         // 接近导弹的转向速度
     maxRollAngle: Math.PI / 3,
     wanderRadius: 60,
