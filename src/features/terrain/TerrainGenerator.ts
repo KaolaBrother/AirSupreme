@@ -405,7 +405,7 @@ export class TerrainGenerator {
       metalness: 0,
       polygonOffset: true, // 修复Z-fighting闪烁
       polygonOffsetFactor: 1, // 偏移因子
-      polygonOffsetUnits: false // 使用世界单位
+      polygonOffsetUnits: 1
     });
 
     const ground = new THREE.Mesh(groundGeometry, groundMaterial);
@@ -584,7 +584,7 @@ export class TerrainGenerator {
       metalness: 0,
       polygonOffset: true, // 修复Z-fighting闪烁
       polygonOffsetFactor: 1, // 偏移因子
-      polygonOffsetUnits: false, // 使用世界单位
+      polygonOffsetUnits: 1,
     });
 
     const ground = new THREE.Mesh(groundGeometry, groundMaterial);

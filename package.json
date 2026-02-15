@@ -5,9 +5,21 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "lint": "eslint src",
+    "lint:fix": "eslint src --fix",
+    "format": "prettier --write \"src/**/*.ts\"",
+    "format:check": "prettier --check \"src/**/*.ts\"",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "test:coverage": "vitest run --coverage"
   },
-  "keywords": ["game", "three.js", "flight", "combat"],
+  "keywords": [
+    "game",
+    "three.js",
+    "flight",
+    "combat"
+  ],
   "author": "",
   "license": "MIT",
   "dependencies": {
@@ -15,7 +27,16 @@
   },
   "devDependencies": {
     "@types/three": "^0.160.0",
+    "@typescript-eslint/eslint-plugin": "^8.55.0",
+    "@typescript-eslint/parser": "^8.55.0",
+    "@vitest/coverage-v8": "^4.0.18",
+    "eslint": "^9.39.2",
+    "eslint-config-prettier": "^10.1.8",
+    "jsdom": "^27.0.1",
+    "prettier": "^3.8.1",
     "typescript": "^5.3.3",
-    "vite": "^5.0.10"
+    "typescript-eslint": "^8.55.0",
+    "vite": "^5.0.10",
+    "vitest": "^3.2.4"
   }
 }

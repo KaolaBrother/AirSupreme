@@ -332,7 +332,8 @@ export class Game {
 
     // 根据敌人类型定义配色和尺寸
     let bodyColor: number, wingColor: number, accentColor: number;
-    let bodySize = 1.6, bodyLength = 6, wingSpan = 3, tailSize = 0.8;
+    let bodySize = 1.6, bodyLength = 6, wingSpan = 3;
+    const tailSize = 0.8;
     let scaleMultiplier = 1;
 
     switch (config.type) {
