@@ -7,3 +7,4 @@ export { CombatSystem } from './systems/CombatSystem';
 export { PlayerSystem } from './systems/PlayerSystem';
 export { EnemySystem } from './systems/EnemySystem';
 export { PowerUpSystem } from './systems/PowerUpSystem';
+export { GameCoordinator } from './GameCoordinator';
