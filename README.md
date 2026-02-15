@@ -91,9 +91,17 @@ npm run build
 ```
 src/
 ├── core/                    # 核心系统
+│   ├── GameCoordinator.ts   # 主协调器 (v2)
+│   ├── EventBus.ts          # 事件总线 (v2)
 │   ├── GameLoop.ts          # 游戏循环
 │   ├── GameState.ts         # 游戏状态
-│   ├── ECS/                 # 实体组件系统
+│   ├── interfaces/          # 系统接口 (v2)
+│   │   └── IGameSystem.ts
+│   ├── systems/             # 子系统 (v2)
+│   │   ├── PlayerSystem.ts
+│   │   ├── CombatSystem.ts
+│   │   ├── EnemySystem.ts
+│   │   └── PowerUpSystem.ts
 │   ├── Input/               # 输入处理
 │   └── Audio/               # 音效系统
 │
@@ -101,10 +109,12 @@ src/
 │   ├── player/              # 玩家控制
 │   ├── enemy/               # AI 敌人
 │   │   ├── EnemyAI.ts       # 敌人逻辑
-│   │   ├── EnemyFSM.ts      # 状态机
+│   │   ├── FriendlyAI.ts    # 友军AI
 │   │   └── EnemyTypes.ts    # 敌人类型
 │   ├── combat/              # 战斗系统
-│   │   ├── MissileSystem.ts  # 导弹系统
+│   │   ├── ProjectilePool.ts
+│   │   ├── MissileSystem.ts
+│   │   └── HealthSystem.ts
 │   ├── camera/              # 相机系统
 │   ├── terrain/             # 地形生成
 │   ├── levels/              # 关卡管理
@@ -116,9 +126,12 @@ src/
 ├── ui/                      # UI 组件
 │   ├── HUD.ts              # 游戏界面
 │   ├── StartMenu.ts         # 开始菜单
-│   ├── EnemyIndicator.ts    # 敌人指示器
-│   └── LockOnIndicator.ts  # 导弹锁定指示器
-├── Game.ts                  # 主游戏类
+│   └── LockOnIndicator.ts  # 导弹锁定
+│
+├── __tests__/              # 测试文件 (v2)
+│
+├── Game.ts                  # 向后兼容导出
+├── Game.legacy.ts           # 旧实现 (@deprecated)
 ├── main.ts                  # 入口文件
 └── config.ts                # 配置文件
 ```

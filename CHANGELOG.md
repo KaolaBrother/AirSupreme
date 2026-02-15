@@ -1,5 +1,134 @@
 # AirSupreme 更新日志
 
+## [2.0.0] - 2026-02-15
+
+### 🏗️ 架构重构
+
+#### EventBus 事件系统
+- 新增类型安全的事件总线 `src/core/EventBus.ts`
+- 定义 20+ 游戏事件类型 (`GameEventType`)
+- 支持 `on`, `off`, `once`, `emit`, `clear` 操作
+- 完整的 TypeScript 类型推断
+
+#### 模块化子系统
+从单体 `Game.ts` (1300+ 行) 提取为 4 个独立子系统：
+
+| 子系统 | 文件 | 行数 | 职责 |
+|--------|------|------|------|
+| PlayerSystem | `src/core/systems/PlayerSystem.ts` | 213 | 玩家控制、生命、护盾、重生 |
+| CombatSystem | `src/core/systems/CombatSystem.ts` | 158 | 投射物、导弹、碰撞检测 |
+| EnemySystem | `src/core/systems/EnemySystem.ts` | 144 | 敌人生成、友军管理、波次 |
+| PowerUpSystem | `src/core/systems/PowerUpSystem.ts` | 76 | 道具掉落、效果应用 |
+
+#### GameCoordinator 主协调器
+- 新增 `src/core/GameCoordinator.ts` (711 行)
+- 替代原有 `Game.ts` 作为主入口
+- 组装所有子系统，通过 EventBus 通信
+- 处理游戏生命周期 (start, stop, dispose)
+
+### 🧪 测试基础设施
+
+#### 新增测试框架
+- **Vitest**: 单元测试框架
+- **jsdom**: DOM 环境模拟
+- **@vitest/coverage-v8**: 测试覆盖率
+
+#### 测试覆盖
+| 测试文件 | 测试数 | 覆盖范围 |
+|---------|--------|---------|
+| `config.test.ts` | 5 | 游戏配置 |
+| `EventBus.test.ts` | 6 | 事件总线 |
+| `interfaces.test.ts` | 1 | 系统接口 |
+| `events.integration.test.ts` | 7 | 事件集成 |
+| **总计** | **19** | |
+
+### 📦 代码质量工具
+
+#### ESLint + Prettier
+- `eslint.config.js`: ESLint 9.x 配置
+- `.prettierrc`: Prettier 格式化规则
+- TypeScript 严格规则
+
+#### 新增 npm 脚本
+```bash
+npm run lint          # ESLint 检查
+npm run lint:fix      # 自动修复
+npm run format        # Prettier 格式化
+npm run test          # Vitest 测试
+npm run test:run      # 单次测试
+npm run test:coverage # 覆盖率报告
+```
+
+### 📁 文件变更
+
+#### 新增文件
+```
+src/core/EventBus.ts              # 事件总线
+src/core/GameCoordinator.ts       # 主协调器
+src/core/index.ts                 # 统一导出
+src/core/interfaces/IGameSystem.ts # 系统接口
+src/core/systems/                 # 子系统目录
+  ├── PlayerSystem.ts
+  ├── CombatSystem.ts
+  ├── EnemySystem.ts
+  └── PowerUpSystem.ts
+src/__tests__/                    # 测试目录
+  ├── config.test.ts
+  ├── EventBus.test.ts
+  ├── interfaces.test.ts
+  └── events.integration.test.ts
+eslint.config.js
+.prettierrc
+vitest.config.ts
+```
+
+#### 重命名/废弃
+- `src/Game.ts` → `src/Game.legacy.ts` (@deprecated)
+- `src/Game.ts` (新建) → 向后兼容导出
+
+### 🔄 迁移指南
+
+#### 使用新架构
+```typescript
+// main.ts
+import { GameCoordinator } from './core/GameCoordinator';
+
+const game = new GameCoordinator();
+game.start();
+```
+
+#### 监听游戏事件
+```typescript
+import { EventBus, GameEventType } from '@/core/EventBus';
+
+EventBus.on(GameEventType.ENEMY_DEATH, ({ payload }) => {
+  console.log(`敌人被击败: ${payload.config.name}`);
+});
+```
+
+#### 创建新子系统
+```typescript
+import { IGameSystem } from '@/core/interfaces/IGameSystem';
+
+export class MySystem implements IGameSystem {
+  readonly name = 'MySystem';
+  init(): void { /* ... */ }
+  update(deltaTime: number): void { /* ... */ }
+  dispose(): void { /* ... */ }
+}
+```
+
+### ✅ 质量指标
+
+| 指标 | 结果 |
+|------|------|
+| 构建 | ✅ 成功 |
+| 测试 | ✅ 19/19 通过 |
+| TypeScript | ✅ 严格模式 |
+| ESLint | ✅ 主要问题已修复 |
+
+---
+
 ## [未发布] - 2026-02-14
 
 ### 地面闪烁修复（Z-fighting 问题）

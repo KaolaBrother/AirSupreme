@@ -2,6 +2,10 @@
 
 AirSupreme 是一个基于 Three.js 和 TypeScript 的 3D 飞机战斗游戏，具有复杂的敌人AI、多个游戏系统和跨平台支持（桌面和移动端）。
 
+> **当前分支**: `v2` - 事件驱动架构重构版本
+> 
+> **架构变更**: Game.ts 已重构为模块化子系统架构，使用 EventBus 进行解耦通信。
+
 ## 常用命令
 
 ### 开发命令
@@ -12,10 +16,116 @@ npm run build            # 生产环境构建
 npm run preview          # 预览生产构建
 ```
 
+### 代码质量
+```bash
+npm run lint             # ESLint 代码检查
+npm run lint:fix         # 自动修复 lint 问题
+npm run format           # Prettier 格式化代码
+npm run format:check     # 检查格式化
+```
+
+### 测试
+```bash
+npm run test             # 运行测试 (watch 模式)
+npm run test:run         # 运行测试 (单次)
+npm run test:coverage    # 测试覆盖率报告
+```
+
 ### 类型检查
 ```bash
 npx tsc --noEmit        # 仅进行 TypeScript 类型检查，不生成文件
 ```
+
+## v2 架构 (当前)
+
+### 架构概览
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      GameCoordinator                        │
+│                    (主协调器, 711 行)                         │
+└─────────────────────────┬───────────────────────────────────┘
+                          │
+                          ▼
+┌─────────────────────────────────────────────────────────────┐
+│                       EventBus                              │
+│              (类型安全事件总线, 20+ 事件类型)                  │
+└─────────────────────────┬───────────────────────────────────┘
+                          │
+        ┌─────────────────┼─────────────────┐
+        ▼                 ▼                 ▼
+┌───────────────┐ ┌───────────────┐ ┌───────────────┐
+│ PlayerSystem  │ │ CombatSystem  │ │ EnemySystem   │
+│ (玩家系统)    │ │ (战斗系统)    │ │ (敌人系统)    │
+└───────────────┘ └───────────────┘ └───────────────┘
+        │                 │                 │
+        └─────────────────┼─────────────────┘
+                          ▼
+                  ┌───────────────┐
+                  │ PowerUpSystem │
+                  │ (道具系统)    │
+                  └───────────────┘
+```
+
+### 核心文件
+
+| 文件 | 行数 | 职责 |
+|------|------|------|
+| `src/core/GameCoordinator.ts` | 711 | 主协调器，组装子系统 |
+| `src/core/EventBus.ts` | 142 | 类型安全事件总线 |
+| `src/core/systems/PlayerSystem.ts` | 213 | 玩家控制、生命、护盾 |
+| `src/core/systems/CombatSystem.ts` | 158 | 投射物、导弹、碰撞 |
+| `src/core/systems/EnemySystem.ts` | 144 | 敌人生成、友军管理 |
+| `src/core/systems/PowerUpSystem.ts` | 76 | 道具掉落、效果 |
+
+### 事件类型 (GameEventType)
+
+```typescript
+enum GameEventType {
+  // 玩家事件
+  PLAYER_FIRED, PLAYER_HIT, PLAYER_DEATH, PLAYER_RESPAWN,
+  // 敌人事件
+  ENEMY_SPAWNED, ENEMY_FIRED, ENEMY_HIT, ENEMY_DEATH,
+  // 友军事件
+  FRIENDLY_SPAWNED, FRIENDLY_FIRED, FRIENDLY_DEATH,
+  // 战斗事件
+  MISSILE_FIRED, MISSILE_HIT,
+  // 波次事件
+  WAVE_START, WAVE_COMPLETE, LEVEL_COMPLETE,
+  // 道具事件
+  POWERUP_COLLECTED, POWERUP_EXPIRED, BALLOON_DESTROYED,
+  // 状态事件
+  SHIELD_ACTIVATED, SHIELD_DEACTIVATED, SCORE_CHANGED,
+}
+```
+
+### 使用 EventBus
+
+```typescript
+import { EventBus, GameEventType } from '@/core/EventBus';
+
+class MySystem implements IGameSystem {
+  init() {
+    EventBus.on(GameEventType.ENEMY_DEATH, ({ payload }) => {
+      console.log(`敌人 ${payload.enemyId} 被击败`);
+    });
+  }
+
+  someAction() {
+    EventBus.emit(GameEventType.SCORE_CHANGED, { 
+      score: 100, 
+      delta: 10 
+    });
+  }
+}
+```
+
+### 废弃文件
+
+| 文件 | 状态 | 替代 |
+|------|------|------|
+| `src/Game.legacy.ts` | @deprecated | 使用 `GameCoordinator` |
+| `src/Game.ts` | 向后兼容导出 | 实际导出 `GameCoordinator` |
 
 ## 项目架构概览
 
@@ -521,5 +631,137 @@ window.game.levelManager    // 查看关卡状态
 
 ---
 
-**最后更新**: 2026-02-14
-**项目版本**: 1.0.0
+**最后更新**: 2026-02-15
+**项目版本**: 2.0.0 (v2 分支)
+
+---
+
+## v2 架构重构 (2026-02-15)
+
+### 架构变更
+
+#### 从单体到模块化
+- **之前**: `Game.ts` (1300+ 行) 包含所有游戏逻辑
+- **之后**: `GameCoordinator` (711 行) + 4 个独立子系统
+
+#### 新增子系统
+
+| 子系统 | 职责 | 文件 |
+|--------|------|------|
+| `PlayerSystem` | 玩家控制、生命、护盾、重生 | `src/core/systems/PlayerSystem.ts` |
+| `CombatSystem` | 投射物、导弹、碰撞检测 | `src/core/systems/CombatSystem.ts` |
+| `EnemySystem` | 敌人生成、友军管理、波次 | `src/core/systems/EnemySystem.ts` |
+| `PowerUpSystem` | 道具掉落、效果应用 | `src/core/systems/PowerUpSystem.ts` |
+
+#### 事件驱动架构
+
+```typescript
+// 旧方式：直接回调
+enemy.onFire = (position, direction) => {
+  this.enemyProjectilePool.fire(position, direction);
+};
+
+// 新方式：EventBus
+EventBus.on(GameEventType.ENEMY_FIRED, ({ payload }) => {
+  // 处理射击
+});
+EventBus.emit(GameEventType.ENEMY_FIRED, { position, direction, damage });
+```
+
+### 新增测试覆盖
+
+| 测试文件 | 测试数 | 覆盖范围 |
+|---------|--------|---------|
+| `config.test.ts` | 5 | 游戏配置 |
+| `EventBus.test.ts` | 6 | 事件总线 |
+| `interfaces.test.ts` | 1 | 系统接口 |
+| `events.integration.test.ts` | 7 | 事件集成 |
+| **总计** | **19** | |
+
+### 新增开发工具
+
+```bash
+# 代码质量
+npm run lint          # ESLint 检查
+npm run lint:fix      # 自动修复
+npm run format        # Prettier 格式化
+
+# 测试
+npm run test          # Vitest 测试
+npm run test:coverage # 覆盖率报告
+```
+
+### 文件结构变更
+
+```
+新增文件:
+src/core/EventBus.ts              # 事件总线
+src/core/GameCoordinator.ts       # 主协调器
+src/core/interfaces/IGameSystem.ts # 系统接口
+src/core/systems/                 # 子系统目录
+  ├── PlayerSystem.ts
+  ├── CombatSystem.ts
+  ├── EnemySystem.ts
+  └── PowerUpSystem.ts
+src/__tests__/                    # 测试目录
+
+重命名:
+src/Game.ts → src/Game.legacy.ts  # 旧实现 (@deprecated)
+src/Game.ts (新建)                # 向后兼容导出
+```
+
+### 迁移指南
+
+#### 使用新架构
+
+```typescript
+// main.ts - 使用 GameCoordinator
+import { GameCoordinator } from './core/GameCoordinator';
+
+const game = new GameCoordinator();
+game.start();
+```
+
+#### 监听游戏事件
+
+```typescript
+import { EventBus, GameEventType } from '@/core/EventBus';
+
+// 监听敌人死亡
+EventBus.on(GameEventType.ENEMY_DEATH, ({ payload }) => {
+  console.log(`敌人被击败: ${payload.config.name}`);
+  console.log(`得分: ${payload.config.scoreValue}`);
+});
+
+// 监听道具收集
+EventBus.on(GameEventType.POWERUP_COLLECTED, ({ payload }) => {
+  console.log(`获得道具: ${payload.config.name}`);
+});
+```
+
+#### 创建新子系统
+
+```typescript
+import { IGameSystem } from '@/core/interfaces/IGameSystem';
+import { EventBus, GameEventType } from '@/core/EventBus';
+
+export class MySystem implements IGameSystem {
+  readonly name = 'MySystem';
+
+  init(): void {
+    EventBus.on(GameEventType.PLAYER_FIRED, this.handlePlayerFired);
+  }
+
+  update(deltaTime: number): void {
+    // 每帧更新逻辑
+  }
+
+  dispose(): void {
+    // 清理资源
+  }
+
+  private handlePlayerFired = (event: GameEvent<GameEventType.PLAYER_FIRED>) => {
+    // 处理玩家射击
+  };
+}
+```
