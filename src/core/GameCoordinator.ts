@@ -701,6 +701,13 @@ export class GameCoordinator {
 
     this.gameLoop.start((dt) => this.update(dt), () => this.render());
     this.audioManager.startEngine();
+
+    // 初始福利：游戏开始1秒后自动召唤友军
+    setTimeout(() => {
+      this.spawnFriendlyAI();
+      this.hud.showPowerUpBig('✈️', '召唤友军');
+      console.log('初始福利：自动召唤友军');
+    }, 1000);
   }
 
   public stop(): void {
