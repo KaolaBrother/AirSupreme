@@ -1,8 +1,5 @@
-import { Game } from './Game';
+import { GameCoordinator } from './core/GameCoordinator';
 
-/**
- * 隐藏加载画面
- */
 function hideLoadingScreen(): void {
   const loadingScreen = document.getElementById('loading-screen');
   if (loadingScreen) {
@@ -10,9 +7,6 @@ function hideLoadingScreen(): void {
   }
 }
 
-/**
- * 显示错误信息
- */
 function showError(message: string): void {
   const loadingScreen = document.getElementById('loading-screen');
   if (loadingScreen) {
@@ -28,9 +22,6 @@ function showError(message: string): void {
   }
 }
 
-/**
- * 检查 WebGL 支持
- */
 function checkWebGL(): boolean {
   try {
     const canvas = document.createElement('canvas');
@@ -41,47 +32,37 @@ function checkWebGL(): boolean {
   }
 }
 
-/**
- * 主函数
- */
 async function main(): Promise<void> {
-  // 检查 WebGL 支持
   if (!checkWebGL()) {
     showError('您的浏览器不支持 WebGL');
     return;
   }
 
   try {
-    // 创建游戏实例
-    const game = new Game();
+    const game = new GameCoordinator();
 
-    // 隐藏加载画面
     hideLoadingScreen();
 
-    // 显示开始提示
-    console.log('🎮 Air Supreme - 3D 空战游戏');
+    console.log('🎮 Air Supreme - 3D 空战游戏 (v2)');
     console.log('📖 控制说明:');
     console.log('  W/S - 俯仰（机头上下）');
     console.log('  A/D - 偏航（机头左右）');
     console.log('  Q/E - 翻滚（机翼倾斜）');
     console.log('  空格 - 开火');
+    console.log('  M - 导弹');
     console.log('  Shift - 加速');
     console.log('');
     console.log('📱 移动端: 使用虚拟摇杆和按钮控制');
-    console.log('⏳️ 请在菜单中选择"开始游戏"以开始');
 
-    // 页面卸载时清理
     window.addEventListener('beforeunload', () => {
       game.dispose();
     });
-
   } catch (error) {
     console.error('游戏初始化失败:', error);
     showError('游戏初始化失败，请查看控制台了解详情');
   }
 }
 
-// 等待 DOM 加载完成后启动游戏
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', () => main());
 } else {
