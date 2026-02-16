@@ -21,7 +21,13 @@ export class Missile {
   private maxFlightDistance: number = GAME_CONSTANTS.MISSILE.MAX_FLIGHT_DISTANCE; // 最大飞行距离
   private enemies: THREE.Object3D[] = []; // 敌人列表，用于重新锁定目标
 
-  constructor(scene: THREE.Scene, position: THREE.Vector3, target: THREE.Object3D | null, particleSystem: ParticleSystem, enemies: THREE.Object3D[] = []) {
+  constructor(
+    scene: THREE.Scene,
+    position: THREE.Vector3,
+    target: THREE.Object3D | null,
+    particleSystem: ParticleSystem,
+    enemies: THREE.Object3D[] = []
+  ) {
     this.particleSystem = particleSystem;
     this.target = target;
     this.enemies = enemies;
@@ -66,12 +72,11 @@ export class Missile {
 
     // 设置初始速度朝向目标
     if (this.target) {
-      const direction = new THREE.Vector3()
-        .subVectors(this.target.position, position)
-        .normalize();
+      const targetWorldPos = new THREE.Vector3();
+      this.target.getWorldPosition(targetWorldPos);
+      const direction = new THREE.Vector3().subVectors(targetWorldPos, position).normalize();
       this.velocity.copy(direction).multiplyScalar(this.speed);
     } else {
-      // 没有目标时，向前发射
       this.velocity.set(0, 0, -this.speed);
     }
 
@@ -160,9 +165,13 @@ export class Missile {
   private huntTarget(deltaTime: number): void {
     if (!this.target) return;
 
+    // 使用 getWorldPosition 获取实时世界坐标（解决 Boss 部件位置不更新的问题）
+    const targetPos = new THREE.Vector3();
+    this.target.getWorldPosition(targetPos);
+
     // 计算到目标的方向
     const targetDirection = new THREE.Vector3()
-      .subVectors(this.target.position, this.mesh.position)
+      .subVectors(targetPos, this.mesh.position)
       .normalize();
 
     // 获取当前速度方向
@@ -198,10 +207,11 @@ export class Missile {
     let nearestDistance = Infinity;
 
     for (const enemy of this.enemies) {
-      // 检查敌人是否存活（有父对象）
       if (!enemy.parent) continue;
 
-      const distance = this.mesh.position.distanceTo(enemy.position);
+      const enemyWorldPos = new THREE.Vector3();
+      enemy.getWorldPosition(enemyWorldPos);
+      const distance = this.mesh.position.distanceTo(enemyWorldPos);
       if (distance < nearestDistance) {
         nearestDistance = distance;
         nearestEnemy = enemy;
@@ -264,7 +274,13 @@ export class MissileSystem {
    * 发射导弹
    */
   public fire(position: THREE.Vector3, _direction: THREE.Vector3, target?: THREE.Object3D): void {
-    const missile = new Missile(this.scene, position, target || null, this.particleSystem, this.enemies);
+    const missile = new Missile(
+      this.scene,
+      position,
+      target || null,
+      this.particleSystem,
+      this.enemies
+    );
     this.missiles.push(missile);
   }
 
@@ -280,7 +296,7 @@ export class MissileSystem {
     }
 
     // 移除不活跃的导弹
-    this.missiles = this.missiles.filter(m => {
+    this.missiles = this.missiles.filter((m) => {
       if (!m.active) {
         m.dispose(this.scene);
         return false;
@@ -289,9 +305,6 @@ export class MissileSystem {
     });
   }
 
-  /**
-   * 检查导弹碰撞
-   */
   public checkCollisions(
     targetMeshes: THREE.Object3D[],
     onHit: (target: THREE.Object3D) => void
@@ -300,14 +313,21 @@ export class MissileSystem {
       if (!missile.active) continue;
 
       for (const targetMesh of targetMeshes) {
-        if (!targetMesh.parent) continue;
+        const targetWorldPos = new THREE.Vector3();
+        targetMesh.getWorldPosition(targetWorldPos);
 
-        // 计算距离
-        const distance = missile.mesh.position.distanceTo(targetMesh.position);
-        const hitDistance = 2; // 命中距离阈值
+        if (
+          !isFinite(targetWorldPos.x) ||
+          !isFinite(targetWorldPos.y) ||
+          !isFinite(targetWorldPos.z)
+        ) {
+          continue;
+        }
+
+        const distance = missile.mesh.position.distanceTo(targetWorldPos);
+        const hitDistance = 2;
 
         if (distance < hitDistance) {
-          // 命中目标
           missile.active = false;
           onHit(targetMesh);
           break;
@@ -320,7 +340,7 @@ export class MissileSystem {
    * 获取活跃导弹数量
    */
   public getActiveCount(): number {
-    return this.missiles.filter(m => m.active).length;
+    return this.missiles.filter((m) => m.active).length;
   }
 
   /**

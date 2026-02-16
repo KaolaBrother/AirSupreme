@@ -363,3 +363,195 @@ Apply effect based on PowerUpType
 ```
 
 **Important**: Powerups should not be collectable during respawn. Check `isPlayerRespawning()` before processing collisions.
+
+## Boss Battle System (2025-02-15)
+
+### Overview
+
+Boss 战系统允许玩家直接挑战关底 Boss，或完成普通波次后与 Boss 战斗。
+
+### Files
+
+| Purpose       | File                                     |
+| ------------- | ---------------------------------------- |
+| Boss 配置     | `src/features/boss/BossTypes.ts`         |
+| Boss AI       | `src/features/boss/BossAI.ts`            |
+| Boss 导弹系统 | `src/features/boss/BossMissileSystem.ts` |
+
+### Boss 配置
+
+第一关 Boss - 重型轰炸机：
+
+| 属性 | 数值                  |
+| ---- | --------------------- |
+| 体型 | scale 5               |
+| 血量 | 2000                  |
+| 速度 | 10                    |
+| 武器 | 四门重炮 + 导弹发射器 |
+
+### Boss 武器系统
+
+**四门重炮**：
+
+- 位置：左翼、右翼、机背、机腹
+- 轮流发射，每 0.5 秒一门
+- **目标选择策略**：
+  - 左翼/右翼炮：优先攻击最近威胁（玩家或友军）
+  - 机背/机腹炮：随机选择目标
+
+**导弹发射器**：
+
+- 每 10 秒发射一枚
+- 目标：玩家或最近的友军
+- 导弹可被摧毁（HP=20）
+- 红色追踪指示器
+
+### 游戏模式
+
+| 模式 | 流程                                   |
+| ---- | -------------------------------------- |
+| 普通 | 波次1→...→波次N→音乐切换→Boss战→下一关 |
+| Boss | 开始菜单→直接Boss战→下一关Boss战→...   |
+
+### Boss 战特性
+
+- 每 30 秒生成友军助战
+- Boss 专用音乐（180 BPM，紧张激烈）
+- Boss 导弹可被玩家导弹锁定摧毁
+- 红色追踪指示器（区别于敌机的黄色）
+
+### Boss 导弹属性
+
+| 属性     | Boss 导弹 | 玩家导弹 |
+| -------- | --------- | -------- |
+| 模型大小 | 4x        | 1x       |
+| 速度     | 0.5x      | 1x       |
+| HP       | 20        | 不可摧毁 |
+| 颜色     | 红色      | -        |
+| 射程     | 5000      | -        |
+
+---
+
+## Recent Fixes (2025-02-16)
+
+### Boss 导弹追踪修复
+
+- **Issue**: Boss 导弹没有正确追踪玩家，总是在追踪友机
+- **Cause**: `BossMissileSystem.update()` 中 `huntTarget()` 调用条件错误
+- **Fix**: 修改条件为 `this.isTargetingPlayer || (this.target && this.target.parent)`
+- **File**: `src/features/boss/BossMissileSystem.ts`
+
+### 友军 AI 重构
+
+- **Issue**: 友军 AI 行为与敌军不一致，`isTargetInView` 逻辑混乱
+- **Changes**:
+  1. 删除 `isTargetInView()` 函数
+  2. `EnemyAI.update()` 添加 `fireTarget` 参数，分离移动目标和开火目标
+  3. 友军无目标时跟随玩家但不开火（`fireTarget = null`）
+  4. 使用 `getWorldPosition()` 获取 Boss 部件世界坐标
+- **Files**: `src/features/enemy/FriendlyAI.ts`, `src/features/enemy/EnemyAI.ts`
+
+### 友军 AI 行为规则
+
+```typescript
+// 友军 update 签名
+public update(deltaTime: number, enemyMeshes: THREE.Object3D[], playerPosition: THREE.Vector3): void
+
+// 行为逻辑：
+// 1. 有敌人时：移动到敌人位置 + 对敌人开火
+// 2. 无敌人时：移动到玩家位置 + 不开火
+// 3. 只对敌军和 Boss 开火，不会对玩家开火
+```
+
+### Boss 重炮目标选择
+
+- **Issue**: Boss 重炮一直在攻击玩家，不攻击友军
+- **Fix**:
+  - 左翼/右翼炮：`findNearestThreat()` 攻击最近威胁（玩家或友军）
+  - 机背/机腹炮：`selectRandomTarget()` 随机选择目标
+- **File**: `src/features/boss/BossAI.ts`
+
+### 敌机 Mesh 方向修复
+
+- **Issue**: 敌机 mesh 方向不正确（如 Fighter 没有翅膀）
+- **Fix**:
+  - 机身改用 `ConeGeometry`（机头细机尾粗）
+  - 移除单独的机头锥体
+  - 部件位置改为相对 `bodyLength` 比例
+  - 机头朝向 -Z 方向
+- **File**: `src/core/GameCoordinator.ts` - `createAircraftMesh()`
+
+### 飞机模型预览功能
+
+- **New File**: `src/ui/ModelPreview.ts`
+- **Features**:
+  - 3D 渲染所有飞机模型（玩家 + 5 敌机 + 1 Boss）
+  - 左右滑动/按钮切换模型
+  - 自动旋转 + 手动拖拽旋转
+  - 初始隐藏，点击后显示
+- **Modified**: `src/ui/StartMenu.ts`
+  - 添加「模型预览」按钮，与「开始游戏」并排
+  - 添加滚动条支持
+  - 集成 ModelPreview 组件
+
+### 关键文件更新
+
+| File                                     | Change                                     |
+| ---------------------------------------- | ------------------------------------------ |
+| `src/features/boss/BossMissileSystem.ts` | huntTarget 调用条件修复                    |
+| `src/features/boss/BossAI.ts`            | 重炮目标选择逻辑（两门优先威胁，两门随机） |
+| `src/features/enemy/EnemyAI.ts`          | 添加 fireTarget 参数                       |
+| `src/features/enemy/FriendlyAI.ts`       | 删除 isTargetInView，跟随玩家逻辑          |
+| `src/core/GameCoordinator.ts`            | 敌机 mesh 方向修复                         |
+| `src/ui/ModelPreview.ts`                 | 新建模型预览组件                           |
+| `src/ui/StartMenu.ts`                    | 集成模型预览按钮和滚动条                   |
+
+---
+
+## Completed Implementation (2025-02-16)
+
+### 普通模式 Boss 战触发
+
+**实现状态**：✅ 已完成并验证
+
+**实现流程**：
+
+```
+波次1 → 波次2 → ... → 波次N → 音乐切换 → Boss战 → 下一关
+```
+
+**事件流程**：
+
+```
+LevelManager.update()
+  → waveDelayTimer expired
+  → onLevelComplete(level)
+  → EnemySystem emits LEVEL_COMPLETE event
+  → GameCoordinator.startLevelBossBattle()
+  → Boss 生成
+  → Boss 击败后进入下一关
+```
+
+**实现细节**：
+
+- 新增 `inLevelBossBattle` 状态变量，标记普通模式的 Boss 战状态
+- `LEVEL_COMPLETE` 事件现在触发 `startLevelBossBattle()` 而不是直接进入下一关
+- 新增 `startLevelBossBattle()` 方法：
+  - 播放 Boss 音乐
+  - 生成当前关卡的 Boss
+  - Boss 击败后进入下一关并开始波次
+- `update()` 方法现在检查 `bossMode || inLevelBossBattle` 来决定是否调用 `updateBossBattle()`
+
+**测试验证**：
+
+通过浏览器测试确认事件流程正确：
+
+1. 波次完成 → `waveDelayTimer` 开始倒计时
+2. 3秒后 → 触发 `onLevelComplete` 回调
+3. EnemySystem → 发出 `LEVEL_COMPLETE` 事件
+4. GameCoordinator → 接收事件，调用 `startLevelBossBattle()`
+5. Boss → 正确生成（`HEAVY_BOMBER`）
+
+**修改文件**：
+
+- `src/core/GameCoordinator.ts`

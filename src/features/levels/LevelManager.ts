@@ -292,8 +292,7 @@ export class LevelManager {
 
     // 更新敌人
     for (const enemy of this.enemies) {
-      // 传入玩家位置和友军列表（EnemyAI内部会判断盘旋目标）
-      enemy.update(deltaTime, playerPosition, friendlyMeshes);
+      enemy.update(deltaTime, playerPosition, friendlyMeshes, playerPosition);
     }
 
     // 清理已死亡的敌人（从场景中移除，清理尾迹）

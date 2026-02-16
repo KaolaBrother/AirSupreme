@@ -60,7 +60,11 @@ export class EnemySystem implements IGameSystem {
 
   update(_deltaTime: number): void {}
 
-  updateWithPlayer(deltaTime: number, playerPosition: THREE.Vector3): void {
+  updateWithPlayer(
+    deltaTime: number,
+    playerPosition: THREE.Vector3,
+    additionalTargets?: THREE.Object3D[]
+  ): void {
     const friendlyMeshes = this.friendlyAIs.map((f) => f.getMesh());
     this.levelManager.update(deltaTime, playerPosition, friendlyMeshes);
 
@@ -69,8 +73,10 @@ export class EnemySystem implements IGameSystem {
 
       if (friendly.isAlive()) {
         const enemyMeshes = this.getEnemyMeshes();
-        friendly.update(deltaTime, enemyMeshes);
+        const allTargets = additionalTargets ? [...enemyMeshes, ...additionalTargets] : enemyMeshes;
+        friendly.update(deltaTime, allTargets, playerPosition);
       } else {
+        friendly.dispose();
         this.friendlyAIs.splice(i, 1);
       }
     }
@@ -90,7 +96,10 @@ export class EnemySystem implements IGameSystem {
   }
 
   getEnemyMeshes(): THREE.Object3D[] {
-    return this.levelManager.getEnemies().filter((e) => e.isAlive()).map((e) => e.getMesh());
+    return this.levelManager
+      .getEnemies()
+      .filter((e) => e.isAlive())
+      .map((e) => e.getMesh());
   }
 
   getAliveEnemyCount(): number {

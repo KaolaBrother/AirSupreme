@@ -8,8 +8,8 @@ import { GAME_CONSTANTS } from '@/config';
  */
 export class LockOnIndicator {
   private container: HTMLDivElement;
-  private lockCircle: HTMLDivElement;  // 黄色圈（锁定范围）
-  private lockProgress: HTMLDivElement;  // 橙色圈（锁定进度）
+  private lockCircle: HTMLDivElement; // 黄色圈（锁定范围）
+  private lockProgress: HTMLDivElement; // 橙色圈（锁定进度）
   private noMissileLabel: HTMLDivElement;
 
   // 锁定状态
@@ -153,15 +153,6 @@ export class LockOnIndicator {
     this.cancelLockOn();
   }
 
-  /**
-   * 更新锁定状态
-   * @param playerPos 玩家位置
-   * @param enemies 敌人列表
-   * @param camera 相机
-   * @param deltaTime 时间增量
-   * @param _enemyScreenPos 敌人UI屏幕位置（未使用，保留兼容性）
-   * @returns 锁定是否完成
-   */
   public update(
     playerPos: THREE.Vector3,
     enemies: THREE.Object3D[],
@@ -173,17 +164,18 @@ export class LockOnIndicator {
       return false;
     }
 
-    // 黄色圈半径（像素）
     const lockCircleRadius = this.lockCircleSize / 2;
-
-    // 锁定距离：最大飞行距离的一半
     const lockDistance = GAME_CONSTANTS.MISSILE.MAX_FLIGHT_DISTANCE / 2;
 
-    // 阶段1：验证当前锁定目标是否仍然有效
     if (this.lockedTarget) {
-      // 检查目标是否还活着
-      if (!this.lockedTarget.parent) {
-        // 目标已销毁，清除锁定，下一帧会寻找新目标
+      const targetWorldPos = new THREE.Vector3();
+      this.lockedTarget.getWorldPosition(targetWorldPos);
+
+      if (
+        !isFinite(targetWorldPos.x) ||
+        !isFinite(targetWorldPos.y) ||
+        !isFinite(targetWorldPos.z)
+      ) {
         this.lockedTarget = null;
         this.currentTarget = null;
         this.lockProgressValue = Math.max(0, this.lockProgressValue - deltaTime * 3);
@@ -191,10 +183,8 @@ export class LockOnIndicator {
         return false;
       }
 
-      // 计算目标的屏幕位置
-      const targetScreenPosPixels = this.worldToScreenPixels(this.lockedTarget.position, camera);
+      const targetScreenPosPixels = this.worldToScreenPixels(targetWorldPos, camera);
       if (!targetScreenPosPixels) {
-        // 目标不在相机视野内，清除锁定
         this.lockedTarget = null;
         this.currentTarget = null;
         this.lockProgressValue = Math.max(0, this.lockProgressValue - deltaTime * 3);
@@ -202,10 +192,8 @@ export class LockOnIndicator {
         return false;
       }
 
-      // 条件1：检查世界距离
-      const worldDistance = playerPos.distanceTo(this.lockedTarget.position);
+      const worldDistance = playerPos.distanceTo(targetWorldPos);
       if (worldDistance > lockDistance) {
-        // 距离太远，清除锁定，允许寻找新目标
         this.lockedTarget = null;
         this.currentTarget = null;
         this.lockProgressValue = Math.max(0, this.lockProgressValue - deltaTime * 3);
@@ -213,13 +201,11 @@ export class LockOnIndicator {
         return false;
       }
 
-      // 条件2：检查屏幕位置是否在黄色圈内
       const dx = targetScreenPosPixels.x - this.centerX;
       const dy = targetScreenPosPixels.y - this.centerY;
       const screenDistance = Math.sqrt(dx * dx + dy * dy);
 
       if (screenDistance > lockCircleRadius) {
-        // 在黄色圈外，清除锁定，允许寻找新目标
         this.lockedTarget = null;
         this.currentTarget = null;
         this.lockProgressValue = Math.max(0, this.lockProgressValue - deltaTime * 3);
@@ -227,17 +213,14 @@ export class LockOnIndicator {
         return false;
       }
 
-      // 当前锁定目标仍然有效，增加锁定进度
       this.lockProgressValue += deltaTime / this.lockTime;
 
-      // 转换为 0-1 的屏幕坐标用于更新 UI
       const normalizedScreenPos = {
         x: targetScreenPosPixels.x / window.innerWidth,
-        y: targetScreenPosPixels.y / window.innerHeight
+        y: targetScreenPosPixels.y / window.innerHeight,
       };
       this.updateLockProgress(normalizedScreenPos);
 
-      // 锁定完成
       if (this.lockProgressValue >= 1) {
         this.lockProgressValue = 1;
         this.onLockComplete();
@@ -247,22 +230,21 @@ export class LockOnIndicator {
       return false;
     }
 
-    // 阶段2：没有锁定目标，寻找新目标
     let bestTarget: THREE.Object3D | null = null;
     let bestDistance = Infinity;
 
-    // 遍历所有敌人，找到同时满足两个条件的目标
     for (const enemy of enemies) {
-      // 条件1：世界距离在锁定距离内
-      const worldDistance = playerPos.distanceTo(enemy.position);
+      const enemyWorldPos = new THREE.Vector3();
+      enemy.getWorldPosition(enemyWorldPos);
+
+      const worldDistance = playerPos.distanceTo(enemyWorldPos);
       if (worldDistance > lockDistance) {
-        continue; // 距离太远，跳过
+        continue;
       }
 
-      // 条件2：屏幕位置在黄色圈内
-      const screenPos = this.worldToScreenPixels(enemy.position, camera);
+      const screenPos = this.worldToScreenPixels(enemyWorldPos, camera);
       if (!screenPos) {
-        continue; // 不在相机视野内，跳过
+        continue;
       }
 
       const dx = screenPos.x - this.centerX;
@@ -270,10 +252,9 @@ export class LockOnIndicator {
       const screenDistance = Math.sqrt(dx * dx + dy * dy);
 
       if (screenDistance > lockCircleRadius) {
-        continue; // 在黄色圈外，跳过
+        continue;
       }
 
-      // 两个条件都满足，选择最近的目标
       if (worldDistance < bestDistance) {
         bestDistance = worldDistance;
         bestTarget = enemy;
@@ -281,11 +262,9 @@ export class LockOnIndicator {
     }
 
     if (bestTarget) {
-      // 找到满足条件的目标，开始锁定
       this.lockedTarget = bestTarget;
       this.currentTarget = bestTarget;
     } else {
-      // 没有找到目标，更新 UI 显示空状态
       this.updateLockProgress(null);
     }
 
@@ -295,7 +274,10 @@ export class LockOnIndicator {
   /**
    * 世界坐标转屏幕坐标（像素）
    */
-  private worldToScreenPixels(position: THREE.Vector3, camera: THREE.Camera): { x: number; y: number } | null {
+  private worldToScreenPixels(
+    position: THREE.Vector3,
+    camera: THREE.Camera
+  ): { x: number; y: number } | null {
     const vector = position.clone();
     vector.project(camera);
 
@@ -305,8 +287,8 @@ export class LockOnIndicator {
     }
 
     return {
-      x: (vector.x + 1) / 2 * window.innerWidth,
-      y: -(vector.y - 1) / 2 * window.innerHeight
+      x: ((vector.x + 1) / 2) * window.innerWidth,
+      y: (-(vector.y - 1) / 2) * window.innerHeight,
     };
   }
 

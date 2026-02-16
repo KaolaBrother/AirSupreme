@@ -20,17 +20,17 @@ export class EnemyAI {
 
   // 基于导弹的运动系统
   public velocity: THREE.Vector3;
-  private targetPosition: THREE.Vector3 | null;  // 玩家位置（不是Object3D）
+  private targetPosition: THREE.Vector3 | null; // 玩家位置（不是Object3D）
 
   // 状态机
-  private currentState: EnemyAIState = EnemyAIState.CHASE;  // 默认状态
-  private stateTimer: number = 0;          // 当前状态持续时间
+  private currentState: EnemyAIState = EnemyAIState.CHASE; // 默认状态
+  private stateTimer: number = 0; // 当前状态持续时间
   private fixedDirectionTarget: THREE.Vector3; // 固定方向飞行状态的虚拟追踪点
-  private circleAngle: number = 0;            // 盘旋角度
+  private circleAngle: number = 0; // 盘旋角度
 
   // 盘旋随机参数（每次进入盘旋状态时重新生成）
-  private currentCircleRadius: number = 0;   // 当前盘旋半径（配置值 + 随机20-60米）
-  private currentCircleHeight: number = 0;   // 当前高度差（随机0-50米）
+  private currentCircleRadius: number = 0; // 当前盘旋半径（配置值 + 随机20-60米）
+  private currentCircleHeight: number = 0; // 当前高度差（随机0-50米）
 
   // 攻击参数
   private attackCooldown: number = 0;
@@ -78,33 +78,33 @@ export class EnemyAI {
   /**
    * 更新敌人
    */
-  public update(deltaTime: number, playerPosition: THREE.Vector3, friendlyMeshes?: THREE.Object3D[]): void {
-    // 安全检查：确保位置有效
+  public update(
+    deltaTime: number,
+    playerPosition: THREE.Vector3 | null,
+    friendlyMeshes?: THREE.Object3D[],
+    fireTarget: THREE.Vector3 | null = null
+  ): void {
     const pos = this.mesh.position;
     if (!isFinite(pos.x) || !isFinite(pos.y) || !isFinite(pos.z)) {
       console.error('Enemy position is NaN or Infinity, resetting to origin', {
-        position: { x: pos.x, y: pos.y, z: pos.z }
+        position: { x: pos.x, y: pos.y, z: pos.z },
       });
       this.mesh.position.set(0, 0, 0);
       return;
     }
 
-    // 更新目标引用（盘旋状态时会重新判断玩家和友军哪个更近）
     this.targetPosition = playerPosition;
 
-    // 存储友军列表（用于盘旋状态）
     if (friendlyMeshes) {
       this.friendlyMeshes = friendlyMeshes;
     }
 
-    // 更新状态计时器
     this.stateTimer -= deltaTime;
     if (this.stateTimer <= 0) {
       this.selectNewState();
       this.stateTimer = this.randomStateDuration();
     }
 
-    // 根据当前状态执行行为
     switch (this.currentState) {
       case EnemyAIState.CHASE:
         this.updateChase(deltaTime);
@@ -117,10 +117,8 @@ export class EnemyAI {
         break;
     }
 
-    // 移动敌机
     this.mesh.position.add(this.velocity.clone().multiplyScalar(deltaTime));
 
-    // 更新朝向（使用四元数直接指向速度方向）
     if (this.velocity.length() > 0) {
       const targetPos = this.mesh.position.clone().add(this.velocity);
       const dummy = new THREE.Object3D();
@@ -129,29 +127,25 @@ export class EnemyAI {
       this.mesh.quaternion.slerp(dummy.quaternion, 0.3);
     }
 
-    // 添加尾迹点（引擎位置在local坐标系 (0, 0, 2)）
     const engineLocalPos = new THREE.Vector3(0, 0, 2);
     const engineWorldPos = engineLocalPos.applyMatrix4(this.mesh.matrixWorld);
     this.trail.addPoint(engineWorldPos);
 
-    // 更新攻击冷却
     this.attackCooldown = Math.max(0, this.attackCooldown - deltaTime);
 
-    // 所有状态下都可以尝试射击（只要机头朝向目标）
-    if (this.attackCooldown <= 0 && this.targetPosition) {
-      const toPlayer = new THREE.Vector3().subVectors(this.targetPosition, this.mesh.position).normalize();
+    if (this.attackCooldown <= 0 && fireTarget) {
+      const toTarget = new THREE.Vector3().subVectors(fireTarget, this.mesh.position).normalize();
       const forward = this.velocity.clone().normalize();
-      const dot = toPlayer.dot(forward);
+      const dot = toTarget.dot(forward);
 
-      const fireAngle = Math.cos(this.config.fireSpreadAngle * Math.PI / 180);
+      const fireAngle = Math.cos((this.config.fireSpreadAngle * Math.PI) / 180);
 
       if (dot > fireAngle) {
-        this.fire(this.targetPosition);
+        this.fire(fireTarget);
         this.attackCooldown = this.config.attackCooldown;
       }
     }
 
-    // 更新尾迹
     this.trail.update(deltaTime);
   }
 
@@ -355,8 +349,12 @@ export class EnemyAI {
       );
 
       // 检查是否在战场边界内
-      if (target.x >= BATTLEFIELD_MIN && target.x <= BATTLEFIELD_MAX &&
-          target.z >= BATTLEFIELD_MIN && target.z <= BATTLEFIELD_MAX) {
+      if (
+        target.x >= BATTLEFIELD_MIN &&
+        target.x <= BATTLEFIELD_MAX &&
+        target.z >= BATTLEFIELD_MIN &&
+        target.z <= BATTLEFIELD_MAX
+      ) {
         return target;
       }
 
@@ -411,7 +409,7 @@ export class EnemyAI {
   public getHealth(): { current: number; max: number } {
     return {
       current: this.health.getCurrentHealth(),
-      max: this.health.getMaxHealth()
+      max: this.health.getMaxHealth(),
     };
   }
 

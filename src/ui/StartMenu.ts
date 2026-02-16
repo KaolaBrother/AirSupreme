@@ -1,20 +1,24 @@
-/**
- * 开始菜单
- */
+import { ModelPreview } from './ModelPreview';
+
 export class StartMenu {
   private container: HTMLDivElement;
   private settingsContainer: HTMLDivElement;
   private onStart?: (settings: GameSettings) => void;
+  private modelPreview: ModelPreview;
 
-  // 设置值
   private settings: GameSettings = {
-    difficulty: 1,      // 1-5
+    difficulty: 1,
     soundVolume: 0.7,
     playerLives: 3,
-    startLevel: 1,      // 起始关卡（1-5）
+    startLevel: 1,
+    gameMode: 'normal',
   };
 
   constructor() {
+    this.modelPreview = new ModelPreview();
+    this.modelPreview.setOnBack(() => {
+      this.container.style.display = 'flex';
+    });
     this.container = this.createContainer();
     this.settingsContainer = this.createSettingsPanel();
     this.container.appendChild(this.settingsContainer);
@@ -36,7 +40,8 @@ export class StartMenu {
           display: flex;
           flex-direction: column;
           align-items: center;
-          justify-content: center;
+          padding: 40px 20px;
+          overflow-y: auto;
           z-index: 1000;
           font-family: 'Arial', sans-serif;
           color: white;
@@ -114,8 +119,8 @@ export class StartMenu {
         }
 
         .start-btn {
-          padding: 20px 60px;
-          font-size: 28px;
+          padding: 20px 40px;
+          font-size: 24px;
           font-weight: bold;
           border: none;
           border-radius: 50px;
@@ -124,12 +129,36 @@ export class StartMenu {
           cursor: pointer;
           transition: all 0.3s;
           box-shadow: 0 5px 20px rgba(76, 175, 80, 0.4);
-          margin-bottom: 30px;
         }
 
         .start-btn:hover {
           transform: translateY(-3px);
           box-shadow: 0 8px 30px rgba(76, 175, 80, 0.6);
+        }
+
+        .button-container {
+          display: flex;
+          gap: 20px;
+          justify-content: center;
+          margin-bottom: 30px;
+        }
+
+        .preview-btn {
+          padding: 20px 40px;
+          font-size: 24px;
+          font-weight: bold;
+          border: none;
+          border-radius: 50px;
+          background: linear-gradient(135deg, #2196F3, #1976D2);
+          color: white;
+          cursor: pointer;
+          transition: all 0.3s;
+          box-shadow: 0 5px 15px rgba(33, 150, 243, 0.4);
+        }
+
+        .preview-btn:hover {
+          transform: translateY(-3px);
+          box-shadow: 0 8px 25px rgba(33, 150, 243, 0.6);
         }
 
         .controls-info {
@@ -163,6 +192,24 @@ export class StartMenu {
           margin-top: 15px;
           padding-top: 15px;
           border-top: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        #start-menu::-webkit-scrollbar {
+          width: 8px;
+        }
+
+        #start-menu::-webkit-scrollbar-track {
+          background: rgba(255, 255, 255, 0.1);
+          border-radius: 4px;
+        }
+
+        #start-menu::-webkit-scrollbar-thumb {
+          background: rgba(255, 255, 255, 0.3);
+          border-radius: 4px;
+        }
+
+        #start-menu::-webkit-scrollbar-thumb:hover {
+          background: rgba(255, 255, 255, 0.5);
         }
       </style>
 
@@ -240,14 +287,46 @@ export class StartMenu {
     panel.appendChild(soundRow);
     panel.appendChild(livesRow);
     panel.appendChild(levelRow);
-    panel.appendChild(livesRow);
+
+    // 游戏模式选择
+    const modeRow = this.createSettingRow(
+      '游戏模式',
+      this.settings.gameMode === 'normal' ? '普通模式' : 'Boss 模式',
+      () => {
+        this.settings.gameMode = this.settings.gameMode === 'normal' ? 'boss' : 'normal';
+        this.updateDisplay();
+      },
+      () => {
+        this.settings.gameMode = this.settings.gameMode === 'normal' ? 'boss' : 'normal';
+        this.updateDisplay();
+      }
+    );
+    modeRow.id = 'mode-row';
+    panel.appendChild(modeRow);
+
+    // 按钮容器 - 并排放置
+    const buttonContainer = document.createElement('div');
+    buttonContainer.className = 'button-container';
 
     // 开始按钮
     const startBtn = document.createElement('button');
     startBtn.className = 'start-btn';
-    startBtn.textContent = '🎮 开始游戏';
+    startBtn.textContent = this.settings.gameMode === 'normal' ? '🎮 开始游戏' : '👹 Boss 挑战';
+    startBtn.id = 'start-btn';
     startBtn.onclick = () => this.startGame();
-    panel.appendChild(startBtn);
+    buttonContainer.appendChild(startBtn);
+
+    // 模型预览按钮
+    const previewBtn = document.createElement('button');
+    previewBtn.className = 'preview-btn';
+    previewBtn.innerHTML = '✈️ 模型预览';
+    previewBtn.onclick = () => {
+      this.container.style.display = 'none';
+      this.modelPreview.show();
+    };
+    buttonContainer.appendChild(previewBtn);
+
+    panel.appendChild(buttonContainer);
 
     // 控制说明
     const controlsInfo = document.createElement('div');
@@ -330,15 +409,32 @@ export class StartMenu {
   }
 
   private updateDisplay(): void {
-    const difficultyValue = document.getElementById('难度-value') || document.querySelector('#difficulty-row .setting-value');
-    const soundValue = document.getElementById('音效音量-value') || document.querySelector('#sound-row .setting-value');
-    const livesValue = document.getElementById('生命数-value') || document.querySelector('#lives-row .setting-value');
-    const levelValue = document.getElementById('起始关卡-value') || document.querySelector('#level-row .setting-value');
+    const difficultyValue =
+      document.getElementById('难度-value') ||
+      document.querySelector('#difficulty-row .setting-value');
+    const soundValue =
+      document.getElementById('音效音量-value') ||
+      document.querySelector('#sound-row .setting-value');
+    const livesValue =
+      document.getElementById('生命数-value') ||
+      document.querySelector('#lives-row .setting-value');
+    const levelValue =
+      document.getElementById('起始关卡-value') ||
+      document.querySelector('#level-row .setting-value');
+    const modeValue =
+      document.getElementById('游戏模式-value') ||
+      document.querySelector('#mode-row .setting-value');
+    const startBtn = document.getElementById('start-btn');
 
-    if (difficultyValue) difficultyValue.textContent = this.getDifficultyText(this.settings.difficulty);
+    if (difficultyValue)
+      difficultyValue.textContent = this.getDifficultyText(this.settings.difficulty);
     if (soundValue) soundValue.textContent = `${Math.round(this.settings.soundVolume * 100)}%`;
     if (livesValue) livesValue.textContent = `${this.settings.playerLives}`;
     if (levelValue) levelValue.textContent = `第${this.settings.startLevel}关`;
+    if (modeValue)
+      modeValue.textContent = this.settings.gameMode === 'normal' ? '普通模式' : 'Boss 模式';
+    if (startBtn)
+      startBtn.textContent = this.settings.gameMode === 'normal' ? '🎮 开始游戏' : '👹 Boss 挑战';
   }
 
   private startGame(): void {
@@ -363,5 +459,6 @@ export interface GameSettings {
   difficulty: number;
   soundVolume: number;
   playerLives: number;
-  startLevel: number;    // 起始关卡（1-5）
+  startLevel: number;
+  gameMode: 'normal' | 'boss';
 }

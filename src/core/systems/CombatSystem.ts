@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { IGameSystem } from '@/core/interfaces/IGameSystem';
 import { EventBus, GameEventType } from '@/core/EventBus';
 import { ProjectilePool } from '@/features/combat/ProjectilePool';
+import { BossProjectilePool } from '@/features/combat/BossProjectilePool';
 import { MissileSystem } from '@/features/combat/MissileSystem';
 import { ParticleSystem } from '@/features/effects/ParticleSystem';
 import { Faction, areHostile } from '@/core/Faction';
@@ -17,6 +18,7 @@ export class CombatSystem implements IGameSystem {
 
   private playerProjectilePool: ProjectilePool;
   private enemyProjectilePool: ProjectilePool;
+  private bossProjectilePool: BossProjectilePool;
   private missileSystem: MissileSystem;
 
   private playerMesh: THREE.Group;
@@ -24,13 +26,10 @@ export class CombatSystem implements IGameSystem {
 
   private damageMultiplier: number = 1;
 
-  constructor(
-    scene: THREE.Scene,
-    particleSystem: ParticleSystem,
-    playerMesh: THREE.Group
-  ) {
+  constructor(scene: THREE.Scene, particleSystem: ParticleSystem, playerMesh: THREE.Group) {
     this.playerProjectilePool = new ProjectilePool(scene);
     this.enemyProjectilePool = new ProjectilePool(scene);
+    this.bossProjectilePool = new BossProjectilePool(scene);
     this.missileSystem = new MissileSystem(scene, particleSystem);
     this.playerMesh = playerMesh;
     this.playerPosition = new THREE.Vector3();
@@ -38,11 +37,7 @@ export class CombatSystem implements IGameSystem {
 
   init(): void {
     EventBus.on(GameEventType.PLAYER_FIRED, ({ payload }) => {
-      this.playerProjectilePool.fire(
-        payload.position,
-        payload.direction,
-        this.getPlayerDamage()
-      );
+      this.playerProjectilePool.fire(payload.position, payload.direction, this.getPlayerDamage());
     });
 
     EventBus.on(GameEventType.ENEMY_FIRED, ({ payload }) => {
@@ -74,6 +69,7 @@ export class CombatSystem implements IGameSystem {
     this.playerPosition.copy(this.playerMesh.position);
     this.playerProjectilePool.update(deltaTime);
     this.enemyProjectilePool.update(deltaTime);
+    this.bossProjectilePool.update(deltaTime);
     this.missileSystem.update(deltaTime);
   }
 
@@ -136,6 +132,28 @@ export class CombatSystem implements IGameSystem {
         }
       }
     );
+
+    this.bossProjectilePool.checkCollisions(
+      targets.map((t) => t.mesh),
+      (hitObject, projectileMesh, damage) => {
+        const projectileFaction = projectileMesh.userData.faction as Faction | undefined;
+
+        if (!projectileFaction) return;
+
+        const target = targets.find((t) => t.mesh === hitObject);
+        if (!target) return;
+
+        if (areHostile(projectileFaction, target.faction)) {
+          if (target.faction === Faction.NEUTRAL) {
+            onPlayerHit(damage);
+          } else if (target.faction === Faction.ENEMY) {
+            onEnemyHit(target.mesh, damage);
+          } else if (target.faction === Faction.FRIENDLY) {
+            onFriendlyHit(target.mesh, damage);
+          }
+        }
+      }
+    );
   }
 
   updateEnemyMeshes(enemyMeshes: THREE.Object3D[]): void {
@@ -148,6 +166,10 @@ export class CombatSystem implements IGameSystem {
 
   getEnemyProjectilePool(): ProjectilePool {
     return this.enemyProjectilePool;
+  }
+
+  getBossProjectilePool(): BossProjectilePool {
+    return this.bossProjectilePool;
   }
 
   getMissileSystem(): MissileSystem {

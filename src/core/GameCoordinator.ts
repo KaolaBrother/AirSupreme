@@ -16,11 +16,15 @@ import { FriendlyAI } from '@/features/enemy/FriendlyAI';
 import { EnemyType, ENEMY_CONFIGS } from '@/features/enemy/EnemyTypes';
 import { PowerUpType, POWER_UP_CONFIGS } from '@/features/powerups/PowerUpSystem';
 import { HUD } from '@/ui/HUD';
-import { StartMenu } from '@/ui/StartMenu';
+import { StartMenu, GameSettings } from '@/ui/StartMenu';
 import { EnemyHealthBars } from '@/ui/EnemyHealthBars';
 import { LockOnIndicator } from '@/ui/LockOnIndicator';
 import { ThirdPersonCamera } from '@/features/camera/ThirdPersonCamera';
+import { BossMissileIndicator } from '@/ui/BossMissileIndicator';
 import { GAME_CONSTANTS } from '@/config';
+import { BossAI, createBossMesh } from '@/features/boss/BossAI';
+import { BOSS_CONFIGS, BOSS_MISSILE_CONFIG, getBossForLevel } from '@/features/boss/BossTypes';
+import { Faction } from '@/core/Faction';
 
 export class GameCoordinator {
   private gameLoop: GameLoop;
@@ -52,6 +56,13 @@ export class GameCoordinator {
 
   private currentLevelId: number = 1;
   private audioInitialized: boolean = false;
+
+  // Boss 战相关
+  private bossMode: boolean = false; // Boss 模式：直接 Boss 战，跳过波次
+  private inLevelBossBattle: boolean = false; // 普通模式：波次完成后的 Boss 战
+  private currentBoss: BossAI | null = null;
+  private bossFriendlySpawnTimer: number = 0;
+  private bossIndicator: BossMissileIndicator;
 
   constructor() {
     this.gameLoop = new GameLoop();
@@ -88,6 +99,7 @@ export class GameCoordinator {
     this.lockOnIndicator = new LockOnIndicator();
     this.enemyHealthBars = new EnemyHealthBars();
     this.startMenu = new StartMenu();
+    this.bossIndicator = new BossMissileIndicator();
 
     this.initSystems();
     this.setupEventListeners();
@@ -165,26 +177,14 @@ export class GameCoordinator {
     EventBus.on(GameEventType.LEVEL_COMPLETE, () => {
       this.audioManager.playLevelUp();
 
-      // 清理当前关卡残留
       this.combatSystem.getPlayerProjectilePool().clear();
       this.combatSystem.getEnemyProjectilePool().clear();
       this.particleSystem.clear();
       this.powerUpSystem.clear();
 
-      // 停止当前音乐，准备切换
       this.musicSystem.stopMusic();
 
-      this.currentLevelId++;
-      this.enemySystem.loadLevel(this.currentLevelId);
-
-      // 更新 HUD 显示新关卡的敌人数量
-      this.hud.updateRemainingEnemies(this.enemySystem.getTotalEnemyCount());
-
-      setTimeout(() => {
-        // 播放新关卡的音乐
-        this.musicSystem.playLevelMusic(this.getLevelMusic(this.currentLevelId));
-        this.enemySystem.startWave(this.playerSystem.getPosition());
-      }, 2000);
+      this.startLevelBossBattle();
     });
 
     EventBus.on(GameEventType.POWERUP_COLLECTED, ({ payload }) => {
@@ -250,10 +250,11 @@ export class GameCoordinator {
   }
 
   private setupStartMenu(): void {
-    this.startMenu.setOnStart((settings) => {
+    this.startMenu.setOnStart((settings: GameSettings) => {
       this.playerSystem.setLives(settings.playerLives);
       this.audioManager.setSFXVolume(settings.soundVolume);
       this.currentLevelId = settings.startLevel;
+      this.bossMode = settings.gameMode === 'boss';
       this.gameState.start();
       this.start();
     });
@@ -400,7 +401,8 @@ export class GameCoordinator {
 
     group.scale.set(scaleMultiplier, scaleMultiplier, scaleMultiplier);
 
-    const bodyGeometry = new THREE.CylinderGeometry(bodySize * 0.4, bodySize * 0.3, bodyLength, 8);
+    // 机身 - 锥形，机头细机尾粗，沿 Z 轴
+    const bodyGeometry = new THREE.ConeGeometry(bodySize * 0.4, bodyLength, 8);
     const bodyMaterial = new THREE.MeshStandardMaterial({
       color: bodyColor,
       metalness: 0.7,
@@ -408,23 +410,10 @@ export class GameCoordinator {
     });
     const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
     body.rotation.x = Math.PI / 2;
-    body.rotation.z = Math.PI / 2;
     body.castShadow = true;
     group.add(body);
 
-    const noseGeometry = new THREE.ConeGeometry(bodySize * 0.3, bodyLength * 0.25, 8);
-    const noseMaterial = new THREE.MeshStandardMaterial({
-      color: accentColor,
-      metalness: 0.8,
-      roughness: 0.2,
-    });
-    const nose = new THREE.Mesh(noseGeometry, noseMaterial);
-    nose.rotation.x = Math.PI / 2;
-    nose.rotation.z = Math.PI / 2;
-    nose.position.set(0, 0, bodyLength / 2 + 0.5);
-    nose.castShadow = true;
-    group.add(nose);
-
+    // 主翼 - 在机身中后部
     const wingGeometry = new THREE.BoxGeometry(wingSpan, 0.15, 1.2);
     const wingMaterial = new THREE.MeshStandardMaterial({
       color: wingColor,
@@ -432,10 +421,11 @@ export class GameCoordinator {
       roughness: 0.4,
     });
     const wings = new THREE.Mesh(wingGeometry, wingMaterial);
-    wings.position.set(0, 0, -0.8);
+    wings.position.set(0, 0, bodyLength * 0.2);
     wings.castShadow = true;
     group.add(wings);
 
+    // 驾驶舱 - 在机身前部
     const cockpitGeometry = new THREE.SphereGeometry(bodySize * 0.35, 8, 8);
     const cockpitMaterial = new THREE.MeshStandardMaterial({
       color: accentColor,
@@ -445,22 +435,25 @@ export class GameCoordinator {
       emissiveIntensity: 0.3,
     });
     const cockpit = new THREE.Mesh(cockpitGeometry, cockpitMaterial);
-    cockpit.position.set(0, bodySize * 0.25, 0.5);
+    cockpit.position.set(0, bodySize * 0.25, -bodyLength * 0.2);
     cockpit.castShadow = true;
     group.add(cockpit);
 
+    // 水平尾翼 - 在机尾
     const tailGeometry = new THREE.BoxGeometry(tailSize, 0.12, 1);
     const tail = new THREE.Mesh(tailGeometry, wingMaterial);
-    tail.position.set(0, 0, -bodyLength / 2 - 0.3);
+    tail.position.set(0, 0, bodyLength * 0.45);
     tail.castShadow = true;
     group.add(tail);
 
+    // 垂直尾翼 - 在机尾上方
     const vStabGeometry = new THREE.BoxGeometry(0.15, 1.2, 0.8);
     const vStab = new THREE.Mesh(vStabGeometry, wingMaterial);
-    vStab.position.set(0, 0.6, -bodyLength / 2 + 0.1);
+    vStab.position.set(0, 0.6, bodyLength * 0.4);
     vStab.castShadow = true;
     group.add(vStab);
 
+    // 引擎 - 在机尾末端
     const engineGeometry = new THREE.CylinderGeometry(bodySize * 0.2, bodySize * 0.15, 0.5, 8);
     const engineMaterial = new THREE.MeshBasicMaterial({
       color: 0xff6600,
@@ -469,7 +462,7 @@ export class GameCoordinator {
     });
     const engine = new THREE.Mesh(engineGeometry, engineMaterial);
     engine.rotation.x = Math.PI / 2;
-    engine.position.set(0, 0, -bodyLength / 2 - 0.8);
+    engine.position.set(0, 0, bodyLength * 0.5 + 0.3);
     group.add(engine);
 
     group.name = config.type;
@@ -515,7 +508,13 @@ export class GameCoordinator {
 
     this.playerSystem.update(deltaTime);
     this.combatSystem.update(deltaTime);
-    this.enemySystem.updateWithPlayer(deltaTime, this.playerSystem.getPosition());
+
+    if ((this.bossMode || this.inLevelBossBattle) && this.currentBoss) {
+      this.updateBossBattle(deltaTime);
+    } else {
+      this.enemySystem.updateWithPlayer(deltaTime, this.playerSystem.getPosition());
+    }
+
     this.powerUpSystem.update(deltaTime);
 
     const enemyMeshes = this.enemySystem.getEnemyMeshes();
@@ -556,8 +555,166 @@ export class GameCoordinator {
     this.updateMissileRespawn(deltaTime);
   }
 
+  private updateBossBattle(deltaTime: number): void {
+    if (!this.currentBoss) return;
+
+    const friendlyMeshes = this.enemySystem.getFriendlyAIs().map((f) => f.getMesh());
+
+    const bossMissileSystem = this.currentBoss.getMissileSystem();
+    const bossPartMeshes = this.currentBoss.getCollisionPartMeshes();
+    const bossAndMissiles = [...bossPartMeshes, ...bossMissileSystem.getMissileMeshes()];
+    this.enemySystem.updateWithPlayer(deltaTime, this.playerSystem.getPosition(), bossAndMissiles);
+
+    this.currentBoss.update(deltaTime, this.playerSystem.getMesh(), friendlyMeshes);
+
+    bossMissileSystem.checkCollisions(
+      [this.playerAircraft, ...friendlyMeshes],
+      (target, _damage) => {
+        this.particleSystem.createExplosion(target.position.clone(), 1);
+        if (target === this.playerAircraft) {
+          if (!this.playerSystem.isShieldActive()) {
+            this.playerSystem.getHealth().takeDamage(BOSS_MISSILE_CONFIG.DAMAGE);
+          }
+        } else {
+          const friendly = this.enemySystem.getFriendlyAIs().find((f) => f.getMesh() === target);
+          friendly?.takeDamage(BOSS_MISSILE_CONFIG.DAMAGE);
+        }
+      }
+    );
+
+    const missileTargets = [
+      this.currentBoss.getMesh(),
+      ...bossPartMeshes,
+      ...bossMissileSystem.getMissileMeshes(),
+    ];
+    this.combatSystem.getMissileSystem().checkCollisions(missileTargets, (target) => {
+      const hitWorldPos = new THREE.Vector3();
+      target.getWorldPosition(hitWorldPos);
+
+      const isBossPart = bossPartMeshes.some((p) => p === target);
+      if (target === this.currentBoss?.getMesh() || isBossPart) {
+        this.currentBoss?.takeDamage(GAME_CONSTANTS.MISSILE.DAMAGE);
+        this.particleSystem.createExplosion(hitWorldPos, 1.5);
+        this.audioManager.playExplosion();
+      } else {
+        const missile = bossMissileSystem.getMissiles().find((m) => m.getMesh() === target);
+        if (missile) {
+          missile.takeDamage(GAME_CONSTANTS.MISSILE.DAMAGE);
+          this.particleSystem.createExplosion(hitWorldPos, 0.8);
+        }
+      }
+    });
+
+    const bossTargets = [...bossPartMeshes, ...bossMissileSystem.getMissileMeshes()];
+
+    this.combatSystem.getPlayerProjectilePool().checkCollisions(bossTargets, (target) => {
+      const partMesh = bossPartMeshes.find((p) => p === target);
+      if (partMesh || target === this.currentBoss?.getMesh()) {
+        this.currentBoss?.takeDamage(this.combatSystem['damageMultiplier'] * 12.5);
+        const hitPos = target.position.clone();
+        this.particleSystem.createHit(hitPos);
+      } else {
+        const missile = bossMissileSystem.getMissiles().find((m) => m.getMesh() === target);
+        if (missile) {
+          missile.takeDamage(this.combatSystem['damageMultiplier'] * 12.5);
+        }
+      }
+    });
+
+    this.combatSystem
+      .getEnemyProjectilePool()
+      .checkCollisions(bossTargets, (target, _projectile, damage) => {
+        const partMesh = bossPartMeshes.find((p) => p === target);
+        if (partMesh || target === this.currentBoss?.getMesh()) {
+          this.currentBoss?.takeDamage(damage);
+          this.particleSystem.createHit(target.position);
+        } else {
+          const missile = bossMissileSystem.getMissiles().find((m) => m.getMesh() === target);
+          if (missile) {
+            missile.takeDamage(damage);
+            this.particleSystem.createExplosion(target.position.clone(), 0.5);
+          }
+        }
+      });
+
+    this.bossFriendlySpawnTimer += deltaTime;
+    if (this.bossFriendlySpawnTimer >= 30) {
+      this.bossFriendlySpawnTimer = 0;
+      this.spawnFriendlyAI();
+      this.hud.showPowerUpBig('✈️', '友军支援');
+    }
+
+    this.updateBossMissileIndicators();
+  }
+
+  private updateBossMissileIndicators(): void {
+    if (!this.currentBoss) {
+      this.bossIndicator.clear();
+      return;
+    }
+
+    const bossMissileSystem = this.currentBoss.getMissileSystem();
+    const missiles = bossMissileSystem.getMissiles();
+    const playerPosition = this.playerSystem.getPosition();
+    const camera = this.gameScene.camera;
+    const playerRight = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
+
+    // 只显示锁定玩家的导弹指示器
+    const indicatorData = missiles
+      .filter((missile) => missile.isTargetingPlayer)
+      .filter((missile) => {
+        // 验证导弹位置有效性，过滤掉位置无效的导弹
+        const pos = missile.getMesh().position;
+        return isFinite(pos.x) && isFinite(pos.y) && isFinite(pos.z);
+      })
+      .map((missile, index) => {
+        const screenPos = this.getScreenPosition(missile.getMesh().position);
+        const distance = playerPosition.distanceTo(missile.getMesh().position);
+        const inView = this.isPositionInView(missile.getMesh().position);
+        const toMissile = missile.getMesh().position.clone().sub(playerPosition);
+        const isOnRight = playerRight.dot(toMissile) > 0;
+
+        return {
+          id: `boss-missile-${index}`,
+          screenPos,
+          distance,
+          inView,
+          isOnRight,
+        };
+      });
+
+    this.bossIndicator.update(indicatorData);
+  }
+
+  private getScreenPosition(worldPos: THREE.Vector3): { x: number; y: number } {
+    const camera = this.gameScene.camera;
+    const vector = worldPos.clone();
+    vector.project(camera);
+
+    return {
+      x: ((vector.x + 1) / 2) * window.innerWidth,
+      y: ((-vector.y + 1) / 2) * window.innerHeight,
+    };
+  }
+
+  private isPositionInView(worldPos: THREE.Vector3): boolean {
+    const camera = this.gameScene.camera;
+    const vector = worldPos.clone();
+    vector.project(camera);
+
+    return vector.x >= -1 && vector.x <= 1 && vector.y >= -1 && vector.y <= 1 && vector.z <= 1;
+  }
+
   private handleMissileInput(input: ReturnType<InputHandler['getState']>): void {
-    const enemyMeshes = this.enemySystem.getEnemyMeshes();
+    let targetMeshes: THREE.Object3D[] = this.enemySystem.getEnemyMeshes();
+
+    if (this.bossMode && this.currentBoss) {
+      const bossPartMeshes = this.currentBoss.getCollisionParts();
+      targetMeshes = [...bossPartMeshes, ...targetMeshes];
+      const bossMissiles = this.currentBoss.getMissileSystem().getMissileMeshes();
+      targetMeshes = [...targetMeshes, ...bossMissiles];
+    }
+
     const enemyScreenPos = this.enemyHealthBars.getFirstEnemyScreenPos();
 
     if (this.missileCount <= 0) {
@@ -574,7 +731,7 @@ export class GameCoordinator {
     if (this.lockOnIndicator.isLocking()) {
       const lockComplete = this.lockOnIndicator.update(
         this.playerSystem.getPosition(),
-        enemyMeshes,
+        targetMeshes,
         this.gameScene.camera,
         0.016,
         enemyScreenPos
@@ -691,8 +848,18 @@ export class GameCoordinator {
         maxHealth: f.getHealth().max,
       }));
 
+    // Boss 血条数据
+    const bossData: Array<{ mesh: THREE.Object3D; currentHealth: number; maxHealth: number }> = [];
+    if (this.bossMode && this.currentBoss && this.currentBoss.isAlive()) {
+      bossData.push({
+        mesh: this.currentBoss.getMesh(),
+        currentHealth: this.currentBoss.getHealth().current,
+        maxHealth: this.currentBoss.getHealth().max,
+      });
+    }
+
     this.enemyHealthBars.update(
-      enemyData,
+      [...enemyData, ...bossData],
       friendlyData,
       this.gameScene.camera,
       this.playerSystem.getPosition()
@@ -729,12 +896,6 @@ export class GameCoordinator {
       this.audioInitialized = true;
     }
 
-    this.enemySystem.loadLevel(this.currentLevelId);
-
-    setTimeout(() => {
-      this.enemySystem.startWave(this.playerSystem.getPosition());
-    }, GAME_CONSTANTS.LEVEL.START_DELAY * 1000);
-
     this.missileCount = GAME_CONSTANTS.MISSILE.STARTING_MISSILES;
     this.hud.updateMissiles(this.missileCount);
 
@@ -743,13 +904,189 @@ export class GameCoordinator {
       () => this.render()
     );
     this.audioManager.startEngine();
-    this.musicSystem.playLevelMusic(this.getLevelMusic(this.currentLevelId));
 
-    // 初始福利：游戏开始1秒后自动召唤友军
+    if (this.bossMode) {
+      this.startBossBattle();
+    } else {
+      this.enemySystem.loadLevel(this.currentLevelId);
+
+      setTimeout(() => {
+        this.enemySystem.startWave(this.playerSystem.getPosition());
+      }, GAME_CONSTANTS.LEVEL.START_DELAY * 1000);
+
+      this.musicSystem.playLevelMusic(this.getLevelMusic(this.currentLevelId));
+
+      setTimeout(() => {
+        this.spawnFriendlyAI();
+        this.hud.showPowerUpBig('✈️', '召唤友军');
+      }, 1000);
+    }
+  }
+
+  private startBossBattle(): void {
+    this.musicSystem.playBossMusic();
+
+    // 加载当前关卡的地形
+    this.enemySystem.loadLevel(this.currentLevelId);
+
+    const bossType = getBossForLevel(this.currentLevelId);
+    if (!bossType) return;
+
+    const config = BOSS_CONFIGS[bossType];
+    const mesh = createBossMesh(config);
+
+    const playerPos = this.playerSystem.getPosition();
+    const spawnOffset = new THREE.Vector3(
+      (Math.random() - 0.5) * 200,
+      50 + Math.random() * 50,
+      (Math.random() - 0.5) * 200
+    );
+    mesh.position.copy(playerPos).add(spawnOffset);
+
+    this.gameScene.scene.add(mesh);
+
+    this.currentBoss = new BossAI(mesh, config, this.gameScene.scene, this.particleSystem);
+
+    this.currentBoss.onFire = (position, direction, damage) => {
+      this.combatSystem
+        .getBossProjectilePool()
+        .fire(position, direction, damage, this.currentBoss?.getMesh(), Faction.ENEMY);
+      this.audioManager.playShoot();
+    };
+
+    this.currentBoss.onDestroy = (position, bossConfig) => {
+      this.audioManager.playExplosion();
+      this.particleSystem.createExplosion(position, config.scale);
+      this.gameState.addScore(bossConfig.scoreValue);
+      this.playerStats.addScore(bossConfig.scoreValue);
+
+      this.bossIndicator.clear();
+
+      if (this.currentBoss) {
+        this.currentBoss.getMissileSystem().dispose();
+      }
+
+      for (const friendly of this.enemySystem.getFriendlyAIs()) {
+        friendly.dispose();
+      }
+      this.enemySystem['friendlyAIs'] = [];
+
+      this.combatSystem.getPlayerProjectilePool().clear();
+      this.combatSystem.getEnemyProjectilePool().clear();
+      this.particleSystem.clear();
+
+      this.hud.showPowerUpBig('🏆', 'Boss 已击败！');
+      this.currentBoss = null;
+
+      setTimeout(() => {
+        this.currentLevelId++;
+        if (this.currentLevelId <= 5) {
+          this.hud.showPowerUpBig('⏭️', `进入第 ${this.currentLevelId} 关`);
+          setTimeout(() => {
+            this.startBossBattle();
+          }, 2000);
+        } else {
+          this.gameState.setStatus(GameStatus.GAME_OVER);
+          this.musicSystem.stopMusic();
+          this.hud.showGameOver(this.gameState.getScore());
+        }
+      }, 1000);
+    };
+
+    this.currentBoss.onMissileFired = () => {
+      this.audioManager.playMissileLaunch();
+    };
+
+    this.bossFriendlySpawnTimer = 0;
+
     setTimeout(() => {
       this.spawnFriendlyAI();
       this.hud.showPowerUpBig('✈️', '召唤友军');
-      console.log('初始福利：自动召唤友军');
+    }, 1000);
+  }
+
+  private startLevelBossBattle(): void {
+    this.inLevelBossBattle = true;
+    this.musicSystem.playBossMusic();
+
+    const bossType = getBossForLevel(this.currentLevelId);
+    if (!bossType) return;
+
+    const config = BOSS_CONFIGS[bossType];
+    const mesh = createBossMesh(config);
+
+    const playerPos = this.playerSystem.getPosition();
+    const spawnOffset = new THREE.Vector3(
+      (Math.random() - 0.5) * 200,
+      50 + Math.random() * 50,
+      (Math.random() - 0.5) * 200
+    );
+    mesh.position.copy(playerPos).add(spawnOffset);
+
+    this.gameScene.scene.add(mesh);
+
+    this.currentBoss = new BossAI(mesh, config, this.gameScene.scene, this.particleSystem);
+
+    this.currentBoss.onFire = (position, direction, damage) => {
+      this.combatSystem
+        .getBossProjectilePool()
+        .fire(position, direction, damage, this.currentBoss?.getMesh(), Faction.ENEMY);
+      this.audioManager.playShoot();
+    };
+
+    this.currentBoss.onDestroy = (position, bossConfig) => {
+      this.audioManager.playExplosion();
+      this.particleSystem.createExplosion(position, config.scale);
+      this.gameState.addScore(bossConfig.scoreValue);
+      this.playerStats.addScore(bossConfig.scoreValue);
+
+      this.bossIndicator.clear();
+
+      if (this.currentBoss) {
+        this.currentBoss.getMissileSystem().dispose();
+      }
+
+      for (const friendly of this.enemySystem.getFriendlyAIs()) {
+        friendly.dispose();
+      }
+      this.enemySystem['friendlyAIs'] = [];
+
+      this.combatSystem.getPlayerProjectilePool().clear();
+      this.combatSystem.getEnemyProjectilePool().clear();
+      this.particleSystem.clear();
+
+      this.hud.showPowerUpBig('🏆', 'Boss 已击败！');
+      this.currentBoss = null;
+      this.inLevelBossBattle = false;
+
+      setTimeout(() => {
+        this.currentLevelId++;
+        if (this.currentLevelId <= 5) {
+          this.hud.showPowerUpBig('⏭️', `进入第 ${this.currentLevelId} 关`);
+          this.enemySystem.loadLevel(this.currentLevelId);
+          this.hud.updateRemainingEnemies(this.enemySystem.getTotalEnemyCount());
+
+          setTimeout(() => {
+            this.musicSystem.playLevelMusic(this.getLevelMusic(this.currentLevelId));
+            this.enemySystem.startWave(this.playerSystem.getPosition());
+          }, 2000);
+        } else {
+          this.gameState.setStatus(GameStatus.GAME_OVER);
+          this.musicSystem.stopMusic();
+          this.hud.showGameOver(this.gameState.getScore());
+        }
+      }, 1000);
+    };
+
+    this.currentBoss.onMissileFired = () => {
+      this.audioManager.playMissileLaunch();
+    };
+
+    this.bossFriendlySpawnTimer = 0;
+
+    setTimeout(() => {
+      this.spawnFriendlyAI();
+      this.hud.showPowerUpBig('✈️', '召唤友军');
     }, 1000);
   }
 

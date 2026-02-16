@@ -62,6 +62,7 @@ export enum LevelMusic {
   SNOW = 'SNOW',
   OCEAN = 'OCEAN',
   CITY = 'CITY',
+  BOSS = 'BOSS',
 }
 
 export class MusicSystem {
@@ -605,6 +606,244 @@ export class MusicSystem {
     return { notes, waveform: 'sine', volume: 0.1 };
   }
 
+  private createBossMelodyA(): MusicTrack {
+    const notes: NoteEvent[] = [
+      { note: NOTE.E4, duration: 0.25 },
+      { note: NOTE.E4, duration: 0.25 },
+      { note: NOTE.E4, duration: 0.25 },
+      { note: NOTE.G4, duration: 0.25 },
+      { note: NOTE.A4, duration: 0.25 },
+      { note: NOTE.B4, duration: 0.25 },
+      { note: NOTE.C5, duration: 0.5 },
+      { note: NOTE.B4, duration: 0.25 },
+      { note: NOTE.A4, duration: 0.25 },
+      { note: NOTE.G4, duration: 0.25 },
+      { note: NOTE.E4, duration: 0.25 },
+      { note: NOTE.D4, duration: 0.5 },
+      { note: NOTE.E4, duration: 0.25 },
+      { note: NOTE.G4, duration: 0.25 },
+      { note: NOTE.B4, duration: 0.25 },
+      { note: NOTE.D5, duration: 0.25 },
+      { note: NOTE.C5, duration: 0.5 },
+      { note: NOTE.B4, duration: 0.25 },
+      { note: NOTE.A4, duration: 0.25 },
+      { note: NOTE.G4, duration: 0.25 },
+      { note: NOTE.A4, duration: 0.25 },
+      { note: NOTE.B4, duration: 0.25 },
+      { note: NOTE.A4, duration: 0.25 },
+      { note: NOTE.G4, duration: 0.25 },
+      { note: NOTE.E4, duration: 0.25 },
+      { note: NOTE.D4, duration: 0.25 },
+      { note: NOTE.E4, duration: 0.25 },
+      { note: NOTE.G4, duration: 0.5 },
+      { note: NOTE.A4, duration: 0.25 },
+      { note: NOTE.G4, duration: 0.25 },
+      { note: NOTE.E4, duration: 0.25 },
+      { note: NOTE.F4S, duration: 0.25 },
+      { note: NOTE.G4, duration: 0.25 },
+      { note: NOTE.A4, duration: 0.25 },
+      { note: NOTE.B4, duration: 0.5 },
+      { note: NOTE.A4, duration: 0.25 },
+      { note: NOTE.G4, duration: 0.25 },
+      { note: NOTE.E4, duration: 0.5 },
+      { note: NOTE.D4, duration: 0.25 },
+      { note: NOTE.E4, duration: 0.25 },
+      { note: NOTE.G4, duration: 0.25 },
+      { note: NOTE.A4, duration: 0.25 },
+      { note: NOTE.B4, duration: 0.5 },
+      { note: NOTE.C5, duration: 0.25 },
+      { note: NOTE.B4, duration: 0.25 },
+      { note: NOTE.A4, duration: 0.25 },
+      { note: NOTE.G4, duration: 0.25 },
+      { note: NOTE.E4, duration: 0.5 },
+      { note: NOTE.D4, duration: 0.25 },
+      { note: NOTE.E4, duration: 0.25 },
+      { note: NOTE.G4, duration: 0.25 },
+      { note: NOTE.A4, duration: 0.25 },
+      { note: NOTE.B4, duration: 0.5 },
+      { note: NOTE.C5, duration: 0.25 },
+      { note: NOTE.B4, duration: 0.25 },
+      { note: NOTE.A4, duration: 0.25 },
+      { note: NOTE.G4, duration: 0.25 },
+      { note: NOTE.E4, duration: 0.5 },
+      { note: NOTE.D4, duration: 0.25 },
+      { note: NOTE.E4, duration: 0.25 },
+      { note: NOTE.G4, duration: 0.25 },
+      { note: NOTE.A4, duration: 0.25 },
+      { note: NOTE.B4, duration: 0.25 },
+      { note: NOTE.C5, duration: 0.5 },
+      { note: NOTE.D4, duration: 0.25 },
+      { note: NOTE.E4, duration: 0.75 },
+    ];
+    return { notes, waveform: 'sawtooth', volume: 0.25 };
+  }
+
+  private createBossMelodyB(): MusicTrack {
+    const notes: NoteEvent[] = [
+      { note: NOTE.C5, duration: 0.25 },
+      { note: NOTE.D5, duration: 0.25 },
+      { note: NOTE.E5, duration: 0.5 },
+      { note: NOTE.D5, duration: 0.25 },
+      { note: NOTE.C5, duration: 0.25 },
+      { note: NOTE.B4, duration: 0.5 },
+      { note: NOTE.A4, duration: 0.25 },
+      { note: NOTE.G4, duration: 0.25 },
+      { note: NOTE.F4S, duration: 0.25 },
+      { note: NOTE.E4, duration: 0.25 },
+      { note: NOTE.D4, duration: 0.5 },
+      { note: NOTE.E4, duration: 0.25 },
+      { note: NOTE.G4, duration: 0.25 },
+      { note: NOTE.B4, duration: 0.25 },
+      { note: NOTE.C5, duration: 0.25 },
+      { note: NOTE.D5, duration: 0.5 },
+      { note: NOTE.C5, duration: 0.25 },
+      { note: NOTE.B4, duration: 0.25 },
+      { note: NOTE.A4, duration: 0.25 },
+      { note: NOTE.G4, duration: 0.25 },
+      { note: NOTE.A4, duration: 0.25 },
+      { note: NOTE.A4, duration: 0.25 },
+      { note: NOTE.B4, duration: 0.25 },
+      { note: NOTE.C5, duration: 0.25 },
+      { note: NOTE.B4, duration: 0.25 },
+      { note: NOTE.A4, duration: 0.25 },
+      { note: NOTE.G4, duration: 0.5 },
+      { note: NOTE.E4, duration: 0.25 },
+      { note: NOTE.G4, duration: 0.25 },
+      { note: NOTE.A4, duration: 0.25 },
+      { note: NOTE.B4, duration: 0.25 },
+      { note: NOTE.C5, duration: 0.25 },
+      { note: NOTE.D5, duration: 0.25 },
+      { note: NOTE.E5, duration: 0.5 },
+      { note: NOTE.D5, duration: 0.25 },
+      { note: NOTE.C5, duration: 0.25 },
+      { note: NOTE.B4, duration: 0.5 },
+      { note: NOTE.A4, duration: 0.25 },
+      { note: NOTE.G4, duration: 0.25 },
+      { note: NOTE.A4, duration: 0.25 },
+      { note: NOTE.B4, duration: 0.25 },
+      { note: NOTE.C5, duration: 0.25 },
+      { note: NOTE.D5, duration: 0.25 },
+      { note: NOTE.E5, duration: 0.5 },
+      { note: NOTE.D5, duration: 0.25 },
+      { note: NOTE.C5, duration: 0.25 },
+      { note: NOTE.B4, duration: 0.25 },
+      { note: NOTE.A4, duration: 0.25 },
+      { note: NOTE.G4, duration: 0.25 },
+      { note: NOTE.E4, duration: 0.5 },
+      { note: NOTE.D4, duration: 0.25 },
+      { note: NOTE.E4, duration: 0.25 },
+      { note: NOTE.G4, duration: 0.25 },
+      { note: NOTE.A4, duration: 0.25 },
+      { note: NOTE.B4, duration: 0.25 },
+      { note: NOTE.C5, duration: 0.25 },
+      { note: NOTE.D5, duration: 0.5 },
+      { note: NOTE.C5, duration: 0.25 },
+      { note: NOTE.B4, duration: 0.25 },
+      { note: NOTE.A4, duration: 0.25 },
+      { note: NOTE.G4, duration: 0.25 },
+      { note: NOTE.E4, duration: 0.5 },
+    ];
+    return { notes, waveform: 'sawtooth', volume: 0.25 };
+  }
+
+  private createBossMelodyC(): MusicTrack {
+    const notes: NoteEvent[] = [
+      { note: NOTE.E5, duration: 0.25 },
+      { note: NOTE.E5, duration: 0.25 },
+      { note: NOTE.D5, duration: 0.25 },
+      { note: NOTE.C5, duration: 0.25 },
+      { note: NOTE.B4, duration: 0.5 },
+      { note: NOTE.A4, duration: 0.25 },
+      { note: NOTE.G4, duration: 0.25 },
+      { note: NOTE.F4S, duration: 0.25 },
+      { note: NOTE.E4, duration: 0.25 },
+      { note: NOTE.D4, duration: 0.25 },
+      { note: NOTE.E4, duration: 0.25 },
+      { note: NOTE.G4, duration: 0.25 },
+      { note: NOTE.A4, duration: 0.25 },
+      { note: NOTE.B4, duration: 0.5 },
+      { note: NOTE.A4, duration: 0.25 },
+      { note: NOTE.G4, duration: 0.25 },
+      { note: NOTE.E4, duration: 0.25 },
+      { note: NOTE.D4, duration: 0.25 },
+      { note: NOTE.E4, duration: 0.5 },
+      { note: NOTE.G4, duration: 0.25 },
+      { note: NOTE.A4, duration: 0.25 },
+      { note: NOTE.B4, duration: 0.25 },
+      { note: NOTE.A4, duration: 0.25 },
+      { note: NOTE.G4, duration: 0.25 },
+      { note: NOTE.E4, duration: 0.25 },
+      { note: NOTE.D4, duration: 0.25 },
+      { note: NOTE.E4, duration: 0.25 },
+      { note: NOTE.G4, duration: 0.25 },
+      { note: NOTE.A4, duration: 0.25 },
+      { note: NOTE.B4, duration: 0.25 },
+      { note: NOTE.C5, duration: 0.25 },
+      { note: NOTE.D5, duration: 0.25 },
+      { note: NOTE.E5, duration: 0.5 },
+      { note: NOTE.D5, duration: 0.25 },
+      { note: NOTE.C5, duration: 0.25 },
+      { note: NOTE.B4, duration: 0.25 },
+      { note: NOTE.A4, duration: 0.25 },
+      { note: NOTE.G4, duration: 0.25 },
+      { note: NOTE.E4, duration: 1.0 },
+      { note: NOTE.D4, duration: 0.25 },
+      { note: NOTE.E4, duration: 0.25 },
+      { note: NOTE.G4, duration: 0.25 },
+      { note: NOTE.A4, duration: 0.25 },
+      { note: NOTE.B4, duration: 0.25 },
+      { note: NOTE.C5, duration: 0.25 },
+      { note: NOTE.D5, duration: 0.5 },
+      { note: NOTE.C5, duration: 0.25 },
+      { note: NOTE.B4, duration: 0.25 },
+      { note: NOTE.A4, duration: 0.25 },
+      { note: NOTE.G4, duration: 0.25 },
+      { note: NOTE.E4, duration: 0.5 },
+      { note: NOTE.D4, duration: 0.25 },
+      { note: NOTE.E4, duration: 1.0 },
+    ];
+    return { notes, waveform: 'sawtooth', volume: 0.25 };
+  }
+
+  private createBossBass(): MusicTrack {
+    const notes: NoteEvent[] = [
+      { note: NOTE.E3, duration: 0.25 },
+      { note: NOTE.E3, duration: 0.25 },
+      { note: NOTE.E3, duration: 0.25 },
+      { note: NOTE.E3, duration: 0.25 },
+      { note: NOTE.D3, duration: 0.25 },
+      { note: NOTE.D3, duration: 0.25 },
+      { note: NOTE.E3, duration: 0.25 },
+      { note: NOTE.E3, duration: 0.25 },
+      { note: NOTE.G3, duration: 0.25 },
+      { note: NOTE.G3, duration: 0.25 },
+      { note: NOTE.A3, duration: 0.25 },
+      { note: NOTE.A3, duration: 0.25 },
+      { note: NOTE.B3, duration: 0.25 },
+      { note: NOTE.B3, duration: 0.25 },
+      { note: NOTE.A3, duration: 0.25 },
+      { note: NOTE.A3, duration: 0.25 },
+      { note: NOTE.G3, duration: 0.25 },
+      { note: NOTE.G3, duration: 0.25 },
+      { note: NOTE.E3, duration: 0.25 },
+      { note: NOTE.E3, duration: 0.25 },
+      { note: NOTE.D3, duration: 0.25 },
+      { note: NOTE.D3, duration: 0.25 },
+      { note: NOTE.E3, duration: 0.5 },
+    ];
+    return { notes, waveform: 'square', volume: 0.18 };
+  }
+
+  private createBossDrone(): MusicTrack {
+    const notes: NoteEvent[] = [
+      { note: NOTE.E3, duration: 2.0 },
+      { note: NOTE.D3, duration: 2.0 },
+      { note: NOTE.G3, duration: 2.0 },
+      { note: NOTE.A3, duration: 2.0 },
+    ];
+    return { notes, waveform: 'sine', volume: 0.12 };
+  }
+
   private playNote(
     frequency: number,
     duration: number,
@@ -656,6 +895,7 @@ export class MusicSystem {
   private getTracksForLevel(level: LevelMusic): {
     melodyA: MusicTrack;
     melodyB: MusicTrack;
+    melodyC?: MusicTrack;
     bass: MusicTrack;
     pad?: MusicTrack;
   } {
@@ -691,6 +931,14 @@ export class MusicSystem {
           bass: this.createCityBass(),
           pad: this.createCityPad(),
         };
+      case LevelMusic.BOSS:
+        return {
+          melodyA: this.createBossMelodyA(),
+          melodyB: this.createBossMelodyB(),
+          melodyC: this.createBossMelodyC(),
+          bass: this.createBossBass(),
+          pad: this.createBossDrone(),
+        };
     }
   }
 
@@ -702,7 +950,8 @@ export class MusicSystem {
 
     const totalBeats =
       tracks.melodyA.notes.reduce((sum, n) => sum + n.duration, 0) +
-      tracks.melodyB.notes.reduce((sum, n) => sum + n.duration, 0);
+      tracks.melodyB.notes.reduce((sum, n) => sum + n.duration, 0) +
+      (tracks.melodyC?.notes.reduce((sum, n) => sum + n.duration, 0) ?? 0);
     const totalDuration = totalBeats * this.beatDuration;
 
     this.playTrack(tracks.melodyA, now);
@@ -710,6 +959,12 @@ export class MusicSystem {
     const aDuration =
       tracks.melodyA.notes.reduce((sum, n) => sum + n.duration, 0) * this.beatDuration;
     this.playTrack(tracks.melodyB, now + aDuration);
+
+    if (tracks.melodyC) {
+      const bDuration =
+        tracks.melodyB.notes.reduce((sum, n) => sum + n.duration, 0) * this.beatDuration;
+      this.playTrack(tracks.melodyC, now + aDuration + bDuration);
+    }
 
     this.playTrack(tracks.bass, now);
 
@@ -770,11 +1025,19 @@ export class MusicSystem {
         this.bpm = 160;
         this.musicVolume = 0.32;
         break;
+      case LevelMusic.BOSS:
+        this.bpm = 180;
+        this.musicVolume = 0.35;
+        break;
     }
 
     if (this.masterGain) {
       this.masterGain.gain.value = this.musicVolume;
     }
+  }
+
+  public playBossMusic(): void {
+    this.playLevelMusic(LevelMusic.BOSS);
   }
 
   public stopMusic(): void {

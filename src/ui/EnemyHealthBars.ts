@@ -6,13 +6,16 @@ import * as THREE from 'three';
  */
 export class EnemyHealthBars {
   private container: HTMLDivElement;
-  private healthBars: Map<string, {
-    bar: HTMLDivElement;
-    background: HTMLDivElement;
-    targetName: HTMLSpanElement;
-    arrow: HTMLDivElement | null;
-    screenPos: { x: number; y: number } | null;  // 缓存屏幕位置
-  }> = new Map();
+  private healthBars: Map<
+    string,
+    {
+      bar: HTMLDivElement;
+      background: HTMLDivElement;
+      targetName: HTMLSpanElement;
+      arrow: HTMLDivElement | null;
+      screenPos: { x: number; y: number } | null; // 缓存屏幕位置
+    }
+  > = new Map();
 
   constructor() {
     this.container = document.createElement('div');
@@ -50,8 +53,8 @@ export class EnemyHealthBars {
     camera: THREE.Camera,
     playerPosition: THREE.Vector3
   ): void {
-    const enemyIds = new Set(enemies.map(e => e.mesh.uuid));
-    const friendlyIds = new Set(friendlies.map(f => f.mesh.uuid));
+    const enemyIds = new Set(enemies.map((e) => e.mesh.uuid));
+    const friendlyIds = new Set(friendlies.map((f) => f.mesh.uuid));
     const activeIds = new Set([...enemyIds, ...friendlyIds]);
 
     // 移除不存在的血条
@@ -88,24 +91,26 @@ export class EnemyHealthBars {
     const id = enemy.mesh.uuid;
     let barData = this.healthBars.get(id);
 
-    // 计算屏幕位置
+    const isBoss = (enemy.mesh.name || '').includes('BOSS');
+    const barWidth = isBoss ? 120 : 60;
+
     const screenPos = this.worldToScreen(enemy.mesh.position.clone(), camera);
 
-    // 缓存屏幕位置（给锁定系统使用）
     if (barData) {
       barData.screenPos = { x: screenPos.x, y: screenPos.y };
     }
 
-    // 检查是否在视野内
-    const inView = screenPos.x >= 0 && screenPos.x <= 1 &&
-                   screenPos.y >= 0 && screenPos.y <= 1 &&
-                   screenPos.z < 1;
+    const inView =
+      screenPos.x >= 0 &&
+      screenPos.x <= 1 &&
+      screenPos.y >= 0 &&
+      screenPos.y <= 1 &&
+      screenPos.z < 1;
 
     if (!barData) {
-      // 创建新血条、箭头（友军不需要箭头）
       const bar = this.createHealthBar();
-      const background = this.createBackgroundBar(60);
-      const targetName = this.createTargetName(isFriendly);
+      const background = this.createBackgroundBar(barWidth, isBoss);
+      const targetName = this.createTargetName(isFriendly, isBoss);
       const arrow = isFriendly ? null : this.createArrowIndicator();
 
       bar.appendChild(background);
@@ -119,21 +124,18 @@ export class EnemyHealthBars {
       this.healthBars.set(id, barData);
     }
 
-    // 更新血条颜色
     const healthPercent = enemy.currentHealth / enemy.maxHealth;
     const color = this.getHealthColor(healthPercent);
 
     if (inView) {
-      // 敌人在视野内 - 显示血条
-      const barWidth = 60;
-      const barHeight = 6;
+      const barWidth = isBoss ? 120 : 60;
+      const barHeight = isBoss ? 10 : 6;
 
       barData.bar.style.display = 'block';
       if (barData.arrow) {
         barData.arrow.style.display = 'none';
       }
 
-      // 更新血条位置和内容
       const { x, y } = this.calculateBarPosition(enemy.mesh, camera, barWidth, barHeight);
       barData.bar.style.left = `${x}px`;
       barData.bar.style.top = `${y}px`;
@@ -143,21 +145,17 @@ export class EnemyHealthBars {
 
       const name = this.getTargetName(enemy.mesh, isFriendly);
       barData.targetName.textContent = name;
-      // 动态计算文字居中位置
       const textWidth = barData.targetName.offsetWidth;
       const centeredLeft = (barWidth - textWidth) / 2;
       barData.targetName.style.left = `${centeredLeft}px`;
     } else {
-      // 敌人在视野外 - 显示箭头指示器（友军不显示箭头）
       barData.bar.style.display = 'none';
       if (barData.arrow) {
         barData.arrow.style.display = 'block';
-        // 计算敌人到玩家的距离（不是到原点的距离）
         const distance = playerPosition.distanceTo(enemy.mesh.position);
-        // 计算敌人在玩家视角中的左右位置（使用3D空间，避免camera旋转导致跳跃）
         const toEnemy = enemy.mesh.position.clone().sub(playerPosition);
         const playerRight = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
-        const isOnRight = playerRight.dot(toEnemy) > 0; // 正值表示在右边
+        const isOnRight = playerRight.dot(toEnemy) > 0;
         this.updateArrowIndicator(barData.arrow, screenPos, distance, isOnRight);
       }
     }
@@ -180,12 +178,13 @@ export class EnemyHealthBars {
   /**
    * 创建血条背景
    */
-  private createBackgroundBar(width: number): HTMLDivElement {
+  private createBackgroundBar(width: number, isBoss: boolean = false): HTMLDivElement {
     const background = document.createElement('div');
     background.className = 'health-bar-background';
+    const height = isBoss ? 10 : 6;
     background.style.cssText = `
       width: ${width}px;
-      height: 6px;
+      height: ${height}px;
       background: rgba(0, 0, 0, 0.6);
       border-radius: 3px;
       border: 2px solid rgba(255, 255, 255, 0.5);
@@ -201,19 +200,21 @@ export class EnemyHealthBars {
   /**
    * 创建目标名称标签
    */
-  private createTargetName(isFriendly: boolean = false): HTMLSpanElement {
+  private createTargetName(isFriendly: boolean = false, isBoss: boolean = false): HTMLSpanElement {
     const name = document.createElement('span');
     name.className = 'enemy-name';
+    const fontSize = isBoss ? 16 : 12;
+    const color = isBoss ? '#ff4444' : isFriendly ? '#ffff00' : '#ffffff';
     name.style.cssText = `
-      font-size: 12px;
+      font-size: ${fontSize}px;
       font-weight: bold;
       white-space: nowrap;
       position: absolute;
-      bottom: 100%; /* 在血条上方 */
-      left: 0; /* 将由 JavaScript 动态计算居中 */
-      margin-bottom: 4px; /* 距离血条4px */
-      color: ${isFriendly ? '#ffff00' : '#ffffff'}; /* 友军黄色，敌人白色 */
-      text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.9), /* 更强的阴影 */
+      bottom: 100%;
+      left: 0;
+      margin-bottom: 4px;
+      color: ${color};
+      text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.9),
                    -1px -1px 2px rgba(0, 0, 0, 0.8);
     `;
     return name;
@@ -344,7 +345,7 @@ export class EnemyHealthBars {
     return {
       x: (vector.x + 1) / 2,
       y: 1 - (vector.y + 1) / 2, // 反转 Y 轴，因为屏幕 Y 向下为正
-      z: vector.z
+      z: vector.z,
     };
   }
 
@@ -372,6 +373,7 @@ export class EnemyHealthBars {
    */
   private getEnemyName(mesh: THREE.Object3D): string {
     const name = mesh.name || '';
+    if (name.includes('BOSS')) return 'BOSS';
     if (name.includes('Scout')) return 'SCOUT';
     if (name.includes('Fighter')) return 'FIGHTER';
     if (name.includes('Heavy')) return 'HEAVY';
@@ -409,9 +411,11 @@ export class EnemyHealthBars {
     barWidth: number,
     barHeight: number
   ): { x: number; y: number } {
-    // 计算敌人顶部的屏幕位置
+    const isBoss = (enemyMesh.name || '').includes('BOSS');
+    const heightOffset = isBoss ? 15 : 2;
+
     const enemyTop = enemyMesh.position.clone();
-    enemyTop.y += 2; // 在敌人模型顶部上方
+    enemyTop.y += heightOffset;
 
     const screenPos = this.worldToScreen(enemyTop, camera);
 
@@ -419,8 +423,8 @@ export class EnemyHealthBars {
     const offsetY = barHeight + 15;
 
     return {
-      x: (screenPos.x * window.innerWidth) - offsetX,
-      y: (screenPos.y * window.innerHeight) - offsetY
+      x: screenPos.x * window.innerWidth - offsetX,
+      y: screenPos.y * window.innerHeight - offsetY,
     };
   }
 
