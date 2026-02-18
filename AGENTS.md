@@ -849,3 +849,113 @@ LevelManager.update()
 | 激光预警平面旋转  | `LaserSweepSystem.ts`                  | `createWarningVisual()`   |
 | Boss 模型清理     | `GameCoordinator.ts`                   | `handleBossDestroy()`     |
 | Boss dispose 方法 | `BossAI.ts`, `DesertFortressAI.ts`, 等 | `dispose()` 方法          |
+
+---
+
+## 飞机/Boss 模型创建指南 (2026-02-18)
+
+### 坐标系约定
+
+**Three.js 右手坐标系**：
+
+- **+X** = 右
+- **+Y** = 上
+- **+Z** = 后
+- **-Z** = 前（飞行方向）
+
+**关键规则**：
+
+- `lookAt(target)` 会让物体的 **-Z 轴**指向目标
+- 所以机头必须在 **-Z 方向**，机尾在 **+Z 方向**
+
+### 几何体默认方向
+
+| 几何体             | 默认轴向    | 旋转方法                        |
+| ------------------ | ----------- | ------------------------------- |
+| `ConeGeometry`     | 尖端朝向 +Y | `rotation.x = +π/2` → 尖端朝 +Z |
+| `ConeGeometry`     | 尖端朝向 +Y | `rotation.x = -π/2` → 尖端朝 -Z |
+| `CylinderGeometry` | 轴向 +Y     | `rotation.x = ±π/2` → 轴向 ±Z   |
+| `BoxGeometry`      | 无方向性    | 无需旋转                        |
+
+### 旋转方向速查
+
+**绕 X 轴旋转**：
+
+- `+π/2` (90°): +Y → +Z
+- `-π/2` (-90°): +Y → -Z
+
+### 敌机/友军模型结构
+
+```
+Group (根节点)
+├── body (机身 Cone) - rotation.x = +π/2, 尖端朝 +Z
+├── wings (主翼 Box) - position.z = -0.2 * length (机身后部)
+├── cockpit (驾驶舱 Sphere) - position.z = +0.2 * length (机身前部)
+├── tail (水平尾翼 Box) - position.z = -0.45 * length (机尾)
+├── vStab (垂直尾翼 Box) - position.z = -0.4 * length (机尾上方)
+└── engineGlow (引擎 Cone) - rotation.x = -π/2, position.z = -0.5 * length
+```
+
+**关键**：所有部件的 Z 坐标符号与直觉相反！
+
+- 驾驶舱在前面 → position.z = **正值**
+- 尾翼在后面 → position.z = **负值**
+
+这是因为整个模型被"翻转"了（body 旋转 +π/2 后尖端指向 +Z，所以视觉上前 = +Z）。
+
+### 玩家模型结构
+
+玩家模型使用不同的方式：
+
+- 机头锥体单独创建，rotation.x = -π/2，position.z = **负值**（前方）
+- 机尾引擎在 position.z = **正值**（后方）
+
+### Boss 模型创建注意事项
+
+1. **不要使用 `group.rotation.y = Math.PI`** - 会被 `lookAt()` 的 quaternion 覆盖
+2. **部件位置参考敌机模式** - 翻转 Z 坐标
+3. **引擎/发射口位置** - 在 +Z 方向（视觉上是后方）
+4. **武器发射方向** - 朝向 -Z（前方）
+
+### 创建新 Boss 步骤
+
+1. **创建 Boss AI 文件** - 参考 `BossAI.ts` 或 `DesertFortressAI.ts`
+2. **创建武器系统** - 参考 `BossMissileSystem.ts` 或 `FlakCannonSystem.ts`
+3. **添加配置到 BossTypes.ts**:
+   ```typescript
+   export const BOSS_CONFIGS: Record<BossType, BossConfig> = {
+     YOUR_BOSS: {
+       type: BossType.YOUR_BOSS,
+       health: 3000,
+       speed: 10,
+       scale: 5,
+       // ...
+     },
+   };
+   ```
+4. **在 GameCoordinator.ts 添加创建逻辑**:
+   - `createYourBoss()` 方法
+   - `updateYourBossBattle()` 方法
+   - 在 `startBossBattle()` 中调用
+5. **添加音乐** - 在 `MusicSystem.ts` 添加 Boss 专属音乐
+6. **添加音效** - 在 `AudioManager.ts` 添加武器音效
+7. **更新模型预览** - 在 `ModelPreview.ts` 添加新 Boss
+
+### 常见错误
+
+| 错误                    | 症状         | 修复                           |
+| ----------------------- | ------------ | ------------------------------ |
+| 飞机倒着飞              | 机尾朝前     | 翻转所有部件 Z 坐标            |
+| 尾迹从机头喷出          | 引擎位置错误 | engineGlow.position.z 应为负值 |
+| `group.rotation.y` 无效 | lookAt 覆盖  | 翻转部件位置而非旋转 group     |
+| Boss 炮弹向后飞         | 发射方向错误 | 使用 velocity(0, 0, -speed)    |
+
+### 参考文件
+
+| 用途          | 文件                                                     |
+| ------------- | -------------------------------------------------------- |
+| 敌机/友军模型 | `src/features/aircraft/AircraftMeshFactory.ts`           |
+| Boss 1 模型   | `src/features/boss/BossAI.ts` - `createMesh()`           |
+| Boss 2 模型   | `src/features/boss/DesertFortressAI.ts` - `createMesh()` |
+| Boss 3 模型   | `src/features/boss/OctopusWarshipAI.ts` - `createMesh()` |
+| 模型预览      | `src/ui/ModelPreview.ts`                                 |

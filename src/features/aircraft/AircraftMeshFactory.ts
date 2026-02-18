@@ -390,45 +390,50 @@ export function createEnemyMesh(config: EnemyConfig): THREE.Group {
     emissiveIntensity: 0.3,
   });
 
-  // === 机身 - 锥形，机头细机尾粗 ===
+  // === 方向约定 ===
+  // 前进方向 = -Z，机头朝向 -Z，机尾在 +Z
   // ConeGeometry 默认尖端朝向 +Y
-  // rotation.x = +PI/2 使尖端朝向 +Z，翻转所有部件后变成 -Z（前方）
+  // rotation.x = +PI/2 → 尖端从 +Y 转到 +Z（机尾方向）
+  // 所以机身粗端在 -Z（前方），细端在 +Z（后方）- 这是错误的
+  // 正确做法：所有部件 Z 坐标取反，让视觉上机头在 -Z，机尾在 +Z
+
+  // === 机身 - 锥形，机头细机尾粗 ===
   const bodyGeometry = new THREE.ConeGeometry(bodySize * 0.4, bodyLength, 8);
   const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
   body.rotation.x = Math.PI / 2;
   body.castShadow = true;
   group.add(body);
 
-  // === 主翼 - 在机身中后部（翻转后为负 Z）
+  // === 主翼 - 在机身后部（视觉上在后方，所以用负 Z）
   const wingGeometry = new THREE.BoxGeometry(wingSpan, 0.15, 1.2);
   const wings = new THREE.Mesh(wingGeometry, wingMaterial);
   wings.position.set(0, 0, -bodyLength * 0.2);
   wings.castShadow = true;
   group.add(wings);
 
-  // === 驾驶舱 - 在机身前部（翻转后为正 Z）
+  // === 驾驶舱 - 在机身前部（视觉上在前方，所以用正 Z）
   const cockpitGeometry = new THREE.SphereGeometry(bodySize * 0.35, 8, 8);
   const cockpit = new THREE.Mesh(cockpitGeometry, cockpitMaterial);
   cockpit.position.set(0, bodySize * 0.25, bodyLength * 0.2);
   cockpit.castShadow = true;
   group.add(cockpit);
 
-  // === 水平尾翼 - 在机尾（翻转后为负 Z）
+  // === 水平尾翼 - 在机尾（视觉上在最后方，用最负的 Z）
   const tailGeometry = new THREE.BoxGeometry(wingSpan * 0.4, 0.12, 0.8);
   const tail = new THREE.Mesh(tailGeometry, wingMaterial);
   tail.position.set(0, 0, -bodyLength * 0.45);
   tail.castShadow = true;
   group.add(tail);
 
-  // === 垂直尾翼 - 在机尾上方（翻转后为负 Z）
+  // === 垂直尾翼 - 在机尾上方
   const vStabGeometry = new THREE.BoxGeometry(0.15, bodySize * 0.6, 0.8);
   const vStab = new THREE.Mesh(vStabGeometry, wingMaterial);
   vStab.position.set(0, bodySize * 0.3, -bodyLength * 0.4);
   vStab.castShadow = true;
   group.add(vStab);
 
-  // === 引擎喷口 - 发光（翻转后为负 Z，机尾）
-  // rotation.x = -PI/2 使尖端朝向 -Z，翻转后变成 +Z（后方喷射方向）
+  // === 引擎喷口 - 发光，在机尾最后方
+  // rotation.x = -PI/2 → 尖端从 +Y 转到 -Z（后方喷射方向）
   const engineGeometry = new THREE.ConeGeometry(bodySize * 0.15, 0.6, 8);
   const engineMaterial = new THREE.MeshBasicMaterial({
     color: 0xff6600,
