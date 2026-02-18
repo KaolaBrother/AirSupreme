@@ -3,7 +3,8 @@
  */
 export enum BossType {
   HEAVY_BOMBER = 'HEAVY_BOMBER', // 第一关 Boss：重型轰炸机
-  // 后续可添加更多 Boss 类型
+  DESERT_FORTRESS = 'DESERT_FORTRESS', // 第二关 Boss：沙漠堡垒
+  OCTOPUS_WARSHIP = 'OCTOPUS_WARSHIP', // 第三关 Boss：八爪鱼战舰
 }
 
 /**
@@ -57,6 +58,70 @@ export const BOSS_MISSILE_CONFIG = {
 };
 
 /**
+ * 防空炮配置（第二关 Boss 专用）
+ */
+export const FLAK_CANNON_CONFIG = {
+  SPEED: 50,
+  SCALE: 3,
+  MAX_RANGE: 1500,
+  AOE_RADIUS: 50,
+  DAMAGE: 15,
+  EXPLOSION_HEIGHT_VARIANCE: 20,
+};
+
+/**
+ * 激光扫射配置（第三关 Boss 专用）
+ */
+export const LASER_SWEEP_CONFIG = {
+  WARNING_DURATION: 3.0,
+  SWEEP_DURATION: 6.0,
+  INTERVAL: 5.0,
+  DAMAGE: 100,
+  ROTATION_SPEED: (Math.PI * 2) / 6, // 60°/s = 6秒一圈
+  COLOR: 0x00aaff, // 蓝色
+  PLANE_THICKNESS: 15, // 激光平面厚度（米）
+  RANGE: 800, // 激光射程
+};
+
+/**
+ * 眼睛配置（第三关 Boss 专用）
+ */
+export const EYE_CONFIG = {
+  HEALTH: 300,
+  DAMAGE: 20,
+  FIRE_INTERVAL: 1.5,
+  BULLET_SPEED: 80,
+  BULLET_LENGTH: 8,
+  BULLET_RADIUS: 0.3,
+  COUNT: 8,
+};
+
+/**
+ * 瞬移配置（第三关 Boss 专用）
+ */
+export const TELEPORT_CONFIG = {
+  CHANCE_ON_HIT: 0.05, // 5% 概率
+  COOLDOWN: 10.0, // 10 秒冷却
+  DURATION: 0.5, // 瞬移动画时长
+  BOUNDS: {
+    X: 400,
+    Y_MIN: 100,
+    Y_MAX: 250,
+    Z: 400,
+  },
+};
+
+/**
+ * 防空炮位置（第二关 Boss）
+ */
+export enum FlakCannonPosition {
+  FRONT_LEFT = 'FRONT_LEFT',
+  FRONT_RIGHT = 'FRONT_RIGHT',
+  BACK_LEFT = 'BACK_LEFT',
+  BACK_RIGHT = 'BACK_RIGHT',
+}
+
+/**
  * Boss 配置预设
  */
 export const BOSS_CONFIGS: Record<BossType, BossConfig> = {
@@ -75,22 +140,51 @@ export const BOSS_CONFIGS: Record<BossType, BossConfig> = {
     maxRange: BOSS_MISSILE_CONFIG.MAX_RANGE,
     scoreValue: 2000,
   },
+  [BossType.DESERT_FORTRESS]: {
+    type: BossType.DESERT_FORTRESS,
+    name: '沙漠堡垒 Boss',
+    health: 2500,
+    speed: 0,
+    damage: FLAK_CANNON_CONFIG.DAMAGE,
+    scale: 5,
+    circleRadius: 0,
+    turnSpeed: 0,
+    cannonFireInterval: 2.0,
+    missileFireInterval: 10,
+    missileDamage: BOSS_MISSILE_CONFIG.DAMAGE,
+    maxRange: FLAK_CANNON_CONFIG.MAX_RANGE,
+    scoreValue: 2500,
+  },
+  [BossType.OCTOPUS_WARSHIP]: {
+    type: BossType.OCTOPUS_WARSHIP,
+    name: '八爪鱼战舰 Boss',
+    health: 3000,
+    speed: 5,
+    damage: LASER_SWEEP_CONFIG.DAMAGE,
+    scale: 5,
+    circleRadius: 100,
+    turnSpeed: 0.3,
+    cannonFireInterval: 0,
+    missileFireInterval: 0,
+    missileDamage: 0,
+    maxRange: LASER_SWEEP_CONFIG.RANGE,
+    scoreValue: 3000,
+  },
 };
 
 /**
  * 根据关卡获取 Boss 类型
  */
 export function getBossForLevel(level: number): BossType | null {
-  // 每个关卡都有对应的 Boss
-  // 第一关是重型轰炸机，后续关卡可扩展
   switch (level) {
     case 1:
       return BossType.HEAVY_BOMBER;
     case 2:
+      return BossType.DESERT_FORTRESS;
     case 3:
+      return BossType.OCTOPUS_WARSHIP;
     case 4:
     case 5:
-      // 暂时都返回重型轰炸机，后续可扩展不同的 Boss
       return BossType.HEAVY_BOMBER;
     default:
       return null;

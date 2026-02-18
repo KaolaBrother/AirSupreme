@@ -23,8 +23,18 @@ import { ThirdPersonCamera } from '@/features/camera/ThirdPersonCamera';
 import { BossMissileIndicator } from '@/ui/BossMissileIndicator';
 import { GAME_CONSTANTS } from '@/config';
 import { BossAI, createBossMesh } from '@/features/boss/BossAI';
-import { BOSS_CONFIGS, BOSS_MISSILE_CONFIG, getBossForLevel } from '@/features/boss/BossTypes';
+import { DesertFortressAI, createDesertFortressMesh } from '@/features/boss/DesertFortressAI';
+import { OctopusWarshipAI, createOctopusWarshipMesh } from '@/features/boss/OctopusWarshipAI';
+import {
+  BOSS_CONFIGS,
+  BOSS_MISSILE_CONFIG,
+  FLAK_CANNON_CONFIG,
+  getBossForLevel,
+  BossType,
+  BossConfig,
+} from '@/features/boss/BossTypes';
 import { Faction } from '@/core/Faction';
+import { createPlayerMesh, createEnemyMesh } from '@/features/aircraft/AircraftMeshFactory';
 
 export class GameCoordinator {
   private gameLoop: GameLoop;
@@ -60,9 +70,10 @@ export class GameCoordinator {
   // Boss 战相关
   private bossMode: boolean = false; // Boss 模式：直接 Boss 战，跳过波次
   private inLevelBossBattle: boolean = false; // 普通模式：波次完成后的 Boss 战
-  private currentBoss: BossAI | null = null;
+  private currentBoss: BossAI | DesertFortressAI | OctopusWarshipAI | null = null;
   private bossFriendlySpawnTimer: number = 0;
   private bossIndicator: BossMissileIndicator;
+  private laserDamageCooldown: number = 0;
 
   constructor() {
     this.gameLoop = new GameLoop();
@@ -74,7 +85,7 @@ export class GameCoordinator {
     this.particleSystem = new ParticleSystem(this.gameScene.scene);
     this.playerStats = new PlayerStats();
 
-    this.playerAircraft = this.createPlayerAircraft();
+    this.playerAircraft = createPlayerMesh();
     this.gameScene.scene.add(this.playerAircraft);
 
     this.thirdPersonCamera = new ThirdPersonCamera(this.gameScene.camera, this.playerAircraft);
@@ -260,221 +271,12 @@ export class GameCoordinator {
     });
   }
 
-  private createPlayerAircraft(): THREE.Group {
-    const group = new THREE.Group();
-
-    const bodyMaterial = new THREE.MeshStandardMaterial({
-      color: 0x4488ff,
-      metalness: 0.7,
-      roughness: 0.2,
-    });
-
-    const bodyGeometry = new THREE.ConeGeometry(0.5, 3.5, 12);
-    const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
-    body.rotation.x = Math.PI / 2;
-    group.add(body);
-
-    const cockpitMaterial = new THREE.MeshStandardMaterial({
-      color: 0x111133,
-      metalness: 0.9,
-      roughness: 0.1,
-    });
-    const cockpitGeometry = new THREE.SphereGeometry(0.3, 12, 12);
-    const cockpit = new THREE.Mesh(cockpitGeometry, cockpitMaterial);
-    cockpit.position.set(0, 0.3, -0.5);
-    cockpit.scale.set(1, 0.6, 1.5);
-    group.add(cockpit);
-
-    const wingMaterial = new THREE.MeshStandardMaterial({
-      color: 0x3366dd,
-      metalness: 0.6,
-      roughness: 0.3,
-    });
-
-    const wingShape = new THREE.Shape();
-    wingShape.moveTo(0, 0);
-    wingShape.lineTo(2, 0.8);
-    wingShape.lineTo(0.3, 1);
-    wingShape.lineTo(0, 0);
-
-    const wingGeometry = new THREE.ExtrudeGeometry(wingShape, { depth: 0.05, bevelEnabled: false });
-
-    const leftWing = new THREE.Mesh(wingGeometry, wingMaterial);
-    leftWing.rotation.x = Math.PI / 2;
-    leftWing.rotation.z = Math.PI;
-    leftWing.position.set(-0.3, 0, 0.3);
-    group.add(leftWing);
-
-    const rightWing = new THREE.Mesh(wingGeometry, wingMaterial);
-    rightWing.rotation.x = Math.PI / 2;
-    rightWing.position.set(0.3, 0, 0.3);
-    group.add(rightWing);
-
-    const tailGeometry = new THREE.BoxGeometry(0.05, 0.8, 0.6);
-    const tail = new THREE.Mesh(tailGeometry, wingMaterial);
-    tail.position.set(0, 0.5, 1.5);
-    group.add(tail);
-
-    const engineGlowGeometry = new THREE.ConeGeometry(0.2, 0.8, 8);
-    const engineGlowMaterial = new THREE.MeshBasicMaterial({
-      color: 0xff4400,
-      transparent: true,
-      opacity: 0.8,
-    });
-    const engineGlow = new THREE.Mesh(engineGlowGeometry, engineGlowMaterial);
-    engineGlow.rotation.x = -Math.PI / 2;
-    engineGlow.position.set(0, 0, 2);
-    engineGlow.name = 'engineGlow';
-    group.add(engineGlow);
-
-    group.traverse((child) => {
-      if (child instanceof THREE.Mesh && child.name !== 'engineGlow') {
-        child.castShadow = true;
-        child.receiveShadow = true;
-      }
-    });
-
-    return group;
-  }
-
-  private createAircraftMesh(config: (typeof ENEMY_CONFIGS)[EnemyType]): THREE.Group {
-    const group = new THREE.Group();
-
-    let bodyColor: number, wingColor: number, accentColor: number;
-    let bodySize = 1.6,
-      bodyLength = 6,
-      wingSpan = 3;
-    const tailSize = 0.8;
-    let scaleMultiplier = 1;
-
-    switch (config.type) {
-      case EnemyType.SCOUT:
-        bodyColor = 0x4a5584;
-        wingColor = 0x6b7b8e;
-        accentColor = 0x3d5a87;
-        bodySize = 1.2;
-        bodyLength = 5;
-        wingSpan = 2.2;
-        scaleMultiplier = 0.85;
-        break;
-      case EnemyType.FIGHTER:
-        bodyColor = 0xcc3300;
-        wingColor = 0xe63900;
-        accentColor = 0x8b2500;
-        bodySize = 1.8;
-        bodyLength = 7;
-        wingSpan = 3.5;
-        scaleMultiplier = 1.1;
-        break;
-      case EnemyType.HEAVY:
-        bodyColor = 0x2c2c2c;
-        wingColor = 0x3a3a3a;
-        accentColor = 0x1a1a1a;
-        bodySize = 2.2;
-        bodyLength = 8;
-        wingSpan = 4.2;
-        scaleMultiplier = 1.3;
-        break;
-      case EnemyType.SNIPER:
-        bodyColor = 0x4a235a;
-        wingColor = 0x6b4c7a;
-        accentColor = 0x7c3aed;
-        bodySize = 1.6;
-        bodyLength = 7.5;
-        wingSpan = 2.8;
-        scaleMultiplier = 0.95;
-        break;
-      case EnemyType.ACE:
-        bodyColor = 0x8b0000;
-        wingColor = 0xffd700;
-        accentColor = 0xff4500;
-        bodySize = 1.9;
-        bodyLength = 7;
-        wingSpan = 3.3;
-        scaleMultiplier = 1.15;
-        break;
-      default:
-        bodyColor = config.color;
-        wingColor = config.color;
-        accentColor = config.color;
-    }
-
-    group.scale.set(scaleMultiplier, scaleMultiplier, scaleMultiplier);
-
-    // 机身 - 锥形，机头细机尾粗，沿 Z 轴
-    const bodyGeometry = new THREE.ConeGeometry(bodySize * 0.4, bodyLength, 8);
-    const bodyMaterial = new THREE.MeshStandardMaterial({
-      color: bodyColor,
-      metalness: 0.7,
-      roughness: 0.3,
-    });
-    const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
-    body.rotation.x = Math.PI / 2;
-    body.castShadow = true;
-    group.add(body);
-
-    // 主翼 - 在机身中后部
-    const wingGeometry = new THREE.BoxGeometry(wingSpan, 0.15, 1.2);
-    const wingMaterial = new THREE.MeshStandardMaterial({
-      color: wingColor,
-      metalness: 0.6,
-      roughness: 0.4,
-    });
-    const wings = new THREE.Mesh(wingGeometry, wingMaterial);
-    wings.position.set(0, 0, bodyLength * 0.2);
-    wings.castShadow = true;
-    group.add(wings);
-
-    // 驾驶舱 - 在机身前部
-    const cockpitGeometry = new THREE.SphereGeometry(bodySize * 0.35, 8, 8);
-    const cockpitMaterial = new THREE.MeshStandardMaterial({
-      color: accentColor,
-      metalness: 0.9,
-      roughness: 0.1,
-      emissive: accentColor,
-      emissiveIntensity: 0.3,
-    });
-    const cockpit = new THREE.Mesh(cockpitGeometry, cockpitMaterial);
-    cockpit.position.set(0, bodySize * 0.25, -bodyLength * 0.2);
-    cockpit.castShadow = true;
-    group.add(cockpit);
-
-    // 水平尾翼 - 在机尾
-    const tailGeometry = new THREE.BoxGeometry(tailSize, 0.12, 1);
-    const tail = new THREE.Mesh(tailGeometry, wingMaterial);
-    tail.position.set(0, 0, bodyLength * 0.45);
-    tail.castShadow = true;
-    group.add(tail);
-
-    // 垂直尾翼 - 在机尾上方
-    const vStabGeometry = new THREE.BoxGeometry(0.15, 1.2, 0.8);
-    const vStab = new THREE.Mesh(vStabGeometry, wingMaterial);
-    vStab.position.set(0, 0.6, bodyLength * 0.4);
-    vStab.castShadow = true;
-    group.add(vStab);
-
-    // 引擎 - 在机尾末端
-    const engineGeometry = new THREE.CylinderGeometry(bodySize * 0.2, bodySize * 0.15, 0.5, 8);
-    const engineMaterial = new THREE.MeshBasicMaterial({
-      color: 0xff6600,
-      transparent: true,
-      opacity: 0.8,
-    });
-    const engine = new THREE.Mesh(engineGeometry, engineMaterial);
-    engine.rotation.x = Math.PI / 2;
-    engine.position.set(0, 0, bodyLength * 0.5 + 0.3);
-    group.add(engine);
-
-    group.name = config.type;
-    return group;
-  }
-
   private spawnFriendlyAI(): void {
     const enemyTypes = Object.values(EnemyType);
     const randomType = enemyTypes[Math.floor(Math.random() * enemyTypes.length)];
     const config = ENEMY_CONFIGS[randomType];
 
-    const mesh = this.createAircraftMesh(config);
+    const mesh = createEnemyMesh(config);
     const friendly = new FriendlyAI(mesh, config, this.gameScene.scene);
 
     const playerPos = this.playerSystem.getPosition();
@@ -561,42 +363,71 @@ export class GameCoordinator {
     const friendlyMeshes = this.enemySystem.getFriendlyAIs().map((f) => f.getMesh());
 
     const bossMissileSystem = this.currentBoss.getMissileSystem();
-    const bossPartMeshes = this.currentBoss.getCollisionPartMeshes();
-    const bossAndMissiles = [...bossPartMeshes, ...bossMissileSystem.getMissileMeshes()];
+    const bossAllParts = this.currentBoss.getCollisionParts();
+    const missileMeshes = bossMissileSystem ? bossMissileSystem.getMissileMeshes() : [];
+    const bossAndMissiles = [...bossAllParts, ...missileMeshes];
     this.enemySystem.updateWithPlayer(deltaTime, this.playerSystem.getPosition(), bossAndMissiles);
 
     this.currentBoss.update(deltaTime, this.playerSystem.getMesh(), friendlyMeshes);
 
-    bossMissileSystem.checkCollisions(
-      [this.playerAircraft, ...friendlyMeshes],
-      (target, _damage) => {
-        this.particleSystem.createExplosion(target.position.clone(), 1);
-        if (target === this.playerAircraft) {
-          if (!this.playerSystem.isShieldActive()) {
-            this.playerSystem.getHealth().takeDamage(BOSS_MISSILE_CONFIG.DAMAGE);
+    if (bossMissileSystem) {
+      bossMissileSystem.checkCollisions(
+        [this.playerAircraft, ...friendlyMeshes],
+        (target: THREE.Object3D, _damage: number) => {
+          this.particleSystem.createExplosion(target.position.clone(), 1);
+          if (target === this.playerAircraft) {
+            if (!this.playerSystem.isShieldActive()) {
+              this.playerSystem.getHealth().takeDamage(BOSS_MISSILE_CONFIG.DAMAGE);
+            }
+          } else {
+            const friendly = this.enemySystem.getFriendlyAIs().find((f) => f.getMesh() === target);
+            friendly?.takeDamage(BOSS_MISSILE_CONFIG.DAMAGE);
           }
-        } else {
-          const friendly = this.enemySystem.getFriendlyAIs().find((f) => f.getMesh() === target);
-          friendly?.takeDamage(BOSS_MISSILE_CONFIG.DAMAGE);
         }
-      }
-    );
+      );
+    }
 
-    const missileTargets = [
-      this.currentBoss.getMesh(),
-      ...bossPartMeshes,
-      ...bossMissileSystem.getMissileMeshes(),
-    ];
+    // 对于 OctopusWarship，眼睛碰撞检查必须先于 Boss 本体检查
+    // 因为导弹在碰撞后会被停用，所以需要先检查眼睛再检查本体
+    if (this.currentBoss instanceof OctopusWarshipAI) {
+      const octopusBoss = this.currentBoss;
+      const eyeParts = octopusBoss.getEyeCollisionParts();
+      const eyeMeshes = eyeParts.map((p) => p.mesh);
+
+      this.combatSystem.getMissileSystem().checkCollisions(eyeMeshes, (target) => {
+        const part = eyeParts.find((p) => p.mesh === target);
+        if (part) {
+          octopusBoss.takeEyeDamage(part.index, GAME_CONSTANTS.MISSILE.DAMAGE);
+          const hitWorldPos = new THREE.Vector3();
+          target.getWorldPosition(hitWorldPos);
+          this.particleSystem.createExplosion(hitWorldPos, 1);
+          this.audioManager.playExplosion();
+        }
+      });
+
+      this.combatSystem.getPlayerProjectilePool().checkCollisions(eyeMeshes, (target) => {
+        const part = eyeParts.find((p) => p.mesh === target);
+        if (part) {
+          octopusBoss.takeEyeDamage(part.index, this.combatSystem['damageMultiplier'] * 12.5);
+          const hitWorldPos = new THREE.Vector3();
+          target.getWorldPosition(hitWorldPos);
+          this.particleSystem.createHit(hitWorldPos);
+        }
+      });
+    }
+
+    // Boss 本体和 Boss 导弹的碰撞检查
+    const missileTargets = [this.currentBoss.getMesh(), ...bossAllParts, ...missileMeshes];
     this.combatSystem.getMissileSystem().checkCollisions(missileTargets, (target) => {
       const hitWorldPos = new THREE.Vector3();
       target.getWorldPosition(hitWorldPos);
 
-      const isBossPart = bossPartMeshes.some((p) => p === target);
+      const isBossPart = bossAllParts.some((p) => p === target);
       if (target === this.currentBoss?.getMesh() || isBossPart) {
         this.currentBoss?.takeDamage(GAME_CONSTANTS.MISSILE.DAMAGE);
         this.particleSystem.createExplosion(hitWorldPos, 1.5);
         this.audioManager.playExplosion();
-      } else {
+      } else if (bossMissileSystem) {
         const missile = bossMissileSystem.getMissiles().find((m) => m.getMesh() === target);
         if (missile) {
           missile.takeDamage(GAME_CONSTANTS.MISSILE.DAMAGE);
@@ -605,15 +436,16 @@ export class GameCoordinator {
       }
     });
 
-    const bossTargets = [...bossPartMeshes, ...bossMissileSystem.getMissileMeshes()];
+    const bossTargets = [...bossAllParts, ...missileMeshes];
 
     this.combatSystem.getPlayerProjectilePool().checkCollisions(bossTargets, (target) => {
-      const partMesh = bossPartMeshes.find((p) => p === target);
-      if (partMesh || target === this.currentBoss?.getMesh()) {
+      const isBossPart = bossAllParts.some((p) => p === target);
+      if (isBossPart || target === this.currentBoss?.getMesh()) {
         this.currentBoss?.takeDamage(this.combatSystem['damageMultiplier'] * 12.5);
-        const hitPos = target.position.clone();
-        this.particleSystem.createHit(hitPos);
-      } else {
+        const hitWorldPos = new THREE.Vector3();
+        target.getWorldPosition(hitWorldPos);
+        this.particleSystem.createHit(hitWorldPos);
+      } else if (bossMissileSystem) {
         const missile = bossMissileSystem.getMissiles().find((m) => m.getMesh() === target);
         if (missile) {
           missile.takeDamage(this.combatSystem['damageMultiplier'] * 12.5);
@@ -623,12 +455,14 @@ export class GameCoordinator {
 
     this.combatSystem
       .getEnemyProjectilePool()
-      .checkCollisions(bossTargets, (target, _projectile, damage) => {
-        const partMesh = bossPartMeshes.find((p) => p === target);
-        if (partMesh || target === this.currentBoss?.getMesh()) {
+      .checkCollisions(bossTargets, (target: THREE.Object3D, _projectile, damage: number) => {
+        const isBossPart = bossAllParts.some((p) => p === target);
+        if (isBossPart || target === this.currentBoss?.getMesh()) {
           this.currentBoss?.takeDamage(damage);
-          this.particleSystem.createHit(target.position);
-        } else {
+          const hitWorldPos = new THREE.Vector3();
+          target.getWorldPosition(hitWorldPos);
+          this.particleSystem.createHit(hitWorldPos);
+        } else if (bossMissileSystem) {
           const missile = bossMissileSystem.getMissiles().find((m) => m.getMesh() === target);
           if (missile) {
             missile.takeDamage(damage);
@@ -636,6 +470,10 @@ export class GameCoordinator {
           }
         }
       });
+
+    if (this.currentBoss instanceof OctopusWarshipAI) {
+      this.updateOctopusWarshipBattle(deltaTime);
+    }
 
     this.bossFriendlySpawnTimer += deltaTime;
     if (this.bossFriendlySpawnTimer >= 30) {
@@ -647,6 +485,71 @@ export class GameCoordinator {
     this.updateBossMissileIndicators();
   }
 
+  private updateOctopusWarshipBattle(deltaTime: number): void {
+    if (!(this.currentBoss instanceof OctopusWarshipAI)) return;
+
+    const octopusBoss = this.currentBoss;
+    const playerPos = this.playerAircraft.position;
+
+    if (this.laserDamageCooldown > 0) {
+      this.laserDamageCooldown -= deltaTime;
+    }
+
+    if (octopusBoss.checkLaserCollision(playerPos)) {
+      if (!this.playerSystem.isShieldActive() && this.laserDamageCooldown <= 0) {
+        this.playerSystem.getHealth().takeDamage(octopusBoss.getConfig().damage);
+        this.particleSystem.createHit(playerPos);
+        this.laserDamageCooldown = 1.0;
+      }
+    }
+
+    const eyeParts = octopusBoss.getEyeCollisionParts();
+    const eyeMeshes = eyeParts.map((p) => p.mesh);
+    const eyeBulletMeshes = octopusBoss.getEyeBulletMeshes();
+
+    // 友军子弹对眼睛的碰撞检查（玩家导弹和机枪已在 updateBossBattle 中处理）
+    const allEyeTargets = [...eyeMeshes, ...eyeBulletMeshes];
+    this.combatSystem
+      .getEnemyProjectilePool()
+      .checkCollisions(allEyeTargets, (target: THREE.Object3D, _projectile, _damage: number) => {
+        const part = eyeParts.find((p) => p.mesh === target);
+        if (part) {
+          octopusBoss.takeEyeDamage(part.index, this.combatSystem['damageMultiplier'] * 12.5);
+          const hitWorldPos = new THREE.Vector3();
+          target.getWorldPosition(hitWorldPos);
+          this.particleSystem.createHit(hitWorldPos);
+        }
+      });
+
+    const eyeBulletCollideRadius = 5;
+    for (const bulletMesh of eyeBulletMeshes) {
+      const bulletPos = bulletMesh.position;
+
+      const playerPos = this.playerSystem.getPosition();
+      if (bulletPos.distanceTo(playerPos) < eyeBulletCollideRadius) {
+        if (!this.playerSystem.isShieldActive()) {
+          this.playerSystem.getHealth().takeDamage(octopusBoss.getEyeDamage());
+          this.particleSystem.createHit(playerPos);
+          this.audioManager.playHit();
+        }
+        octopusBoss.getEyeSystem().removeBullet(bulletMesh);
+        break;
+      }
+
+      const friendlies = this.enemySystem.getFriendlyAIs();
+      for (const friendly of friendlies) {
+        if (!friendly.isAlive()) continue;
+        const friendlyPos = friendly.getMesh().position;
+        if (bulletPos.distanceTo(friendlyPos) < eyeBulletCollideRadius) {
+          friendly.takeDamage(octopusBoss.getEyeDamage());
+          this.particleSystem.createHit(friendlyPos);
+          octopusBoss.getEyeSystem().removeBullet(bulletMesh);
+          break;
+        }
+      }
+    }
+  }
+
   private updateBossMissileIndicators(): void {
     if (!this.currentBoss) {
       this.bossIndicator.clear();
@@ -654,6 +557,11 @@ export class GameCoordinator {
     }
 
     const bossMissileSystem = this.currentBoss.getMissileSystem();
+    if (!bossMissileSystem) {
+      this.bossIndicator.clear();
+      return;
+    }
+
     const missiles = bossMissileSystem.getMissiles();
     const playerPosition = this.playerSystem.getPosition();
     const camera = this.gameScene.camera;
@@ -708,11 +616,14 @@ export class GameCoordinator {
   private handleMissileInput(input: ReturnType<InputHandler['getState']>): void {
     let targetMeshes: THREE.Object3D[] = this.enemySystem.getEnemyMeshes();
 
-    if (this.bossMode && this.currentBoss) {
+    if ((this.bossMode || this.inLevelBossBattle) && this.currentBoss) {
       const bossPartMeshes = this.currentBoss.getCollisionParts();
       targetMeshes = [...bossPartMeshes, ...targetMeshes];
-      const bossMissiles = this.currentBoss.getMissileSystem().getMissileMeshes();
-      targetMeshes = [...targetMeshes, ...bossMissiles];
+      const bossMissileSystem = this.currentBoss.getMissileSystem();
+      if (bossMissileSystem) {
+        const bossMissiles = bossMissileSystem.getMissileMeshes();
+        targetMeshes = [...targetMeshes, ...bossMissiles];
+      }
     }
 
     const enemyScreenPos = this.enemyHealthBars.getFirstEnemyScreenPos();
@@ -858,8 +769,29 @@ export class GameCoordinator {
       });
     }
 
+    // Boss 眼睛血条数据（第三关 Boss）
+    const eyeData: Array<{ mesh: THREE.Object3D; currentHealth: number; maxHealth: number }> = [];
+    if (
+      (this.bossMode || this.inLevelBossBattle) &&
+      this.currentBoss instanceof OctopusWarshipAI &&
+      this.currentBoss.isAlive()
+    ) {
+      const eyeSystem = this.currentBoss.getEyeSystem();
+      const eyeParts = eyeSystem.getCollisionParts();
+      for (const part of eyeParts) {
+        const health = eyeSystem.getEyeHealth(part.index);
+        if (health) {
+          eyeData.push({
+            mesh: part.mesh,
+            currentHealth: health.current,
+            maxHealth: health.max,
+          });
+        }
+      }
+    }
+
     this.enemyHealthBars.update(
-      [...enemyData, ...bossData],
+      [...enemyData, ...bossData, ...eyeData],
       friendlyData,
       this.gameScene.camera,
       this.playerSystem.getPosition()
@@ -924,78 +856,22 @@ export class GameCoordinator {
   }
 
   private startBossBattle(): void {
-    this.musicSystem.playBossMusic();
+    this.musicSystem.playBossMusic(this.currentLevelId);
 
-    // 加载当前关卡的地形
     this.enemySystem.loadLevel(this.currentLevelId);
 
     const bossType = getBossForLevel(this.currentLevelId);
     if (!bossType) return;
 
     const config = BOSS_CONFIGS[bossType];
-    const mesh = createBossMesh(config);
 
-    const playerPos = this.playerSystem.getPosition();
-    const spawnOffset = new THREE.Vector3(
-      (Math.random() - 0.5) * 200,
-      50 + Math.random() * 50,
-      (Math.random() - 0.5) * 200
-    );
-    mesh.position.copy(playerPos).add(spawnOffset);
-
-    this.gameScene.scene.add(mesh);
-
-    this.currentBoss = new BossAI(mesh, config, this.gameScene.scene, this.particleSystem);
-
-    this.currentBoss.onFire = (position, direction, damage) => {
-      this.combatSystem
-        .getBossProjectilePool()
-        .fire(position, direction, damage, this.currentBoss?.getMesh(), Faction.ENEMY);
-      this.audioManager.playShoot();
-    };
-
-    this.currentBoss.onDestroy = (position, bossConfig) => {
-      this.audioManager.playExplosion();
-      this.particleSystem.createExplosion(position, config.scale);
-      this.gameState.addScore(bossConfig.scoreValue);
-      this.playerStats.addScore(bossConfig.scoreValue);
-
-      this.bossIndicator.clear();
-
-      if (this.currentBoss) {
-        this.currentBoss.getMissileSystem().dispose();
-      }
-
-      for (const friendly of this.enemySystem.getFriendlyAIs()) {
-        friendly.dispose();
-      }
-      this.enemySystem['friendlyAIs'] = [];
-
-      this.combatSystem.getPlayerProjectilePool().clear();
-      this.combatSystem.getEnemyProjectilePool().clear();
-      this.particleSystem.clear();
-
-      this.hud.showPowerUpBig('🏆', 'Boss 已击败！');
-      this.currentBoss = null;
-
-      setTimeout(() => {
-        this.currentLevelId++;
-        if (this.currentLevelId <= 5) {
-          this.hud.showPowerUpBig('⏭️', `进入第 ${this.currentLevelId} 关`);
-          setTimeout(() => {
-            this.startBossBattle();
-          }, 2000);
-        } else {
-          this.gameState.setStatus(GameStatus.GAME_OVER);
-          this.musicSystem.stopMusic();
-          this.hud.showGameOver(this.gameState.getScore());
-        }
-      }, 1000);
-    };
-
-    this.currentBoss.onMissileFired = () => {
-      this.audioManager.playMissileLaunch();
-    };
+    if (bossType === BossType.DESERT_FORTRESS) {
+      this.createDesertFortressBoss(config);
+    } else if (bossType === BossType.OCTOPUS_WARSHIP) {
+      this.createOctopusWarshipBoss(config);
+    } else {
+      this.createHeavyBomberBoss(config);
+    }
 
     this.bossFriendlySpawnTimer = 0;
 
@@ -1005,14 +881,7 @@ export class GameCoordinator {
     }, 1000);
   }
 
-  private startLevelBossBattle(): void {
-    this.inLevelBossBattle = true;
-    this.musicSystem.playBossMusic();
-
-    const bossType = getBossForLevel(this.currentLevelId);
-    if (!bossType) return;
-
-    const config = BOSS_CONFIGS[bossType];
+  private createHeavyBomberBoss(config: BossConfig): void {
     const mesh = createBossMesh(config);
 
     const playerPos = this.playerSystem.getPosition();
@@ -1035,52 +904,181 @@ export class GameCoordinator {
     };
 
     this.currentBoss.onDestroy = (position, bossConfig) => {
-      this.audioManager.playExplosion();
-      this.particleSystem.createExplosion(position, config.scale);
-      this.gameState.addScore(bossConfig.scoreValue);
-      this.playerStats.addScore(bossConfig.scoreValue);
-
-      this.bossIndicator.clear();
-
-      if (this.currentBoss) {
-        this.currentBoss.getMissileSystem().dispose();
-      }
-
-      for (const friendly of this.enemySystem.getFriendlyAIs()) {
-        friendly.dispose();
-      }
-      this.enemySystem['friendlyAIs'] = [];
-
-      this.combatSystem.getPlayerProjectilePool().clear();
-      this.combatSystem.getEnemyProjectilePool().clear();
-      this.particleSystem.clear();
-
-      this.hud.showPowerUpBig('🏆', 'Boss 已击败！');
-      this.currentBoss = null;
-      this.inLevelBossBattle = false;
-
-      setTimeout(() => {
-        this.currentLevelId++;
-        if (this.currentLevelId <= 5) {
-          this.hud.showPowerUpBig('⏭️', `进入第 ${this.currentLevelId} 关`);
-          this.enemySystem.loadLevel(this.currentLevelId);
-          this.hud.updateRemainingEnemies(this.enemySystem.getTotalEnemyCount());
-
-          setTimeout(() => {
-            this.musicSystem.playLevelMusic(this.getLevelMusic(this.currentLevelId));
-            this.enemySystem.startWave(this.playerSystem.getPosition());
-          }, 2000);
-        } else {
-          this.gameState.setStatus(GameStatus.GAME_OVER);
-          this.musicSystem.stopMusic();
-          this.hud.showGameOver(this.gameState.getScore());
-        }
-      }, 1000);
+      this.handleBossDestroy(position, bossConfig, true);
     };
 
     this.currentBoss.onMissileFired = () => {
       this.audioManager.playMissileLaunch();
     };
+  }
+
+  private createDesertFortressBoss(config: BossConfig): void {
+    const mesh = createDesertFortressMesh(config);
+
+    const playerPos = this.playerSystem.getPosition();
+    mesh.position.set(playerPos.x, -50, playerPos.z + 200);
+
+    this.gameScene.scene.add(mesh);
+
+    const desertFortress = new DesertFortressAI(
+      mesh,
+      config,
+      this.gameScene.scene,
+      this.particleSystem
+    );
+    this.currentBoss = desertFortress;
+
+    desertFortress.onFlakFire = (_position) => {
+      this.audioManager.playFlakCannonFire();
+    };
+
+    desertFortress.onFlakExplode = (position, _radius, _damage) => {
+      this.particleSystem.createFlakExplosion(position, FLAK_CANNON_CONFIG.AOE_RADIUS);
+      this.audioManager.playFlakCannonExplosion();
+
+      const targets = [
+        this.playerAircraft,
+        ...this.enemySystem.getFriendlyAIs().map((f) => f.getMesh()),
+      ];
+      desertFortress.getFlakCannonSystem().checkAoeCollisions(targets, (target, damage) => {
+        this.particleSystem.createHit(target.position);
+        if (target === this.playerAircraft) {
+          if (!this.playerSystem.isShieldActive()) {
+            this.playerSystem.getHealth().takeDamage(damage);
+          }
+        } else {
+          const friendly = this.enemySystem.getFriendlyAIs().find((f) => f.getMesh() === target);
+          friendly?.takeDamage(damage);
+        }
+      });
+    };
+
+    desertFortress.onDestroy = (position, bossConfig) => {
+      if (this.currentBoss) {
+        const missileSystem = this.currentBoss.getMissileSystem();
+        if (missileSystem) {
+          missileSystem.dispose();
+        }
+        (this.currentBoss as DesertFortressAI).getFlakCannonSystem().dispose();
+      }
+      this.handleBossDestroy(position, bossConfig, true);
+    };
+
+    desertFortress.onMissileFired = () => {
+      this.audioManager.playMissileLaunch();
+    };
+  }
+
+  private createOctopusWarshipBoss(config: BossConfig): void {
+    const mesh = createOctopusWarshipMesh(config);
+
+    const playerPos = this.playerSystem.getPosition();
+    mesh.position.set(playerPos.x + (Math.random() - 0.5) * 100, 150, playerPos.z + 200);
+
+    this.gameScene.scene.add(mesh);
+
+    const octopusWarship = new OctopusWarshipAI(mesh, config, this.particleSystem);
+    this.currentBoss = octopusWarship;
+
+    octopusWarship.init();
+
+    octopusWarship.onTeleport = (from, to) => {
+      this.particleSystem.createTeleportOut(from);
+      this.particleSystem.createTeleportIn(to);
+    };
+
+    octopusWarship.onLaserWarning = () => {
+      this.hud.showPowerUpBig('⚠️', '激光预警！', 1, true);
+    };
+
+    octopusWarship.onLaserSweep = () => {
+      this.hud.showPowerUpBig('💣', '激光扫射！', 1, true);
+    };
+
+    octopusWarship.onLaserHit = () => {
+      if (!this.playerSystem.isShieldActive()) {
+        this.playerSystem.getHealth().takeDamage(config.damage);
+        this.particleSystem.createHit(this.playerAircraft.position);
+      }
+    };
+
+    octopusWarship.onDestroy = (position, bossConfig) => {
+      octopusWarship.getLaserSystem().dispose();
+      octopusWarship.getEyeSystem().dispose();
+      this.handleBossDestroy(position, bossConfig, true);
+    };
+  }
+
+  private handleBossDestroy(
+    position: THREE.Vector3,
+    bossConfig: BossConfig,
+    isBossMode: boolean
+  ): void {
+    this.audioManager.playExplosion();
+    this.particleSystem.createExplosion(position, bossConfig.scale);
+    this.gameState.addScore(bossConfig.scoreValue);
+    this.playerStats.addScore(bossConfig.scoreValue);
+
+    this.bossIndicator.clear();
+
+    if (this.currentBoss) {
+      const missileSystem = this.currentBoss.getMissileSystem();
+      if (missileSystem) {
+        missileSystem.dispose();
+      }
+    }
+
+    for (const friendly of this.enemySystem.getFriendlyAIs()) {
+      friendly.dispose();
+    }
+    this.enemySystem['friendlyAIs'] = [];
+
+    this.combatSystem.getPlayerProjectilePool().clear();
+    this.combatSystem.getEnemyProjectilePool().clear();
+    this.particleSystem.clear();
+
+    this.hud.showPowerUpBig('🏆', 'Boss 已击败！');
+    this.currentBoss?.dispose();
+    this.currentBoss = null;
+
+    setTimeout(() => {
+      this.currentLevelId++;
+      if (this.currentLevelId <= 5) {
+        this.hud.showPowerUpBig('⏭️', `进入第 ${this.currentLevelId} 关`);
+        setTimeout(() => {
+          if (isBossMode) {
+            this.startBossBattle();
+          } else {
+            this.enemySystem.loadLevel(this.currentLevelId);
+            this.hud.updateRemainingEnemies(this.enemySystem.getTotalEnemyCount());
+            this.musicSystem.playLevelMusic(this.getLevelMusic(this.currentLevelId));
+            this.enemySystem.startWave(this.playerSystem.getPosition());
+          }
+        }, 2000);
+      } else {
+        this.gameState.setStatus(GameStatus.GAME_OVER);
+        this.musicSystem.stopMusic();
+        this.hud.showGameOver(this.gameState.getScore());
+      }
+    }, 1000);
+  }
+
+  private startLevelBossBattle(): void {
+    this.inLevelBossBattle = true;
+    this.musicSystem.playBossMusic(this.currentLevelId);
+
+    const bossType = getBossForLevel(this.currentLevelId);
+    if (!bossType) return;
+
+    const config = BOSS_CONFIGS[bossType];
+
+    if (bossType === BossType.DESERT_FORTRESS) {
+      this.createDesertFortressBossForLevel(config);
+    } else if (bossType === BossType.OCTOPUS_WARSHIP) {
+      this.createOctopusWarshipBossForLevel(config);
+    } else {
+      this.createHeavyBomberBossForLevel(config);
+    }
 
     this.bossFriendlySpawnTimer = 0;
 
@@ -1088,6 +1086,137 @@ export class GameCoordinator {
       this.spawnFriendlyAI();
       this.hud.showPowerUpBig('✈️', '召唤友军');
     }, 1000);
+  }
+
+  private createHeavyBomberBossForLevel(config: BossConfig): void {
+    const mesh = createBossMesh(config);
+
+    const playerPos = this.playerSystem.getPosition();
+    const spawnOffset = new THREE.Vector3(
+      (Math.random() - 0.5) * 200,
+      50 + Math.random() * 50,
+      (Math.random() - 0.5) * 200
+    );
+    mesh.position.copy(playerPos).add(spawnOffset);
+
+    this.gameScene.scene.add(mesh);
+
+    this.currentBoss = new BossAI(mesh, config, this.gameScene.scene, this.particleSystem);
+
+    this.currentBoss.onFire = (position, direction, damage) => {
+      this.combatSystem
+        .getBossProjectilePool()
+        .fire(position, direction, damage, this.currentBoss?.getMesh(), Faction.ENEMY);
+      this.audioManager.playShoot();
+    };
+
+    this.currentBoss.onDestroy = (position, bossConfig) => {
+      this.handleBossDestroy(position, bossConfig, false);
+      this.inLevelBossBattle = false;
+    };
+
+    this.currentBoss.onMissileFired = () => {
+      this.audioManager.playMissileLaunch();
+    };
+  }
+
+  private createDesertFortressBossForLevel(config: BossConfig): void {
+    const mesh = createDesertFortressMesh(config);
+
+    const playerPos = this.playerSystem.getPosition();
+    mesh.position.set(playerPos.x, -50, playerPos.z + 200);
+
+    this.gameScene.scene.add(mesh);
+
+    const desertFortress = new DesertFortressAI(
+      mesh,
+      config,
+      this.gameScene.scene,
+      this.particleSystem
+    );
+    this.currentBoss = desertFortress;
+
+    desertFortress.onFlakFire = (_position) => {
+      this.audioManager.playFlakCannonFire();
+    };
+
+    desertFortress.onFlakExplode = (position, _radius, _damage) => {
+      this.particleSystem.createFlakExplosion(position, FLAK_CANNON_CONFIG.AOE_RADIUS);
+      this.audioManager.playFlakCannonExplosion();
+
+      const targets = [
+        this.playerAircraft,
+        ...this.enemySystem.getFriendlyAIs().map((f) => f.getMesh()),
+      ];
+      desertFortress.getFlakCannonSystem().checkAoeCollisions(targets, (target, damage) => {
+        this.particleSystem.createHit(target.position);
+        if (target === this.playerAircraft) {
+          if (!this.playerSystem.isShieldActive()) {
+            this.playerSystem.getHealth().takeDamage(damage);
+          }
+        } else {
+          const friendly = this.enemySystem.getFriendlyAIs().find((f) => f.getMesh() === target);
+          friendly?.takeDamage(damage);
+        }
+      });
+    };
+
+    desertFortress.onDestroy = (position, bossConfig) => {
+      if (this.currentBoss) {
+        const missileSystem = this.currentBoss.getMissileSystem();
+        if (missileSystem) {
+          missileSystem.dispose();
+        }
+        (this.currentBoss as DesertFortressAI).getFlakCannonSystem().dispose();
+      }
+      this.handleBossDestroy(position, bossConfig, false);
+      this.inLevelBossBattle = false;
+    };
+
+    desertFortress.onMissileFired = () => {
+      this.audioManager.playMissileLaunch();
+    };
+  }
+
+  private createOctopusWarshipBossForLevel(config: BossConfig): void {
+    const mesh = createOctopusWarshipMesh(config);
+
+    const playerPos = this.playerSystem.getPosition();
+    mesh.position.set(playerPos.x + (Math.random() - 0.5) * 100, 150, playerPos.z + 200);
+
+    this.gameScene.scene.add(mesh);
+
+    const octopusWarship = new OctopusWarshipAI(mesh, config, this.particleSystem);
+    this.currentBoss = octopusWarship;
+
+    octopusWarship.init();
+
+    octopusWarship.onTeleport = (from, to) => {
+      this.particleSystem.createTeleportOut(from);
+      this.particleSystem.createTeleportIn(to);
+    };
+
+    octopusWarship.onLaserWarning = () => {
+      this.hud.showPowerUpBig('⚠️', '激光预警！', 1, true);
+    };
+
+    octopusWarship.onLaserSweep = () => {
+      this.hud.showPowerUpBig('💣', '激光扫射！', 1, true);
+    };
+
+    octopusWarship.onLaserHit = () => {
+      if (!this.playerSystem.isShieldActive()) {
+        this.playerSystem.getHealth().takeDamage(config.damage);
+        this.particleSystem.createHit(this.playerAircraft.position);
+      }
+    };
+
+    octopusWarship.onDestroy = (position, bossConfig) => {
+      octopusWarship.getLaserSystem().dispose();
+      octopusWarship.getEyeSystem().dispose();
+      this.handleBossDestroy(position, bossConfig, false);
+      this.inLevelBossBattle = false;
+    };
   }
 
   public stop(): void {

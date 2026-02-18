@@ -555,3 +555,297 @@ LevelManager.update()
 **修改文件**：
 
 - `src/core/GameCoordinator.ts`
+
+---
+
+## Second Boss Implementation (2026-02-17)
+
+### 第二关 Boss - 沙漠堡垒 (DESERT_FORTRESS)
+
+**实现状态**：✅ 已完成
+
+| 属性 | 数值                        |
+| ---- | --------------------------- |
+| 体型 | scale 5                     |
+| 血量 | 2500                        |
+| 速度 | 0（地面固定）               |
+| 位置 | y = -50（地面）             |
+| 武器 | 四门防空炮 + 两个导弹发射器 |
+
+### 防空炮系统 (FlakCannonSystem)
+
+- **发射频率**：2.0 秒/发（四门轮流）
+- **炮弹速度**：50
+- **AOE 半径**：50
+- **伤害**：15
+- **特性**：
+  - 不追踪目标，发射时锁定玩家当前位置
+  - 炮弹飞到固定位置后爆炸
+  - 玩家可通过移动躲避
+
+### 新增文件
+
+| File                                     | Description      |
+| ---------------------------------------- | ---------------- |
+| `src/features/boss/FlakCannonSystem.ts`  | 防空炮弹系统     |
+| `src/features/boss/DesertFortressAI.ts`  | 沙漠堡垒 Boss AI |
+| `src/__tests__/FlakCannonSystem.test.ts` | 防空炮测试       |
+| `src/__tests__/DesertFortressAI.test.ts` | Boss AI 测试     |
+
+### 修改文件
+
+| File                                     | Change                                   |
+| ---------------------------------------- | ---------------------------------------- |
+| `src/features/boss/BossTypes.ts`         | 添加 DESERT_FORTRESS、FLAK_CANNON_CONFIG |
+| `src/features/effects/ParticleSystem.ts` | 添加 createFlakExplosion()               |
+| `src/core/Audio/AudioManager.ts`         | 添加防空炮音效                           |
+| `src/core/Audio/MusicSystem.ts`          | 添加 DESERT_BOSS 音乐                    |
+| `src/core/GameCoordinator.ts`            | Boss 创建和战斗逻辑                      |
+
+---
+
+## Recent Fixes (2026-02-17)
+
+### Boss 音乐节奏调整
+
+- **Issue**：Boss 音乐节奏太快
+- **Fix**：BPM 减半
+  - 第一关 Boss：180 → 90 BPM
+  - 第二关 Boss：190 → 95 BPM
+- **File**：`src/core/Audio/MusicSystem.ts`
+
+### Boss 导弹模型重设计
+
+- **Changes**：
+  - 全新专业外观：机身 + 弹头 + 四片尾翼 + 双层火焰
+  - 机身：圆柱形，前细后粗
+  - 弹头：黑色锥形
+  - 尾翼：四片长方形，向外展开
+  - 火焰：外层橙色 + 内层黄色
+- **Files**：`src/features/boss/BossMissileSystem.ts`, `src/ui/ModelPreview.ts`
+
+### Boss 导弹转向性能
+
+- **Issue**：导弹追踪能力太强，难以躲避
+- **Fix**：`turnSpeed` 从 1.0 → 0.5 → 0.25
+- **File**：`src/features/boss/BossMissileSystem.ts`
+
+### Boss 导弹地面碰撞
+
+- **Issue**：导弹追踪时穿过地面不销毁
+- **Fix**：当 `y <= -50` 时爆炸销毁
+- **File**：`src/features/boss/BossMissileSystem.ts`
+
+### 模型预览更新
+
+- **Changes**：
+  - 添加 Boss 导弹到预览列表
+  - 现在共 9 个模型：玩家 + 5 敌机 + 2 Boss + 导弹
+- **File**：`src/ui/ModelPreview.ts`
+
+### 防空炮不追踪玩家
+
+- **Issue**：防空炮像导弹一样追踪玩家，无法躲避
+- **Fix**：炮弹发射时锁定玩家当前位置，飞到固定点爆炸，不再追踪
+- **File**：`src/features/boss/FlakCannonSystem.ts`
+
+### 沙漠堡垒 Boss 高度
+
+- **Issue**：Boss 悬空
+- **Fix**：位置从 y=0 改为 y=-50（地面）
+- **File**：`src/core/GameCoordinator.ts`
+
+### 防空炮发射频率
+
+- **Issue**：发射太快
+- **Fix**：`cannonFireInterval` 从 0.5s 改为 2.0s
+- **File**：`src/features/boss/BossTypes.ts`
+
+### Boss 武器发射位置
+
+- **Issue**：导弹和防空炮从错误位置发射
+- **Fix**：
+  - 防空炮：从炮管顶端发射（y=3）
+  - 导弹：从两个发射井轮流发射（左/右发射井，y=4.5）
+- **File**：`src/features/boss/DesertFortressAI.ts`
+
+### 导弹发射井方向
+
+- **Issue**：发射井横向放置
+- **Fix**：改用 CylinderGeometry，竖直向上
+- **File**：`src/features/boss/DesertFortressAI.ts`
+
+### 敌人追踪指示器 Y 方向修复
+
+- **Issue**：敌人位于飞机下方/后面时，黄色追踪指示器错误地出现在屏幕角落
+- **Cause**：
+  - X 方向使用 3D 世界空间计算（正确）
+  - Y 方向使用投影后的 `screenPos.y`（错误）
+  - 当敌人在相机后面（z > 1）时，投影坐标镜像翻转
+- **Fix**：使用**相机局部坐标系**统一处理 X/Y 方向
+  ```typescript
+  const cameraLocal = toEnemy.clone().applyQuaternion(camera.quaternion.clone().invert());
+  // cameraLocal.x: 正=右, 负=左
+  // cameraLocal.y: 正=上, 负=下
+  // cameraLocal.z: 正=前, 负=后
+  ```
+- **算法逻辑**：
+  1. 计算水平角 `angleH = atan2(x, |z|)` 和垂直角 `angleV = atan2(y, |z|)`
+  2. 敌人在后面：根据 `|y| > |x|` 判断放上下边缘还是左右边缘
+  3. 敌人在前面但超出视野：将角度映射到屏幕位置并钳制到边缘
+  4. 旋转角度基于实际角度计算，而非屏幕位置
+- **File**：`src/ui/EnemyHealthBars.ts`
+  - `updateOrCreateHealthBar()`：添加相机局部坐标计算
+  - `updateArrowIndicator()`：完全重写，使用角度定位和旋转
+
+---
+
+## Third Boss Implementation (2026-02-17)
+
+### 第三关 Boss - 八爪鱼战舰 (OCTOPUS_WARSHIP)
+
+**实现状态**：✅ 已完成
+
+| 属性     | 数值              |
+| -------- | ----------------- |
+| 体型     | scale 5           |
+| 血量     | 3000 HP           |
+| 速度     | 5（缓慢追踪玩家） |
+| 高度     | y = 150（浮空）   |
+| 模型风格 | 机械风            |
+
+### 机制一：瞬移
+
+- **触发条件**：被攻击后 5% 概率
+- **冷却时间**：10 秒
+- **目标位置**：战场范围内随机位置（x: ±400, y: 100~250, z: ±400）
+- **视觉效果**：消失 + 闪烁 + 重新出现（带粒子效果）
+
+### 机制二：全屏激光扫射
+
+- **触发频率**：每 5 秒一次
+- **预警时间**：3 秒（显示激光平面位置）
+- **激光颜色**：蓝色
+- **旋转速度**：60°/秒（6 秒一圈）
+- **伤害**：100 HP
+- **激光平面**：随机（水平/垂直/倾斜）
+- **躲避方式**：玩家飞离激光平面即可
+
+### 机制三：八只机械臂
+
+- **数量**：8 只，均匀分布
+- **独立血量**：300 HP
+- **碰撞伤害**：50 HP
+- **击退效果**：推远 50 米
+- **碰撞冷却**：1 秒（每只独立）
+- **可被攻击**：✅ 玩家/友军可攻击，可被导弹锁定
+- **伤害传递**：✅ 机械臂伤害计入 Boss 本体 HP
+- **被消灭效果**：爆炸 + 消失
+- **长度**：~100 米
+
+### 新增文件
+
+| File                                     | Description                         |
+| ---------------------------------------- | ----------------------------------- |
+| `src/features/boss/OctopusWarshipAI.ts`  | Boss AI（移动、瞬移、激光、机械臂） |
+| `src/features/boss/LaserSweepSystem.ts`  | 全屏激光扫射系统                    |
+| `src/features/boss/TentacleSystem.ts`    | 机械臂系统（摆动、碰撞）            |
+| `src/__tests__/OctopusWarshipAI.test.ts` | Boss AI 测试                        |
+| `src/__tests__/LaserSweepSystem.test.ts` | 激光系统测试                        |
+| `src/__tests__/TentacleSystem.test.ts`   | 机械臂系统测试                      |
+
+### 修改文件
+
+| File                                     | Change                                                                                              |
+| ---------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `src/features/boss/BossTypes.ts`         | 添加 OCTOPUS_WARSHIP、LASER_SWEEP_CONFIG、TENTACLE_CONFIG、TELEPORT_CONFIG                          |
+| `src/features/effects/ParticleSystem.ts` | 添加 createTeleportOut()、createTeleportIn()、createLaserBeam()、createTentacleExplosion()          |
+| `src/core/GameCoordinator.ts`            | Boss 创建和战斗逻辑（createOctopusWarshipBoss、updateOctopusWarshipBattle）                         |
+| `src/core/Audio/MusicSystem.ts`          | 添加 OCTOPUS_BOSS 音乐（100 BPM）                                                                   |
+| `src/core/Audio/AudioManager.ts`         | 添加 playTeleport()、playLaserWarning()、playLaserSweep()、playTentacleHit()、playTentacleDestroy() |
+| `src/ui/ModelPreview.ts`                 | 添加 Boss 3 到预览列表                                                                              |
+
+### Boss 音乐配置
+
+| 关卡   | 主题       | 调式   | 波形     | BPM |
+| ------ | ---------- | ------ | -------- | --- |
+| Boss 1 | 紧张激烈   | E 小调 | sawtooth | 90  |
+| Boss 2 | 热烈中东风 | D 小调 | sawtooth | 95  |
+| Boss 3 | 空灵神秘   | E 小调 | sine     | 100 |
+
+---
+
+## Recent Fixes (2026-02-17) - Session 2
+
+### 第三关 Boss 重构：触手改眼睛
+
+**实现状态**：✅ 已完成
+
+- 删除机械触手系统 (TentacleSystem.ts)
+- 新增眼睛系统 (EyeSystem.ts)
+- 8 个眼睛均匀分布，可被摧毁，发射红色激光子弹
+- 眼睛 HP：300，伤害：20
+
+### 眼睛碰撞检测修复
+
+- **Issue**：导弹锁定眼睛但伤害打在 Boss 本体，眼睛 HP 不减少
+- **Cause**：
+  - `updateBossBattle()` 中有两个碰撞检查：通用 Boss 检查和眼睛专用检查
+  - 通用检查先运行，如果在 `bossAllParts` 中找到眼睛，伤害打给 Boss
+  - 导弹被停用后，眼睛专用检查永远不会触发
+- **Fix**：将眼睛碰撞检查移到 `updateBossBattle()` 的最前面，在 Boss 本体检查之前
+- **File**：`src/core/GameCoordinator.ts`
+  - 新增眼睛碰撞检查代码块（导弹和机枪）
+  - 移除 `updateOctopusWarshipBattle()` 中重复的玩家碰撞检查
+
+### 激光扫射平面不一致修复
+
+- **Issue**：预警平面显示正确倾斜角度，但激光扫射方向与预警平面不一致
+- **Cause**：
+  - `PlaneGeometry` 默认法线是 **+Z 轴**，不是 +Y 轴
+  - 代码从 `(0, 1, 0)` 旋转到 `planeNormal`，这是错误的
+- **Fix**：将 `createWarningVisual()` 中的旋转轴从 `(0, 1, 0)` 改为 `(0, 0, 1)`
+
+  ```typescript
+  // 修改前
+  const up = new THREE.Vector3(0, 1, 0); // Y 轴 - 错误
+
+  // 修改后
+  const defaultNormal = new THREE.Vector3(0, 0, 1); // Z 轴 - PlaneGeometry 默认法线
+  ```
+
+- **File**：`src/features/boss/LaserSweepSystem.ts`
+
+### Boss 击败后模型未清除修复
+
+- **Issue**：Boss 被击败后，模型仍然显示在场景中，进入下一关时不消失
+- **Cause**：`handleBossDestroy()` 设置 `this.currentBoss = null` 但从未调用 `this.currentBoss.dispose()`
+  - `dispose()` 方法负责：`mesh.visible = false` 和 `mesh.parent.remove(mesh)`
+  - 但这个方法只在测试文件中调用，游戏代码从未调用
+- **Fix**：在 `handleBossDestroy()` 中添加 `this.currentBoss?.dispose()` 调用
+  ```typescript
+  this.hud.showPowerUpBig('🏆', 'Boss 已击败！');
+  this.currentBoss?.dispose(); // 新增：移除 Boss 模型
+  this.currentBoss = null;
+  ```
+- **影响范围**：所有三个 Boss（HeavyBomber、DesertFortress、OctopusWarship）
+- **File**：`src/core/GameCoordinator.ts`
+
+### 修改文件汇总
+
+| File                                    | Change                                 |
+| --------------------------------------- | -------------------------------------- |
+| `src/features/boss/LaserSweepSystem.ts` | 修复预警平面旋转轴（Y → Z）            |
+| `src/core/GameCoordinator.ts`           | 眼睛碰撞检查前置 + Boss dispose() 调用 |
+| `src/features/boss/TentacleSystem.ts`   | 已删除                                 |
+| `src/features/boss/EyeSystem.ts`        | 新建 - 眼睛系统                        |
+| `src/__tests__/TentacleSystem.test.ts`  | 已删除                                 |
+
+### 关键代码位置
+
+| 功能              | 文件                                   | 行号/方法                 |
+| ----------------- | -------------------------------------- | ------------------------- |
+| 眼睛碰撞检查      | `GameCoordinator.ts`                   | `updateBossBattle()` 开头 |
+| 激光预警平面旋转  | `LaserSweepSystem.ts`                  | `createWarningVisual()`   |
+| Boss 模型清理     | `GameCoordinator.ts`                   | `handleBossDestroy()`     |
+| Boss dispose 方法 | `BossAI.ts`, `DesertFortressAI.ts`, 等 | `dispose()` 方法          |

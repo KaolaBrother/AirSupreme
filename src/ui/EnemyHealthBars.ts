@@ -76,6 +76,15 @@ export class EnemyHealthBars {
   }
 
   /**
+   * 获取目标的实际世界坐标
+   */
+  private getTargetWorldPosition(mesh: THREE.Object3D): THREE.Vector3 {
+    const worldPos = new THREE.Vector3();
+    mesh.getWorldPosition(worldPos);
+    return worldPos;
+  }
+
+  /**
    * 更新或创建血条
    */
   private updateOrCreateHealthBar(
@@ -91,10 +100,12 @@ export class EnemyHealthBars {
     const id = enemy.mesh.uuid;
     let barData = this.healthBars.get(id);
 
-    const isBoss = (enemy.mesh.name || '').includes('BOSS');
+    const name = enemy.mesh.name || '';
+    const isBoss = name.includes('BOSS') || name.includes('boss_eye');
     const barWidth = isBoss ? 120 : 60;
 
-    const screenPos = this.worldToScreen(enemy.mesh.position.clone(), camera);
+    const worldPos = this.getTargetWorldPosition(enemy.mesh);
+    const screenPos = this.worldToScreen(worldPos, camera);
 
     if (barData) {
       barData.screenPos = { x: screenPos.x, y: screenPos.y };
@@ -152,11 +163,11 @@ export class EnemyHealthBars {
       barData.bar.style.display = 'none';
       if (barData.arrow) {
         barData.arrow.style.display = 'block';
-        const distance = playerPosition.distanceTo(enemy.mesh.position);
-        const toEnemy = enemy.mesh.position.clone().sub(playerPosition);
-        const playerRight = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
-        const isOnRight = playerRight.dot(toEnemy) > 0;
-        this.updateArrowIndicator(barData.arrow, screenPos, distance, isOnRight);
+        const worldPos = this.getTargetWorldPosition(enemy.mesh);
+        const distance = playerPosition.distanceTo(worldPos);
+        const toEnemy = worldPos.clone().sub(playerPosition);
+        const cameraLocal = toEnemy.clone().applyQuaternion(camera.quaternion.clone().invert());
+        this.updateArrowIndicator(barData.arrow, cameraLocal, distance);
       }
     }
   }
@@ -271,49 +282,82 @@ export class EnemyHealthBars {
 
   /**
    * 更新箭头指示器位置和方向
+   * 使用相机局部坐标系进行角度计算，正确处理敌人在相机后面或下方的情况
    */
   private updateArrowIndicator(
     arrow: HTMLDivElement,
-    screenPos: { x: number; y: number; z: number },
-    distance: number,
-    isOnRight: boolean // 敌人在玩家视角的右边
+    cameraLocal: THREE.Vector3,
+    distance: number
   ): void {
-    // 计算屏幕中心
     const centerX = 0.5;
     const centerY = 0.5;
-
-    // 计算从中心到敌人的方向（用于确定箭头Y位置）
-    const dy = screenPos.y - centerY;
-
     const edgePadding = 0.08;
+
+    const isOnRight = cameraLocal.x > 0;
+    const isAbove = cameraLocal.y > 0;
+    const isBehind = cameraLocal.z < 0;
+
+    // 计算水平角和垂直角（相对于相机前方向）
+    // 使用 z 的绝对值来避免 z 为负时角度符号错误
+    const absZ = Math.max(Math.abs(cameraLocal.z), 0.001);
+    const angleH = Math.atan2(cameraLocal.x, absZ);
+    const angleV = Math.atan2(cameraLocal.y, absZ);
+
+    // 相机 FOV 相关的最大角度（假设水平 90°，垂直 60°）
+    const maxAngleH = Math.PI / 4; // 45° 水平半角
+    const maxAngleV = Math.PI / 5; // 36° 垂直半角
+
     let arrowX: number;
     let arrowY: number;
 
-    // 使用3D空间中的相对位置判断箭头在左边还是右边（避免camera旋转导致跳跃）
-    if (isOnRight) {
-      // 敌人在玩家视角右边 → 箭头在右边缘
-      arrowX = 1 - edgePadding;
-      // Y 根据敌人位置，但限制在屏幕范围内
-      arrowY = Math.max(edgePadding, Math.min(1 - edgePadding, centerY + dy));
+    // 计算箭头位置：将角度映射到屏幕边缘
+    if (isBehind) {
+      // 敌人在后面：箭头放在对应方向的边缘
+      if (Math.abs(cameraLocal.y) > Math.abs(cameraLocal.x)) {
+        // 更偏上/下
+        arrowY = isAbove ? 1 - edgePadding : edgePadding;
+        const hRatio = Math.min(1, Math.abs(angleH) / maxAngleH);
+        arrowX = centerX + (isOnRight ? hRatio : -hRatio) * (0.5 - edgePadding);
+      } else {
+        // 更偏左/右
+        arrowX = isOnRight ? 1 - edgePadding : edgePadding;
+        const vRatio = Math.min(1, Math.abs(angleV) / maxAngleV);
+        arrowY = centerY + (isAbove ? -vRatio : vRatio) * (0.5 - edgePadding);
+      }
     } else {
-      // 敌人在玩家视角左边 → 箭头在左边缘
-      arrowX = edgePadding;
-      // Y 根据敌人位置，但限制在屏幕范围内
-      arrowY = Math.max(edgePadding, Math.min(1 - edgePadding, centerY + dy));
+      // 敌人在前面但不在视野内：将角度映射到屏幕位置
+      const normalizedH = Math.max(-1, Math.min(1, angleH / maxAngleH));
+      const normalizedV = Math.max(-1, Math.min(1, angleV / maxAngleV));
+
+      arrowX = centerX + normalizedH * (0.5 - edgePadding);
+      arrowY = centerY - normalizedV * (0.5 - edgePadding);
+
+      // 如果超出视野，钳制到最近的边缘
+      if (Math.abs(normalizedH) >= 1 || Math.abs(normalizedV) >= 1) {
+        const slope = Math.abs(angleV) / (Math.abs(angleH) + 0.001);
+        if (slope > 1) {
+          // 上下边缘
+          arrowY = isAbove ? 1 - edgePadding : edgePadding;
+          const hPos = centerX + (isOnRight ? 1 : -1) * (1 / slope) * (0.5 - edgePadding);
+          arrowX = Math.max(edgePadding, Math.min(1 - edgePadding, hPos));
+        } else {
+          // 左右边缘
+          arrowX = isOnRight ? 1 - edgePadding : edgePadding;
+          const vPos = centerY + (isAbove ? -1 : 1) * slope * (0.5 - edgePadding);
+          arrowY = Math.max(edgePadding, Math.min(1 - edgePadding, vPos));
+        }
+      }
     }
 
-    // 计算从屏幕中心到箭头的方向（用于旋转角度）
-    const toArrowX = arrowX - centerX;
-    const toArrowY = arrowY - centerY;
-    const angleDeg = Math.atan2(toArrowY, toArrowX) * (180 / Math.PI);
+    // 计算旋转角度：箭头指向敌人方向
+    // 使用实际角度而非屏幕位置，确保旋转正确
+    const rotationAngle = Math.atan2(angleV, angleH) * (180 / Math.PI);
+    // 修正：箭头默认指向下方，需要调整
+    const adjustedRotation = isBehind ? -rotationAngle : rotationAngle;
 
-    // 设置箭头位置和旋转
     arrow.style.left = `${arrowX * 100}%`;
     arrow.style.top = `${arrowY * 100}%`;
-    // 箭头默认向下（border-bottom），需要调整角度指向箭头位置
-    // atan2(toArrowY, toArrowX) 返回的角度是以X轴正向为0度，逆时针为正
-    // 箭头默认向下（-90度），所以需要 +90度修正
-    arrow.style.transform = `translate(-50%, -50%) rotate(${angleDeg + 90}deg)`;
+    arrow.style.transform = `translate(-50%, -50%) rotate(${-adjustedRotation + 90}deg)`;
 
     // 更新箭头颜色（亮黄色）
     const arrowShape = arrow.querySelector('div');
@@ -325,7 +369,6 @@ export class EnemyHealthBars {
     const distanceLabel = arrow.querySelector('.arrow-distance-label') as HTMLSpanElement;
     if (distanceLabel) {
       distanceLabel.textContent = `${Math.round(distance)}m`;
-      // 确保标签不随箭头旋转
       distanceLabel.style.transform = 'none';
     }
   }
@@ -373,13 +416,14 @@ export class EnemyHealthBars {
    */
   private getEnemyName(mesh: THREE.Object3D): string {
     const name = mesh.name || '';
-    if (name.includes('BOSS')) return 'BOSS';
-    if (name.includes('Scout')) return 'SCOUT';
-    if (name.includes('Fighter')) return 'FIGHTER';
-    if (name.includes('Heavy')) return 'HEAVY';
-    if (name.includes('Sniper')) return 'SNIPER';
-    if (name.includes('Ace')) return 'ACE';
-    return 'ENEMY';
+    if (name.includes('boss_eye')) return 'Eye';
+    if (name.includes('BOSS') && !name.includes('boss_eye')) return 'Boss';
+    if (name === 'SCOUT' || name.includes('Scout')) return 'Scout';
+    if (name === 'FIGHTER' || name.includes('Fighter')) return 'Fighter';
+    if (name === 'HEAVY' || name.includes('Heavy')) return 'Heavy';
+    if (name === 'SNIPER' || name.includes('Sniper')) return 'Sniper';
+    if (name === 'ACE' || name.includes('Ace')) return 'Ace';
+    return 'Enemy';
   }
 
   /**
@@ -387,37 +431,33 @@ export class EnemyHealthBars {
    */
   private getTargetName(mesh: THREE.Object3D, isFriendly: boolean): string {
     if (isFriendly) {
-      // 友军：提取类型名称（mesh.name 格式为 'Scout-friendly', 'Fighter-friendly' 等）
       const name = mesh.name || '';
-      // 移除 '-friendly' 后缀
-      const baseName = name.replace('-friendly', '');
-      // 检查飞机类型
-      if (baseName.includes('Scout')) return 'SCOUT';
-      if (baseName.includes('Fighter')) return 'FIGHTER';
-      if (baseName.includes('Heavy')) return 'HEAVY';
-      if (baseName.includes('Sniper')) return 'SNIPER';
-      if (baseName.includes('Ace')) return 'ACE';
-      return baseName || 'UNKNOWN';
+      if (name === 'SCOUT' || name.includes('Scout')) return 'Scout';
+      if (name === 'FIGHTER' || name.includes('Fighter')) return 'Fighter';
+      if (name === 'HEAVY' || name.includes('Heavy')) return 'Heavy';
+      if (name === 'SNIPER' || name.includes('Sniper')) return 'Sniper';
+      if (name === 'ACE' || name.includes('Ace')) return 'Ace';
+      return 'Ally';
     }
     return this.getEnemyName(mesh);
   }
 
-  /**
-   * 计算血条位置（在敌人上方）
-   */
   private calculateBarPosition(
     enemyMesh: THREE.Object3D,
     camera: THREE.Camera,
     barWidth: number,
     barHeight: number
   ): { x: number; y: number } {
-    const isBoss = (enemyMesh.name || '').includes('BOSS');
-    const heightOffset = isBoss ? 15 : 2;
+    const name = enemyMesh.name || '';
+    const isBoss = name.includes('BOSS');
+    const isEye = name.includes('boss_eye');
+    const heightOffset = isBoss ? 15 : isEye ? 5 : 2;
 
-    const enemyTop = enemyMesh.position.clone();
-    enemyTop.y += heightOffset;
+    const worldPos = new THREE.Vector3();
+    enemyMesh.getWorldPosition(worldPos);
+    worldPos.y += heightOffset;
 
-    const screenPos = this.worldToScreen(enemyTop, camera);
+    const screenPos = this.worldToScreen(worldPos, camera);
 
     const offsetX = barWidth / 2;
     const offsetY = barHeight + 15;

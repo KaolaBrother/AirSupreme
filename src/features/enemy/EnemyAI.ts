@@ -127,8 +127,14 @@ export class EnemyAI {
       this.mesh.quaternion.slerp(dummy.quaternion, 0.3);
     }
 
-    const engineLocalPos = new THREE.Vector3(0, 0, 2);
-    const engineWorldPos = engineLocalPos.applyMatrix4(this.mesh.matrixWorld);
+    // 从引擎 mesh 获取世界位置（名为 'engineGlow'）
+    const engine = this.mesh.getObjectByName('engineGlow');
+    const engineWorldPos = new THREE.Vector3();
+    if (engine) {
+      engine.getWorldPosition(engineWorldPos);
+    } else {
+      engineWorldPos.copy(this.mesh.position);
+    }
     this.trail.addPoint(engineWorldPos);
 
     this.attackCooldown = Math.max(0, this.attackCooldown - deltaTime);

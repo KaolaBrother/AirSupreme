@@ -382,9 +382,10 @@ export function createBossMesh(config: BossConfig): THREE.Group {
   parts.push(body);
 
   // 机头 - 尖端朝向 -Z（前方）
+  // ConeGeometry 默认尖端朝向 +Y，rotation.x = +PI/2 使尖端朝向 -Z
   const noseGeometry = new THREE.ConeGeometry(0.8 * scale, 3 * scale, 12);
   const nose = new THREE.Mesh(noseGeometry, accentMaterial);
-  nose.rotation.x = -Math.PI / 2;
+  nose.rotation.x = Math.PI / 2; // 正值使尖端朝向 -Z（前方）
   nose.position.set(0, 0, -5.5 * scale);
   nose.name = 'boss_nose';
   nose.castShadow = true;
@@ -489,16 +490,17 @@ export function createBossMesh(config: BossConfig): THREE.Group {
     new THREE.Vector3(1.5 * scale, 0, 4.5 * scale),
   ];
 
+  const engineMeshes: THREE.Mesh[] = [];
   enginePositions.forEach((pos, i) => {
     const engine = new THREE.Mesh(engineGeometry, engineMaterial);
-    engine.rotation.x = Math.PI / 2;
     engine.position.copy(pos);
     engine.name = `boss_engine_${i}`;
     group.add(engine);
     parts.push(engine);
+    engineMeshes.push(engine);
   });
 
-  group.name = `BOSS_${config.type}`;
-  (group as any).bossParts = parts;
+  group.userData.bossParts = parts;
+  group.userData.engineMeshes = engineMeshes;
   return group;
 }

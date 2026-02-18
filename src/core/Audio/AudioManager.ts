@@ -10,9 +10,9 @@ export enum SoundType {
   LEVEL_UP = 'LEVEL_UP',
   WAVE_START = 'WAVE_START',
   GAME_OVER = 'GAME_OVER',
-  BALLOON_POP = 'BALLOON_POP',      // 气球打破音效
-  MISSILE_LOCK = 'MISSILE_LOCK',    // 导弹锁定音效
-  MISSILE_FIRE = 'MISSILE_FIRE',      // 导弹发射音效
+  BALLOON_POP = 'BALLOON_POP', // 气球打破音效
+  MISSILE_LOCK = 'MISSILE_LOCK', // 导弹锁定音效
+  MISSILE_FIRE = 'MISSILE_FIRE', // 导弹发射音效
   MISSILE_EXPLOSION = 'MISSILE_EXPLOSION', // 导弹爆炸音效
 }
 
@@ -236,7 +236,7 @@ export class AudioManager {
       const now = this.context.currentTime;
 
       // 上升音阶
-      const notes = [523.25, 659.25, 783.99, 1046.50]; // C5, E5, G5, C6
+      const notes = [523.25, 659.25, 783.99, 1046.5]; // C5, E5, G5, C6
 
       notes.forEach((freq, i) => {
         const osc = this.context!.createOscillator();
@@ -550,6 +550,288 @@ export class AudioManager {
 
       // 添加噪声层增强爆炸感
       this.playNoise(0.6, 0.1, 0.8 * this.sfxVolume);
+    } catch (e) {
+      // Ignore
+    }
+  }
+
+  public playFlakCannonFire(): void {
+    this.initContext();
+    if (!this.context || !this.masterVolume) return;
+
+    try {
+      const now = this.context.currentTime;
+
+      const osc = this.context.createOscillator();
+      const gain = this.context.createGain();
+
+      osc.type = 'square';
+      osc.frequency.setValueAtTime(200, now);
+      osc.frequency.exponentialRampToValueAtTime(80, now + 0.15);
+
+      gain.gain.setValueAtTime(0.35 * this.sfxVolume, now);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
+
+      osc.connect(gain);
+      gain.connect(this.masterVolume);
+
+      osc.start(now);
+      osc.stop(now + 0.15);
+
+      const osc2 = this.context.createOscillator();
+      const gain2 = this.context.createGain();
+
+      osc2.type = 'sawtooth';
+      osc2.frequency.setValueAtTime(600, now);
+      osc2.frequency.exponentialRampToValueAtTime(200, now + 0.1);
+
+      gain2.gain.setValueAtTime(0, now);
+      gain2.gain.linearRampToValueAtTime(0.15 * this.sfxVolume, now + 0.01);
+      gain2.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
+
+      osc2.connect(gain2);
+      gain2.connect(this.masterVolume);
+
+      osc2.start(now);
+      osc2.stop(now + 0.1);
+
+      this.playNoise(0.15, 0.02, 0.2 * this.sfxVolume);
+    } catch (e) {
+      // Ignore
+    }
+  }
+
+  public playFlakCannonExplosion(): void {
+    this.initContext();
+    if (!this.context || !this.masterVolume) return;
+
+    try {
+      const now = this.context.currentTime;
+
+      const osc = this.context.createOscillator();
+      const gain = this.context.createGain();
+
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(120, now);
+      osc.frequency.exponentialRampToValueAtTime(25, now + 0.6);
+
+      gain.gain.setValueAtTime(0, now);
+      gain.gain.linearRampToValueAtTime(0.5 * this.sfxVolume, now + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.6);
+
+      osc.connect(gain);
+      gain.connect(this.masterVolume);
+
+      osc.start(now);
+      osc.stop(now + 0.6);
+
+      const osc2 = this.context.createOscillator();
+      const gain2 = this.context.createGain();
+
+      osc2.type = 'sine';
+      osc2.frequency.setValueAtTime(300, now);
+      osc2.frequency.exponentialRampToValueAtTime(50, now + 0.4);
+
+      gain2.gain.setValueAtTime(0, now);
+      gain2.gain.linearRampToValueAtTime(0.3 * this.sfxVolume, now + 0.02);
+      gain2.gain.exponentialRampToValueAtTime(0.01, now + 0.4);
+
+      osc2.connect(gain2);
+      gain2.connect(this.masterVolume);
+
+      osc2.start(now);
+      osc2.stop(now + 0.4);
+
+      this.playNoise(0.6, 0.1, 0.5 * this.sfxVolume);
+    } catch (e) {
+      // Ignore
+    }
+  }
+
+  public playTeleport(): void {
+    this.initContext();
+    if (!this.context || !this.masterVolume) return;
+
+    try {
+      const now = this.context.currentTime;
+
+      const osc = this.context.createOscillator();
+      const gain = this.context.createGain();
+
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(800, now);
+      osc.frequency.exponentialRampToValueAtTime(200, now + 0.3);
+      osc.frequency.exponentialRampToValueAtTime(1500, now + 0.5);
+
+      gain.gain.setValueAtTime(0, now);
+      gain.gain.linearRampToValueAtTime(0.4 * this.sfxVolume, now + 0.05);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.5);
+
+      osc.connect(gain);
+      gain.connect(this.masterVolume);
+
+      osc.start(now);
+      osc.stop(now + 0.5);
+
+      const osc2 = this.context.createOscillator();
+      const gain2 = this.context.createGain();
+
+      osc2.type = 'square';
+      osc2.frequency.setValueAtTime(400, now);
+      osc2.frequency.exponentialRampToValueAtTime(100, now + 0.4);
+
+      gain2.gain.setValueAtTime(0, now);
+      gain2.gain.linearRampToValueAtTime(0.15 * this.sfxVolume, now + 0.02);
+      gain2.gain.exponentialRampToValueAtTime(0.01, now + 0.4);
+
+      osc2.connect(gain2);
+      gain2.connect(this.masterVolume);
+
+      osc2.start(now);
+      osc2.stop(now + 0.4);
+
+      this.playNoise(0.3, 0.05, 0.2 * this.sfxVolume);
+    } catch (e) {
+      // Ignore
+    }
+  }
+
+  public playLaserWarning(): void {
+    this.initContext();
+    if (!this.context || !this.masterVolume) return;
+
+    try {
+      const now = this.context.currentTime;
+
+      for (let i = 0; i < 3; i++) {
+        const osc = this.context.createOscillator();
+        const gain = this.context.createGain();
+        const startTime = now + i * 0.8;
+
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(600, startTime);
+        osc.frequency.setValueAtTime(500, startTime + 0.1);
+        osc.frequency.setValueAtTime(600, startTime + 0.2);
+
+        gain.gain.setValueAtTime(0, startTime);
+        gain.gain.linearRampToValueAtTime(0.3 * this.sfxVolume, startTime + 0.02);
+        gain.gain.setValueAtTime(0.3 * this.sfxVolume, startTime + 0.3);
+        gain.gain.exponentialRampToValueAtTime(0.01, startTime + 0.4);
+
+        osc.connect(gain);
+        gain.connect(this.masterVolume);
+
+        osc.start(startTime);
+        osc.stop(startTime + 0.4);
+      }
+    } catch (e) {
+      // Ignore
+    }
+  }
+
+  public playLaserSweep(): void {
+    this.initContext();
+    if (!this.context || !this.masterVolume) return;
+
+    try {
+      const now = this.context.currentTime;
+
+      const osc = this.context.createOscillator();
+      const gain = this.context.createGain();
+
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(200, now);
+      osc.frequency.linearRampToValueAtTime(800, now + 0.1);
+      osc.frequency.linearRampToValueAtTime(150, now + 6);
+
+      gain.gain.setValueAtTime(0, now);
+      gain.gain.linearRampToValueAtTime(0.25 * this.sfxVolume, now + 0.1);
+      gain.gain.setValueAtTime(0.2 * this.sfxVolume, now + 3);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + 6);
+
+      osc.connect(gain);
+      gain.connect(this.masterVolume);
+
+      osc.start(now);
+      osc.stop(now + 6);
+
+      const osc2 = this.context.createOscillator();
+      const gain2 = this.context.createGain();
+
+      osc2.type = 'sine';
+      osc2.frequency.setValueAtTime(1000, now);
+      osc2.frequency.linearRampToValueAtTime(200, now + 6);
+
+      gain2.gain.setValueAtTime(0, now);
+      gain2.gain.linearRampToValueAtTime(0.15 * this.sfxVolume, now + 0.2);
+      gain2.gain.setValueAtTime(0.1 * this.sfxVolume, now + 3);
+      gain2.gain.exponentialRampToValueAtTime(0.01, now + 6);
+
+      osc2.connect(gain2);
+      gain2.connect(this.masterVolume);
+
+      osc2.start(now);
+      osc2.stop(now + 6);
+    } catch (e) {
+      // Ignore
+    }
+  }
+
+  public playTentacleHit(): void {
+    this.initContext();
+    if (!this.context || !this.masterVolume) return;
+
+    try {
+      const now = this.context.currentTime;
+
+      const osc = this.context.createOscillator();
+      const gain = this.context.createGain();
+
+      osc.type = 'square';
+      osc.frequency.setValueAtTime(150, now);
+      osc.frequency.exponentialRampToValueAtTime(50, now + 0.15);
+
+      gain.gain.setValueAtTime(0, now);
+      gain.gain.linearRampToValueAtTime(0.4 * this.sfxVolume, now + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
+
+      osc.connect(gain);
+      gain.connect(this.masterVolume);
+
+      osc.start(now);
+      osc.stop(now + 0.15);
+
+      this.playNoise(0.1, 0.02, 0.3 * this.sfxVolume);
+    } catch (e) {
+      // Ignore
+    }
+  }
+
+  public playTentacleDestroy(): void {
+    this.initContext();
+    if (!this.context || !this.masterVolume) return;
+
+    try {
+      const now = this.context.currentTime;
+
+      const osc = this.context.createOscillator();
+      const gain = this.context.createGain();
+
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(400, now);
+      osc.frequency.exponentialRampToValueAtTime(50, now + 0.4);
+
+      gain.gain.setValueAtTime(0, now);
+      gain.gain.linearRampToValueAtTime(0.5 * this.sfxVolume, now + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.4);
+
+      osc.connect(gain);
+      gain.connect(this.masterVolume);
+
+      osc.start(now);
+      osc.stop(now + 0.4);
+
+      this.playNoise(0.3, 0.05, 0.4 * this.sfxVolume);
     } catch (e) {
       // Ignore
     }

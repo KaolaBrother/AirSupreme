@@ -63,6 +63,8 @@ export enum LevelMusic {
   OCEAN = 'OCEAN',
   CITY = 'CITY',
   BOSS = 'BOSS',
+  DESERT_BOSS = 'DESERT_BOSS',
+  OCTOPUS_BOSS = 'OCTOPUS_BOSS',
 }
 
 export class MusicSystem {
@@ -844,6 +846,229 @@ export class MusicSystem {
     return { notes, waveform: 'sine', volume: 0.12 };
   }
 
+  private createDesertBossMelodyA(): MusicTrack {
+    const notes: NoteEvent[] = [
+      { note: NOTE.D4, duration: 0.25 },
+      { note: NOTE.F4, duration: 0.25 },
+      { note: NOTE.G4S, duration: 0.25 },
+      { note: NOTE.A4, duration: 0.25 },
+      { note: NOTE.D5, duration: 0.5 },
+      { note: NOTE.C5, duration: 0.25 },
+      { note: NOTE.A4, duration: 0.25 },
+      { note: NOTE.G4S, duration: 0.5 },
+      { note: NOTE.F4, duration: 0.25 },
+      { note: NOTE.D4, duration: 0.25 },
+      { note: NOTE.E4, duration: 0.25 },
+      { note: NOTE.F4, duration: 0.25 },
+      { note: NOTE.G4S, duration: 0.5 },
+      { note: NOTE.A4, duration: 0.25 },
+      { note: NOTE.G4S, duration: 0.25 },
+      { note: NOTE.F4, duration: 0.5 },
+      { note: NOTE.D4, duration: 0.5 },
+      { note: NOTE.F4, duration: 0.5 },
+      { note: NOTE.A4, duration: 0.5 },
+      { note: NOTE.G4S, duration: 0.25 },
+      { note: NOTE.F4, duration: 0.25 },
+      { note: NOTE.D4, duration: 0.5 },
+    ];
+    return { notes, waveform: 'sawtooth', volume: 0.28 };
+  }
+
+  private createDesertBossMelodyB(): MusicTrack {
+    const notes: NoteEvent[] = [
+      { note: NOTE.A4, duration: 0.25 },
+      { note: NOTE.G4S, duration: 0.25 },
+      { note: NOTE.F4, duration: 0.25 },
+      { note: NOTE.D4, duration: 0.25 },
+      { note: NOTE.E4, duration: 0.5 },
+      { note: NOTE.F4, duration: 0.25 },
+      { note: NOTE.G4S, duration: 0.25 },
+      { note: NOTE.A4, duration: 0.5 },
+      { note: NOTE.C5, duration: 0.25 },
+      { note: NOTE.D5, duration: 0.25 },
+      { note: NOTE.C5, duration: 0.25 },
+      { note: NOTE.A4, duration: 0.25 },
+      { note: NOTE.G4S, duration: 0.5 },
+      { note: NOTE.F4, duration: 0.25 },
+      { note: NOTE.D4, duration: 0.25 },
+      { note: NOTE.F4, duration: 0.5 },
+      { note: NOTE.A4, duration: 0.25 },
+      { note: NOTE.G4S, duration: 0.25 },
+      { note: NOTE.F4, duration: 0.25 },
+      { note: NOTE.D4, duration: 0.25 },
+      { note: NOTE.E4, duration: 0.5 },
+      { note: NOTE.F4, duration: 0.5 },
+    ];
+    return { notes, waveform: 'sawtooth', volume: 0.28 };
+  }
+
+  private createDesertBossMelodyC(): MusicTrack {
+    const notes: NoteEvent[] = [
+      { note: NOTE.D5, duration: 0.25 },
+      { note: NOTE.C5, duration: 0.25 },
+      { note: NOTE.A4, duration: 0.25 },
+      { note: NOTE.G4S, duration: 0.25 },
+      { note: NOTE.A4, duration: 0.5 },
+      { note: NOTE.C5, duration: 0.25 },
+      { note: NOTE.D5, duration: 0.5 },
+      { note: NOTE.F5, duration: 0.25 },
+      { note: NOTE.E5, duration: 0.25 },
+      { note: NOTE.D5, duration: 0.25 },
+      { note: NOTE.C5, duration: 0.25 },
+      { note: NOTE.A4, duration: 0.5 },
+      { note: NOTE.G4S, duration: 0.25 },
+      { note: NOTE.F4, duration: 0.25 },
+      { note: NOTE.D4, duration: 0.5 },
+      { note: NOTE.F4, duration: 0.25 },
+      { note: NOTE.A4, duration: 0.25 },
+      { note: NOTE.C5, duration: 0.25 },
+      { note: NOTE.D5, duration: 0.25 },
+      { note: NOTE.C5, duration: 0.5 },
+      { note: NOTE.A4, duration: 0.25 },
+      { note: NOTE.G4S, duration: 0.25 },
+      { note: NOTE.D4, duration: 0.75 },
+    ];
+    return { notes, waveform: 'sawtooth', volume: 0.28 };
+  }
+
+  private createDesertBossBass(): MusicTrack {
+    const notes: NoteEvent[] = [
+      { note: NOTE.D3, duration: 0.25 },
+      { note: NOTE.D3, duration: 0.25 },
+      { note: NOTE.D3, duration: 0.25 },
+      { note: NOTE.D3, duration: 0.25 },
+      { note: NOTE.F3, duration: 0.25 },
+      { note: NOTE.F3, duration: 0.25 },
+      { note: NOTE.G3S, duration: 0.25 },
+      { note: NOTE.G3S, duration: 0.25 },
+      { note: NOTE.A3, duration: 0.25 },
+      { note: NOTE.A3, duration: 0.25 },
+      { note: NOTE.G3S, duration: 0.25 },
+      { note: NOTE.G3S, duration: 0.25 },
+      { note: NOTE.F3, duration: 0.25 },
+      { note: NOTE.F3, duration: 0.25 },
+      { note: NOTE.D3, duration: 0.25 },
+      { note: NOTE.D3, duration: 0.25 },
+      { note: NOTE.E3, duration: 0.25 },
+      { note: NOTE.E3, duration: 0.25 },
+      { note: NOTE.F3, duration: 0.25 },
+      { note: NOTE.F3, duration: 0.25 },
+      { note: NOTE.G3S, duration: 0.5 },
+      { note: NOTE.A3, duration: 0.5 },
+    ];
+    return { notes, waveform: 'square', volume: 0.2 };
+  }
+
+  private createDesertBossDrone(): MusicTrack {
+    const notes: NoteEvent[] = [
+      { note: NOTE.D3, duration: 2.0 },
+      { note: NOTE.F3, duration: 2.0 },
+      { note: NOTE.G3S, duration: 2.0 },
+      { note: NOTE.A3, duration: 2.0 },
+    ];
+    return { notes, waveform: 'sine', volume: 0.14 };
+  }
+
+  private createOctopusBossMelodyA(): MusicTrack {
+    const notes: NoteEvent[] = [
+      { note: NOTE.E4, duration: 0.5 },
+      { note: NOTE.G4, duration: 0.25 },
+      { note: NOTE.A4, duration: 0.25 },
+      { note: NOTE.B4, duration: 0.5 },
+      { note: NOTE.A4, duration: 0.25 },
+      { note: NOTE.G4, duration: 0.25 },
+      { note: NOTE.E4, duration: 1.0 },
+      { note: NOTE.REST, duration: 0.5 },
+      { note: NOTE.D4, duration: 0.5 },
+      { note: NOTE.E4, duration: 0.5 },
+      { note: NOTE.G4, duration: 0.5 },
+      { note: NOTE.A4, duration: 0.25 },
+      { note: NOTE.B4, duration: 0.25 },
+      { note: NOTE.C5, duration: 0.5 },
+      { note: NOTE.B4, duration: 0.25 },
+      { note: NOTE.A4, duration: 0.25 },
+      { note: NOTE.G4, duration: 0.5 },
+      { note: NOTE.E4, duration: 1.0 },
+      { note: NOTE.D4, duration: 0.5 },
+      { note: NOTE.E4, duration: 0.5 },
+      { note: NOTE.G4, duration: 0.25 },
+      { note: NOTE.A4, duration: 0.25 },
+      { note: NOTE.B4, duration: 0.5 },
+      { note: NOTE.C5, duration: 0.5 },
+      { note: NOTE.B4, duration: 0.25 },
+      { note: NOTE.A4, duration: 0.25 },
+      { note: NOTE.G4, duration: 0.5 },
+      { note: NOTE.E4, duration: 1.0 },
+    ];
+    return { notes, waveform: 'sine', volume: 0.28 };
+  }
+
+  private createOctopusBossMelodyB(): MusicTrack {
+    const notes: NoteEvent[] = [
+      { note: NOTE.B4, duration: 0.25 },
+      { note: NOTE.C5, duration: 0.25 },
+      { note: NOTE.D5, duration: 0.5 },
+      { note: NOTE.C5, duration: 0.25 },
+      { note: NOTE.B4, duration: 0.25 },
+      { note: NOTE.A4, duration: 0.5 },
+      { note: NOTE.G4, duration: 0.25 },
+      { note: NOTE.E4, duration: 0.25 },
+      { note: NOTE.D4, duration: 1.0 },
+      { note: NOTE.E4, duration: 0.5 },
+      { note: NOTE.G4, duration: 0.5 },
+      { note: NOTE.A4, duration: 0.5 },
+      { note: NOTE.B4, duration: 0.25 },
+      { note: NOTE.A4, duration: 0.25 },
+      { note: NOTE.G4, duration: 0.5 },
+      { note: NOTE.E4, duration: 0.5 },
+      { note: NOTE.D4, duration: 0.5 },
+      { note: NOTE.E4, duration: 0.5 },
+      { note: NOTE.G4, duration: 0.25 },
+      { note: NOTE.A4, duration: 0.25 },
+      { note: NOTE.B4, duration: 0.5 },
+      { note: NOTE.C5, duration: 0.5 },
+      { note: NOTE.B4, duration: 0.25 },
+      { note: NOTE.A4, duration: 0.25 },
+      { note: NOTE.G4, duration: 0.5 },
+      { note: NOTE.E4, duration: 1.0 },
+    ];
+    return { notes, waveform: 'sine', volume: 0.28 };
+  }
+
+  private createOctopusBossBass(): MusicTrack {
+    const notes: NoteEvent[] = [
+      { note: NOTE.E3, duration: 0.5 },
+      { note: NOTE.E3, duration: 0.5 },
+      { note: NOTE.G3, duration: 0.5 },
+      { note: NOTE.A3, duration: 0.5 },
+      { note: NOTE.B3, duration: 0.5 },
+      { note: NOTE.A3, duration: 0.5 },
+      { note: NOTE.G3, duration: 0.5 },
+      { note: NOTE.E3, duration: 0.5 },
+      { note: NOTE.D3, duration: 0.5 },
+      { note: NOTE.E3, duration: 0.5 },
+      { note: NOTE.G3, duration: 0.5 },
+      { note: NOTE.A3, duration: 0.5 },
+      { note: NOTE.B3, duration: 0.5 },
+      { note: NOTE.C4, duration: 0.5 },
+      { note: NOTE.B3, duration: 0.5 },
+      { note: NOTE.A3, duration: 0.5 },
+      { note: NOTE.G3, duration: 0.5 },
+      { note: NOTE.E3, duration: 1.0 },
+    ];
+    return { notes, waveform: 'triangle', volume: 0.18 };
+  }
+
+  private createOctopusBossPad(): MusicTrack {
+    const notes: NoteEvent[] = [
+      { note: NOTE.E3, duration: 2.0 },
+      { note: NOTE.G3, duration: 2.0 },
+      { note: NOTE.A3, duration: 2.0 },
+      { note: NOTE.B3, duration: 2.0 },
+    ];
+    return { notes, waveform: 'sine', volume: 0.1 };
+  }
+
   private playNote(
     frequency: number,
     duration: number,
@@ -939,6 +1164,21 @@ export class MusicSystem {
           bass: this.createBossBass(),
           pad: this.createBossDrone(),
         };
+      case LevelMusic.DESERT_BOSS:
+        return {
+          melodyA: this.createDesertBossMelodyA(),
+          melodyB: this.createDesertBossMelodyB(),
+          melodyC: this.createDesertBossMelodyC(),
+          bass: this.createDesertBossBass(),
+          pad: this.createDesertBossDrone(),
+        };
+      case LevelMusic.OCTOPUS_BOSS:
+        return {
+          melodyA: this.createOctopusBossMelodyA(),
+          melodyB: this.createOctopusBossMelodyB(),
+          bass: this.createOctopusBossBass(),
+          pad: this.createOctopusBossPad(),
+        };
     }
   }
 
@@ -1026,7 +1266,15 @@ export class MusicSystem {
         this.musicVolume = 0.32;
         break;
       case LevelMusic.BOSS:
-        this.bpm = 180;
+        this.bpm = 90;
+        this.musicVolume = 0.35;
+        break;
+      case LevelMusic.DESERT_BOSS:
+        this.bpm = 95;
+        this.musicVolume = 0.38;
+        break;
+      case LevelMusic.OCTOPUS_BOSS:
+        this.bpm = 100;
         this.musicVolume = 0.35;
         break;
     }
@@ -1036,8 +1284,14 @@ export class MusicSystem {
     }
   }
 
-  public playBossMusic(): void {
-    this.playLevelMusic(LevelMusic.BOSS);
+  public playBossMusic(level?: number): void {
+    if (level === 2) {
+      this.playLevelMusic(LevelMusic.DESERT_BOSS);
+    } else if (level === 3) {
+      this.playLevelMusic(LevelMusic.OCTOPUS_BOSS);
+    } else {
+      this.playLevelMusic(LevelMusic.BOSS);
+    }
   }
 
   public stopMusic(): void {

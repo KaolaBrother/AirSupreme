@@ -62,9 +62,15 @@ export class ProjectilePool {
    * @param owner 发射者（用于防止立即碰撞）
    * @param faction 子弹阵营（用于伤害检测）
    */
-  public fire(origin: THREE.Vector3, direction: THREE.Vector3, damage: number, owner?: THREE.Object3D, faction?: string): void {
+  public fire(
+    origin: THREE.Vector3,
+    direction: THREE.Vector3,
+    damage: number,
+    owner?: THREE.Object3D,
+    faction?: string
+  ): void {
     // 找到未激活的子弹
-    const projectile = this.pool.find(p => !p.active);
+    const projectile = this.pool.find((p) => !p.active);
     if (!projectile) return;
 
     projectile.mesh.position.copy(origin);
@@ -85,10 +91,7 @@ export class ProjectilePool {
       if (!projectile.active) continue;
 
       // 移动子弹
-      projectile.mesh.position.addScaledVector(
-        projectile.direction,
-        projectile.speed * deltaTime
-      );
+      projectile.mesh.position.addScaledVector(projectile.direction, projectile.speed * deltaTime);
 
       // 检查是否超出最大距离
       const distance = projectile.mesh.position.distanceTo(projectile.startPosition);
@@ -111,11 +114,13 @@ export class ProjectilePool {
       for (const target of targets) {
         if (!target.visible) continue;
 
-        // 跳过发射者自己，防止子弹立即碰撞到发射者
         if (projectile.owner && target === projectile.owner) continue;
 
-        const distance = projectile.mesh.position.distanceTo(target.position);
-        const collisionThreshold = 5; // 碰撞距离
+        const targetWorldPos = new THREE.Vector3();
+        target.getWorldPosition(targetWorldPos);
+
+        const distance = projectile.mesh.position.distanceTo(targetWorldPos);
+        const collisionThreshold = 5;
 
         if (distance < collisionThreshold) {
           onHit(target, projectile.mesh, projectile.damage);
@@ -135,9 +140,7 @@ export class ProjectilePool {
   }
 
   public getActiveProjectiles(): THREE.Mesh[] {
-    return this.pool
-      .filter(p => p.active)
-      .map(p => p.mesh);
+    return this.pool.filter((p) => p.active).map((p) => p.mesh);
   }
 
   public clear(): void {

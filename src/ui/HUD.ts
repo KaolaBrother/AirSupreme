@@ -16,13 +16,13 @@ export class HUD {
   private missilesDisplay: HTMLDivElement;
   private missileProgressDisplay: HTMLDivElement; // 导弹补给进度条背景
   private missileProgressFill: HTMLDivElement; // 导弹补给进度条填充
-  private powerUpDisplay: HTMLDivElement;  // 道具提示显示
+  private powerUpDisplay: HTMLDivElement; // 道具提示显示
   private powerUpBigDisplay: HTMLDivElement; // 道具大字提示（屏幕中央）
   private gameOverDisplay: HTMLDivElement; // 游戏结束显示
 
-  private powerUpTimer: number = 0;  // 道具提示显示计时器
-  private activePowerUpDuration: number = 0;  // 道具持续时间
-  private powerUpBigTimer: number = 0;  // 大字提示显示计时器
+  private powerUpTimer: number = 0; // 道具提示显示计时器
+  private activePowerUpDuration: number = 0; // 道具持续时间
+  private powerUpBigTimer: number = 0; // 大字提示显示计时器
 
   constructor() {
     this.container = document.createElement('div');
@@ -418,7 +418,8 @@ export class HUD {
       const remainingTime = Math.max(0, Math.ceil(this.powerUpTimer));
       const spaceIndex = this.powerUpDisplay.textContent.lastIndexOf(' ');
       if (spaceIndex !== -1) {
-        this.powerUpDisplay.textContent = this.powerUpDisplay.textContent.substring(0, spaceIndex) + ' ' + remainingTime;
+        this.powerUpDisplay.textContent =
+          this.powerUpDisplay.textContent.substring(0, spaceIndex) + ' ' + remainingTime;
       }
 
       if (this.powerUpTimer <= 0) {
@@ -451,13 +452,23 @@ export class HUD {
    * @param icon 道具图标
    * @param name 道具名称
    * @param minDisplayTime 最小显示时间（秒），默认1秒
+   * @param hideSubtext 是否隐藏副标题，默认false
    */
-  public showPowerUpBig(icon: string, name: string, minDisplayTime: number = 1): void {
+  public showPowerUpBig(
+    icon: string,
+    name: string,
+    minDisplayTime: number = 1,
+    hideSubtext: boolean = false
+  ): void {
     const iconElement = this.powerUpBigDisplay.querySelector('.powerup-big-icon') as HTMLDivElement;
     const textElement = this.powerUpBigDisplay.querySelector('.powerup-big-text') as HTMLDivElement;
+    const subtextElement = this.powerUpBigDisplay.querySelector(
+      '.powerup-big-subtext'
+    ) as HTMLDivElement;
 
     if (iconElement) iconElement.textContent = icon;
     if (textElement) textElement.textContent = name;
+    if (subtextElement) subtextElement.style.display = hideSubtext ? 'none' : 'block';
 
     this.powerUpBigDisplay.style.opacity = '1';
     this.powerUpBigTimer = minDisplayTime;

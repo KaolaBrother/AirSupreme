@@ -11,7 +11,7 @@ export class BossMissile {
   public lifetime: number = 0;
   public isTargetingPlayer: boolean = false;
 
-  private turnSpeed: number = 1.0;
+  private turnSpeed: number = 0.25;
   private speed: number = 50;
   private particleSystem: ParticleSystem;
   private health: HealthSystem;
@@ -47,28 +47,89 @@ export class BossMissile {
     this.mesh = new THREE.Group();
     const scale = BOSS_MISSILE_CONFIG.SCALE;
 
-    const coneGeometry = new THREE.ConeGeometry(0.4 * scale, 2.5 * scale, 16);
-    const coneMaterial = new THREE.MeshStandardMaterial({
-      color: 0xff0000,
-      emissive: 0xff0000,
-      emissiveIntensity: 0.8,
-      metalness: 0.8,
+    const bodyMaterial = new THREE.MeshStandardMaterial({
+      color: 0x8b0000,
+      metalness: 0.7,
+      roughness: 0.3,
+    });
+
+    const noseMaterial = new THREE.MeshStandardMaterial({
+      color: 0x1a1a1a,
+      metalness: 0.9,
       roughness: 0.2,
     });
-    const cone = new THREE.Mesh(coneGeometry, coneMaterial);
-    cone.rotation.x = Math.PI / 2;
-    this.mesh.add(cone);
 
-    const trailGeometry = new THREE.ConeGeometry(0.25 * scale, 2 * scale, 16);
-    const trailMaterial = new THREE.MeshBasicMaterial({
-      color: 0xff6600,
+    const finMaterial = new THREE.MeshStandardMaterial({
+      color: 0x2a2a2a,
+      metalness: 0.8,
+      roughness: 0.3,
+    });
+
+    const bodyLength = 2.0 * scale;
+    const bodyRadius = 0.35 * scale;
+
+    const bodyGeometry = new THREE.CylinderGeometry(bodyRadius * 0.8, bodyRadius, bodyLength, 12);
+    const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
+    body.rotation.x = Math.PI / 2;
+    body.position.z = bodyLength * 0.1;
+    this.mesh.add(body);
+
+    const noseGeometry = new THREE.ConeGeometry(bodyRadius * 0.8, bodyLength * 0.6, 12);
+    const nose = new THREE.Mesh(noseGeometry, noseMaterial);
+    nose.rotation.x = Math.PI / 2;
+    nose.position.z = bodyLength * 0.7;
+    this.mesh.add(nose);
+
+    const finCount = 4;
+    const finLength = bodyLength * 0.4;
+    const finHeight = bodyRadius * 1.0;
+
+    for (let i = 0; i < finCount; i++) {
+      const angle = (i / finCount) * Math.PI * 2;
+
+      const finGeometry = new THREE.BoxGeometry(0.1 * scale, finHeight, finLength);
+      const fin = new THREE.Mesh(finGeometry, finMaterial);
+
+      fin.position.x = Math.cos(angle) * (bodyRadius + finHeight * 0.5);
+      fin.position.y = Math.sin(angle) * (bodyRadius + finHeight * 0.5);
+      fin.position.z = -bodyLength * 0.3;
+
+      fin.rotation.z = angle;
+
+      this.mesh.add(fin);
+    }
+
+    const ringGeometry = new THREE.TorusGeometry(bodyRadius * 1.1, 0.05 * scale, 8, 16);
+    const ringMaterial = new THREE.MeshStandardMaterial({
+      color: 0xffaa00,
+      emissive: 0xff6600,
+      emissiveIntensity: 0.5,
+    });
+    const ring = new THREE.Mesh(ringGeometry, ringMaterial);
+    ring.position.z = -bodyLength * 0.1;
+    this.mesh.add(ring);
+
+    const thrustGeometry = new THREE.ConeGeometry(bodyRadius * 0.6, bodyLength * 0.8, 8);
+    const thrustMaterial = new THREE.MeshBasicMaterial({
+      color: 0xff4400,
+      transparent: true,
+      opacity: 0.9,
+    });
+    const thrust = new THREE.Mesh(thrustGeometry, thrustMaterial);
+    thrust.rotation.x = Math.PI / 2;
+    thrust.position.z = -bodyLength * 0.7;
+    this.mesh.add(thrust);
+
+    const innerThrustGeometry = new THREE.ConeGeometry(bodyRadius * 0.3, bodyLength * 0.5, 8);
+    const innerThrustMaterial = new THREE.MeshBasicMaterial({
+      color: 0xffff00,
       transparent: true,
       opacity: 1,
     });
-    const trail = new THREE.Mesh(trailGeometry, trailMaterial);
-    trail.rotation.x = Math.PI / 2;
-    trail.position.z = -1.5 * scale;
-    this.mesh.add(trail);
+    const innerThrust = new THREE.Mesh(innerThrustGeometry, innerThrustMaterial);
+    innerThrust.rotation.x = Math.PI / 2;
+    innerThrust.position.z = -bodyLength * 0.5;
+    this.mesh.add(innerThrust);
 
     this.mesh.position.copy(position);
     scene.add(this.mesh);
@@ -86,6 +147,12 @@ export class BossMissile {
     const flightDistance = this.mesh.position.distanceTo(this.startPosition);
     if (flightDistance > BOSS_MISSILE_CONFIG.MAX_RANGE) {
       this.active = false;
+      return;
+    }
+
+    if (this.mesh.position.y <= -50) {
+      this.active = false;
+      this.particleSystem.createExplosion(this.mesh.position.clone(), 1.5);
       return;
     }
 

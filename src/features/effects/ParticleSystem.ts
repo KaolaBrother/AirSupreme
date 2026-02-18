@@ -200,6 +200,168 @@ export class ParticleSystem {
     });
   }
 
+  public createFlakExplosion(position: THREE.Vector3, radius: number = 50): void {
+    const scale = radius / 15;
+    const particleCount = Math.floor(40 * scale);
+
+    for (let i = 0; i < particleCount * 0.3; i++) {
+      this.spawnParticle(ParticleType.EXPLOSION, position.clone(), {
+        speed: 80 + Math.random() * 40,
+        life: 0.4 + Math.random() * 0.2,
+        size: 1 + Math.random() * 2,
+        color: new THREE.Color().setHSL(0.1, 0.8, 0.7),
+      });
+    }
+
+    for (let i = 0; i < particleCount * 0.4; i++) {
+      this.spawnParticle(ParticleType.FIRE, position.clone(), {
+        speed: 50 * scale,
+        life: 0.6 + Math.random() * 0.4,
+        size: 0.3 + Math.random() * 0.5,
+        color: new THREE.Color().setHSL(0.05 + Math.random() * 0.05, 1, 0.5),
+      });
+    }
+
+    for (let i = 0; i < particleCount * 0.2; i++) {
+      this.spawnParticle(ParticleType.SPARK, position.clone(), {
+        speed: 100,
+        life: 0.3 + Math.random() * 0.3,
+        size: 0.2 + Math.random() * 0.3,
+        color: new THREE.Color(0xffcc00),
+      });
+    }
+
+    const timeoutId = setTimeout(() => {
+      this.pendingTimeouts.delete(timeoutId);
+      for (let i = 0; i < particleCount * 0.3; i++) {
+        this.spawnParticle(ParticleType.SMOKE, position.clone(), {
+          speed: 10,
+          life: 1.5 + Math.random() * 1,
+          size: 3 + Math.random() * 4,
+          color: new THREE.Color().setHSL(0, 0, 0.2 + Math.random() * 0.2),
+        });
+      }
+    }, 50);
+    this.pendingTimeouts.add(timeoutId);
+  }
+
+  public createTeleportOut(position: THREE.Vector3): void {
+    const particleCount = 50;
+    const blueColor = new THREE.Color(0x00aaff);
+
+    for (let i = 0; i < particleCount; i++) {
+      const speed = 30 + Math.random() * 20;
+
+      this.spawnParticle(ParticleType.SPARK, position.clone(), {
+        speed: speed,
+        life: 0.3 + Math.random() * 0.3,
+        size: 0.5 + Math.random() * 0.5,
+        color: blueColor.clone(),
+      });
+    }
+
+    for (let i = 0; i < 20; i++) {
+      this.spawnParticle(ParticleType.FIRE, position.clone(), {
+        speed: 40 + Math.random() * 20,
+        life: 0.2 + Math.random() * 0.2,
+        size: 1 + Math.random() * 1.5,
+        color: new THREE.Color().setHSL(0.55, 1, 0.6),
+      });
+    }
+  }
+
+  public createTeleportIn(position: THREE.Vector3): void {
+    const particleCount = 50;
+    const blueColor = new THREE.Color(0x00aaff);
+
+    for (let i = 0; i < particleCount; i++) {
+      const angle = (i / particleCount) * Math.PI * 2;
+      const offset = new THREE.Vector3(
+        Math.cos(angle) * (5 + Math.random() * 10),
+        Math.random() * 10,
+        Math.sin(angle) * (5 + Math.random() * 10)
+      );
+
+      this.spawnParticle(ParticleType.SPARK, position.clone().add(offset), {
+        speed: 0,
+        life: 0.4 + Math.random() * 0.2,
+        size: 0.3 + Math.random() * 0.3,
+        color: blueColor.clone(),
+      });
+    }
+
+    for (let i = 0; i < 15; i++) {
+      this.spawnParticle(ParticleType.FIRE, position.clone(), {
+        speed: 20,
+        life: 0.3,
+        size: 1.5 + Math.random() * 1,
+        color: new THREE.Color().setHSL(0.55, 1, 0.7),
+      });
+    }
+  }
+
+  public createLaserBeam(start: THREE.Vector3, end: THREE.Vector3, color: number = 0x00aaff): void {
+    const laserColor = new THREE.Color(color);
+    const particleCount = 20;
+
+    for (let i = 0; i < particleCount; i++) {
+      const t = i / particleCount;
+      const pos = start.clone().lerp(end, t);
+
+      this.spawnParticle(ParticleType.SPARK, pos, {
+        speed: 5 + Math.random() * 5,
+        life: 0.2 + Math.random() * 0.1,
+        size: 0.3 + Math.random() * 0.2,
+        color: laserColor.clone(),
+      });
+    }
+  }
+
+  public createTentacleExplosion(position: THREE.Vector3): void {
+    const particleCount = 40;
+
+    for (let i = 0; i < particleCount * 0.3; i++) {
+      this.spawnParticle(ParticleType.EXPLOSION, position.clone(), {
+        speed: 40 + Math.random() * 30,
+        life: 0.3 + Math.random() * 0.3,
+        size: 0.8 + Math.random() * 1.2,
+        color: new THREE.Color().setHSL(0.08, 0.9, 0.6),
+      });
+    }
+
+    for (let i = 0; i < particleCount * 0.4; i++) {
+      this.spawnParticle(ParticleType.DEBRIS, position.clone(), {
+        speed: 25 + Math.random() * 20,
+        life: 0.8 + Math.random() * 0.8,
+        size: 0.3 + Math.random() * 0.4,
+        color: new THREE.Color(0x666666),
+        gravity: true,
+      });
+    }
+
+    for (let i = 0; i < particleCount * 0.2; i++) {
+      this.spawnParticle(ParticleType.SPARK, position.clone(), {
+        speed: 60 + Math.random() * 40,
+        life: 0.3 + Math.random() * 0.3,
+        size: 0.2 + Math.random() * 0.3,
+        color: new THREE.Color(0xffaa00),
+      });
+    }
+
+    const timeoutId = setTimeout(() => {
+      this.pendingTimeouts.delete(timeoutId);
+      for (let i = 0; i < particleCount * 0.2; i++) {
+        this.spawnParticle(ParticleType.SMOKE, position.clone(), {
+          speed: 8,
+          life: 1 + Math.random() * 1,
+          size: 2 + Math.random() * 3,
+          color: new THREE.Color().setHSL(0, 0, 0.3 + Math.random() * 0.2),
+        });
+      }
+    }, 50);
+    this.pendingTimeouts.add(timeoutId);
+  }
+
   /**
    * 生成单个粒子
    */

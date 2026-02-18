@@ -9,6 +9,7 @@ import {
 import { EnemyAI } from '@/features/enemy/EnemyAI';
 import { TerrainGenerator } from '@/features/terrain/TerrainGenerator';
 import { SpawnPortal } from '@/features/effects/SpawnPortal';
+import { createEnemyMesh } from '@/features/aircraft/AircraftMeshFactory';
 
 /**
  * 关卡状态
@@ -530,9 +531,9 @@ export class LevelManager {
       return enemy;
     }
 
-    // 创建新敌人
+    // 创建新敌人 - 使用统一的工厂函数
     const config = ENEMY_CONFIGS[type];
-    const mesh = this.createEnemyMesh(config);
+    const mesh = createEnemyMesh(config);
     this.scene.add(mesh);
 
     const enemy = new EnemyAI(mesh, config, this.scene);
@@ -549,191 +550,5 @@ export class LevelManager {
       enemy.dispose();
     }
     this.enemies = [];
-  }
-
-  /**
-   * 创建敌人网格
-   */
-  private createEnemyMesh(config: any): THREE.Group {
-    const group = new THREE.Group();
-
-    // 根据敌人类型定义配色和尺寸
-    let bodyColor: number, wingColor: number, accentColor: number;
-    let bodySize = 1.6,
-      bodyLength = 6,
-      wingSpan = 3,
-      tailSize = 0.8;
-    let scaleMultiplier = 1;
-
-    switch (config.type) {
-      case EnemyType.SCOUT:
-        // 侦察机：蓝灰配色，小巧
-        bodyColor = 0x4a5584; // 深蓝灰
-        wingColor = 0x6b7b8e; // 灰蓝色
-        accentColor = 0x3d5a87; // 紫色调
-        bodySize = 1.2;
-        bodyLength = 5;
-        wingSpan = 2.2;
-        scaleMultiplier = 0.85;
-        break;
-
-      case EnemyType.FIGHTER:
-        // 战斗机：红橙配色，中等
-        bodyColor = 0xcc3300; // 深橙红
-        wingColor = 0xe63900; // 橙黄色
-        accentColor = 0x8b2500; // 焦棕
-        bodySize = 1.8;
-        bodyLength = 7;
-        wingSpan = 3.5;
-        scaleMultiplier = 1.1;
-        break;
-
-      case EnemyType.HEAVY:
-        // 重型机：暗灰配色，大型
-        bodyColor = 0x2c2c2c; // 深灰
-        wingColor = 0x3a3a3a; // 暗灰
-        accentColor = 0x1a1a1a; // 黑灰
-        bodySize = 2.2;
-        bodyLength = 8;
-        wingSpan = 4.2;
-        scaleMultiplier = 1.3;
-        break;
-
-      case EnemyType.SNIPER:
-        // 狙击机：紫灰配色，修长
-        bodyColor = 0x4a235a; // 深紫
-        wingColor = 0x6b4c7a; // 紫灰
-        accentColor = 0x7c3aed; // 淡紫
-        bodySize = 1.6;
-        bodyLength = 7.5;
-        wingSpan = 2.8;
-        scaleMultiplier = 0.95;
-        break;
-
-      case EnemyType.ACE:
-        // 王牌：金红配色，特殊
-        bodyColor = 0x8b0000; // 深红
-        wingColor = 0xffd700; // 金黄
-        accentColor = 0xff4500; // 橙红
-        bodySize = 1.9;
-        bodyLength = 7;
-        wingSpan = 3.3;
-        scaleMultiplier = 1.15;
-        break;
-
-      default:
-        // 默认使用配置颜色
-        bodyColor = config.color;
-        wingColor = config.color;
-        accentColor = config.color;
-    }
-
-    // 应用整体缩放
-    group.scale.set(scaleMultiplier, scaleMultiplier, scaleMultiplier);
-
-    // 创建主机身（流线型圆柱）
-    const bodyGeometry = new THREE.CylinderGeometry(bodySize * 0.4, bodySize * 0.3, bodyLength, 8);
-    const bodyMaterial = new THREE.MeshStandardMaterial({
-      color: bodyColor,
-      metalness: 0.7,
-      roughness: 0.3,
-    });
-    const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
-    body.rotation.x = Math.PI / 2; // 使圆柱水平放置
-    body.rotation.z = Math.PI / 2; // 调整朝向
-    body.castShadow = true;
-    group.add(body);
-
-    // 创建机头锥
-    const noseGeometry = new THREE.ConeGeometry(bodySize * 0.3, bodyLength * 0.25, 8);
-    const noseMaterial = new THREE.MeshStandardMaterial({
-      color: accentColor,
-      metalness: 0.8,
-      roughness: 0.2,
-    });
-    const nose = new THREE.Mesh(noseGeometry, noseMaterial);
-    nose.rotation.x = Math.PI / 2;
-    nose.rotation.z = Math.PI / 2;
-    nose.position.set(0, 0, bodyLength / 2 + 0.5);
-    nose.castShadow = true;
-    group.add(nose);
-
-    // 创建主翼（后掠翼设计）
-    const wingGeometry = new THREE.BoxGeometry(wingSpan, 0.15, 1.2);
-    const wingMaterial = new THREE.MeshStandardMaterial({
-      color: wingColor,
-      metalness: 0.6,
-      roughness: 0.4,
-    });
-    const wings = new THREE.Mesh(wingGeometry, wingMaterial);
-    wings.position.set(0, 0, -0.8);
-    wings.castShadow = true;
-    group.add(wings);
-
-    // 创建座舱盖
-    const cockpitGeometry = new THREE.SphereGeometry(bodySize * 0.35, 8, 8);
-    const cockpitMaterial = new THREE.MeshStandardMaterial({
-      color: accentColor,
-      metalness: 0.9,
-      roughness: 0.1,
-      emissive: accentColor,
-      emissiveIntensity: 0.3,
-    });
-    const cockpit = new THREE.Mesh(cockpitGeometry, cockpitMaterial);
-    cockpit.position.set(0, bodySize * 0.25, 0.5);
-    cockpit.castShadow = true;
-    group.add(cockpit);
-
-    // 创建尾翼（垂直和水平）
-    const tailGeometry = new THREE.BoxGeometry(tailSize, 0.12, 1);
-    const tailMaterial = new THREE.MeshStandardMaterial({
-      color: wingColor,
-      metalness: 0.6,
-      roughness: 0.4,
-    });
-    const tail = new THREE.Mesh(tailGeometry, tailMaterial);
-    tail.position.set(0, 0, -bodyLength / 2 - 0.3);
-    tail.castShadow = true;
-    group.add(tail);
-
-    // 创建垂直尾翼
-    const vStabGeometry = new THREE.BoxGeometry(0.15, 1.2, 0.8);
-    const vStab = new THREE.Mesh(vStabGeometry, tailMaterial);
-    vStab.position.set(0, 0.6, -bodyLength / 2 + 0.1);
-    vStab.castShadow = true;
-    group.add(vStab);
-
-    // 创建引擎喷口（发光）
-    const engineGeometry = new THREE.CylinderGeometry(bodySize * 0.2, bodySize * 0.15, 0.5, 8);
-    const engineMaterial = new THREE.MeshBasicMaterial({
-      color: 0xff6600, // 橙色发光
-      transparent: true,
-      opacity: 0.8,
-    });
-    const engine = new THREE.Mesh(engineGeometry, engineMaterial);
-    engine.rotation.x = Math.PI / 2;
-    engine.position.set(0, 0, -bodyLength / 2 - 0.8);
-    group.add(engine);
-
-    // 根据敌人类型设置名称
-    switch (config.type) {
-      case EnemyType.SCOUT:
-        group.name = 'Scout';
-        break;
-      case EnemyType.FIGHTER:
-        group.name = 'Fighter';
-        break;
-      case EnemyType.HEAVY:
-        group.name = 'Heavy';
-        break;
-      case EnemyType.SNIPER:
-        group.name = 'Sniper';
-        break;
-      case EnemyType.ACE:
-        group.name = 'Ace';
-        break;
-    }
-
-    return group;
   }
 }

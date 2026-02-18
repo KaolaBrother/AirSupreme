@@ -1,12 +1,15 @@
 import * as THREE from 'three';
 import { EnemyType, ENEMY_CONFIGS } from '@/features/enemy/EnemyTypes';
-import { BossType, BOSS_CONFIGS } from '@/features/boss/BossTypes';
+import { BossType, BOSS_CONFIGS, BOSS_MISSILE_CONFIG } from '@/features/boss/BossTypes';
 import { createBossMesh } from '@/features/boss/BossAI';
+import { createDesertFortressMesh } from '@/features/boss/DesertFortressAI';
+import { createOctopusWarshipMesh } from '@/features/boss/OctopusWarshipAI';
+import { createPlayerMesh, createEnemyMesh } from '@/features/aircraft/AircraftMeshFactory';
 
 interface AircraftInfo {
   id: string;
   name: string;
-  type: 'player' | 'enemy' | 'boss';
+  type: 'player' | 'enemy' | 'boss' | 'missile';
   createMesh: () => THREE.Group;
 }
 
@@ -176,7 +179,7 @@ export class ModelPreview {
       <div class="preview-canvas-container" id="canvas-container"></div>
       <div class="nav-controls">
         <button class="nav-btn" id="prev-btn">◀</button>
-        <div class="page-indicator" id="page-indicator">1 / 7</div>
+        <div class="page-indicator" id="page-indicator">1 / 9</div>
         <button class="nav-btn" id="next-btn">▶</button>
       </div>
       <button class="rotate-toggle" id="rotate-toggle">🔄 自动旋转: 开</button>
@@ -209,15 +212,15 @@ export class ModelPreview {
   }
 
   private setupAircrafts(): void {
-    // 玩家飞机
+    // 玩家飞机 - 使用工厂函数
     this.aircrafts.push({
       id: 'player',
       name: '玩家飞机',
       type: 'player',
-      createMesh: () => this.createPlayerMesh(),
+      createMesh: () => createPlayerMesh(),
     });
 
-    // 敌机
+    // 敌机 - 使用工厂函数
     const enemyTypes = Object.values(EnemyType);
     for (const type of enemyTypes) {
       const config = ENEMY_CONFIGS[type];
@@ -225,7 +228,7 @@ export class ModelPreview {
         id: type,
         name: config.name,
         type: 'enemy',
-        createMesh: () => this.createEnemyMesh(config),
+        createMesh: () => createEnemyMesh(config),
       });
     }
 
@@ -233,176 +236,125 @@ export class ModelPreview {
     const bossTypes = Object.values(BossType);
     for (const type of bossTypes) {
       const config = BOSS_CONFIGS[type];
-      this.aircrafts.push({
-        id: type,
-        name: config.name,
-        type: 'boss',
-        createMesh: () => createBossMesh(config),
-      });
+      if (type === BossType.DESERT_FORTRESS) {
+        this.aircrafts.push({
+          id: type,
+          name: config.name,
+          type: 'boss',
+          createMesh: () => createDesertFortressMesh(config),
+        });
+      } else if (type === BossType.OCTOPUS_WARSHIP) {
+        this.aircrafts.push({
+          id: type,
+          name: config.name,
+          type: 'boss',
+          createMesh: () => createOctopusWarshipMesh(config),
+        });
+      } else {
+        this.aircrafts.push({
+          id: type,
+          name: config.name,
+          type: 'boss',
+          createMesh: () => createBossMesh(config),
+        });
+      }
     }
+
+    this.aircrafts.push({
+      id: 'boss_missile',
+      name: 'Boss 导弹',
+      type: 'missile',
+      createMesh: () => this.createBossMissileMesh(),
+    });
   }
 
-  private createPlayerMesh(): THREE.Group {
+  private createBossMissileMesh(): THREE.Group {
     const group = new THREE.Group();
+    const scale = BOSS_MISSILE_CONFIG.SCALE;
 
     const bodyMaterial = new THREE.MeshStandardMaterial({
-      color: 0x4488ff,
+      color: 0x8b0000,
       metalness: 0.7,
+      roughness: 0.3,
+    });
+
+    const noseMaterial = new THREE.MeshStandardMaterial({
+      color: 0x1a1a1a,
+      metalness: 0.9,
       roughness: 0.2,
     });
 
-    const bodyGeometry = new THREE.ConeGeometry(0.5, 3.5, 12);
-    const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
-    body.rotation.x = Math.PI / 2;
-    group.add(body);
-
-    const cockpitMaterial = new THREE.MeshStandardMaterial({
-      color: 0x111133,
-      metalness: 0.9,
-      roughness: 0.1,
-    });
-    const cockpitGeometry = new THREE.SphereGeometry(0.3, 12, 12);
-    const cockpit = new THREE.Mesh(cockpitGeometry, cockpitMaterial);
-    cockpit.position.set(0, 0.3, -0.5);
-    cockpit.scale.set(1, 0.6, 1.5);
-    group.add(cockpit);
-
-    const wingMaterial = new THREE.MeshStandardMaterial({
-      color: 0x3366dd,
-      metalness: 0.6,
+    const finMaterial = new THREE.MeshStandardMaterial({
+      color: 0x2a2a2a,
+      metalness: 0.8,
       roughness: 0.3,
     });
 
-    const wingShape = new THREE.Shape();
-    wingShape.moveTo(0, 0);
-    wingShape.lineTo(2, 0.8);
-    wingShape.lineTo(0.3, 1);
-    wingShape.lineTo(0, 0);
+    const bodyLength = 2.0 * scale;
+    const bodyRadius = 0.35 * scale;
 
-    const wingGeometry = new THREE.ExtrudeGeometry(wingShape, { depth: 0.05, bevelEnabled: false });
+    const bodyGeometry = new THREE.CylinderGeometry(bodyRadius * 0.8, bodyRadius, bodyLength, 12);
+    const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
+    body.rotation.x = Math.PI / 2;
+    body.position.z = bodyLength * 0.1;
+    group.add(body);
 
-    const leftWing = new THREE.Mesh(wingGeometry, wingMaterial);
-    leftWing.rotation.x = Math.PI / 2;
-    leftWing.rotation.z = Math.PI;
-    leftWing.position.set(-0.3, 0, 0.3);
-    group.add(leftWing);
+    const noseGeometry = new THREE.ConeGeometry(bodyRadius * 0.8, bodyLength * 0.6, 12);
+    const nose = new THREE.Mesh(noseGeometry, noseMaterial);
+    nose.rotation.x = Math.PI / 2;
+    nose.position.z = bodyLength * 0.7;
+    group.add(nose);
 
-    const rightWing = new THREE.Mesh(wingGeometry, wingMaterial);
-    rightWing.rotation.x = Math.PI / 2;
-    rightWing.position.set(0.3, 0, 0.3);
-    group.add(rightWing);
+    const finCount = 4;
+    const finLength = bodyLength * 0.4;
+    const finHeight = bodyRadius * 1.0;
 
-    const tailGeometry = new THREE.BoxGeometry(0.05, 0.8, 0.6);
-    const tail = new THREE.Mesh(tailGeometry, wingMaterial);
-    tail.position.set(0, 0.5, 1.5);
-    group.add(tail);
+    for (let i = 0; i < finCount; i++) {
+      const angle = (i / finCount) * Math.PI * 2;
 
-    return group;
-  }
+      const finGeometry = new THREE.BoxGeometry(0.1 * scale, finHeight, finLength);
+      const fin = new THREE.Mesh(finGeometry, finMaterial);
 
-  private createEnemyMesh(config: (typeof ENEMY_CONFIGS)[EnemyType]): THREE.Group {
-    const group = new THREE.Group();
+      fin.position.x = Math.cos(angle) * (bodyRadius + finHeight * 0.5);
+      fin.position.y = Math.sin(angle) * (bodyRadius + finHeight * 0.5);
+      fin.position.z = -bodyLength * 0.3;
 
-    let bodyColor = config.color;
-    let wingColor = config.color;
-    let accentColor = config.color;
-    let bodySize = 1.6;
-    let bodyLength = 6;
-    let wingSpan = 3;
-    const tailSize = 0.8;
-    let scaleMultiplier = 1;
+      fin.rotation.z = angle;
 
-    switch (config.type) {
-      case EnemyType.SCOUT:
-        bodyColor = 0x4a5584;
-        wingColor = 0x6b7b8e;
-        accentColor = 0x3d5a87;
-        bodySize = 1.2;
-        bodyLength = 5;
-        wingSpan = 2.2;
-        scaleMultiplier = 0.85;
-        break;
-      case EnemyType.FIGHTER:
-        bodyColor = 0xcc3300;
-        wingColor = 0xe63900;
-        accentColor = 0x8b2500;
-        bodySize = 1.8;
-        bodyLength = 7;
-        wingSpan = 3.5;
-        scaleMultiplier = 1.1;
-        break;
-      case EnemyType.HEAVY:
-        bodyColor = 0x2c2c2c;
-        wingColor = 0x3a3a3a;
-        accentColor = 0x1a1a1a;
-        bodySize = 2.2;
-        bodyLength = 8;
-        wingSpan = 4.2;
-        scaleMultiplier = 1.3;
-        break;
-      case EnemyType.SNIPER:
-        bodyColor = 0x4a235a;
-        wingColor = 0x6b4c7a;
-        accentColor = 0x7c3aed;
-        bodySize = 1.6;
-        bodyLength = 7.5;
-        wingSpan = 2.8;
-        scaleMultiplier = 0.95;
-        break;
-      case EnemyType.ACE:
-        bodyColor = 0x8b0000;
-        wingColor = 0xffd700;
-        accentColor = 0xff4500;
-        bodySize = 1.9;
-        bodyLength = 7;
-        wingSpan = 3.3;
-        scaleMultiplier = 1.15;
-        break;
+      group.add(fin);
     }
 
-    group.scale.set(scaleMultiplier, scaleMultiplier, scaleMultiplier);
-
-    const bodyGeometry = new THREE.ConeGeometry(bodySize * 0.4, bodyLength, 8);
-    const bodyMaterial = new THREE.MeshStandardMaterial({
-      color: bodyColor,
-      metalness: 0.7,
-      roughness: 0.3,
+    const ringGeometry = new THREE.TorusGeometry(bodyRadius * 1.1, 0.05 * scale, 8, 16);
+    const ringMaterial = new THREE.MeshStandardMaterial({
+      color: 0xffaa00,
+      emissive: 0xff6600,
+      emissiveIntensity: 0.5,
     });
-    const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
-    body.rotation.x = Math.PI / 2;
-    group.add(body);
+    const ring = new THREE.Mesh(ringGeometry, ringMaterial);
+    ring.position.z = -bodyLength * 0.1;
+    group.add(ring);
 
-    const wingGeometry = new THREE.BoxGeometry(wingSpan, 0.15, 1.2);
-    const wingMaterial = new THREE.MeshStandardMaterial({
-      color: wingColor,
-      metalness: 0.6,
-      roughness: 0.4,
+    const thrustGeometry = new THREE.ConeGeometry(bodyRadius * 0.6, bodyLength * 0.8, 8);
+    const thrustMaterial = new THREE.MeshBasicMaterial({
+      color: 0xff4400,
+      transparent: true,
+      opacity: 0.9,
     });
-    const wings = new THREE.Mesh(wingGeometry, wingMaterial);
-    wings.position.set(0, 0, bodyLength * 0.2);
-    group.add(wings);
+    const thrust = new THREE.Mesh(thrustGeometry, thrustMaterial);
+    thrust.rotation.x = Math.PI / 2;
+    thrust.position.z = -bodyLength * 0.7;
+    group.add(thrust);
 
-    const cockpitGeometry = new THREE.SphereGeometry(bodySize * 0.35, 8, 8);
-    const cockpitMaterial = new THREE.MeshStandardMaterial({
-      color: accentColor,
-      metalness: 0.9,
-      roughness: 0.1,
-      emissive: accentColor,
-      emissiveIntensity: 0.3,
+    const innerThrustGeometry = new THREE.ConeGeometry(bodyRadius * 0.3, bodyLength * 0.5, 8);
+    const innerThrustMaterial = new THREE.MeshBasicMaterial({
+      color: 0xffff00,
+      transparent: true,
+      opacity: 1,
     });
-    const cockpit = new THREE.Mesh(cockpitGeometry, cockpitMaterial);
-    cockpit.position.set(0, bodySize * 0.25, -bodyLength * 0.2);
-    group.add(cockpit);
-
-    const tailGeometry = new THREE.BoxGeometry(tailSize, 0.12, 1);
-    const tail = new THREE.Mesh(tailGeometry, wingMaterial);
-    tail.position.set(0, 0, bodyLength * 0.45);
-    group.add(tail);
-
-    const vStabGeometry = new THREE.BoxGeometry(0.15, 1.2, 0.8);
-    const vStab = new THREE.Mesh(vStabGeometry, wingMaterial);
-    vStab.position.set(0, 0.6, bodyLength * 0.4);
-    group.add(vStab);
+    const innerThrust = new THREE.Mesh(innerThrustGeometry, innerThrustMaterial);
+    innerThrust.rotation.x = Math.PI / 2;
+    innerThrust.position.z = -bodyLength * 0.5;
+    group.add(innerThrust);
 
     return group;
   }
@@ -487,13 +439,18 @@ export class ModelPreview {
     const aircraft = this.aircrafts[index];
     this.currentMesh = aircraft.createMesh();
 
-    // 根据飞机类型调整缩放
-    const scale = aircraft.type === 'boss' ? 0.3 : 0.8;
+    let scale: number;
+    if (aircraft.type === 'boss') {
+      scale = 0.3;
+    } else if (aircraft.type === 'missile') {
+      scale = 0.15;
+    } else {
+      scale = 0.8;
+    }
     this.currentMesh.scale.set(scale, scale, scale);
 
     this.scene.add(this.currentMesh);
 
-    // 更新显示
     this.nameDisplay.textContent = aircraft.name;
     const indicator = document.getElementById('page-indicator');
     if (indicator) {
