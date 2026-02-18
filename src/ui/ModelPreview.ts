@@ -4,6 +4,8 @@ import { BossType, BOSS_CONFIGS, BOSS_MISSILE_CONFIG } from '@/features/boss/Bos
 import { createBossMesh } from '@/features/boss/BossAI';
 import { createDesertFortressMesh } from '@/features/boss/DesertFortressAI';
 import { createOctopusWarshipMesh } from '@/features/boss/OctopusWarshipAI';
+import { createMissileDestroyerMesh } from '@/features/boss/MissileDestroyerAI';
+import { createSkyCarrierMesh } from '@/features/boss/SkyCarrierAI';
 import { createPlayerMesh, createEnemyMesh } from '@/features/aircraft/AircraftMeshFactory';
 
 interface AircraftInfo {
@@ -249,6 +251,20 @@ export class ModelPreview {
           name: config.name,
           type: 'boss',
           createMesh: () => createOctopusWarshipMesh(config),
+        });
+      } else if (type === BossType.MISSILE_DESTROYER) {
+        this.aircrafts.push({
+          id: type,
+          name: config.name,
+          type: 'boss',
+          createMesh: () => createMissileDestroyerMesh(config),
+        });
+      } else if (type === BossType.SKY_CARRIER) {
+        this.aircrafts.push({
+          id: type,
+          name: config.name,
+          type: 'boss',
+          createMesh: () => createSkyCarrierMesh(config),
         });
       } else {
         this.aircrafts.push({

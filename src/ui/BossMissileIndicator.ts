@@ -1,3 +1,5 @@
+import * as THREE from 'three';
+
 export class BossMissileIndicator {
   private container: HTMLDivElement;
   private indicators: Map<string, HTMLDivElement> = new Map();
@@ -20,11 +22,11 @@ export class BossMissileIndicator {
   public update(
     missiles: Array<{
       id: string;
-      screenPos: { x: number; y: number };
+      worldPos: THREE.Vector3;
       distance: number;
       inView: boolean;
-      isOnRight: boolean;
-    }>
+    }>,
+    camera: THREE.Camera
   ): void {
     const activeIds = new Set(missiles.map((m) => m.id));
 
@@ -39,17 +41,19 @@ export class BossMissileIndicator {
       if (missile.inView) {
         this.hideIndicator(missile.id);
       } else {
-        this.showOrUpdateIndicator(missile);
+        this.showOrUpdateIndicator(missile, camera);
       }
     }
   }
 
-  private showOrUpdateIndicator(missile: {
-    id: string;
-    screenPos: { x: number; y: number };
-    distance: number;
-    isOnRight: boolean;
-  }): void {
+  private showOrUpdateIndicator(
+    missile: {
+      id: string;
+      worldPos: THREE.Vector3;
+      distance: number;
+    },
+    camera: THREE.Camera
+  ): void {
     let indicator = this.indicators.get(missile.id);
 
     if (!indicator) {
@@ -58,13 +62,10 @@ export class BossMissileIndicator {
       this.indicators.set(missile.id, indicator);
     }
 
-    const { position, rotation } = this.calculateIndicatorPosition(
-      missile.screenPos,
-      missile.isOnRight
-    );
+    const { arrowX, arrowY, rotation } = this.calculateIndicatorPosition(missile.worldPos, camera);
 
-    indicator.style.left = `${position.x}px`;
-    indicator.style.top = `${position.y}px`;
+    indicator.style.left = `${arrowX * 100}%`;
+    indicator.style.top = `${arrowY * 100}%`;
     indicator.style.transform = `translate(-50%, -50%) rotate(${rotation}deg)`;
 
     const distanceLabel = indicator.querySelector('.distance-label') as HTMLSpanElement;
@@ -91,6 +92,7 @@ export class BossMissileIndicator {
     `;
 
     const arrow = document.createElement('div');
+    // SVG 箭头默认指向上方（尖端在 12 点钟方向）
     arrow.innerHTML = `
       <svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="${color}">
         <path d="M12 2 L22 12 L12 8 L2 12 Z" />
@@ -118,38 +120,68 @@ export class BossMissileIndicator {
   }
 
   private calculateIndicatorPosition(
-    screenPos: { x: number; y: number },
-    isOnRight: boolean
-  ): {
-    position: { x: number; y: number };
-    rotation: number;
-  } {
-    const padding = 50;
-    const centerX = window.innerWidth / 2;
-    const centerY = window.innerHeight / 2;
+    worldPos: THREE.Vector3,
+    camera: THREE.Camera
+  ): { arrowX: number; arrowY: number; rotation: number } {
+    const centerX = 0.5;
+    const centerY = 0.5;
+    const edgePadding = 0.08;
 
-    // 根据3D空间位置确定箭头在左/右边缘
-    let indicatorX: number;
-    if (isOnRight) {
-      indicatorX = window.innerWidth - padding;
+    // 使用相机位置计算方向向量
+    const fromCamera = worldPos.clone().sub(camera.position);
+    const cameraLocal = fromCamera.applyQuaternion(camera.quaternion.clone().invert());
+
+    const isOnRight = cameraLocal.x > 0;
+    const isAbove = cameraLocal.y > 0;
+    const isBehind = cameraLocal.z < 0;
+
+    const absZ = Math.max(Math.abs(cameraLocal.z), 0.001);
+    const angleH = Math.atan2(cameraLocal.x, absZ);
+    const angleV = Math.atan2(cameraLocal.y, absZ);
+
+    const maxAngleH = Math.PI / 4;
+    const maxAngleV = Math.PI / 5;
+
+    let arrowX: number;
+    let arrowY: number;
+
+    // 屏幕Y轴向下为正（Y=0是顶部，Y=1是底部）
+    if (isBehind) {
+      if (Math.abs(cameraLocal.y) > Math.abs(cameraLocal.x)) {
+        arrowY = isAbove ? edgePadding : 1 - edgePadding;
+        const hRatio = Math.min(1, Math.abs(angleH) / maxAngleH);
+        arrowX = centerX + (isOnRight ? hRatio : -hRatio) * (0.5 - edgePadding);
+      } else {
+        arrowX = isOnRight ? 1 - edgePadding : edgePadding;
+        const vRatio = Math.min(1, Math.abs(angleV) / maxAngleV);
+        arrowY = centerY + (isAbove ? -vRatio : vRatio) * (0.5 - edgePadding);
+      }
     } else {
-      indicatorX = padding;
+      const normalizedH = Math.max(-1, Math.min(1, angleH / maxAngleH));
+      const normalizedV = Math.max(-1, Math.min(1, angleV / maxAngleV));
+
+      arrowX = centerX + normalizedH * (0.5 - edgePadding);
+      arrowY = centerY - normalizedV * (0.5 - edgePadding);
+
+      if (Math.abs(normalizedH) >= 1 || Math.abs(normalizedV) >= 1) {
+        const slope = Math.abs(angleV) / (Math.abs(angleH) + 0.001);
+        if (slope > 1) {
+          arrowY = isAbove ? edgePadding : 1 - edgePadding;
+          const hPos = centerX + (isOnRight ? 1 : -1) * (1 / slope) * (0.5 - edgePadding);
+          arrowX = Math.max(edgePadding, Math.min(1 - edgePadding, hPos));
+        } else {
+          arrowX = isOnRight ? 1 - edgePadding : edgePadding;
+          const vPos = centerY + (isAbove ? -1 : 1) * slope * (0.5 - edgePadding);
+          arrowY = Math.max(edgePadding, Math.min(1 - edgePadding, vPos));
+        }
+      }
     }
 
-    // Y位置根据屏幕Y坐标
-    const dy = screenPos.y - centerY;
-    let indicatorY = centerY + dy * 2;
-    indicatorY = Math.max(padding, Math.min(window.innerHeight - padding, indicatorY));
+    // SVG 箭头默认指向上方（0度）
+    // atan2(x, y) 给出正确的旋转角度
+    const rotation = Math.atan2(cameraLocal.x, cameraLocal.y) * (180 / Math.PI);
 
-    // 旋转从屏幕中心指向箭头位置
-    const toArrowX = indicatorX - centerX;
-    const toArrowY = indicatorY - centerY;
-    const rotation = Math.atan2(toArrowY, toArrowX) * (180 / Math.PI) + 90;
-
-    return {
-      position: { x: indicatorX, y: indicatorY },
-      rotation,
-    };
+    return { arrowX, arrowY, rotation };
   }
 
   private hideIndicator(id: string): void {

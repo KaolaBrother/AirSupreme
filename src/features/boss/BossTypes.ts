@@ -5,6 +5,8 @@ export enum BossType {
   HEAVY_BOMBER = 'HEAVY_BOMBER', // 第一关 Boss：重型轰炸机
   DESERT_FORTRESS = 'DESERT_FORTRESS', // 第二关 Boss：沙漠堡垒
   OCTOPUS_WARSHIP = 'OCTOPUS_WARSHIP', // 第三关 Boss：八爪鱼战舰
+  MISSILE_DESTROYER = 'MISSILE_DESTROYER', // 第四关 Boss：导弹驱逐舰
+  SKY_CARRIER = 'SKY_CARRIER', // 第五关 Boss：空中航空母舰
 }
 
 /**
@@ -100,15 +102,21 @@ export const EYE_CONFIG = {
  * 瞬移配置（第三关 Boss 专用）
  */
 export const TELEPORT_CONFIG = {
-  CHANCE_ON_HIT: 0.05, // 5% 概率
-  COOLDOWN: 10.0, // 10 秒冷却
-  DURATION: 0.5, // 瞬移动画时长
+  CHANCE_ON_HIT: 0.05,
+  COOLDOWN: 10.0,
+  DURATION: 0.5,
   BOUNDS: {
     X: 400,
     Y_MIN: 100,
     Y_MAX: 250,
     Z: 400,
   },
+};
+
+export const FIGHTER_LAUNCH_CONFIG = {
+  INTERVAL: 60.0,
+  COUNT: 2,
+  SPAWN_HEIGHT: 10,
 };
 
 /**
@@ -170,6 +178,36 @@ export const BOSS_CONFIGS: Record<BossType, BossConfig> = {
     maxRange: LASER_SWEEP_CONFIG.RANGE,
     scoreValue: 3000,
   },
+  [BossType.MISSILE_DESTROYER]: {
+    type: BossType.MISSILE_DESTROYER,
+    name: '导弹驱逐舰 Boss',
+    health: 3500,
+    speed: 10,
+    damage: FLAK_CANNON_CONFIG.DAMAGE,
+    scale: 5,
+    circleRadius: 0,
+    turnSpeed: 0.2,
+    cannonFireInterval: 2.0,
+    missileFireInterval: 8,
+    missileDamage: BOSS_MISSILE_CONFIG.DAMAGE,
+    maxRange: FLAK_CANNON_CONFIG.MAX_RANGE,
+    scoreValue: 3500,
+  },
+  [BossType.SKY_CARRIER]: {
+    type: BossType.SKY_CARRIER,
+    name: '空中航空母舰 Boss',
+    health: 4000,
+    speed: 8,
+    damage: 30,
+    scale: 5,
+    circleRadius: 200,
+    turnSpeed: 0.15,
+    cannonFireInterval: 0.8,
+    missileFireInterval: 12,
+    missileDamage: BOSS_MISSILE_CONFIG.DAMAGE,
+    maxRange: BOSS_MISSILE_CONFIG.MAX_RANGE,
+    scoreValue: 4000,
+  },
 };
 
 /**
@@ -184,8 +222,9 @@ export function getBossForLevel(level: number): BossType | null {
     case 3:
       return BossType.OCTOPUS_WARSHIP;
     case 4:
+      return BossType.MISSILE_DESTROYER;
     case 5:
-      return BossType.HEAVY_BOMBER;
+      return BossType.SKY_CARRIER;
     default:
       return null;
   }

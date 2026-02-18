@@ -152,9 +152,12 @@ describe('BossTypes', () => {
       expect(getBossForLevel(3)).toBe(BossType.OCTOPUS_WARSHIP);
     });
 
-    it('should return HEAVY_BOMBER for levels 4-5', () => {
-      expect(getBossForLevel(4)).toBe(BossType.HEAVY_BOMBER);
-      expect(getBossForLevel(5)).toBe(BossType.HEAVY_BOMBER);
+    it('should return MISSILE_DESTROYER for level 4', () => {
+      expect(getBossForLevel(4)).toBe(BossType.MISSILE_DESTROYER);
+    });
+
+    it('should return SKY_CARRIER for level 5', () => {
+      expect(getBossForLevel(5)).toBe(BossType.SKY_CARRIER);
     });
 
     it('should return null for invalid levels', () => {

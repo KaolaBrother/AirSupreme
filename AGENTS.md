@@ -247,6 +247,11 @@ describe('SystemName', () => {
 | Enemy types/config | `src/features/enemy/EnemyTypes.ts`        |
 | Enemy AI           | `src/features/enemy/EnemyAI.ts`           |
 | Player controller  | `src/features/player/PlayerController.ts` |
+| Boss types/config  | `src/features/boss/BossTypes.ts`          |
+| Boss 1 - Bomber    | `src/features/boss/BossAI.ts`             |
+| Boss 2 - Fortress  | `src/features/boss/DesertFortressAI.ts`   |
+| Boss 3 - Octopus   | `src/features/boss/OctopusWarshipAI.ts`   |
+| Boss 4 - Destroyer | `src/features/boss/MissileDestroyerAI.ts` |
 
 ## Branch Notes
 
@@ -772,6 +777,135 @@ LevelManager.update()
 | Boss 1 | 紧张激烈   | E 小调 | sawtooth | 90  |
 | Boss 2 | 热烈中东风 | D 小调 | sawtooth | 95  |
 | Boss 3 | 空灵神秘   | E 小调 | sine     | 100 |
+
+---
+
+## Fourth Boss Implementation (2026-02-18)
+
+### 第四关 Boss - 导弹驱逐舰 (MISSILE_DESTROYER)
+
+**实现状态**：✅ 已完成
+
+| 属性     | 数值                 |
+| -------- | -------------------- |
+| 体型     | scale 5              |
+| 血量     | 3500 HP              |
+| 速度     | 10（水平面追踪玩家） |
+| 高度     | y = -50（水面）      |
+| 模型风格 | 现代海军驱逐舰       |
+
+### 机制一：防空炮系统
+
+- **数量**：4 门（前左、前右、后左、后右）
+- **发射间隔**：2.0 秒/门（轮流发射）
+- **伤害**：15 HP（AOE 半径 50 米）
+- **特性**：从炮管模型位置发射，锁定目标当前位置（可躲避）
+
+### 机制二：导弹发射井
+
+- **数量**：4 个（前左、前右、后左、后右）
+- **发射间隔**：8 秒
+- **伤害**：90 HP
+- **特性**：从发射井模型位置发射，追踪目标
+
+### 机制三：战斗机起飞
+
+- **触发频率**：每 60 秒
+- **数量**：2 架 Fighter
+- **起飞位置**：从甲板表面起飞（左右各一架）
+- **战斗机属性**：与普通关卡 Fighter 相同（HP 100，速度 55）
+
+### 移动逻辑
+
+- 只在水平面（XZ）上追踪玩家
+- 无法改变 Y 轴位置（始终在水面）
+- 转向速度：0.2
+
+### 新增文件
+
+| File                                      | Description                       |
+| ----------------------------------------- | --------------------------------- |
+| `src/features/boss/MissileDestroyerAI.ts` | Boss AI（移动、武器、起飞战斗机） |
+
+### 修改文件
+
+| File                                  | Change                                                |
+| ------------------------------------- | ----------------------------------------------------- |
+| `src/features/boss/BossTypes.ts`      | 添加 MISSILE_DESTROYER、FIGHTER_LAUNCH_CONFIG         |
+| `src/core/GameCoordinator.ts`         | 添加 createMissileDestroyerBoss、spawnFighterFromBoss |
+| `src/core/Audio/MusicSystem.ts`       | 添加 OCEAN_BOSS 音乐（C 大调，triangle，105 BPM）     |
+| `src/features/levels/LevelManager.ts` | 添加 spawnEnemyAtPosition() 方法                      |
+| `src/core/systems/EnemySystem.ts`     | 添加 spawnEnemyAt() 方法                              |
+| `src/ui/ModelPreview.ts`              | 添加 Boss 4 到预览列表                                |
+
+### Boss 音乐配置（更新）
+
+| 关卡   | 主题         | 调式   | 波形     | BPM |
+| ------ | ------------ | ------ | -------- | --- |
+| Boss 1 | 紧张激烈     | E 小调 | sawtooth | 90  |
+| Boss 2 | 热烈中东风   | D 小调 | sawtooth | 95  |
+| Boss 3 | 空灵神秘     | E 小调 | sine     | 100 |
+| Boss 4 | 波涛汹涌海战 | C 大调 | triangle | 105 |
+| Boss 5 | 史诗终局     | F 小调 | sawtooth | 110 |
+
+---
+
+## Fifth Boss Implementation (2026-02-18)
+
+### 第五关 Boss - 空中航空母舰 (SKY_CARRIER)
+
+**实现状态**：✅ 已完成
+
+| 属性     | 数值              |
+| -------- | ----------------- |
+| 体型     | scale 5           |
+| 血量     | 4000 HP           |
+| 速度     | 8（缓慢追踪玩家） |
+| 高度     | y = 200（高空）   |
+| 模型风格 | 现代科幻航空母舰  |
+
+### 机制一：两门重炮
+
+- **位置**：左翼、右翼
+- **发射间隔**：0.8 秒（轮流发射）
+- **伤害**：15 HP
+- **目标选择**：优先攻击最近的威胁（玩家或友军）
+
+### 机制二：两个导弹发射井
+
+- **位置**：后部左右
+- **发射间隔**：12 秒
+- **伤害**：90 HP
+- **特性**：追踪目标，可被击落
+
+### 机制三：敌机起飞
+
+- **触发频率**：每 60 秒
+- **数量**：3 架
+- **敌机类型**：随机（Fighter、Heavy、Ace）- 排除 Scout
+- **起飞位置**：从机库口飞出
+
+### 移动逻辑
+
+- 在高空（y = 200）追踪玩家
+- 保持一定距离（玩家前方 100 米）
+- 转向速度：0.15
+
+### 新增文件
+
+| File                                | Description                     |
+| ----------------------------------- | ------------------------------- |
+| `src/features/boss/SkyCarrierAI.ts` | Boss AI（移动、武器、起飞敌机） |
+
+### 修改文件
+
+| File                              | Change                                                  |
+| --------------------------------- | ------------------------------------------------------- |
+| `src/features/boss/BossTypes.ts`  | 添加 SKY_CARRIER、配置                                  |
+| `src/core/GameCoordinator.ts`     | 添加 createSkyCarrierBoss、createSkyCarrierBossForLevel |
+| `src/core/Audio/MusicSystem.ts`   | 添加 SKY_CARRIER_BOSS 音乐（F 小调，sawtooth，110 BPM） |
+| `src/ui/ModelPreview.ts`          | 添加 Boss 5 到预览列表                                  |
+| `src/__tests__/BossTypes.test.ts` | 更新测试期望（level 5 → SKY_CARRIER）                   |
 
 ---
 

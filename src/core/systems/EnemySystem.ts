@@ -152,4 +152,11 @@ export class EnemySystem implements IGameSystem {
       this.friendlyAIs.splice(index, 1);
     }
   }
+
+  spawnEnemyAt(
+    type: import('@/features/enemy/EnemyTypes').EnemyType,
+    position: THREE.Vector3
+  ): void {
+    this.levelManager.spawnEnemyAtPosition(type, position);
+  }
 }

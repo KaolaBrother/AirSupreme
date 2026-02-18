@@ -165,8 +165,10 @@ export class EnemyHealthBars {
         barData.arrow.style.display = 'block';
         const worldPos = this.getTargetWorldPosition(enemy.mesh);
         const distance = playerPosition.distanceTo(worldPos);
-        const toEnemy = worldPos.clone().sub(playerPosition);
-        const cameraLocal = toEnemy.clone().applyQuaternion(camera.quaternion.clone().invert());
+        // 使用相机位置计算方向向量，而不是玩家位置
+        // 因为箭头指示器是相对于相机视野的方向
+        const fromCamera = worldPos.clone().sub(camera.position);
+        const cameraLocal = fromCamera.applyQuaternion(camera.quaternion.clone().invert());
         this.updateArrowIndicator(barData.arrow, cameraLocal, distance);
       }
     }
@@ -311,17 +313,19 @@ export class EnemyHealthBars {
     let arrowY: number;
 
     // 计算箭头位置：将角度映射到屏幕边缘
+    // 注意：屏幕 Y 轴向下为正（Y=0 是顶部，Y=1 是底部）
     if (isBehind) {
       // 敌人在后面：箭头放在对应方向的边缘
       if (Math.abs(cameraLocal.y) > Math.abs(cameraLocal.x)) {
-        // 更偏上/下
-        arrowY = isAbove ? 1 - edgePadding : edgePadding;
+        // 更偏上/下：isAbove=true → 敌人在相机上方 → 箭头放屏幕顶部(edgePadding)
+        arrowY = isAbove ? edgePadding : 1 - edgePadding;
         const hRatio = Math.min(1, Math.abs(angleH) / maxAngleH);
         arrowX = centerX + (isOnRight ? hRatio : -hRatio) * (0.5 - edgePadding);
       } else {
         // 更偏左/右
         arrowX = isOnRight ? 1 - edgePadding : edgePadding;
         const vRatio = Math.min(1, Math.abs(angleV) / maxAngleV);
+        // isAbove=true → 敌人在上方 → 箭头 Y 值应该更小（靠近顶部）
         arrowY = centerY + (isAbove ? -vRatio : vRatio) * (0.5 - edgePadding);
       }
     } else {
@@ -330,14 +334,15 @@ export class EnemyHealthBars {
       const normalizedV = Math.max(-1, Math.min(1, angleV / maxAngleV));
 
       arrowX = centerX + normalizedH * (0.5 - edgePadding);
+      // normalizedV > 0 表示敌人在上方 → arrowY 应该更小（靠近顶部）
       arrowY = centerY - normalizedV * (0.5 - edgePadding);
 
       // 如果超出视野，钳制到最近的边缘
       if (Math.abs(normalizedH) >= 1 || Math.abs(normalizedV) >= 1) {
         const slope = Math.abs(angleV) / (Math.abs(angleH) + 0.001);
         if (slope > 1) {
-          // 上下边缘
-          arrowY = isAbove ? 1 - edgePadding : edgePadding;
+          // 上下边缘：isAbove=true → 敌人在上方 → 箭头放屏幕顶部
+          arrowY = isAbove ? edgePadding : 1 - edgePadding;
           const hPos = centerX + (isOnRight ? 1 : -1) * (1 / slope) * (0.5 - edgePadding);
           arrowX = Math.max(edgePadding, Math.min(1 - edgePadding, hPos));
         } else {
@@ -349,15 +354,17 @@ export class EnemyHealthBars {
       }
     }
 
-    // 计算旋转角度：箭头指向敌人方向
-    // 使用实际角度而非屏幕位置，确保旋转正确
-    const rotationAngle = Math.atan2(angleV, angleH) * (180 / Math.PI);
-    // 修正：箭头默认指向下方，需要调整
-    const adjustedRotation = isBehind ? -rotationAngle : rotationAngle;
+    // 箭头默认指向上方（CSS border-bottom 三角形尖端朝上）
+    // atan2(x, y) 给出正确的旋转角度：
+    // - 上方 (y>0): atan2(0, 1) = 0°
+    // - 下方 (y<0): atan2(0, -1) = 180°
+    // - 右方 (x>0): atan2(1, 0) = 90°
+    // - 左方 (x<0): atan2(-1, 0) = -90°
+    const rotationAngle = Math.atan2(cameraLocal.x, cameraLocal.y) * (180 / Math.PI);
 
     arrow.style.left = `${arrowX * 100}%`;
     arrow.style.top = `${arrowY * 100}%`;
-    arrow.style.transform = `translate(-50%, -50%) rotate(${-adjustedRotation + 90}deg)`;
+    arrow.style.transform = `translate(-50%, -50%) rotate(${rotationAngle}deg)`;
 
     // 更新箭头颜色（亮黄色）
     const arrowShape = arrow.querySelector('div');
@@ -417,7 +424,11 @@ export class EnemyHealthBars {
   private getEnemyName(mesh: THREE.Object3D): string {
     const name = mesh.name || '';
     if (name.includes('boss_eye')) return 'Eye';
-    if (name.includes('BOSS') && !name.includes('boss_eye')) return 'Boss';
+    if (name.includes('HEAVY_BOMBER')) return 'Heavy Bomber';
+    if (name.includes('DESERT_FORTRESS')) return 'Desert Fortress';
+    if (name.includes('OCTOPUS_WARSHIP')) return 'Octopus Warship';
+    if (name.includes('MISSILE_DESTROYER')) return 'Missile Destroyer';
+    if (name.includes('SKY_CARRIER')) return 'Sky Carrier';
     if (name === 'SCOUT' || name.includes('Scout')) return 'Scout';
     if (name === 'FIGHTER' || name.includes('Fighter')) return 'Fighter';
     if (name === 'HEAVY' || name.includes('Heavy')) return 'Heavy';

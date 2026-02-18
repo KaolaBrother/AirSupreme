@@ -543,6 +543,19 @@ export class LevelManager {
   }
 
   /**
+   * 在指定位置生成敌人（用于 Boss 召唤）
+   */
+  public spawnEnemyAtPosition(type: EnemyType, position: THREE.Vector3): EnemyAI | null {
+    const enemy = this.getOrCreateEnemy(type);
+    enemy.reset(position);
+    enemy.getMesh().visible = true;
+    this.totalEnemiesSpawned++;
+
+    this.onEnemySpawned?.(enemy);
+    return enemy;
+  }
+
+  /**
    * 清理敌人资源
    */
   public dispose(_scene: THREE.Scene): void {

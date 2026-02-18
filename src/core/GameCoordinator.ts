@@ -25,6 +25,8 @@ import { GAME_CONSTANTS } from '@/config';
 import { BossAI, createBossMesh } from '@/features/boss/BossAI';
 import { DesertFortressAI, createDesertFortressMesh } from '@/features/boss/DesertFortressAI';
 import { OctopusWarshipAI, createOctopusWarshipMesh } from '@/features/boss/OctopusWarshipAI';
+import { MissileDestroyerAI, createMissileDestroyerMesh } from '@/features/boss/MissileDestroyerAI';
+import { SkyCarrierAI, createSkyCarrierMesh } from '@/features/boss/SkyCarrierAI';
 import {
   BOSS_CONFIGS,
   BOSS_MISSILE_CONFIG,
@@ -70,7 +72,13 @@ export class GameCoordinator {
   // Boss 战相关
   private bossMode: boolean = false; // Boss 模式：直接 Boss 战，跳过波次
   private inLevelBossBattle: boolean = false; // 普通模式：波次完成后的 Boss 战
-  private currentBoss: BossAI | DesertFortressAI | OctopusWarshipAI | null = null;
+  private currentBoss:
+    | BossAI
+    | DesertFortressAI
+    | OctopusWarshipAI
+    | MissileDestroyerAI
+    | SkyCarrierAI
+    | null = null;
   private bossFriendlySpawnTimer: number = 0;
   private bossIndicator: BossMissileIndicator;
   private laserDamageCooldown: number = 0;
@@ -289,6 +297,11 @@ export class GameCoordinator {
 
     this.gameScene.scene.add(mesh);
     this.enemySystem.spawnFriendly(friendly);
+  }
+
+  private spawnFighterFromBoss(position: THREE.Vector3): void {
+    this.enemySystem.spawnEnemyAt(EnemyType.FIGHTER, position);
+    this.hud.showPowerUpBig('⚠️', '敌机起飞！');
   }
 
   private update(deltaTime: number): void {
@@ -565,7 +578,6 @@ export class GameCoordinator {
     const missiles = bossMissileSystem.getMissiles();
     const playerPosition = this.playerSystem.getPosition();
     const camera = this.gameScene.camera;
-    const playerRight = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
 
     // 只显示锁定玩家的导弹指示器
     const indicatorData = missiles
@@ -576,33 +588,19 @@ export class GameCoordinator {
         return isFinite(pos.x) && isFinite(pos.y) && isFinite(pos.z);
       })
       .map((missile, index) => {
-        const screenPos = this.getScreenPosition(missile.getMesh().position);
-        const distance = playerPosition.distanceTo(missile.getMesh().position);
-        const inView = this.isPositionInView(missile.getMesh().position);
-        const toMissile = missile.getMesh().position.clone().sub(playerPosition);
-        const isOnRight = playerRight.dot(toMissile) > 0;
+        const worldPos = missile.getMesh().position.clone();
+        const distance = playerPosition.distanceTo(worldPos);
+        const inView = this.isPositionInView(worldPos);
 
         return {
           id: `boss-missile-${index}`,
-          screenPos,
+          worldPos,
           distance,
           inView,
-          isOnRight,
         };
       });
 
-    this.bossIndicator.update(indicatorData);
-  }
-
-  private getScreenPosition(worldPos: THREE.Vector3): { x: number; y: number } {
-    const camera = this.gameScene.camera;
-    const vector = worldPos.clone();
-    vector.project(camera);
-
-    return {
-      x: ((vector.x + 1) / 2) * window.innerWidth,
-      y: ((-vector.y + 1) / 2) * window.innerHeight,
-    };
+    this.bossIndicator.update(indicatorData, camera);
   }
 
   private isPositionInView(worldPos: THREE.Vector3): boolean {
@@ -869,6 +867,10 @@ export class GameCoordinator {
       this.createDesertFortressBoss(config);
     } else if (bossType === BossType.OCTOPUS_WARSHIP) {
       this.createOctopusWarshipBoss(config);
+    } else if (bossType === BossType.MISSILE_DESTROYER) {
+      this.createMissileDestroyerBoss(config);
+    } else if (bossType === BossType.SKY_CARRIER) {
+      this.createSkyCarrierBoss(config);
     } else {
       this.createHeavyBomberBoss(config);
     }
@@ -1009,6 +1011,99 @@ export class GameCoordinator {
     };
   }
 
+  private createMissileDestroyerBoss(config: BossConfig): void {
+    const mesh = createMissileDestroyerMesh(config);
+
+    const playerPos = this.playerSystem.getPosition();
+    mesh.position.set(playerPos.x, -50, playerPos.z + 200);
+
+    this.gameScene.scene.add(mesh);
+
+    const missileDestroyer = new MissileDestroyerAI(
+      mesh,
+      config,
+      this.gameScene.scene,
+      this.particleSystem
+    );
+    this.currentBoss = missileDestroyer;
+
+    missileDestroyer.onFlakFire = (_position) => {
+      this.audioManager.playFlakCannonFire();
+    };
+
+    missileDestroyer.onFlakExplode = (position, _radius, _damage) => {
+      this.particleSystem.createFlakExplosion(position, FLAK_CANNON_CONFIG.AOE_RADIUS);
+      this.audioManager.playFlakCannonExplosion();
+
+      const targets = [
+        this.playerAircraft,
+        ...this.enemySystem.getFriendlyAIs().map((f) => f.getMesh()),
+      ];
+      missileDestroyer.getFlakCannonSystem().checkAoeCollisions(targets, (target, damage) => {
+        this.particleSystem.createHit(target.position);
+        if (target === this.playerAircraft) {
+          if (!this.playerSystem.isShieldActive()) {
+            this.playerSystem.getHealth().takeDamage(damage);
+          }
+        } else {
+          const friendly = this.enemySystem.getFriendlyAIs().find((f) => f.getMesh() === target);
+          friendly?.takeDamage(damage);
+        }
+      });
+    };
+
+    missileDestroyer.onDestroy = (position, bossConfig) => {
+      if (this.currentBoss) {
+        const missileSystem = this.currentBoss.getMissileSystem();
+        if (missileSystem) {
+          missileSystem.dispose();
+        }
+        (this.currentBoss as MissileDestroyerAI).getFlakCannonSystem().dispose();
+      }
+      this.handleBossDestroy(position, bossConfig, true);
+    };
+
+    missileDestroyer.onMissileFired = () => {
+      this.audioManager.playMissileLaunch();
+    };
+
+    missileDestroyer.onFighterSpawn = (position) => {
+      this.spawnFighterFromBoss(position);
+    };
+  }
+
+  private createSkyCarrierBoss(config: BossConfig): void {
+    const mesh = createSkyCarrierMesh(config);
+
+    const playerPos = this.playerSystem.getPosition();
+    mesh.position.set(playerPos.x, 200, playerPos.z + 200);
+
+    this.gameScene.scene.add(mesh);
+
+    const skyCarrier = new SkyCarrierAI(mesh, config, this.gameScene.scene, this.particleSystem);
+    this.currentBoss = skyCarrier;
+
+    skyCarrier.onFire = (position, direction, damage) => {
+      this.combatSystem
+        .getBossProjectilePool()
+        .fire(position, direction, damage, this.currentBoss?.getMesh(), Faction.ENEMY);
+      this.audioManager.playShoot();
+    };
+
+    skyCarrier.onDestroy = (position, bossConfig) => {
+      this.handleBossDestroy(position, bossConfig, true);
+    };
+
+    skyCarrier.onMissileFired = () => {
+      this.audioManager.playMissileLaunch();
+    };
+
+    skyCarrier.onEnemySpawn = (position, enemyType) => {
+      this.enemySystem.spawnEnemyAt(enemyType, position);
+      this.hud.showPowerUpBig('⚠️', '敌机起飞！');
+    };
+  }
+
   private handleBossDestroy(
     position: THREE.Vector3,
     bossConfig: BossConfig,
@@ -1076,6 +1171,10 @@ export class GameCoordinator {
       this.createDesertFortressBossForLevel(config);
     } else if (bossType === BossType.OCTOPUS_WARSHIP) {
       this.createOctopusWarshipBossForLevel(config);
+    } else if (bossType === BossType.MISSILE_DESTROYER) {
+      this.createMissileDestroyerBossForLevel(config);
+    } else if (bossType === BossType.SKY_CARRIER) {
+      this.createSkyCarrierBossForLevel(config);
     } else {
       this.createHeavyBomberBossForLevel(config);
     }
@@ -1216,6 +1315,101 @@ export class GameCoordinator {
       octopusWarship.getEyeSystem().dispose();
       this.handleBossDestroy(position, bossConfig, false);
       this.inLevelBossBattle = false;
+    };
+  }
+
+  private createMissileDestroyerBossForLevel(config: BossConfig): void {
+    const mesh = createMissileDestroyerMesh(config);
+
+    const playerPos = this.playerSystem.getPosition();
+    mesh.position.set(playerPos.x, -50, playerPos.z + 200);
+
+    this.gameScene.scene.add(mesh);
+
+    const missileDestroyer = new MissileDestroyerAI(
+      mesh,
+      config,
+      this.gameScene.scene,
+      this.particleSystem
+    );
+    this.currentBoss = missileDestroyer;
+
+    missileDestroyer.onFlakFire = (_position) => {
+      this.audioManager.playFlakCannonFire();
+    };
+
+    missileDestroyer.onFlakExplode = (position, _radius, _damage) => {
+      this.particleSystem.createFlakExplosion(position, FLAK_CANNON_CONFIG.AOE_RADIUS);
+      this.audioManager.playFlakCannonExplosion();
+
+      const targets = [
+        this.playerAircraft,
+        ...this.enemySystem.getFriendlyAIs().map((f) => f.getMesh()),
+      ];
+      missileDestroyer.getFlakCannonSystem().checkAoeCollisions(targets, (target, damage) => {
+        this.particleSystem.createHit(target.position);
+        if (target === this.playerAircraft) {
+          if (!this.playerSystem.isShieldActive()) {
+            this.playerSystem.getHealth().takeDamage(damage);
+          }
+        } else {
+          const friendly = this.enemySystem.getFriendlyAIs().find((f) => f.getMesh() === target);
+          friendly?.takeDamage(damage);
+        }
+      });
+    };
+
+    missileDestroyer.onDestroy = (position, bossConfig) => {
+      if (this.currentBoss) {
+        const missileSystem = this.currentBoss.getMissileSystem();
+        if (missileSystem) {
+          missileSystem.dispose();
+        }
+        (this.currentBoss as MissileDestroyerAI).getFlakCannonSystem().dispose();
+      }
+      this.handleBossDestroy(position, bossConfig, false);
+      this.inLevelBossBattle = false;
+    };
+
+    missileDestroyer.onMissileFired = () => {
+      this.audioManager.playMissileLaunch();
+    };
+
+    missileDestroyer.onFighterSpawn = (position) => {
+      this.spawnFighterFromBoss(position);
+    };
+  }
+
+  private createSkyCarrierBossForLevel(config: BossConfig): void {
+    const mesh = createSkyCarrierMesh(config);
+
+    const playerPos = this.playerSystem.getPosition();
+    mesh.position.set(playerPos.x, 200, playerPos.z + 200);
+
+    this.gameScene.scene.add(mesh);
+
+    const skyCarrier = new SkyCarrierAI(mesh, config, this.gameScene.scene, this.particleSystem);
+    this.currentBoss = skyCarrier;
+
+    skyCarrier.onFire = (position, direction, damage) => {
+      this.combatSystem
+        .getBossProjectilePool()
+        .fire(position, direction, damage, this.currentBoss?.getMesh(), Faction.ENEMY);
+      this.audioManager.playShoot();
+    };
+
+    skyCarrier.onDestroy = (position, bossConfig) => {
+      this.handleBossDestroy(position, bossConfig, false);
+      this.inLevelBossBattle = false;
+    };
+
+    skyCarrier.onMissileFired = () => {
+      this.audioManager.playMissileLaunch();
+    };
+
+    skyCarrier.onEnemySpawn = (position, enemyType) => {
+      this.enemySystem.spawnEnemyAt(enemyType, position);
+      this.hud.showPowerUpBig('⚠️', '敌机起飞！');
     };
   }
 
