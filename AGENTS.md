@@ -321,14 +321,15 @@ The upgrade system exists in code but has no UI:
 
 ```typescript
 // PlayerStats tracks score and upgrade points
-playerStats.addScore(score); // Every 500 score = 1 upgrade point
+playerStats.addScore(score); // Every 400 score = 1 upgrade point
 
-// Available upgrades:
-// - MAX_HEALTH: +20 HP per level
-// - DAMAGE: +5 damage per level
-// - FIRE_RATE: -0.02s cooldown per level
-// - SPEED: +5 max speed per level
-// - SHIELD_DURATION: +2 seconds per level
+// Available upgrades (6 types):
+// - MAX_HEALTH: +40 HP per level
+// - DAMAGE: +3.5 damage per level
+// - FIRE_RATE: -0.04s cooldown per level
+// - SPEED: +8 max speed per level
+// - MISSILE_LOCK_TIME: -0.2s per level
+// - MISSILE_RELOAD_TIME: -1.0s per level
 
 // Missing: UI to spend upgrade points
 // Location for UI: Could be added to StartMenu or HUD
@@ -1093,3 +1094,120 @@ Group (根节点)
 | Boss 2 模型   | `src/features/boss/DesertFortressAI.ts` - `createMesh()` |
 | Boss 3 模型   | `src/features/boss/OctopusWarshipAI.ts` - `createMesh()` |
 | 模型预览      | `src/ui/ModelPreview.ts`                                 |
+
+---
+
+## Upgrade System Implementation (2026-02-18)
+
+### Overview
+
+升级系统允许玩家在游戏暂停时使用积分强化飞机性能。按 ESC 或 P 键打开升级菜单。
+
+### 升级类型 / Upgrade Types (6 种 × 5 档)
+
+| 升级           | 图标 | 基础值 | 最大值 | 每档变化 | 成本      |
+| -------------- | ---- | ------ | ------ | -------- | --------- |
+| HP             | ❤️   | 200    | 400    | +40      | 1,2,3,4,5 |
+| Speed          | ⚡   | 45     | 85     | +8       | 1,2,3,4,5 |
+| Fire Rate      | 🔫   | 0.30s  | 0.10s  | -0.04s   | 1,2,3,4,5 |
+| Damage         | 💥   | 12.5   | 30     | +3.5     | 1,2,3,4,5 |
+| Missile Reload | 🚀   | 7.5s   | 2.5s   | -1.0s    | 1,2,3,4,5 |
+| Missile Lock   | 🎯   | 1.5s   | 0.5s   | -0.2s    | 1,2,3,4,5 |
+
+### 积分系统 / Points System
+
+- **获取方式**: 每 400 分获得 1 升级点
+- **跨生命保持**: 死亡后积分保留
+- **新游戏重置**: 从主菜单开始新游戏时重置
+
+### 暂停菜单 / Pause Menu
+
+- **快捷键**: ESC 或 P
+- **功能**: 显示升级选项、当前点数、继续游戏按钮
+- **z-index**: 999（低于开始菜单 1000）
+
+### 移动端升级按钮 / Mobile Upgrade Button
+
+- **位置**: 移动端控制区域右侧，与"导弹"按钮并列
+- **样式**: 紫色圆形按钮，显示"升级"文字
+- **功能**: 点击打开暂停/升级菜单
+- **实现**: `InputHandler.isUpgradeToggled()` 与 `isPauseToggled()` 共用同一菜单
+
+### 测试分数 / Test Score
+
+- **位置**: 开始菜单设置面板
+- **选项**: 关闭 / 2000 / 3000 / 4000 / 5000
+- **功能**: 游戏开始时自动添加指定分数，用于测试升级系统
+- **用途**: 快速获得升级点数，测试各种升级组合
+
+### 关键文件 / Key Files
+
+| Purpose      | File                                             |
+| ------------ | ------------------------------------------------ |
+| 升级逻辑     | `src/features/upgrade/UpgradeSystem.ts`          |
+| 属性获取     | `src/features/upgrade/PlayerStats.ts` (同一文件) |
+| 暂停菜单 UI  | `src/ui/UpgradeMenu.ts`                          |
+| HUD 点数显示 | `src/ui/HUD.ts`                                  |
+| 暂停按键     | `src/core/Input/InputHandler.ts`                 |
+| 动态锁定时间 | `src/ui/LockOnIndicator.ts`                      |
+
+### 实现模式 / Implementation Patterns
+
+**动态属性获取**:
+
+```typescript
+// PlayerStats getters return dynamic values based on upgrade levels
+const lockTime = this.playerStats.getMissileLockTime();
+const reloadTime = this.playerStats.getMissileReloadTime();
+```
+
+**暂停时更新锁定时间**:
+
+```typescript
+// When MISSILE_LOCK_TIME is upgraded
+this.lockOnIndicator.setLockTime(this.playerStats.getMissileLockTime());
+```
+
+**分数添加时自动计算点数**:
+
+```typescript
+// In GameCoordinator when score changes
+this.playerStats.addScore(scoreGained);
+this.hud.updateUpgradePoints(this.playerStats.getUpgrades().getAvailablePoints());
+```
+
+### 升级效果应用 / Upgrade Effect Application
+
+| 升级类型            | 应用时机 | 应用方式                                  |
+| ------------------- | -------- | ----------------------------------------- |
+| MAX_HEALTH          | 升级时   | `playerSystem.syncMaxHealth()`            |
+| DAMAGE              | 实时     | 通过 `PlayerStats.getDamage()`            |
+| FIRE_RATE           | 实时     | 通过 `PlayerStats.getFireRate()`          |
+| SPEED               | 实时     | 通过 `PlayerStats.getMaxSpeed()`          |
+| MISSILE_LOCK_TIME   | 升级时   | `lockOnIndicator.setLockTime()`           |
+| MISSILE_RELOAD_TIME | 实时     | 通过 `PlayerStats.getMissileReloadTime()` |
+
+### 新增文件
+
+| File                                  | Description      |
+| ------------------------------------- | ---------------- |
+| `src/ui/UpgradeMenu.ts`               | 暂停菜单 UI 组件 |
+| `src/__tests__/UpgradeSystem.test.ts` | 升级系统单元测试 |
+
+### 修改文件
+
+| File                                    | Change                                                     |
+| --------------------------------------- | ---------------------------------------------------------- |
+| `src/features/upgrade/UpgradeSystem.ts` | 添加导弹升级、改为 5 档、调整费用、积分阈值改为 400        |
+| `src/core/Input/InputHandler.ts`        | 添加 ESC/P 暂停键、`isPauseToggled()`、`resetPauseState()` |
+| `src/ui/HUD.ts`                         | 添加 `upgradePointsDisplay`、`updateUpgradePoints()`       |
+| `src/ui/LockOnIndicator.ts`             | 添加 `setLockTime()` 方法                                  |
+| `src/core/GameCoordinator.ts`           | 暂停逻辑、UpgradeMenu 集成、动态导弹参数                   |
+
+### 升满所需积分
+
+- 普通 4 项: (2+3+4+5+6) × 4 = 80 点
+- 导弹 2 项: (3+4+5+6+7) × 2 = 50 点
+- **总计: 130 点** = 52,000 分
+
+预估通关总分约 38,400 分，获得约 96 点，鼓励选择性升级。

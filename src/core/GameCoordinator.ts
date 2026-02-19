@@ -11,7 +11,8 @@ import { InputHandler } from '@/core/Input/InputHandler';
 import { AudioManager } from '@/core/Audio/AudioManager';
 import { MusicSystem, LevelMusic } from '@/core/Audio/MusicSystem';
 import { ParticleSystem } from '@/features/effects/ParticleSystem';
-import { PlayerStats } from '@/features/upgrade/UpgradeSystem';
+import { PlayerStats, UpgradeType } from '@/features/upgrade/UpgradeSystem';
+import { UpgradeMenu } from '@/ui/UpgradeMenu';
 import { FriendlyAI } from '@/features/enemy/FriendlyAI';
 import { EnemyType, ENEMY_CONFIGS } from '@/features/enemy/EnemyTypes';
 import { PowerUpType, POWER_UP_CONFIGS } from '@/features/powerups/PowerUpSystem';
@@ -83,6 +84,9 @@ export class GameCoordinator {
   private bossIndicator: BossMissileIndicator;
   private laserDamageCooldown: number = 0;
 
+  private isPaused: boolean = false;
+  private upgradeMenu: UpgradeMenu | null = null;
+
   constructor() {
     this.gameLoop = new GameLoop();
     this.gameScene = new GameScene();
@@ -116,9 +120,16 @@ export class GameCoordinator {
 
     this.hud = new HUD();
     this.lockOnIndicator = new LockOnIndicator();
+    this.lockOnIndicator.setLockTime(this.playerStats.getMissileLockTime());
     this.enemyHealthBars = new EnemyHealthBars();
     this.startMenu = new StartMenu();
     this.bossIndicator = new BossMissileIndicator();
+
+    this.upgradeMenu = new UpgradeMenu(
+      this.playerStats.getUpgrades(),
+      (type: UpgradeType) => this.handleUpgrade(type),
+      () => this.resumeGame()
+    );
 
     this.initSystems();
     this.setupEventListeners();
@@ -181,6 +192,7 @@ export class GameCoordinator {
     EventBus.on(GameEventType.ENEMY_DEATH, ({ payload }) => {
       this.gameState.addScore(payload.config.scoreValue);
       this.playerStats.addScore(payload.config.scoreValue);
+      this.hud.updateUpgradePoints(this.playerStats.getUpgrades().getAvailablePoints());
       this.audioManager.playExplosion();
       this.particleSystem.createExplosion(payload.position, payload.config.scale);
 
@@ -274,6 +286,12 @@ export class GameCoordinator {
       this.audioManager.setSFXVolume(settings.soundVolume);
       this.currentLevelId = settings.startLevel;
       this.bossMode = settings.gameMode === 'boss';
+
+      if (settings.testScore > 0) {
+        this.playerStats.addScore(settings.testScore);
+        this.hud.updateUpgradePoints(this.playerStats.getUpgrades().getAvailablePoints());
+      }
+
       this.gameState.start();
       this.start();
     });
@@ -300,12 +318,29 @@ export class GameCoordinator {
   }
 
   private spawnFighterFromBoss(position: THREE.Vector3): void {
+    const MAX_ENEMIES = 8;
+    if (this.enemySystem.getAliveEnemyCount() >= MAX_ENEMIES) {
+      return;
+    }
     this.enemySystem.spawnEnemyAt(EnemyType.FIGHTER, position);
     this.hud.showPowerUpBig('⚠️', '敌机起飞！');
   }
 
   private update(deltaTime: number): void {
     if (this.gameState.getStatus() !== GameStatus.PLAYING) {
+      return;
+    }
+
+    if (this.inputHandler.isPauseToggled() || this.inputHandler.isUpgradeToggled()) {
+      if (this.isPaused) {
+        this.resumeGame();
+      } else {
+        this.pauseGame();
+      }
+      return;
+    }
+
+    if (this.isPaused) {
       return;
     }
 
@@ -1099,6 +1134,10 @@ export class GameCoordinator {
     };
 
     skyCarrier.onEnemySpawn = (position, enemyType) => {
+      const MAX_ENEMIES = 8;
+      if (this.enemySystem.getAliveEnemyCount() >= MAX_ENEMIES) {
+        return;
+      }
       this.enemySystem.spawnEnemyAt(enemyType, position);
       this.hud.showPowerUpBig('⚠️', '敌机起飞！');
     };
@@ -1408,6 +1447,10 @@ export class GameCoordinator {
     };
 
     skyCarrier.onEnemySpawn = (position, enemyType) => {
+      const MAX_ENEMIES = 8;
+      if (this.enemySystem.getAliveEnemyCount() >= MAX_ENEMIES) {
+        return;
+      }
       this.enemySystem.spawnEnemyAt(enemyType, position);
       this.hud.showPowerUpBig('⚠️', '敌机起飞！');
     };
@@ -1428,6 +1471,32 @@ export class GameCoordinator {
       5: LevelMusic.CITY,
     };
     return levelMusicMap[levelId] || LevelMusic.LAKE;
+  }
+
+  private pauseGame(): void {
+    this.isPaused = true;
+    this.upgradeMenu?.show();
+    this.inputHandler.resetPauseState();
+    this.inputHandler.resetUpgradeState();
+  }
+
+  private resumeGame(): void {
+    this.isPaused = false;
+    this.upgradeMenu?.hide();
+    this.inputHandler.resetPauseState();
+    this.inputHandler.resetUpgradeState();
+  }
+
+  private handleUpgrade(type: UpgradeType): void {
+    if (this.playerStats.getUpgrades().upgrade(type)) {
+      if (type === UpgradeType.MAX_HEALTH) {
+        this.playerSystem.syncMaxHealth();
+      }
+      if (type === UpgradeType.MISSILE_LOCK_TIME) {
+        this.lockOnIndicator.setLockTime(this.playerStats.getMissileLockTime());
+      }
+      this.hud.updateUpgradePoints(this.playerStats.getUpgrades().getAvailablePoints());
+    }
   }
 
   public dispose(): void {

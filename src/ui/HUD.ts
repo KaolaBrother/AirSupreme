@@ -7,7 +7,6 @@ export class HUD {
   private container: HTMLDivElement;
   private healthBarContainer: HTMLDivElement;
   private healthBarFill!: HTMLDivElement;
-  private healthText: HTMLSpanElement;
   private scoreDisplay: HTMLDivElement;
   private speedDisplay: HTMLDivElement;
   private enemiesDisplay: HTMLDivElement;
@@ -16,11 +15,12 @@ export class HUD {
   private missilesDisplay: HTMLDivElement;
   private missileProgressDisplay: HTMLDivElement; // 导弹补给进度条背景
   private missileProgressFill: HTMLDivElement; // 导弹补给进度条填充
-  private powerUpDisplay: HTMLDivElement; // 道具提示显示
-  private powerUpBigDisplay: HTMLDivElement; // 道具大字提示（屏幕中央）
-  private gameOverDisplay: HTMLDivElement; // 游戏结束显示
+  private powerUpDisplay: HTMLDivElement;
+  private powerUpBigDisplay: HTMLDivElement;
+  private gameOverDisplay: HTMLDivElement;
+  private upgradePointsDisplay: HTMLDivElement;
 
-  private powerUpTimer: number = 0; // 道具提示显示计时器
+  private powerUpTimer: number = 0;
   private activePowerUpDuration: number = 0; // 道具持续时间
   private powerUpBigTimer: number = 0; // 大字提示显示计时器
 
@@ -45,21 +45,37 @@ export class HUD {
       z-index: 50;
     `;
 
-    // 生命值条（改进版：更平衡的设计）
     this.healthBarContainer = this.createHealthBar(isMobile);
-    this.healthText = this.createHealthText(isMobile);
 
-    // 分数显示
+    this.upgradePointsDisplay = document.createElement('div');
+    this.upgradePointsDisplay.style.cssText = `
+      font-size: ${isMobile ? '14px' : '18px'};
+      position: absolute;
+      top: ${isMobile ? '25px' : '40px'};
+      left: ${padding};
+      color: #FFD700;
+      display: none;
+    `;
+    this.upgradePointsDisplay.textContent = '⭐ 0';
+
     this.scoreDisplay = document.createElement('div');
     this.scoreDisplay.style.cssText = `
       font-size: ${fontSize};
       position: absolute;
-      top: ${padding};
-      right: ${padding};
+      top: ${isMobile ? '50px' : '70px'};
+      left: ${padding};
     `;
     this.scoreDisplay.textContent = '分数: 0';
 
-    // 剩余敌人数量显示（右上角）
+    this.speedDisplay = document.createElement('div');
+    this.speedDisplay.style.cssText = `
+      font-size: ${isMobile ? '14px' : '18px'};
+      position: absolute;
+      top: ${isMobile ? '75px' : '100px'};
+      left: ${padding};
+    `;
+    this.speedDisplay.textContent = '速度: 0 km/h';
+
     this.remainingEnemiesDisplay = document.createElement('div');
     this.remainingEnemiesDisplay.style.cssText = `
       font-size: ${isMobile ? '14px' : '18px'};
@@ -71,18 +87,9 @@ export class HUD {
     `;
     this.remainingEnemiesDisplay.textContent = '剩余: 0';
     this.container.appendChild(this.remainingEnemiesDisplay);
+    this.container.appendChild(this.upgradePointsDisplay);
+    this.container.appendChild(this.speedDisplay);
 
-    // 速度显示
-    this.speedDisplay = document.createElement('div');
-    this.speedDisplay.style.cssText = `
-      font-size: ${isMobile ? '14px' : '18px'};
-      position: absolute;
-      bottom: ${isMobile ? '40%' : '20px'};
-      left: ${padding};
-    `;
-    this.speedDisplay.textContent = '速度: 0 km/h';
-
-    // 敌人数量显示
     this.enemiesDisplay = document.createElement('div');
     this.enemiesDisplay.style.cssText = `
       font-size: ${isMobile ? '14px' : '18px'};
@@ -231,9 +238,7 @@ export class HUD {
     `;
 
     this.container.appendChild(this.healthBarContainer);
-    this.container.appendChild(this.healthText);
     this.container.appendChild(this.scoreDisplay);
-    this.container.appendChild(this.speedDisplay);
     this.container.appendChild(this.enemiesDisplay);
     this.container.appendChild(this.livesDisplay);
     this.container.appendChild(this.missilesDisplay);
@@ -245,24 +250,7 @@ export class HUD {
   }
 
   /**
-   * 创建血量文字显示
-   */
-  private createHealthText(isMobile: boolean): HTMLSpanElement {
-    const text = document.createElement('span');
-    text.className = 'health-text';
-    text.style.cssText = `
-      font-size: ${isMobile ? '18px' : '24px'};
-      font-weight: bold;
-      color: white;
-      text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
-      pointer-events: none;
-    `;
-    text.textContent = '100';
-    return text;
-  }
-
-  /**
-   * 创建生命值条（改进版：紧凑设计）
+   * 创建生命值条（紧凑设计）
    */
   private createHealthBar(isMobile: boolean): HTMLDivElement {
     const container = document.createElement('div');
@@ -295,39 +283,22 @@ export class HUD {
     return container;
   }
 
-  /**
-   * 更新生命值显示
-   */
   public updateHealth(percent: number): void {
-    // 更新血条填充宽度
     this.healthBarFill.style.width = `${percent * 100}%`;
 
-    // 更新血量数字
-    this.healthText.textContent = `${Math.ceil(percent * 100)}`;
-
-    // 根据生命值改变颜色 - 4层渐变系统
     let gradient: string;
-    let textColor: string = '#ffffff';
 
     if (percent > 0.6) {
-      // 高血量：绿色渐变
       gradient = 'linear-gradient(90deg, #00ff66, #00ff33, #00cc00)';
     } else if (percent > 0.3) {
-      // 中高血量：黄绿色渐变
       gradient = 'linear-gradient(90deg, #ffcc00, #ffdd00, #88aa00)';
-      textColor = '#ffdd00';
     } else if (percent > 0.15) {
-      // 低血量：橙色渐变
       gradient = 'linear-gradient(90deg, #ff9900, #ffcc00, #ffaa00)';
-      textColor = '#ffaa00';
     } else {
-      // 危低血量：红色渐变
       gradient = 'linear-gradient(90deg, #ff3300, #cc0000, #ff0000)';
-      textColor = '#ff0000';
     }
 
     this.healthBarFill.style.background = gradient;
-    this.healthText.style.color = textColor;
   }
 
   /**
@@ -367,9 +338,11 @@ export class HUD {
     this.livesDisplay.textContent = `生命: ${hearts}`;
   }
 
-  /**
-   * 更新导弹数量显示
-   */
+  public updateUpgradePoints(points: number): void {
+    this.upgradePointsDisplay.textContent = `⭐ ${points}`;
+    this.upgradePointsDisplay.style.display = points > 0 ? 'block' : 'none';
+  }
+
   public updateMissiles(count: number): void {
     const maxMissiles = 10; // 假设最多10发
     const icons = '🚀'.repeat(Math.max(0, count)) + '⬜'.repeat(Math.max(0, maxMissiles - count));

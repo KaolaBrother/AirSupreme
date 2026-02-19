@@ -500,8 +500,8 @@ export function createBossMesh(config: BossConfig): THREE.Group {
     engineMeshes.push(engine);
   });
 
-  group.userData.bossParts = parts;
-  group.userData.engineMeshes = engineMeshes;
+  (group as any).bossParts = parts;
+  (group as any).engineMeshes = engineMeshes;
   group.name = `BOSS_${config.type}`;
   return group;
 }

@@ -16,7 +16,7 @@ export class LockOnIndicator {
   private isLockingOn: boolean = false;
   private currentTarget: THREE.Object3D | null = null;
   private lockProgressValue: number = 0; // 0-1，1 表示锁定完成
-  private lockTime: number = 0.8; // 锁定时间 0.8 秒
+  private lockTime: number = 3.0; // 锁定时间（默认 3 秒，可通过 setLockTime 动态调整）
   private lockedTarget: THREE.Object3D | null = null; // 锁定的目标（一旦锁定就保持不变）
 
   // 屏幕中心
@@ -381,6 +381,14 @@ export class LockOnIndicator {
    */
   public isLocking(): boolean {
     return this.isLockingOn;
+  }
+
+  /**
+   * 设置锁定时间
+   * @param time 锁定时间（秒），最小 0.5 秒
+   */
+  public setLockTime(time: number): void {
+    this.lockTime = Math.max(0.5, time);
   }
 
   /**

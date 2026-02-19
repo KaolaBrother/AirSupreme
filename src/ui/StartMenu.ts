@@ -12,6 +12,7 @@ export class StartMenu {
     playerLives: 3,
     startLevel: 1,
     gameMode: 'normal',
+    testScore: 0,
   };
 
   constructor() {
@@ -304,6 +305,25 @@ export class StartMenu {
     modeRow.id = 'mode-row';
     panel.appendChild(modeRow);
 
+    const testScoreValues = [0, 2000, 3000, 4000, 5000];
+    const testScoreRow = this.createSettingRow(
+      '测试分数',
+      this.settings.testScore === 0 ? '关闭' : `${this.settings.testScore}`,
+      () => {
+        const currentIndex = testScoreValues.indexOf(this.settings.testScore);
+        this.settings.testScore = testScoreValues[Math.max(0, currentIndex - 1)];
+        this.updateDisplay();
+      },
+      () => {
+        const currentIndex = testScoreValues.indexOf(this.settings.testScore);
+        this.settings.testScore =
+          testScoreValues[Math.min(testScoreValues.length - 1, currentIndex + 1)];
+        this.updateDisplay();
+      }
+    );
+    testScoreRow.id = 'testscore-row';
+    panel.appendChild(testScoreRow);
+
     // 按钮容器 - 并排放置
     const buttonContainer = document.createElement('div');
     buttonContainer.className = 'button-container';
@@ -424,6 +444,9 @@ export class StartMenu {
     const modeValue =
       document.getElementById('游戏模式-value') ||
       document.querySelector('#mode-row .setting-value');
+    const testScoreValue =
+      document.getElementById('测试分数-value') ||
+      document.querySelector('#testscore-row .setting-value');
     const startBtn = document.getElementById('start-btn');
 
     if (difficultyValue)
@@ -433,6 +456,9 @@ export class StartMenu {
     if (levelValue) levelValue.textContent = `第${this.settings.startLevel}关`;
     if (modeValue)
       modeValue.textContent = this.settings.gameMode === 'normal' ? '普通模式' : 'Boss 模式';
+    if (testScoreValue)
+      testScoreValue.textContent =
+        this.settings.testScore === 0 ? '关闭' : `${this.settings.testScore}`;
     if (startBtn)
       startBtn.textContent = this.settings.gameMode === 'normal' ? '🎮 开始游戏' : '👹 Boss 挑战';
   }
@@ -461,4 +487,5 @@ export interface GameSettings {
   playerLives: number;
   startLevel: number;
   gameMode: 'normal' | 'boss';
+  testScore: number;
 }

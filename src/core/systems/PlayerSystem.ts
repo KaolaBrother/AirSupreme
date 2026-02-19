@@ -153,12 +153,11 @@ export class PlayerSystem implements IGameSystem {
     const baseFireRate = this.stats.getFireRate();
     this.fireCooldown = baseFireRate / this.stats.getRapidFireMultiplier();
 
-    const spreadAngle = this.stats.getSpreadAngle();
-    if (spreadAngle > 0) {
-      const spreadRad = ((spreadAngle / 2) * Math.PI) / 180;
-      const randomAngle = (Math.random() - 0.5) * 2 * spreadRad;
-      forward.applyAxisAngle(new THREE.Vector3(0, 1, 0), randomAngle);
-    }
+    const baseSpread = 3;
+    const spreadAngle = this.stats.getSpreadAngle() + baseSpread;
+    const spreadRad = ((spreadAngle / 2) * Math.PI) / 180;
+    const randomAngle = (Math.random() - 0.5) * 2 * spreadRad;
+    forward.applyAxisAngle(new THREE.Vector3(0, 1, 0), randomAngle);
 
     EventBus.emit(GameEventType.PLAYER_FIRED, {
       position,
@@ -210,8 +209,15 @@ export class PlayerSystem implements IGameSystem {
   }
 
   syncMaxHealth(): void {
+    const oldPercent = this.health.getHealthPercent();
     const newMax = this.stats.getMaxHealth();
     this.health.setMaxHealth(newMax);
+    if (oldPercent > 0.9) {
+      this.health.healToMax();
+    } else {
+      const newCurrent = Math.ceil(newMax * oldPercent);
+      this.health.heal(newCurrent - this.health.getCurrentHealth());
+    }
   }
 
   getFireCooldown(): number {
