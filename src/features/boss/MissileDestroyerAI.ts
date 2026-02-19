@@ -300,7 +300,9 @@ export class MissileDestroyerAI {
       this.mesh.remove(child);
       if (child instanceof THREE.Mesh) {
         child.geometry.dispose();
-        if (child.material instanceof THREE.Material) {
+        if (Array.isArray(child.material)) {
+          child.material.forEach((m) => m.dispose());
+        } else if (child.material instanceof THREE.Material) {
           child.material.dispose();
         }
       }

@@ -1,4 +1,8 @@
 import { GameCoordinator } from './core/GameCoordinator';
+import { getLogger } from './core/utils/Logger';
+import { configLoader } from './core/utils/ConfigLoader';
+
+const log = getLogger('Main');
 
 function hideLoadingScreen(): void {
   const loadingScreen = document.getElementById('loading-screen');
@@ -39,26 +43,27 @@ async function main(): Promise<void> {
   }
 
   try {
+    await configLoader.load();
+
     const game = new GameCoordinator();
 
     hideLoadingScreen();
 
-    console.log('🎮 Air Supreme - 3D 空战游戏 (v2)');
-    console.log('📖 控制说明:');
-    console.log('  W/S - 俯仰（机头上下）');
-    console.log('  A/D - 偏航（机头左右）');
-    console.log('  Q/E - 翻滚（机翼倾斜）');
-    console.log('  空格 - 开火');
-    console.log('  M - 导弹');
-    console.log('  Shift - 加速');
-    console.log('');
-    console.log('📱 移动端: 使用虚拟摇杆和按钮控制');
+    log.info('🎮 Air Supreme - 3D 空战游戏 (v2)');
+    log.info('📖 控制说明:');
+    log.info('  W/S - 俯仰（机头上下）');
+    log.info('  A/D - 偏航（机头左右）');
+    log.info('  Q/E - 翻滚（机翼倾斜）');
+    log.info('  空格 - 开火');
+    log.info('  M - 导弹');
+    log.info('  Shift - 加速');
+    log.info('📱 移动端: 使用虚拟摇杆和按钮控制');
 
     window.addEventListener('beforeunload', () => {
       game.dispose();
     });
   } catch (error) {
-    console.error('游戏初始化失败:', error);
+    log.error('游戏初始化失败:', error);
     showError('游戏初始化失败，请查看控制台了解详情');
   }
 }

@@ -62,13 +62,13 @@
 
 每个关卡都有独特的 Boss，完成所有波次后触发战斗：
 
-| 关卡     | Boss         | 特点                           |
-| -------- | ------------ | ------------------------------ |
-| 湖畔晨曦 | 重型轰炸机   | 四门重炮 + 导弹发射器          |
-| 沙漠风暴 | 沙漠堡垒     | 防空炮（AOE）+ 导弹发射井      |
-| 雪山之巅 | 八爪鱼战舰   | 瞬移 + 全屏激光扫射 + 眼睛激光 |
-| 深海决战 | 导弹驱逐舰   | 防空炮 + 导弹 + 起飞战斗机     |
-| 城市废墟 | 空中航空母舰 | 重炮 + 导弹 + 起飞敌机群       |
+| 关卡     | Boss         | HP   | 特点                           |
+| -------- | ------------ | ---- | ------------------------------ |
+| 湖畔晨曦 | 重型轰炸机   | 2000 | 四门重炮 + 导弹发射器          |
+| 沙漠风暴 | 沙漠堡垒     | 2500 | 防空炮（AOE）+ 导弹发射井      |
+| 雪山之巅 | 八爪鱼战舰   | 3000 | 瞬移 + 全屏激光扫射 + 眼睛激光 |
+| 深海决战 | 导弹驱逐舰   | 3500 | 防空炮 + 导弹 + 起飞战斗机     |
+| 城市废墟 | 空中航空母舰 | 4000 | 重炮 + 导弹 + 起飞敌机群       |
 
 ## 🎯 游戏控制
 
@@ -131,7 +131,10 @@ src/
 │   │   ├── EnemySystem.ts
 │   │   └── PowerUpSystem.ts
 │   ├── Input/               # 输入处理
-│   └── Audio/               # 音效系统
+│   ├── Audio/               # 音效系统
+│   └── utils/               # 工具类
+│       ├── ConfigLoader.ts  # 配置加载器
+│       └── Logger.ts        # 日志系统
 │
 ├── features/                # 游戏功能
 │   ├── player/              # 玩家控制
@@ -161,9 +164,10 @@ src/
 ├── ui/                      # UI 组件
 │   ├── HUD.ts              # 游戏界面
 │   ├── StartMenu.ts         # 开始菜单
-│   └── LockOnIndicator.ts  # 导弹锁定
+│   ├── LockOnIndicator.ts  # 导弹锁定
+│   └── UpgradeMenu.ts       # 升级菜单
 │
-├── __tests__/              # 测试文件 (v2)
+├── __tests__/              # 测试文件 (273 个测试)
 │
 ├── Game.ts                  # 向后兼容导出
 ├── Game.legacy.ts           # 旧实现 (@deprecated)
@@ -232,6 +236,8 @@ src/
 
 ## 🔧 配置
 
+### 传统配置 (src/config.ts)
+
 修改 `src/config.ts` 调整游戏参数：
 
 ```typescript
@@ -243,6 +249,95 @@ PLAYER: {
   BASE_SPEED: 50,      // 基础速度
   MAX_SPEED: 100,      // 最大速度
 }
+```
+
+### JSON 配置系统
+
+游戏支持通过 JSON 文件进行外部配置，无需修改代码即可调整参数：
+
+**配置文件位置**: `public/config/game-config.json`
+
+```json
+{
+  "player": {
+    "maxHealth": 200,
+    "speed": 45,
+    "fireRate": 0.3,
+    "damage": 12.5
+  },
+  "enemy": {
+    "spawnInterval": 2000,
+    "maxCount": 10
+  },
+  "game": {
+    "difficulty": "normal"
+  }
+}
+```
+
+**在代码中使用 ConfigLoader**:
+
+```typescript
+import { configLoader } from '@/core/utils/ConfigLoader';
+
+// 异步加载配置
+async function initGame() {
+  await configLoader.loadConfig();
+
+  // 获取配置值
+  const playerConfig = configLoader.get('player');
+  console.log(playerConfig.maxHealth); // 200
+
+  // 获取嵌套值
+  const difficulty = configLoader.get('game.difficulty'); // "normal"
+}
+```
+
+## 📊 日志系统
+
+游戏使用统一的日志系统，支持不同日志级别和模块过滤：
+
+### 基本用法
+
+```typescript
+import { logger } from '@/core/utils/Logger';
+
+// 不同日志级别
+logger.debug('调试信息', { detail: 'value' });
+logger.info('普通信息');
+logger.warn('警告信息');
+logger.error('错误信息', new Error('Something went wrong'));
+```
+
+### 模块日志
+
+```typescript
+// 创建模块专用 logger
+const moduleLogger = logger.createModuleLogger('EnemyAI');
+
+moduleLogger.info('敌人生成'); // [EnemyAI] 敌人生成
+moduleLogger.debug('AI 状态更新', { state: 'chase' });
+```
+
+### 日志级别控制
+
+```typescript
+// 设置全局日志级别
+logger.setLevel('debug'); // 'debug' | 'info' | 'warn' | 'error'
+
+// 开发环境显示所有日志，生产环境只显示警告和错误
+if (import.meta.env.PROD) {
+  logger.setLevel('warn');
+}
+```
+
+### 性能追踪
+
+```typescript
+// 计时功能
+const timer = logger.startTimer('帧更新');
+// ... 执行代码
+timer.end(); // 输出: [Timer] 帧更新: 16.5ms
 ```
 
 ## 📄 许可证

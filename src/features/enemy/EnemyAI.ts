@@ -2,16 +2,10 @@ import * as THREE from 'three';
 import { EnemyConfig, EnemyType, EnemyAIState } from './EnemyTypes';
 import { HealthSystem } from '@/features/combat/HealthSystem';
 import { ParticleTrailRenderer } from '@/features/effects/ParticleTrailRenderer';
+import { getLogger } from '@/core/utils/Logger';
 
-/**
- * 新的敌人AI系统 - 基于导弹设计
- *
- * 核心特性：
- * - 类似导弹的运动方式（velocity + turnSpeed）
- * - 三种行为状态：追逐、固定方向飞行、盘旋
- * - 状态概率分布决定敌机攻击性
- * - 状态持续4-8秒后重新随机选择
- */
+const log = getLogger('EnemyAI');
+
 export class EnemyAI {
   private mesh: THREE.Group;
   private config: EnemyConfig;
@@ -86,7 +80,7 @@ export class EnemyAI {
   ): void {
     const pos = this.mesh.position;
     if (!isFinite(pos.x) || !isFinite(pos.y) || !isFinite(pos.z)) {
-      console.error('Enemy position is NaN or Infinity, resetting to origin', {
+      log.error('Enemy position is NaN or Infinity, resetting', {
         position: { x: pos.x, y: pos.y, z: pos.z },
       });
       this.mesh.position.set(0, 0, 0);
@@ -505,7 +499,9 @@ export class EnemyAI {
       this.mesh.remove(child);
       if (child instanceof THREE.Mesh) {
         child.geometry.dispose();
-        if (child.material instanceof THREE.Material) {
+        if (Array.isArray(child.material)) {
+          child.material.forEach((m) => m.dispose());
+        } else if (child.material instanceof THREE.Material) {
           child.material.dispose();
         }
       }

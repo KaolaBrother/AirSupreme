@@ -22,6 +22,7 @@ export class BossProjectilePool {
   private pool: Projectile[] = [];
   private maxDistance: number;
   private scene: THREE.Scene;
+  private geometry: THREE.SphereGeometry;
 
   constructor(scene: THREE.Scene) {
     this.scene = scene;
@@ -29,17 +30,15 @@ export class BossProjectilePool {
 
     const poolSize = GameConfig.getProjectilePoolSize();
 
-    // 创建Boss炮弹几何体和材质 - 比普通炮弹大约2.7倍
-    const geometry = new THREE.SphereGeometry(0.8, 12, 12);
+    this.geometry = new THREE.SphereGeometry(0.8, 12, 12);
     const material = new THREE.MeshBasicMaterial({
-      color: 0xff3300, // 红橙色
+      color: 0xff3300,
       transparent: true,
       opacity: 0.9,
     });
 
-    // 预创建炮弹
     for (let i = 0; i < poolSize; i++) {
-      const mesh = new THREE.Mesh(geometry, material.clone());
+      const mesh = new THREE.Mesh(this.geometry, material.clone());
       mesh.visible = false;
       this.scene.add(mesh);
 
@@ -49,7 +48,7 @@ export class BossProjectilePool {
         speed: GAME_CONSTANTS.PROJECTILE.SPEED,
         active: false,
         startPosition: new THREE.Vector3(),
-        damage: 10, // 默认伤害
+        damage: 10,
       });
     }
   }
@@ -146,5 +145,14 @@ export class BossProjectilePool {
       projectile.mesh.visible = false;
       projectile.active = false;
     }
+  }
+
+  public dispose(): void {
+    for (const projectile of this.pool) {
+      this.scene.remove(projectile.mesh);
+      (projectile.mesh.material as THREE.Material).dispose();
+    }
+    this.geometry.dispose();
+    this.pool = [];
   }
 }

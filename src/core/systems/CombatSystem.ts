@@ -25,6 +25,7 @@ export class CombatSystem implements IGameSystem {
   private playerPosition: THREE.Vector3;
 
   private damageMultiplier: number = 1;
+  private eventUnsubscribers: (() => void)[] = [];
 
   constructor(scene: THREE.Scene, particleSystem: ParticleSystem, playerMesh: THREE.Group) {
     this.playerProjectilePool = new ProjectilePool(scene);
@@ -36,33 +37,41 @@ export class CombatSystem implements IGameSystem {
   }
 
   init(): void {
-    EventBus.on(GameEventType.PLAYER_FIRED, ({ payload }) => {
-      this.playerProjectilePool.fire(payload.position, payload.direction, this.getPlayerDamage());
-    });
+    this.eventUnsubscribers.push(
+      EventBus.on(GameEventType.PLAYER_FIRED, ({ payload }) => {
+        this.playerProjectilePool.fire(payload.position, payload.direction, this.getPlayerDamage());
+      })
+    );
 
-    EventBus.on(GameEventType.ENEMY_FIRED, ({ payload }) => {
-      this.enemyProjectilePool.fire(
-        payload.position,
-        payload.direction,
-        payload.damage,
-        payload.owner,
-        payload.faction
-      );
-    });
+    this.eventUnsubscribers.push(
+      EventBus.on(GameEventType.ENEMY_FIRED, ({ payload }) => {
+        this.enemyProjectilePool.fire(
+          payload.position,
+          payload.direction,
+          payload.damage,
+          payload.owner,
+          payload.faction
+        );
+      })
+    );
 
-    EventBus.on(GameEventType.FRIENDLY_FIRED, ({ payload }) => {
-      this.enemyProjectilePool.fire(
-        payload.position,
-        payload.direction,
-        payload.damage,
-        payload.owner,
-        payload.faction
-      );
-    });
+    this.eventUnsubscribers.push(
+      EventBus.on(GameEventType.FRIENDLY_FIRED, ({ payload }) => {
+        this.enemyProjectilePool.fire(
+          payload.position,
+          payload.direction,
+          payload.damage,
+          payload.owner,
+          payload.faction
+        );
+      })
+    );
 
-    EventBus.on(GameEventType.MISSILE_FIRED, ({ payload }) => {
-      this.missileSystem.fire(payload.position, new THREE.Vector3(0, 0, -1), payload.target);
-    });
+    this.eventUnsubscribers.push(
+      EventBus.on(GameEventType.MISSILE_FIRED, ({ payload }) => {
+        this.missileSystem.fire(payload.position, new THREE.Vector3(0, 0, -1), payload.target);
+      })
+    );
   }
 
   update(deltaTime: number): void {
@@ -74,7 +83,13 @@ export class CombatSystem implements IGameSystem {
   }
 
   dispose(): void {
-    // ProjectilePool 没有 dispose 方法，清理由 scene 处理
+    this.eventUnsubscribers.forEach((unsub) => unsub());
+    this.eventUnsubscribers = [];
+
+    this.playerProjectilePool.dispose();
+    this.enemyProjectilePool.dispose();
+    this.bossProjectilePool.dispose();
+    this.missileSystem.dispose();
   }
 
   setDamageMultiplier(multiplier: number): void {

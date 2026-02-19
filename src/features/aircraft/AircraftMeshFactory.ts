@@ -10,10 +10,87 @@
 import * as THREE from 'three';
 import { EnemyType, ENEMY_CONFIGS } from '@/features/enemy/EnemyTypes';
 
-/**
- * 敌机配置类型
- */
 type EnemyConfig = (typeof ENEMY_CONFIGS)[EnemyType];
+
+// 缓存：按敌机类型存储几何体和材质
+interface CachedGeometry {
+  body: THREE.ConeGeometry;
+  wing: THREE.BoxGeometry;
+  cockpit: THREE.SphereGeometry;
+  tail: THREE.BoxGeometry;
+  vStab: THREE.BoxGeometry;
+  engine: THREE.ConeGeometry;
+}
+
+interface CachedMaterials {
+  body: THREE.MeshStandardMaterial;
+  wing: THREE.MeshStandardMaterial;
+  cockpit: THREE.MeshStandardMaterial;
+  engine: THREE.MeshBasicMaterial;
+}
+
+const geometryCache: Map<EnemyType, CachedGeometry> = new Map();
+const materialsCache: Map<EnemyType, CachedMaterials> = new Map();
+
+function getOrCreateGeometry(
+  type: EnemyType,
+  bodySize: number,
+  bodyLength: number,
+  wingSpan: number
+): CachedGeometry {
+  const cached = geometryCache.get(type);
+  if (cached) return cached;
+
+  const geometry: CachedGeometry = {
+    body: new THREE.ConeGeometry(bodySize * 0.4, bodyLength, 8),
+    wing: new THREE.BoxGeometry(wingSpan, 0.15, 1.2),
+    cockpit: new THREE.SphereGeometry(bodySize * 0.35, 8, 8),
+    tail: new THREE.BoxGeometry(wingSpan * 0.4, 0.12, 0.8),
+    vStab: new THREE.BoxGeometry(0.15, bodySize * 0.6, 0.8),
+    engine: new THREE.ConeGeometry(bodySize * 0.15, 0.6, 8),
+  };
+
+  geometryCache.set(type, geometry);
+  return geometry;
+}
+
+function getOrCreateMaterials(
+  type: EnemyType,
+  bodyColor: number,
+  wingColor: number,
+  accentColor: number
+): CachedMaterials {
+  const cached = materialsCache.get(type);
+  if (cached) return cached;
+
+  const materials: CachedMaterials = {
+    body: new THREE.MeshStandardMaterial({
+      color: bodyColor,
+      metalness: 0.7,
+      roughness: 0.3,
+    }),
+    wing: new THREE.MeshStandardMaterial({
+      color: wingColor,
+      metalness: 0.6,
+      roughness: 0.4,
+    }),
+    cockpit: new THREE.MeshStandardMaterial({
+      color: accentColor,
+      metalness: 0.9,
+      roughness: 0.1,
+      emissive: accentColor,
+      emissiveIntensity: 0.3,
+    }),
+    engine: new THREE.MeshBasicMaterial({
+      color: 0xff6600,
+      transparent: true,
+      opacity: 0.8,
+    }),
+  };
+
+  materialsCache.set(type, materials);
+  return materials;
+}
 
 /**
  * 创建玩家飞机模型 - F-15/F-22 风格战斗机
@@ -369,78 +446,42 @@ export function createEnemyMesh(config: EnemyConfig): THREE.Group {
 
   group.scale.set(scaleMultiplier, scaleMultiplier, scaleMultiplier);
 
-  // 材料定义
-  const bodyMaterial = new THREE.MeshStandardMaterial({
-    color: bodyColor,
-    metalness: 0.7,
-    roughness: 0.3,
-  });
-
-  const wingMaterial = new THREE.MeshStandardMaterial({
-    color: wingColor,
-    metalness: 0.6,
-    roughness: 0.4,
-  });
-
-  const cockpitMaterial = new THREE.MeshStandardMaterial({
-    color: accentColor,
-    metalness: 0.9,
-    roughness: 0.1,
-    emissive: accentColor,
-    emissiveIntensity: 0.3,
-  });
-
-  // === 方向约定 ===
-  // 前进方向 = -Z，机头朝向 -Z，机尾在 +Z
-  // ConeGeometry 默认尖端朝向 +Y
-  // rotation.x = +PI/2 → 尖端从 +Y 转到 +Z（机尾方向）
-  // 所以机身粗端在 -Z（前方），细端在 +Z（后方）- 这是错误的
-  // 正确做法：所有部件 Z 坐标取反，让视觉上机头在 -Z，机尾在 +Z
+  // 使用缓存的几何体和材质
+  const geometry = getOrCreateGeometry(config.type, bodySize, bodyLength, wingSpan);
+  const materials = getOrCreateMaterials(config.type, bodyColor, wingColor, accentColor);
 
   // === 机身 - 锥形，机头细机尾粗 ===
-  const bodyGeometry = new THREE.ConeGeometry(bodySize * 0.4, bodyLength, 8);
-  const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
+  const body = new THREE.Mesh(geometry.body, materials.body);
   body.rotation.x = Math.PI / 2;
   body.castShadow = true;
   group.add(body);
 
   // === 主翼 - 在机身后部（视觉上在后方，所以用负 Z）
-  const wingGeometry = new THREE.BoxGeometry(wingSpan, 0.15, 1.2);
-  const wings = new THREE.Mesh(wingGeometry, wingMaterial);
+  const wings = new THREE.Mesh(geometry.wing, materials.wing);
   wings.position.set(0, 0, -bodyLength * 0.2);
   wings.castShadow = true;
   group.add(wings);
 
   // === 驾驶舱 - 在机身前部（视觉上在前方，所以用正 Z）
-  const cockpitGeometry = new THREE.SphereGeometry(bodySize * 0.35, 8, 8);
-  const cockpit = new THREE.Mesh(cockpitGeometry, cockpitMaterial);
+  const cockpit = new THREE.Mesh(geometry.cockpit, materials.cockpit);
   cockpit.position.set(0, bodySize * 0.25, bodyLength * 0.2);
   cockpit.castShadow = true;
   group.add(cockpit);
 
   // === 水平尾翼 - 在机尾（视觉上在最后方，用最负的 Z）
-  const tailGeometry = new THREE.BoxGeometry(wingSpan * 0.4, 0.12, 0.8);
-  const tail = new THREE.Mesh(tailGeometry, wingMaterial);
+  const tail = new THREE.Mesh(geometry.tail, materials.wing);
   tail.position.set(0, 0, -bodyLength * 0.45);
   tail.castShadow = true;
   group.add(tail);
 
   // === 垂直尾翼 - 在机尾上方
-  const vStabGeometry = new THREE.BoxGeometry(0.15, bodySize * 0.6, 0.8);
-  const vStab = new THREE.Mesh(vStabGeometry, wingMaterial);
+  const vStab = new THREE.Mesh(geometry.vStab, materials.wing);
   vStab.position.set(0, bodySize * 0.3, -bodyLength * 0.4);
   vStab.castShadow = true;
   group.add(vStab);
 
   // === 引擎喷口 - 发光，在机尾最后方
-  // rotation.x = -PI/2 → 尖端从 +Y 转到 -Z（后方喷射方向）
-  const engineGeometry = new THREE.ConeGeometry(bodySize * 0.15, 0.6, 8);
-  const engineMaterial = new THREE.MeshBasicMaterial({
-    color: 0xff6600,
-    transparent: true,
-    opacity: 0.8,
-  });
-  const engine = new THREE.Mesh(engineGeometry, engineMaterial);
+  const engine = new THREE.Mesh(geometry.engine, materials.engine);
   engine.rotation.x = -Math.PI / 2;
   engine.position.set(0, 0, -bodyLength * 0.5 - 0.3);
   engine.name = 'engineGlow';

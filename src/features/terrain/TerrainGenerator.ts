@@ -1,9 +1,9 @@
 import * as THREE from 'three';
 import { TerrainType, LevelConfig } from './LevelConfig';
+import { getLogger } from '@/core/utils/Logger';
 
-/**
- * 地形生成器 - 美化版
- */
+const log = getLogger('TerrainGenerator');
+
 export class TerrainGenerator {
   private scene: THREE.Scene;
   private terrainGroup: THREE.Group;
@@ -25,12 +25,11 @@ export class TerrainGenerator {
    * 生成关卡地形
    */
   public generateTerrain(config: LevelConfig): void {
-    console.log(`[TerrainGenerator] Generating terrain: ${config.terrain}`);
+    log.debug('Generating terrain:', { terrain: config.terrain });
 
-    // 清除旧地形
     this.clearTerrain();
 
-    console.log(`[TerrainGenerator] After clear, terrainGroup children: ${this.terrainGroup.children.length}`);
+    log.debug('After clear, terrainGroup children:', { count: this.terrainGroup.children.length });
 
     // 设置天空
     this.createSky(config.skyColors);
@@ -181,10 +180,10 @@ export class TerrainGenerator {
   private createForest(count: number, groundY: number, radius: number, avoidRadius: number): void {
     // 多种树类型
     const treeTypes = [
-      { color: 0x228b22, height: 12, width: 6 },  // 橡树
-      { color: 0x2e8b57, height: 18, width: 5 },  // 松树
-      { color: 0x32cd32, height: 8, width: 4 },   // 小树
-      { color: 0x006400, height: 15, width: 7 },  // 大树
+      { color: 0x228b22, height: 12, width: 6 }, // 橡树
+      { color: 0x2e8b57, height: 18, width: 5 }, // 松树
+      { color: 0x32cd32, height: 8, width: 4 }, // 小树
+      { color: 0x006400, height: 15, width: 7 }, // 大树
     ];
 
     for (let i = 0; i < count; i++) {
@@ -275,11 +274,7 @@ export class TerrainGenerator {
       const angle = Math.random() * Math.PI * 2;
       const r = Math.random() * radius;
 
-      dummy.position.set(
-        Math.cos(angle) * r,
-        -49.5,
-        Math.sin(angle) * r
-      );
+      dummy.position.set(Math.cos(angle) * r, -49.5, Math.sin(angle) * r);
       dummy.rotation.set(
         (Math.random() - 0.5) * 0.2,
         Math.random() * Math.PI * 2,
@@ -320,11 +315,7 @@ export class TerrainGenerator {
         const angle = Math.random() * Math.PI * 2;
         const r = Math.random() * radius;
 
-        dummy.position.set(
-          Math.cos(angle) * r,
-          -49.3,
-          Math.sin(angle) * r
-        );
+        dummy.position.set(Math.cos(angle) * r, -49.3, Math.sin(angle) * r);
         dummy.scale.setScalar(0.8 + Math.random() * 0.4);
         dummy.updateMatrix();
         flowers.setMatrixAt(i, dummy.matrix);
@@ -340,10 +331,7 @@ export class TerrainGenerator {
    */
   private createRocks(count: number): void {
     for (let i = 0; i < count; i++) {
-      const rockGeometry = new THREE.DodecahedronGeometry(
-        1 + Math.random() * 2,
-        0
-      );
+      const rockGeometry = new THREE.DodecahedronGeometry(1 + Math.random() * 2, 0);
 
       // 随机变形
       const positions = rockGeometry.attributes.position;
@@ -361,16 +349,8 @@ export class TerrainGenerator {
       });
 
       const rock = new THREE.Mesh(rockGeometry, rockMaterial);
-      rock.position.set(
-        (Math.random() - 0.5) * 1500,
-        -49,
-        (Math.random() - 0.5) * 1500
-      );
-      rock.rotation.set(
-        Math.random() * Math.PI,
-        Math.random() * Math.PI,
-        Math.random() * Math.PI
-      );
+      rock.position.set((Math.random() - 0.5) * 1500, -49, (Math.random() - 0.5) * 1500);
+      rock.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
       rock.castShadow = true;
       rock.receiveShadow = true;
       this.terrainGroup.add(rock);
@@ -405,7 +385,7 @@ export class TerrainGenerator {
       metalness: 0,
       polygonOffset: true, // 修复Z-fighting闪烁
       polygonOffsetFactor: 1, // 偏移因子
-      polygonOffsetUnits: 1
+      polygonOffsetUnits: 1,
     });
 
     const ground = new THREE.Mesh(groundGeometry, groundMaterial);
@@ -452,10 +432,7 @@ export class TerrainGenerator {
 
     // 主体
     const bodyHeight = 6 + Math.random() * 4;
-    const body = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.8, 1.2, bodyHeight, 8),
-      material
-    );
+    const body = new THREE.Mesh(new THREE.CylinderGeometry(0.8, 1.2, bodyHeight, 8), material);
     body.position.y = bodyHeight / 2;
     body.castShadow = true;
     cactus.add(body);
@@ -471,7 +448,7 @@ export class TerrainGenerator {
         new THREE.CylinderGeometry(0.4, 0.5, 2 + Math.random() * 2, 8),
         material
       );
-      armH.rotation.z = Math.PI / 2 * side;
+      armH.rotation.z = (Math.PI / 2) * side;
       armH.position.set(side * 1.5, armHeight, 0);
       armH.castShadow = true;
       cactus.add(armH);
@@ -523,11 +500,7 @@ export class TerrainGenerator {
         material
       );
       trunk.position.y = 2.5;
-      trunk.rotation.set(
-        (Math.random() - 0.5) * 0.3,
-        0,
-        (Math.random() - 0.5) * 0.3
-      );
+      trunk.rotation.set((Math.random() - 0.5) * 0.3, 0, (Math.random() - 0.5) * 0.3);
       trunk.castShadow = true;
       tree.add(trunk);
 
@@ -537,11 +510,7 @@ export class TerrainGenerator {
           new THREE.CylinderGeometry(0.1, 0.15, 2 + Math.random(), 6),
           material
         );
-        branch.position.set(
-          (Math.random() - 0.5) * 0.5,
-          3 + j * 1.2,
-          (Math.random() - 0.5) * 0.5
-        );
+        branch.position.set((Math.random() - 0.5) * 0.5, 3 + j * 1.2, (Math.random() - 0.5) * 0.5);
         branch.rotation.set(
           (Math.random() - 0.5) * 1,
           Math.random() * Math.PI * 2,
@@ -652,7 +621,12 @@ export class TerrainGenerator {
   /**
    * 创建松树林
    */
-  private createPineForest(count: number, groundY: number, radius: number, avoidRadius: number): void {
+  private createPineForest(
+    count: number,
+    groundY: number,
+    radius: number,
+    avoidRadius: number
+  ): void {
     for (let i = 0; i < count; i++) {
       const angle = Math.random() * Math.PI * 2;
       const r = avoidRadius + Math.random() * (radius - avoidRadius);
@@ -824,15 +798,8 @@ export class TerrainGenerator {
       roughness: 0.9,
     });
 
-    const trunk = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.2, 0.4, 8, 8),
-      trunkMaterial
-    );
-    trunk.rotation.set(
-      (Math.random() - 0.5) * 0.3,
-      0,
-      (Math.random() - 0.5) * 0.3
-    );
+    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.4, 8, 8), trunkMaterial);
+    trunk.rotation.set((Math.random() - 0.5) * 0.3, 0, (Math.random() - 0.5) * 0.3);
     trunk.position.y = 4;
     trunk.castShadow = true;
     palm.add(trunk);
@@ -844,16 +811,9 @@ export class TerrainGenerator {
     });
 
     for (let i = 0; i < 8; i++) {
-      const leaf = new THREE.Mesh(
-        new THREE.PlaneGeometry(0.8, 6),
-        leafMaterial
-      );
+      const leaf = new THREE.Mesh(new THREE.PlaneGeometry(0.8, 6), leafMaterial);
       leaf.position.set(0, 8, 0);
-      leaf.rotation.set(
-        Math.PI / 4,
-        (i / 8) * Math.PI * 2,
-        0
-      );
+      leaf.rotation.set(Math.PI / 4, (i / 8) * Math.PI * 2, 0);
       palm.add(leaf);
     }
 
@@ -863,11 +823,7 @@ export class TerrainGenerator {
         new THREE.SphereGeometry(0.3, 8, 8),
         new THREE.MeshStandardMaterial({ color: 0x654321 })
       );
-      coconut.position.set(
-        (Math.random() - 0.5) * 0.5,
-        7.5,
-        (Math.random() - 0.5) * 0.5
-      );
+      coconut.position.set((Math.random() - 0.5) * 0.5, 7.5, (Math.random() - 0.5) * 0.5);
       palm.add(coconut);
     }
 
@@ -910,10 +866,7 @@ export class TerrainGenerator {
 
     // 水平道路
     for (let i = -3; i <= 3; i++) {
-      const road = new THREE.Mesh(
-        new THREE.PlaneGeometry(2000, 20),
-        roadMaterial
-      );
+      const road = new THREE.Mesh(new THREE.PlaneGeometry(2000, 20), roadMaterial);
       road.rotation.x = -Math.PI / 2;
       road.position.set(0, -49.9, i * 250);
       this.terrainGroup.add(road);
@@ -921,10 +874,7 @@ export class TerrainGenerator {
       // 道路标线
       const lineMaterial = new THREE.MeshStandardMaterial({ color: 0xffffff });
       for (let j = -20; j <= 20; j++) {
-        const line = new THREE.Mesh(
-          new THREE.PlaneGeometry(15, 1),
-          lineMaterial
-        );
+        const line = new THREE.Mesh(new THREE.PlaneGeometry(15, 1), lineMaterial);
         line.rotation.x = -Math.PI / 2;
         line.position.set(j * 50, -49.8, i * 250);
         this.terrainGroup.add(line);
@@ -933,10 +883,7 @@ export class TerrainGenerator {
 
     // 垂直道路
     for (let i = -3; i <= 3; i++) {
-      const road = new THREE.Mesh(
-        new THREE.PlaneGeometry(20, 2000),
-        roadMaterial
-      );
+      const road = new THREE.Mesh(new THREE.PlaneGeometry(20, 2000), roadMaterial);
       road.rotation.x = -Math.PI / 2;
       road.position.set(i * 250, -49.9, 0);
       this.terrainGroup.add(road);
@@ -974,7 +921,7 @@ export class TerrainGenerator {
     // 建筑主体
     const bodyMaterial = new THREE.MeshStandardMaterial({
       color: new THREE.Color().setHSL(
-        Math.random() * 0.1 + 0.55,  // 蓝色系
+        Math.random() * 0.1 + 0.55, // 蓝色系
         0.1 + Math.random() * 0.1,
         0.2 + Math.random() * 0.3
       ),
@@ -982,10 +929,7 @@ export class TerrainGenerator {
       metalness: 0.3,
     });
 
-    const body = new THREE.Mesh(
-      new THREE.BoxGeometry(width, height, depth),
-      bodyMaterial
-    );
+    const body = new THREE.Mesh(new THREE.BoxGeometry(width, height, depth), bodyMaterial);
     body.position.y = height / 2;
     body.castShadow = true;
     body.receiveShadow = true;
@@ -1011,11 +955,7 @@ export class TerrainGenerator {
         const angle = (i / 4) * Math.PI * 2;
         const offset = (i % 2 === 0 ? width : depth) / 2 + 0.1;
 
-        window.position.set(
-          Math.cos(angle) * offset * 0.7,
-          y,
-          Math.sin(angle) * offset * 0.7
-        );
+        window.position.set(Math.cos(angle) * offset * 0.7, y, Math.sin(angle) * offset * 0.7);
         window.rotation.y = -angle + Math.PI / 2;
         building.add(window);
       }
@@ -1023,10 +963,7 @@ export class TerrainGenerator {
 
     // 屋顶装饰
     if (Math.random() > 0.5) {
-      const roof = new THREE.Mesh(
-        new THREE.BoxGeometry(width * 0.3, 3, depth * 0.3),
-        bodyMaterial
-      );
+      const roof = new THREE.Mesh(new THREE.BoxGeometry(width * 0.3, 3, depth * 0.3), bodyMaterial);
       roof.position.y = height + 1.5;
       building.add(roof);
     }
@@ -1098,10 +1035,7 @@ export class TerrainGenerator {
     const puffs = 5 + Math.floor(Math.random() * 4);
     for (let i = 0; i < puffs; i++) {
       const size = 0.5 + Math.random() * 0.5;
-      const puff = new THREE.Mesh(
-        new THREE.SphereGeometry(size, 12, 12),
-        material
-      );
+      const puff = new THREE.Mesh(new THREE.SphereGeometry(size, 12, 12), material);
       puff.position.set(
         (Math.random() - 0.5) * 2,
         (Math.random() - 0.5) * 0.5,
@@ -1142,11 +1076,28 @@ export class TerrainGenerator {
   }
 
   /**
+   * 更新地形 LOD - 根据玩家距离隐藏远处树木和岩石
+   */
+  public updateLOD(playerPosition: THREE.Vector3): void {
+    const LOD_FAR = 600;
+
+    for (const tree of this.trees) {
+      const distance = playerPosition.distanceTo(tree.position);
+      tree.visible = distance <= LOD_FAR;
+    }
+
+    for (const rock of this.rocks) {
+      const distance = playerPosition.distanceTo(rock.position);
+      rock.visible = distance <= LOD_FAR;
+    }
+  }
+
+  /**
    * 清除地形
    */
   public clearTerrain(): void {
     const childrenCount = this.terrainGroup.children.length;
-    console.log(`[TerrainGenerator] clearTerrain: Starting with ${childrenCount} children`);
+    log.debug('clearTerrain: Starting', { childrenCount });
 
     // 立即清空 waterMesh 引用（避免 update() 访问旧对象）
     this.waterMesh = undefined;
@@ -1169,7 +1120,7 @@ export class TerrainGenerator {
       if (child instanceof THREE.Mesh) {
         child.geometry.dispose();
         if (Array.isArray(child.material)) {
-          child.material.forEach(m => m.dispose());
+          child.material.forEach((m) => m.dispose());
         } else {
           child.material.dispose();
         }
@@ -1185,14 +1136,14 @@ export class TerrainGenerator {
           if (obj instanceof THREE.Mesh) {
             obj.geometry.dispose();
             if (Array.isArray(obj.material)) {
-              obj.material.forEach(m => m.dispose());
+              obj.material.forEach((m) => m.dispose());
             } else {
               obj.material.dispose();
             }
           } else if (obj instanceof THREE.InstancedMesh) {
             obj.geometry.dispose();
             obj.material.dispose();
-            }
+          }
         });
       }
     }
@@ -1203,6 +1154,6 @@ export class TerrainGenerator {
     this.grass = null;
     this.rocks = [];
 
-    console.log(`[TerrainGenerator] clearTerrain: Complete, remaining children: ${this.terrainGroup.children.length}`);
+    log.debug('clearTerrain: Complete', { remainingChildren: this.terrainGroup.children.length });
   }
 }

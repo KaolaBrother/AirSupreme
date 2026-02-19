@@ -1,15 +1,6 @@
-/**
- * 音乐系统 - 原创空战关卡背景音乐
- * 风格：经典空战游戏风格，快节奏、合成器音色、紧张感
- * 注意：这是完全原创的旋律和编曲，不复制任何版权音乐
- *
- * 每个关卡都有独特的旋律和风格：
- * - LAKE (关卡1): 平和流畅的A小调，triangle波形
- * - DESERT (关卡2): 热烈的中东风格D小调，sawtooth波形
- * - SNOW (关卡3): 空灵神秘的E小调，sine波形
- * - OCEAN (关卡4): 波浪流动的C大调，triangle波形
- * - CITY (关卡5): 紧张工业感的F小调，square波形
- */
+import { getLogger } from '@/core/utils/Logger';
+
+const log = getLogger('MusicSystem');
 
 const NOTE = {
   C3: 130.81,
@@ -90,7 +81,7 @@ export class MusicSystem {
       this.masterGain.gain.value = this.musicVolume;
       this.masterGain.connect(this.context.destination);
     } catch (e) {
-      console.warn('Web Audio API not supported for music');
+      log.warn('Web Audio API not supported for music');
     }
   }
 

@@ -1,6 +1,7 @@
-/**
- * 音效类型
- */
+import { getLogger } from '@/core/utils/Logger';
+
+const log = getLogger('AudioManager');
+
 export enum SoundType {
   ENGINE = 'ENGINE',
   SHOOT = 'SHOOT',
@@ -47,7 +48,7 @@ export class AudioManager {
       this.masterVolume.gain.value = this.masterVolumeValue;
       this.masterVolume.connect(this.context.destination);
     } catch (e) {
-      console.warn('Web Audio API not supported');
+      log.warn('Web Audio API not supported');
     }
   }
 
@@ -93,7 +94,7 @@ export class AudioManager {
       this.engineOscillator.start();
       this.isEnginePlaying = true;
     } catch (e) {
-      console.warn('Failed to start engine sound');
+      log.warn('Failed to start engine sound');
     }
   }
 

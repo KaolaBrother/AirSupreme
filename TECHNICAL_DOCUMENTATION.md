@@ -5,18 +5,22 @@
 AirSupreme 是一个基于 Three.js 和 TypeScript 的 3D 飞机战斗游戏。
 
 ### 技术栈
+
 - **渲染引擎**: Three.js (WebGL)
 - **编程语言**: TypeScript
 - **构建工具**: Vite
 - **包管理**: npm
 
 ### 核心系统
+
 1. **玩家控制系统** - 飞机飞行控制
 2. **敌人AI系统** - 基于导弹设计的敌机AI
 3. **战斗系统** - 子弹、导弹、碰撞检测
 4. **关卡管理** - 波次生成、敌机生成
 5. **粒子系统** - 尾迹、爆炸效果
 6. **UI系统** - HUD、小地图、血条
+7. **配置系统** - JSON 配置加载、默认值 fallback
+8. **日志系统** - 结构化日志、模块标记、级别控制
 
 ---
 
@@ -25,6 +29,7 @@ AirSupreme 是一个基于 Three.js 和 TypeScript 的 3D 飞机战斗游戏。
 ### 设计理念
 
 敌机AI采用**基于导弹的运动系统**：
+
 - 使用 `velocity` 向量控制运动方向和速度
 - 通过 `turnSpeed` 限制转向速度
 - **只能向前飞**，通过转向调整方向
@@ -33,23 +38,29 @@ AirSupreme 是一个基于 Three.js 和 TypeScript 的 3D 飞机战斗游戏。
 ### 三种行为状态
 
 #### 1. 追逐状态 (CHASE)
+
 **行为**: 主动追踪玩家位置
 **特点**:
+
 - 持续转向玩家方向（受转向速度限制）
 - **只有机头朝向玩家时才能射击**（30°圆锥内）
 - 攻击性最强的状态
 
 #### 2. 固定方向飞行状态 (FIXED_DIRECTION)
+
 **行为**: 平滑转向虚拟追踪点（距离玩家100-300米）直线飞行
 **特点**:
+
 - 在战场范围内生成虚拟追踪点（距离玩家位置100-300米）
 - 通过转向速度限制平滑转向追踪点
 - **不射击**
 - 用于"休息"，降低游戏压力
 
 #### 3. 盘旋状态 (CIRCLE)
+
 **行为**: 围绕目标的大圆周水平飞行
 **特点**:
+
 - **智能目标选择**: 判断玩家和友军哪个更近，围绕更近的目标
   - 敌人：围绕玩家或友军中更近的
   - 友军：围绕最近的敌方敌人
@@ -86,22 +97,23 @@ AirSupreme 是一个基于 Three.js 和 TypeScript 的 3D 飞机战斗游戏。
 
 ### 概览表
 
-| 类型 | 追逐 | 固定方向 | 盘旋 | 速度 | 转向 | 血量 | 特点 |
-|-----|------------|--------------|----------|------|------|------|------|
-| **侦察机** | 25% | 50% | 25% | 40 m/s | 1.5 rad/s | 30 | 快速但脆弱，攻击性弱 |
-| **战斗机** | 32.5% | 47.5% | 20% | 55 m/s | 2.0 rad/s | 50 | 平衡型 |
-| **重型机** | 35% | 45% | 20% | 35 m/s | 0.8 rad/s | 150 | 慢但血厚，有侧向火力 |
-| **狙击机** | 30% | 50% | 20% | 45 m/s | 1.2 rad/s | 40 | 远距离攻击，保持距离 |
-| **王牌** | 40% | 45% | 15% | 70 m/s | 2.4 rad/s | 80 | 高难度，攻击性强 |
+| 类型       | 追逐  | 固定方向 | 盘旋 | 速度   | 转向      | 血量 | 特点                 |
+| ---------- | ----- | -------- | ---- | ------ | --------- | ---- | -------------------- |
+| **侦察机** | 25%   | 50%      | 25%  | 40 m/s | 1.5 rad/s | 60   | 快速但脆弱，攻击性弱 |
+| **战斗机** | 32.5% | 47.5%    | 20%  | 55 m/s | 2.0 rad/s | 100  | 平衡型               |
+| **重型机** | 35%   | 45%      | 20%  | 35 m/s | 0.8 rad/s | 300  | 慢但血厚，有侧向火力 |
+| **狙击机** | 30%   | 50%      | 20%  | 45 m/s | 1.2 rad/s | 80   | 远距离攻击，保持距离 |
+| **王牌**   | 40%   | 45%      | 15%  | 70 m/s | 2.4 rad/s | 160  | 高难度，攻击性强     |
 
 ### 配置详情
 
 #### 侦察机 (SCOUT)
+
 ```typescript
 {
   speed: 40,                    // 速度（导弹的50%）
   turnSpeed: 1.5,              // 转向速度
-  health: 30,
+  health: 60,
   damage: 10,
   attackCooldown: 0.4,
   accuracy: 0.4,
@@ -121,11 +133,12 @@ AirSupreme 是一个基于 Three.js 和 TypeScript 的 3D 飞机战斗游戏。
 ```
 
 #### 战斗机 (FIGHTER)
+
 ```typescript
 {
   speed: 55,                    // 速度（导弹的69%）
   turnSpeed: 2.0,
-  health: 50,
+  health: 100,
   damage: 15,
   attackCooldown: 0.5,
   accuracy: 0.5,
@@ -143,11 +156,12 @@ AirSupreme 是一个基于 Three.js 和 TypeScript 的 3D 飞机战斗游戏。
 ```
 
 #### 重型轰炸机 (HEAVY)
+
 ```typescript
 {
   speed: 35,                    // 慢速
   turnSpeed: 0.8,              // 转向慢
-  health: 150,                 // 血厚
+  health: 300,                 // 血厚
   damage: 30,
   attackCooldown: 0.8,
   accuracy: 0.6,
@@ -165,11 +179,12 @@ AirSupreme 是一个基于 Three.js 和 TypeScript 的 3D 飞机战斗游戏。
 ```
 
 #### 狙击机 (SNIPER)
+
 ```typescript
 {
   speed: 45,
   turnSpeed: 1.2,
-  health: 40,
+  health: 80,
   damage: 40,                  // 高伤害
   attackCooldown: 1.0,
   accuracy: 0.7,
@@ -187,11 +202,12 @@ AirSupreme 是一个基于 Three.js 和 TypeScript 的 3D 飞机战斗游戏。
 ```
 
 #### 王牌 (ACE)
+
 ```typescript
 {
   speed: 70,                    // 接近导弹速度
   turnSpeed: 2.4,              // 接近导弹转向
-  health: 80,
+  health: 160,
   damage: 25,
   attackCooldown: 0.4,
   accuracy: 0.6,
@@ -220,11 +236,11 @@ AirSupreme 是一个基于 Three.js 和 TypeScript 的 3D 飞机战斗游戏。
 // 计算机头方向与玩家方向的夹角
 const toPlayer = targetPosition - enemyPosition;
 const forward = velocity.normalized();
-const dot = toPlayer.dot(forward);  // 1.0 = 正对准，0.0 = 垂直
+const dot = toPlayer.dot(forward); // 1.0 = 正对准，0.0 = 垂直
 
 // 30°圆锥内（cos(30°) ≈ 0.866）
 if (dot > 0.866) {
-  fire();  // 可以射击
+  fire(); // 可以射击
 }
 ```
 
@@ -253,13 +269,13 @@ const anglePerturbation = (Math.random() - 0.5) * perturbationStrength;
 direction.applyAxisAngle(new THREE.Vector3(0, 1, 0), anglePerturbation);
 ```
 
-| 精度 | 最大扰动角度 | 特点 |
-|-----|--------------|------|
-| 0.4 (侦察机) | ~13.7° | 不太准 |
-| 0.5 (战斗机) | ~11.5° | 中等 |
-| 0.6 (王牌/重型) | ~9.2° | 较准 |
-| 0.7 (狙击机) | ~6.9° | 准确 |
-| 0.9 (玩家基础) | ~2.3° | 很准 |
+| 精度            | 最大扰动角度 | 特点   |
+| --------------- | ------------ | ------ |
+| 0.4 (侦察机)    | ~13.7°       | 不太准 |
+| 0.5 (战斗机)    | ~11.5°       | 中等   |
+| 0.6 (王牌/重型) | ~9.2°        | 较准   |
+| 0.7 (狙击机)    | ~6.9°        | 准确   |
+| 0.9 (玩家基础)  | ~2.3°        | 很准   |
 
 ---
 
@@ -305,6 +321,7 @@ src/
 ## 最近更新记录
 
 ### 2026-02-14: 生命道具修复
+
 **主要变更**:
 
 1. **生命道具效果修正** - [Game.ts:211-214](src/Game.ts#L211-L214)
@@ -321,6 +338,7 @@ src/
    - **移除**: [UpgradeSystem.ts:237-242](src/features/upgrade/UpgradeSystem.ts#L237-L242) 删除错误的 `increaseMaxHealth()` 方法
 
 ### 2026-02-14: 战斗系统与阵营系统修复
+
 **主要变更**:
 
 1. **友军AI系统实现** - BOMB道具重构为召唤友军
@@ -374,6 +392,7 @@ src/
    - 添加调试日志：`[碰撞检测] XX子弹命中XX，伤害: XX`
 
 **技术细节**:
+
 - **对象池模式**: 子弹复用，避免频繁创建/销毁
 - **阵营标识**: `userData.faction` 存储阵营信息
 - **发射者追踪**: `owner` 字段用于防碰撞检测
@@ -382,6 +401,7 @@ src/
 ---
 
 ### 2026-02-14: 视觉效果优化
+
 **主要变更**:
 
 1. **玩家尾迹改为发动机火焰效果** - 移除粒子尾迹，添加 Sprite 火焰
@@ -409,6 +429,7 @@ src/
      - 适用于所有敌人类型（SCOUT、FIGHTER、HEAVY、SNIPER、ACE）
 
 **技术细节**:
+
 - 火焰纹理：128x128 Canvas，5 层径向渐变
 - 火焰朝向：Sprite 始终面朝相机（billboard）
 - 性能优化：火焰材质复用，避免每帧创建新纹理
@@ -416,7 +437,9 @@ src/
 ---
 
 ### 2025-02-14: 敌人AI重构
+
 **主要变更**:
+
 1. **重写敌人AI系统** - 基于导弹设计
    - 使用 `velocity` 向量 + `turnSpeed` 转向限制
    - 移除复杂的 Euler 角度控制
@@ -452,6 +475,7 @@ src/
    - 最大扰动 ~2.3°
 
 **删除文件**:
+
 - `EnemyAircraft.ts` (测试文件，已删除)
 - `EnemyConfig.ts` (合并到 EnemyTypes.ts)
 
@@ -460,6 +484,7 @@ src/
 ## 开发指南
 
 ### 运行项目
+
 ```bash
 npm install
 npm run dev     # 开发服务器
@@ -467,19 +492,24 @@ npm run build   # 生产构建
 ```
 
 ### 修改敌人配置
+
 编辑 `src/features/enemy/EnemyTypes.ts`:
+
 - 修改 `ENEMY_CONFIGS` 对象
 - 调整速度、转向、概率等参数
 - 保持概率总和为 1.0
 
 ### 修改敌人AI行为
+
 编辑 `src/features/enemy/EnemyAI.ts`:
+
 - `updateChase()` - 追逐状态行为
 - `updateFixedDirection()` - 固定方向行为
 - `updateCircle()` - 盘旋状态行为
 - `fire()` - 射击逻辑
 
 ### 添加新敌人类型
+
 1. 在 `EnemyTypes.ts` 中添加枚举值
 2. 在 `ENEMY_CONFIGS` 中添加配置
 3. 在 `getEnemyTypesForWave()` 中配置出现规则
@@ -489,6 +519,7 @@ npm run build   # 生产构建
 ## 设计原则
 
 ### 敌人AI设计
+
 1. **只能向前飞** - 飞机不能后退或横向平移
 2. **转向受限** - 转向速度受 `turnSpeed` 限制
 3. **平滑运动** - 使用四元数插值，避免突然转向
@@ -496,12 +527,14 @@ npm run build   # 生产构建
 5. **友好难度** - 降低追逐概率，多"固定方向"休息
 
 ### 射击设计
+
 1. **真实朝向** - 机头必须朝向目标才能射击
 2. **精度差异** - 不同类型有不同精度和扰动
 3. **合理限制** - 盘旋时不射击（除重型机）
 4. **玩家优势** - 玩家精度高，敌人精度低
 
 ### 性能优化
+
 1. **对象池** - 子弹使用对象池复用
 2. **粒子复用** - 尾迹粒子材质复用
 3. **状态缓存** - 避免每帧创建新对象
@@ -512,11 +545,11 @@ npm run build   # 生产构建
 ## 已知问题
 
 ### 待优化
+
 1. 敌人生成可能重叠（虽然有分散算法）
-2. 粒子系统在大量敌机时可能性能下降
-3. 远距离敌机渲染裁剪可优化
 
 ### 技术债
+
 1. `EnemyFSM.ts` 已废弃但未删除（兼容性保留）
 2. 部分类型使用 `any` 避免严格类型检查
 3. 硬编码的魔法数字（如 30° 圆锥角）
@@ -526,16 +559,73 @@ npm run build   # 生产构建
 ## 未来计划
 
 ### 短期
+
 1. 添加更多敌人类型（如轰炸机、支援机）
 2. 实现敌机编队飞行
-3. 添加Boss战
-4. 优化粒子性能
+3. 优化粒子性能
 
 ### 长期
+
 1. 多人联机
 2. 任务系统
 3. 飞机自定义
 4. 关卡编辑器
+
+---
+
+## 配置系统 (ConfigLoader)
+
+### 配置文件
+
+位置: `public/config/game-config.json`
+
+包含所有游戏参数：玩家、敌人、Boss、导弹、升级等配置。
+
+### 使用方式
+
+```typescript
+import { configLoader } from '@/core/utils/ConfigLoader';
+
+// 异步加载配置
+await configLoader.load();
+
+// 获取各类配置
+const playerConfig = configLoader.getPlayer();
+const enemyConfig = configLoader.getEnemy('FIGHTER');
+const bossConfig = configLoader.getBoss('HEAVY_BOMBER');
+const missileConfig = configLoader.getMissile();
+```
+
+---
+
+## 日志系统 (Logger)
+
+### 特性
+
+- 日志级别：DEBUG、INFO、WARN、ERROR
+- 模块名标记
+- 结构化数据输出
+- 生产环境自动关闭 DEBUG
+- 日志历史存储与导出
+
+### 使用方式
+
+```typescript
+import { getLogger, loggerManager, LogLevel } from '@/core/utils/Logger';
+
+const log = getLogger('MyModule');
+
+log.debug('调试信息', { data: 123 });
+log.info('普通信息');
+log.warn('警告');
+log.error('错误');
+
+// 配置日志级别
+loggerManager.setMinLevel(LogLevel.WARN);
+
+// 导出日志历史
+const history = loggerManager.exportHistory();
+```
 
 ---
 
@@ -547,5 +637,5 @@ npm run build   # 生产构建
 
 ---
 
-**文档更新日期**: 2025-02-14
-**项目版本**: 1.0.0
+**文档更新日期**: 2026-02-19
+**项目版本**: 2.1.0

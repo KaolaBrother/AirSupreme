@@ -2,10 +2,10 @@ import * as THREE from 'three';
 import { ParticleSystem } from '@/features/effects/ParticleSystem';
 import { BalloonPowerUp } from './BalloonPowerUp';
 import { SpawnBalloon } from '@/features/effects/SpawnBalloon';
+import { getLogger } from '@/core/utils/Logger';
 
-/**
- * 道具类型
- */
+const log = getLogger('PowerUpSystem');
+
 export enum PowerUpType {
   HEALTH = 'HEALTH', // 恢复生命
   SHIELD = 'SHIELD', // 护盾
@@ -342,19 +342,25 @@ export class PowerUpManager {
   public addActivePowerUp(type: PowerUpType, config: PowerUpConfig): void {
     const now = Date.now();
 
-    // 检查是否已有此效果
-    if (this.activePowerUps.some((p) => p.type === type)) {
-      // 刷新已有效果的持续时间
-      const existing = this.activePowerUps.find((p) => p.type === type);
-      if (existing && config.duration > 0) {
-        existing.remainingTime = config.duration;
-        existing.startTime = now;
-        console.log(`刷新道具效果: ${config.name}`);
+    if (config.duration <= 0) {
+      log.debug('即时道具效果', { name: config.name });
+      this.onPowerUpCollected?.(type, config);
+      if (type === PowerUpType.BOMB) {
+        this.onBombUsed?.();
       }
       return;
     }
 
-    // 添加新效果
+    if (this.activePowerUps.some((p) => p.type === type)) {
+      const existing = this.activePowerUps.find((p) => p.type === type);
+      if (existing) {
+        existing.remainingTime = config.duration;
+        existing.startTime = now;
+        log.debug('刷新道具效果', { name: config.name });
+      }
+      return;
+    }
+
     const activePowerUp: ActivePowerUp = {
       type,
       config,
@@ -362,7 +368,7 @@ export class PowerUpManager {
       startTime: now,
     };
     this.activePowerUps.push(activePowerUp);
-    console.log(`激活道具效果: ${config.name}, 持续时间: ${config.duration}秒`);
+    log.debug('激活道具效果', { name: config.name, duration: config.duration });
 
     // 触发回调
     this.onPowerUpCollected?.(type, config);
@@ -385,8 +391,7 @@ export class PowerUpManager {
         powerUp.remainingTime -= deltaTime;
 
         if (powerUp.remainingTime <= 0) {
-          // 效果过期
-          console.log(`道具效果过期: ${powerUp.config.name}`);
+          log.debug('道具效果过期', { name: powerUp.config.name });
           this.onPowerUpExpired?.(powerUp.type);
           this.activePowerUps.splice(i, 1);
         }

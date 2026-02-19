@@ -2,11 +2,10 @@ import type { Entity } from './Entity';
 import type { Component } from './Component';
 import type { System } from './System';
 import { ComponentContainer } from './ComponentContainer';
+import { getLogger } from '@/core/utils/Logger';
 
-/**
- * ECS 主控制器
- * 协调实体、组件和系统
- */
+const log = getLogger('ECS');
+
 export class ECS {
   private entities = new Map<Entity, ComponentContainer>();
   private systems = new Map<System, Set<Entity>>();
@@ -69,7 +68,7 @@ export class ECS {
    */
   public addSystem(system: System): void {
     if (system.componentsRequired.size === 0) {
-      console.warn('System not added: empty components list');
+      log.warn('System not added: empty components list');
       return;
     }
 

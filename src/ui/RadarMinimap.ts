@@ -1,8 +1,8 @@
 import * as THREE from 'three';
+import { getLogger } from '@/core/utils/Logger';
 
-/**
- * 敌人状态（用于雷达显示）
- */
+const log = getLogger('RadarMinimap');
+
 interface EnemyRadarInfo {
   position: THREE.Vector3;
   isSpawning: boolean; // 是否正在生成（传送门动画中）
@@ -56,7 +56,7 @@ export class RadarMinimap {
 
     this.ctx = this.radarCanvas.getContext('2d')!;
     if (!this.ctx) {
-      console.error('Failed to get 2D context');
+      log.error('Failed to get 2D context');
       return;
     }
 
@@ -71,7 +71,12 @@ export class RadarMinimap {
    * @param balloons 气球信息列表
    * @param playerRotation 玩家朝向
    */
-  public update(playerPos: THREE.Vector3, enemies: EnemyRadarInfo[], balloons: BalloonRadarInfo[], playerRotation: THREE.Quaternion): void {
+  public update(
+    playerPos: THREE.Vector3,
+    enemies: EnemyRadarInfo[],
+    balloons: BalloonRadarInfo[],
+    playerRotation: THREE.Quaternion
+  ): void {
     // 清空画布
     this.ctx.clearRect(0, 0, this.size, this.size);
 
@@ -145,7 +150,11 @@ export class RadarMinimap {
   /**
    * 绘制敌人
    */
-  private drawEnemies(playerPos: THREE.Vector3, enemies: EnemyRadarInfo[], playerRotation: THREE.Quaternion): void {
+  private drawEnemies(
+    playerPos: THREE.Vector3,
+    enemies: EnemyRadarInfo[],
+    playerRotation: THREE.Quaternion
+  ): void {
     const centerX = this.size / 2;
     const centerY = this.size / 2;
     const scale = this.size / this.range; // 缩放因子
@@ -202,7 +211,11 @@ export class RadarMinimap {
   /**
    * 绘制气球
    */
-  private drawBalloons(playerPos: THREE.Vector3, balloons: BalloonRadarInfo[], playerRotation: THREE.Quaternion): void {
+  private drawBalloons(
+    playerPos: THREE.Vector3,
+    balloons: BalloonRadarInfo[],
+    playerRotation: THREE.Quaternion
+  ): void {
     const centerX = this.size / 2;
     const centerY = this.size / 2;
     const scale = this.size / this.range; // 缩放因子

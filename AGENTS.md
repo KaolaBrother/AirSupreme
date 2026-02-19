@@ -196,6 +196,8 @@ this.mesh.rotation.y = angle;
 
 ## Test Patterns
 
+The project has **273 tests** covering core systems, AI, and game mechanics.
+
 ```typescript
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
@@ -252,6 +254,39 @@ describe('SystemName', () => {
 | Boss 2 - Fortress  | `src/features/boss/DesertFortressAI.ts`   |
 | Boss 3 - Octopus   | `src/features/boss/OctopusWarshipAI.ts`   |
 | Boss 4 - Destroyer | `src/features/boss/MissileDestroyerAI.ts` |
+
+## Utility Systems (2026-02-19)
+
+### ConfigLoader - 配置外置系统
+
+配置文件位置: `public/config/game-config.json`
+
+```typescript
+import { configLoader } from '@/core/utils/ConfigLoader';
+
+// 加载配置
+await configLoader.load();
+
+// 获取配置
+const playerConfig = configLoader.getPlayer();
+const enemyConfig = configLoader.getEnemy('FIGHTER');
+const bossConfig = configLoader.getBoss('HEAVY_BOMBER');
+```
+
+### Logger - 结构化日志系统
+
+```typescript
+import { getLogger, LogLevel, loggerManager } from '@/core/utils/Logger';
+
+const log = getLogger('MyModule');
+log.debug('调试信息', { data: 123 });
+log.info('普通信息');
+log.warn('警告');
+log.error('错误');
+
+// 导出日志历史
+const history = loggerManager.exportHistory();
+```
 
 ## Branch Notes
 
@@ -1211,3 +1246,85 @@ this.hud.updateUpgradePoints(this.playerStats.getUpgrades().getAvailablePoints()
 - **总计: 130 点** = 52,000 分
 
 预估通关总分约 38,400 分，获得约 96 点，鼓励选择性升级。
+
+---
+
+## Recent Fixes (2026-02-19)
+
+### 生命恢复道具第二次无效 Bug
+
+- **Issue**：生命恢复道具第一次正常工作，第二次收集后没有效果
+- **Cause**：`healToMax()` 中 `isDead` 状态没有正确重置，导致复活后道具无法生效
+- **Fix**：
+  - `healToMax()` 现在无条件重置 `isDead = false` 并恢复满血
+  - `PlayerSystem.syncMaxHealth()` 确保升级后的最大血量同步
+  - `handleBalloonCollisions()` 添加复活检查，防止复活期间收集道具
+- **Files**：`src/features/player/PlayerSystem.ts`, `src/core/GameCoordinator.ts`
+
+### 内存泄漏修复
+
+#### EventBus 订阅追踪
+
+- **Issue**：EventBus 事件订阅没有正确取消，导致组件销毁后回调仍然执行
+- **Fix**：
+  - 添加 `subscriptionId` 追踪所有订阅
+  - 新增 `getActiveSubscriptions()` 方法用于调试
+  - 所有系统在 `dispose()` 中正确取消订阅
+- **File**：`src/core/EventBus.ts`
+
+#### setTimeout 追踪
+
+- **Issue**：`setTimeout` 回调在组件销毁后仍然执行
+- **Fix**：
+  - ParticleSystem 添加 `pendingTimeouts` Set 追踪所有定时器
+  - `clear()` 方法现在取消所有待处理的定时器
+- **File**：`src/features/effects/ParticleSystem.ts`
+
+### 性能优化
+
+#### 粒子系统
+
+- 添加对象池复用粒子对象
+- 减少每帧创建的对象数量
+- 移动端自动降低粒子数量
+
+#### 导弹系统
+
+- MissileSystem 添加对象池
+- BossMissileSystem 添加对象池
+- FlakCannonSystem 添加对象池
+
+#### 材质缓存
+
+- 添加 `MaterialCache` 工具类
+- 复用相同颜色/属性的材质
+- 减少 GPU 资源占用
+- **File**：`src/core/utils/MaterialCache.ts`
+
+#### 地形 LOD
+
+- 远距离地形使用简化几何体
+- 根据 camera distance 动态调整细节
+- **File**：`src/features/terrain/TerrainGenerator.ts`
+
+### 测试补充
+
+- **EnemyAI 测试**：添加 AI 行为测试（巡逻、追击、攻击、闪避）
+- **LevelManager 测试**：添加波次管理、关卡加载测试
+- **测试数量**：从 19 个增加到 273 个
+- **Files**：`src/__tests__/EnemyAI.test.ts`, `src/__tests__/LevelManager.test.ts`
+
+### 配置外置 (ConfigLoader)
+
+- 游戏配置从代码中分离到 JSON 文件
+- 支持热重载配置（开发模式）
+- 类型安全的配置访问
+- **File**：`src/core/utils/ConfigLoader.ts`
+- **Config**：`public/config/game-config.json`
+
+### 日志系统 (Logger)
+
+- 结构化日志输出，支持模块名标记
+- 日志级别控制（DEBUG、INFO、WARN、ERROR）
+- 日志历史导出功能（用于调试）
+- **File**：`src/core/utils/Logger.ts`

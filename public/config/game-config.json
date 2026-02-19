@@ -1,0 +1,338 @@
+{
+  "version": "1.0.0",
+  "player": {
+    "pitchSpeed": 2.0,
+    "yawSpeed": 1.5,
+    "rollSpeed": 3.0,
+    "baseSpeed": 45,
+    "maxSpeed": 45,
+    "baseHealth": 200,
+    "baseDamage": 12.5,
+    "baseFireRate": 0.3
+  },
+  "projectile": {
+    "speed": 100,
+    "maxDistance": 500,
+    "poolSize": 200
+  },
+  "camera": {
+    "fov": 75,
+    "near": 0.1,
+    "far": 2000,
+    "offsetX": 0,
+    "offsetY": 5,
+    "offsetZ": 15,
+    "smoothFactor": 0.1
+  },
+  "world": {
+    "fogNear": 100,
+    "fogFar": 1000,
+    "skyboxSize": 1000
+  },
+  "powerup": {
+    "spawnChance": 0.4,
+    "collectRadius": 5
+  },
+  "level": {
+    "startDelay": 2,
+    "waveDelay": 5,
+    "spawnInterval": 3
+  },
+  "missile": {
+    "speed": 80,
+    "damage": 50,
+    "turnSpeed": 2.0,
+    "maxLifetime": 10,
+    "lockTime": 3.0,
+    "lockBoxSize": 0.15,
+    "maxLockDistance": 600,
+    "maxFlightDistance": 2400,
+    "startingMissiles": 2,
+    "maxMissiles": 10,
+    "respawnTime": 7.5,
+    "maxRespawnMissiles": 10
+  },
+  "bossMissile": {
+    "scale": 4,
+    "speedMultiplier": 0.5,
+    "health": 20,
+    "maxRange": 5000,
+    "damage": 90
+  },
+  "flakCannon": {
+    "speed": 50,
+    "scale": 3,
+    "maxRange": 1500,
+    "aoeRadius": 50,
+    "damage": 15,
+    "explosionHeightVariance": 20
+  },
+  "laserSweep": {
+    "warningDuration": 3.0,
+    "sweepDuration": 6.0,
+    "interval": 5.0,
+    "damage": 100,
+    "rotationSpeed": 1.0472,
+    "color": 43991,
+    "planeThickness": 15,
+    "range": 800
+  },
+  "eye": {
+    "health": 300,
+    "damage": 20,
+    "fireInterval": 1.5,
+    "bulletSpeed": 80,
+    "bulletLength": 8,
+    "bulletRadius": 0.3,
+    "count": 8
+  },
+  "teleport": {
+    "chanceOnHit": 0.05,
+    "cooldown": 10.0,
+    "duration": 0.5,
+    "boundsX": 400,
+    "boundsYMin": 100,
+    "boundsYMax": 250,
+    "boundsZ": 400
+  },
+  "fighterLaunch": {
+    "interval": 60.0,
+    "count": 2,
+    "spawnHeight": 10
+  },
+  "enemies": {
+    "SCOUT": {
+      "name": "侦察机",
+      "health": 60,
+      "speed": 40,
+      "damage": 5,
+      "detectionRange": 120,
+      "attackRange": 25,
+      "attackCooldown": 0.4,
+      "evasionChance": 0.3,
+      "accuracy": 0.4,
+      "fireSpreadAngle": 50,
+      "turnSpeed": 1.5,
+      "maxRollAngle": 0.7854,
+      "wanderRadius": 80,
+      "stateProbabilities": {
+        "CHASE": 0.25,
+        "FIXED_DIRECTION": 0.5,
+        "CIRCLE": 0.25
+      },
+      "stateDurationRange": [4, 8],
+      "circleRadius": 150,
+      "circleHeight": 30,
+      "scoreValue": 50,
+      "color": 2722428,
+      "scale": 0.7
+    },
+    "FIGHTER": {
+      "name": "战斗机",
+      "health": 100,
+      "speed": 55,
+      "damage": 7.5,
+      "detectionRange": 100,
+      "attackRange": 30,
+      "attackCooldown": 0.5,
+      "evasionChance": 0.15,
+      "accuracy": 0.5,
+      "fireSpreadAngle": 45,
+      "turnSpeed": 2.0,
+      "maxRollAngle": 0.7854,
+      "wanderRadius": 60,
+      "stateProbabilities": {
+        "CHASE": 0.325,
+        "FIXED_DIRECTION": 0.475,
+        "CIRCLE": 0.2
+      },
+      "stateDurationRange": [4, 8],
+      "circleRadius": 120,
+      "circleHeight": 40,
+      "scoreValue": 100,
+      "color": 16729300,
+      "scale": 1.0
+    },
+    "HEAVY": {
+      "name": "重型轰炸机",
+      "health": 300,
+      "speed": 35,
+      "damage": 15,
+      "detectionRange": 80,
+      "attackRange": 40,
+      "attackCooldown": 0.8,
+      "evasionChance": 0.02,
+      "accuracy": 0.6,
+      "fireSpreadAngle": 35,
+      "turnSpeed": 0.8,
+      "maxRollAngle": 0.3142,
+      "wanderRadius": 40,
+      "stateProbabilities": {
+        "CHASE": 0.35,
+        "FIXED_DIRECTION": 0.45,
+        "CIRCLE": 0.2
+      },
+      "stateDurationRange": [5, 9],
+      "circleRadius": 100,
+      "circleHeight": 20,
+      "scoreValue": 200,
+      "color": 8929792,
+      "scale": 1.8
+    },
+    "SNIPER": {
+      "name": "狙击机",
+      "health": 80,
+      "speed": 45,
+      "damage": 20,
+      "detectionRange": 200,
+      "attackRange": 80,
+      "attackCooldown": 1.0,
+      "evasionChance": 0.2,
+      "accuracy": 0.7,
+      "fireSpreadAngle": 60,
+      "turnSpeed": 1.2,
+      "maxRollAngle": 0.3927,
+      "wanderRadius": 100,
+      "stateProbabilities": {
+        "CHASE": 0.3,
+        "FIXED_DIRECTION": 0.5,
+        "CIRCLE": 0.2
+      },
+      "stateDurationRange": [4, 8],
+      "circleRadius": 180,
+      "circleHeight": 50,
+      "scoreValue": 150,
+      "color": 8919039,
+      "scale": 0.9
+    },
+    "ACE": {
+      "name": "王牌飞行员",
+      "health": 160,
+      "speed": 70,
+      "damage": 12.5,
+      "detectionRange": 150,
+      "attackRange": 35,
+      "attackCooldown": 0.4,
+      "evasionChance": 0.4,
+      "accuracy": 0.6,
+      "fireSpreadAngle": 55,
+      "turnSpeed": 2.4,
+      "maxRollAngle": 1.0472,
+      "wanderRadius": 60,
+      "stateProbabilities": {
+        "CHASE": 0.4,
+        "FIXED_DIRECTION": 0.45,
+        "CIRCLE": 0.15
+      },
+      "stateDurationRange": [3, 7],
+      "circleRadius": 100,
+      "circleHeight": 50,
+      "scoreValue": 500,
+      "color": 16763904,
+      "scale": 1.2
+    }
+  },
+  "bosses": {
+    "HEAVY_BOMBER": {
+      "name": "重型轰炸机 Boss",
+      "health": 2000,
+      "speed": 10,
+      "damage": 15,
+      "scale": 5,
+      "circleRadius": 300,
+      "turnSpeed": 0.3,
+      "cannonFireInterval": 0.5,
+      "missileFireInterval": 10,
+      "missileDamage": 90,
+      "maxRange": 5000,
+      "scoreValue": 2000
+    },
+    "DESERT_FORTRESS": {
+      "name": "沙漠堡垒 Boss",
+      "health": 2500,
+      "speed": 0,
+      "damage": 15,
+      "scale": 5,
+      "circleRadius": 0,
+      "turnSpeed": 0,
+      "cannonFireInterval": 2.0,
+      "missileFireInterval": 10,
+      "missileDamage": 90,
+      "maxRange": 1500,
+      "scoreValue": 2500
+    },
+    "OCTOPUS_WARSHIP": {
+      "name": "八爪鱼战舰 Boss",
+      "health": 3000,
+      "speed": 5,
+      "damage": 100,
+      "scale": 5,
+      "circleRadius": 100,
+      "turnSpeed": 0.3,
+      "cannonFireInterval": 0,
+      "missileFireInterval": 0,
+      "missileDamage": 0,
+      "maxRange": 800,
+      "scoreValue": 3000
+    },
+    "MISSILE_DESTROYER": {
+      "name": "导弹驱逐舰 Boss",
+      "health": 3500,
+      "speed": 10,
+      "damage": 15,
+      "scale": 5,
+      "circleRadius": 0,
+      "turnSpeed": 0.2,
+      "cannonFireInterval": 2.0,
+      "missileFireInterval": 8,
+      "missileDamage": 90,
+      "maxRange": 1500,
+      "scoreValue": 3500
+    },
+    "SKY_CARRIER": {
+      "name": "空中航空母舰 Boss",
+      "health": 4000,
+      "speed": 8,
+      "damage": 30,
+      "scale": 5,
+      "circleRadius": 200,
+      "turnSpeed": 0.15,
+      "cannonFireInterval": 0.8,
+      "missileFireInterval": 12,
+      "missileDamage": 90,
+      "maxRange": 5000,
+      "scoreValue": 4000
+    }
+  },
+  "upgrade": {
+    "pointsPerScore": 400,
+    "costs": [1, 2, 3, 4, 5],
+    "missileCosts": [3, 4, 5, 6, 7],
+    "maxHealthPerLevel": 40,
+    "damagePerLevel": 3.5,
+    "fireRateReductionPerLevel": 0.04,
+    "speedPerLevel": 8,
+    "missileLockReductionPerLevel": 0.2,
+    "missileReloadReductionPerLevel": 1.0
+  },
+  "performance": {
+    "mobile": {
+      "maxPixelRatio": 1.5,
+      "maxEnemies": 5,
+      "particleCount": 20,
+      "projectilePoolSize": 100,
+      "targetFPS": 30,
+      "shadowEnabled": false,
+      "antialiasEnabled": false
+    },
+    "desktop": {
+      "maxPixelRatio": 2,
+      "maxEnemies": 10,
+      "particleCount": 50,
+      "projectilePoolSize": 200,
+      "targetFPS": 60,
+      "shadowEnabled": true,
+      "antialiasEnabled": true
+    }
+  }
+}

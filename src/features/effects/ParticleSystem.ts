@@ -441,7 +441,7 @@ export class ParticleSystem {
         // 移除死亡粒子
         if (particle.mesh) {
           this.particleMeshes.remove(particle.mesh);
-          particle.mesh.geometry.dispose();
+          // 几何体是共享的，不能 dispose；只 dispose 克隆的材质
           (particle.mesh.material as THREE.Material).dispose();
         }
         this.particles.splice(i, 1);
@@ -489,7 +489,7 @@ export class ParticleSystem {
     for (const particle of this.particles) {
       if (particle.mesh) {
         this.particleMeshes.remove(particle.mesh);
-        particle.mesh.geometry.dispose();
+        // 几何体是共享的，不能 dispose；只 dispose 克隆的材质
         (particle.mesh.material as THREE.Material).dispose();
       }
     }

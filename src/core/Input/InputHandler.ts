@@ -1,8 +1,8 @@
 import { GameConfig } from '@/config';
+import { getLogger } from '@/core/utils/Logger';
 
-/**
- * 输入状态
- */
+const log = getLogger('InputHandler');
+
 export interface InputState {
   pitchUp: boolean;
   pitchDown: boolean;
@@ -76,7 +76,7 @@ export class InputHandler {
     const upgradeButton = document.getElementById('upgrade-button');
 
     if (!joystick || !joystickKnob) {
-      console.warn('Joystick elements not found');
+      log.warn('Joystick elements not found');
       return;
     }
 

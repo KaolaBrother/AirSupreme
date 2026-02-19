@@ -32,6 +32,7 @@ export class OctopusWarshipAI {
   public onLaserSweep?: () => void;
 
   private parts: THREE.Mesh[] = [];
+  private pendingTimeouts: Set<ReturnType<typeof setTimeout>> = new Set();
 
   constructor(mesh: THREE.Group, config: BossConfig, particleSystem: ParticleSystem) {
     this.mesh = mesh;
@@ -178,7 +179,8 @@ export class OctopusWarshipAI {
       (Math.random() - 0.5) * TELEPORT_CONFIG.BOUNDS.Z * 2
     );
 
-    setTimeout(() => {
+    const timeoutId = setTimeout(() => {
+      this.pendingTimeouts.delete(timeoutId);
       this.mesh.position.copy(toPos);
       this.mesh.visible = true;
       this.particleSystem.createTeleportIn(toPos);
@@ -187,6 +189,7 @@ export class OctopusWarshipAI {
       this.teleportDisabled = false;
       this.onTeleport?.(fromPos, toPos);
     }, TELEPORT_CONFIG.DURATION * 1000);
+    this.pendingTimeouts.add(timeoutId);
   }
 
   public getMesh(): THREE.Group {
@@ -251,6 +254,11 @@ export class OctopusWarshipAI {
   }
 
   public dispose(): void {
+    for (const timeoutId of this.pendingTimeouts) {
+      clearTimeout(timeoutId);
+    }
+    this.pendingTimeouts.clear();
+
     this.mesh.visible = false;
     if (this.mesh.parent) {
       this.mesh.parent.remove(this.mesh);
@@ -272,7 +280,9 @@ export class OctopusWarshipAI {
       this.mesh.remove(child);
       if (child instanceof THREE.Mesh) {
         child.geometry.dispose();
-        if (child.material instanceof THREE.Material) {
+        if (Array.isArray(child.material)) {
+          child.material.forEach((m) => m.dispose());
+        } else if (child.material instanceof THREE.Material) {
           child.material.dispose();
         }
       }

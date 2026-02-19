@@ -10,10 +10,10 @@ import { EnemyAI } from '@/features/enemy/EnemyAI';
 import { TerrainGenerator } from '@/features/terrain/TerrainGenerator';
 import { SpawnPortal } from '@/features/effects/SpawnPortal';
 import { createEnemyMesh } from '@/features/aircraft/AircraftMeshFactory';
+import { getLogger } from '@/core/utils/Logger';
 
-/**
- * 关卡状态
- */
+const log = getLogger('LevelManager');
+
 export enum LevelState {
   IDLE = 'IDLE',
   WAVE_ACTIVE = 'WAVE_ACTIVE',
@@ -81,24 +81,21 @@ export class LevelManager {
   public loadLevel(levelId: number): void {
     const config = getLevelConfig(levelId);
     if (!config) {
-      console.error(`Level ${levelId} not found`);
+      log.error('Level not found', { levelId });
       return;
     }
 
     this.currentLevel = config;
     this.currentWave = 0;
     this.state = LevelState.IDLE;
-    this.totalEnemiesSpawned = 0; // 重置已生成敌人数计数器（关卡切换时必须重置）
-    this.enemiesSpawnedThisWave = 0; // 重置当前波次已生成计数
+    this.totalEnemiesSpawned = 0;
+    this.enemiesSpawnedThisWave = 0;
 
-    console.log(
-      `[LevelManager] Loading level ${levelId}: ${config.name}, terrain: ${config.terrain}`
-    );
+    log.info('Loading level', { levelId, name: config.name, terrain: config.terrain });
 
-    // 生成地形
     this.terrainGenerator.generateTerrain(config);
 
-    console.log(`Loaded level ${levelId}: ${config.name}`);
+    log.info('Level loaded', { levelId, name: config.name });
   }
 
   /**
@@ -130,9 +127,8 @@ export class LevelManager {
       this.clampToBattlefield(rawCenter.z)
     );
 
-    // 如果被限制（说明超出边界），向战场中心调整
     if (clampedCenter.x !== rawCenter.x || clampedCenter.z !== rawCenter.z) {
-      console.warn('[LevelManager] 群中心超出战场，已调整到边界内', {
+      log.warn('群中心超出战场，已调整到边界内', {
         original: { x: rawCenter.x, z: rawCenter.z },
         clamped: { x: clampedCenter.x, z: clampedCenter.z },
       });
@@ -236,6 +232,12 @@ export class LevelManager {
     playerPosition: THREE.Vector3,
     friendlyMeshes?: THREE.Object3D[]
   ): void {
+    // 更新地形（水面动画、云朵移动）
+    this.terrainGenerator.update(deltaTime);
+
+    // 更新地形 LOD
+    this.terrainGenerator.updateLOD(playerPosition);
+
     // 更新传送门动画
     for (let i = this.activePortals.length - 1; i >= 0; i--) {
       const portal = this.activePortals[i];
@@ -254,9 +256,8 @@ export class LevelManager {
       if (this.waveDelayTimer <= 0) {
         // 检查是否还有下一波（当前波次索引 + 1 >= 总波次数）
         if (this.currentWave + 1 >= this.currentLevel.totalWaves) {
-          // 关卡完成
           this.state = LevelState.LEVEL_COMPLETE;
-          console.log(`[Level ${this.currentLevel.id}] Complete! All waves defeated.`);
+          log.info('Level complete', { levelId: this.currentLevel.id });
           this.onLevelComplete?.(this.currentLevel.id);
         } else {
           // 开始下一波
@@ -282,11 +283,10 @@ export class LevelManager {
         aliveEnemies === 0 &&
         this.enemiesSpawnedThisWave >= maxEnemies
       ) {
-        // 当前波次完成（必须等待所有传送门完成且所有敌人都被消灭）
-        console.log(`[Wave ${this.currentWave}] Complete! All enemies defeated.`);
+        log.debug('Wave complete', { wave: this.currentWave });
         this.state = LevelState.WAVE_COMPLETE;
         this.enemiesSpawnedThisWave = 0;
-        this.waveDelayTimer = 3; // 3秒后开始下一波
+        this.waveDelayTimer = 3;
         this.onWaveComplete?.(this.currentWave);
       }
     }
@@ -415,7 +415,7 @@ export class LevelManager {
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       // 使用保存的群中心（在startNextWave中计算）
       if (!this.waveGroupCenter) {
-        console.warn('[Wave Manager] No group center set, using fallback position');
+        log.warn('No group center set, using fallback position');
         // 降级：如果没有群中心，使用玩家位置作为参考
         const fallbackDistance =
           minGroupDistanceFromPlayer +

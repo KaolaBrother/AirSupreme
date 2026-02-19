@@ -1,6 +1,26 @@
 import * as THREE from 'three';
 import { ParticleSystem } from '@/features/effects/ParticleSystem';
 import { GAME_CONSTANTS } from '@/config';
+import { getLogger } from '@/core/utils/Logger';
+
+const log = getLogger('MissileSystem');
+
+let sharedConeGeometry: THREE.ConeGeometry | null = null;
+let sharedTrailGeometry: THREE.ConeGeometry | null = null;
+
+function getSharedConeGeometry(): THREE.ConeGeometry {
+  if (!sharedConeGeometry) {
+    sharedConeGeometry = new THREE.ConeGeometry(0.4, 2.5, 16);
+  }
+  return sharedConeGeometry;
+}
+
+function getSharedTrailGeometry(): THREE.ConeGeometry {
+  if (!sharedTrailGeometry) {
+    sharedTrailGeometry = new THREE.ConeGeometry(0.25, 2, 16);
+  }
+  return sharedTrailGeometry;
+}
 
 /**
  * 导弹类
@@ -20,6 +40,8 @@ export class Missile {
   private startPosition: THREE.Vector3; // 记录发射位置
   private maxFlightDistance: number = GAME_CONSTANTS.MISSILE.MAX_FLIGHT_DISTANCE; // 最大飞行距离
   private enemies: THREE.Object3D[] = []; // 敌人列表，用于重新锁定目标
+  private coneMaterial: THREE.MeshStandardMaterial;
+  private trailMaterial: THREE.MeshBasicMaterial;
 
   constructor(
     scene: THREE.Scene,
@@ -38,27 +60,25 @@ export class Missile {
     // 导弹模型 - 使用父容器来正确控制朝向
     this.mesh = new THREE.Group();
 
-    // 创建锥体（导弹弹头）
-    const coneGeometry = new THREE.ConeGeometry(0.4, 2.5, 16);
-    const coneMaterial = new THREE.MeshStandardMaterial({
+    // 创建锥体（导弹弹头）- 使用共享几何体
+    this.coneMaterial = new THREE.MeshStandardMaterial({
       color: 0xff4444,
       emissive: 0xff0000,
       emissiveIntensity: 0.5,
       metalness: 0.8,
       roughness: 0.2,
     });
-    const cone = new THREE.Mesh(coneGeometry, coneMaterial);
+    const cone = new THREE.Mesh(getSharedConeGeometry(), this.coneMaterial);
     cone.rotation.x = -Math.PI / 2; // 旋转锥体让尖头朝 Z+ 方向（向前）
     this.mesh.add(cone);
 
-    // 增强尾焰效果
-    const trailGeometry = new THREE.ConeGeometry(0.25, 2, 16);
-    const trailMaterial = new THREE.MeshBasicMaterial({
+    // 增强尾焰效果 - 使用共享几何体
+    this.trailMaterial = new THREE.MeshBasicMaterial({
       color: 0xffdd00,
       transparent: true,
       opacity: 1,
     });
-    this.trail = new THREE.Mesh(trailGeometry, trailMaterial);
+    this.trail = new THREE.Mesh(getSharedTrailGeometry(), this.trailMaterial);
     this.trail.rotation.x = -Math.PI / 2;
     this.trail.position.z = 1.5;
     this.mesh.add(this.trail);
@@ -120,7 +140,7 @@ export class Missile {
       const newTarget = this.findNearestEnemy();
       if (newTarget) {
         this.target = newTarget;
-        console.log('导弹重新锁定目标');
+        log.debug('导弹重新锁定目标');
       }
     }
 
@@ -240,6 +260,8 @@ export class Missile {
    */
   public dispose(scene: THREE.Scene): void {
     scene.remove(this.mesh);
+    this.coneMaterial.dispose();
+    this.trailMaterial.dispose();
     this.active = false;
   }
 }

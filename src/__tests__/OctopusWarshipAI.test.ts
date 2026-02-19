@@ -15,6 +15,7 @@ describe('OctopusWarshipAI', () => {
     config = BOSS_CONFIGS[BossType.OCTOPUS_WARSHIP];
     mesh = createOctopusWarshipMesh(config);
     scene = new THREE.Scene();
+    scene.add(mesh); // 必须将 mesh 添加到 scene，否则 getScene() 返回 null
     particleSystem = new ParticleSystem(scene);
 
     boss = new OctopusWarshipAI(mesh, config, particleSystem);

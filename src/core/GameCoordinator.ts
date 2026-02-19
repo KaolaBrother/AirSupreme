@@ -87,6 +87,10 @@ export class GameCoordinator {
   private isPaused: boolean = false;
   private upgradeMenu: UpgradeMenu | null = null;
 
+  // 资源清理追踪
+  private eventUnsubscribers: (() => void)[] = [];
+  private pendingTimeouts: Set<ReturnType<typeof setTimeout>> = new Set();
+
   constructor() {
     this.gameLoop = new GameLoop();
     this.gameScene = new GameScene();
@@ -144,90 +148,115 @@ export class GameCoordinator {
   }
 
   private setupEventListeners(): void {
-    EventBus.on(GameEventType.PLAYER_HIT, ({ payload }) => {
-      if (!this.playerSystem.isShieldActive()) {
-        this.audioManager.playHit();
-        this.particleSystem.createHit(payload.position);
-      }
-    });
+    this.eventUnsubscribers.push(
+      EventBus.on(GameEventType.PLAYER_HIT, ({ payload }) => {
+        if (!this.playerSystem.isShieldActive()) {
+          this.audioManager.playHit();
+          this.particleSystem.createHit(payload.position);
+        }
+      })
+    );
 
-    EventBus.on(GameEventType.PLAYER_DEATH, ({ payload }) => {
-      this.audioManager.stopEngine();
-      this.audioManager.playExplosion();
-      this.particleSystem.createExplosion(payload.position, 2);
-      this.lockOnIndicator.cancelLockOn();
-      this.playerAircraft.visible = false;
+    this.eventUnsubscribers.push(
+      EventBus.on(GameEventType.PLAYER_DEATH, ({ payload }) => {
+        this.audioManager.stopEngine();
+        this.audioManager.playExplosion();
+        this.particleSystem.createExplosion(payload.position, 2);
+        this.lockOnIndicator.cancelLockOn();
+        this.playerAircraft.visible = false;
 
-      if (this.playerSystem.getLives() <= 0) {
-        this.gameState.setStatus(GameStatus.GAME_OVER);
-        this.audioManager.playGameOver();
+        if (this.playerSystem.getLives() <= 0) {
+          this.gameState.setStatus(GameStatus.GAME_OVER);
+          this.audioManager.playGameOver();
+          this.musicSystem.stopMusic();
+          this.hud.showGameOver(this.gameState.getScore());
+        }
+      })
+    );
+
+    this.eventUnsubscribers.push(
+      EventBus.on(GameEventType.PLAYER_RESPAWN, ({ payload }) => {
+        this.particleSystem.createExplosion(payload.position, 1.5);
+        this.playerAircraft.visible = true;
+        this.missileCount = GAME_CONSTANTS.MISSILE.STARTING_MISSILES;
+        this.hud.updateMissiles(this.missileCount);
+        this.audioManager.startEngine();
+
+        this.playerSystem.activateShield(this.gameScene.scene);
+        this.powerUpSystem.addActivePowerUp(
+          PowerUpType.SHIELD,
+          POWER_UP_CONFIGS[PowerUpType.SHIELD]
+        );
+      })
+    );
+
+    this.eventUnsubscribers.push(
+      EventBus.on(GameEventType.ENEMY_FIRED, () => {
+        this.audioManager.playShoot();
+      })
+    );
+
+    this.eventUnsubscribers.push(
+      EventBus.on(GameEventType.FRIENDLY_FIRED, () => {
+        this.audioManager.playShoot();
+      })
+    );
+
+    this.eventUnsubscribers.push(
+      EventBus.on(GameEventType.PLAYER_FIRED, () => {
+        this.audioManager.playShoot();
+      })
+    );
+
+    this.eventUnsubscribers.push(
+      EventBus.on(GameEventType.ENEMY_DEATH, ({ payload }) => {
+        this.gameState.addScore(payload.config.scoreValue);
+        this.playerStats.addScore(payload.config.scoreValue);
+        this.hud.updateUpgradePoints(this.playerStats.getUpgrades().getAvailablePoints());
+        this.audioManager.playExplosion();
+        this.particleSystem.createExplosion(payload.position, payload.config.scale);
+
+        if (Math.random() < GAME_CONSTANTS.POWERUP.SPAWN_CHANCE) {
+          this.powerUpSystem.spawn(payload.position);
+        }
+      })
+    );
+
+    this.eventUnsubscribers.push(
+      EventBus.on(GameEventType.WAVE_START, () => {
+        this.audioManager.playWaveStart();
+      })
+    );
+
+    this.eventUnsubscribers.push(
+      EventBus.on(GameEventType.LEVEL_COMPLETE, () => {
+        this.audioManager.playLevelUp();
+
+        this.combatSystem.getPlayerProjectilePool().clear();
+        this.combatSystem.getEnemyProjectilePool().clear();
+        this.particleSystem.clear();
+        this.powerUpSystem.clear();
+
         this.musicSystem.stopMusic();
-        this.hud.showGameOver(this.gameState.getScore());
-      }
-    });
 
-    EventBus.on(GameEventType.PLAYER_RESPAWN, ({ payload }) => {
-      this.particleSystem.createExplosion(payload.position, 1.5);
-      this.playerAircraft.visible = true;
-      this.missileCount = GAME_CONSTANTS.MISSILE.STARTING_MISSILES;
-      this.hud.updateMissiles(this.missileCount);
-      this.audioManager.startEngine();
+        this.startLevelBossBattle();
+      })
+    );
 
-      this.playerSystem.activateShield(this.gameScene.scene);
-      this.powerUpSystem.addActivePowerUp(PowerUpType.SHIELD, POWER_UP_CONFIGS[PowerUpType.SHIELD]);
-    });
+    this.eventUnsubscribers.push(
+      EventBus.on(GameEventType.POWERUP_COLLECTED, ({ payload }) => {
+        this.audioManager.playPowerUp();
+        this.hud.showPowerUp(payload.config.name, payload.config.icon, payload.config.duration);
 
-    EventBus.on(GameEventType.ENEMY_FIRED, () => {
-      this.audioManager.playShoot();
-    });
+        this.handlePowerUpEffect(payload.type, payload.config);
+      })
+    );
 
-    EventBus.on(GameEventType.FRIENDLY_FIRED, () => {
-      this.audioManager.playShoot();
-    });
-
-    EventBus.on(GameEventType.PLAYER_FIRED, () => {
-      this.audioManager.playShoot();
-    });
-
-    EventBus.on(GameEventType.ENEMY_DEATH, ({ payload }) => {
-      this.gameState.addScore(payload.config.scoreValue);
-      this.playerStats.addScore(payload.config.scoreValue);
-      this.hud.updateUpgradePoints(this.playerStats.getUpgrades().getAvailablePoints());
-      this.audioManager.playExplosion();
-      this.particleSystem.createExplosion(payload.position, payload.config.scale);
-
-      if (Math.random() < GAME_CONSTANTS.POWERUP.SPAWN_CHANCE) {
-        this.powerUpSystem.spawn(payload.position);
-      }
-    });
-
-    EventBus.on(GameEventType.WAVE_START, () => {
-      this.audioManager.playWaveStart();
-    });
-
-    EventBus.on(GameEventType.LEVEL_COMPLETE, () => {
-      this.audioManager.playLevelUp();
-
-      this.combatSystem.getPlayerProjectilePool().clear();
-      this.combatSystem.getEnemyProjectilePool().clear();
-      this.particleSystem.clear();
-      this.powerUpSystem.clear();
-
-      this.musicSystem.stopMusic();
-
-      this.startLevelBossBattle();
-    });
-
-    EventBus.on(GameEventType.POWERUP_COLLECTED, ({ payload }) => {
-      this.audioManager.playPowerUp();
-      this.hud.showPowerUp(payload.config.name, payload.config.icon, payload.config.duration);
-
-      this.handlePowerUpEffect(payload.type, payload.config);
-    });
-
-    EventBus.on(GameEventType.POWERUP_EXPIRED, ({ payload }) => {
-      this.handlePowerUpExpired(payload.type);
-    });
+    this.eventUnsubscribers.push(
+      EventBus.on(GameEventType.POWERUP_EXPIRED, ({ payload }) => {
+        this.handlePowerUpExpired(payload.type);
+      })
+    );
   }
 
   private handlePowerUpEffect(
@@ -686,7 +715,7 @@ export class GameCoordinator {
         if (lockedTarget && this.missileCount > 0 && !this.missileFiringScheduled) {
           this.missileFiringScheduled = true;
 
-          setTimeout(() => {
+          this.scheduleTimeout(() => {
             this.fireMissile(lockedTarget);
             this.lockOnIndicator.onMissileFired();
             this.missileFiringScheduled = false;
@@ -707,7 +736,7 @@ export class GameCoordinator {
     const missileCount = this.multiShotActive ? Math.min(3, this.missileCount) : 1;
 
     for (let i = 0; i < missileCount; i++) {
-      setTimeout(() => {
+      this.scheduleTimeout(() => {
         if (this.missileCount <= 0) return;
 
         const position = this.playerSystem.getPosition().clone();
@@ -875,13 +904,13 @@ export class GameCoordinator {
     } else {
       this.enemySystem.loadLevel(this.currentLevelId);
 
-      setTimeout(() => {
+      this.scheduleTimeout(() => {
         this.enemySystem.startWave(this.playerSystem.getPosition());
       }, GAME_CONSTANTS.LEVEL.START_DELAY * 1000);
 
       this.musicSystem.playLevelMusic(this.getLevelMusic(this.currentLevelId));
 
-      setTimeout(() => {
+      this.scheduleTimeout(() => {
         this.spawnFriendlyAI();
         this.hud.showPowerUpBig('✈️', '召唤友军');
       }, 1000);
@@ -912,7 +941,7 @@ export class GameCoordinator {
 
     this.bossFriendlySpawnTimer = 0;
 
-    setTimeout(() => {
+    this.scheduleTimeout(() => {
       this.spawnFriendlyAI();
       this.hud.showPowerUpBig('✈️', '召唤友军');
     }, 1000);
@@ -1175,11 +1204,11 @@ export class GameCoordinator {
     this.currentBoss?.dispose();
     this.currentBoss = null;
 
-    setTimeout(() => {
+    this.scheduleTimeout(() => {
       this.currentLevelId++;
       if (this.currentLevelId <= 5) {
         this.hud.showPowerUpBig('⏭️', `进入第 ${this.currentLevelId} 关`);
-        setTimeout(() => {
+        this.scheduleTimeout(() => {
           if (isBossMode) {
             this.startBossBattle();
           } else {
@@ -1220,7 +1249,7 @@ export class GameCoordinator {
 
     this.bossFriendlySpawnTimer = 0;
 
-    setTimeout(() => {
+    this.scheduleTimeout(() => {
       this.spawnFriendlyAI();
       this.hud.showPowerUpBig('✈️', '召唤友军');
     }, 1000);
@@ -1499,13 +1528,29 @@ export class GameCoordinator {
     }
   }
 
+  private scheduleTimeout(callback: () => void, delay: number): ReturnType<typeof setTimeout> {
+    const timeoutId = setTimeout(() => {
+      this.pendingTimeouts.delete(timeoutId);
+      callback();
+    }, delay);
+    this.pendingTimeouts.add(timeoutId);
+    return timeoutId;
+  }
+
   public dispose(): void {
+    for (const timeoutId of this.pendingTimeouts) {
+      clearTimeout(timeoutId);
+    }
+    this.pendingTimeouts.clear();
+
+    this.eventUnsubscribers.forEach((unsub) => unsub());
+    this.eventUnsubscribers = [];
+
     this.stop();
     this.enemySystem.dispose();
     this.particleSystem.clear();
     this.powerUpSystem.dispose();
     this.gameScene.dispose();
     this.musicSystem.dispose();
-    EventBus.clear();
   }
 }
