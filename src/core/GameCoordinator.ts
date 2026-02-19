@@ -232,6 +232,10 @@ export class GameCoordinator {
       EventBus.on(GameEventType.LEVEL_COMPLETE, () => {
         this.audioManager.playLevelUp();
 
+        this.playerSystem.syncMaxHealth();
+        this.playerSystem.getHealth().healToMax();
+        this.hud.updateHealth(this.playerSystem.getHealth().getHealthPercent());
+
         this.combatSystem.getPlayerProjectilePool().clear();
         this.combatSystem.getEnemyProjectilePool().clear();
         this.particleSystem.clear();
