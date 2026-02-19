@@ -99,21 +99,20 @@ function getOrCreateMaterials(
 export function createPlayerMesh(): THREE.Group {
   const group = new THREE.Group();
 
-  // 材料定义
   const bodyMaterial = new THREE.MeshStandardMaterial({
-    color: 0x4488ff,
+    color: 0xe8e8e8,
     metalness: 0.8,
     roughness: 0.2,
   });
 
   const wingMaterial = new THREE.MeshStandardMaterial({
-    color: 0x3366dd,
+    color: 0xa0a0a0,
     metalness: 0.7,
     roughness: 0.3,
   });
 
   const cockpitMaterial = new THREE.MeshStandardMaterial({
-    color: 0x111133,
+    color: 0x1a1a1a,
     metalness: 0.95,
     roughness: 0.1,
     transparent: true,
@@ -121,13 +120,13 @@ export function createPlayerMesh(): THREE.Group {
   });
 
   const accentMaterial = new THREE.MeshStandardMaterial({
-    color: 0x2266cc,
+    color: 0x707070,
     metalness: 0.9,
     roughness: 0.2,
   });
 
   const engineMaterial = new THREE.MeshStandardMaterial({
-    color: 0x333344,
+    color: 0x404040,
     metalness: 0.8,
     roughness: 0.3,
   });
@@ -149,15 +148,14 @@ export function createPlayerMesh(): THREE.Group {
   // === 中机身（座舱区域）===
   // CylinderGeometry 默认轴向 +Y
   // rotation.x = -PI/2 使轴向 -Z/+Z
-  const midBodyGeometry = new THREE.CylinderGeometry(0.5, 0.5, 1.5, 12);
+  const midBodyGeometry = new THREE.CylinderGeometry(0.5, 0.55, 1.5, 12);
   const midBody = new THREE.Mesh(midBodyGeometry, bodyMaterial);
   midBody.rotation.x = -Math.PI / 2;
   midBody.position.set(0, 0, -fuselageLength / 2 + 0.7);
   midBody.castShadow = true;
   group.add(midBody);
 
-  // === 后机身（发动机区域）===
-  const rearBodyGeometry = new THREE.CylinderGeometry(0.55, 0.45, 1.8, 12);
+  const rearBodyGeometry = new THREE.CylinderGeometry(0.45, 0.55, 1.8, 12);
   const rearBody = new THREE.Mesh(rearBodyGeometry, bodyMaterial);
   rearBody.rotation.x = -Math.PI / 2;
   rearBody.position.set(0, -0.05, 0.8);
@@ -188,15 +186,13 @@ export function createPlayerMesh(): THREE.Group {
     bevelEnabled: false,
   });
 
-  // 左翼
   const leftWing = new THREE.Mesh(wingGeometry, wingMaterial);
   leftWing.rotation.x = Math.PI / 2;
-  leftWing.rotation.z = Math.PI; // 镜像翻转
+  leftWing.scale.x = -1;
   leftWing.position.set(-0.4, 0, 0);
   leftWing.castShadow = true;
   group.add(leftWing);
 
-  // 右翼
   const rightWing = new THREE.Mesh(wingGeometry, wingMaterial);
   rightWing.rotation.x = Math.PI / 2;
   rightWing.position.set(0.4, 0, 0);
@@ -232,20 +228,18 @@ export function createPlayerMesh(): THREE.Group {
     bevelEnabled: false,
   });
 
-  // 左垂尾（外倾 15 度）
   const leftVTail = new THREE.Mesh(vTailGeometry, wingMaterial);
-  leftVTail.rotation.x = Math.PI / 2;
-  leftVTail.rotation.z = Math.PI;
+  leftVTail.scale.x = -1;
+  leftVTail.rotation.y = Math.PI / 2;
+  leftVTail.rotation.z = -0.26;
   leftVTail.position.set(-0.6, 0.3, 1.5);
-  leftVTail.rotation.y = -0.26; // 外倾 15 度
   leftVTail.castShadow = true;
   group.add(leftVTail);
 
-  // 右垂尾（外倾 15 度）
   const rightVTail = new THREE.Mesh(vTailGeometry, wingMaterial);
-  rightVTail.rotation.x = Math.PI / 2;
+  rightVTail.rotation.y = Math.PI / 2;
+  rightVTail.rotation.z = 0.26;
   rightVTail.position.set(0.6, 0.3, 1.5);
-  rightVTail.rotation.y = 0.26; // 外倾 15 度
   rightVTail.castShadow = true;
   group.add(rightVTail);
 
@@ -263,15 +257,13 @@ export function createPlayerMesh(): THREE.Group {
     bevelEnabled: false,
   });
 
-  // 左水平尾翼
   const leftHTail = new THREE.Mesh(hTailGeometry, wingMaterial);
   leftHTail.rotation.x = Math.PI / 2;
-  leftHTail.rotation.z = Math.PI;
+  leftHTail.scale.x = -1;
   leftHTail.position.set(-0.35, 0, 1.3);
   leftHTail.castShadow = true;
   group.add(leftHTail);
 
-  // 右水平尾翼
   const rightHTail = new THREE.Mesh(hTailGeometry, wingMaterial);
   rightHTail.rotation.x = Math.PI / 2;
   rightHTail.position.set(0.35, 0, 1.3);
