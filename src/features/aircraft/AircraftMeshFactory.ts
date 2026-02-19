@@ -237,8 +237,7 @@ export function createPlayerMesh(): THREE.Group {
   group.add(leftVTail);
 
   const rightVTail = new THREE.Mesh(vTailGeometry, wingMaterial);
-  rightVTail.scale.z = -1;
-  rightVTail.rotation.y = Math.PI / 2;
+  rightVTail.rotation.y = -Math.PI / 2;
   rightVTail.rotation.z = 0.26;
   rightVTail.position.set(0.6, 0.3, 1.5);
   rightVTail.castShadow = true;
