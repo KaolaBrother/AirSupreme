@@ -306,6 +306,11 @@ export class PowerUpManager {
       balloon.dispose(this.scene);
     }
     this.balloons = [];
+
+    for (const powerUp of this.activePowerUps) {
+      log.debug('道具效果过期（清除时）', { name: powerUp.config.name });
+      this.onPowerUpExpired?.(powerUp.type);
+    }
     this.activePowerUps = [];
 
     // 清除生成特效

@@ -823,7 +823,11 @@ export class GameCoordinator {
 
     // Boss 血条数据
     const bossData: Array<{ mesh: THREE.Object3D; currentHealth: number; maxHealth: number }> = [];
-    if (this.bossMode && this.currentBoss && this.currentBoss.isAlive()) {
+    if (
+      (this.bossMode || this.inLevelBossBattle) &&
+      this.currentBoss &&
+      this.currentBoss.isAlive()
+    ) {
       bossData.push({
         mesh: this.currentBoss.getMesh(),
         currentHealth: this.currentBoss.getHealth().current,
