@@ -43,6 +43,9 @@ export class OctopusWarshipAI {
     this.laserSystem = new LaserSweepSystem(this.getScene());
     this.eyeSystem = new EyeSystem(this.getScene());
 
+    // 从 mesh 中提取 body parts（由 createOctopusWarshipMesh 设置）
+    this.parts = (mesh as any).bossParts || [];
+
     this.setupCallbacks();
 
     this.health.onDeath = () => {
