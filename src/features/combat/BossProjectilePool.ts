@@ -96,12 +96,25 @@ export class BossProjectilePool {
   /**
    * 更新所有炮弹
    */
-  public update(deltaTime: number): void {
+  public update(
+    deltaTime: number,
+    impactHeight?: number,
+    onEnvironmentHit?: (position: Vector3) => void
+  ): void {
     for (const projectile of this.pool) {
       if (!projectile.active) continue;
 
       // 移动炮弹
       projectile.mesh.position.addScaledVector(projectile.direction, projectile.speed * deltaTime);
+
+      if (
+        typeof impactHeight === 'number'
+        && projectile.mesh.position.y <= impactHeight
+      ) {
+        onEnvironmentHit?.(projectile.mesh.position.clone());
+        this.deactivate(projectile);
+        continue;
+      }
 
       // 检查是否超出最大距离
       const distance = projectile.mesh.position.distanceTo(projectile.startPosition);

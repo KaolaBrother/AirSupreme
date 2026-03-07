@@ -26,7 +26,7 @@ import { GameConfig, GAME_CONSTANTS, type QualityPreset } from '@/config';
 import { BOSS_CONFIGS, BossType, BossConfig } from '@/features/boss/BossTypes';
 import { createPlayerMesh, createEnemyMesh } from '@/features/aircraft/AircraftMeshFactory';
 import { getDifficultyProfile } from '@/core/Difficulty';
-import { getLevelConfig, LevelWaveEventType } from '@/features/terrain/LevelConfig';
+import { getLevelConfig, LevelWaveEventType, TerrainType } from '@/features/terrain/LevelConfig';
 import { GameSessionState } from '@/core/GameSessionState';
 import { ResourceRegistry } from '@/core/ResourceRegistry';
 import { PresentationController } from '@/core/PresentationController';
@@ -1339,6 +1339,40 @@ export class GameCoordinator {
     }
 
     this.gameScene.applyLevelEnvironment(levelConfig);
+    this.configureEnvironmentImpactFeedback(levelConfig);
+  }
+
+  private configureEnvironmentImpactFeedback(levelConfig: ReturnType<typeof getLevelConfig>): void {
+    if (!levelConfig) {
+      this.combatSystem.setEnvironmentImpactHandler(null);
+      return;
+    }
+
+    const impactHeight = levelConfig.terrain === TerrainType.OCEAN ? -47.8 : -48.6;
+    this.combatSystem.setEnvironmentImpactHandler(impactHeight, (position, source) => {
+      const isWaterImpact = this.isWaterImpact(levelConfig.terrain, position);
+      if (isWaterImpact) {
+        this.particleSystem.createWaterImpact(position, source === 'boss' ? 1.2 : 0.9);
+        this.audioManager.playWaterImpact(source === 'boss' ? 1.1 : 0.85);
+        return;
+      }
+
+      this.particleSystem.createGroundImpact(position, source === 'boss' ? 1.15 : 0.85);
+      this.audioManager.playHit(source === 'boss' ? 1.05 : 0.8);
+    });
+  }
+
+  private isWaterImpact(terrain: TerrainType, position: THREE.Vector3): boolean {
+    if (terrain === TerrainType.OCEAN) {
+      return true;
+    }
+
+    if (terrain !== TerrainType.LAKE) {
+      return false;
+    }
+
+    const lakeRadius = 210;
+    return position.x * position.x + position.z * position.z <= lakeRadius * lakeRadius;
   }
 
   public stop(): void {

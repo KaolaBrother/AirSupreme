@@ -647,6 +647,39 @@ export class AudioManager {
     }
   }
 
+  public playWaterImpact(intensity: number = 1): void {
+    const sound = this.beginSound(SoundType.HIT, 90);
+    if (!sound) return;
+    const { now, context, sfxGain } = sound;
+    const splashIntensity = Math.max(0.7, Math.min(1.8, intensity));
+
+    try {
+      const bodyOsc = context.createOscillator();
+      const bodyGain = context.createGain();
+      bodyOsc.type = 'sine';
+      bodyOsc.frequency.setValueAtTime(240, now);
+      bodyOsc.frequency.exponentialRampToValueAtTime(90, now + 0.12);
+      bodyGain.gain.setValueAtTime(0, now);
+      bodyGain.gain.linearRampToValueAtTime(0.08 * this.sfxVolume * splashIntensity, now + 0.01);
+      bodyGain.gain.exponentialRampToValueAtTime(0.01, now + 0.13);
+      bodyOsc.connect(bodyGain);
+      bodyGain.connect(sfxGain);
+      bodyOsc.start(now);
+      bodyOsc.stop(now + 0.13);
+
+      this.playFilteredNoise(
+        0.11,
+        0.01,
+        0.09 * this.sfxVolume * splashIntensity,
+        'bandpass',
+        1400,
+        1.2
+      );
+    } catch {
+      // Ignore
+    }
+  }
+
   /**
    * 播放道具拾取音效
    */

@@ -14,6 +14,8 @@ interface TargetInfo {
   ai?: unknown;
 }
 
+type EnvironmentProjectileSource = 'player' | 'enemy' | 'boss';
+
 export class CombatSystem implements IGameSystem {
   readonly name = 'CombatSystem';
 
@@ -24,6 +26,8 @@ export class CombatSystem implements IGameSystem {
 
   private playerMesh: Group;
   private playerPosition: Vector3;
+  private environmentImpactHeight: number | null = null;
+  private onEnvironmentImpact?: (position: Vector3, source: EnvironmentProjectileSource) => void;
 
   private damageMultiplier: number = 1;
   private eventUnsubscribers: (() => void)[] = [];
@@ -77,9 +81,15 @@ export class CombatSystem implements IGameSystem {
 
   update(deltaTime: number): void {
     this.playerPosition.copy(this.playerMesh.position);
-    this.playerProjectilePool.update(deltaTime);
-    this.enemyProjectilePool.update(deltaTime);
-    this.bossProjectilePool.update(deltaTime);
+    this.playerProjectilePool.update(deltaTime, this.environmentImpactHeight ?? undefined, (position) => {
+      this.onEnvironmentImpact?.(position, 'player');
+    });
+    this.enemyProjectilePool.update(deltaTime, this.environmentImpactHeight ?? undefined, (position) => {
+      this.onEnvironmentImpact?.(position, 'enemy');
+    });
+    this.bossProjectilePool.update(deltaTime, this.environmentImpactHeight ?? undefined, (position) => {
+      this.onEnvironmentImpact?.(position, 'boss');
+    });
     this.missileSystem.update(deltaTime);
   }
 
@@ -99,6 +109,14 @@ export class CombatSystem implements IGameSystem {
 
   getDamageMultiplier(): number {
     return this.damageMultiplier;
+  }
+
+  setEnvironmentImpactHandler(
+    impactHeight: number | null,
+    onEnvironmentImpact?: (position: Vector3, source: EnvironmentProjectileSource) => void
+  ): void {
+    this.environmentImpactHeight = impactHeight;
+    this.onEnvironmentImpact = onEnvironmentImpact;
   }
 
   checkProjectileCollisions(

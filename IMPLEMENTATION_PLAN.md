@@ -114,6 +114,9 @@
   - 更清楚的炮口 flash
   - 更清楚的弹道存在感
   - 命中后有更明确的冲击层次
+- [done] 环境命中反馈第一批已接入
+  - 普通子弹与 Boss 炮弹撞地时会触发地面火花/尘土反馈
+  - 湖区与海洋关已接入水花反馈
 - [later] 不同材质命中反馈差异化
   - 金属目标、地面、水面、装甲目标可有不同表现
 
@@ -231,6 +234,7 @@
   - 菜单启动与游戏运行时进一步拆边界
   - `EnemySystem -> LevelManager -> TerrainGenerator` 延后实例化
   - Boss 控制器继续后移到按需路径
+- [next] `EnemySystem` 从 `GameCoordinator` 构造阶段后移到 `start()` / 战斗开始阶段
 - [done] 菜单启动与游戏运行时已拆出一层边界
   - `main.ts` 现在先启动 `StartMenu`
   - 点击开始后才动态导入并实例化 `GameCoordinator`

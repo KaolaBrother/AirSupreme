@@ -262,6 +262,66 @@ export class ParticleSystem {
     });
   }
 
+  public createGroundImpact(position: THREE.Vector3, intensity: number = 1): void {
+    const impactIntensity = THREE.MathUtils.clamp(intensity, 0.7, 1.8);
+    const sparkCount = Math.max(3, Math.floor(4 + impactIntensity * 3));
+    const dustCount = Math.max(4, Math.floor(5 + impactIntensity * 4));
+
+    for (let i = 0; i < sparkCount; i++) {
+      this.spawnParticle(ParticleType.SPARK, position, {
+        speed: 10 + Math.random() * (8 + impactIntensity * 8),
+        life: 0.06 + Math.random() * 0.08,
+        size: 0.06 + Math.random() * 0.08,
+        color: this.tempColorA.setHSL(0.1, 1, 0.68 + Math.random() * 0.08),
+      });
+    }
+
+    for (let i = 0; i < dustCount; i++) {
+      this.spawnParticle(ParticleType.SMOKE, position, {
+        speed: 2 + Math.random() * (2 + impactIntensity * 2),
+        life: 0.2 + Math.random() * 0.18,
+        size: 0.18 + Math.random() * (0.18 + impactIntensity * 0.16),
+        color: this.tempColorB.setHSL(0.08, 0.18, 0.34 + Math.random() * 0.1),
+      });
+    }
+  }
+
+  public createWaterImpact(position: THREE.Vector3, intensity: number = 1): void {
+    const impactIntensity = THREE.MathUtils.clamp(intensity, 0.75, 2);
+    const sprayCount = Math.max(5, Math.floor(6 + impactIntensity * 4));
+    const mistCount = Math.max(4, Math.floor(4 + impactIntensity * 3));
+
+    for (let i = 0; i < sprayCount; i++) {
+      const particle = this.spawnParticle(ParticleType.SPARK, position, {
+        speed: 6 + Math.random() * (8 + impactIntensity * 5),
+        life: 0.1 + Math.random() * 0.08,
+        size: 0.08 + Math.random() * 0.08,
+        color: this.tempColorA.setHSL(0.55 + Math.random() * 0.03, 0.75, 0.78 + Math.random() * 0.08),
+      });
+      if (!particle) continue;
+      particle.velocity.y = 4 + Math.random() * (4 + impactIntensity * 4);
+    }
+
+    for (let i = 0; i < mistCount; i++) {
+      this.spawnParticle(ParticleType.SMOKE, position, {
+        speed: 1.4 + Math.random() * (1.6 + impactIntensity * 1.8),
+        life: 0.16 + Math.random() * 0.16,
+        size: 0.22 + Math.random() * (0.18 + impactIntensity * 0.16),
+        color: this.tempColorB.setHSL(0.56, 0.28, 0.82 + Math.random() * 0.08),
+      });
+    }
+
+    this.emitFlakRing(
+      position,
+      0.4 + impactIntensity * 0.5,
+      Math.max(6, Math.floor(6 + impactIntensity * 3)),
+      0.08,
+      0.16,
+      6,
+      0.05
+    );
+  }
+
   /**
    * 创建尾迹效果
    */
