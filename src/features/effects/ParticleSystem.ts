@@ -49,6 +49,7 @@ export class ParticleSystem {
   private readonly gravity = new THREE.Vector3(0, -9.8, 0);
   private readonly spawnDirection = new THREE.Vector3();
   private readonly trailColor = new THREE.Color();
+  private readonly directedVelocity = new THREE.Vector3();
 
   constructor(scene: THREE.Scene) {
     this.scene = scene;
@@ -184,16 +185,41 @@ export class ParticleSystem {
   /**
    * 创建击中效果
    */
-  public createHit(position: THREE.Vector3): void {
-    // 小型火花
-    for (let i = 0; i < 10; i++) {
+  public createHit(position: THREE.Vector3, intensity: number = 1): void {
+    const sparkCount = Math.max(6, Math.floor(10 * intensity));
+
+    // 高频火花层：让普通命中更明确
+    for (let i = 0; i < sparkCount; i++) {
       this.spawnParticle(ParticleType.SPARK, position, {
-        speed: 20,
-        life: 0.2 + Math.random() * 0.3,
-        size: 0.1 + Math.random() * 0.2,
-        color: new THREE.Color(0xffaa00),
+        speed: 18 + Math.random() * 18 * intensity,
+        life: 0.12 + Math.random() * 0.18,
+        size: 0.08 + Math.random() * 0.16 * intensity,
+        color: new THREE.Color().setHSL(0.1, 1, 0.62),
       });
     }
+
+    // 擦伤热区：短寿命橙白闪
+    for (let i = 0; i < Math.max(2, Math.floor(4 * intensity)); i++) {
+      this.spawnParticle(ParticleType.EXPLOSION, position, {
+        speed: 8 + Math.random() * 12,
+        life: 0.08 + Math.random() * 0.12,
+        size: 0.14 + Math.random() * 0.2 * intensity,
+        color: new THREE.Color().setHSL(0.075, 0.95, 0.72),
+      });
+    }
+
+    // 轻微烟痕，增加冲击感但不抢镜
+    const smokePosition = position.clone();
+    this.scheduleBurst(0.03, () => {
+      for (let i = 0; i < Math.max(1, Math.floor(3 * intensity)); i++) {
+        this.spawnParticle(ParticleType.SMOKE, smokePosition, {
+          speed: 2 + Math.random() * 3,
+          life: 0.18 + Math.random() * 0.18,
+          size: 0.18 + Math.random() * 0.28 * intensity,
+          color: new THREE.Color().setHSL(0.08, 0.12, 0.42 + Math.random() * 0.08),
+        });
+      }
+    });
   }
 
   /**
@@ -207,6 +233,142 @@ export class ParticleSystem {
       size: 0.3,
       color: this.trailColor,
     });
+  }
+
+  public createMissileTrail(
+    position: THREE.Vector3,
+    direction: THREE.Vector3,
+    color: THREE.Color,
+    intensity: number = 1
+  ): void {
+    this.trailColor.copy(color);
+    this.directedVelocity.copy(direction).normalize();
+
+    const smoke = this.spawnParticle(ParticleType.SMOKE, position, {
+      speed: 3 + intensity * 2,
+      life: 0.26 + Math.random() * 0.12,
+      size: 0.28 + Math.random() * 0.18 * intensity,
+      color: this.trailColor,
+    });
+    if (smoke) {
+      smoke.velocity.copy(this.directedVelocity).multiplyScalar(-(8 + intensity * 5));
+      smoke.velocity.y += (Math.random() - 0.5) * 1.5;
+    }
+
+    const flame = this.spawnParticle(ParticleType.FIRE, position, {
+      speed: 5 + intensity * 3,
+      life: 0.1 + Math.random() * 0.07,
+      size: 0.18 + Math.random() * 0.14 * intensity,
+      color: new THREE.Color().setHSL(0.085 + Math.random() * 0.03, 1, 0.58),
+    });
+    if (flame) {
+      flame.velocity.copy(this.directedVelocity).multiplyScalar(-(15 + intensity * 8));
+    }
+
+    if (Math.random() < 0.4) {
+      const spark = this.spawnParticle(ParticleType.SPARK, position, {
+        speed: 6 + intensity * 3,
+        life: 0.08 + Math.random() * 0.08,
+        size: 0.08 + Math.random() * 0.06,
+        color: new THREE.Color(0xffcc66),
+      });
+      if (spark) {
+        spark.velocity.copy(this.directedVelocity).multiplyScalar(-(20 + intensity * 8));
+      }
+    }
+  }
+
+  public createMissileImpact(position: THREE.Vector3, scale: number = 1): void {
+    const sparkCount = Math.max(10, Math.floor(14 * scale));
+
+    for (let i = 0; i < Math.max(4, Math.floor(6 * scale)); i++) {
+      this.spawnParticle(ParticleType.EXPLOSION, position, {
+        speed: 18 + Math.random() * 14,
+        life: 0.12 + Math.random() * 0.12,
+        size: 0.18 + Math.random() * 0.28 * scale,
+        color: new THREE.Color().setHSL(0.08, 1, 0.72),
+      });
+    }
+
+    for (let i = 0; i < sparkCount; i++) {
+      this.spawnParticle(ParticleType.SPARK, position, {
+        speed: 34 + Math.random() * 30,
+        life: 0.18 + Math.random() * 0.18,
+        size: 0.08 + Math.random() * 0.12 * scale,
+        color: new THREE.Color(0xffc15c),
+      });
+    }
+
+    for (let i = 0; i < Math.max(3, Math.floor(5 * scale)); i++) {
+      this.spawnParticle(ParticleType.DEBRIS, position, {
+        speed: 14 + Math.random() * 10,
+        life: 0.45 + Math.random() * 0.35,
+        size: 0.12 + Math.random() * 0.14 * scale,
+        color: new THREE.Color(0x5f6066),
+        gravity: true,
+      });
+    }
+
+    const smokePosition = position.clone();
+    this.scheduleBurst(0.04, () => {
+      for (let i = 0; i < Math.max(4, Math.floor(6 * scale)); i++) {
+        this.spawnParticle(ParticleType.SMOKE, smokePosition, {
+          speed: 4 + Math.random() * 4,
+          life: 0.45 + Math.random() * 0.35,
+          size: 0.45 + Math.random() * 0.4 * scale,
+          color: new THREE.Color().setHSL(0.08, 0.08, 0.34 + Math.random() * 0.08),
+        });
+      }
+    });
+  }
+
+  public createBossMissileTrail(position: THREE.Vector3, direction: THREE.Vector3): void {
+    this.directedVelocity.copy(direction).normalize();
+
+    const smoke = this.spawnParticle(ParticleType.SMOKE, position, {
+      speed: 4,
+      life: 0.4 + Math.random() * 0.16,
+      size: 0.5 + Math.random() * 0.24,
+      color: new THREE.Color().setHSL(0.03, 0.18, 0.4 + Math.random() * 0.06),
+    });
+    if (smoke) {
+      smoke.velocity.copy(this.directedVelocity).multiplyScalar(-14);
+      smoke.velocity.y += (Math.random() - 0.5) * 1.8;
+    }
+
+    const fireCore = this.spawnParticle(ParticleType.FIRE, position, {
+      speed: 7,
+      life: 0.14 + Math.random() * 0.1,
+      size: 0.34 + Math.random() * 0.18,
+      color: new THREE.Color().setHSL(0.055 + Math.random() * 0.025, 1, 0.54),
+    });
+    if (fireCore) {
+      fireCore.velocity.copy(this.directedVelocity).multiplyScalar(-24);
+    }
+
+    const flare = this.spawnParticle(ParticleType.EXPLOSION, position, {
+      speed: 5,
+      life: 0.1 + Math.random() * 0.06,
+      size: 0.22 + Math.random() * 0.12,
+      color: new THREE.Color().setHSL(0.1, 1, 0.7),
+    });
+    if (flare) {
+      flare.velocity.copy(this.directedVelocity).multiplyScalar(-18);
+    }
+  }
+
+  public createBossMissileExplosion(position: THREE.Vector3, scale: number = 1.6): void {
+    this.createExplosion(position, scale);
+    this.createMissileImpact(position, scale * 1.1);
+
+    for (let i = 0; i < Math.max(8, Math.floor(10 * scale)); i++) {
+      this.spawnParticle(ParticleType.FIRE, position, {
+        speed: 28 + Math.random() * 20,
+        life: 0.28 + Math.random() * 0.24,
+        size: 0.42 + Math.random() * 0.35 * scale,
+        color: new THREE.Color().setHSL(0.04 + Math.random() * 0.03, 1, 0.5),
+      });
+    }
   }
 
   public createFlakExplosion(position: THREE.Vector3, radius: number = 50): void {

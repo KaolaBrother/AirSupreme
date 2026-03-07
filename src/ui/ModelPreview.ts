@@ -1,25 +1,40 @@
-import * as THREE from 'three';
+import {
+  AmbientLight,
+  BoxGeometry,
+  Color,
+  ConeGeometry,
+  CylinderGeometry,
+  DirectionalLight,
+  Group,
+  Mesh,
+  MeshBasicMaterial,
+  MeshStandardMaterial,
+  PerspectiveCamera,
+  Scene,
+  TorusGeometry,
+  WebGLRenderer,
+} from 'three';
 import { EnemyType, ENEMY_CONFIGS } from '@/features/enemy/EnemyTypes';
 import { BossType, BOSS_CONFIGS, BOSS_MISSILE_CONFIG } from '@/features/boss/BossTypes';
 
 interface AircraftMeshFactoryModule {
-  createPlayerMesh: () => THREE.Group;
-  createEnemyMesh: (config: (typeof ENEMY_CONFIGS)[EnemyType]) => THREE.Group;
+  createPlayerMesh: () => Group;
+  createEnemyMesh: (config: (typeof ENEMY_CONFIGS)[EnemyType]) => Group;
 }
 
 interface AircraftInfo {
   id: string;
   name: string;
   type: 'player' | 'enemy' | 'boss' | 'missile';
-  createMesh: () => THREE.Group | Promise<THREE.Group>;
+  createMesh: () => Group | Promise<Group>;
 }
 
 export class ModelPreview {
   private container: HTMLDivElement;
-  private scene: THREE.Scene;
-  private camera: THREE.PerspectiveCamera;
-  private renderer: THREE.WebGLRenderer;
-  private currentMesh: THREE.Group | null = null;
+  private scene: Scene;
+  private camera: PerspectiveCamera;
+  private renderer: WebGLRenderer;
+  private currentMesh: Group | null = null;
   private currentIndex: number = 0;
   private aircrafts: AircraftInfo[] = [];
   private animationId: number = 0;
@@ -37,14 +52,14 @@ export class ModelPreview {
 
     this.nameDisplay = this.createNameDisplay();
 
-    this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0x1a1a2e);
+    this.scene = new Scene();
+    this.scene.background = new Color(0x1a1a2e);
 
-    this.camera = new THREE.PerspectiveCamera(50, 1, 0.1, 1000);
+    this.camera = new PerspectiveCamera(50, 1, 0.1, 1000);
     this.camera.position.set(0, 2, 8);
     this.camera.lookAt(0, 0, 0);
 
-    this.renderer = new THREE.WebGLRenderer({ antialias: true });
+    this.renderer = new WebGLRenderer({ antialias: true });
     this.renderer.setPixelRatio(window.devicePixelRatio);
     this.renderer.shadowMap.enabled = true;
 
@@ -203,15 +218,15 @@ export class ModelPreview {
   }
 
   private setupLighting(): void {
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+    const ambientLight = new AmbientLight(0xffffff, 0.5);
     this.scene.add(ambientLight);
 
-    const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+    const directionalLight = new DirectionalLight(0xffffff, 1);
     directionalLight.position.set(5, 10, 5);
     directionalLight.castShadow = true;
     this.scene.add(directionalLight);
 
-    const backLight = new THREE.DirectionalLight(0x6688ff, 0.5);
+    const backLight = new DirectionalLight(0x6688ff, 0.5);
     backLight.position.set(-5, 5, -5);
     this.scene.add(backLight);
   }
@@ -316,23 +331,23 @@ export class ModelPreview {
     return this.aircraftMeshFactoryPromise;
   }
 
-  private createBossMissileMesh(): THREE.Group {
-    const group = new THREE.Group();
+  private createBossMissileMesh(): Group {
+    const group = new Group();
     const scale = BOSS_MISSILE_CONFIG.SCALE;
 
-    const bodyMaterial = new THREE.MeshStandardMaterial({
+    const bodyMaterial = new MeshStandardMaterial({
       color: 0x8b0000,
       metalness: 0.7,
       roughness: 0.3,
     });
 
-    const noseMaterial = new THREE.MeshStandardMaterial({
+    const noseMaterial = new MeshStandardMaterial({
       color: 0x1a1a1a,
       metalness: 0.9,
       roughness: 0.2,
     });
 
-    const finMaterial = new THREE.MeshStandardMaterial({
+    const finMaterial = new MeshStandardMaterial({
       color: 0x2a2a2a,
       metalness: 0.8,
       roughness: 0.3,
@@ -341,14 +356,14 @@ export class ModelPreview {
     const bodyLength = 2.0 * scale;
     const bodyRadius = 0.35 * scale;
 
-    const bodyGeometry = new THREE.CylinderGeometry(bodyRadius * 0.8, bodyRadius, bodyLength, 12);
-    const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
+    const bodyGeometry = new CylinderGeometry(bodyRadius * 0.8, bodyRadius, bodyLength, 12);
+    const body = new Mesh(bodyGeometry, bodyMaterial);
     body.rotation.x = Math.PI / 2;
     body.position.z = bodyLength * 0.1;
     group.add(body);
 
-    const noseGeometry = new THREE.ConeGeometry(bodyRadius * 0.8, bodyLength * 0.6, 12);
-    const nose = new THREE.Mesh(noseGeometry, noseMaterial);
+    const noseGeometry = new ConeGeometry(bodyRadius * 0.8, bodyLength * 0.6, 12);
+    const nose = new Mesh(noseGeometry, noseMaterial);
     nose.rotation.x = Math.PI / 2;
     nose.position.z = bodyLength * 0.7;
     group.add(nose);
@@ -360,8 +375,8 @@ export class ModelPreview {
     for (let i = 0; i < finCount; i++) {
       const angle = (i / finCount) * Math.PI * 2;
 
-      const finGeometry = new THREE.BoxGeometry(0.1 * scale, finHeight, finLength);
-      const fin = new THREE.Mesh(finGeometry, finMaterial);
+      const finGeometry = new BoxGeometry(0.1 * scale, finHeight, finLength);
+      const fin = new Mesh(finGeometry, finMaterial);
 
       fin.position.x = Math.cos(angle) * (bodyRadius + finHeight * 0.5);
       fin.position.y = Math.sin(angle) * (bodyRadius + finHeight * 0.5);
@@ -372,34 +387,34 @@ export class ModelPreview {
       group.add(fin);
     }
 
-    const ringGeometry = new THREE.TorusGeometry(bodyRadius * 1.1, 0.05 * scale, 8, 16);
-    const ringMaterial = new THREE.MeshStandardMaterial({
+    const ringGeometry = new TorusGeometry(bodyRadius * 1.1, 0.05 * scale, 8, 16);
+    const ringMaterial = new MeshStandardMaterial({
       color: 0xffaa00,
       emissive: 0xff6600,
       emissiveIntensity: 0.5,
     });
-    const ring = new THREE.Mesh(ringGeometry, ringMaterial);
+    const ring = new Mesh(ringGeometry, ringMaterial);
     ring.position.z = -bodyLength * 0.1;
     group.add(ring);
 
-    const thrustGeometry = new THREE.ConeGeometry(bodyRadius * 0.6, bodyLength * 0.8, 8);
-    const thrustMaterial = new THREE.MeshBasicMaterial({
+    const thrustGeometry = new ConeGeometry(bodyRadius * 0.6, bodyLength * 0.8, 8);
+    const thrustMaterial = new MeshBasicMaterial({
       color: 0xff4400,
       transparent: true,
       opacity: 0.9,
     });
-    const thrust = new THREE.Mesh(thrustGeometry, thrustMaterial);
+    const thrust = new Mesh(thrustGeometry, thrustMaterial);
     thrust.rotation.x = Math.PI / 2;
     thrust.position.z = -bodyLength * 0.7;
     group.add(thrust);
 
-    const innerThrustGeometry = new THREE.ConeGeometry(bodyRadius * 0.3, bodyLength * 0.5, 8);
-    const innerThrustMaterial = new THREE.MeshBasicMaterial({
+    const innerThrustGeometry = new ConeGeometry(bodyRadius * 0.3, bodyLength * 0.5, 8);
+    const innerThrustMaterial = new MeshBasicMaterial({
       color: 0xffff00,
       transparent: true,
       opacity: 1,
     });
-    const innerThrust = new THREE.Mesh(innerThrustGeometry, innerThrustMaterial);
+    const innerThrust = new Mesh(innerThrustGeometry, innerThrustMaterial);
     innerThrust.rotation.x = Math.PI / 2;
     innerThrust.position.z = -bodyLength * 0.5;
     group.add(innerThrust);
@@ -493,7 +508,7 @@ export class ModelPreview {
     const mesh = await aircraft.createMesh();
     if (loadSequence !== this.meshLoadSequence || this.container.style.display === 'none') {
       mesh.traverse((object) => {
-        if (object instanceof THREE.Mesh) {
+        if (object instanceof Mesh) {
           object.geometry.dispose();
           if (Array.isArray(object.material)) {
             object.material.forEach((material) => material.dispose());
@@ -529,7 +544,7 @@ export class ModelPreview {
 
     this.scene.remove(this.currentMesh);
     this.currentMesh.traverse((object) => {
-      if (object instanceof THREE.Mesh) {
+      if (object instanceof Mesh) {
         object.geometry.dispose();
         if (Array.isArray(object.material)) {
           object.material.forEach((material) => material.dispose());

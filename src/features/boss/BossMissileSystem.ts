@@ -21,6 +21,7 @@ export class BossMissile {
   private potentialTargets: THREE.Object3D[] = [];
   private playerMesh: THREE.Object3D | null = null;
   private trailTimer: number = BOSS_MISSILE_TRAIL_INTERVAL;
+  private visualPulseTime: number = 0;
   private readonly lookTarget = new THREE.Vector3();
   private readonly orientationHelper = new THREE.Object3D();
   private readonly trailPosition = new THREE.Vector3();
@@ -29,6 +30,10 @@ export class BossMissile {
   private readonly targetPosition = new THREE.Vector3();
   private readonly targetDirection = new THREE.Vector3();
   private readonly currentDirection = new THREE.Vector3();
+  private readonly bodyMaterial: THREE.MeshStandardMaterial;
+  private readonly ringMaterial: THREE.MeshStandardMaterial;
+  private readonly thrustMaterial: THREE.MeshBasicMaterial;
+  private readonly innerThrustMaterial: THREE.MeshBasicMaterial;
 
   constructor(
     scene: THREE.Scene,
@@ -52,14 +57,16 @@ export class BossMissile {
 
     this.health.onDeath = () => {
       this.active = false;
-      this.particleSystem.createExplosion(this.mesh.position.clone(), 1.5);
+      this.particleSystem.createBossMissileExplosion(this.mesh.position.clone(), 1.6);
     };
 
     this.mesh = new THREE.Group();
     const scale = BOSS_MISSILE_CONFIG.SCALE;
 
-    const bodyMaterial = new THREE.MeshStandardMaterial({
+    this.bodyMaterial = new THREE.MeshStandardMaterial({
       color: 0x8b0000,
+      emissive: 0x3c0303,
+      emissiveIntensity: 0.18,
       metalness: 0.7,
       roughness: 0.3,
     });
@@ -80,7 +87,7 @@ export class BossMissile {
     const bodyRadius = 0.35 * scale;
 
     const bodyGeometry = new THREE.CylinderGeometry(bodyRadius * 0.8, bodyRadius, bodyLength, 12);
-    const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
+    const body = new THREE.Mesh(bodyGeometry, this.bodyMaterial);
     body.rotation.x = Math.PI / 2;
     body.position.z = bodyLength * 0.1;
     this.mesh.add(body);
@@ -111,33 +118,33 @@ export class BossMissile {
     }
 
     const ringGeometry = new THREE.TorusGeometry(bodyRadius * 1.1, 0.05 * scale, 8, 16);
-    const ringMaterial = new THREE.MeshStandardMaterial({
+    this.ringMaterial = new THREE.MeshStandardMaterial({
       color: 0xffaa00,
       emissive: 0xff6600,
-      emissiveIntensity: 0.5,
+      emissiveIntensity: 0.72,
     });
-    const ring = new THREE.Mesh(ringGeometry, ringMaterial);
+    const ring = new THREE.Mesh(ringGeometry, this.ringMaterial);
     ring.position.z = -bodyLength * 0.1;
     this.mesh.add(ring);
 
     const thrustGeometry = new THREE.ConeGeometry(bodyRadius * 0.6, bodyLength * 0.8, 8);
-    const thrustMaterial = new THREE.MeshBasicMaterial({
+    this.thrustMaterial = new THREE.MeshBasicMaterial({
       color: 0xff4400,
       transparent: true,
       opacity: 0.9,
     });
-    const thrust = new THREE.Mesh(thrustGeometry, thrustMaterial);
+    const thrust = new THREE.Mesh(thrustGeometry, this.thrustMaterial);
     thrust.rotation.x = Math.PI / 2;
     thrust.position.z = -bodyLength * 0.7;
     this.mesh.add(thrust);
 
     const innerThrustGeometry = new THREE.ConeGeometry(bodyRadius * 0.3, bodyLength * 0.5, 8);
-    const innerThrustMaterial = new THREE.MeshBasicMaterial({
+    this.innerThrustMaterial = new THREE.MeshBasicMaterial({
       color: 0xffff00,
       transparent: true,
       opacity: 1,
     });
-    const innerThrust = new THREE.Mesh(innerThrustGeometry, innerThrustMaterial);
+    const innerThrust = new THREE.Mesh(innerThrustGeometry, this.innerThrustMaterial);
     innerThrust.rotation.x = Math.PI / 2;
     innerThrust.position.z = -bodyLength * 0.5;
     this.mesh.add(innerThrust);
@@ -164,7 +171,7 @@ export class BossMissile {
 
     if (this.mesh.position.y <= -50) {
       this.active = false;
-      this.particleSystem.createExplosion(this.mesh.position.clone(), 1.5);
+      this.particleSystem.createBossMissileExplosion(this.mesh.position.clone(), 1.5);
       return;
     }
 
@@ -177,6 +184,8 @@ export class BossMissile {
     }
 
     this.mesh.position.addScaledVector(this.velocity, deltaTime);
+    this.visualPulseTime += deltaTime;
+    this.updateVisuals();
 
     if (this.velocity.length() > 0) {
       this.lookTarget.copy(this.mesh.position).add(this.velocity);
@@ -246,11 +255,20 @@ export class BossMissile {
       .normalize()
       .multiplyScalar(-1.5 * BOSS_MISSILE_CONFIG.SCALE);
     this.trailPosition.add(this.backwardDirection);
-    this.trailColor.setHSL(0.05 + Math.random() * 0.03, 1, 0.6);
-    this.particleSystem.createTrail(this.trailPosition, this.trailColor);
+    this.trailColor.setHSL(0.045 + Math.random() * 0.02, 1, 0.58);
+    this.particleSystem.createBossMissileTrail(this.trailPosition, this.velocity);
+  }
+
+  private updateVisuals(): void {
+    const pulse = 0.7 + Math.sin(this.visualPulseTime * 18) * 0.2;
+    this.bodyMaterial.emissiveIntensity = 0.12 + pulse * 0.16;
+    this.ringMaterial.emissiveIntensity = 0.56 + pulse * 0.42;
+    this.thrustMaterial.opacity = 0.68 + pulse * 0.22;
+    this.innerThrustMaterial.opacity = 0.78 + pulse * 0.2;
   }
 
   public takeDamage(damage: number): void {
+    this.particleSystem.createHit(this.mesh.position, 1.2);
     this.health.takeDamage(damage);
   }
 
@@ -332,6 +350,7 @@ export class BossMissileSystem {
 
         if (distance < hitDistance) {
           missile.active = false;
+          this.particleSystem.createBossMissileExplosion(missile.mesh.position.clone(), 1.45);
           onHit(targetMesh, BOSS_MISSILE_CONFIG.DAMAGE);
           break;
         }

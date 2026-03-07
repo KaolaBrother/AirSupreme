@@ -19,6 +19,9 @@ describe('BossMissileSystem', () => {
     mockParticleSystem = {
       createExplosion: vi.fn(),
       createTrail: vi.fn(),
+      createBossMissileTrail: vi.fn(),
+      createBossMissileExplosion: vi.fn(),
+      createHit: vi.fn(),
     } as unknown as ParticleSystem;
   });
 
@@ -101,7 +104,8 @@ describe('BossMissileSystem', () => {
       expect(missile.active).toBe(true);
       missile.takeDamage(BOSS_MISSILE_CONFIG.HEALTH);
       expect(missile.active).toBe(false);
-      expect(mockParticleSystem.createExplosion).toHaveBeenCalled();
+      expect(mockParticleSystem.createHit).toHaveBeenCalled();
+      expect(mockParticleSystem.createBossMissileExplosion).toHaveBeenCalled();
     });
 
     it('should survive partial damage', () => {
@@ -116,7 +120,7 @@ describe('BossMissileSystem', () => {
 
       missile.update(0.016);
 
-      expect(mockParticleSystem.createTrail).toHaveBeenCalled();
+      expect(mockParticleSystem.createBossMissileTrail).toHaveBeenCalled();
     });
   });
 

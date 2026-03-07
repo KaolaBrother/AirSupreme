@@ -1,14 +1,28 @@
-import * as THREE from 'three';
+import {
+  AdditiveBlending,
+  BufferAttribute,
+  BufferGeometry,
+  DoubleSide,
+  Group,
+  Material,
+  Mesh,
+  MeshBasicMaterial,
+  Points,
+  PointsMaterial,
+  SphereGeometry,
+  TorusGeometry,
+  Vector3,
+} from 'three';
 
 /**
  * 气球生成效果
  * 从上方降落并弹出，持续 2 秒
  */
 export class SpawnBalloon {
-  private group: THREE.Group;
-  private glowSphere!: THREE.Mesh;
-  private ring!: THREE.Mesh;
-  private starParticles!: THREE.Points;
+  private group: Group;
+  private glowSphere!: Mesh;
+  private ring!: Mesh;
+  private starParticles!: Points;
 
   private lifetime: number = 0;
   private maxLifetime: number = 2; // 2秒生成时间
@@ -17,9 +31,9 @@ export class SpawnBalloon {
 
   private onComplete?: () => void;
 
-  constructor(position: THREE.Vector3, onComplete?: () => void) {
+  constructor(position: Vector3, onComplete?: () => void) {
     this.onComplete = onComplete;
-    this.group = new THREE.Group();
+    this.group = new Group();
     this.group.position.copy(position);
 
     this.createSpawnEffect();
@@ -30,28 +44,28 @@ export class SpawnBalloon {
    */
   private createSpawnEffect(): void {
     // 材质
-    const glowMaterial = new THREE.MeshBasicMaterial({
+    const glowMaterial = new MeshBasicMaterial({
       color: 0x00ffff,
       transparent: true,
       opacity: 0.6,
     });
 
-    const ringMaterial = new THREE.MeshBasicMaterial({
+    const ringMaterial = new MeshBasicMaterial({
       color: 0xffff00,
       transparent: true,
       opacity: 0.5,
-      side: THREE.DoubleSide,
+      side: DoubleSide,
     });
 
     // 中心发光球
-    const glowGeometry = new THREE.SphereGeometry(3, 32, 32);
-    this.glowSphere = new THREE.Mesh(glowGeometry, glowMaterial);
+    const glowGeometry = new SphereGeometry(3, 32, 32);
+    this.glowSphere = new Mesh(glowGeometry, glowMaterial);
     this.glowSphere.scale.set(0, 0, 0);
     this.group.add(this.glowSphere);
 
     // 扩散环
-    const ringGeometry = new THREE.TorusGeometry(4, 0.3, 16, 100);
-    this.ring = new THREE.Mesh(ringGeometry, ringMaterial);
+    const ringGeometry = new TorusGeometry(4, 0.3, 16, 100);
+    this.ring = new Mesh(ringGeometry, ringMaterial);
     this.ring.rotation.x = Math.PI / 2;
     this.ring.scale.set(0, 0, 0);
     this.group.add(this.ring);
@@ -65,7 +79,7 @@ export class SpawnBalloon {
    */
   private createStarParticles(): void {
     const particleCount = 30;
-    const geometry = new THREE.BufferGeometry();
+    const geometry = new BufferGeometry();
     const positions = new Float32Array(particleCount * 3);
     const colors = new Float32Array(particleCount * 3);
 
@@ -87,18 +101,18 @@ export class SpawnBalloon {
       colors[i3 + 2] = 0.0;
     }
 
-    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    geometry.setAttribute('position', new BufferAttribute(positions, 3));
+    geometry.setAttribute('color', new BufferAttribute(colors, 3));
 
-    const material = new THREE.PointsMaterial({
+    const material = new PointsMaterial({
       size: 0.6,
       vertexColors: true,
       transparent: true,
       opacity: 0.9,
-      blending: THREE.AdditiveBlending,
+      blending: AdditiveBlending,
     });
 
-    this.starParticles = new THREE.Points(geometry, material);
+    this.starParticles = new Points(geometry, material);
     this.starParticles.visible = false;
     this.group.add(this.starParticles);
   }
@@ -167,8 +181,8 @@ export class SpawnBalloon {
 
       // 淡出透明度
       const opacity = 1 - fadeProgress;
-      (this.glowSphere.material as THREE.MeshBasicMaterial).opacity = opacity * 0.6;
-      (this.ring.material as THREE.MeshBasicMaterial).opacity = opacity * 0.5;
+      (this.glowSphere.material as MeshBasicMaterial).opacity = opacity * 0.6;
+      (this.ring.material as MeshBasicMaterial).opacity = opacity * 0.5;
     }
 
     // 完成检查
@@ -198,7 +212,7 @@ export class SpawnBalloon {
   /**
    * 获取特效的 Group
    */
-  public getMesh(): THREE.Group {
+  public getMesh(): Group {
     return this.group;
   }
 
@@ -224,12 +238,12 @@ export class SpawnBalloon {
 
     // 释放几何体和材质
     this.glowSphere.geometry.dispose();
-    (this.glowSphere.material as THREE.Material).dispose();
+    (this.glowSphere.material as Material).dispose();
 
     this.ring.geometry.dispose();
-    (this.ring.material as THREE.Material).dispose();
+    (this.ring.material as Material).dispose();
 
     this.starParticles.geometry.dispose();
-    (this.starParticles.material as THREE.Material).dispose();
+    (this.starParticles.material as Material).dispose();
   }
 }

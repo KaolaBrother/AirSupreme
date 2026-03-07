@@ -43,7 +43,9 @@ export class Missile {
   private enemies: THREE.Object3D[] = []; // 敌人列表，用于重新锁定目标
   private coneMaterial: THREE.MeshStandardMaterial;
   private trailMaterial: THREE.MeshBasicMaterial;
+  private engineGlowMaterial: THREE.MeshBasicMaterial;
   private trailTimer: number = MISSILE_TRAIL_INTERVAL;
+  private visualPulseTime: number = 0;
   private readonly targetWorldPos = new THREE.Vector3();
   private readonly targetDirection = new THREE.Vector3();
   private readonly currentDirection = new THREE.Vector3();
@@ -93,6 +95,16 @@ export class Missile {
     this.trail.rotation.x = -Math.PI / 2;
     this.trail.position.z = 1.5;
     this.mesh.add(this.trail);
+
+    this.engineGlowMaterial = new THREE.MeshBasicMaterial({
+      color: 0xffaa33,
+      transparent: true,
+      opacity: 0.72,
+    });
+    const engineGlow = new THREE.Mesh(new THREE.SphereGeometry(0.38, 10, 10), this.engineGlowMaterial);
+    engineGlow.scale.set(0.7, 0.7, 1.2);
+    engineGlow.position.z = 1.3;
+    this.mesh.add(engineGlow);
 
     // 设置导弹位置为发射位置
     this.mesh.position.copy(position);
@@ -161,6 +173,8 @@ export class Missile {
 
     // 移动导弹
     this.mesh.position.addScaledVector(this.velocity, deltaTime);
+    this.visualPulseTime += deltaTime;
+    this.updateVisuals();
 
     // 更新朝向（使用四元数直接指向速度方向）
     if (this.velocity.length() > 0) {
@@ -224,7 +238,20 @@ export class Missile {
     this.backwardDirection.copy(this.velocity).normalize().multiplyScalar(-1.5);
     this.trailPosition.add(this.backwardDirection);
     this.trailColor.setHSL(0.08 + Math.random() * 0.03, 1, 0.6);
-    this.particleSystem.createTrail(this.trailPosition, this.trailColor);
+    this.particleSystem.createMissileTrail(this.trailPosition, this.velocity, this.trailColor, 1);
+  }
+
+  private updateVisuals(): void {
+    const pulse = 0.72 + Math.sin(this.visualPulseTime * 28) * 0.18;
+    const speedPulse = THREE.MathUtils.clamp(this.velocity.length() / this.speed, 0.8, 1.15);
+
+    this.coneMaterial.emissiveIntensity = 0.42 + pulse * 0.28;
+    this.trailMaterial.opacity = 0.78 + pulse * 0.22;
+    this.engineGlowMaterial.opacity = 0.58 + pulse * 0.26;
+    if (this.trail) {
+      const flameScale = 0.88 + pulse * 0.18 * speedPulse;
+      this.trail.scale.set(flameScale, flameScale, 1 + pulse * 0.2);
+    }
   }
 
   /**
@@ -269,6 +296,7 @@ export class Missile {
     scene.remove(this.mesh);
     this.coneMaterial.dispose();
     this.trailMaterial.dispose();
+    this.engineGlowMaterial.dispose();
     this.active = false;
   }
 }
@@ -358,6 +386,7 @@ export class MissileSystem {
 
         if (distance < hitDistance) {
           missile.active = false;
+          this.particleSystem.createMissileImpact(targetWorldPos, 1.05);
           onHit(targetMesh);
           break;
         }

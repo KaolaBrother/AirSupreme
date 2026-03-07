@@ -42,6 +42,10 @@ const detailGeometries = {
   pod: new THREE.BoxGeometry(0.24, 0.18, 0.9),
   rail: new THREE.BoxGeometry(0.08, 0.08, 1.3),
   fin: new THREE.BoxGeometry(0.08, 0.45, 0.5),
+  strip: new THREE.BoxGeometry(0.08, 0.03, 0.9),
+  intakeLip: new THREE.BoxGeometry(0.06, 0.08, 0.68),
+  hardpoint: new THREE.BoxGeometry(0.12, 0.1, 0.46),
+  node: new THREE.BoxGeometry(0.18, 0.12, 0.28),
 };
 
 function createAircraftMaterial(
@@ -215,6 +219,7 @@ export function createPlayerMesh(): THREE.Group {
 
   const bodyMaterial = createAircraftMaterial(0xe8e8e8, 0.82, 0.22, 0.04);
   const wingMaterial = createAircraftMaterial(0xa0a0a0, 0.72, 0.32, 0.03);
+  const heroPanelMaterial = createAircraftMaterial(0xcfd8e3, 0.88, 0.18, 0.05);
   const cockpitMaterial = new THREE.MeshStandardMaterial({
     color: 0x1a1a1a,
     metalness: 0.95,
@@ -226,6 +231,7 @@ export function createPlayerMesh(): THREE.Group {
   });
   const accentMaterial = createAircraftMaterial(0x707070, 0.9, 0.2, 0.06);
   const detailMaterial = createAircraftMaterial(0x45505c, 0.72, 0.4, 0.02);
+  const sensorMaterial = createAircraftMaterial(0x5f7488, 0.9, 0.18, 0.1);
   const playerLightMaterial = new THREE.MeshBasicMaterial({
     color: 0x58d5ff,
     transparent: true,
@@ -292,6 +298,18 @@ export function createPlayerMesh(): THREE.Group {
   noseSensor.position.set(0, 0.03, -2.18);
   group.add(noseSensor);
 
+  const leftSensorCheek = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.12, 0.46), sensorMaterial);
+  leftSensorCheek.position.set(-0.22, 0.05, -1.78);
+  leftSensorCheek.rotation.y = -0.12;
+  leftSensorCheek.castShadow = true;
+  group.add(leftSensorCheek);
+
+  const rightSensorCheek = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.12, 0.46), sensorMaterial);
+  rightSensorCheek.position.set(0.22, 0.05, -1.78);
+  rightSensorCheek.rotation.y = 0.12;
+  rightSensorCheek.castShadow = true;
+  group.add(rightSensorCheek);
+
   // === 主翼 ===
   // ExtrudeGeometry 在 XY 平面创建，rotation.x = PI/2 后 Y→-Z
   // 所以 Y 值大 = Z 负（前方），Y 值小 = Z 正（后方）
@@ -320,6 +338,18 @@ export function createPlayerMesh(): THREE.Group {
   rightWing.position.set(0.4, 0, 0);
   rightWing.castShadow = true;
   group.add(rightWing);
+
+  const leftWingRootFairing = new THREE.Mesh(new THREE.BoxGeometry(0.58, 0.14, 1.1), heroPanelMaterial);
+  leftWingRootFairing.position.set(-0.68, 0.08, -0.5);
+  leftWingRootFairing.rotation.y = 0.18;
+  leftWingRootFairing.castShadow = true;
+  group.add(leftWingRootFairing);
+
+  const rightWingRootFairing = new THREE.Mesh(new THREE.BoxGeometry(0.58, 0.14, 1.1), heroPanelMaterial);
+  rightWingRootFairing.position.set(0.68, 0.08, -0.5);
+  rightWingRootFairing.rotation.y = -0.18;
+  rightWingRootFairing.castShadow = true;
+  group.add(rightWingRootFairing);
 
   const leftWingPanel = new THREE.Mesh(new THREE.BoxGeometry(1.15, 0.04, 0.22), detailMaterial);
   leftWingPanel.position.set(-1.28, 0.06, -0.25);
@@ -417,6 +447,11 @@ export function createPlayerMesh(): THREE.Group {
   leftIntake.castShadow = true;
   group.add(leftIntake);
 
+  const leftIntakeLip = new THREE.Mesh(detailGeometries.intakeLip, heroPanelMaterial);
+  leftIntakeLip.position.set(-0.43, -0.02, -0.3);
+  leftIntakeLip.castShadow = true;
+  group.add(leftIntakeLip);
+
   // 进气口内部（深色）
   const leftIntakeInner = new THREE.Mesh(new THREE.PlaneGeometry(0.2, 0.25), intakeInnerMaterial);
   leftIntakeInner.position.set(-0.68, -0.15, -0.3);
@@ -427,6 +462,11 @@ export function createPlayerMesh(): THREE.Group {
   rightIntake.position.set(0.55, -0.15, -0.3);
   rightIntake.castShadow = true;
   group.add(rightIntake);
+
+  const rightIntakeLip = new THREE.Mesh(detailGeometries.intakeLip, heroPanelMaterial);
+  rightIntakeLip.position.set(0.43, -0.02, -0.3);
+  rightIntakeLip.castShadow = true;
+  group.add(rightIntakeLip);
 
   const rightIntakeInner = new THREE.Mesh(new THREE.PlaneGeometry(0.2, 0.25), intakeInnerMaterial);
   rightIntakeInner.position.set(0.68, -0.15, -0.3);
@@ -450,6 +490,12 @@ export function createPlayerMesh(): THREE.Group {
   leftNozzle.castShadow = true;
   group.add(leftNozzle);
 
+  const leftNozzleRing = new THREE.Mesh(new THREE.TorusGeometry(0.21, 0.04, 8, 14), accentMaterial);
+  leftNozzleRing.rotation.x = Math.PI / 2;
+  leftNozzleRing.position.set(-0.3, -0.05, 2.07);
+  leftNozzleRing.castShadow = true;
+  group.add(leftNozzleRing);
+
   // 火焰：ConeGeometry 尖端朝向 +Y，+PI/2 使尖端朝向 +Z（后方）
   const leftGlow = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.3, 8), glowMaterial);
   leftGlow.rotation.x = Math.PI / 2;
@@ -467,6 +513,12 @@ export function createPlayerMesh(): THREE.Group {
   rightNozzle.position.set(0.3, -0.05, 2.0);
   rightNozzle.castShadow = true;
   group.add(rightNozzle);
+
+  const rightNozzleRing = new THREE.Mesh(new THREE.TorusGeometry(0.21, 0.04, 8, 14), accentMaterial);
+  rightNozzleRing.rotation.x = Math.PI / 2;
+  rightNozzleRing.position.set(0.3, -0.05, 2.07);
+  rightNozzleRing.castShadow = true;
+  group.add(rightNozzleRing);
 
   const rightGlow = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.3, 8), glowMaterial);
   rightGlow.rotation.x = Math.PI / 2;
@@ -487,11 +539,23 @@ export function createPlayerMesh(): THREE.Group {
   leftPylon.rotation.y = 0.15;
   group.add(leftPylon);
 
+  const leftInnerPylon = new THREE.Mesh(detailGeometries.hardpoint, accentMaterial);
+  leftInnerPylon.position.set(-0.82, -0.06, 0.15);
+  leftInnerPylon.rotation.y = 0.08;
+  leftInnerPylon.castShadow = true;
+  group.add(leftInnerPylon);
+
   // 右翼下挂点
   const rightPylon = new THREE.Mesh(pylonGeometry, accentMaterial);
   rightPylon.position.set(1.2, -0.1, 0.5);
   rightPylon.rotation.y = -0.15;
   group.add(rightPylon);
+
+  const rightInnerPylon = new THREE.Mesh(detailGeometries.hardpoint, accentMaterial);
+  rightInnerPylon.position.set(0.82, -0.06, 0.15);
+  rightInnerPylon.rotation.y = -0.08;
+  rightInnerPylon.castShadow = true;
+  group.add(rightInnerPylon);
 
   // === 细节装饰 ===
   // 机背脊线
@@ -499,6 +563,16 @@ export function createPlayerMesh(): THREE.Group {
   const spine = new THREE.Mesh(spineGeometry, accentMaterial);
   spine.position.set(0, 0.45, -0.2);
   group.add(spine);
+
+  const spineNodeFront = new THREE.Mesh(detailGeometries.node, heroPanelMaterial);
+  spineNodeFront.position.set(0, 0.34, -0.92);
+  spineNodeFront.castShadow = true;
+  group.add(spineNodeFront);
+
+  const spineNodeRear = new THREE.Mesh(detailGeometries.node, heroPanelMaterial);
+  spineNodeRear.position.set(0, 0.27, 0.88);
+  spineNodeRear.castShadow = true;
+  group.add(spineNodeRear);
 
   const dorsalStripe = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.03, 1.7), detailMaterial);
   dorsalStripe.position.set(0, 0.19, -0.1);
@@ -509,9 +583,21 @@ export function createPlayerMesh(): THREE.Group {
   leftNavLight.position.set(-2.18, 0.03, -0.48);
   group.add(leftNavLight);
 
+  const leftWingTipNode = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.08, 0.28), heroPanelMaterial);
+  leftWingTipNode.position.set(-2.02, 0.01, -0.44);
+  leftWingTipNode.rotation.y = -0.18;
+  leftWingTipNode.castShadow = true;
+  group.add(leftWingTipNode);
+
   const rightNavLight = new THREE.Mesh(new THREE.SphereGeometry(0.05, 8, 8), navGreenMaterial);
   rightNavLight.position.set(2.18, 0.03, -0.48);
   group.add(rightNavLight);
+
+  const rightWingTipNode = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.08, 0.28), heroPanelMaterial);
+  rightWingTipNode.position.set(2.02, 0.01, -0.44);
+  rightWingTipNode.rotation.y = 0.18;
+  rightWingTipNode.castShadow = true;
+  group.add(rightWingTipNode);
 
   // 设置阴影
   group.traverse((child) => {
@@ -638,6 +724,15 @@ export function createEnemyMesh(config: EnemyConfig): THREE.Group {
   engine.name = 'engineGlow';
   group.add(engine);
 
+  const engineRing = new THREE.Mesh(
+    new THREE.TorusGeometry(bodySize * 0.16, bodySize * 0.045, 8, 12),
+    materials.accent
+  );
+  engineRing.rotation.x = Math.PI / 2;
+  engineRing.position.set(0, 0, -bodyLength * 0.5 - 0.04);
+  engineRing.castShadow = true;
+  group.add(engineRing);
+
   const spinePanel = new THREE.Mesh(detailGeometries.panel, materials.detail);
   spinePanel.scale.z = bodyLength * 0.18;
   spinePanel.position.set(0, bodySize * 0.18, bodyLength * 0.02);
@@ -693,6 +788,20 @@ export function createEnemyMesh(config: EnemyConfig): THREE.Group {
       scoutFin.scale.set(0.8, 0.8, 0.65);
       scoutFin.position.set(0, bodySize * 0.32, -bodyLength * 0.08);
       group.add(scoutFin);
+
+      const leftScoutAntenna = new THREE.Mesh(detailGeometries.strip, materials.detail);
+      leftScoutAntenna.scale.set(0.45, 0.7, 0.75);
+      leftScoutAntenna.position.set(-bodySize * 0.22, bodySize * 0.3, bodyLength * 0.22);
+      leftScoutAntenna.rotation.z = -0.24;
+      leftScoutAntenna.castShadow = true;
+      group.add(leftScoutAntenna);
+
+      const rightScoutAntenna = new THREE.Mesh(detailGeometries.strip, materials.detail);
+      rightScoutAntenna.scale.set(0.45, 0.7, 0.75);
+      rightScoutAntenna.position.set(bodySize * 0.22, bodySize * 0.3, bodyLength * 0.22);
+      rightScoutAntenna.rotation.z = 0.24;
+      rightScoutAntenna.castShadow = true;
+      group.add(rightScoutAntenna);
       break;
     }
     case EnemyType.FIGHTER: {
@@ -709,6 +818,20 @@ export function createEnemyMesh(config: EnemyConfig): THREE.Group {
       rightPylon.rotation.y = -0.08;
       rightPylon.castShadow = true;
       group.add(rightPylon);
+
+      const leftCanard = new THREE.Mesh(detailGeometries.blade, materials.detail);
+      leftCanard.scale.set(0.75, 0.9, 0.8);
+      leftCanard.position.set(-bodySize * 0.28, 0.06, bodyLength * 0.12);
+      leftCanard.rotation.y = 0.42;
+      leftCanard.castShadow = true;
+      group.add(leftCanard);
+
+      const rightCanard = new THREE.Mesh(detailGeometries.blade, materials.detail);
+      rightCanard.scale.set(0.75, 0.9, 0.8);
+      rightCanard.position.set(bodySize * 0.28, 0.06, bodyLength * 0.12);
+      rightCanard.rotation.y = -0.42;
+      rightCanard.castShadow = true;
+      group.add(rightCanard);
       break;
     }
     case EnemyType.HEAVY: {
@@ -724,6 +847,18 @@ export function createEnemyMesh(config: EnemyConfig): THREE.Group {
       rightArmor.castShadow = true;
       group.add(rightArmor);
 
+      const heavySpine = new THREE.Mesh(detailGeometries.rail, materials.detail);
+      heavySpine.scale.set(1.3, 0.75, 1.18);
+      heavySpine.position.set(0, bodySize * 0.24, -bodyLength * 0.02);
+      heavySpine.castShadow = true;
+      group.add(heavySpine);
+
+      const heavyChin = new THREE.Mesh(detailGeometries.pod, materials.accent);
+      heavyChin.scale.set(1.05, 0.72, 0.92);
+      heavyChin.position.set(0, -bodySize * 0.18, bodyLength * 0.12);
+      heavyChin.castShadow = true;
+      group.add(heavyChin);
+
       engine.scale.set(1.2, 1.2, 1.35);
       break;
     }
@@ -738,6 +873,18 @@ export function createEnemyMesh(config: EnemyConfig): THREE.Group {
       sniperSensor.scale.set(0.55, 0.55, 0.9);
       sniperSensor.position.set(0, bodySize * 0.42, 0);
       group.add(sniperSensor);
+
+      const sniperNoseLance = new THREE.Mesh(detailGeometries.strip, materials.accent);
+      sniperNoseLance.scale.set(0.38, 0.38, 1.9);
+      sniperNoseLance.position.set(0, bodySize * 0.02, bodyLength * 0.4);
+      sniperNoseLance.castShadow = true;
+      group.add(sniperNoseLance);
+
+      const sniperBackFin = new THREE.Mesh(detailGeometries.fin, materials.detail);
+      sniperBackFin.scale.set(0.72, 1.05, 0.95);
+      sniperBackFin.position.set(0, bodySize * 0.4, -bodyLength * 0.12);
+      sniperBackFin.castShadow = true;
+      group.add(sniperBackFin);
       break;
     }
     case EnemyType.ACE: {
@@ -751,6 +898,25 @@ export function createEnemyMesh(config: EnemyConfig): THREE.Group {
       aceRearLight.scale.setScalar(1.15);
       aceRearLight.position.set(0, bodySize * 0.18, -bodyLength * 0.42);
       group.add(aceRearLight);
+
+      const leftAceBlade = new THREE.Mesh(detailGeometries.blade, materials.accent);
+      leftAceBlade.scale.set(1.05, 0.95, 0.92);
+      leftAceBlade.position.set(-wingSpan * 0.34, 0.08, -bodyLength * 0.02);
+      leftAceBlade.rotation.y = 0.24;
+      leftAceBlade.castShadow = true;
+      group.add(leftAceBlade);
+
+      const rightAceBlade = new THREE.Mesh(detailGeometries.blade, materials.accent);
+      rightAceBlade.scale.set(1.05, 0.95, 0.92);
+      rightAceBlade.position.set(wingSpan * 0.34, 0.08, -bodyLength * 0.02);
+      rightAceBlade.rotation.y = -0.24;
+      rightAceBlade.castShadow = true;
+      group.add(rightAceBlade);
+
+      const aceNoseBand = new THREE.Mesh(detailGeometries.strip, materials.light);
+      aceNoseBand.scale.set(0.8, 0.7, 0.62);
+      aceNoseBand.position.set(0, bodySize * 0.1, bodyLength * 0.34);
+      group.add(aceNoseBand);
       break;
     }
   }

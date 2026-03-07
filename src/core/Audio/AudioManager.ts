@@ -375,25 +375,34 @@ export class AudioManager {
     const { now, context, sfxGain } = sound;
 
     try {
-      // 低频爆炸声
-      const osc = context.createOscillator();
-      const gain = context.createGain();
+      const bodyOsc = context.createOscillator();
+      const bodyGain = context.createGain();
+      bodyOsc.type = 'sine';
+      bodyOsc.frequency.setValueAtTime(150, now);
+      bodyOsc.frequency.exponentialRampToValueAtTime(24, now + 0.52);
+      bodyGain.gain.setValueAtTime(0, now);
+      bodyGain.gain.linearRampToValueAtTime(0.44 * this.sfxVolume, now + 0.015);
+      bodyGain.gain.exponentialRampToValueAtTime(0.01, now + 0.52);
+      bodyOsc.connect(bodyGain);
+      bodyGain.connect(sfxGain);
+      bodyOsc.start(now);
+      bodyOsc.stop(now + 0.52);
 
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(150, now);
-      osc.frequency.exponentialRampToValueAtTime(20, now + 0.5);
+      const crackOsc = context.createOscillator();
+      const crackGain = context.createGain();
+      crackOsc.type = 'triangle';
+      crackOsc.frequency.setValueAtTime(960, now);
+      crackOsc.frequency.exponentialRampToValueAtTime(180, now + 0.14);
+      crackGain.gain.setValueAtTime(0, now);
+      crackGain.gain.linearRampToValueAtTime(0.2 * this.sfxVolume, now + 0.006);
+      crackGain.gain.exponentialRampToValueAtTime(0.01, now + 0.16);
+      crackOsc.connect(crackGain);
+      crackGain.connect(sfxGain);
+      crackOsc.start(now);
+      crackOsc.stop(now + 0.16);
 
-      gain.gain.setValueAtTime(0.5 * this.sfxVolume, now);
-      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.5);
-
-      osc.connect(gain);
-      gain.connect(sfxGain);
-
-      osc.start(now);
-      osc.stop(now + 0.5);
-
-      // 添加噪声
-      this.playNoise(0.3, 0.5, 0.3 * this.sfxVolume);
+      this.playFilteredNoise(0.24, 0.015, 0.18 * this.sfxVolume, 'bandpass', 760, 1.1);
+      this.playFilteredNoise(0.32, 0.018, 0.24 * this.sfxVolume, 'highpass', 1600, 0.8);
     } catch {
       // Ignore
     }
@@ -408,21 +417,33 @@ export class AudioManager {
     const { now, context, sfxGain } = sound;
 
     try {
-      const osc = context.createOscillator();
-      const gain = context.createGain();
+      const bodyOsc = context.createOscillator();
+      const bodyGain = context.createGain();
+      bodyOsc.type = 'triangle';
+      bodyOsc.frequency.setValueAtTime(420, now);
+      bodyOsc.frequency.exponentialRampToValueAtTime(120, now + 0.11);
+      bodyGain.gain.setValueAtTime(0, now);
+      bodyGain.gain.linearRampToValueAtTime(0.15 * this.sfxVolume, now + 0.004);
+      bodyGain.gain.exponentialRampToValueAtTime(0.01, now + 0.11);
+      bodyOsc.connect(bodyGain);
+      bodyGain.connect(sfxGain);
+      bodyOsc.start(now);
+      bodyOsc.stop(now + 0.11);
 
-      osc.type = 'triangle';
-      osc.frequency.setValueAtTime(400, now);
-      osc.frequency.exponentialRampToValueAtTime(100, now + 0.1);
+      const sparkOsc = context.createOscillator();
+      const sparkGain = context.createGain();
+      sparkOsc.type = 'square';
+      sparkOsc.frequency.setValueAtTime(1600, now);
+      sparkOsc.frequency.exponentialRampToValueAtTime(520, now + 0.05);
+      sparkGain.gain.setValueAtTime(0, now);
+      sparkGain.gain.linearRampToValueAtTime(0.09 * this.sfxVolume, now + 0.002);
+      sparkGain.gain.exponentialRampToValueAtTime(0.01, now + 0.06);
+      sparkOsc.connect(sparkGain);
+      sparkGain.connect(sfxGain);
+      sparkOsc.start(now);
+      sparkOsc.stop(now + 0.06);
 
-      gain.gain.setValueAtTime(0.15 * this.sfxVolume, now);
-      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
-
-      osc.connect(gain);
-      gain.connect(sfxGain);
-
-      osc.start(now);
-      osc.stop(now + 0.1);
+      this.playFilteredNoise(0.07, 0.003, 0.08 * this.sfxVolume, 'highpass', 2200, 1.1);
     } catch {
       // Ignore
     }
@@ -713,23 +734,31 @@ export class AudioManager {
     const { now, context, sfxGain } = sound;
 
     try {
-      // 高频"滴"声表示锁定成功
-      const osc = context.createOscillator();
-      const gain = context.createGain();
+      const confirmOsc = context.createOscillator();
+      const confirmGain = context.createGain();
+      confirmOsc.type = 'sine';
+      confirmOsc.frequency.setValueAtTime(1240, now);
+      confirmOsc.frequency.exponentialRampToValueAtTime(1820, now + 0.09);
+      confirmGain.gain.setValueAtTime(0, now);
+      confirmGain.gain.linearRampToValueAtTime(0.2 * this.sfxVolume, now + 0.008);
+      confirmGain.gain.exponentialRampToValueAtTime(0.01, now + 0.13);
+      confirmOsc.connect(confirmGain);
+      confirmGain.connect(sfxGain);
+      confirmOsc.start(now);
+      confirmOsc.stop(now + 0.13);
 
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(1200, now);
-      osc.frequency.exponentialRampToValueAtTime(1800, now + 0.1);
-
-      gain.gain.setValueAtTime(0, now);
-      gain.gain.linearRampToValueAtTime(0.25 * this.sfxVolume, now + 0.01);
-      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
-
-      osc.connect(gain);
-      gain.connect(sfxGain);
-
-      osc.start(now);
-      osc.stop(now + 0.15);
+      const harmonicOsc = context.createOscillator();
+      const harmonicGain = context.createGain();
+      harmonicOsc.type = 'triangle';
+      harmonicOsc.frequency.setValueAtTime(620, now + 0.025);
+      harmonicOsc.frequency.exponentialRampToValueAtTime(930, now + 0.12);
+      harmonicGain.gain.setValueAtTime(0, now + 0.02);
+      harmonicGain.gain.linearRampToValueAtTime(0.1 * this.sfxVolume, now + 0.03);
+      harmonicGain.gain.exponentialRampToValueAtTime(0.01, now + 0.14);
+      harmonicOsc.connect(harmonicGain);
+      harmonicGain.connect(sfxGain);
+      harmonicOsc.start(now + 0.02);
+      harmonicOsc.stop(now + 0.14);
     } catch {
       // Ignore
     }
@@ -744,23 +773,33 @@ export class AudioManager {
     const { now, context, sfxGain } = sound;
 
     try {
-      // 导弹发射"咻"声
-      const osc = context.createOscillator();
-      const gain = context.createGain();
+      const ignitionOsc = context.createOscillator();
+      const ignitionGain = context.createGain();
+      ignitionOsc.type = 'square';
+      ignitionOsc.frequency.setValueAtTime(240, now);
+      ignitionOsc.frequency.exponentialRampToValueAtTime(110, now + 0.12);
+      ignitionGain.gain.setValueAtTime(0, now);
+      ignitionGain.gain.linearRampToValueAtTime(0.22 * this.sfxVolume, now + 0.01);
+      ignitionGain.gain.exponentialRampToValueAtTime(0.01, now + 0.12);
+      ignitionOsc.connect(ignitionGain);
+      ignitionGain.connect(sfxGain);
+      ignitionOsc.start(now);
+      ignitionOsc.stop(now + 0.12);
 
-      osc.type = 'sawtooth';
-      osc.frequency.setValueAtTime(300, now);
-      osc.frequency.exponentialRampToValueAtTime(150, now + 0.3);
+      const sustainOsc = context.createOscillator();
+      const sustainGain = context.createGain();
+      sustainOsc.type = 'sawtooth';
+      sustainOsc.frequency.setValueAtTime(360, now + 0.015);
+      sustainOsc.frequency.exponentialRampToValueAtTime(140, now + 0.32);
+      sustainGain.gain.setValueAtTime(0, now + 0.01);
+      sustainGain.gain.linearRampToValueAtTime(0.22 * this.sfxVolume, now + 0.03);
+      sustainGain.gain.exponentialRampToValueAtTime(0.01, now + 0.32);
+      sustainOsc.connect(sustainGain);
+      sustainGain.connect(sfxGain);
+      sustainOsc.start(now + 0.01);
+      sustainOsc.stop(now + 0.32);
 
-      gain.gain.setValueAtTime(0, now);
-      gain.gain.linearRampToValueAtTime(0.3 * this.sfxVolume, now + 0.02);
-      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
-
-      osc.connect(gain);
-      gain.connect(sfxGain);
-
-      osc.start(now);
-      osc.stop(now + 0.3);
+      this.playFilteredNoise(0.16, 0.01, 0.14 * this.sfxVolume, 'bandpass', 900, 0.9);
     } catch {
       // Ignore
     }
@@ -775,26 +814,34 @@ export class AudioManager {
     const { now, context, sfxGain } = sound;
 
     try {
-      // 导弹爆炸 - 更沉重的爆炸声
-      const osc = context.createOscillator();
-      const gain = context.createGain();
+      const boomOsc = context.createOscillator();
+      const boomGain = context.createGain();
+      boomOsc.type = 'sawtooth';
+      boomOsc.frequency.setValueAtTime(95, now);
+      boomOsc.frequency.exponentialRampToValueAtTime(28, now + 0.56);
+      boomGain.gain.setValueAtTime(0, now);
+      boomGain.gain.linearRampToValueAtTime(0.52 * this.sfxVolume, now + 0.018);
+      boomGain.gain.exponentialRampToValueAtTime(0.01, now + 0.56);
+      boomOsc.connect(boomGain);
+      boomGain.connect(sfxGain);
+      boomOsc.start(now);
+      boomOsc.stop(now + 0.56);
 
-      osc.type = 'sawtooth';
-      osc.frequency.setValueAtTime(100, now);
-      osc.frequency.exponentialRampToValueAtTime(30, now + 0.5);
+      const crackOsc = context.createOscillator();
+      const crackGain = context.createGain();
+      crackOsc.type = 'triangle';
+      crackOsc.frequency.setValueAtTime(620, now + 0.01);
+      crackOsc.frequency.exponentialRampToValueAtTime(160, now + 0.18);
+      crackGain.gain.setValueAtTime(0, now);
+      crackGain.gain.linearRampToValueAtTime(0.18 * this.sfxVolume, now + 0.014);
+      crackGain.gain.exponentialRampToValueAtTime(0.01, now + 0.2);
+      crackOsc.connect(crackGain);
+      crackGain.connect(sfxGain);
+      crackOsc.start(now + 0.01);
+      crackOsc.stop(now + 0.2);
 
-      gain.gain.setValueAtTime(0, now);
-      gain.gain.linearRampToValueAtTime(0.6 * this.sfxVolume, now + 0.02);
-      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.5);
-
-      osc.connect(gain);
-      gain.connect(sfxGain);
-
-      osc.start(now);
-      osc.stop(now + 0.5);
-
-      // 添加噪声层增强爆炸感
-      this.playNoise(0.6, 0.1, 0.8 * this.sfxVolume);
+      this.playFilteredNoise(0.28, 0.02, 0.22 * this.sfxVolume, 'bandpass', 720, 1.1);
+      this.playFilteredNoise(0.4, 0.025, 0.28 * this.sfxVolume, 'highpass', 1500, 0.85);
     } catch {
       // Ignore
     }
@@ -1090,23 +1137,31 @@ export class AudioManager {
     const { now, context, sfxGain } = sound;
 
     try {
-      // 导弹发射"咻"声
-      const osc = context.createOscillator();
-      const gain = context.createGain();
+      const transientOsc = context.createOscillator();
+      const transientGain = context.createGain();
+      transientOsc.type = 'square';
+      transientOsc.frequency.setValueAtTime(320, now);
+      transientOsc.frequency.exponentialRampToValueAtTime(180, now + 0.08);
+      transientGain.gain.setValueAtTime(0, now);
+      transientGain.gain.linearRampToValueAtTime(0.14 * this.sfxVolume, now + 0.006);
+      transientGain.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
+      transientOsc.connect(transientGain);
+      transientGain.connect(sfxGain);
+      transientOsc.start(now);
+      transientOsc.stop(now + 0.1);
 
-      osc.type = 'sawtooth';
-      osc.frequency.setValueAtTime(400, now);
-      osc.frequency.exponentialRampToValueAtTime(600, now + 0.1);
-
-      gain.gain.setValueAtTime(0, now);
-      gain.gain.linearRampToValueAtTime(0.2 * this.sfxVolume, now + 0.01);
-      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.2);
-
-      osc.connect(gain);
-      gain.connect(sfxGain);
-
-      osc.start(now);
-      osc.stop(now + 0.15);
+      const tailOsc = context.createOscillator();
+      const tailGain = context.createGain();
+      tailOsc.type = 'sawtooth';
+      tailOsc.frequency.setValueAtTime(420, now + 0.01);
+      tailOsc.frequency.exponentialRampToValueAtTime(620, now + 0.09);
+      tailGain.gain.setValueAtTime(0, now + 0.01);
+      tailGain.gain.linearRampToValueAtTime(0.12 * this.sfxVolume, now + 0.02);
+      tailGain.gain.exponentialRampToValueAtTime(0.01, now + 0.16);
+      tailOsc.connect(tailGain);
+      tailGain.connect(sfxGain);
+      tailOsc.start(now + 0.01);
+      tailOsc.stop(now + 0.16);
     } catch {
       // Ignore
     }

@@ -1,4 +1,18 @@
-import * as THREE from 'three';
+import {
+  CanvasTexture,
+  Color,
+  CylinderGeometry,
+  DoubleSide,
+  Group,
+  Material,
+  Mesh,
+  MeshBasicMaterial,
+  MeshStandardMaterial,
+  PlaneGeometry,
+  Scene,
+  SphereGeometry,
+  Vector3,
+} from 'three';
 import { PowerUpType, POWER_UP_CONFIGS } from './PowerUpSystem';
 
 /**
@@ -6,12 +20,12 @@ import { PowerUpType, POWER_UP_CONFIGS } from './PowerUpSystem';
  * 浮在空中，被打破后获得道具
  */
 export class BalloonPowerUp {
-  private mesh: THREE.Group;
+  private mesh: Group;
   private config: { type: PowerUpType; icon: string; isRandom: boolean };
 
   // 气球组件
-  private balloon!: THREE.Mesh;
-  private string!: THREE.Mesh;
+  private balloon!: Mesh;
+  private string!: Mesh;
 
   // 浮动参数
   private baseY: number;
@@ -22,7 +36,7 @@ export class BalloonPowerUp {
   // 生成无敌时间（防止刚生成就被打破）
   private spawnInvincibleTimer: number = 0.5; // 0.5秒无敌时间
 
-  constructor(position: THREE.Vector3, type: PowerUpType, icon?: string) {
+  constructor(position: Vector3, type: PowerUpType, icon?: string) {
     this.config = {
       type,
       icon: icon || (!icon ? '?' : POWER_UP_CONFIGS[type].icon),
@@ -30,7 +44,7 @@ export class BalloonPowerUp {
     };
 
     this.baseY = position.y;
-    this.mesh = new THREE.Group();
+    this.mesh = new Group();
     this.mesh.position.copy(position);
     this.createBalloon();
   }
@@ -42,23 +56,23 @@ export class BalloonPowerUp {
     const config = this.config;
 
     // 气球本体（较大）- 改为亮白色，更明显
-    const balloonGeometry = new THREE.SphereGeometry(3, 16, 16);
-    const balloonMaterial = new THREE.MeshStandardMaterial({
+    const balloonGeometry = new SphereGeometry(3, 16, 16);
+    const balloonMaterial = new MeshStandardMaterial({
       color: 0xffffff,
       emissive: 0x4444ff,  // 添加蓝色自发光
       emissiveIntensity: 0.3,
       metalness: 0.3,
       roughness: 0.7,
     });
-    this.balloon = new THREE.Mesh(balloonGeometry, balloonMaterial);
+    this.balloon = new Mesh(balloonGeometry, balloonMaterial);
     this.balloon.scale.set(1, 1.2, 1); // 拉长一点
 
     // 气球绳子
-    const stringGeometry = new THREE.CylinderGeometry(0.1, 0.1, 2);
-    const stringMaterial = new THREE.MeshStandardMaterial({
+    const stringGeometry = new CylinderGeometry(0.1, 0.1, 2);
+    const stringMaterial = new MeshStandardMaterial({
       color: 0xcccccc,
     });
-    this.string = new THREE.Mesh(stringGeometry, stringMaterial);
+    this.string = new Mesh(stringGeometry, stringMaterial);
     this.string.position.y = -2.5;
 
     // 气球道具图标/问号（使用文本纹理）- 放大并提高位置避免被气球遮挡
@@ -84,14 +98,14 @@ export class BalloonPowerUp {
     ctx.fillText(config.icon, 64, 64);
 
     // 创建纹理
-    const iconTexture = new THREE.CanvasTexture(iconCanvas);
-    const iconGeometry = new THREE.PlaneGeometry(5, 5); // 放大一倍（2.5 → 5）
-    const iconMaterial = new THREE.MeshBasicMaterial({
+    const iconTexture = new CanvasTexture(iconCanvas);
+    const iconGeometry = new PlaneGeometry(5, 5); // 放大一倍（2.5 → 5）
+    const iconMaterial = new MeshBasicMaterial({
       map: iconTexture,
       transparent: true,
-      side: THREE.DoubleSide,
+      side: DoubleSide,
     });
-    const icon = new THREE.Mesh(iconGeometry, iconMaterial);
+    const icon = new Mesh(iconGeometry, iconMaterial);
     icon.position.y = 5.5; // 提高位置（3.5 → 5.5）避免被气球遮挡
 
     // 组装气球
@@ -120,9 +134,9 @@ export class BalloonPowerUp {
 
     // 彩虹闪烁效果 - 颜色不断变化
     const hue = (this.time * 0.5) % 1; // 色相循环
-    const color = new THREE.Color().setHSL(hue, 1, 0.5);
+    const color = new Color().setHSL(hue, 1, 0.5);
 
-    const material = this.balloon.material as THREE.MeshStandardMaterial;
+    const material = this.balloon.material as MeshStandardMaterial;
     material.emissive = color;
     material.emissiveIntensity = 0.4 + Math.sin(this.time * 4) * 0.2; // 0.2 到 0.6 闪烁
 
@@ -133,7 +147,7 @@ export class BalloonPowerUp {
   /**
    * 获取网格
    */
-  public getMesh(): THREE.Group {
+  public getMesh(): Group {
     return this.mesh;
   }
 
@@ -161,22 +175,24 @@ export class BalloonPowerUp {
   /**
    * 销毁气球（创建爆炸效果）
    */
-  public dispose(scene: THREE.Scene): void {
+  public dispose(scene: Scene): void {
     // TODO: 添加爆炸粒子效果
     scene.remove(this.mesh);
 
     // 释放几何体和材质
     this.balloon.geometry.dispose();
-    (this.balloon.material as THREE.Material).dispose();
+    (this.balloon.material as Material).dispose();
 
     this.string.geometry.dispose();
-    (this.string.material as THREE.Material).dispose();
+    (this.string.material as Material).dispose();
 
-    const iconMesh = this.mesh.children.find(c => c instanceof THREE.Mesh && c.geometry instanceof THREE.PlaneGeometry) as THREE.Mesh | undefined;
+    const iconMesh = this.mesh.children.find(
+      (c) => c instanceof Mesh && c.geometry instanceof PlaneGeometry
+    ) as Mesh | undefined;
     if (iconMesh) {
       iconMesh.geometry.dispose();
-      (iconMesh.material as THREE.MeshBasicMaterial).dispose();
-      (iconMesh.material as THREE.MeshBasicMaterial).map?.dispose();
+      (iconMesh.material as MeshBasicMaterial).dispose();
+      (iconMesh.material as MeshBasicMaterial).map?.dispose();
     }
   }
 }

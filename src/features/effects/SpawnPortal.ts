@@ -1,18 +1,33 @@
-import * as THREE from 'three';
+import {
+  AdditiveBlending,
+  BufferAttribute,
+  BufferGeometry,
+  Color,
+  DoubleSide,
+  Group,
+  Material,
+  Mesh,
+  MeshBasicMaterial,
+  Points,
+  PointsMaterial,
+  SphereGeometry,
+  TorusGeometry,
+  Vector3,
+} from 'three';
 
 /**
  * 敌人生成传送门效果
  * 持续 5 秒的显眼生成动画
  */
 export class SpawnPortal {
-  private group: THREE.Group;
-  private ring1!: THREE.Mesh;
-  private ring2!: THREE.Mesh;
-  private ring3!: THREE.Mesh;
-  private coreSphere!: THREE.Mesh;
-  private outerGlow!: THREE.Mesh;
+  private group: Group;
+  private ring1!: Mesh;
+  private ring2!: Mesh;
+  private ring3!: Mesh;
+  private coreSphere!: Mesh;
+  private outerGlow!: Mesh;
 
-  private particleSystem!: THREE.Points;
+  private particleSystem!: Points;
   private particleCount: number = 100;
   private particleSpeeds: number[] = [];
 
@@ -22,9 +37,9 @@ export class SpawnPortal {
 
   private onComplete?: () => void;
 
-  constructor(position: THREE.Vector3, onComplete?: () => void) {
+  constructor(position: Vector3, onComplete?: () => void) {
     this.onComplete = onComplete;
-    this.group = new THREE.Group();
+    this.group = new Group();
     this.group.position.copy(position);
 
     this.createPortalEffect();
@@ -36,55 +51,55 @@ export class SpawnPortal {
    */
   private createPortalEffect(): void {
     // 材质
-    const coreMaterial = new THREE.MeshBasicMaterial({
+    const coreMaterial = new MeshBasicMaterial({
       color: 0x00ffff,
       transparent: true,
       opacity: 0.8,
     });
 
-    const ringMaterial = new THREE.MeshBasicMaterial({
+    const ringMaterial = new MeshBasicMaterial({
       color: 0xff00ff,
       transparent: true,
       opacity: 0.6,
-      side: THREE.DoubleSide,
+      side: DoubleSide,
     });
 
-    const glowMaterial = new THREE.MeshBasicMaterial({
+    const glowMaterial = new MeshBasicMaterial({
       color: 0x00aaff,
       transparent: true,
       opacity: 0.3,
     });
 
     // 核心（明亮的球体）
-    const coreGeometry = new THREE.SphereGeometry(2, 32, 32);
-    this.coreSphere = new THREE.Mesh(coreGeometry, coreMaterial);
+    const coreGeometry = new SphereGeometry(2, 32, 32);
+    this.coreSphere = new Mesh(coreGeometry, coreMaterial);
     this.coreSphere.scale.set(0, 0, 0); // 从零开始
     this.group.add(this.coreSphere);
 
     // 内环（小环）
-    const ring1Geometry = new THREE.TorusGeometry(4, 0.5, 16, 100);
-    this.ring1 = new THREE.Mesh(ring1Geometry, ringMaterial);
+    const ring1Geometry = new TorusGeometry(4, 0.5, 16, 100);
+    this.ring1 = new Mesh(ring1Geometry, ringMaterial);
     this.ring1.rotation.x = Math.PI / 2;
     this.ring1.scale.set(0, 0, 0);
     this.group.add(this.ring1);
 
     // 中环（中等）
-    const ring2Geometry = new THREE.TorusGeometry(6, 0.8, 16, 100);
-    this.ring2 = new THREE.Mesh(ring2Geometry, ringMaterial);
+    const ring2Geometry = new TorusGeometry(6, 0.8, 16, 100);
+    this.ring2 = new Mesh(ring2Geometry, ringMaterial);
     this.ring2.rotation.x = Math.PI / 2;
     this.ring2.scale.set(0, 0, 0);
     this.group.add(this.ring2);
 
     // 外环（大环）
-    const ring3Geometry = new THREE.TorusGeometry(8, 1, 16, 100);
-    this.ring3 = new THREE.Mesh(ring3Geometry, ringMaterial);
+    const ring3Geometry = new TorusGeometry(8, 1, 16, 100);
+    this.ring3 = new Mesh(ring3Geometry, ringMaterial);
     this.ring3.rotation.x = Math.PI / 2;
     this.ring3.scale.set(0, 0, 0);
     this.group.add(this.ring3);
 
     // 外发光球
-    const glowGeometry = new THREE.SphereGeometry(12, 32, 32);
-    this.outerGlow = new THREE.Mesh(glowGeometry, glowMaterial);
+    const glowGeometry = new SphereGeometry(12, 32, 32);
+    this.outerGlow = new Mesh(glowGeometry, glowMaterial);
     this.outerGlow.scale.set(0, 0, 0);
     this.group.add(this.outerGlow);
   }
@@ -93,12 +108,12 @@ export class SpawnPortal {
    * 创建粒子系统
    */
   private createParticles(): void {
-    const geometry = new THREE.BufferGeometry();
+    const geometry = new BufferGeometry();
     const positions = new Float32Array(this.particleCount * 3);
     const colors = new Float32Array(this.particleCount * 3);
 
-    const color1 = new THREE.Color(0x00ffff);
-    const color2 = new THREE.Color(0xff00ff);
+    const color1 = new Color(0x00ffff);
+    const color2 = new Color(0xff00ff);
 
     for (let i = 0; i < this.particleCount; i++) {
       const i3 = i * 3;
@@ -123,18 +138,18 @@ export class SpawnPortal {
       this.particleSpeeds[i] = 5 + Math.random() * 10;
     }
 
-    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    geometry.setAttribute('position', new BufferAttribute(positions, 3));
+    geometry.setAttribute('color', new BufferAttribute(colors, 3));
 
-    const material = new THREE.PointsMaterial({
+    const material = new PointsMaterial({
       size: 0.8,
       vertexColors: true,
       transparent: true,
       opacity: 0.9,
-      blending: THREE.AdditiveBlending,
+      blending: AdditiveBlending,
     });
 
-    this.particleSystem = new THREE.Points(geometry, material);
+    this.particleSystem = new Points(geometry, material);
     this.particleSystem.visible = false; // 初始隐藏
     this.group.add(this.particleSystem);
   }
@@ -172,10 +187,10 @@ export class SpawnPortal {
 
     // 颜色循环
     const hue = (this.lifetime * 0.5) % 1;
-    const color = new THREE.Color().setHSL(hue, 1, 0.5);
-    (this.ring1.material as THREE.MeshBasicMaterial).color = color;
-    (this.ring2.material as THREE.MeshBasicMaterial).color = color;
-    (this.ring3.material as THREE.MeshBasicMaterial).color = color;
+    const color = new Color().setHSL(hue, 1, 0.5);
+    (this.ring1.material as MeshBasicMaterial).color = color;
+    (this.ring2.material as MeshBasicMaterial).color = color;
+    (this.ring3.material as MeshBasicMaterial).color = color;
 
     // 3. 粒子效果（1-4秒）
     if (progress > 0.2 && progress < 0.8) {
@@ -217,11 +232,11 @@ export class SpawnPortal {
 
       // 淡出透明度
       const opacity = 1 - fadeProgress;
-      (this.coreSphere.material as THREE.MeshBasicMaterial).opacity = opacity * 0.8;
-      (this.ring1.material as THREE.MeshBasicMaterial).opacity = opacity * 0.6;
-      (this.ring2.material as THREE.MeshBasicMaterial).opacity = opacity * 0.6;
-      (this.ring3.material as THREE.MeshBasicMaterial).opacity = opacity * 0.6;
-      (this.outerGlow.material as THREE.MeshBasicMaterial).opacity = opacity * 0.3;
+      (this.coreSphere.material as MeshBasicMaterial).opacity = opacity * 0.8;
+      (this.ring1.material as MeshBasicMaterial).opacity = opacity * 0.6;
+      (this.ring2.material as MeshBasicMaterial).opacity = opacity * 0.6;
+      (this.ring3.material as MeshBasicMaterial).opacity = opacity * 0.6;
+      (this.outerGlow.material as MeshBasicMaterial).opacity = opacity * 0.3;
     }
 
     // 完成检查
@@ -243,7 +258,7 @@ export class SpawnPortal {
   /**
    * 获取传送门的 Group
    */
-  public getMesh(): THREE.Group {
+  public getMesh(): Group {
     return this.group;
   }
 
@@ -262,21 +277,21 @@ export class SpawnPortal {
 
     // 释放几何体和材质
     this.coreSphere.geometry.dispose();
-    (this.coreSphere.material as THREE.Material).dispose();
+    (this.coreSphere.material as Material).dispose();
 
     this.ring1.geometry.dispose();
-    (this.ring1.material as THREE.Material).dispose();
+    (this.ring1.material as Material).dispose();
 
     this.ring2.geometry.dispose();
-    (this.ring2.material as THREE.Material).dispose();
+    (this.ring2.material as Material).dispose();
 
     this.ring3.geometry.dispose();
-    (this.ring3.material as THREE.Material).dispose();
+    (this.ring3.material as Material).dispose();
 
     this.outerGlow.geometry.dispose();
-    (this.outerGlow.material as THREE.Material).dispose();
+    (this.outerGlow.material as Material).dispose();
 
     this.particleSystem.geometry.dispose();
-    (this.particleSystem.material as THREE.Material).dispose();
+    (this.particleSystem.material as Material).dispose();
   }
 }

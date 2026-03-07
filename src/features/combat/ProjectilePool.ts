@@ -1,17 +1,25 @@
-import * as THREE from 'three';
+import {
+  Mesh,
+  MeshBasicMaterial,
+  Object3D,
+  Scene,
+  SphereGeometry,
+  Vector3,
+  type Material,
+} from 'three';
 import { GameConfig, GAME_CONSTANTS } from '@/config';
 
 /**
  * 子弹数据
  */
 interface Projectile {
-  mesh: THREE.Mesh;
-  direction: THREE.Vector3;
+  mesh: Mesh;
+  direction: Vector3;
   speed: number;
   active: boolean;
-  startPosition: THREE.Vector3;
+  startPosition: Vector3;
   damage: number; // 伤害值
-  owner?: THREE.Object3D; // 发射者，用于防止子弹立即碰撞到发射者
+  owner?: Object3D; // 发射者，用于防止子弹立即碰撞到发射者
 }
 
 /**
@@ -21,33 +29,33 @@ interface Projectile {
 export class ProjectilePool {
   private pool: Projectile[] = [];
   private maxDistance: number;
-  private scene: THREE.Scene;
-  private geometry: THREE.SphereGeometry;
+  private scene: Scene;
+  private geometry: SphereGeometry;
 
-  constructor(scene: THREE.Scene) {
+  constructor(scene: Scene) {
     this.scene = scene;
     this.maxDistance = GAME_CONSTANTS.PROJECTILE.MAX_DISTANCE;
 
     const poolSize = GameConfig.getProjectilePoolSize();
 
-    this.geometry = new THREE.SphereGeometry(0.3, 8, 8);
-    const material = new THREE.MeshBasicMaterial({
+    this.geometry = new SphereGeometry(0.3, 8, 8);
+    const material = new MeshBasicMaterial({
       color: 0xffff00,
       transparent: true,
       opacity: 0.9,
     });
 
     for (let i = 0; i < poolSize; i++) {
-      const mesh = new THREE.Mesh(this.geometry, material.clone());
+      const mesh = new Mesh(this.geometry, material.clone());
       mesh.visible = false;
       this.scene.add(mesh);
 
       this.pool.push({
         mesh,
-        direction: new THREE.Vector3(),
+        direction: new Vector3(),
         speed: GAME_CONSTANTS.PROJECTILE.SPEED,
         active: false,
-        startPosition: new THREE.Vector3(),
+        startPosition: new Vector3(),
         damage: 10,
       });
     }
@@ -62,10 +70,10 @@ export class ProjectilePool {
    * @param faction 子弹阵营（用于伤害检测）
    */
   public fire(
-    origin: THREE.Vector3,
-    direction: THREE.Vector3,
+    origin: Vector3,
+    direction: Vector3,
     damage: number,
-    owner?: THREE.Object3D,
+    owner?: Object3D,
     faction?: string
   ): void {
     // 找到未激活的子弹
@@ -104,8 +112,8 @@ export class ProjectilePool {
    * 检查碰撞
    */
   public checkCollisions(
-    targets: THREE.Object3D[],
-    onHit: (target: THREE.Object3D, projectile: THREE.Mesh, damage: number) => void
+    targets: Object3D[],
+    onHit: (target: Object3D, projectile: Mesh, damage: number) => void
   ): void {
     for (const projectile of this.pool) {
       if (!projectile.active) continue;
@@ -115,7 +123,7 @@ export class ProjectilePool {
 
         if (projectile.owner && target === projectile.owner) continue;
 
-        const targetWorldPos = new THREE.Vector3();
+        const targetWorldPos = new Vector3();
         target.getWorldPosition(targetWorldPos);
 
         const distance = projectile.mesh.position.distanceTo(targetWorldPos);
@@ -138,7 +146,7 @@ export class ProjectilePool {
     projectile.active = false;
   }
 
-  public getActiveProjectiles(): THREE.Mesh[] {
+  public getActiveProjectiles(): Mesh[] {
     return this.pool.filter((p) => p.active).map((p) => p.mesh);
   }
 
@@ -152,7 +160,7 @@ export class ProjectilePool {
   public dispose(): void {
     for (const projectile of this.pool) {
       this.scene.remove(projectile.mesh);
-      (projectile.mesh.material as THREE.Material).dispose();
+      (projectile.mesh.material as Material).dispose();
     }
     this.geometry.dispose();
     this.pool = [];
