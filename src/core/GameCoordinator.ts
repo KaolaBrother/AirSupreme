@@ -224,8 +224,10 @@ export class GameCoordinator {
       EventBus.on(GameEventType.PLAYER_HIT, ({ payload }) => {
         this.handleTutorialPlayerHit();
         if (!this.playerSystem.isShieldActive()) {
-          this.audioManager.playHit();
-          this.particleSystem.createHit(payload.position);
+          const hitIntensity = THREE.MathUtils.clamp(payload.damage / 18, 0.8, 2.1);
+          this.audioManager.playHit(hitIntensity);
+          this.particleSystem.createHit(payload.position, hitIntensity);
+          this.hud.triggerDamageFlash(hitIntensity);
         }
       })
     );
@@ -269,20 +271,20 @@ export class GameCoordinator {
 
     this.resourceRegistry.addUnsubscriber(
       EventBus.on(GameEventType.ENEMY_FIRED, () => {
-        this.audioManager.playShoot();
+        this.audioManager.playShoot('enemy');
       })
     );
 
     this.resourceRegistry.addUnsubscriber(
       EventBus.on(GameEventType.FRIENDLY_FIRED, () => {
-        this.audioManager.playShoot();
+        this.audioManager.playShoot('friendly');
       })
     );
 
     this.resourceRegistry.addUnsubscriber(
       EventBus.on(GameEventType.PLAYER_FIRED, () => {
         this.handleTutorialPlayerFired();
-        this.audioManager.playShoot();
+        this.audioManager.playShoot('player');
       })
     );
 

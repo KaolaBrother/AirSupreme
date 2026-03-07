@@ -39,10 +39,10 @@ export class PlayerSystem implements IGameSystem {
   }
 
   init(): void {
-    this.health.onDamage = () => {
+    this.health.onDamage = (amount) => {
       if (!this.shieldActive && !this.isRespawning) {
         EventBus.emit(GameEventType.PLAYER_HIT, {
-          damage: 0,
+          damage: amount,
           position: this.mesh.position.clone(),
         });
       }

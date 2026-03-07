@@ -305,6 +305,11 @@ export function createPlayerMesh(): THREE.Group {
   noseSensor.position.set(0, 0.03, -2.18);
   group.add(noseSensor);
 
+  const noseSensorCollar = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.08, 0.2), heroPanelMaterial);
+  noseSensorCollar.position.set(0, 0.02, -2.02);
+  noseSensorCollar.castShadow = true;
+  group.add(noseSensorCollar);
+
   const leftSensorCheek = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.12, 0.46), sensorMaterial);
   leftSensorCheek.position.set(-0.22, 0.05, -1.78);
   leftSensorCheek.rotation.y = -0.12;
@@ -553,6 +558,11 @@ export function createPlayerMesh(): THREE.Group {
   leftNozzleRing.castShadow = true;
   group.add(leftNozzleRing);
 
+  const leftNozzleShroud = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.12, 0.24), heroPanelMaterial);
+  leftNozzleShroud.position.set(-0.3, -0.04, 1.82);
+  leftNozzleShroud.castShadow = true;
+  group.add(leftNozzleShroud);
+
   // 火焰：ConeGeometry 尖端朝向 +Y，+PI/2 使尖端朝向 +Z（后方）
   const leftGlow = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.3, 8), glowMaterial);
   leftGlow.rotation.x = Math.PI / 2;
@@ -576,6 +586,11 @@ export function createPlayerMesh(): THREE.Group {
   rightNozzleRing.position.set(0.3, -0.05, 2.07);
   rightNozzleRing.castShadow = true;
   group.add(rightNozzleRing);
+
+  const rightNozzleShroud = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.12, 0.24), heroPanelMaterial);
+  rightNozzleShroud.position.set(0.3, -0.04, 1.82);
+  rightNozzleShroud.castShadow = true;
+  group.add(rightNozzleShroud);
 
   const rightGlow = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.3, 8), glowMaterial);
   rightGlow.rotation.x = Math.PI / 2;
@@ -1194,6 +1209,24 @@ export function createEnemyMesh(config: EnemyConfig): THREE.Group {
       heavyNosePlate.castShadow = true;
       group.add(heavyNosePlate);
 
+      const heavyMuzzleBlockLeft = new THREE.Mesh(detailGeometries.actuator, weaponMaterial);
+      heavyMuzzleBlockLeft.scale.set(1.15, 1.05, 1.1);
+      heavyMuzzleBlockLeft.position.set(-bodySize * 0.56, 0.08, -bodyLength * 0.18);
+      heavyMuzzleBlockLeft.castShadow = true;
+      group.add(heavyMuzzleBlockLeft);
+
+      const heavyMuzzleBlockRight = new THREE.Mesh(detailGeometries.actuator, weaponMaterial);
+      heavyMuzzleBlockRight.scale.set(1.15, 1.05, 1.1);
+      heavyMuzzleBlockRight.position.set(bodySize * 0.56, 0.08, -bodyLength * 0.18);
+      heavyMuzzleBlockRight.castShadow = true;
+      group.add(heavyMuzzleBlockRight);
+
+      const heavyCoreFrame = new THREE.Mesh(detailGeometries.rail, structureMaterial);
+      heavyCoreFrame.scale.set(1.1, 0.85, 0.9);
+      heavyCoreFrame.position.set(0, bodySize * 0.08, bodyLength * 0.14);
+      heavyCoreFrame.castShadow = true;
+      group.add(heavyCoreFrame);
+
       engine.scale.set(1.2, 1.2, 1.35);
       break;
     }
@@ -1339,6 +1372,21 @@ export function createEnemyMesh(config: EnemyConfig): THREE.Group {
       aceTailHalo.rotation.x = Math.PI / 2;
       aceTailHalo.position.set(0, bodySize * 0.08, -bodyLength * 0.44);
       group.add(aceTailHalo);
+
+      const aceShoulderLightLeft = new THREE.Mesh(detailGeometries.light, materials.light);
+      aceShoulderLightLeft.scale.setScalar(0.82);
+      aceShoulderLightLeft.position.set(-bodySize * 0.4, bodySize * 0.18, -bodyLength * 0.02);
+      group.add(aceShoulderLightLeft);
+
+      const aceShoulderLightRight = new THREE.Mesh(detailGeometries.light, materials.light);
+      aceShoulderLightRight.scale.setScalar(0.82);
+      aceShoulderLightRight.position.set(bodySize * 0.4, bodySize * 0.18, -bodyLength * 0.02);
+      group.add(aceShoulderLightRight);
+
+      const aceTailCore = new THREE.Mesh(detailGeometries.sensor, energyMaterial);
+      aceTailCore.scale.set(0.9, 0.6, 1);
+      aceTailCore.position.set(0, bodySize * 0.08, -bodyLength * 0.38);
+      group.add(aceTailCore);
       break;
     }
   }

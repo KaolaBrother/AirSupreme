@@ -22,6 +22,8 @@ interface Projectile {
   owner?: Object3D; // 发射者，用于防止子弹立即碰撞到发射者
 }
 
+const FORWARD = new Vector3(0, 0, 1);
+
 /**
  * 子弹对象池
  * 使用对象池模式避免频繁创建/销毁对象
@@ -86,6 +88,7 @@ export class ProjectilePool {
     projectile.damage = damage; // 设置伤害
     projectile.owner = owner; // 记录发射者
     projectile.mesh.userData.faction = faction; // 设置阵营
+    this.applyProjectileVisual(projectile, faction);
     projectile.mesh.visible = true;
     projectile.active = true;
   }
@@ -144,6 +147,26 @@ export class ProjectilePool {
   private deactivate(projectile: Projectile): void {
     projectile.mesh.visible = false;
     projectile.active = false;
+    projectile.mesh.scale.setScalar(1);
+  }
+
+  private applyProjectileVisual(projectile: Projectile, faction?: string): void {
+    const material = projectile.mesh.material as MeshBasicMaterial;
+    if (faction === 'ENEMY') {
+      material.color.set(0xff9b4a);
+      material.opacity = 0.92;
+      projectile.mesh.scale.set(0.9, 0.9, 1.8);
+    } else if (faction === 'FRIENDLY') {
+      material.color.set(0x78ffd8);
+      material.opacity = 0.86;
+      projectile.mesh.scale.set(0.82, 0.82, 1.6);
+    } else {
+      material.color.set(0xfff27a);
+      material.opacity = 0.98;
+      projectile.mesh.scale.set(0.75, 0.75, 2.1);
+    }
+
+    projectile.mesh.quaternion.setFromUnitVectors(FORWARD, projectile.direction);
   }
 
   public getActiveProjectiles(): Mesh[] {

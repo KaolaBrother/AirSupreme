@@ -22,6 +22,8 @@ interface Projectile {
   owner?: Object3D; // 发射者，用于防止子弹立即碰撞到发射者
 }
 
+const FORWARD = new Vector3(0, 0, 1);
+
 /**
  * Boss炮弹对象池
  * 使用更大的几何体和红橙色，区别于普通敌人炮弹
@@ -86,6 +88,7 @@ export class BossProjectilePool {
     projectile.damage = damage; // 设置伤害
     projectile.owner = owner; // 记录发射者
     projectile.mesh.userData.faction = faction; // 设置阵营
+    this.applyProjectileVisual(projectile);
     projectile.mesh.visible = true;
     projectile.active = true;
   }
@@ -142,6 +145,15 @@ export class BossProjectilePool {
   private deactivate(projectile: Projectile): void {
     projectile.mesh.visible = false;
     projectile.active = false;
+    projectile.mesh.scale.setScalar(1);
+  }
+
+  private applyProjectileVisual(projectile: Projectile): void {
+    const material = projectile.mesh.material as MeshBasicMaterial;
+    material.color.set(0xff542b);
+    material.opacity = 0.96;
+    projectile.mesh.scale.set(1.05, 1.05, 2.35);
+    projectile.mesh.quaternion.setFromUnitVectors(FORWARD, projectile.direction);
   }
 
   public getActiveProjectiles(): Mesh[] {

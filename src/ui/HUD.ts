@@ -28,10 +28,14 @@ export class HUD {
   private gameOverDisplay: HTMLDivElement;
   private finalScoreDisplay: HTMLDivElement;
   private upgradePointsDisplay: HTMLDivElement;
+  private damageFlashOverlay: HTMLDivElement;
 
   private powerUpTimer: number = 0;
   private activePowerUpDuration: number = 0; // 道具持续时间
   private powerUpBigTimer: number = 0; // 大字提示显示计时器
+  private damageFlashTimer: number = 0;
+  private damageFlashDuration: number = 0;
+  private damageFlashPeakOpacity: number = 0;
   private activePowerUpName: string = '';
   private activePowerUpIcon: string = '';
   private lastPowerUpRemainingSeconds: number = -1;
@@ -329,6 +333,20 @@ export class HUD {
     this.gameOverDisplay.appendChild(gameOverTitle);
     this.gameOverDisplay.appendChild(this.finalScoreDisplay);
 
+    this.damageFlashOverlay = document.createElement('div');
+    this.damageFlashOverlay.style.cssText = `
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 70;
+      opacity: 0;
+      background:
+        radial-gradient(circle at center, rgba(255, 120, 72, 0) 42%, rgba(255, 96, 54, 0.08) 72%, rgba(255, 54, 36, 0.22) 100%),
+        linear-gradient(180deg, rgba(255, 80, 52, 0.18), rgba(255, 80, 52, 0));
+      mix-blend-mode: screen;
+      transition: opacity 0.06s linear;
+    `;
+
     this.container.appendChild(this.healthBarContainer);
     this.container.appendChild(this.enemiesDisplay);
     this.container.appendChild(this.livesDisplay);
@@ -337,6 +355,7 @@ export class HUD {
     this.container.appendChild(this.powerUpDisplay);
     document.body.appendChild(this.container);
     document.body.appendChild(this.powerUpBigDisplay);
+    document.body.appendChild(this.damageFlashOverlay);
     document.body.appendChild(this.gameOverDisplay);
   }
 
@@ -579,6 +598,20 @@ export class HUD {
         this.hidePowerUpBig();
       }
     }
+
+    if (this.damageFlashTimer > 0) {
+      this.damageFlashTimer = Math.max(0, this.damageFlashTimer - safeDeltaTime);
+      const duration = Math.max(this.damageFlashDuration, 0.001);
+      const fade = this.damageFlashTimer / duration;
+      this.setStyleValue(
+        this.damageFlashOverlay,
+        'opacity',
+        (this.damageFlashPeakOpacity * fade).toFixed(3)
+      );
+      if (this.damageFlashTimer <= 0) {
+        this.setStyleValue(this.damageFlashOverlay, 'opacity', '0');
+      }
+    }
   }
 
   /**
@@ -618,6 +651,14 @@ export class HUD {
     this.setStyleValue(this.powerUpBigSubtext, 'display', shouldHideSubtext ? 'none' : 'block');
     this.setStyleValue(this.powerUpBigDisplay, 'opacity', '1');
     this.powerUpBigTimer = minDisplayTime;
+  }
+
+  public triggerDamageFlash(intensity: number = 1): void {
+    const normalizedIntensity = Math.max(0.18, Math.min(0.55, 0.18 + intensity * 0.08));
+    this.damageFlashDuration = 0.18 + Math.min(intensity, 2.2) * 0.06;
+    this.damageFlashPeakOpacity = normalizedIntensity;
+    this.damageFlashTimer = this.damageFlashDuration;
+    this.setStyleValue(this.damageFlashOverlay, 'opacity', normalizedIntensity.toFixed(3));
   }
 
   /**
@@ -703,6 +744,7 @@ export class HUD {
   public dispose(): void {
     this.container.remove();
     this.powerUpBigDisplay.remove();
+    this.damageFlashOverlay.remove();
     this.gameOverDisplay.remove();
   }
 }
