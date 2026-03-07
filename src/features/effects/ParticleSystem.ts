@@ -12,6 +12,8 @@ export enum ParticleType {
   DEBRIS = 'DEBRIS',
 }
 
+export type SurfaceImpactType = 'ground' | 'desert' | 'snow' | 'city';
+
 /**
  * 单个粒子数据
  */
@@ -262,26 +264,41 @@ export class ParticleSystem {
     });
   }
 
-  public createGroundImpact(position: THREE.Vector3, intensity: number = 1): void {
+  public createGroundImpact(
+    position: THREE.Vector3,
+    intensity: number = 1,
+    surface: SurfaceImpactType = 'ground'
+  ): void {
     const impactIntensity = THREE.MathUtils.clamp(intensity, 0.7, 1.8);
     const sparkCount = Math.max(3, Math.floor(4 + impactIntensity * 3));
     const dustCount = Math.max(4, Math.floor(5 + impactIntensity * 4));
+    const sparkColor = this.getSurfaceSparkColor(surface);
+    const smokeHue = surface === 'snow' ? 0.56 : surface === 'city' ? 0 : 0.08;
+    const smokeSaturation = surface === 'desert' ? 0.3 : surface === 'city' ? 0.08 : 0.18;
+    const smokeLightness = this.getSurfaceSmokeLightness(surface);
+    const dustSpeedBase = surface === 'snow' ? 1.4 : 2;
 
     for (let i = 0; i < sparkCount; i++) {
       this.spawnParticle(ParticleType.SPARK, position, {
         speed: 10 + Math.random() * (8 + impactIntensity * 8),
         life: 0.06 + Math.random() * 0.08,
         size: 0.06 + Math.random() * 0.08,
-        color: this.tempColorA.setHSL(0.1, 1, 0.68 + Math.random() * 0.08),
+        color: this.tempColorA.set(sparkColor),
       });
     }
 
     for (let i = 0; i < dustCount; i++) {
       this.spawnParticle(ParticleType.SMOKE, position, {
-        speed: 2 + Math.random() * (2 + impactIntensity * 2),
-        life: 0.2 + Math.random() * 0.18,
-        size: 0.18 + Math.random() * (0.18 + impactIntensity * 0.16),
-        color: this.tempColorB.setHSL(0.08, 0.18, 0.34 + Math.random() * 0.1),
+        speed: dustSpeedBase + Math.random() * (2 + impactIntensity * 2),
+        life: 0.22 + Math.random() * 0.22,
+        size:
+          (surface === 'desert' ? 0.24 : 0.18)
+          + Math.random() * (0.18 + impactIntensity * (surface === 'snow' ? 0.12 : 0.16)),
+        color: this.tempColorB.setHSL(
+          smokeHue,
+          smokeSaturation,
+          smokeLightness + Math.random() * 0.08
+        ),
       });
     }
   }
@@ -320,6 +337,32 @@ export class ParticleSystem {
       6,
       0.05
     );
+  }
+
+  private getSurfaceSparkColor(surface: SurfaceImpactType): number {
+    switch (surface) {
+      case 'desert':
+        return 0xffd07a;
+      case 'snow':
+        return 0xe6f8ff;
+      case 'city':
+        return 0xffc48f;
+      default:
+        return 0xffd36b;
+    }
+  }
+
+  private getSurfaceSmokeLightness(surface: SurfaceImpactType): number {
+    switch (surface) {
+      case 'desert':
+        return 0.42;
+      case 'snow':
+        return 0.78;
+      case 'city':
+        return 0.24;
+      default:
+        return 0.34;
+    }
   }
 
   /**

@@ -36,6 +36,7 @@ export class HUD {
   private damageFlashTimer: number = 0;
   private damageFlashDuration: number = 0;
   private damageFlashPeakOpacity: number = 0;
+  private lowHealthAlertActive: boolean = false;
   private activePowerUpName: string = '';
   private activePowerUpIcon: string = '';
   private lastPowerUpRemainingSeconds: number = -1;
@@ -478,6 +479,19 @@ export class HUD {
     }
 
     this.setStyleValue(this.healthBarFill, 'background', gradient);
+    this.lowHealthAlertActive = clampedPercent <= 0.25;
+    this.setStyleValue(
+      this.healthBarContainer,
+      'borderColor',
+      this.lowHealthAlertActive ? 'rgba(255, 90, 90, 0.95)' : 'rgba(255,255,255,0.8)'
+    );
+    this.setStyleValue(
+      this.healthBarContainer,
+      'boxShadow',
+      this.lowHealthAlertActive
+        ? '0 0 18px rgba(255, 80, 60, 0.35), inset 0 0 12px rgba(255, 64, 32, 0.18)'
+        : 'none'
+    );
   }
 
   /**

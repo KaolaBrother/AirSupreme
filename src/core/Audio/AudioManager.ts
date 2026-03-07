@@ -30,6 +30,7 @@ export enum SoundType {
   LASER_SWEEP = 'LASER_SWEEP',
   TENTACLE_HIT = 'TENTACLE_HIT',
   TENTACLE_DESTROY = 'TENTACLE_DESTROY',
+  LOW_HEALTH = 'LOW_HEALTH',
 }
 
 interface SoundPolicy {
@@ -132,6 +133,12 @@ export class AudioManager {
       maxConcurrent: 2,
       duckAmount: 0.22,
       duckDurationMs: 260,
+    },
+    [SoundType.LOW_HEALTH]: {
+      minIntervalMs: 1200,
+      maxConcurrent: 1,
+      duckAmount: 0.06,
+      duckDurationMs: 220,
     },
   };
 
@@ -680,6 +687,84 @@ export class AudioManager {
     }
   }
 
+  public playGroundImpact(
+    surface: 'ground' | 'desert' | 'snow' | 'city',
+    intensity: number = 1
+  ): void {
+    switch (surface) {
+      case 'desert':
+        this.playFilteredNoise(
+          0.1,
+          0.008,
+          0.08 * this.sfxVolume * Math.min(1.8, intensity),
+          'bandpass',
+          900,
+          0.9
+        );
+        this.playHit(Math.max(0.72, intensity * 0.9));
+        return;
+      case 'snow':
+        this.playFilteredNoise(
+          0.08,
+          0.006,
+          0.05 * this.sfxVolume * Math.min(1.6, intensity),
+          'bandpass',
+          1200,
+          1.4
+        );
+        return;
+      case 'city':
+        this.playHit(Math.max(0.85, intensity * 1.05));
+        this.playFilteredNoise(
+          0.06,
+          0.003,
+          0.06 * this.sfxVolume * Math.min(1.8, intensity),
+          'highpass',
+          2600,
+          1.2
+        );
+        return;
+      default:
+        this.playHit(Math.max(0.8, intensity));
+    }
+  }
+
+  public playLowHealthWarning(): void {
+    const sound = this.beginSound(SoundType.LOW_HEALTH, 450);
+    if (!sound) return;
+    const { now, context, sfxGain } = sound;
+
+    try {
+      const alarmOsc = context.createOscillator();
+      const alarmGain = context.createGain();
+      alarmOsc.type = 'square';
+      alarmOsc.frequency.setValueAtTime(720, now);
+      alarmOsc.frequency.exponentialRampToValueAtTime(540, now + 0.18);
+      alarmGain.gain.setValueAtTime(0, now);
+      alarmGain.gain.linearRampToValueAtTime(0.07 * this.sfxVolume, now + 0.01);
+      alarmGain.gain.exponentialRampToValueAtTime(0.01, now + 0.2);
+      alarmOsc.connect(alarmGain);
+      alarmGain.connect(sfxGain);
+      alarmOsc.start(now);
+      alarmOsc.stop(now + 0.2);
+
+      const pulseOsc = context.createOscillator();
+      const pulseGain = context.createGain();
+      pulseOsc.type = 'triangle';
+      pulseOsc.frequency.setValueAtTime(240, now + 0.03);
+      pulseOsc.frequency.exponentialRampToValueAtTime(160, now + 0.26);
+      pulseGain.gain.setValueAtTime(0, now + 0.03);
+      pulseGain.gain.linearRampToValueAtTime(0.05 * this.sfxVolume, now + 0.05);
+      pulseGain.gain.exponentialRampToValueAtTime(0.01, now + 0.28);
+      pulseOsc.connect(pulseGain);
+      pulseGain.connect(sfxGain);
+      pulseOsc.start(now + 0.03);
+      pulseOsc.stop(now + 0.28);
+    } catch {
+      // Ignore
+    }
+  }
+
   /**
    * 播放道具拾取音效
    */
@@ -990,6 +1075,42 @@ export class AudioManager {
       harmonicGain.connect(sfxGain);
       harmonicOsc.start(now + 0.02);
       harmonicOsc.stop(now + 0.14);
+    } catch {
+      // Ignore
+    }
+  }
+
+  public playMissileLockConfirm(): void {
+    const sound = this.beginSound(SoundType.MISSILE_LOCK, 150);
+    if (!sound) return;
+    const { now, context, sfxGain } = sound;
+
+    try {
+      const confirmOsc = context.createOscillator();
+      const confirmGain = context.createGain();
+      confirmOsc.type = 'triangle';
+      confirmOsc.frequency.setValueAtTime(980, now);
+      confirmOsc.frequency.exponentialRampToValueAtTime(1460, now + 0.08);
+      confirmGain.gain.setValueAtTime(0, now);
+      confirmGain.gain.linearRampToValueAtTime(0.11 * this.sfxVolume, now + 0.01);
+      confirmGain.gain.exponentialRampToValueAtTime(0.01, now + 0.12);
+      confirmOsc.connect(confirmGain);
+      confirmGain.connect(sfxGain);
+      confirmOsc.start(now);
+      confirmOsc.stop(now + 0.12);
+
+      const accentOsc = context.createOscillator();
+      const accentGain = context.createGain();
+      accentOsc.type = 'sine';
+      accentOsc.frequency.setValueAtTime(1480, now + 0.02);
+      accentOsc.frequency.exponentialRampToValueAtTime(1920, now + 0.11);
+      accentGain.gain.setValueAtTime(0, now + 0.02);
+      accentGain.gain.linearRampToValueAtTime(0.07 * this.sfxVolume, now + 0.035);
+      accentGain.gain.exponentialRampToValueAtTime(0.01, now + 0.12);
+      accentOsc.connect(accentGain);
+      accentGain.connect(sfxGain);
+      accentOsc.start(now + 0.02);
+      accentOsc.stop(now + 0.12);
     } catch {
       // Ignore
     }

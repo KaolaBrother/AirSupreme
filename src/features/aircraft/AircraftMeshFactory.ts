@@ -1071,6 +1071,11 @@ export function createEnemyMesh(config: EnemyConfig): THREE.Group {
       scoutWingTipRight.scale.setScalar(0.72);
       scoutWingTipRight.position.set(wingSpan * 0.54, 0.04, -bodyLength * 0.12);
       group.add(scoutWingTipRight);
+
+      const scoutTailProbe = new THREE.Mesh(detailGeometries.strip, energyMaterial);
+      scoutTailProbe.scale.set(0.34, 0.34, 0.82);
+      scoutTailProbe.position.set(0, bodySize * 0.06, -bodyLength * 0.46);
+      group.add(scoutTailProbe);
       break;
     }
     case EnemyType.FIGHTER: {
@@ -1135,6 +1140,18 @@ export function createEnemyMesh(config: EnemyConfig): THREE.Group {
       fighterTailBeacon.scale.setScalar(0.82);
       fighterTailBeacon.position.set(0, bodySize * 0.22, -bodyLength * 0.42);
       group.add(fighterTailBeacon);
+
+      const fighterIntakeBraceLeft = new THREE.Mesh(detailGeometries.panel, structureMaterial);
+      fighterIntakeBraceLeft.scale.set(0.68, 0.42, 0.9);
+      fighterIntakeBraceLeft.position.set(-bodySize * 0.34, -0.03, bodyLength * 0.02);
+      fighterIntakeBraceLeft.castShadow = true;
+      group.add(fighterIntakeBraceLeft);
+
+      const fighterIntakeBraceRight = new THREE.Mesh(detailGeometries.panel, structureMaterial);
+      fighterIntakeBraceRight.scale.set(0.68, 0.42, 0.9);
+      fighterIntakeBraceRight.position.set(bodySize * 0.34, -0.03, bodyLength * 0.02);
+      fighterIntakeBraceRight.castShadow = true;
+      group.add(fighterIntakeBraceRight);
       break;
     }
     case EnemyType.HEAVY: {
@@ -1227,6 +1244,18 @@ export function createEnemyMesh(config: EnemyConfig): THREE.Group {
       heavyCoreFrame.castShadow = true;
       group.add(heavyCoreFrame);
 
+      const heavyRearFinLeft = new THREE.Mesh(detailGeometries.fin, materials.detail);
+      heavyRearFinLeft.scale.set(0.8, 1.05, 0.82);
+      heavyRearFinLeft.position.set(-bodySize * 0.24, bodySize * 0.22, -bodyLength * 0.32);
+      heavyRearFinLeft.castShadow = true;
+      group.add(heavyRearFinLeft);
+
+      const heavyRearFinRight = new THREE.Mesh(detailGeometries.fin, materials.detail);
+      heavyRearFinRight.scale.set(0.8, 1.05, 0.82);
+      heavyRearFinRight.position.set(bodySize * 0.24, bodySize * 0.22, -bodyLength * 0.32);
+      heavyRearFinRight.castShadow = true;
+      group.add(heavyRearFinRight);
+
       engine.scale.set(1.2, 1.2, 1.35);
       break;
     }
@@ -1297,6 +1326,11 @@ export function createEnemyMesh(config: EnemyConfig): THREE.Group {
       sniperRearEmitter.scale.setScalar(0.78);
       sniperRearEmitter.position.set(0, bodySize * 0.12, -bodyLength * 0.44);
       group.add(sniperRearEmitter);
+
+      const sniperDorsalEmitter = new THREE.Mesh(detailGeometries.sensor, energyMaterial);
+      sniperDorsalEmitter.scale.set(0.62, 0.42, 0.82);
+      sniperDorsalEmitter.position.set(0, bodySize * 0.26, -bodyLength * 0.22);
+      group.add(sniperDorsalEmitter);
       break;
     }
     case EnemyType.ACE: {
@@ -1387,6 +1421,20 @@ export function createEnemyMesh(config: EnemyConfig): THREE.Group {
       aceTailCore.scale.set(0.9, 0.6, 1);
       aceTailCore.position.set(0, bodySize * 0.08, -bodyLength * 0.38);
       group.add(aceTailCore);
+
+      const aceDorsalBladeLeft = new THREE.Mesh(detailGeometries.vane, materials.accent);
+      aceDorsalBladeLeft.scale.set(1.2, 1.1, 1.1);
+      aceDorsalBladeLeft.position.set(-bodySize * 0.18, bodySize * 0.28, bodyLength * 0.02);
+      aceDorsalBladeLeft.rotation.z = -0.22;
+      aceDorsalBladeLeft.castShadow = true;
+      group.add(aceDorsalBladeLeft);
+
+      const aceDorsalBladeRight = new THREE.Mesh(detailGeometries.vane, materials.accent);
+      aceDorsalBladeRight.scale.set(1.2, 1.1, 1.1);
+      aceDorsalBladeRight.position.set(bodySize * 0.18, bodySize * 0.28, bodyLength * 0.02);
+      aceDorsalBladeRight.rotation.z = 0.22;
+      aceDorsalBladeRight.castShadow = true;
+      group.add(aceDorsalBladeRight);
       break;
     }
   }

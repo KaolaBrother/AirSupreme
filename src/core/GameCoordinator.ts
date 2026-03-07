@@ -31,6 +31,7 @@ import { GameSessionState } from '@/core/GameSessionState';
 import { ResourceRegistry } from '@/core/ResourceRegistry';
 import { PresentationController } from '@/core/PresentationController';
 import type { BossBattleController } from '@/core/BossBattleController';
+import type { SurfaceImpactType } from '@/features/effects/ParticleSystem';
 
 interface EyeBossHealthData {
   current: number;
@@ -162,6 +163,7 @@ export class GameCoordinator {
     friendlyId: null,
     wave: -1,
   };
+  private lowHealthWarningTimer: number = 0;
   private lastRenderTimestamp: number = 0;
 
   constructor(options: GameCoordinatorOptions = {}) {
@@ -634,6 +636,7 @@ export class GameCoordinator {
 
     this.updateUI(deltaTime);
     this.updateMissileRespawn(deltaTime);
+    this.updateLowHealthWarning(deltaTime);
     this.playerSystem.captureCurrentVisualState();
     this.currentCameraTargetPosition.copy(this.playerAircraft.position);
     this.currentCameraTargetQuaternion.copy(this.playerAircraft.quaternion);
@@ -686,6 +689,7 @@ export class GameCoordinator {
         const lockedTarget = this.lockOnIndicator.getCurrentTarget();
         if (lockedTarget && this.missileCount > 0 && !this.missileFiringScheduled) {
           this.missileFiringScheduled = true;
+          this.audioManager.playMissileLockConfirm();
 
           this.scheduleTimeout(() => {
             this.fireMissile(lockedTarget);
@@ -921,6 +925,20 @@ export class GameCoordinator {
     return getDifficultyProfile(this.sessionState.getDifficulty());
   }
 
+  private updateLowHealthWarning(deltaTime: number): void {
+    const healthPercent = this.playerSystem.getHealth().getHealthPercent();
+    if (healthPercent > 0.25 || !this.sessionState.isPlaying() || this.sessionState.isPaused()) {
+      this.lowHealthWarningTimer = 0;
+      return;
+    }
+
+    this.lowHealthWarningTimer += deltaTime;
+    if (this.lowHealthWarningTimer >= 1.35) {
+      this.lowHealthWarningTimer = 0;
+      this.audioManager.playLowHealthWarning();
+    }
+  }
+
   private render(alpha: number): void {
     const clampedAlpha = Math.max(0, Math.min(1, alpha));
     this.playerSystem.applyInterpolatedVisual(clampedAlpha);
@@ -974,6 +992,7 @@ export class GameCoordinator {
     }
 
     this.missileCount = GAME_CONSTANTS.MISSILE.STARTING_MISSILES;
+    this.lowHealthWarningTimer = 0;
     this.hud.updateUpgradePoints(this.playerStats.getUpgrades().getAvailablePoints());
     this.presentationController.updateMissileHud(
       0,
@@ -1456,9 +1475,24 @@ export class GameCoordinator {
         return;
       }
 
-      this.particleSystem?.createGroundImpact(position, source === 'boss' ? 1.15 : 0.85);
-      this.audioManager.playHit(source === 'boss' ? 1.05 : 0.8);
+      const surfaceType = this.getSurfaceImpactType(levelConfig.terrain);
+      const impactIntensity = source === 'boss' ? 1.15 : 0.85;
+      this.particleSystem?.createGroundImpact(position, impactIntensity, surfaceType);
+      this.audioManager.playGroundImpact(surfaceType, source === 'boss' ? 1.05 : 0.8);
     });
+  }
+
+  private getSurfaceImpactType(terrain: TerrainType): SurfaceImpactType {
+    switch (terrain) {
+      case TerrainType.DESERT:
+        return 'desert';
+      case TerrainType.MOUNTAINS:
+        return 'snow';
+      case TerrainType.CITY:
+        return 'city';
+      default:
+        return 'ground';
+    }
   }
 
   private isWaterImpact(terrain: TerrainType, position: THREE.Vector3): boolean {
