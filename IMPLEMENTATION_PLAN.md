@@ -39,6 +39,7 @@
 - [active] 子弹 / 导弹 / 爆炸特效统一升级下一批
 - [active] 武器音效 / 混音第一批
 - [active] HUD 左上角状态区与升级反馈继续收口
+- [active] 启动边界与运行时初始化继续后移
 
 ### 已知未收尾
 - [watch] `vendor-three` 构建块仍约 `503 kB`，warning 仍在
@@ -194,6 +195,10 @@
   - 菜单启动与游戏运行时进一步拆边界
   - `EnemySystem -> LevelManager -> TerrainGenerator` 延后实例化
   - Boss 控制器继续后移到按需路径
+- [done] 菜单启动与游戏运行时已拆出一层边界
+  - `main.ts` 现在先启动 `StartMenu`
+  - 点击开始后才动态导入并实例化 `GameCoordinator`
+- [done] `LevelManager` 的 `TerrainGenerator` 已延后到 `loadLevel()` 才初始化
 - [later] 继续隔离非首屏 Three 依赖和高画质附加路径
 
 #### E2. 结构优化

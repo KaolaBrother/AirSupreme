@@ -35,7 +35,7 @@ export interface BossMissileIndicatorSnapshot {
 
 interface PresentationControllerOptions {
   hud: HUD;
-  startMenu: StartMenu;
+  startMenu?: StartMenu | null;
   enemyHealthBars: EnemyHealthBars;
   bossIndicator: BossMissileIndicator;
   lockOnIndicator: LockOnIndicator;
@@ -48,7 +48,7 @@ interface PresentationControllerOptions {
  */
 export class PresentationController {
   private readonly hud: HUD;
-  private readonly startMenu: StartMenu;
+  private readonly startMenu: StartMenu | null;
   private readonly enemyHealthBars: EnemyHealthBars;
   private readonly bossIndicator: BossMissileIndicator;
   private readonly lockOnIndicator: LockOnIndicator;
@@ -60,7 +60,7 @@ export class PresentationController {
 
   constructor(options: PresentationControllerOptions) {
     this.hud = options.hud;
-    this.startMenu = options.startMenu;
+    this.startMenu = options.startMenu ?? null;
     this.enemyHealthBars = options.enemyHealthBars;
     this.bossIndicator = options.bossIndicator;
     this.lockOnIndicator = options.lockOnIndicator;
@@ -68,7 +68,7 @@ export class PresentationController {
   }
 
   public wireStartMenu(onStart: (settings: GameSettings) => void): void {
-    this.startMenu.setOnStart(onStart);
+    this.startMenu?.setOnStart(onStart);
   }
 
   /**
@@ -147,6 +147,6 @@ export class PresentationController {
     this.enemyHealthBars.dispose();
     this.lockOnIndicator.dispose();
     this.bossIndicator.dispose();
-    this.startMenu.dispose();
+    this.startMenu?.dispose();
   }
 }

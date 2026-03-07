@@ -1,5 +1,6 @@
 import { getLogger } from './core/utils/Logger';
 import { configLoader } from './core/utils/ConfigLoader';
+import { StartMenu, type GameSettings } from './ui/StartMenu';
 
 const log = getLogger('Main');
 
@@ -43,9 +44,33 @@ async function main(): Promise<void> {
 
   try {
     await configLoader.load();
+    const startMenu = new StartMenu();
+    let game: { dispose: () => void } | null = null;
 
-    const [{ GameCoordinator }] = await Promise.all([import('./core/GameCoordinator')]);
-    const game = new GameCoordinator();
+    startMenu.setOnStart(async (settings: GameSettings) => {
+      const loadingScreen = document.getElementById('loading-screen');
+      if (loadingScreen) {
+        loadingScreen.classList.remove('hidden');
+        loadingScreen.innerHTML = `
+          <div style="text-align: center; color: white;">
+            <h1 style="font-size: 32px; margin-bottom: 20px;">⏳ 正在进入战场</h1>
+            <p style="font-size: 16px; opacity: 0.8;">正在初始化游戏运行时...</p>
+          </div>
+        `;
+      }
+
+      try {
+        const [{ GameCoordinator }] = await Promise.all([import('./core/GameCoordinator')]);
+        startMenu.dispose();
+        const coordinator = new GameCoordinator({ showStartMenu: false });
+        coordinator.boot(settings);
+        game = coordinator;
+        hideLoadingScreen();
+      } catch (error) {
+        log.error('游戏启动失败:', error);
+        showError('游戏启动失败，请查看控制台了解详情');
+      }
+    });
 
     hideLoadingScreen();
 
@@ -60,7 +85,7 @@ async function main(): Promise<void> {
     log.info('📱 移动端: 使用虚拟摇杆和按钮控制');
 
     window.addEventListener('beforeunload', () => {
-      game.dispose();
+      game?.dispose();
     });
   } catch (error) {
     log.error('游戏初始化失败:', error);

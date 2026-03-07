@@ -31,7 +31,7 @@ export enum LevelState {
  */
 export class LevelManager {
   private scene: Scene;
-  private terrainGenerator: TerrainGenerator;
+  private terrainGenerator: TerrainGenerator | null = null;
 
   // 战斗区域边界
   private combatBounds: {
@@ -77,7 +77,14 @@ export class LevelManager {
 
   constructor(scene: Scene) {
     this.scene = scene;
-    this.terrainGenerator = new TerrainGenerator(scene);
+  }
+
+  private getTerrainGenerator(): TerrainGenerator {
+    if (!this.terrainGenerator) {
+      this.terrainGenerator = new TerrainGenerator(this.scene);
+    }
+
+    return this.terrainGenerator;
   }
 
   /**
@@ -99,7 +106,7 @@ export class LevelManager {
 
     log.info('Loading level', { levelId, name: config.name, terrain: config.terrain });
 
-    this.terrainGenerator.generateTerrain(config);
+    this.getTerrainGenerator().generateTerrain(config);
 
     log.info('Level loaded', { levelId, name: config.name });
   }
@@ -322,8 +329,13 @@ export class LevelManager {
    * 更新纯视觉环境动画，跟随渲染帧而不是固定玩法步长。
    */
   public updateVisuals(deltaTime: number, playerPosition: Vector3): void {
-    this.terrainGenerator.update(deltaTime);
-    this.terrainGenerator.updateLOD(playerPosition);
+    const terrainGenerator = this.terrainGenerator;
+    if (!terrainGenerator) {
+      return;
+    }
+
+    terrainGenerator.update(deltaTime);
+    terrainGenerator.updateLOD(playerPosition);
   }
 
   /**

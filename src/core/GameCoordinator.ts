@@ -47,6 +47,10 @@ interface EyeBoss {
   getEyeSystem(): EyeBossSystem;
 }
 
+interface GameCoordinatorOptions {
+  showStartMenu?: boolean;
+}
+
 export class GameCoordinator {
   private static readonly TUTORIAL_STAGE_DURATION_MS = 2200;
   private static readonly TUTORIAL_STAGE_GAP_MS = 350;
@@ -80,7 +84,7 @@ export class GameCoordinator {
   private powerUpSystem: PowerUpSystem;
 
   private hud: HUD;
-  private startMenu: StartMenu;
+  private startMenu: StartMenu | null;
   private lockOnIndicator: LockOnIndicator;
   private enemyHealthBars: EnemyHealthBars;
   private presentationController: PresentationController;
@@ -110,7 +114,8 @@ export class GameCoordinator {
   private readonly interpolatedCameraTargetQuaternion = new THREE.Quaternion();
   private lastRenderTimestamp: number = 0;
 
-  constructor() {
+  constructor(options: GameCoordinatorOptions = {}) {
+    const showStartMenu = options.showStartMenu ?? true;
     this.gameLoop = new GameLoop();
     this.resourceRegistry = new ResourceRegistry();
     this.sessionState = new GameSessionState();
@@ -150,7 +155,7 @@ export class GameCoordinator {
     this.lockOnIndicator = new LockOnIndicator();
     this.lockOnIndicator.setLockTime(this.playerStats.getMissileLockTime());
     this.enemyHealthBars = new EnemyHealthBars();
-    this.startMenu = new StartMenu();
+    this.startMenu = showStartMenu ? new StartMenu() : null;
     this.bossIndicator = new BossMissileIndicator();
     this.presentationController = new PresentationController({
       hud: this.hud,
@@ -189,7 +194,9 @@ export class GameCoordinator {
 
     this.initSystems();
     this.setupEventListeners();
-    this.setupStartMenu();
+    if (showStartMenu) {
+      this.setupStartMenu();
+    }
   }
 
   private initSystems(): void {
@@ -372,34 +379,42 @@ export class GameCoordinator {
 
   private setupStartMenu(): void {
     this.presentationController.wireStartMenu((settings: GameSettings) => {
-      this.sessionState.applySettings({
-        difficulty: settings.difficulty,
-        audioSettings: {
-          sfxVolume: settings.sfxVolume,
-          musicVolume: settings.musicVolume,
-        },
-        tutorialEnabled: settings.tutorialEnabled,
-        mode: settings.gameMode,
-        level: settings.startLevel,
-      });
-      this.enemySystem.setDifficultyProfile(this.getCurrentDifficultyProfile());
-      this.playerSystem.setLives(settings.playerLives);
-      this.setQualityPreset(settings.qualityPreset);
-      this.audioManager.setSFXVolume(settings.sfxVolume);
-      this.audioManager.setMusicVolume(settings.musicVolume);
-      this.musicSystem.setVolume(settings.musicVolume);
-      this.sessionState.setWave(0);
-      this.gameState.reset();
-      this.sessionState.setInBossBattle(false);
-      this.sessionState.resume();
-
-      if (settings.testScore > 0) {
-        this.playerStats.addScore(settings.testScore);
-        this.hud.updateUpgradePoints(this.playerStats.getUpgrades().getAvailablePoints());
-      }
-
+      this.applyGameSettings(settings);
       this.start();
     });
+  }
+
+  public boot(settings: GameSettings): void {
+    this.applyGameSettings(settings);
+    this.start();
+  }
+
+  private applyGameSettings(settings: GameSettings): void {
+    this.sessionState.applySettings({
+      difficulty: settings.difficulty,
+      audioSettings: {
+        sfxVolume: settings.sfxVolume,
+        musicVolume: settings.musicVolume,
+      },
+      tutorialEnabled: settings.tutorialEnabled,
+      mode: settings.gameMode,
+      level: settings.startLevel,
+    });
+    this.enemySystem.setDifficultyProfile(this.getCurrentDifficultyProfile());
+    this.playerSystem.setLives(settings.playerLives);
+    this.setQualityPreset(settings.qualityPreset);
+    this.audioManager.setSFXVolume(settings.sfxVolume);
+    this.audioManager.setMusicVolume(settings.musicVolume);
+    this.musicSystem.setVolume(settings.musicVolume);
+    this.sessionState.setWave(0);
+    this.gameState.reset();
+    this.sessionState.setInBossBattle(false);
+    this.sessionState.resume();
+
+    if (settings.testScore > 0) {
+      this.playerStats.addScore(settings.testScore);
+      this.hud.updateUpgradePoints(this.playerStats.getUpgrades().getAvailablePoints());
+    }
   }
 
   private spawnFriendlyAI(): void {
