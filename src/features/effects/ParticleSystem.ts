@@ -656,7 +656,7 @@ export class ParticleSystem {
     for (let i = 0; i < coreCount; i++) {
       this.spawnParticle(ParticleType.EXPLOSION, position, {
         speed: 35 + Math.random() * 25,
-        life: 0.22 + Math.random() * 0.16,
+        life: 0.36 + Math.random() * 0.22,
         size: coreSize + Math.random() * (coreSize * 0.9),
         color: new THREE.Color().setHSL(0.095, 0.9, 0.74),
       });
@@ -666,7 +666,7 @@ export class ParticleSystem {
     for (let i = 0; i < fireballCount; i++) {
       this.spawnParticle(ParticleType.FIRE, position, {
         speed: 34 + Math.random() * 24,
-        life: 0.46 + Math.random() * 0.34,
+        life: 0.72 + Math.random() * 0.46,
         size: fireballSize + Math.random() * (fireballSize * 0.85),
         color: new THREE.Color().setHSL(0.06 + Math.random() * 0.04, 1, 0.52),
       });
@@ -676,34 +676,34 @@ export class ParticleSystem {
     for (let i = 0; i < sparkCount; i++) {
       this.spawnParticle(ParticleType.SPARK, position, {
         speed: 80 + Math.random() * 35,
-        life: 0.24 + Math.random() * 0.24,
+        life: 0.34 + Math.random() * 0.28,
         size: 0.16 + Math.random() * 0.16,
         color: new THREE.Color(0xffd36b),
       });
     }
 
     // 3. 冲击波环：分阶段扩散，帮助玩家读到“爆炸半径与时间”
-    this.emitFlakRing(position, radius * 0.22, ringCount, 0.2, 0.34, 24, 0.28);
+    this.emitFlakRing(position, radius * 0.22, ringCount, 0.22, 0.52, 24, 0.28);
     const secondRingPos = position.clone();
-    this.scheduleBurst(0.06, () => {
+    this.scheduleBurst(0.1, () => {
       this.emitFlakRing(
         secondRingPos,
         radius * 0.42,
         Math.max(10, Math.floor(ringCount * 0.9)),
-        0.18,
-        0.38,
+        0.2,
+        0.62,
         22,
         0.2
       );
     });
     const thirdRingPos = position.clone();
-    this.scheduleBurst(0.13, () => {
+    this.scheduleBurst(0.2, () => {
       this.emitFlakRing(
         thirdRingPos,
         radius * 0.62,
         Math.max(8, Math.floor(ringCount * 0.75)),
-        0.16,
-        0.42,
+        0.18,
+        0.72,
         18,
         0.16
       );
@@ -711,18 +711,18 @@ export class ParticleSystem {
 
     // 4. 烟雾体积层：两段出现，既看得见时序又不过量
     const smokePosition = position.clone();
-    this.scheduleBurst(0.05, () => {
+    this.scheduleBurst(0.08, () => {
       for (let i = 0; i < Math.floor(10 * radiusScale); i++) {
         this.spawnParticle(ParticleType.SMOKE, smokePosition, {
           speed: 8 + Math.random() * 6,
-          life: 1.5 + Math.random() * 0.95,
+          life: 2.3 + Math.random() * 1.2,
           size: smokeSize + Math.random() * (smokeSize * 0.8),
           color: new THREE.Color().setHSL(0, 0, 0.2 + Math.random() * 0.16),
         });
       }
     });
     const smokeShellPosition = position.clone();
-    this.scheduleBurst(0.14, () => {
+    this.scheduleBurst(0.24, () => {
       for (let i = 0; i < Math.floor(8 * radiusScale); i++) {
         const angle = (i / Math.max(1, Math.floor(8 * radiusScale))) * Math.PI * 2;
         const shellPos = new THREE.Vector3(
@@ -732,7 +732,7 @@ export class ParticleSystem {
         );
         this.spawnParticle(ParticleType.SMOKE, shellPos, {
           speed: 5 + Math.random() * 4,
-          life: 1.35 + Math.random() * 0.85,
+          life: 2.1 + Math.random() * 1.15,
           size: shellSmokeSize + Math.random() * (shellSmokeSize * 0.75),
           color: new THREE.Color().setHSL(0, 0, 0.24 + Math.random() * 0.12),
         });

@@ -5,7 +5,7 @@ import { GameState } from '@/core/GameState';
 import { EventBus, GameEventType } from '@/core/EventBus';
 import { CombatSystem } from '@/core/systems/CombatSystem';
 import { PlayerSystem } from '@/core/systems/PlayerSystem';
-import { EnemySystem } from '@/core/systems/EnemySystem';
+import type { EnemySystem } from '@/core/systems/EnemySystem';
 import { PowerUpSystem } from '@/core/systems/PowerUpSystem';
 import { InputHandler } from '@/core/Input/InputHandler';
 import { AudioManager } from '@/core/Audio/AudioManager';
@@ -58,9 +58,11 @@ interface TutorialCombatState {
   speedHintShown: boolean;
   fireHintShown: boolean;
   lockHintShown: boolean;
+  lockCompleteHintShown: boolean;
   missileHintShown: boolean;
   killHintShown: boolean;
   hitHintShown: boolean;
+  friendlySupportHintShown: boolean;
 }
 
 interface EscortWaveState {
@@ -100,7 +102,8 @@ export class GameCoordinator {
 
   private playerSystem: PlayerSystem;
   private combatSystem: CombatSystem;
-  private enemySystem: EnemySystem;
+  private enemySystem: EnemySystem | null = null;
+  private enemySystemPromise: Promise<EnemySystem> | null = null;
   private powerUpSystem: PowerUpSystem;
 
   private hud: HUD;
@@ -141,9 +144,11 @@ export class GameCoordinator {
     speedHintShown: false,
     fireHintShown: false,
     lockHintShown: false,
+    lockCompleteHintShown: false,
     missileHintShown: false,
     killHintShown: false,
     hitHintShown: false,
+    friendlySupportHintShown: false,
   };
   private readonly escortWaveState: EscortWaveState = {
     active: false,
@@ -185,8 +190,6 @@ export class GameCoordinator {
       this.playerAircraft
     );
 
-    this.enemySystem = new EnemySystem(this.gameScene.scene, this.sessionState);
-
     this.powerUpSystem = new PowerUpSystem(this.gameScene.scene, this.particleSystem);
 
     this.hud = new HUD();
@@ -203,8 +206,6 @@ export class GameCoordinator {
       lockOnIndicator: this.lockOnIndicator,
     });
 
-    this.enemySystem.setDifficultyProfile(getDifficultyProfile(this.sessionState.getDifficulty()));
-
     this.initSystems();
     this.setupEventListeners();
     if (showStartMenu) {
@@ -215,8 +216,25 @@ export class GameCoordinator {
   private initSystems(): void {
     this.playerSystem.init();
     this.combatSystem.init();
-    this.enemySystem.init();
     this.powerUpSystem.init();
+  }
+
+  private async ensureEnemySystem(): Promise<EnemySystem> {
+    if (this.enemySystem) {
+      return this.enemySystem;
+    }
+
+    if (!this.enemySystemPromise) {
+      this.enemySystemPromise = import('@/core/systems/EnemySystem').then(({ EnemySystem }) => {
+        const enemySystem = new EnemySystem(this.gameScene.scene, this.sessionState);
+        enemySystem.init();
+        enemySystem.setDifficultyProfile(getDifficultyProfile(this.sessionState.getDifficulty()));
+        this.enemySystem = enemySystem;
+        return enemySystem;
+      });
+    }
+
+    return this.enemySystemPromise;
   }
 
   private setupEventListeners(): void {
@@ -436,7 +454,7 @@ export class GameCoordinator {
       mode: settings.gameMode,
       level: settings.startLevel,
     });
-    this.enemySystem.setDifficultyProfile(this.getCurrentDifficultyProfile());
+    this.enemySystem?.setDifficultyProfile(this.getCurrentDifficultyProfile());
     this.playerSystem.setLives(settings.playerLives);
     this.setQualityPreset(settings.qualityPreset);
     this.audioManager.setSFXVolume(settings.sfxVolume);
@@ -470,12 +488,17 @@ export class GameCoordinator {
     mesh.position.copy(playerPos).add(offset);
 
     this.gameScene.scene.add(mesh);
-    this.enemySystem.spawnFriendly(friendly);
+    this.enemySystem?.spawnFriendly(friendly);
+    this.handleTutorialFriendlySupport();
     return friendly;
   }
 
   private spawnEnemyFromBoss(position: THREE.Vector3, enemyType: EnemyType = EnemyType.FIGHTER): void {
     const MAX_ENEMIES = 8;
+    if (!this.enemySystem) {
+      return;
+    }
+
     if (this.enemySystem.getAliveEnemyCount() >= MAX_ENEMIES) {
       return;
     }
@@ -536,14 +559,14 @@ export class GameCoordinator {
     ) {
       this.bossBattleController.update(deltaTime);
     } else {
-      this.enemySystem.updateWithPlayer(deltaTime, this.playerSystem.getPosition());
+      this.enemySystem?.updateWithPlayer(deltaTime, this.playerSystem.getPosition());
     }
 
     this.powerUpSystem.update(deltaTime);
     this.updateTutorialCombatState();
 
-    const enemyMeshes = this.enemySystem.getEnemyMeshes();
-    const friendlyMeshes = this.enemySystem.getFriendlyAIs().map((f) => f.getMesh());
+    const enemyMeshes = this.enemySystem?.getEnemyMeshes() ?? [];
+    const friendlyMeshes = this.enemySystem?.getFriendlyAIs().map((f) => f.getMesh()) ?? [];
 
     this.combatSystem.updateEnemyMeshes(enemyMeshes);
 
@@ -551,7 +574,7 @@ export class GameCoordinator {
       enemyMeshes,
       friendlyMeshes,
       (target, damage) => {
-        const enemy = this.enemySystem.getEnemies().find((e) => e.getMesh() === target);
+        const enemy = this.enemySystem?.getEnemies().find((e) => e.getMesh() === target);
         enemy?.takeDamage(damage);
       },
       (damage) => {
@@ -560,7 +583,7 @@ export class GameCoordinator {
         }
       },
       (target, damage) => {
-        const friendly = this.enemySystem.getFriendlyAIs().find((f) => f.getMesh() === target);
+        const friendly = this.enemySystem?.getFriendlyAIs().find((f) => f.getMesh() === target);
         friendly?.takeDamage(damage);
       }
     );
@@ -587,7 +610,7 @@ export class GameCoordinator {
     input: ReturnType<InputHandler['getState']>,
     deltaTime: number
   ): void {
-    let targetMeshes: THREE.Object3D[] = this.enemySystem.getEnemyMeshes();
+    let targetMeshes: THREE.Object3D[] = this.enemySystem?.getEnemyMeshes() ?? [];
     const currentBoss = this.bossBattleController?.getCurrentBoss() ?? null;
 
     if (
@@ -626,6 +649,7 @@ export class GameCoordinator {
       );
 
       if (lockComplete) {
+        this.handleTutorialMissileLockCompleted();
         const lockedTarget = this.lockOnIndicator.getCurrentTarget();
         if (lockedTarget && this.missileCount > 0 && !this.missileFiringScheduled) {
           this.missileFiringScheduled = true;
@@ -704,9 +728,9 @@ export class GameCoordinator {
   }
 
   private updateUI(deltaTime: number): void {
-    const totalEnemies = this.enemySystem.getTotalEnemyCount();
-    const spawnedEnemies = this.enemySystem.getSpawnedEnemyCount();
-    const aliveEnemies = this.enemySystem.getAliveEnemyCount();
+    const totalEnemies = this.enemySystem?.getTotalEnemyCount() ?? 0;
+    const spawnedEnemies = this.enemySystem?.getSpawnedEnemyCount() ?? 0;
+    const aliveEnemies = this.enemySystem?.getAliveEnemyCount() ?? 0;
     const killedEnemies = spawnedEnemies - aliveEnemies;
     const remaining = totalEnemies - killedEnemies;
 
@@ -728,8 +752,8 @@ export class GameCoordinator {
   }
 
   private updateEnemyHealthBars(): void {
-    const enemies = this.enemySystem.getEnemies();
-    const friendlies = this.enemySystem.getFriendlyAIs();
+    const enemies = this.enemySystem?.getEnemies() ?? [];
+    const friendlies = this.enemySystem?.getFriendlyAIs() ?? [];
     const currentBoss = this.bossBattleController?.getCurrentBoss() ?? null;
 
     const enemyData = enemies
@@ -818,7 +842,7 @@ export class GameCoordinator {
 
   private shouldSpawnPowerUp(): boolean {
     const currentLevel =
-      this.enemySystem.getCurrentLevelConfig() ||
+      this.enemySystem?.getCurrentLevelConfig() ||
       getLevelConfig(this.sessionState.getLevel());
     const baseChance = currentLevel?.powerUpFrequency ?? GAME_CONSTANTS.POWERUP.SPAWN_CHANCE;
     const difficultyProfile = this.getCurrentDifficultyProfile();
@@ -832,7 +856,7 @@ export class GameCoordinator {
 
   private spawnPowerUpForCurrentLevel(position: THREE.Vector3): void {
     const currentLevel =
-      this.enemySystem.getCurrentLevelConfig() ||
+      this.enemySystem?.getCurrentLevelConfig() ||
       getLevelConfig(this.sessionState.getLevel());
     const allowedTypes = currentLevel?.powerUpTypes ?? Object.values(PowerUpType);
     const filteredTypes = Object.values(PowerUpType).filter((type) => allowedTypes.includes(type));
@@ -864,7 +888,7 @@ export class GameCoordinator {
   private render(alpha: number): void {
     const clampedAlpha = Math.max(0, Math.min(1, alpha));
     this.playerSystem.applyInterpolatedVisual(clampedAlpha);
-    this.enemySystem.applyInterpolatedVisuals(clampedAlpha);
+    this.enemySystem?.applyInterpolatedVisuals(clampedAlpha);
     this.interpolatedCameraTargetPosition.lerpVectors(
       this.previousCameraTargetPosition,
       this.currentCameraTargetPosition,
@@ -883,7 +907,7 @@ export class GameCoordinator {
     this.lastRenderTimestamp = now;
 
     if (this.sessionState.isPlaying() && !this.sessionState.isPaused()) {
-      this.enemySystem.updateVisuals(renderDeltaTime, this.playerSystem.getPosition());
+      this.enemySystem?.updateVisuals(renderDeltaTime, this.playerSystem.getPosition());
     }
 
     try {
@@ -893,7 +917,7 @@ export class GameCoordinator {
       );
       this.gameScene.render();
     } finally {
-      this.enemySystem.restoreCurrentVisuals();
+      this.enemySystem?.restoreCurrentVisuals();
       this.playerSystem.restoreCurrentVisual();
     }
   }
@@ -903,7 +927,6 @@ export class GameCoordinator {
     this.presentationController.resetHudThrottle();
     this.resetTutorialCombatState();
     this.playerSystem.getHealth().reset();
-    this.enemySystem.setDifficultyProfile(this.getCurrentDifficultyProfile());
     this.sessionState.setInBossBattle(this.sessionState.isBossMode());
     this.applyCurrentLevelEnvironment();
     this.syncCameraInterpolationState();
@@ -922,40 +945,52 @@ export class GameCoordinator {
       true
     );
 
-    this.gameLoop.start(
-      (dt) => this.update(dt),
-      (alpha) => this.render(alpha)
-    );
-    this.audioManager.startEngine();
+    void this.ensureEnemySystem()
+      .then((enemySystem) => {
+        if (!this.sessionState.isPlaying()) {
+          return;
+        }
 
-    if (this.sessionState.isBossMode()) {
-      this.startBossBattle();
-    } else {
-      const level = this.sessionState.getLevel();
-      this.enemySystem.loadLevel(level);
-      this.applyCurrentLevelEnvironment(level);
-      const shouldRunTutorialIntro = this.shouldRunTutorialIntro();
-      const tutorialWaveDelayMs = shouldRunTutorialIntro ? this.getTutorialWaveDelayMs() : 0;
+        enemySystem.setDifficultyProfile(this.getCurrentDifficultyProfile());
 
-      if (shouldRunTutorialIntro) {
-        this.startTutorialIntroSequence();
-        this.startTutorialCombatSequence(tutorialWaveDelayMs);
-      }
-
-      this.scheduleTimeout(() => {
-        this.enemySystem.startWave(this.playerSystem.getPosition());
-      }, GAME_CONSTANTS.LEVEL.START_DELAY * 1000 + tutorialWaveDelayMs);
-
-      this.musicSystem.playLevelMusic(this.getLevelMusic(level));
-
-      this.scheduleTimeout(() => {
-        this.spawnFriendlyAI();
-        this.hud.showPowerUpBig(
-          '✈️',
-          shouldRunTutorialIntro ? '友军编队已入场' : '召唤友军'
+        this.gameLoop.start(
+          (dt) => this.update(dt),
+          (alpha) => this.render(alpha)
         );
-      }, shouldRunTutorialIntro ? tutorialWaveDelayMs + GameCoordinator.TUTORIAL_FRIENDLY_SPAWN_DELAY_MS : 1000);
-    }
+        this.audioManager.startEngine();
+
+        if (this.sessionState.isBossMode()) {
+          this.startBossBattle();
+        } else {
+          const level = this.sessionState.getLevel();
+          enemySystem.loadLevel(level);
+          this.applyCurrentLevelEnvironment(level);
+          const shouldRunTutorialIntro = this.shouldRunTutorialIntro();
+          const tutorialWaveDelayMs = shouldRunTutorialIntro ? this.getTutorialWaveDelayMs() : 0;
+
+          if (shouldRunTutorialIntro) {
+            this.startTutorialIntroSequence();
+            this.startTutorialCombatSequence(tutorialWaveDelayMs);
+          }
+
+          this.scheduleTimeout(() => {
+            this.enemySystem?.startWave(this.playerSystem.getPosition());
+          }, GAME_CONSTANTS.LEVEL.START_DELAY * 1000 + tutorialWaveDelayMs);
+
+          this.musicSystem.playLevelMusic(this.getLevelMusic(level));
+
+          this.scheduleTimeout(() => {
+            this.spawnFriendlyAI();
+            this.hud.showPowerUpBig(
+              '✈️',
+              shouldRunTutorialIntro ? '友军编队已入场' : '召唤友军'
+            );
+          }, shouldRunTutorialIntro ? tutorialWaveDelayMs + GameCoordinator.TUTORIAL_FRIENDLY_SPAWN_DELAY_MS : 1000);
+        }
+      })
+      .catch((error) => {
+        console.error('Failed to initialize enemy system', error);
+      });
   }
 
   private shouldRunTutorialIntro(): boolean {
@@ -1024,7 +1059,7 @@ export class GameCoordinator {
     }, combatStartDelayMs);
 
     this.scheduleTimeout(() => {
-      this.hud.showPowerUpBig('🤝', '友军即将加入战斗', 1.8);
+      this.hud.showPowerUpBig('🤝', '友军正在接近，准备协同压制', 1.8);
     }, combatStartDelayMs + GameCoordinator.TUTORIAL_FRIENDLY_SPAWN_BUFFER_MS);
   }
 
@@ -1035,9 +1070,11 @@ export class GameCoordinator {
     this.tutorialCombatState.speedHintShown = false;
     this.tutorialCombatState.fireHintShown = false;
     this.tutorialCombatState.lockHintShown = false;
+    this.tutorialCombatState.lockCompleteHintShown = false;
     this.tutorialCombatState.missileHintShown = false;
     this.tutorialCombatState.killHintShown = false;
     this.tutorialCombatState.hitHintShown = false;
+    this.tutorialCombatState.friendlySupportHintShown = false;
   }
 
   private activateTutorialCombatStage(): void {
@@ -1105,6 +1142,15 @@ export class GameCoordinator {
     this.hud.showPowerUpBig('🚀', '导弹离轨，优先清理高威胁目标', 1.8);
   }
 
+  private handleTutorialMissileLockCompleted(): void {
+    if (!this.tutorialCombatState.active || this.tutorialCombatState.lockCompleteHintShown) {
+      return;
+    }
+
+    this.tutorialCombatState.lockCompleteHintShown = true;
+    this.hud.showPowerUpBig('✅', '锁定完成，抓住窗口立刻发射', 1.6);
+  }
+
   private handleTutorialEnemyDeath(): void {
     if (!this.tutorialCombatState.active || this.tutorialCombatState.killHintShown) {
       return;
@@ -1124,6 +1170,15 @@ export class GameCoordinator {
     this.hud.showPowerUpBig('↪️', '被命中时横滚或加速脱离火线', 1.6);
   }
 
+  private handleTutorialFriendlySupport(): void {
+    if (!this.tutorialCombatState.active || this.tutorialCombatState.friendlySupportHintShown) {
+      return;
+    }
+
+    this.tutorialCombatState.friendlySupportHintShown = true;
+    this.hud.showPowerUpBig('🤝', '友军已入场，优先配合清理高威胁目标', 1.8);
+  }
+
   private handleWaveEventStart(eventType: LevelWaveEventType, wave: number): void {
     this.escortWaveState.active = false;
     this.escortWaveState.friendlyId = null;
@@ -1138,7 +1193,7 @@ export class GameCoordinator {
         this.hud.showPowerUpBig('⚠️', `限时拦截波次 · 第 ${waveNumber} 波`, 1.8, true);
         break;
       case LevelWaveEventType.ESCORT_DEFENSE:
-        if (this.enemySystem.getFriendlyAIs().length < 4) {
+        if ((this.enemySystem?.getFriendlyAIs().length ?? 0) < 4) {
           const escortFriendly = this.spawnFriendlyAI();
           this.escortWaveState.active = true;
           this.escortWaveState.friendlyId = escortFriendly.getMesh().uuid;
@@ -1153,8 +1208,7 @@ export class GameCoordinator {
       return;
     }
 
-    const escortFriendlyAlive = this.enemySystem
-      .getFriendlyAIs()
+    const escortFriendlyAlive = (this.enemySystem?.getFriendlyAIs() ?? [])
       .some(
         (friendly) =>
           friendly.isAlive() && friendly.getMesh().uuid === this.escortWaveState.friendlyId
@@ -1201,14 +1255,14 @@ export class GameCoordinator {
     }
 
     if (!this.bossBattleControllerPromise) {
-      this.bossBattleControllerPromise = import('@/core/BossBattleController').then(
-        ({ BossBattleController }) => {
+      this.bossBattleControllerPromise = this.ensureEnemySystem().then((enemySystem) =>
+        import('@/core/BossBattleController').then(({ BossBattleController }) => {
           const controller = new BossBattleController({
             scene: this.gameScene.scene,
             camera: this.gameScene.camera,
             particleSystem: this.particleSystem,
             combatSystem: this.combatSystem,
-            enemySystem: this.enemySystem,
+            enemySystem,
             playerSystem: this.playerSystem,
             playerAircraft: this.playerAircraft,
             audioManager: this.audioManager,
@@ -1226,7 +1280,7 @@ export class GameCoordinator {
           });
           this.bossBattleController = controller;
           return controller;
-        }
+        })
       );
     }
 
@@ -1286,7 +1340,7 @@ export class GameCoordinator {
     this.presentationController.clearBossMissileIndicators();
 
     this.bossBattleController?.clear();
-    this.enemySystem.clearFriendlies();
+    this.enemySystem?.clearFriendlies();
 
     this.combatSystem.getPlayerProjectilePool().clear();
     this.combatSystem.getEnemyProjectilePool().clear();
@@ -1306,11 +1360,11 @@ export class GameCoordinator {
           if (isBossMode) {
             this.startBossBattle();
           } else {
-            this.enemySystem.loadLevel(nextLevel);
+            this.enemySystem?.loadLevel(nextLevel);
             this.applyCurrentLevelEnvironment(nextLevel);
-            this.hud.updateRemainingEnemies(this.enemySystem.getTotalEnemyCount());
+            this.hud.updateRemainingEnemies(this.enemySystem?.getTotalEnemyCount() ?? 0);
             this.musicSystem.playLevelMusic(this.getLevelMusic(nextLevel));
-            this.enemySystem.startWave(this.playerSystem.getPosition());
+            this.enemySystem?.startWave(this.playerSystem.getPosition());
           }
         }, 2000);
       } else {
@@ -1446,7 +1500,7 @@ export class GameCoordinator {
     this.stop();
     this.resourceRegistry.dispose();
     this.bossBattleController?.clear();
-    this.enemySystem.dispose();
+    this.enemySystem?.dispose();
     this.particleSystem.clear();
     this.powerUpSystem.dispose();
     this.presentationController.dispose();

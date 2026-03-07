@@ -39,7 +39,7 @@
 - [active] 子弹 / 导弹 / 爆炸特效统一升级下一批
 - [active] 武器音效 / 混音第一批
 - [done] HUD 左上角状态区与升级反馈已完成当前轮收口
-- [active] 阶段式 onboarding 第二批
+- [active] 阶段式 onboarding 第三批
 - [active] 事件型波次第二批
 
 ### 已知未收尾
@@ -187,13 +187,14 @@
 
 #### D1. 试玩关卡与新手引导
 - [done] 试玩关卡已可开关，并接入首关开场
-- [active] 从“提示驱动”升级到“阶段式 onboarding”第二批已落地
+- [active] 从“提示驱动”升级到“阶段式 onboarding”第三批已落地
   - 已加入战斗内阶段提示: 机动、加速、开火、导弹、首击杀
   - 已加入首次受击规避提示
+  - 已加入导弹锁定完成提示与友军配合提示
 - [done] 已加入导弹锁定阶段提示
-- [next] 阶段式 onboarding 第三批
-  - 导弹锁定完成时机更精确
-  - 首关目标优先级和友军配合提示继续收口
+- [next] 阶段式 onboarding 第四批
+  - 首关目标优先级提示继续收口
+  - 友军入场与教程提示时序继续收口
 - [later] 首关开场演出与环境表现联动
 
 #### D2. 事件型波次
@@ -234,7 +235,9 @@
   - 菜单启动与游戏运行时进一步拆边界
   - `EnemySystem -> LevelManager -> TerrainGenerator` 延后实例化
   - Boss 控制器继续后移到按需路径
-- [next] `EnemySystem` 从 `GameCoordinator` 构造阶段后移到 `start()` / 战斗开始阶段
+- [done] `EnemySystem` 已从 `GameCoordinator` 构造阶段后移到 `start()` / 战斗开始阶段
+  - 现在仅在实际开始游戏时动态导入并初始化
+  - `BossBattleController` 创建也会等待 `EnemySystem` 就绪
 - [done] 菜单启动与游戏运行时已拆出一层边界
   - `main.ts` 现在先启动 `StartMenu`
   - 点击开始后才动态导入并实例化 `GameCoordinator`
