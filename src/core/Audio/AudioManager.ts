@@ -479,25 +479,34 @@ export class AudioManager {
     const { now, context, sfxGain } = sound;
 
     try {
-      // 创建射击声
-      const osc = context.createOscillator();
-      const gain = context.createGain();
+      // 机炮：高频瞬态 click + 轻低频 body
+      const clickOsc = context.createOscillator();
+      const clickGain = context.createGain();
+      clickOsc.type = 'square';
+      clickOsc.frequency.setValueAtTime(1480, now);
+      clickOsc.frequency.exponentialRampToValueAtTime(520, now + 0.05);
+      clickGain.gain.setValueAtTime(0, now);
+      clickGain.gain.linearRampToValueAtTime(0.14 * this.sfxVolume, now + 0.002);
+      clickGain.gain.exponentialRampToValueAtTime(0.01, now + 0.055);
+      clickOsc.connect(clickGain);
+      clickGain.connect(sfxGain);
+      clickOsc.start(now);
+      clickOsc.stop(now + 0.055);
 
-      osc.type = 'square';
-      osc.frequency.setValueAtTime(800, now);
-      osc.frequency.exponentialRampToValueAtTime(200, now + 0.1);
+      const bodyOsc = context.createOscillator();
+      const bodyGain = context.createGain();
+      bodyOsc.type = 'triangle';
+      bodyOsc.frequency.setValueAtTime(340, now);
+      bodyOsc.frequency.exponentialRampToValueAtTime(150, now + 0.075);
+      bodyGain.gain.setValueAtTime(0, now);
+      bodyGain.gain.linearRampToValueAtTime(0.1 * this.sfxVolume, now + 0.004);
+      bodyGain.gain.exponentialRampToValueAtTime(0.01, now + 0.085);
+      bodyOsc.connect(bodyGain);
+      bodyGain.connect(sfxGain);
+      bodyOsc.start(now);
+      bodyOsc.stop(now + 0.085);
 
-      gain.gain.setValueAtTime(0.2 * this.sfxVolume, now);
-      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
-
-      osc.connect(gain);
-      gain.connect(sfxGain);
-
-      osc.start(now);
-      osc.stop(now + 0.1);
-
-      // 添加噪声层
-      this.playNoise(0.05, 0.1, 0.1 * this.sfxVolume);
+      this.playFilteredNoise(0.055, 0.003, 0.08 * this.sfxVolume, 'highpass', 2400, 1.5);
     } catch {
       // Ignore
     }
@@ -512,34 +521,35 @@ export class AudioManager {
     const { now, context, sfxGain } = sound;
 
     try {
+      // 通用爆炸：中低频主体 + 高频破裂，不强调导弹特征
       const bodyOsc = context.createOscillator();
       const bodyGain = context.createGain();
       bodyOsc.type = 'sine';
-      bodyOsc.frequency.setValueAtTime(150, now);
-      bodyOsc.frequency.exponentialRampToValueAtTime(24, now + 0.52);
+      bodyOsc.frequency.setValueAtTime(135, now);
+      bodyOsc.frequency.exponentialRampToValueAtTime(30, now + 0.5);
       bodyGain.gain.setValueAtTime(0, now);
-      bodyGain.gain.linearRampToValueAtTime(0.44 * this.sfxVolume, now + 0.015);
-      bodyGain.gain.exponentialRampToValueAtTime(0.01, now + 0.52);
+      bodyGain.gain.linearRampToValueAtTime(0.4 * this.sfxVolume, now + 0.018);
+      bodyGain.gain.exponentialRampToValueAtTime(0.01, now + 0.5);
       bodyOsc.connect(bodyGain);
       bodyGain.connect(sfxGain);
       bodyOsc.start(now);
-      bodyOsc.stop(now + 0.52);
+      bodyOsc.stop(now + 0.5);
 
       const crackOsc = context.createOscillator();
       const crackGain = context.createGain();
       crackOsc.type = 'triangle';
-      crackOsc.frequency.setValueAtTime(960, now);
-      crackOsc.frequency.exponentialRampToValueAtTime(180, now + 0.14);
+      crackOsc.frequency.setValueAtTime(880, now + 0.004);
+      crackOsc.frequency.exponentialRampToValueAtTime(220, now + 0.16);
       crackGain.gain.setValueAtTime(0, now);
-      crackGain.gain.linearRampToValueAtTime(0.2 * this.sfxVolume, now + 0.006);
-      crackGain.gain.exponentialRampToValueAtTime(0.01, now + 0.16);
+      crackGain.gain.linearRampToValueAtTime(0.18 * this.sfxVolume, now + 0.008);
+      crackGain.gain.exponentialRampToValueAtTime(0.01, now + 0.18);
       crackOsc.connect(crackGain);
       crackGain.connect(sfxGain);
-      crackOsc.start(now);
-      crackOsc.stop(now + 0.16);
+      crackOsc.start(now + 0.004);
+      crackOsc.stop(now + 0.18);
 
-      this.playFilteredNoise(0.24, 0.015, 0.18 * this.sfxVolume, 'bandpass', 760, 1.1);
-      this.playFilteredNoise(0.32, 0.018, 0.24 * this.sfxVolume, 'highpass', 1600, 0.8);
+      this.playFilteredNoise(0.22, 0.016, 0.16 * this.sfxVolume, 'bandpass', 690, 1.05);
+      this.playFilteredNoise(0.34, 0.02, 0.22 * this.sfxVolume, 'highpass', 1700, 0.82);
     } catch {
       // Ignore
     }
@@ -910,13 +920,14 @@ export class AudioManager {
     const { now, context, sfxGain } = sound;
 
     try {
+      // 导弹发射：点火脉冲 + 推进嘶声 + 尾焰亮边
       const ignitionOsc = context.createOscillator();
       const ignitionGain = context.createGain();
       ignitionOsc.type = 'square';
-      ignitionOsc.frequency.setValueAtTime(240, now);
-      ignitionOsc.frequency.exponentialRampToValueAtTime(110, now + 0.12);
+      ignitionOsc.frequency.setValueAtTime(210, now);
+      ignitionOsc.frequency.exponentialRampToValueAtTime(95, now + 0.12);
       ignitionGain.gain.setValueAtTime(0, now);
-      ignitionGain.gain.linearRampToValueAtTime(0.22 * this.sfxVolume, now + 0.01);
+      ignitionGain.gain.linearRampToValueAtTime(0.24 * this.sfxVolume, now + 0.008);
       ignitionGain.gain.exponentialRampToValueAtTime(0.01, now + 0.12);
       ignitionOsc.connect(ignitionGain);
       ignitionGain.connect(sfxGain);
@@ -926,17 +937,31 @@ export class AudioManager {
       const sustainOsc = context.createOscillator();
       const sustainGain = context.createGain();
       sustainOsc.type = 'sawtooth';
-      sustainOsc.frequency.setValueAtTime(360, now + 0.015);
-      sustainOsc.frequency.exponentialRampToValueAtTime(140, now + 0.32);
+      sustainOsc.frequency.setValueAtTime(300, now + 0.012);
+      sustainOsc.frequency.exponentialRampToValueAtTime(120, now + 0.34);
       sustainGain.gain.setValueAtTime(0, now + 0.01);
-      sustainGain.gain.linearRampToValueAtTime(0.22 * this.sfxVolume, now + 0.03);
-      sustainGain.gain.exponentialRampToValueAtTime(0.01, now + 0.32);
+      sustainGain.gain.linearRampToValueAtTime(0.26 * this.sfxVolume, now + 0.028);
+      sustainGain.gain.exponentialRampToValueAtTime(0.01, now + 0.34);
       sustainOsc.connect(sustainGain);
       sustainGain.connect(sfxGain);
       sustainOsc.start(now + 0.01);
-      sustainOsc.stop(now + 0.32);
+      sustainOsc.stop(now + 0.34);
 
-      this.playFilteredNoise(0.16, 0.01, 0.14 * this.sfxVolume, 'bandpass', 900, 0.9);
+      const tailOsc = context.createOscillator();
+      const tailGain = context.createGain();
+      tailOsc.type = 'triangle';
+      tailOsc.frequency.setValueAtTime(980, now + 0.018);
+      tailOsc.frequency.exponentialRampToValueAtTime(380, now + 0.2);
+      tailGain.gain.setValueAtTime(0, now + 0.015);
+      tailGain.gain.linearRampToValueAtTime(0.08 * this.sfxVolume, now + 0.03);
+      tailGain.gain.exponentialRampToValueAtTime(0.01, now + 0.22);
+      tailOsc.connect(tailGain);
+      tailGain.connect(sfxGain);
+      tailOsc.start(now + 0.015);
+      tailOsc.stop(now + 0.22);
+
+      this.playFilteredNoise(0.2, 0.009, 0.16 * this.sfxVolume, 'bandpass', 980, 1.05);
+      this.playFilteredNoise(0.14, 0.007, 0.1 * this.sfxVolume, 'highpass', 2400, 1.3);
     } catch {
       // Ignore
     }
@@ -951,34 +976,48 @@ export class AudioManager {
     const { now, context, sfxGain } = sound;
 
     try {
+      // 导弹爆炸：更厚的低频冲击 + 更明确的金属破裂层
       const boomOsc = context.createOscillator();
       const boomGain = context.createGain();
       boomOsc.type = 'sawtooth';
-      boomOsc.frequency.setValueAtTime(95, now);
-      boomOsc.frequency.exponentialRampToValueAtTime(28, now + 0.56);
+      boomOsc.frequency.setValueAtTime(88, now);
+      boomOsc.frequency.exponentialRampToValueAtTime(24, now + 0.58);
       boomGain.gain.setValueAtTime(0, now);
-      boomGain.gain.linearRampToValueAtTime(0.52 * this.sfxVolume, now + 0.018);
-      boomGain.gain.exponentialRampToValueAtTime(0.01, now + 0.56);
+      boomGain.gain.linearRampToValueAtTime(0.56 * this.sfxVolume, now + 0.016);
+      boomGain.gain.exponentialRampToValueAtTime(0.01, now + 0.58);
       boomOsc.connect(boomGain);
       boomGain.connect(sfxGain);
       boomOsc.start(now);
-      boomOsc.stop(now + 0.56);
+      boomOsc.stop(now + 0.58);
+
+      const subOsc = context.createOscillator();
+      const subGain = context.createGain();
+      subOsc.type = 'sine';
+      subOsc.frequency.setValueAtTime(62, now);
+      subOsc.frequency.exponentialRampToValueAtTime(24, now + 0.5);
+      subGain.gain.setValueAtTime(0, now);
+      subGain.gain.linearRampToValueAtTime(0.22 * this.sfxVolume, now + 0.022);
+      subGain.gain.exponentialRampToValueAtTime(0.01, now + 0.5);
+      subOsc.connect(subGain);
+      subGain.connect(sfxGain);
+      subOsc.start(now);
+      subOsc.stop(now + 0.5);
 
       const crackOsc = context.createOscillator();
       const crackGain = context.createGain();
       crackOsc.type = 'triangle';
-      crackOsc.frequency.setValueAtTime(620, now + 0.01);
-      crackOsc.frequency.exponentialRampToValueAtTime(160, now + 0.18);
+      crackOsc.frequency.setValueAtTime(760, now + 0.008);
+      crackOsc.frequency.exponentialRampToValueAtTime(170, now + 0.2);
       crackGain.gain.setValueAtTime(0, now);
-      crackGain.gain.linearRampToValueAtTime(0.18 * this.sfxVolume, now + 0.014);
-      crackGain.gain.exponentialRampToValueAtTime(0.01, now + 0.2);
+      crackGain.gain.linearRampToValueAtTime(0.2 * this.sfxVolume, now + 0.012);
+      crackGain.gain.exponentialRampToValueAtTime(0.01, now + 0.22);
       crackOsc.connect(crackGain);
       crackGain.connect(sfxGain);
       crackOsc.start(now + 0.01);
-      crackOsc.stop(now + 0.2);
+      crackOsc.stop(now + 0.22);
 
-      this.playFilteredNoise(0.28, 0.02, 0.22 * this.sfxVolume, 'bandpass', 720, 1.1);
-      this.playFilteredNoise(0.4, 0.025, 0.28 * this.sfxVolume, 'highpass', 1500, 0.85);
+      this.playFilteredNoise(0.3, 0.018, 0.24 * this.sfxVolume, 'bandpass', 680, 1.2);
+      this.playFilteredNoise(0.42, 0.024, 0.3 * this.sfxVolume, 'highpass', 1650, 0.9);
     } catch {
       // Ignore
     }
@@ -990,35 +1029,49 @@ export class AudioManager {
     const { now, context, sfxGain } = sound;
 
     try {
-      // 炮口低频冲击（主体）
+      // 重炮发射：厚重炮口冲击 + 金属门闩感
       const bodyOsc = context.createOscillator();
       const bodyGain = context.createGain();
       bodyOsc.type = 'square';
-      bodyOsc.frequency.setValueAtTime(210, now);
-      bodyOsc.frequency.exponentialRampToValueAtTime(85, now + 0.16);
-      bodyGain.gain.setValueAtTime(0.34 * this.sfxVolume, now);
-      bodyGain.gain.exponentialRampToValueAtTime(0.01, now + 0.16);
+      bodyOsc.frequency.setValueAtTime(185, now);
+      bodyOsc.frequency.exponentialRampToValueAtTime(72, now + 0.18);
+      bodyGain.gain.setValueAtTime(0.4 * this.sfxVolume, now);
+      bodyGain.gain.exponentialRampToValueAtTime(0.01, now + 0.2);
       bodyOsc.connect(bodyGain);
       bodyGain.connect(sfxGain);
       bodyOsc.start(now);
-      bodyOsc.stop(now + 0.16);
+      bodyOsc.stop(now + 0.2);
+
+      const lowPunchOsc = context.createOscillator();
+      const lowPunchGain = context.createGain();
+      lowPunchOsc.type = 'sine';
+      lowPunchOsc.frequency.setValueAtTime(110, now);
+      lowPunchOsc.frequency.exponentialRampToValueAtTime(44, now + 0.22);
+      lowPunchGain.gain.setValueAtTime(0, now);
+      lowPunchGain.gain.linearRampToValueAtTime(0.2 * this.sfxVolume, now + 0.012);
+      lowPunchGain.gain.exponentialRampToValueAtTime(0.01, now + 0.24);
+      lowPunchOsc.connect(lowPunchGain);
+      lowPunchGain.connect(sfxGain);
+      lowPunchOsc.start(now);
+      lowPunchOsc.stop(now + 0.24);
 
       // 瞬态脆响（防空炮特征）
       const crackOsc = context.createOscillator();
       const crackGain = context.createGain();
       crackOsc.type = 'triangle';
-      crackOsc.frequency.setValueAtTime(980, now);
-      crackOsc.frequency.exponentialRampToValueAtTime(260, now + 0.055);
+      crackOsc.frequency.setValueAtTime(860, now + 0.002);
+      crackOsc.frequency.exponentialRampToValueAtTime(240, now + 0.07);
       crackGain.gain.setValueAtTime(0, now);
-      crackGain.gain.linearRampToValueAtTime(0.22 * this.sfxVolume, now + 0.004);
-      crackGain.gain.exponentialRampToValueAtTime(0.01, now + 0.065);
+      crackGain.gain.linearRampToValueAtTime(0.24 * this.sfxVolume, now + 0.004);
+      crackGain.gain.exponentialRampToValueAtTime(0.01, now + 0.08);
       crackOsc.connect(crackGain);
       crackGain.connect(sfxGain);
-      crackOsc.start(now);
-      crackOsc.stop(now + 0.07);
+      crackOsc.start(now + 0.002);
+      crackOsc.stop(now + 0.08);
 
       // 高频炮口气浪（短促带通噪声）
-      this.playFilteredNoise(0.1, 0.006, 0.18 * this.sfxVolume, 'bandpass', 1800, 1.8);
+      this.playFilteredNoise(0.12, 0.005, 0.2 * this.sfxVolume, 'bandpass', 1650, 1.7);
+      this.playFilteredNoise(0.08, 0.004, 0.1 * this.sfxVolume, 'highpass', 2800, 1.5);
     } catch {
       // Ignore
     }
@@ -1030,37 +1083,50 @@ export class AudioManager {
     const { now, context, sfxGain } = sound;
 
     try {
-      // 低频空爆体量
+      // 重炮空爆：更偏空气冲击和破片，不与导弹爆炸混淆
       const boomOsc = context.createOscillator();
       const boomGain = context.createGain();
       boomOsc.type = 'sawtooth';
-      boomOsc.frequency.setValueAtTime(140, now);
-      boomOsc.frequency.exponentialRampToValueAtTime(32, now + 0.5);
+      boomOsc.frequency.setValueAtTime(130, now);
+      boomOsc.frequency.exponentialRampToValueAtTime(34, now + 0.52);
       boomGain.gain.setValueAtTime(0, now);
-      boomGain.gain.linearRampToValueAtTime(0.46 * this.sfxVolume, now + 0.018);
+      boomGain.gain.linearRampToValueAtTime(0.42 * this.sfxVolume, now + 0.02);
       boomGain.gain.exponentialRampToValueAtTime(0.01, now + 0.52);
       boomOsc.connect(boomGain);
       boomGain.connect(sfxGain);
       boomOsc.start(now);
       boomOsc.stop(now + 0.52);
 
+      const airWaveOsc = context.createOscillator();
+      const airWaveGain = context.createGain();
+      airWaveOsc.type = 'triangle';
+      airWaveOsc.frequency.setValueAtTime(280, now + 0.012);
+      airWaveOsc.frequency.exponentialRampToValueAtTime(80, now + 0.26);
+      airWaveGain.gain.setValueAtTime(0, now);
+      airWaveGain.gain.linearRampToValueAtTime(0.16 * this.sfxVolume, now + 0.02);
+      airWaveGain.gain.exponentialRampToValueAtTime(0.01, now + 0.28);
+      airWaveOsc.connect(airWaveGain);
+      airWaveGain.connect(sfxGain);
+      airWaveOsc.start(now + 0.01);
+      airWaveOsc.stop(now + 0.28);
+
       // 金属破片感
       const shrapnelOsc = context.createOscillator();
       const shrapnelGain = context.createGain();
       shrapnelOsc.type = 'triangle';
-      shrapnelOsc.frequency.setValueAtTime(520, now + 0.01);
-      shrapnelOsc.frequency.exponentialRampToValueAtTime(180, now + 0.2);
+      shrapnelOsc.frequency.setValueAtTime(640, now + 0.012);
+      shrapnelOsc.frequency.exponentialRampToValueAtTime(210, now + 0.22);
       shrapnelGain.gain.setValueAtTime(0, now);
-      shrapnelGain.gain.linearRampToValueAtTime(0.24 * this.sfxVolume, now + 0.02);
-      shrapnelGain.gain.exponentialRampToValueAtTime(0.01, now + 0.22);
+      shrapnelGain.gain.linearRampToValueAtTime(0.26 * this.sfxVolume, now + 0.018);
+      shrapnelGain.gain.exponentialRampToValueAtTime(0.01, now + 0.24);
       shrapnelOsc.connect(shrapnelGain);
       shrapnelGain.connect(sfxGain);
-      shrapnelOsc.start(now + 0.01);
-      shrapnelOsc.stop(now + 0.22);
+      shrapnelOsc.start(now + 0.012);
+      shrapnelOsc.stop(now + 0.24);
 
       // 空爆破片 hiss（高通）+ 中频气浪（带通）
-      this.playFilteredNoise(0.22, 0.012, 0.22 * this.sfxVolume, 'highpass', 1400, 0.9);
-      this.playFilteredNoise(0.3, 0.02, 0.18 * this.sfxVolume, 'bandpass', 780, 1.2);
+      this.playFilteredNoise(0.24, 0.01, 0.24 * this.sfxVolume, 'highpass', 1550, 1);
+      this.playFilteredNoise(0.32, 0.018, 0.2 * this.sfxVolume, 'bandpass', 860, 1.25);
     } catch {
       // Ignore
     }

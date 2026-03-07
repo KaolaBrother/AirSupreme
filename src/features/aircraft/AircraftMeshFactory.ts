@@ -708,6 +708,23 @@ export function createPlayerMesh(): THREE.Group {
   rightWingTipNode.castShadow = true;
   group.add(rightWingTipNode);
 
+  const leftRootArmor = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.08, 0.95), weaponMaterial);
+  leftRootArmor.position.set(-0.42, 0.16, -0.62);
+  leftRootArmor.rotation.y = 0.18;
+  leftRootArmor.castShadow = true;
+  group.add(leftRootArmor);
+
+  const rightRootArmor = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.08, 0.95), weaponMaterial);
+  rightRootArmor.position.set(0.42, 0.16, -0.62);
+  rightRootArmor.rotation.y = -0.18;
+  rightRootArmor.castShadow = true;
+  group.add(rightRootArmor);
+
+  const tailEnergyBand = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.04, 0.82), energyPanelMaterial);
+  tailEnergyBand.position.set(0, 0.14, 1.62);
+  tailEnergyBand.castShadow = true;
+  group.add(tailEnergyBand);
+
   // 设置阴影
   group.traverse((child) => {
     if (
@@ -957,6 +974,12 @@ export function createEnemyMesh(config: EnemyConfig): THREE.Group {
       scoutSensorRing.rotation.x = Math.PI / 2;
       scoutSensorRing.position.set(0, bodySize * 0.11, bodyLength * 0.43);
       group.add(scoutSensorRing);
+
+      const scoutKeel = new THREE.Mesh(detailGeometries.keel, structureMaterial);
+      scoutKeel.scale.set(0.46, 0.62, 0.52);
+      scoutKeel.position.set(0, -bodySize * 0.2, -bodyLength * 0.02);
+      scoutKeel.castShadow = true;
+      group.add(scoutKeel);
       break;
     }
     case EnemyType.FIGHTER: {
@@ -1005,6 +1028,11 @@ export function createEnemyMesh(config: EnemyConfig): THREE.Group {
       rightFighterLauncher.position.set(wingSpan * 0.18, -0.1, bodyLength * 0.04);
       rightFighterLauncher.castShadow = true;
       group.add(rightFighterLauncher);
+
+      const fighterChinSensor = new THREE.Mesh(detailGeometries.sensor, energyMaterial);
+      fighterChinSensor.scale.set(0.72, 0.45, 0.95);
+      fighterChinSensor.position.set(0, -bodySize * 0.16, bodyLength * 0.18);
+      group.add(fighterChinSensor);
       break;
     }
     case EnemyType.HEAVY: {
@@ -1061,6 +1089,12 @@ export function createEnemyMesh(config: EnemyConfig): THREE.Group {
       heavyCore.position.set(0, bodySize * 0.08, bodyLength * 0.14);
       group.add(heavyCore);
 
+      const heavyDorsalTurret = new THREE.Mesh(detailGeometries.actuator, weaponMaterial);
+      heavyDorsalTurret.scale.set(1.35, 1.15, 1.2);
+      heavyDorsalTurret.position.set(0, bodySize * 0.34, -bodyLength * 0.02);
+      heavyDorsalTurret.castShadow = true;
+      group.add(heavyDorsalTurret);
+
       engine.scale.set(1.2, 1.2, 1.35);
       break;
     }
@@ -1107,6 +1141,11 @@ export function createEnemyMesh(config: EnemyConfig): THREE.Group {
       sniperStabilizerRight.rotation.y = 0.2;
       sniperStabilizerRight.castShadow = true;
       group.add(sniperStabilizerRight);
+
+      const sniperFocusLens = new THREE.Mesh(detailGeometries.sensor, energyMaterial);
+      sniperFocusLens.scale.set(0.7, 0.52, 1.15);
+      sniperFocusLens.position.set(0, bodySize * 0.02, bodyLength * 0.49);
+      group.add(sniperFocusLens);
       break;
     }
     case EnemyType.ACE: {
@@ -1155,6 +1194,11 @@ export function createEnemyMesh(config: EnemyConfig): THREE.Group {
       aceEnergySpine.position.set(0, bodySize * 0.22, bodyLength * 0.08);
       aceEnergySpine.castShadow = true;
       group.add(aceEnergySpine);
+
+      const aceCrownNode = new THREE.Mesh(detailGeometries.sensor, energyMaterial);
+      aceCrownNode.scale.set(0.9, 0.64, 0.95);
+      aceCrownNode.position.set(0, bodySize * 0.36, bodyLength * 0.2);
+      group.add(aceCrownNode);
       break;
     }
   }
