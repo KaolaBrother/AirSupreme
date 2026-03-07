@@ -129,6 +129,7 @@ export class ParticleSystem {
    */
   public createExplosion(position: THREE.Vector3, scale: number = 1): void {
     const particleCount = Math.floor(30 * scale);
+    const explosionScale = THREE.MathUtils.clamp(scale, 0.7, 2.4);
 
     // 火焰核心
     for (let i = 0; i < particleCount * 0.4; i++) {
@@ -143,10 +144,10 @@ export class ParticleSystem {
     // 爆炸光芒
     for (let i = 0; i < particleCount * 0.3; i++) {
       this.spawnParticle(ParticleType.EXPLOSION, position, {
-        speed: 30 * scale,
-        life: 0.2 + Math.random() * 0.4,
-        size: 0.3 + Math.random() * 1,
-        color: new THREE.Color().setHSL(0.08, 1, 0.6),
+        speed: 24 * scale,
+        life: 0.18 + Math.random() * 0.34,
+        size: 0.24 + Math.random() * 0.84,
+        color: new THREE.Color().setHSL(0.075, 0.92, 0.62),
       });
     }
 
@@ -168,6 +169,21 @@ export class ParticleSystem {
         size: 0.2 + Math.random() * 0.3,
         color: new THREE.Color(0x666666),
         gravity: true,
+      });
+    }
+
+    if (explosionScale > 1.05) {
+      const ringPosition = position.clone();
+      this.scheduleBurst(0.07, () => {
+        this.emitMissileSparkRing(
+          ringPosition,
+          0.4 + explosionScale * 0.35,
+          Math.max(5, Math.floor(5 + explosionScale * 3)),
+          14 + explosionScale * 5,
+          0.14,
+          0.08,
+          0xffc86d
+        );
       });
     }
 
@@ -374,6 +390,17 @@ export class ParticleSystem {
       }
     });
 
+    this.scheduleBurst(0.025, () => {
+      for (let i = 0; i < Math.max(2, Math.floor(2 + impactScale * 2)); i++) {
+        this.spawnParticle(ParticleType.FIRE, smokePosition, {
+          speed: 10 + Math.random() * 7,
+          life: 0.08 + Math.random() * 0.06,
+          size: 0.14 + Math.random() * 0.1,
+          color: this.tempColorC.setHSL(0.09, 0.95, 0.64 + Math.random() * 0.08),
+        });
+      }
+    });
+
     // 中高强度导弹增加一圈延迟火花，帮助读到“爆炸规模”
     if (impactScale > 1.25) {
       const ringPosition = position.clone();
@@ -402,10 +429,10 @@ export class ParticleSystem {
     this.directedVelocity.copy(direction).normalize();
 
     const smoke = this.spawnParticle(ParticleType.SMOKE, position, {
-      speed: 4,
-      life: 0.4 + Math.random() * 0.16,
-      size: 0.5 + Math.random() * 0.24,
-      color: new THREE.Color().setHSL(0.03, 0.18, 0.4 + Math.random() * 0.06),
+      speed: 4.2,
+      life: 0.46 + Math.random() * 0.2,
+      size: 0.56 + Math.random() * 0.28,
+      color: new THREE.Color().setHSL(0.01, 0.12, 0.28 + Math.random() * 0.05),
     });
     if (smoke) {
       smoke.velocity.copy(this.directedVelocity).multiplyScalar(-14);
@@ -416,7 +443,7 @@ export class ParticleSystem {
       speed: 7,
       life: 0.14 + Math.random() * 0.1,
       size: 0.34 + Math.random() * 0.18,
-      color: new THREE.Color().setHSL(0.055 + Math.random() * 0.025, 1, 0.54),
+      color: new THREE.Color().setHSL(0.01 + Math.random() * 0.02, 1, 0.5),
     });
     if (fireCore) {
       fireCore.velocity.copy(this.directedVelocity).multiplyScalar(-24);
@@ -426,7 +453,7 @@ export class ParticleSystem {
       speed: 5,
       life: 0.1 + Math.random() * 0.06,
       size: 0.22 + Math.random() * 0.12,
-      color: new THREE.Color().setHSL(0.1, 1, 0.7),
+      color: new THREE.Color().setHSL(0.035, 1, 0.64),
     });
     if (flare) {
       flare.velocity.copy(this.directedVelocity).multiplyScalar(-18);
@@ -506,6 +533,18 @@ export class ParticleSystem {
         0.09,
         0xff7440
       );
+    });
+
+    const emberPosition = position.clone();
+    this.scheduleBurst(0.11, () => {
+      for (let i = 0; i < Math.max(4, Math.floor(4 + blastScale * 2)); i++) {
+        this.spawnParticle(ParticleType.FIRE, emberPosition, {
+          speed: 8 + Math.random() * 7,
+          life: 0.14 + Math.random() * 0.14,
+          size: 0.16 + Math.random() * 0.12,
+          color: this.tempColorC.setHSL(0.02, 1, 0.54 + Math.random() * 0.08),
+        });
+      }
     });
   }
 

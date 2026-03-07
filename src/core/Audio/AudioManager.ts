@@ -477,16 +477,19 @@ export class AudioManager {
     const sound = this.beginSound(SoundType.SHOOT, 100);
     if (!sound) return;
     const { now, context, sfxGain } = sound;
+    const clickPitch = 0.96 + Math.random() * 0.08;
+    const bodyPitch = 0.94 + Math.random() * 0.1;
+    const shotGain = 0.95 + Math.random() * 0.1;
 
     try {
       // 机炮：高频瞬态 click + 轻低频 body
       const clickOsc = context.createOscillator();
       const clickGain = context.createGain();
       clickOsc.type = 'square';
-      clickOsc.frequency.setValueAtTime(1480, now);
-      clickOsc.frequency.exponentialRampToValueAtTime(520, now + 0.05);
+      clickOsc.frequency.setValueAtTime(1480 * clickPitch, now);
+      clickOsc.frequency.exponentialRampToValueAtTime(520 * clickPitch, now + 0.05);
       clickGain.gain.setValueAtTime(0, now);
-      clickGain.gain.linearRampToValueAtTime(0.14 * this.sfxVolume, now + 0.002);
+      clickGain.gain.linearRampToValueAtTime(0.14 * this.sfxVolume * shotGain, now + 0.002);
       clickGain.gain.exponentialRampToValueAtTime(0.01, now + 0.055);
       clickOsc.connect(clickGain);
       clickGain.connect(sfxGain);
@@ -496,17 +499,18 @@ export class AudioManager {
       const bodyOsc = context.createOscillator();
       const bodyGain = context.createGain();
       bodyOsc.type = 'triangle';
-      bodyOsc.frequency.setValueAtTime(340, now);
-      bodyOsc.frequency.exponentialRampToValueAtTime(150, now + 0.075);
+      bodyOsc.frequency.setValueAtTime(340 * bodyPitch, now);
+      bodyOsc.frequency.exponentialRampToValueAtTime(150 * bodyPitch, now + 0.075);
       bodyGain.gain.setValueAtTime(0, now);
-      bodyGain.gain.linearRampToValueAtTime(0.1 * this.sfxVolume, now + 0.004);
+      bodyGain.gain.linearRampToValueAtTime(0.1 * this.sfxVolume * shotGain, now + 0.004);
       bodyGain.gain.exponentialRampToValueAtTime(0.01, now + 0.085);
       bodyOsc.connect(bodyGain);
       bodyGain.connect(sfxGain);
       bodyOsc.start(now);
       bodyOsc.stop(now + 0.085);
 
-      this.playFilteredNoise(0.055, 0.003, 0.08 * this.sfxVolume, 'highpass', 2400, 1.5);
+      this.playFilteredNoise(0.055, 0.003, 0.08 * this.sfxVolume * shotGain, 'highpass', 2400, 1.5);
+      this.playFilteredNoise(0.028, 0.002, 0.04 * this.sfxVolume, 'bandpass', 4200, 2.2);
     } catch {
       // Ignore
     }
@@ -547,6 +551,19 @@ export class AudioManager {
       crackGain.connect(sfxGain);
       crackOsc.start(now + 0.004);
       crackOsc.stop(now + 0.18);
+
+      const tailOsc = context.createOscillator();
+      const tailGain = context.createGain();
+      tailOsc.type = 'triangle';
+      tailOsc.frequency.setValueAtTime(180, now + 0.02);
+      tailOsc.frequency.exponentialRampToValueAtTime(52, now + 0.42);
+      tailGain.gain.setValueAtTime(0, now + 0.02);
+      tailGain.gain.linearRampToValueAtTime(0.12 * this.sfxVolume, now + 0.05);
+      tailGain.gain.exponentialRampToValueAtTime(0.01, now + 0.42);
+      tailOsc.connect(tailGain);
+      tailGain.connect(sfxGain);
+      tailOsc.start(now + 0.02);
+      tailOsc.stop(now + 0.42);
 
       this.playFilteredNoise(0.22, 0.016, 0.16 * this.sfxVolume, 'bandpass', 690, 1.05);
       this.playFilteredNoise(0.34, 0.02, 0.22 * this.sfxVolume, 'highpass', 1700, 0.82);
@@ -1016,6 +1033,19 @@ export class AudioManager {
       crackOsc.start(now + 0.01);
       crackOsc.stop(now + 0.22);
 
+      const airburstOsc = context.createOscillator();
+      const airburstGain = context.createGain();
+      airburstOsc.type = 'triangle';
+      airburstOsc.frequency.setValueAtTime(420, now + 0.02);
+      airburstOsc.frequency.exponentialRampToValueAtTime(140, now + 0.3);
+      airburstGain.gain.setValueAtTime(0, now + 0.02);
+      airburstGain.gain.linearRampToValueAtTime(0.1 * this.sfxVolume, now + 0.045);
+      airburstGain.gain.exponentialRampToValueAtTime(0.01, now + 0.32);
+      airburstOsc.connect(airburstGain);
+      airburstGain.connect(sfxGain);
+      airburstOsc.start(now + 0.02);
+      airburstOsc.stop(now + 0.32);
+
       this.playFilteredNoise(0.3, 0.018, 0.24 * this.sfxVolume, 'bandpass', 680, 1.2);
       this.playFilteredNoise(0.42, 0.024, 0.3 * this.sfxVolume, 'highpass', 1650, 0.9);
     } catch {
@@ -1340,17 +1370,30 @@ export class AudioManager {
     const { now, context, sfxGain } = sound;
 
     try {
+      const chirpOsc = context.createOscillator();
+      const chirpGain = context.createGain();
+      chirpOsc.type = 'triangle';
+      chirpOsc.frequency.setValueAtTime(1180, now);
+      chirpOsc.frequency.exponentialRampToValueAtTime(760, now + 0.035);
+      chirpGain.gain.setValueAtTime(0, now);
+      chirpGain.gain.linearRampToValueAtTime(0.06 * this.sfxVolume, now + 0.005);
+      chirpGain.gain.exponentialRampToValueAtTime(0.01, now + 0.04);
+      chirpOsc.connect(chirpGain);
+      chirpGain.connect(sfxGain);
+      chirpOsc.start(now);
+      chirpOsc.stop(now + 0.04);
+
       const transientOsc = context.createOscillator();
       const transientGain = context.createGain();
       transientOsc.type = 'square';
-      transientOsc.frequency.setValueAtTime(320, now);
+      transientOsc.frequency.setValueAtTime(320, now + 0.004);
       transientOsc.frequency.exponentialRampToValueAtTime(180, now + 0.08);
       transientGain.gain.setValueAtTime(0, now);
-      transientGain.gain.linearRampToValueAtTime(0.14 * this.sfxVolume, now + 0.006);
+      transientGain.gain.linearRampToValueAtTime(0.14 * this.sfxVolume, now + 0.008);
       transientGain.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
       transientOsc.connect(transientGain);
       transientGain.connect(sfxGain);
-      transientOsc.start(now);
+      transientOsc.start(now + 0.004);
       transientOsc.stop(now + 0.1);
 
       const tailOsc = context.createOscillator();
@@ -1365,6 +1408,8 @@ export class AudioManager {
       tailGain.connect(sfxGain);
       tailOsc.start(now + 0.01);
       tailOsc.stop(now + 0.16);
+
+      this.playFilteredNoise(0.09, 0.006, 0.08 * this.sfxVolume, 'highpass', 2100, 1.2);
     } catch {
       // Ignore
     }
