@@ -50,6 +50,9 @@ export class ParticleSystem {
   private readonly spawnDirection = new THREE.Vector3();
   private readonly trailColor = new THREE.Color();
   private readonly directedVelocity = new THREE.Vector3();
+  private readonly tempColorA = new THREE.Color();
+  private readonly tempColorB = new THREE.Color();
+  private readonly tempColorC = new THREE.Color();
 
   constructor(scene: THREE.Scene) {
     this.scene = scene;
@@ -186,37 +189,58 @@ export class ParticleSystem {
    * 创建击中效果
    */
   public createHit(position: THREE.Vector3, intensity: number = 1): void {
-    const sparkCount = Math.max(6, Math.floor(10 * intensity));
+    const hitIntensity = THREE.MathUtils.clamp(intensity, 0.6, 2.2);
+    const sparkCount = Math.max(5, Math.floor(8 + hitIntensity * 4));
+    const flashCount = Math.max(2, Math.floor(2 + hitIntensity * 3));
 
-    // 高频火花层：让普通命中更明确
+    // 高频火花层：命中边缘感
     for (let i = 0; i < sparkCount; i++) {
+      const sparkLightness = 0.62 + Math.random() * 0.2 * hitIntensity;
       this.spawnParticle(ParticleType.SPARK, position, {
-        speed: 18 + Math.random() * 18 * intensity,
-        life: 0.12 + Math.random() * 0.18,
-        size: 0.08 + Math.random() * 0.16 * intensity,
-        color: new THREE.Color().setHSL(0.1, 1, 0.62),
+        speed: 20 + Math.random() * (14 + hitIntensity * 10),
+        life: 0.1 + Math.random() * 0.16,
+        size: 0.08 + Math.random() * (0.08 + hitIntensity * 0.08),
+        color: this.tempColorA.setHSL(0.1, 1, sparkLightness),
       });
     }
 
-    // 擦伤热区：短寿命橙白闪
-    for (let i = 0; i < Math.max(2, Math.floor(4 * intensity)); i++) {
+    // 冲击闪光层：不同强度下更容易区分
+    for (let i = 0; i < flashCount; i++) {
+      const isHeavy = hitIntensity > 1.25;
+      const hue = isHeavy ? 0.06 + Math.random() * 0.03 : 0.075 + Math.random() * 0.02;
+      const sat = isHeavy ? 1 : 0.92;
+      const light = isHeavy ? 0.74 + Math.random() * 0.08 : 0.66 + Math.random() * 0.08;
       this.spawnParticle(ParticleType.EXPLOSION, position, {
-        speed: 8 + Math.random() * 12,
-        life: 0.08 + Math.random() * 0.12,
-        size: 0.14 + Math.random() * 0.2 * intensity,
-        color: new THREE.Color().setHSL(0.075, 0.95, 0.72),
+        speed: 10 + Math.random() * (8 + hitIntensity * 6),
+        life: 0.07 + Math.random() * (0.08 + hitIntensity * 0.04),
+        size: 0.13 + Math.random() * (0.16 + hitIntensity * 0.1),
+        color: this.tempColorB.setHSL(hue, sat, light),
       });
     }
 
-    // 轻微烟痕，增加冲击感但不抢镜
+    // 强命中补一点碎片，弱命中不增加额外负担
+    if (hitIntensity > 1.35) {
+      const debrisCount = Math.floor(2 + (hitIntensity - 1.35) * 4);
+      for (let i = 0; i < debrisCount; i++) {
+        this.spawnParticle(ParticleType.DEBRIS, position, {
+          speed: 10 + Math.random() * 8,
+          life: 0.28 + Math.random() * 0.22,
+          size: 0.1 + Math.random() * 0.08,
+          color: this.tempColorC.setRGB(0.38, 0.38, 0.42),
+          gravity: true,
+        });
+      }
+    }
+
+    // 轻烟痕层
     const smokePosition = position.clone();
     this.scheduleBurst(0.03, () => {
-      for (let i = 0; i < Math.max(1, Math.floor(3 * intensity)); i++) {
+      for (let i = 0; i < Math.max(1, Math.floor(2 + hitIntensity * 1.8)); i++) {
         this.spawnParticle(ParticleType.SMOKE, smokePosition, {
           speed: 2 + Math.random() * 3,
-          life: 0.18 + Math.random() * 0.18,
-          size: 0.18 + Math.random() * 0.28 * intensity,
-          color: new THREE.Color().setHSL(0.08, 0.12, 0.42 + Math.random() * 0.08),
+          life: 0.15 + Math.random() * (0.16 + hitIntensity * 0.05),
+          size: 0.16 + Math.random() * (0.2 + hitIntensity * 0.14),
+          color: this.tempColorA.setHSL(0.08, 0.12, 0.38 + Math.random() * 0.1),
         });
       }
     });
@@ -241,85 +265,126 @@ export class ParticleSystem {
     color: THREE.Color,
     intensity: number = 1
   ): void {
+    const trailIntensity = THREE.MathUtils.clamp(intensity, 0.8, 1.9);
     this.trailColor.copy(color);
     this.directedVelocity.copy(direction).normalize();
 
     const smoke = this.spawnParticle(ParticleType.SMOKE, position, {
-      speed: 3 + intensity * 2,
-      life: 0.26 + Math.random() * 0.12,
-      size: 0.28 + Math.random() * 0.18 * intensity,
+      speed: 2.8 + trailIntensity * 2.4,
+      life: 0.24 + Math.random() * (0.08 + trailIntensity * 0.08),
+      size: 0.26 + Math.random() * (0.14 + trailIntensity * 0.12),
       color: this.trailColor,
     });
-    if (smoke) {
-      smoke.velocity.copy(this.directedVelocity).multiplyScalar(-(8 + intensity * 5));
-      smoke.velocity.y += (Math.random() - 0.5) * 1.5;
+    this.applyDirectedBackVelocity(smoke, 8 + trailIntensity * 5, 1.5);
+
+    if (trailIntensity > 1.1 && Math.random() < 0.45) {
+      const darkSmoke = this.spawnParticle(ParticleType.SMOKE, position, {
+        speed: 2 + trailIntensity * 1.5,
+        life: 0.2 + Math.random() * 0.1,
+        size: 0.2 + Math.random() * 0.12,
+        color: this.tempColorA.setHSL(0.02, 0.08, 0.26 + Math.random() * 0.05),
+      });
+      this.applyDirectedBackVelocity(darkSmoke, 10 + trailIntensity * 4, 1.3);
     }
 
     const flame = this.spawnParticle(ParticleType.FIRE, position, {
-      speed: 5 + intensity * 3,
-      life: 0.1 + Math.random() * 0.07,
-      size: 0.18 + Math.random() * 0.14 * intensity,
-      color: new THREE.Color().setHSL(0.085 + Math.random() * 0.03, 1, 0.58),
+      speed: 6 + trailIntensity * 2.6,
+      life: 0.09 + Math.random() * (0.05 + trailIntensity * 0.03),
+      size: 0.16 + Math.random() * (0.1 + trailIntensity * 0.09),
+      color: this.tempColorB.setHSL(0.08 + Math.random() * 0.03, 1, 0.56 + Math.random() * 0.08),
     });
-    if (flame) {
-      flame.velocity.copy(this.directedVelocity).multiplyScalar(-(15 + intensity * 8));
+    this.applyDirectedBackVelocity(flame, 15 + trailIntensity * 8, 0.8);
+
+    if (Math.random() < 0.22 + trailIntensity * 0.18) {
+      const flare = this.spawnParticle(ParticleType.EXPLOSION, position, {
+        speed: 4 + trailIntensity * 3,
+        life: 0.07 + Math.random() * 0.05,
+        size: 0.1 + Math.random() * 0.08,
+        color: this.tempColorC.setHSL(0.095, 1, 0.68),
+      });
+      this.applyDirectedBackVelocity(flare, 13 + trailIntensity * 7, 0.5);
     }
 
-    if (Math.random() < 0.4) {
+    if (Math.random() < 0.3 + trailIntensity * 0.12) {
       const spark = this.spawnParticle(ParticleType.SPARK, position, {
-        speed: 6 + intensity * 3,
-        life: 0.08 + Math.random() * 0.08,
+        speed: 6 + trailIntensity * 3.5,
+        life: 0.07 + Math.random() * 0.07,
         size: 0.08 + Math.random() * 0.06,
-        color: new THREE.Color(0xffcc66),
+        color: this.tempColorA.setRGB(1, 0.82, 0.42),
       });
-      if (spark) {
-        spark.velocity.copy(this.directedVelocity).multiplyScalar(-(20 + intensity * 8));
-      }
+      this.applyDirectedBackVelocity(spark, 20 + trailIntensity * 8, 1.1);
     }
   }
 
   public createMissileImpact(position: THREE.Vector3, scale: number = 1): void {
-    const sparkCount = Math.max(10, Math.floor(14 * scale));
+    const impactScale = THREE.MathUtils.clamp(scale, 0.8, 2.1);
+    const sparkCount = Math.max(8, Math.floor(10 + impactScale * 6));
+    const flashCount = Math.max(3, Math.floor(4 + impactScale * 2));
 
-    for (let i = 0; i < Math.max(4, Math.floor(6 * scale)); i++) {
+    // 核心闪光：命中时刻更清晰
+    for (let i = 0; i < flashCount; i++) {
       this.spawnParticle(ParticleType.EXPLOSION, position, {
-        speed: 18 + Math.random() * 14,
-        life: 0.12 + Math.random() * 0.12,
-        size: 0.18 + Math.random() * 0.28 * scale,
-        color: new THREE.Color().setHSL(0.08, 1, 0.72),
+        speed: 18 + Math.random() * (12 + impactScale * 4),
+        life: 0.1 + Math.random() * 0.11,
+        size: 0.16 + Math.random() * (0.18 + impactScale * 0.12),
+        color: this.tempColorA.setHSL(0.08, 1, 0.7 + Math.random() * 0.08),
       });
     }
 
+    // 主体火花：体现冲击强度
     for (let i = 0; i < sparkCount; i++) {
       this.spawnParticle(ParticleType.SPARK, position, {
-        speed: 34 + Math.random() * 30,
-        life: 0.18 + Math.random() * 0.18,
-        size: 0.08 + Math.random() * 0.12 * scale,
-        color: new THREE.Color(0xffc15c),
+        speed: 30 + Math.random() * (20 + impactScale * 14),
+        life: 0.16 + Math.random() * 0.16,
+        size: 0.08 + Math.random() * (0.1 + impactScale * 0.08),
+        color: this.tempColorB.setRGB(1, 0.76, 0.36),
       });
     }
 
-    for (let i = 0; i < Math.max(3, Math.floor(5 * scale)); i++) {
+    for (let i = 0; i < Math.max(2, Math.floor(3 + impactScale * 2)); i++) {
       this.spawnParticle(ParticleType.DEBRIS, position, {
-        speed: 14 + Math.random() * 10,
-        life: 0.45 + Math.random() * 0.35,
-        size: 0.12 + Math.random() * 0.14 * scale,
-        color: new THREE.Color(0x5f6066),
+        speed: 12 + Math.random() * (8 + impactScale * 5),
+        life: 0.4 + Math.random() * 0.32,
+        size: 0.12 + Math.random() * (0.1 + impactScale * 0.08),
+        color: this.tempColorC.setRGB(0.37, 0.38, 0.41),
         gravity: true,
       });
     }
 
     const smokePosition = position.clone();
     this.scheduleBurst(0.04, () => {
-      for (let i = 0; i < Math.max(4, Math.floor(6 * scale)); i++) {
+      for (let i = 0; i < Math.max(3, Math.floor(4 + impactScale * 2)); i++) {
         this.spawnParticle(ParticleType.SMOKE, smokePosition, {
           speed: 4 + Math.random() * 4,
-          life: 0.45 + Math.random() * 0.35,
-          size: 0.45 + Math.random() * 0.4 * scale,
-          color: new THREE.Color().setHSL(0.08, 0.08, 0.34 + Math.random() * 0.08),
+          life: 0.4 + Math.random() * 0.32,
+          size: 0.38 + Math.random() * (0.3 + impactScale * 0.22),
+          color: this.tempColorA.setHSL(0.08, 0.08, 0.32 + Math.random() * 0.08),
         });
       }
     });
+
+    // 中高强度导弹增加一圈延迟火花，帮助读到“爆炸规模”
+    if (impactScale > 1.25) {
+      const ringPosition = position.clone();
+      this.scheduleBurst(0.06, () => {
+        const ringSparks = Math.floor(4 + impactScale * 2);
+        for (let i = 0; i < ringSparks; i++) {
+          const angle = (i / ringSparks) * Math.PI * 2 + (Math.random() - 0.5) * 0.18;
+          const ringOffset = 0.6 + impactScale * 0.45;
+          const ringPos = new THREE.Vector3(
+            ringPosition.x + Math.cos(angle) * ringOffset,
+            ringPosition.y + (Math.random() - 0.5) * 0.35,
+            ringPosition.z + Math.sin(angle) * ringOffset
+          );
+          this.spawnParticle(ParticleType.SPARK, ringPos, {
+            speed: 20 + Math.random() * 12,
+            life: 0.12 + Math.random() * 0.08,
+            size: 0.06 + Math.random() * 0.05,
+            color: this.tempColorB.setRGB(1, 0.8, 0.46),
+          });
+        }
+      });
+    }
   }
 
   public createBossMissileTrail(position: THREE.Vector3, direction: THREE.Vector3): void {
@@ -480,6 +545,18 @@ export class ParticleSystem {
         (Math.random() - 0.5) * 2,
         Math.sin(angle) * (speedBase + Math.random() * 8)
       );
+    }
+  }
+
+  private applyDirectedBackVelocity(
+    particle: Particle | null,
+    speed: number,
+    jitterY: number = 0
+  ): void {
+    if (!particle) return;
+    particle.velocity.copy(this.directedVelocity).multiplyScalar(-speed);
+    if (jitterY > 0) {
+      particle.velocity.y += (Math.random() - 0.5) * jitterY;
     }
   }
 

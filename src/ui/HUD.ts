@@ -68,17 +68,15 @@ export class HUD {
       display: flex;
       flex-direction: column;
       gap: ${isMobile ? '8px' : '10px'};
-      min-width: ${isMobile ? '178px' : '228px'};
-      max-width: min(38vw, ${isMobile ? '220px' : '300px'});
+      width: fit-content;
+      max-width: min(${isMobile ? '58vw' : '28vw'}, ${isMobile ? '220px' : '260px'});
       pointer-events: none;
     `;
 
     this.leftPrimaryRow = document.createElement('div');
     this.leftPrimaryRow.style.cssText = `
-      display: grid;
-      grid-template-columns: ${isMobile
-        ? '1fr'
-        : `minmax(120px, 1.35fr) minmax(98px, 1fr)`};
+      display: flex;
+      flex-direction: column;
       gap: ${isMobile ? '8px' : '10px'};
       align-items: stretch;
     `;
@@ -98,6 +96,9 @@ export class HUD {
       display: none;
       white-space: nowrap;
       font-variant-numeric: tabular-nums;
+      width: 100%;
+      box-sizing: border-box;
+      text-align: left;
     `;
     this.setTextContent(this.upgradePointsDisplay, '⭐ 0');
 
@@ -117,6 +118,9 @@ export class HUD {
       letter-spacing: 0.05em;
       white-space: nowrap;
       font-variant-numeric: tabular-nums;
+      width: 100%;
+      box-sizing: border-box;
+      text-align: left;
     `;
     this.setTextContent(this.scoreDisplay, '得分 000000');
 
@@ -126,7 +130,7 @@ export class HUD {
       min-height: ${isMobile ? '44px' : '60px'};
       display: flex;
       align-items: center;
-      justify-content: center;
+      justify-content: flex-start;
       padding: ${isMobile ? '10px 10px' : '12px 12px'};
       border-radius: 14px;
       background: linear-gradient(165deg, rgba(17, 22, 34, 0.88), rgba(9, 12, 18, 0.76));
@@ -135,9 +139,11 @@ export class HUD {
       color: #ffd2a6;
       font-weight: 700;
       letter-spacing: 0.05em;
-      text-align: center;
+      text-align: left;
       white-space: nowrap;
       font-variant-numeric: tabular-nums;
+      width: 100%;
+      box-sizing: border-box;
     `;
     this.setTextContent(this.speedDisplay, '速度 000');
 
