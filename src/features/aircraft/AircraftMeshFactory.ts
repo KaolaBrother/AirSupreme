@@ -729,6 +729,23 @@ export function createPlayerMesh(): THREE.Group {
   dorsalAntenna.position.set(0, 0.56, 0.18);
   group.add(dorsalAntenna);
 
+  const dorsalCoolingFairing = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.1, 0.54), heroPanelMaterial);
+  dorsalCoolingFairing.position.set(0, 0.3, 0.72);
+  dorsalCoolingFairing.castShadow = true;
+  group.add(dorsalCoolingFairing);
+
+  const leftShoulderSensor = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.08, 0.34), sensorMaterial);
+  leftShoulderSensor.position.set(-0.32, 0.18, -0.94);
+  leftShoulderSensor.rotation.y = 0.18;
+  leftShoulderSensor.castShadow = true;
+  group.add(leftShoulderSensor);
+
+  const rightShoulderSensor = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.08, 0.34), sensorMaterial);
+  rightShoulderSensor.position.set(0.32, 0.18, -0.94);
+  rightShoulderSensor.rotation.y = -0.18;
+  rightShoulderSensor.castShadow = true;
+  group.add(rightShoulderSensor);
+
   const ventralBayLeft = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.06, 0.88), heroPanelMaterial);
   ventralBayLeft.position.set(-0.18, -0.26, 0.06);
   ventralBayLeft.rotation.y = 0.06;
@@ -756,6 +773,23 @@ export function createPlayerMesh(): THREE.Group {
   const tailBeacon = new THREE.Mesh(new THREE.SphereGeometry(0.05, 8, 8), playerLightMaterial);
   tailBeacon.position.set(0, 0.18, 2.08);
   group.add(tailBeacon);
+
+  const leftTailBoomBrace = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.08, 0.42), accentMaterial);
+  leftTailBoomBrace.position.set(-0.34, 0.08, 1.44);
+  leftTailBoomBrace.rotation.y = 0.08;
+  leftTailBoomBrace.castShadow = true;
+  group.add(leftTailBoomBrace);
+
+  const rightTailBoomBrace = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.08, 0.42), accentMaterial);
+  rightTailBoomBrace.position.set(0.34, 0.08, 1.44);
+  rightTailBoomBrace.rotation.y = -0.08;
+  rightTailBoomBrace.castShadow = true;
+  group.add(rightTailBoomBrace);
+
+  const centerlineSensorBand = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.03, 0.72), energyPanelMaterial);
+  centerlineSensorBand.position.set(0, -0.1, -1.02);
+  centerlineSensorBand.castShadow = true;
+  group.add(centerlineSensorBand);
 
   // 设置阴影
   group.traverse((child) => {
@@ -1081,6 +1115,11 @@ export function createEnemyMesh(config: EnemyConfig): THREE.Group {
       fighterDorsalRack.position.set(0, bodySize * 0.28, -bodyLength * 0.14);
       fighterDorsalRack.castShadow = true;
       group.add(fighterDorsalRack);
+
+      const fighterTailBeacon = new THREE.Mesh(detailGeometries.light, materials.light);
+      fighterTailBeacon.scale.setScalar(0.82);
+      fighterTailBeacon.position.set(0, bodySize * 0.22, -bodyLength * 0.42);
+      group.add(fighterTailBeacon);
       break;
     }
     case EnemyType.HEAVY: {
@@ -1149,6 +1188,12 @@ export function createEnemyMesh(config: EnemyConfig): THREE.Group {
       heavyVentralArmor.castShadow = true;
       group.add(heavyVentralArmor);
 
+      const heavyNosePlate = new THREE.Mesh(detailGeometries.panel, materials.accent);
+      heavyNosePlate.scale.set(1.2, 0.95, 1.05);
+      heavyNosePlate.position.set(0, 0.08, bodyLength * 0.32);
+      heavyNosePlate.castShadow = true;
+      group.add(heavyNosePlate);
+
       engine.scale.set(1.2, 1.2, 1.35);
       break;
     }
@@ -1214,6 +1259,11 @@ export function createEnemyMesh(config: EnemyConfig): THREE.Group {
       sniperSideBoomRight.rotation.y = 0.12;
       sniperSideBoomRight.castShadow = true;
       group.add(sniperSideBoomRight);
+
+      const sniperRearEmitter = new THREE.Mesh(detailGeometries.light, materials.light);
+      sniperRearEmitter.scale.setScalar(0.78);
+      sniperRearEmitter.position.set(0, bodySize * 0.12, -bodyLength * 0.44);
+      group.add(sniperRearEmitter);
       break;
     }
     case EnemyType.ACE: {
@@ -1281,6 +1331,14 @@ export function createEnemyMesh(config: EnemyConfig): THREE.Group {
       aceVentralFinRight.rotation.z = 0.16;
       aceVentralFinRight.castShadow = true;
       group.add(aceVentralFinRight);
+
+      const aceTailHalo = new THREE.Mesh(
+        new THREE.TorusGeometry(bodySize * 0.22, bodySize * 0.03, 8, 12),
+        energyMaterial
+      );
+      aceTailHalo.rotation.x = Math.PI / 2;
+      aceTailHalo.position.set(0, bodySize * 0.08, -bodyLength * 0.44);
+      group.add(aceTailHalo);
       break;
     }
   }

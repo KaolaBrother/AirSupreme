@@ -185,7 +185,10 @@ export class TerrainGenerator {
     this.createForestCluster(26, 360, 420, 170, -49);
 
     // 添加草地细节
-    this.createGrassField(500, 100000);
+    this.createLakeEcologicalGrass(520, 100000);
+
+    // 添加湖岸小景
+    this.createLakeShoreProps(surfaceProfile);
 
     // 添加野花
     this.createFlowers(300, 20000);
@@ -195,6 +198,7 @@ export class TerrainGenerator {
 
     // 添加农田和远处山体，提升第一关自然层次
     this.createLakeFarmland(surfaceProfile);
+    this.createLakeDirtPaths(surfaceProfile);
     this.createLakeRidges(surfaceProfile);
   }
 
@@ -283,6 +287,79 @@ export class TerrainGenerator {
     beach.position.y = -49.1;
     beach.receiveShadow = true;
     this.terrainGroup.add(beach);
+
+    // 湖边湿沙层，增加水岸层次
+    const wetShoreShape = new THREE.Shape();
+    for (let i = 0; i <= points; i++) {
+      const angle = (i / points) * Math.PI * 2;
+      const radius = 191 + Math.sin(angle * 3) * 18 + Math.cos(angle * 5) * 13;
+      const x = Math.cos(angle) * radius;
+      const y = Math.sin(angle) * radius;
+      if (i === 0) {
+        wetShoreShape.moveTo(x, y);
+      } else {
+        wetShoreShape.lineTo(x, y);
+      }
+    }
+    wetShoreShape.holes.push(lakeShape);
+
+    const wetShore = new THREE.Mesh(
+      new THREE.ShapeGeometry(wetShoreShape, 24),
+      new THREE.MeshStandardMaterial({
+        color: this.tintColor(shorelineBaseColor, -0.03, 0.16, -0.08),
+        roughness: 0.72,
+        metalness: 0.04,
+        emissive: this.tintColor(shorelineAccentColor, -0.02, 0.08, 0.01),
+        emissiveIntensity: 0.04,
+        map: this.createDetailTexture(
+          this.tintColor(shorelineBaseColor, -0.03, 0.16, -0.08),
+          shorelineAccentColor,
+          shorelineDetailColor,
+          'beach'
+        ),
+      })
+    );
+    wetShore.rotation.x = -Math.PI / 2;
+    wetShore.position.y = -48.75;
+    wetShore.receiveShadow = true;
+    this.terrainGroup.add(wetShore);
+
+    // 外缘草甸过渡层
+    const meadowRingShape = new THREE.Shape();
+    for (let i = 0; i <= points; i++) {
+      const angle = (i / points) * Math.PI * 2;
+      const radius = 250 + Math.sin(angle * 3) * 24 + Math.cos(angle * 5) * 16;
+      const x = Math.cos(angle) * radius;
+      const y = Math.sin(angle) * radius;
+      if (i === 0) {
+        meadowRingShape.moveTo(x, y);
+      } else {
+        meadowRingShape.lineTo(x, y);
+      }
+    }
+    meadowRingShape.holes.push(beachShape);
+
+    const meadowColor = this.tintColor(surfaceProfile.groundBaseColor ?? 0x79b64d, 0.01, 0.12, 0.03);
+    const meadow = new THREE.Mesh(
+      new THREE.ShapeGeometry(meadowRingShape, 24),
+      new THREE.MeshStandardMaterial({
+        color: meadowColor,
+        roughness: 0.88,
+        metalness: 0,
+        emissive: this.tintColor(meadowColor, 0.01, 0.08, 0.01),
+        emissiveIntensity: 0.04,
+        map: this.createDetailTexture(
+          meadowColor,
+          surfaceProfile.groundAccentColor ?? 0x9ddf70,
+          surfaceProfile.groundDetailColor ?? 0x5c9a38,
+          'grass'
+        ),
+      })
+    );
+    meadow.rotation.x = -Math.PI / 2;
+    meadow.position.y = -48.95;
+    meadow.receiveShadow = true;
+    this.terrainGroup.add(meadow);
   }
 
   /**
@@ -368,10 +445,7 @@ export class TerrainGenerator {
     return tree;
   }
 
-  /**
-   * 创建草地
-   */
-  private createGrassField(radius: number, count: number): void {
+  private createLakeEcologicalGrass(radius: number, count: number): void {
     const grassGeometry = new THREE.ConeGeometry(0.1, 0.5, 4);
     const grassMaterial = new THREE.MeshStandardMaterial({
       color: 0xa7ff54,
@@ -389,15 +463,23 @@ export class TerrainGenerator {
     const dummy = new THREE.Object3D();
     for (let i = 0; i < count; i++) {
       const angle = Math.random() * Math.PI * 2;
-      const r = Math.random() * radius;
+      const normalized = Math.random();
+      const r = Math.pow(normalized, 0.82) * radius;
+      const shorelineBias = r < 240 ? 0.65 : r < 320 ? 0.9 : 1.15;
+      const x = Math.cos(angle) * r;
+      const z = Math.sin(angle) * r;
+      const nearForestBoost =
+        (x < -260 && z < -40 ? 0.2 : 0)
+        + (x > 260 && z < 30 ? 0.18 : 0)
+        + (x > 180 && z > 220 ? 0.16 : 0);
 
-      dummy.position.set(Math.cos(angle) * r, -49.5, Math.sin(angle) * r);
+      dummy.position.set(x, -49.5, z);
       dummy.rotation.set(
         (Math.random() - 0.5) * 0.2,
         Math.random() * Math.PI * 2,
         (Math.random() - 0.5) * 0.2
       );
-      dummy.scale.setScalar(0.5 + Math.random() * 1);
+      dummy.scale.setScalar((0.45 + Math.random() * 0.9) * shorelineBias + nearForestBoost);
       dummy.updateMatrix();
       this.grass.setMatrixAt(i, dummy.matrix);
     }
@@ -597,6 +679,98 @@ export class TerrainGenerator {
     barn.position.set(baseX + 80, -49, baseZ + 70);
     this.terrainGroup.add(fieldGroup);
     this.terrainGroup.add(barn);
+  }
+
+  private createLakeDirtPaths(surfaceProfile: LevelSurfaceProfile): void {
+    const pathColor = this.tintColor(surfaceProfile.shorelineDetailColor ?? 0xc8b387, -0.02, 0.14, -0.06);
+    const pathMaterial = new THREE.MeshStandardMaterial({
+      color: pathColor,
+      roughness: 0.96,
+      metalness: 0,
+      map: this.createDetailTexture(
+        pathColor,
+        this.tintColor(pathColor, 0.01, 0.06, 0.04),
+        this.tintColor(pathColor, -0.01, 0.1, -0.08),
+        'sand'
+      ),
+    });
+
+    const pathSegments = [
+      { width: 240, depth: 18, x: -430, z: 310, rot: 0.34 },
+      { width: 160, depth: 16, x: -220, z: 180, rot: 0.6 },
+      { width: 180, depth: 14, x: 340, z: -120, rot: -0.42 },
+    ];
+
+    for (const segment of pathSegments) {
+      const path = new THREE.Mesh(
+        new THREE.PlaneGeometry(segment.width, segment.depth),
+        pathMaterial
+      );
+      path.rotation.x = -Math.PI / 2;
+      path.rotation.z = segment.rot;
+      path.position.set(segment.x, -48.72, segment.z);
+      path.receiveShadow = true;
+      this.terrainGroup.add(path);
+    }
+  }
+
+  private createLakeShoreProps(surfaceProfile: LevelSurfaceProfile): void {
+    const reedMaterial = new THREE.MeshStandardMaterial({
+      color: this.tintColor(surfaceProfile.groundAccentColor ?? 0x9ddf70, -0.02, 0.16, -0.06),
+      roughness: 0.88,
+      metalness: 0,
+      emissive: this.tintColor(surfaceProfile.groundAccentColor ?? 0x9ddf70, 0.01, 0.12, 0.02),
+      emissiveIntensity: 0.05,
+      side: THREE.DoubleSide,
+    });
+    const reedGeometry = new THREE.BoxGeometry(0.08, 0.9, 0.08);
+    const reeds = new THREE.InstancedMesh(reedGeometry, reedMaterial, 240);
+    reeds.castShadow = false;
+    reeds.receiveShadow = false;
+
+    const reedDummy = new THREE.Object3D();
+    for (let i = 0; i < 240; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const radius = 198 + Math.random() * 48;
+      const x = Math.cos(angle) * radius;
+      const z = Math.sin(angle) * radius;
+      reedDummy.position.set(x, -48.88, z);
+      reedDummy.rotation.set(
+        (Math.random() - 0.5) * 0.06,
+        Math.random() * Math.PI * 2,
+        (Math.random() - 0.5) * 0.18
+      );
+      reedDummy.scale.set(0.7 + Math.random() * 0.35, 0.7 + Math.random() * 0.6, 0.7 + Math.random() * 0.35);
+      reedDummy.updateMatrix();
+      reeds.setMatrixAt(i, reedDummy.matrix);
+    }
+    reeds.instanceMatrix.needsUpdate = true;
+    this.terrainGroup.add(reeds);
+
+    const stoneMaterial = new THREE.MeshStandardMaterial({
+      color: this.tintColor(surfaceProfile.shorelineDetailColor ?? 0xc7b18a, -0.03, 0.08, -0.05),
+      roughness: 0.96,
+      metalness: 0,
+    });
+    const stoneGeometry = new THREE.DodecahedronGeometry(0.38, 0);
+    const stones = new THREE.InstancedMesh(stoneGeometry, stoneMaterial, 160);
+    stones.castShadow = true;
+    stones.receiveShadow = true;
+
+    const stoneDummy = new THREE.Object3D();
+    for (let i = 0; i < 160; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const radius = 208 + Math.random() * 54;
+      const x = Math.cos(angle) * radius;
+      const z = Math.sin(angle) * radius;
+      stoneDummy.position.set(x, -48.82, z);
+      stoneDummy.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
+      stoneDummy.scale.setScalar(0.45 + Math.random() * 0.65);
+      stoneDummy.updateMatrix();
+      stones.setMatrixAt(i, stoneDummy.matrix);
+    }
+    stones.instanceMatrix.needsUpdate = true;
+    this.terrainGroup.add(stones);
   }
 
   private createLakeRidges(surfaceProfile: LevelSurfaceProfile): void {
