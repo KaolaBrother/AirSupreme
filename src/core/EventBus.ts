@@ -1,5 +1,6 @@
 import type { Object3D, Vector3 } from 'three';
 import { EnemyType, EnemyConfig } from '@/features/enemy/EnemyTypes';
+import { LevelWaveEventType } from '@/features/terrain/LevelConfig';
 import { PowerUpType, PowerUpConfig } from '@/features/powerups/PowerUpSystem';
 import { Faction } from '@/core/Faction';
 
@@ -22,6 +23,7 @@ export enum GameEventType {
   MISSILE_HIT = 'MISSILE_HIT',
 
   WAVE_START = 'WAVE_START',
+  WAVE_EVENT_START = 'WAVE_EVENT_START',
   WAVE_COMPLETE = 'WAVE_COMPLETE',
   LEVEL_COMPLETE = 'LEVEL_COMPLETE',
 
@@ -78,6 +80,7 @@ export interface GameEventPayloads {
   [GameEventType.MISSILE_HIT]: { position: Vector3; target: Object3D };
 
   [GameEventType.WAVE_START]: { wave: number; level: number };
+  [GameEventType.WAVE_EVENT_START]: { wave: number; level: number; eventType: LevelWaveEventType };
   [GameEventType.WAVE_COMPLETE]: { wave: number; enemiesKilled: number };
   [GameEventType.LEVEL_COMPLETE]: { level: number };
 

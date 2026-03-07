@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { LevelManager } from '@/features/levels/LevelManager';
+import { LevelManager, LevelState } from '@/features/levels/LevelManager';
+import { LevelWaveEventType } from '@/features/terrain/LevelConfig';
 import * as THREE from 'three';
 
 vi.mock('@/features/terrain/TerrainGenerator', () => ({
@@ -116,6 +117,12 @@ describe('LevelManager', () => {
       expect(levelManager.onWaveComplete).toBeDefined();
     });
 
+    it('should have onWaveEventStart callback', () => {
+      expect(levelManager.onWaveEventStart).toBeUndefined();
+      levelManager.onWaveEventStart = vi.fn();
+      expect(levelManager.onWaveEventStart).toBeDefined();
+    });
+
     it('should have onLevelComplete callback', () => {
       expect(levelManager.onLevelComplete).toBeUndefined();
       levelManager.onLevelComplete = vi.fn();
@@ -132,6 +139,25 @@ describe('LevelManager', () => {
       expect(levelManager.onEnemyKilled).toBeUndefined();
       levelManager.onEnemyKilled = vi.fn();
       expect(levelManager.onEnemyKilled).toBeDefined();
+    });
+  });
+
+  describe('event wave templates', () => {
+    beforeEach(() => {
+      levelManager.loadLevel(2);
+    });
+
+    it('should trigger an event callback on later waves when templates exist', () => {
+      const onWaveEventStart = vi.fn();
+      levelManager.onWaveEventStart = onWaveEventStart;
+
+      (levelManager as unknown as { currentWave: number; state: LevelState }).currentWave = 1;
+      (levelManager as unknown as { currentWave: number; state: LevelState }).state =
+        LevelState.WAVE_COMPLETE;
+
+      levelManager.startWave(undefined, true);
+
+      expect(onWaveEventStart).toHaveBeenCalledWith(LevelWaveEventType.INTERCEPT, 1);
     });
   });
 });

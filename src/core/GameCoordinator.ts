@@ -26,7 +26,7 @@ import { GameConfig, GAME_CONSTANTS, type QualityPreset } from '@/config';
 import { BOSS_CONFIGS, BossType, BossConfig } from '@/features/boss/BossTypes';
 import { createPlayerMesh, createEnemyMesh } from '@/features/aircraft/AircraftMeshFactory';
 import { getDifficultyProfile } from '@/core/Difficulty';
-import { getLevelConfig } from '@/features/terrain/LevelConfig';
+import { getLevelConfig, LevelWaveEventType } from '@/features/terrain/LevelConfig';
 import { GameSessionState } from '@/core/GameSessionState';
 import { ResourceRegistry } from '@/core/ResourceRegistry';
 import { PresentationController } from '@/core/PresentationController';
@@ -51,13 +51,25 @@ interface GameCoordinatorOptions {
   showStartMenu?: boolean;
 }
 
+interface TutorialCombatState {
+  active: boolean;
+  startPosition: THREE.Vector3 | null;
+  movementHintShown: boolean;
+  speedHintShown: boolean;
+  fireHintShown: boolean;
+  missileHintShown: boolean;
+  killHintShown: boolean;
+  hitHintShown: boolean;
+}
+
 export class GameCoordinator {
   private static readonly TUTORIAL_STAGE_DURATION_MS = 2200;
   private static readonly TUTORIAL_STAGE_GAP_MS = 350;
   private static readonly TUTORIAL_WAVE_READY_BUFFER_MS = 1000;
-  private static readonly TUTORIAL_POST_WAVE_HINT_DELAY_MS = 2200;
   private static readonly TUTORIAL_FRIENDLY_SPAWN_DELAY_MS = 5200;
   private static readonly TUTORIAL_FRIENDLY_SPAWN_BUFFER_MS = 1200;
+  private static readonly TUTORIAL_MOVE_DISTANCE = 90;
+  private static readonly TUTORIAL_SPEED_THRESHOLD_RATIO = 0.72;
   private static readonly UPGRADE_FEEDBACK: Record<UpgradeType, { icon: string; label: string }> = {
     [UpgradeType.MAX_HEALTH]: { icon: '❤️', label: '最大生命值升级' },
     [UpgradeType.SPEED]: { icon: '⚡', label: '飞行速度升级' },
@@ -112,6 +124,16 @@ export class GameCoordinator {
   private readonly previousCameraTargetQuaternion = new THREE.Quaternion();
   private readonly currentCameraTargetQuaternion = new THREE.Quaternion();
   private readonly interpolatedCameraTargetQuaternion = new THREE.Quaternion();
+  private readonly tutorialCombatState: TutorialCombatState = {
+    active: false,
+    startPosition: null,
+    movementHintShown: false,
+    speedHintShown: false,
+    fireHintShown: false,
+    missileHintShown: false,
+    killHintShown: false,
+    hitHintShown: false,
+  };
   private lastRenderTimestamp: number = 0;
 
   constructor(options: GameCoordinatorOptions = {}) {
@@ -209,6 +231,7 @@ export class GameCoordinator {
   private setupEventListeners(): void {
     this.resourceRegistry.addUnsubscriber(
       EventBus.on(GameEventType.PLAYER_HIT, ({ payload }) => {
+        this.handleTutorialPlayerHit();
         if (!this.playerSystem.isShieldActive()) {
           this.audioManager.playHit();
           this.particleSystem.createHit(payload.position);
@@ -267,6 +290,7 @@ export class GameCoordinator {
 
     this.resourceRegistry.addUnsubscriber(
       EventBus.on(GameEventType.PLAYER_FIRED, () => {
+        this.handleTutorialPlayerFired();
         this.audioManager.playShoot();
       })
     );
@@ -279,6 +303,7 @@ export class GameCoordinator {
         this.notifyEarnedUpgradePoints(earnedPoints);
         this.audioManager.playExplosion();
         this.particleSystem.createExplosion(payload.position, payload.config.scale);
+        this.handleTutorialEnemyDeath();
 
         if (this.shouldSpawnPowerUp()) {
           this.spawnPowerUpForCurrentLevel(payload.position);
@@ -287,8 +312,20 @@ export class GameCoordinator {
     );
 
     this.resourceRegistry.addUnsubscriber(
+      EventBus.on(GameEventType.MISSILE_FIRED, () => {
+        this.handleTutorialMissileFired();
+      })
+    );
+
+    this.resourceRegistry.addUnsubscriber(
       EventBus.on(GameEventType.WAVE_START, () => {
         this.audioManager.playWaveStart();
+      })
+    );
+
+    this.resourceRegistry.addUnsubscriber(
+      EventBus.on(GameEventType.WAVE_EVENT_START, ({ payload }) => {
+        this.handleWaveEventStart(payload.eventType, payload.wave);
       })
     );
 
@@ -503,6 +540,7 @@ export class GameCoordinator {
     }
 
     this.powerUpSystem.update(deltaTime);
+    this.updateTutorialCombatState();
 
     const enemyMeshes = this.enemySystem.getEnemyMeshes();
     const friendlyMeshes = this.enemySystem.getFriendlyAIs().map((f) => f.getMesh());
@@ -862,6 +900,7 @@ export class GameCoordinator {
   public start(): void {
     this.sessionState.setPlaying();
     this.presentationController.resetHudThrottle();
+    this.resetTutorialCombatState();
     this.playerSystem.getHealth().reset();
     this.enemySystem.setDifficultyProfile(this.getCurrentDifficultyProfile());
     this.sessionState.setInBossBattle(this.sessionState.isBossMode());
@@ -979,16 +1018,111 @@ export class GameCoordinator {
     }, waveReadyDelayMs);
 
     this.scheduleTimeout(() => {
+      this.activateTutorialCombatStage();
       this.hud.showPowerUpBig('⚔️', '第一波接敌，保持移动', 1.8);
     }, combatStartDelayMs);
 
     this.scheduleTimeout(() => {
-      this.hud.showPowerUpBig('🚀', '高威胁目标优先使用导弹', 1.8);
-    }, combatStartDelayMs + GameCoordinator.TUTORIAL_POST_WAVE_HINT_DELAY_MS);
-
-    this.scheduleTimeout(() => {
       this.hud.showPowerUpBig('🤝', '友军即将加入战斗', 1.8);
     }, combatStartDelayMs + GameCoordinator.TUTORIAL_FRIENDLY_SPAWN_BUFFER_MS);
+  }
+
+  private resetTutorialCombatState(): void {
+    this.tutorialCombatState.active = false;
+    this.tutorialCombatState.startPosition = null;
+    this.tutorialCombatState.movementHintShown = false;
+    this.tutorialCombatState.speedHintShown = false;
+    this.tutorialCombatState.fireHintShown = false;
+    this.tutorialCombatState.missileHintShown = false;
+    this.tutorialCombatState.killHintShown = false;
+    this.tutorialCombatState.hitHintShown = false;
+  }
+
+  private activateTutorialCombatStage(): void {
+    if (!this.shouldRunTutorialIntro()) {
+      return;
+    }
+
+    this.tutorialCombatState.active = true;
+    this.tutorialCombatState.startPosition = this.playerSystem.getPosition().clone();
+  }
+
+  private updateTutorialCombatState(): void {
+    if (!this.tutorialCombatState.active) {
+      return;
+    }
+
+    const { startPosition } = this.tutorialCombatState;
+    if (!startPosition) {
+      return;
+    }
+
+    if (!this.tutorialCombatState.movementHintShown) {
+      const movedDistance = this.playerSystem.getPosition().distanceTo(startPosition);
+      if (movedDistance >= GameCoordinator.TUTORIAL_MOVE_DISTANCE) {
+        this.tutorialCombatState.movementHintShown = true;
+        this.hud.showPowerUpBig('🕹️', '机动确认，继续加速拉开距离', 1.8);
+      }
+    }
+
+    if (
+      this.tutorialCombatState.movementHintShown &&
+      !this.tutorialCombatState.speedHintShown &&
+      this.playerSystem.getSpeed()
+        >= this.playerStats.getMaxSpeed() * GameCoordinator.TUTORIAL_SPEED_THRESHOLD_RATIO
+    ) {
+      this.tutorialCombatState.speedHintShown = true;
+      this.hud.showPowerUpBig('⚡', '速度已拉起，按住开火持续压制', 1.8);
+    }
+  }
+
+  private handleTutorialPlayerFired(): void {
+    if (!this.tutorialCombatState.active || this.tutorialCombatState.fireHintShown) {
+      return;
+    }
+
+    this.tutorialCombatState.fireHintShown = true;
+    this.hud.showPowerUpBig('🔥', '火力确认，锁定后再发射导弹', 1.8);
+  }
+
+  private handleTutorialMissileFired(): void {
+    if (!this.tutorialCombatState.active || this.tutorialCombatState.missileHintShown) {
+      return;
+    }
+
+    this.tutorialCombatState.missileHintShown = true;
+    this.hud.showPowerUpBig('🚀', '导弹离轨，优先清理高威胁目标', 1.8);
+  }
+
+  private handleTutorialEnemyDeath(): void {
+    if (!this.tutorialCombatState.active || this.tutorialCombatState.killHintShown) {
+      return;
+    }
+
+    this.tutorialCombatState.killHintShown = true;
+    this.hud.showPowerUpBig('🎯', '确认击杀，清空首波进入正式节奏', 1.8);
+    this.tutorialCombatState.active = false;
+  }
+
+  private handleTutorialPlayerHit(): void {
+    if (!this.tutorialCombatState.active || this.tutorialCombatState.hitHintShown) {
+      return;
+    }
+
+    this.tutorialCombatState.hitHintShown = true;
+    this.hud.showPowerUpBig('↪️', '被命中时横滚或加速脱离火线', 1.6);
+  }
+
+  private handleWaveEventStart(eventType: LevelWaveEventType, wave: number): void {
+    const waveNumber = wave + 1;
+    switch (eventType) {
+      case LevelWaveEventType.ELITE_HUNT:
+        this.hud.showPowerUpBig('💠', `精英歼灭波次 · 第 ${waveNumber} 波`, 1.8, true);
+        break;
+      case LevelWaveEventType.INTERCEPT:
+        this.hud.showPowerUpBig('⚠️', `限时拦截波次 · 第 ${waveNumber} 波`, 1.8, true);
+        break;
+    }
   }
 
   public setQualityPreset(preset: QualityPreset): void {

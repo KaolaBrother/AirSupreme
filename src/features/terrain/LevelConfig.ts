@@ -160,6 +160,7 @@ export interface LevelConfig {
   enemiesPerWave: number[];
   enemyTypes: EnemyTypeConfig[];
   waveInterval: number; // 波次间隔（秒）
+  eventTemplates?: LevelWaveEventType[];
 
   // 道具配置
   powerUpFrequency: number; // 道具出现频率（0-1）
@@ -181,6 +182,11 @@ export interface EnemyTypeConfig {
   type: string;
   minWave: number;
   maxCount: number;
+}
+
+export enum LevelWaveEventType {
+  ELITE_HUNT = 'ELITE_HUNT',
+  INTERCEPT = 'INTERCEPT',
 }
 
 /**
@@ -274,6 +280,7 @@ export const LEVELS: LevelConfig[] = [
       { type: 'FIGHTER', minWave: 2, maxCount: 2 },
     ],
     waveInterval: 15,
+    eventTemplates: [LevelWaveEventType.INTERCEPT],
     powerUpFrequency: 0.3,
     powerUpTypes: ['HEALTH', 'SPEED', 'SHIELD'],
     difficulty: 2,
@@ -356,6 +363,7 @@ export const LEVELS: LevelConfig[] = [
       { type: 'SNIPER', minWave: 3, maxCount: 1 },
     ],
     waveInterval: 12,
+    eventTemplates: [LevelWaveEventType.INTERCEPT, LevelWaveEventType.ELITE_HUNT],
     powerUpFrequency: 0.25,
     powerUpTypes: ['HEALTH', 'DAMAGE', 'SPEED'],
     difficulty: 4,
@@ -437,6 +445,7 @@ export const LEVELS: LevelConfig[] = [
       { type: 'SNIPER', minWave: 3, maxCount: 2 },
     ],
     waveInterval: 10,
+    eventTemplates: [LevelWaveEventType.ELITE_HUNT, LevelWaveEventType.INTERCEPT],
     powerUpFrequency: 0.35,
     powerUpTypes: ['HEALTH', 'SHIELD', 'DAMAGE', 'SPEED'],
     difficulty: 6,
@@ -526,6 +535,7 @@ export const LEVELS: LevelConfig[] = [
       { type: 'ACE', minWave: 5, maxCount: 1 },
     ],
     waveInterval: 8,
+    eventTemplates: [LevelWaveEventType.INTERCEPT, LevelWaveEventType.ELITE_HUNT],
     powerUpFrequency: 0.4,
     powerUpTypes: ['HEALTH', 'SHIELD', 'DAMAGE', 'SPEED', 'MULTISHOT'],
     difficulty: 8,
@@ -628,6 +638,7 @@ export const LEVELS: LevelConfig[] = [
       { type: 'ACE', minWave: 6, maxCount: 2 },
     ],
     waveInterval: 6,
+    eventTemplates: [LevelWaveEventType.ELITE_HUNT, LevelWaveEventType.INTERCEPT],
     powerUpFrequency: 0.5,
     powerUpTypes: ['HEALTH', 'SHIELD', 'DAMAGE', 'SPEED', 'MULTISHOT', 'BOMB'],
     difficulty: 10,

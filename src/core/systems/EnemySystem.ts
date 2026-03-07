@@ -49,6 +49,14 @@ export class EnemySystem implements IGameSystem {
       });
     };
 
+    this.levelManager.onWaveEventStart = (eventType, wave) => {
+      EventBus.emit(GameEventType.WAVE_EVENT_START, {
+        wave,
+        level: this.sessionState.getLevel(),
+        eventType,
+      });
+    };
+
     this.levelManager.onWaveComplete = (wave) => {
       this.sessionState.setWave(wave);
       EventBus.emit(GameEventType.WAVE_COMPLETE, {

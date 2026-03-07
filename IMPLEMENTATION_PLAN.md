@@ -38,8 +38,9 @@
 - [active] 飞机模型视觉终版下一批
 - [active] 子弹 / 导弹 / 爆炸特效统一升级下一批
 - [active] 武器音效 / 混音第一批
-- [active] HUD 左上角状态区与升级反馈继续收口
-- [active] 启动边界与运行时初始化继续后移
+- [done] HUD 左上角状态区与升级反馈已完成当前轮收口
+- [active] 阶段式 onboarding 第一批
+- [active] 事件型波次第一批
 
 ### 已知未收尾
 - [watch] `vendor-three` 构建块仍约 `503 kB`，warning 仍在
@@ -155,18 +156,21 @@
 
 #### D1. 试玩关卡与新手引导
 - [done] 试玩关卡已可开关，并接入首关开场
-- [next] 从“提示驱动”升级到“阶段式 onboarding”
-  - 机动
-  - 开火
-  - 导弹锁定
-  - 正式接敌
+- [active] 从“提示驱动”升级到“阶段式 onboarding”第一批已落地
+  - 已加入战斗内阶段提示: 机动、加速、开火、导弹、首击杀
+  - 已加入首次受击规避提示
+- [next] 阶段式 onboarding 第二批
+  - 导弹锁定完成时机更精确
+  - 首关目标优先级和友军配合提示继续收口
 - [later] 首关开场演出与环境表现联动
 
 #### D2. 事件型波次
+- [active] 事件型波次第一批已开始
+  - `精英歼灭` 与 `限时拦截` 已接入 `LevelConfig -> LevelManager -> HUD` 链路
 - [next] 实装至少 3 类事件波次
-  - 精英歼灭
-  - 限时拦截
-  - 护送 / 防守
+  - 已完成: 精英歼灭
+  - 已完成: 限时拦截
+  - 待完成: 护送 / 防守
 - [later] 按关卡主题定制波次节奏，而不只是刷敌数量变化
 
 #### D3. 升级系统 UI 闭环
@@ -198,7 +202,7 @@
 - [done] 菜单启动与游戏运行时已拆出一层边界
   - `main.ts` 现在先启动 `StartMenu`
   - 点击开始后才动态导入并实例化 `GameCoordinator`
-- [done] `LevelManager` 的 `TerrainGenerator` 已延后到 `loadLevel()` 才初始化
+- [done] `LevelManager` 的 `TerrainGenerator` 已改成真正按需动态导入
 - [later] 继续隔离非首屏 Three 依赖和高画质附加路径
 
 #### E2. 结构优化
@@ -214,6 +218,7 @@
 #### F1. 自动化测试
 - [done] 已补强 `Flak` / Boss 关键链路回归测试
 - [done] 升级系统 UI 第一版对应测试已补
+- [done] `LevelManager` 事件波次第一批测试已补
 - [later] 环境配置、事件波次、持久化设置补更多集成测试
 
 #### F2. 人工验收

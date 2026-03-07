@@ -1,6 +1,10 @@
 import { Vector3 } from 'three';
 import type { Object3D, Scene } from 'three';
-import { LevelConfig, getLevelConfig } from '@/features/terrain/LevelConfig';
+import {
+  LevelConfig,
+  LevelWaveEventType,
+  getLevelConfig,
+} from '@/features/terrain/LevelConfig';
 import {
   EnemyConfig,
   EnemyType,
@@ -9,7 +13,7 @@ import {
   getEnemyTypesForWave,
 } from '@/features/enemy/EnemyTypes';
 import { EnemyAI } from '@/features/enemy/EnemyAI';
-import { TerrainGenerator } from '@/features/terrain/TerrainGenerator';
+import type { TerrainGenerator } from '@/features/terrain/TerrainGenerator';
 import { SpawnPortal } from '@/features/effects/SpawnPortal';
 import { createEnemyMesh } from '@/features/aircraft/AircraftMeshFactory';
 import { getLogger } from '@/core/utils/Logger';
@@ -32,6 +36,8 @@ export enum LevelState {
 export class LevelManager {
   private scene: Scene;
   private terrainGenerator: TerrainGenerator | null = null;
+  private terrainGeneratorPromise: Promise<TerrainGenerator> | null = null;
+  private terrainLoadSequence: number = 0;
 
   // 战斗区域边界
   private combatBounds: {
@@ -66,10 +72,12 @@ export class LevelManager {
   private spawnInterval: number = 0.5; // 敌人生成间隔（秒）
   private waveDelayTimer: number = 0; // 波次延迟计时器
   private waveGroupCenter?: Vector3; // 当前波次的敌人群中心
+  private currentWaveEvent: LevelWaveEventType | null = null;
   private difficultyProfile: DifficultyProfile | null = null;
 
   // 回调
   public onWaveStart?: (wave: number) => void;
+  public onWaveEventStart?: (eventType: LevelWaveEventType, wave: number) => void;
   public onWaveComplete?: (wave: number) => void;
   public onLevelComplete?: (level: number) => void;
   public onEnemySpawned?: (enemy: EnemyAI) => void;
@@ -79,12 +87,39 @@ export class LevelManager {
     this.scene = scene;
   }
 
-  private getTerrainGenerator(): TerrainGenerator {
-    if (!this.terrainGenerator) {
-      this.terrainGenerator = new TerrainGenerator(this.scene);
+  private ensureTerrainGenerator(): Promise<TerrainGenerator> {
+    if (this.terrainGenerator) {
+      return Promise.resolve(this.terrainGenerator);
     }
 
-    return this.terrainGenerator;
+    if (!this.terrainGeneratorPromise) {
+      this.terrainGeneratorPromise = import('@/features/terrain/TerrainGenerator').then(
+        ({ TerrainGenerator }) => {
+          if (!this.terrainGenerator) {
+            this.terrainGenerator = new TerrainGenerator(this.scene);
+          }
+
+          return this.terrainGenerator;
+        }
+      );
+    }
+
+    return this.terrainGeneratorPromise;
+  }
+
+  private initializeTerrain(config: LevelConfig): void {
+    const loadSequence = ++this.terrainLoadSequence;
+    void this.ensureTerrainGenerator()
+      .then((terrainGenerator) => {
+        if (this.currentLevel?.id !== config.id || loadSequence !== this.terrainLoadSequence) {
+          return;
+        }
+
+        terrainGenerator.generateTerrain(config);
+      })
+      .catch((error: unknown) => {
+        log.error('Terrain generator load failed', { error, levelId: config.id });
+      });
   }
 
   /**
@@ -103,10 +138,11 @@ export class LevelManager {
     this.totalEnemiesSpawned = 0;
     this.enemiesSpawnedThisWave = 0;
     this.spawnInterval = 0.5;
+    this.currentWaveEvent = null;
 
     log.info('Loading level', { levelId, name: config.name, terrain: config.terrain });
 
-    this.getTerrainGenerator().generateTerrain(config);
+    this.initializeTerrain(config);
 
     log.info('Level loaded', { levelId, name: config.name });
   }
@@ -173,8 +209,13 @@ export class LevelManager {
 
       this.state = LevelState.WAVE_ACTIVE;
       this.enemiesSpawnedThisWave = 0;
+      this.currentWaveEvent = this.resolveWaveEvent();
       this.spawnTimer = 0;
+      this.spawnInterval = this.getWaveSpawnInterval();
       this.onWaveStart?.(this.currentWave);
+      if (this.currentWaveEvent) {
+        this.onWaveEventStart?.(this.currentWaveEvent, this.currentWave);
+      }
 
       // 清理已死亡的敌人（调用 dispose 清理尾迹和资源）
       for (let i = this.enemies.length - 1; i >= 0; i--) {
@@ -193,8 +234,13 @@ export class LevelManager {
 
     this.state = LevelState.WAVE_ACTIVE;
     this.enemiesSpawnedThisWave = 0;
+    this.currentWaveEvent = this.resolveWaveEvent();
     this.spawnTimer = 0;
+    this.spawnInterval = this.getWaveSpawnInterval();
     this.onWaveStart?.(this.currentWave);
+    if (this.currentWaveEvent) {
+      this.onWaveEventStart?.(this.currentWaveEvent, this.currentWave);
+    }
 
     // 清理已死亡的敌人（调用 dispose 清理尾迹和资源）
     for (let i = this.enemies.length - 1; i >= 0; i--) {
@@ -406,6 +452,7 @@ export class LevelManager {
 
     // 重置波次
     this.enemiesSpawnedThisWave = 0;
+    this.currentWaveEvent = null;
   }
 
   /**
@@ -617,11 +664,50 @@ export class LevelManager {
       }
     }
 
-    if (weightedTypes.length === 0) {
-      return getEnemyTypesForWave(this.currentLevel.id, this.currentWave);
+    const baseTypes =
+      weightedTypes.length === 0
+        ? getEnemyTypesForWave(this.currentLevel.id, this.currentWave)
+        : weightedTypes;
+
+    return this.filterEnemyTypesForWaveEvent(baseTypes);
+  }
+
+  private resolveWaveEvent(): LevelWaveEventType | null {
+    const eventTemplates = this.currentLevel?.eventTemplates;
+    if (!eventTemplates || eventTemplates.length === 0) {
+      return null;
     }
 
-    return weightedTypes;
+    if (this.currentWave === 0) {
+      return null;
+    }
+
+    return eventTemplates[(this.currentWave - 1) % eventTemplates.length] ?? null;
+  }
+
+  private getWaveSpawnInterval(): number {
+    switch (this.currentWaveEvent) {
+      case LevelWaveEventType.ELITE_HUNT:
+        return 0.8;
+      case LevelWaveEventType.INTERCEPT:
+        return 0.35;
+      default:
+        return 0.5;
+    }
+  }
+
+  private filterEnemyTypesForWaveEvent(weightedTypes: EnemyType[]): EnemyType[] {
+    if (this.currentWaveEvent === null) {
+      return weightedTypes;
+    }
+
+    const preferredTypes =
+      this.currentWaveEvent === LevelWaveEventType.ELITE_HUNT
+        ? [EnemyType.HEAVY, EnemyType.ACE, EnemyType.SNIPER, EnemyType.FIGHTER]
+        : [EnemyType.SCOUT, EnemyType.FIGHTER, EnemyType.SNIPER];
+    const filteredTypes = weightedTypes.filter((type) => preferredTypes.includes(type));
+
+    return filteredTypes.length > 0 ? filteredTypes : weightedTypes;
   }
 
   private getAdjustedEnemyConfig(type: EnemyType): EnemyConfig {
