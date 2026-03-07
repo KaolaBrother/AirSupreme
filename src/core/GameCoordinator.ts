@@ -267,8 +267,9 @@ export class GameCoordinator {
     this.resourceRegistry.addUnsubscriber(
       EventBus.on(GameEventType.ENEMY_DEATH, ({ payload }) => {
         this.gameState.addScore(payload.config.scoreValue);
-        this.playerStats.addScore(payload.config.scoreValue);
+        const earnedPoints = this.playerStats.addScore(payload.config.scoreValue);
         this.hud.updateUpgradePoints(this.playerStats.getUpgrades().getAvailablePoints());
+        this.notifyEarnedUpgradePoints(earnedPoints);
         this.audioManager.playExplosion();
         this.particleSystem.createExplosion(payload.position, payload.config.scale);
 
@@ -1020,7 +1021,9 @@ export class GameCoordinator {
     this.audioManager.playExplosion();
     this.particleSystem.createExplosion(position, bossConfig.scale);
     this.gameState.addScore(bossConfig.scoreValue);
-    this.playerStats.addScore(bossConfig.scoreValue);
+    const earnedPoints = this.playerStats.addScore(bossConfig.scoreValue);
+    this.hud.updateUpgradePoints(this.playerStats.getUpgrades().getAvailablePoints());
+    this.notifyEarnedUpgradePoints(earnedPoints);
 
     this.presentationController.clearBossMissileIndicators();
 
@@ -1125,6 +1128,15 @@ export class GameCoordinator {
       const feedback = GameCoordinator.UPGRADE_FEEDBACK[type];
       this.hud.showPowerUpBig(feedback.icon, feedback.label, 1.2, true);
     }
+  }
+
+  private notifyEarnedUpgradePoints(earnedPoints: number): void {
+    if (earnedPoints <= 0) {
+      return;
+    }
+
+    const pointLabel = earnedPoints > 1 ? `${earnedPoints} 升级点` : '1 升级点';
+    this.hud.showPowerUpBig('⭐', `获得 ${pointLabel}`, 1.1, true);
   }
 
   private scheduleTimeout(callback: () => void, delay: number): ReturnType<typeof setTimeout> {

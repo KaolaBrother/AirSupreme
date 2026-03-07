@@ -49,7 +49,17 @@ export class AudioManager {
   protected sfxGain: GainNode | null = null;
   protected musicGain: GainNode | null = null;
   private engineOscillator: OscillatorNode | null = null;
+  private engineLayerOscillator: OscillatorNode | null = null;
+  private engineSubOscillator: OscillatorNode | null = null;
+  private engineTextureOscillator: OscillatorNode | null = null;
   private engineGain: GainNode | null = null;
+  private engineSubGain: GainNode | null = null;
+  private engineLayerGain: GainNode | null = null;
+  private engineTextureGain: GainNode | null = null;
+  private engineFilter: BiquadFilterNode | null = null;
+  private engineBandpassFilter: BiquadFilterNode | null = null;
+  private engineHighpassFilter: BiquadFilterNode | null = null;
+  private engineSpeedBlend: number = 0;
   private isEnginePlaying: boolean = false;
   private isDisposed: boolean = false;
   private activeSoundCounts: Map<SoundType, number> = new Map();
@@ -273,28 +283,67 @@ export class AudioManager {
       const sfxGain = this.sfxGain;
       if (!context || !sfxGain) return;
 
-      // 创建引擎声
+      // 创建引擎声（低频主体 + 中频机械层 + 高频气流纹理）
       this.engineOscillator = context.createOscillator();
+      this.engineSubOscillator = context.createOscillator();
+      this.engineLayerOscillator = context.createOscillator();
+      this.engineTextureOscillator = context.createOscillator();
       this.engineGain = context.createGain();
+      this.engineSubGain = context.createGain();
+      this.engineLayerGain = context.createGain();
+      this.engineTextureGain = context.createGain();
+      this.engineFilter = context.createBiquadFilter();
+      this.engineBandpassFilter = context.createBiquadFilter();
+      this.engineHighpassFilter = context.createBiquadFilter();
+      this.engineSpeedBlend = 0;
 
-      // 低频引擎声
+      // 低频主体
       this.engineOscillator.type = 'sawtooth';
-      this.engineOscillator.frequency.value = 80;
+      this.engineOscillator.frequency.value = 68;
+      // 次低频层
+      this.engineSubOscillator.type = 'sine';
+      this.engineSubOscillator.frequency.value = 36;
+      // 中频谐波层
+      this.engineLayerOscillator.type = 'triangle';
+      this.engineLayerOscillator.frequency.value = 112;
+      // 高频气流层
+      this.engineTextureOscillator.type = 'sawtooth';
+      this.engineTextureOscillator.frequency.value = 240;
 
       // 音量包络
-      this.engineGain.gain.value = 0.05 * this.sfxVolume;
+      this.engineGain.gain.value = 0.024 * this.sfxVolume;
+      this.engineSubGain.gain.value = 0.34;
+      this.engineLayerGain.gain.value = 0.18;
+      this.engineTextureGain.gain.value = 0.045;
 
-      // 添加滤波器让声音更自然
-      const filter = context.createBiquadFilter();
-      filter.type = 'lowpass';
-      filter.frequency.value = 500;
+      // 分频塑形，让速度变化更自然
+      this.engineFilter.type = 'lowpass';
+      this.engineFilter.frequency.value = 520;
+      this.engineFilter.Q.value = 0.68;
+      this.engineBandpassFilter.type = 'bandpass';
+      this.engineBandpassFilter.frequency.value = 760;
+      this.engineBandpassFilter.Q.value = 1.0;
+      this.engineHighpassFilter.type = 'highpass';
+      this.engineHighpassFilter.frequency.value = 1400;
+      this.engineHighpassFilter.Q.value = 0.8;
 
       // 连接节点
-      this.engineOscillator.connect(filter);
-      filter.connect(this.engineGain);
+      this.engineOscillator.connect(this.engineFilter);
+      this.engineSubOscillator.connect(this.engineSubGain);
+      this.engineSubGain.connect(this.engineFilter);
+      this.engineFilter.connect(this.engineGain);
+      this.engineLayerOscillator.connect(this.engineBandpassFilter);
+      this.engineBandpassFilter.connect(this.engineLayerGain);
+      this.engineLayerGain.connect(this.engineGain);
+      this.engineTextureOscillator.connect(this.engineHighpassFilter);
+      this.engineHighpassFilter.connect(this.engineTextureGain);
+      this.engineTextureGain.connect(this.engineGain);
       this.engineGain.connect(sfxGain);
 
       this.engineOscillator.start();
+      this.engineSubOscillator.start();
+      this.engineLayerOscillator.start();
+      this.engineTextureOscillator.start();
       this.isEnginePlaying = true;
     } catch {
       log.warn('Failed to start engine sound');
@@ -306,30 +355,118 @@ export class AudioManager {
    */
   public updateEngine(speed: number): void {
     if (!this.canPlay()) return;
-    if (!this.engineOscillator || !this.engineGain) return;
+    if (
+      !this.engineOscillator ||
+      !this.engineSubOscillator ||
+      !this.engineLayerOscillator ||
+      !this.engineTextureOscillator ||
+      !this.engineGain ||
+      !this.engineSubGain ||
+      !this.engineLayerGain ||
+      !this.engineTextureGain ||
+      !this.engineFilter ||
+      !this.engineBandpassFilter ||
+      !this.engineHighpassFilter
+    ) {
+      return;
+    }
 
-    // 根据速度调整频率
-    const baseFreq = 60;
-    const maxFreq = 150;
-    const normalizedSpeed = Math.min(speed / 100, 1);
-    const freq = baseFreq + (maxFreq - baseFreq) * normalizedSpeed;
+    // 使用平滑速度避免抖动；低速更浑厚，高速更明亮
+    const normalizedSpeed = clamp01(speed / 100);
+    this.engineSpeedBlend += (normalizedSpeed - this.engineSpeedBlend) * 0.14;
+    const speedBlend = this.engineSpeedBlend;
+    const throttleCurve = Math.pow(speedBlend, 1.25);
+    const coreFreq = 58 + throttleCurve * 96;
+    const subFreq = coreFreq * 0.52;
+    const layerFreq = 96 + throttleCurve * 170;
+    const textureFreq = 220 + throttleCurve * 420;
+    const engineMasterGain = 0.02 + throttleCurve * 0.054;
+    const subGain = 0.24 + (1 - throttleCurve) * 0.12;
+    const layerGain = 0.12 + throttleCurve * 0.2;
+    const textureGain = 0.02 + Math.pow(throttleCurve, 1.7) * 0.11;
+    const lowpassFreq = 430 + throttleCurve * 1650;
+    const bandpassFreq = 620 + throttleCurve * 1350;
+    const highpassFreq = 1200 + throttleCurve * 2100;
+    const currentTime = this.context?.currentTime || 0;
 
-    this.engineOscillator.frequency.setValueAtTime(freq, this.context?.currentTime || 0);
+    this.engineOscillator.frequency.cancelScheduledValues(currentTime);
+    this.engineSubOscillator.frequency.cancelScheduledValues(currentTime);
+    this.engineLayerOscillator.frequency.cancelScheduledValues(currentTime);
+    this.engineTextureOscillator.frequency.cancelScheduledValues(currentTime);
+    this.engineGain.gain.cancelScheduledValues(currentTime);
+    this.engineSubGain.gain.cancelScheduledValues(currentTime);
+    this.engineLayerGain.gain.cancelScheduledValues(currentTime);
+    this.engineTextureGain.gain.cancelScheduledValues(currentTime);
+    this.engineFilter.frequency.cancelScheduledValues(currentTime);
+    this.engineFilter.Q.cancelScheduledValues(currentTime);
+    this.engineBandpassFilter.frequency.cancelScheduledValues(currentTime);
+    this.engineBandpassFilter.Q.cancelScheduledValues(currentTime);
+    this.engineHighpassFilter.frequency.cancelScheduledValues(currentTime);
+    this.engineHighpassFilter.Q.cancelScheduledValues(currentTime);
 
-    // 调整音量
-    const volume = 0.03 + normalizedSpeed * 0.04;
-    this.engineGain.gain.setValueAtTime(volume * this.sfxVolume, this.context?.currentTime || 0);
+    this.engineOscillator.frequency.setTargetAtTime(coreFreq, currentTime, 0.1);
+    this.engineSubOscillator.frequency.setTargetAtTime(subFreq, currentTime, 0.1);
+    this.engineLayerOscillator.frequency.setTargetAtTime(layerFreq, currentTime, 0.11);
+    this.engineTextureOscillator.frequency.setTargetAtTime(textureFreq, currentTime, 0.12);
+    this.engineGain.gain.setTargetAtTime(engineMasterGain * this.sfxVolume, currentTime, 0.1);
+    this.engineSubGain.gain.setTargetAtTime(subGain, currentTime, 0.14);
+    this.engineLayerGain.gain.setTargetAtTime(layerGain, currentTime, 0.12);
+    this.engineTextureGain.gain.setTargetAtTime(textureGain, currentTime, 0.14);
+    this.engineFilter.frequency.setTargetAtTime(lowpassFreq, currentTime, 0.14);
+    this.engineFilter.Q.setTargetAtTime(0.65 + throttleCurve * 0.9, currentTime, 0.15);
+    this.engineBandpassFilter.frequency.setTargetAtTime(bandpassFreq, currentTime, 0.13);
+    this.engineBandpassFilter.Q.setTargetAtTime(0.92 + throttleCurve * 0.55, currentTime, 0.15);
+    this.engineHighpassFilter.frequency.setTargetAtTime(highpassFreq, currentTime, 0.16);
+    this.engineHighpassFilter.Q.setTargetAtTime(0.7 + throttleCurve * 0.35, currentTime, 0.16);
   }
 
   /**
    * 停止引擎声
    */
   public stopEngine(): void {
-    if (this.engineOscillator) {
-      this.engineOscillator.stop();
-      this.engineOscillator = null;
+    const stopNode = (osc: OscillatorNode | null): void => {
+      if (!osc) return;
+      try {
+        osc.stop();
+      } catch {
+        // Ignore
+      }
+      try {
+        osc.disconnect();
+      } catch {
+        // Ignore
+      }
+    };
+
+    stopNode(this.engineOscillator);
+    stopNode(this.engineSubOscillator);
+    stopNode(this.engineLayerOscillator);
+    stopNode(this.engineTextureOscillator);
+
+    try {
+      this.engineSubGain?.disconnect();
+      this.engineLayerGain?.disconnect();
+      this.engineTextureGain?.disconnect();
+      this.engineFilter?.disconnect();
+      this.engineBandpassFilter?.disconnect();
+      this.engineHighpassFilter?.disconnect();
+      this.engineGain?.disconnect();
+    } catch {
+      // Ignore
     }
+
+    this.engineOscillator = null;
+    this.engineSubOscillator = null;
+    this.engineLayerOscillator = null;
+    this.engineTextureOscillator = null;
+    this.engineSubGain = null;
+    this.engineLayerGain = null;
+    this.engineTextureGain = null;
+    this.engineFilter = null;
+    this.engineBandpassFilter = null;
+    this.engineHighpassFilter = null;
     this.engineGain = null;
+    this.engineSpeedBlend = 0;
     this.isEnginePlaying = false;
   }
 
@@ -1218,6 +1355,12 @@ export class AudioManager {
       this.sfxGain = null;
       this.musicGain = null;
       this.engineGain = null;
+      this.engineSubGain = null;
+      this.engineLayerGain = null;
+      this.engineTextureGain = null;
+      this.engineFilter = null;
+      this.engineBandpassFilter = null;
+      this.engineHighpassFilter = null;
     }
   }
 }

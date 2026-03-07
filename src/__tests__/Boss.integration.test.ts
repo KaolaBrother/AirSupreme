@@ -29,6 +29,9 @@ describe('Boss System Integration', () => {
     mockParticleSystem = {
       createExplosion: vi.fn(),
       createTrail: vi.fn(),
+      createBossMissileTrail: vi.fn(),
+      createBossMissileExplosion: vi.fn(),
+      createHit: vi.fn(),
     } as unknown as ParticleSystem;
   });
 

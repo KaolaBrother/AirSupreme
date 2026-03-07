@@ -8,6 +8,8 @@ type BigMessageVariant = 'announcement' | 'powerup';
 export class HUD {
   private static readonly UPGRADE_HINT_STYLE_ID = 'hud-upgrade-hint-style';
   private container: HTMLDivElement;
+  private leftStatusPanel: HTMLDivElement;
+  private leftPrimaryRow: HTMLDivElement;
   private healthBarContainer: HTMLDivElement;
   private healthBarFill!: HTMLDivElement;
   private scoreDisplay: HTMLDivElement;
@@ -43,7 +45,6 @@ export class HUD {
 
     const isMobile = GameConfig.isMobile;
     const padding = isMobile ? '10px' : '20px';
-    const fontSize = isMobile ? '16px' : '20px';
 
     this.container.style.cssText = `
       position: fixed;
@@ -59,40 +60,86 @@ export class HUD {
     `;
 
     this.healthBarContainer = this.createHealthBar(isMobile);
+    this.leftStatusPanel = document.createElement('div');
+    this.leftStatusPanel.style.cssText = `
+      position: absolute;
+      top: ${isMobile ? '14px' : '18px'};
+      left: ${padding};
+      display: flex;
+      flex-direction: column;
+      gap: ${isMobile ? '8px' : '10px'};
+      min-width: ${isMobile ? '178px' : '228px'};
+      max-width: min(38vw, ${isMobile ? '220px' : '300px'});
+      pointer-events: none;
+    `;
+
+    this.leftPrimaryRow = document.createElement('div');
+    this.leftPrimaryRow.style.cssText = `
+      display: grid;
+      grid-template-columns: ${isMobile
+        ? '1fr'
+        : `minmax(120px, 1.35fr) minmax(98px, 1fr)`};
+      gap: ${isMobile ? '8px' : '10px'};
+      align-items: stretch;
+    `;
 
     this.upgradePointsDisplay = document.createElement('div');
     this.upgradePointsDisplay.style.cssText = `
-      font-size: ${isMobile ? '14px' : '18px'};
-      position: absolute;
-      top: ${isMobile ? '25px' : '40px'};
-      left: ${padding};
-      color: #FFD700;
-      background: rgba(20, 24, 32, 0.75);
-      border: 1px solid rgba(255, 215, 0, 0.45);
-      border-radius: 8px;
-      padding: ${isMobile ? '4px 8px' : '5px 10px'};
-      text-shadow: 0 0 8px rgba(255, 215, 0, 0.35);
+      font-size: ${isMobile ? '12px' : '14px'};
+      color: #FFD76A;
+      background: linear-gradient(135deg, rgba(38, 31, 16, 0.9), rgba(76, 56, 12, 0.78));
+      border: 1px solid rgba(255, 215, 106, 0.45);
+      border-radius: 12px;
+      padding: ${isMobile ? '6px 10px' : '8px 12px'};
+      letter-spacing: 0.08em;
+      font-weight: 700;
+      text-shadow: 0 0 10px rgba(255, 215, 106, 0.28);
+      box-shadow: inset 0 1px 0 rgba(255, 245, 200, 0.12), 0 10px 20px rgba(0, 0, 0, 0.18);
       display: none;
+      white-space: nowrap;
+      font-variant-numeric: tabular-nums;
     `;
     this.setTextContent(this.upgradePointsDisplay, '⭐ 0');
 
     this.scoreDisplay = document.createElement('div');
     this.scoreDisplay.style.cssText = `
-      font-size: ${fontSize};
-      position: absolute;
-      top: ${isMobile ? '50px' : '70px'};
-      left: ${padding};
+      font-size: ${isMobile ? '16px' : '19px'};
+      min-height: ${isMobile ? '44px' : '60px'};
+      display: flex;
+      align-items: center;
+      padding: ${isMobile ? '10px 12px' : '12px 14px'};
+      border-radius: 14px;
+      background: linear-gradient(160deg, rgba(18, 30, 48, 0.88), rgba(10, 14, 22, 0.76));
+      border: 1px solid rgba(118, 204, 255, 0.28);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 12px 24px rgba(0, 0, 0, 0.18);
+      color: #eef8ff;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      white-space: nowrap;
+      font-variant-numeric: tabular-nums;
     `;
-    this.setTextContent(this.scoreDisplay, '分数: 0');
+    this.setTextContent(this.scoreDisplay, '得分 000000');
 
     this.speedDisplay = document.createElement('div');
     this.speedDisplay.style.cssText = `
-      font-size: ${isMobile ? '14px' : '18px'};
-      position: absolute;
-      top: ${isMobile ? '75px' : '100px'};
-      left: ${padding};
+      font-size: ${isMobile ? '14px' : '16px'};
+      min-height: ${isMobile ? '44px' : '60px'};
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: ${isMobile ? '10px 10px' : '12px 12px'};
+      border-radius: 14px;
+      background: linear-gradient(165deg, rgba(17, 22, 34, 0.88), rgba(9, 12, 18, 0.76));
+      border: 1px solid rgba(255, 164, 95, 0.26);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 12px 24px rgba(0, 0, 0, 0.18);
+      color: #ffd2a6;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      text-align: center;
+      white-space: nowrap;
+      font-variant-numeric: tabular-nums;
     `;
-    this.setTextContent(this.speedDisplay, '速度: 0 km/h');
+    this.setTextContent(this.speedDisplay, '速度 000');
 
     this.remainingEnemiesDisplay = document.createElement('div');
     this.remainingEnemiesDisplay.style.cssText = `
@@ -105,8 +152,11 @@ export class HUD {
     `;
     this.setTextContent(this.remainingEnemiesDisplay, '剩余: 0');
     this.container.appendChild(this.remainingEnemiesDisplay);
-    this.container.appendChild(this.upgradePointsDisplay);
-    this.container.appendChild(this.speedDisplay);
+    this.leftPrimaryRow.appendChild(this.scoreDisplay);
+    this.leftPrimaryRow.appendChild(this.speedDisplay);
+    this.leftStatusPanel.appendChild(this.leftPrimaryRow);
+    this.leftStatusPanel.appendChild(this.upgradePointsDisplay);
+    this.container.appendChild(this.leftStatusPanel);
 
     this.enemiesDisplay = document.createElement('div');
     this.enemiesDisplay.style.cssText = `
@@ -274,7 +324,6 @@ export class HUD {
     this.gameOverDisplay.appendChild(this.finalScoreDisplay);
 
     this.container.appendChild(this.healthBarContainer);
-    this.container.appendChild(this.scoreDisplay);
     this.container.appendChild(this.enemiesDisplay);
     this.container.appendChild(this.livesDisplay);
     this.container.appendChild(this.missilesDisplay);
@@ -410,7 +459,7 @@ export class HUD {
    * 更新分数显示
    */
   public updateScore(score: number): void {
-    this.setTextContent(this.scoreDisplay, `分数: ${score}`);
+    this.setTextContent(this.scoreDisplay, `得分 ${score.toString().padStart(6, '0')}`);
   }
 
   /**
@@ -418,7 +467,7 @@ export class HUD {
    */
   public updateSpeed(speed: number): void {
     const displaySpeed = Math.round(speed * 10); // 放大显示
-    this.setTextContent(this.speedDisplay, `速度: ${displaySpeed} km/h`);
+    this.setTextContent(this.speedDisplay, `速度 ${displaySpeed.toString().padStart(3, '0')} km/h`);
   }
 
   /**
@@ -447,8 +496,8 @@ export class HUD {
     if (points > 0) {
       const isMobile = GameConfig.isMobile;
       const hintText = isMobile
-        ? `⭐ 可升级 ${points} 点`
-        : `⭐ 可升级 ${points} 点 · 按 U 打开`;
+        ? `⭐ 升级点 ${points}`
+        : `⭐ 升级点 ${points} · 按 U 打开`;
       this.setTextContent(this.upgradePointsDisplay, hintText);
       this.setStyleValue(this.upgradePointsDisplay, 'display', 'block');
       this.upgradePointsDisplay.classList.add('hud-upgrade-ready');
