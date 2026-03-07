@@ -1,4 +1,4 @@
-import * as THREE from 'three';
+import type { Mesh, Object3D, Vector3 } from 'three';
 import { GameEventType, GameEventPayloads } from '@/core/EventBus';
 
 export interface IGameSystem {
@@ -27,28 +27,28 @@ export interface IWeapon {
   fireRate: number;
   accuracy: number;
   canFire: boolean;
-  fire(position: THREE.Vector3, direction: THREE.Vector3): void;
+  fire(position: Vector3, direction: Vector3): void;
   updateCooldown(deltaTime: number): void;
 }
 
 export interface ITargetable {
-  mesh: THREE.Object3D;
-  position: THREE.Vector3;
+  mesh: Object3D;
+  position: Vector3;
   isAlive: boolean;
   faction: 'player' | 'enemy' | 'friendly';
 }
 
 export interface IProjectile {
-  mesh: THREE.Mesh;
+  mesh: Mesh;
   active: boolean;
   damage: number;
-  owner?: THREE.Object3D;
+  owner?: Object3D;
   faction?: string;
 }
 
 export interface IAIController {
-  target?: THREE.Object3D;
+  target?: Object3D;
   state: 'CHASE' | 'FIXED_DIRECTION' | 'CIRCLE';
-  update(deltaTime: number, targets: THREE.Object3D[]): void;
-  setTarget(target: THREE.Object3D | undefined): void;
+  update(deltaTime: number, targets: Object3D[]): void;
+  setTarget(target: Object3D | undefined): void;
 }

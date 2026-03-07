@@ -82,8 +82,8 @@ describe('BossTypes', () => {
   });
 
   describe('FLAK_CANNON_CONFIG', () => {
-    it('should have correct speed (50% of normal)', () => {
-      expect(FLAK_CANNON_CONFIG.SPEED).toBe(50);
+    it('should have tuned speed for readable airburst travel', () => {
+      expect(FLAK_CANNON_CONFIG.SPEED).toBe(42);
     });
 
     it('should have correct scale (3x)', () => {
@@ -94,8 +94,8 @@ describe('BossTypes', () => {
       expect(FLAK_CANNON_CONFIG.MAX_RANGE).toBe(1500);
     });
 
-    it('should have correct AOE radius', () => {
-      expect(FLAK_CANNON_CONFIG.AOE_RADIUS).toBe(50);
+    it('should have tuned AOE radius for dodgeable area denial', () => {
+      expect(FLAK_CANNON_CONFIG.AOE_RADIUS).toBe(42);
     });
 
     it('should have correct damage', () => {
@@ -104,6 +104,12 @@ describe('BossTypes', () => {
 
     it('should have correct explosion height variance', () => {
       expect(FLAK_CANNON_CONFIG.EXPLOSION_HEIGHT_VARIANCE).toBe(20);
+    });
+
+    it('should include warning and arming parameters', () => {
+      expect(FLAK_CANNON_CONFIG.ARMING_TIME).toBe(0.32);
+      expect(FLAK_CANNON_CONFIG.WARNING_DISTANCE).toBe(120);
+      expect(FLAK_CANNON_CONFIG.DETONATION_DISTANCE).toBe(14);
     });
   });
 

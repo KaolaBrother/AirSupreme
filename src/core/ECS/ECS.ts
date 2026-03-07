@@ -1,5 +1,5 @@
 import type { Entity } from './Entity';
-import type { Component } from './Component';
+import type { Component, ComponentClass } from './Component';
 import type { System } from './System';
 import { ComponentContainer } from './ComponentContainer';
 import { getLogger } from '@/core/utils/Logger';
@@ -53,7 +53,7 @@ export class ECS {
   /**
    * 从实体移除组件
    */
-  public removeComponent(entity: Entity, componentClass: Function): void {
+  public removeComponent(entity: Entity, componentClass: ComponentClass<Component>): void {
     const container = this.entities.get(entity);
     if (!container) return;
 
@@ -101,7 +101,10 @@ export class ECS {
 
     // 销毁标记的实体
     while (this.entitiesToDestroy.length > 0) {
-      this.destroyEntity(this.entitiesToDestroy.pop()!);
+      const entity = this.entitiesToDestroy.pop();
+      if (entity !== undefined) {
+        this.destroyEntity(entity);
+      }
     }
   }
 

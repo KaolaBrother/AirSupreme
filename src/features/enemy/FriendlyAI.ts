@@ -61,6 +61,10 @@ export class FriendlyAI {
     return this.enemy.getMesh();
   }
 
+  public getEnemy(): EnemyAI {
+    return this.enemy;
+  }
+
   public isAlive(): boolean {
     return this.enemy.isAlive();
   }
@@ -74,25 +78,6 @@ export class FriendlyAI {
   }
 
   public dispose(): void {
-    const mesh = this.enemy.getMesh();
-    this.enemy['trail'].dispose();
-
-    if (mesh.parent) {
-      mesh.parent.remove(mesh);
-    }
-
-    mesh.visible = false;
-    while (mesh.children.length > 0) {
-      const child = mesh.children[0];
-      mesh.remove(child);
-      if (child instanceof THREE.Mesh) {
-        child.geometry.dispose();
-        if (Array.isArray(child.material)) {
-          child.material.forEach((m) => m.dispose());
-        } else if (child.material instanceof THREE.Material) {
-          child.material.dispose();
-        }
-      }
-    }
+    this.enemy.dispose();
   }
 }

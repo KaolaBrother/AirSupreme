@@ -1,5 +1,7 @@
 import { GameConfig } from '@/config';
 
+type BigMessageVariant = 'announcement' | 'powerup';
+
 /**
  * 游戏界面 (HUD)
  */
@@ -17,12 +19,21 @@ export class HUD {
   private missileProgressFill: HTMLDivElement; // 导弹补给进度条填充
   private powerUpDisplay: HTMLDivElement;
   private powerUpBigDisplay: HTMLDivElement;
+  private powerUpBigIcon: HTMLDivElement;
+  private powerUpBigText: HTMLDivElement;
+  private powerUpBigSubtext: HTMLDivElement;
   private gameOverDisplay: HTMLDivElement;
+  private finalScoreDisplay: HTMLDivElement;
   private upgradePointsDisplay: HTMLDivElement;
 
   private powerUpTimer: number = 0;
   private activePowerUpDuration: number = 0; // 道具持续时间
   private powerUpBigTimer: number = 0; // 大字提示显示计时器
+  private activePowerUpName: string = '';
+  private activePowerUpIcon: string = '';
+  private lastPowerUpRemainingSeconds: number = -1;
+  private readonly textContentCache = new WeakMap<HTMLElement, string>();
+  private readonly styleValueCache = new WeakMap<HTMLElement, Map<string, string>>();
 
   constructor() {
     this.container = document.createElement('div');
@@ -56,7 +67,7 @@ export class HUD {
       color: #FFD700;
       display: none;
     `;
-    this.upgradePointsDisplay.textContent = '⭐ 0';
+    this.setTextContent(this.upgradePointsDisplay, '⭐ 0');
 
     this.scoreDisplay = document.createElement('div');
     this.scoreDisplay.style.cssText = `
@@ -65,7 +76,7 @@ export class HUD {
       top: ${isMobile ? '50px' : '70px'};
       left: ${padding};
     `;
-    this.scoreDisplay.textContent = '分数: 0';
+    this.setTextContent(this.scoreDisplay, '分数: 0');
 
     this.speedDisplay = document.createElement('div');
     this.speedDisplay.style.cssText = `
@@ -74,7 +85,7 @@ export class HUD {
       top: ${isMobile ? '75px' : '100px'};
       left: ${padding};
     `;
-    this.speedDisplay.textContent = '速度: 0 km/h';
+    this.setTextContent(this.speedDisplay, '速度: 0 km/h');
 
     this.remainingEnemiesDisplay = document.createElement('div');
     this.remainingEnemiesDisplay.style.cssText = `
@@ -85,7 +96,7 @@ export class HUD {
       color: #ff4444;
       text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.8);
     `;
-    this.remainingEnemiesDisplay.textContent = '剩余: 0';
+    this.setTextContent(this.remainingEnemiesDisplay, '剩余: 0');
     this.container.appendChild(this.remainingEnemiesDisplay);
     this.container.appendChild(this.upgradePointsDisplay);
     this.container.appendChild(this.speedDisplay);
@@ -97,7 +108,7 @@ export class HUD {
       top: ${isMobile ? '54px' : '70px'};
       right: ${padding};
     `;
-    this.enemiesDisplay.textContent = '敌人: 0';
+    this.setTextContent(this.enemiesDisplay, '敌人: 0');
 
     // 生命值显示（生命数）
     this.livesDisplay = document.createElement('div');
@@ -107,7 +118,7 @@ export class HUD {
       top: ${isMobile ? '76px' : '95px'};
       right: ${padding};
     `;
-    this.livesDisplay.textContent = '生命: ❤️❤️❤️';
+    this.setTextContent(this.livesDisplay, '生命: ❤️❤️❤️');
 
     // 导弹数量显示
     this.missilesDisplay = document.createElement('div');
@@ -118,7 +129,7 @@ export class HUD {
       right: ${padding};
       color: #ff6600;
     `;
-    this.missilesDisplay.textContent = '导弹: 🚀🚀';
+    this.setTextContent(this.missilesDisplay, '导弹: 🚀🚀');
 
     // 导弹补给进度条（导弹UI下方）
     const progressTop = isMobile ? 120 : 144;
@@ -158,7 +169,7 @@ export class HUD {
       transition: opacity 0.3s;
       pointer-events: none;
     `;
-    this.powerUpDisplay.textContent = '';
+    this.setTextContent(this.powerUpDisplay, '');
 
     // 道具大字提示显示（屏幕中央）
     this.powerUpBigDisplay = document.createElement('div');
@@ -177,29 +188,41 @@ export class HUD {
       transition: opacity 0.3s;
       pointer-events: none;
     `;
-    this.powerUpBigDisplay.innerHTML = `
-      <div class="powerup-big-icon" style="
-        font-size: ${isMobile ? '120px' : '150px'};
-        text-shadow: 0 0 30px rgba(255, 215, 0, 0.8), 0 0 60px rgba(255, 215, 0, 0.4);
-        margin-bottom: 20px;
-        animation: bounce 0.5s ease-out;
-      "></div>
-      <div class="powerup-big-text" style="
-        font-size: ${isMobile ? '48px' : '64px'};
-        font-weight: bold;
-        color: #ffff00;
-        text-shadow: 0 0 20px rgba(255, 215, 0, 0.8), 4px 4px 8px rgba(0, 0, 0, 1);
-        white-space: nowrap;
-      "></div>
-      <div class="powerup-big-subtext" style="
-        font-size: ${isMobile ? '24px' : '32px'};
-        font-weight: bold;
-        color: #ffffff;
-        text-shadow: 2px 2px 4px rgba(0, 0, 0, 1);
-        margin-top: 10px;
-        white-space: nowrap;
-      ">获得道具！</div>
+    this.powerUpBigIcon = document.createElement('div');
+    this.powerUpBigIcon.className = 'powerup-big-icon';
+    this.powerUpBigIcon.style.cssText = `
+      font-size: ${isMobile ? '120px' : '150px'};
+      text-shadow: 0 0 30px rgba(255, 215, 0, 0.8), 0 0 60px rgba(255, 215, 0, 0.4);
+      margin-bottom: 20px;
+      animation: bounce 0.5s ease-out;
     `;
+
+    this.powerUpBigText = document.createElement('div');
+    this.powerUpBigText.className = 'powerup-big-text';
+    this.powerUpBigText.style.cssText = `
+      font-size: ${isMobile ? '48px' : '64px'};
+      font-weight: bold;
+      color: #ffff00;
+      text-shadow: 0 0 20px rgba(255, 215, 0, 0.8), 4px 4px 8px rgba(0, 0, 0, 1);
+      white-space: nowrap;
+    `;
+
+    this.powerUpBigSubtext = document.createElement('div');
+    this.powerUpBigSubtext.className = 'powerup-big-subtext';
+    this.powerUpBigSubtext.style.cssText = `
+      font-size: ${isMobile ? '24px' : '32px'};
+      font-weight: bold;
+      color: #ffffff;
+      text-shadow: 2px 2px 4px rgba(0, 0, 0, 1);
+      margin-top: 10px;
+      white-space: nowrap;
+      display: none;
+    `;
+    this.setTextContent(this.powerUpBigSubtext, '');
+
+    this.powerUpBigDisplay.appendChild(this.powerUpBigIcon);
+    this.powerUpBigDisplay.appendChild(this.powerUpBigText);
+    this.powerUpBigDisplay.appendChild(this.powerUpBigSubtext);
 
     // 游戏结束显示（居中覆盖层）
     this.gameOverDisplay = document.createElement('div');
@@ -219,23 +242,29 @@ export class HUD {
       transition: opacity 0.5s;
       pointer-events: none;
     `;
-    this.gameOverDisplay.innerHTML = `
-      <div style="
-        text-align: center;
-        color: #ff3333;
-        font-size: ${isMobile ? '48px' : '72px'};
-        font-weight: bold;
-        text-shadow: 0 0 20px rgba(255, 0, 0, 0.8), 4px 4px 8px rgba(0, 0, 0, 1);
-        margin-bottom: 30px;
-        animation: pulse 1s ease-in-out infinite;
-      ">GAME OVER</div>
-      <div id="final-score" style="
-        color: #ffdd00;
-        font-size: ${isMobile ? '24px' : '36px'};
-        font-weight: bold;
-        text-shadow: 2px 2px 4px rgba(0, 0, 0, 1);
-      "></div>
+    const gameOverTitle = document.createElement('div');
+    gameOverTitle.style.cssText = `
+      text-align: center;
+      color: #ff3333;
+      font-size: ${isMobile ? '48px' : '72px'};
+      font-weight: bold;
+      text-shadow: 0 0 20px rgba(255, 0, 0, 0.8), 4px 4px 8px rgba(0, 0, 0, 1);
+      margin-bottom: 30px;
+      animation: pulse 1s ease-in-out infinite;
     `;
+    this.setTextContent(gameOverTitle, 'GAME OVER');
+
+    this.finalScoreDisplay = document.createElement('div');
+    this.finalScoreDisplay.id = 'final-score';
+    this.finalScoreDisplay.style.cssText = `
+      color: #ffdd00;
+      font-size: ${isMobile ? '24px' : '36px'};
+      font-weight: bold;
+      text-shadow: 2px 2px 4px rgba(0, 0, 0, 1);
+    `;
+
+    this.gameOverDisplay.appendChild(gameOverTitle);
+    this.gameOverDisplay.appendChild(this.finalScoreDisplay);
 
     this.container.appendChild(this.healthBarContainer);
     this.container.appendChild(this.scoreDisplay);
@@ -283,29 +312,72 @@ export class HUD {
     return container;
   }
 
+  private setTextContent(element: HTMLElement, text: string): void {
+    if (this.textContentCache.get(element) === text) {
+      return;
+    }
+
+    element.textContent = text;
+    this.textContentCache.set(element, text);
+  }
+
+  private setStyleValue(element: HTMLElement, property: string, value: string): void {
+    let cache = this.styleValueCache.get(element);
+    if (!cache) {
+      cache = new Map<string, string>();
+      this.styleValueCache.set(element, cache);
+    }
+
+    if (cache.get(property) === value) {
+      return;
+    }
+
+    const style = element.style as CSSStyleDeclaration & Record<string, string>;
+    style[property] = value;
+    cache.set(property, value);
+  }
+
+  private updatePowerUpTimerText(): void {
+    if (!this.activePowerUpName || !this.activePowerUpIcon) {
+      return;
+    }
+
+    const remainingSeconds = Math.max(0, Math.ceil(this.powerUpTimer));
+    if (remainingSeconds === this.lastPowerUpRemainingSeconds) {
+      return;
+    }
+
+    this.lastPowerUpRemainingSeconds = remainingSeconds;
+    this.setTextContent(
+      this.powerUpDisplay,
+      `${this.activePowerUpIcon} ${this.activePowerUpName} ${remainingSeconds}`
+    );
+  }
+
   public updateHealth(percent: number): void {
-    this.healthBarFill.style.width = `${percent * 100}%`;
+    const clampedPercent = Math.max(0, Math.min(1, percent));
+    this.setStyleValue(this.healthBarFill, 'width', `${clampedPercent * 100}%`);
 
     let gradient: string;
 
-    if (percent > 0.6) {
+    if (clampedPercent > 0.6) {
       gradient = 'linear-gradient(90deg, #00ff66, #00ff33, #00cc00)';
-    } else if (percent > 0.3) {
+    } else if (clampedPercent > 0.3) {
       gradient = 'linear-gradient(90deg, #ffcc00, #ffdd00, #88aa00)';
-    } else if (percent > 0.15) {
+    } else if (clampedPercent > 0.15) {
       gradient = 'linear-gradient(90deg, #ff9900, #ffcc00, #ffaa00)';
     } else {
       gradient = 'linear-gradient(90deg, #ff3300, #cc0000, #ff0000)';
     }
 
-    this.healthBarFill.style.background = gradient;
+    this.setStyleValue(this.healthBarFill, 'background', gradient);
   }
 
   /**
    * 更新分数显示
    */
   public updateScore(score: number): void {
-    this.scoreDisplay.textContent = `分数: ${score}`;
+    this.setTextContent(this.scoreDisplay, `分数: ${score}`);
   }
 
   /**
@@ -313,21 +385,21 @@ export class HUD {
    */
   public updateSpeed(speed: number): void {
     const displaySpeed = Math.round(speed * 10); // 放大显示
-    this.speedDisplay.textContent = `速度: ${displaySpeed} km/h`;
+    this.setTextContent(this.speedDisplay, `速度: ${displaySpeed} km/h`);
   }
 
   /**
    * 更新敌人数量显示
    */
   public updateEnemies(count: number): void {
-    this.enemiesDisplay.textContent = `敌人: ${count}`;
+    this.setTextContent(this.enemiesDisplay, `敌人: ${count}`);
   }
 
   /**
    * 更新剩余敌人数量显示
    */
   public updateRemainingEnemies(count: number): void {
-    this.remainingEnemiesDisplay.textContent = `剩余: ${count}`;
+    this.setTextContent(this.remainingEnemiesDisplay, `剩余: ${count}`);
   }
 
   /**
@@ -335,18 +407,18 @@ export class HUD {
    */
   public updateLives(lives: number): void {
     const hearts = '❤️'.repeat(Math.max(0, lives)) + '🖤'.repeat(Math.max(0, 3 - lives));
-    this.livesDisplay.textContent = `生命: ${hearts}`;
+    this.setTextContent(this.livesDisplay, `生命: ${hearts}`);
   }
 
   public updateUpgradePoints(points: number): void {
-    this.upgradePointsDisplay.textContent = `⭐ ${points}`;
-    this.upgradePointsDisplay.style.display = points > 0 ? 'block' : 'none';
+    this.setTextContent(this.upgradePointsDisplay, `⭐ ${points}`);
+    this.setStyleValue(this.upgradePointsDisplay, 'display', points > 0 ? 'block' : 'none');
   }
 
   public updateMissiles(count: number): void {
     const maxMissiles = 10; // 假设最多10发
     const icons = '🚀'.repeat(Math.max(0, count)) + '⬜'.repeat(Math.max(0, maxMissiles - count));
-    this.missilesDisplay.textContent = `导弹: ${icons}`;
+    this.setTextContent(this.missilesDisplay, `导弹: ${icons}`);
   }
 
   /**
@@ -356,7 +428,7 @@ export class HUD {
   public updateMissileProgress(progress: number): void {
     // 限制在0-1范围
     const clampedProgress = Math.max(0, Math.min(1, progress));
-    this.missileProgressFill.style.width = `${clampedProgress * 100}%`;
+    this.setStyleValue(this.missileProgressFill, 'width', `${clampedProgress * 100}%`);
   }
 
   /**
@@ -373,27 +445,25 @@ export class HUD {
     }
 
     // 只有持续效果的道具才显示在右上角
+    this.activePowerUpName = name;
+    this.activePowerUpIcon = icon;
     this.activePowerUpDuration = duration;
     this.powerUpTimer = duration;
-    this.powerUpDisplay.style.opacity = '1';
-    this.powerUpDisplay.textContent = `${icon} ${name} ${Math.ceil(duration)}`;
+    this.lastPowerUpRemainingSeconds = -1;
+    this.setStyleValue(this.powerUpDisplay, 'opacity', '1');
+    this.updatePowerUpTimerText();
   }
 
   /**
    * 更新道具倒计时
    */
   public update(deltaTime: number): void {
+    const safeDeltaTime = Number.isFinite(deltaTime) && deltaTime > 0 ? deltaTime : 0;
+
     // 更新道具倒计时
     if (this.activePowerUpDuration > 0 && this.powerUpTimer > 0) {
-      this.powerUpTimer -= deltaTime;
-
-      // 显示道具名称 + 剩余时间（向上取整）
-      const remainingTime = Math.max(0, Math.ceil(this.powerUpTimer));
-      const spaceIndex = this.powerUpDisplay.textContent.lastIndexOf(' ');
-      if (spaceIndex !== -1) {
-        this.powerUpDisplay.textContent =
-          this.powerUpDisplay.textContent.substring(0, spaceIndex) + ' ' + remainingTime;
-      }
+      this.powerUpTimer = Math.max(0, this.powerUpTimer - safeDeltaTime);
+      this.updatePowerUpTimerText();
 
       if (this.powerUpTimer <= 0) {
         // 时间到，隐藏道具提示
@@ -403,7 +473,7 @@ export class HUD {
 
     // 更新大字提示计时器
     if (this.powerUpBigTimer > 0) {
-      this.powerUpBigTimer -= deltaTime;
+      this.powerUpBigTimer = Math.max(0, this.powerUpBigTimer - safeDeltaTime);
       if (this.powerUpBigTimer <= 0) {
         // 时间到，隐藏大字提示
         this.hidePowerUpBig();
@@ -415,7 +485,10 @@ export class HUD {
    * 隐藏道具提示
    */
   public hidePowerUp(): void {
-    this.powerUpDisplay.style.opacity = '0';
+    this.activePowerUpName = '';
+    this.activePowerUpIcon = '';
+    this.lastPowerUpRemainingSeconds = -1;
+    this.setStyleValue(this.powerUpDisplay, 'opacity', '0');
     this.activePowerUpDuration = 0;
     this.powerUpTimer = 0;
   }
@@ -431,19 +504,19 @@ export class HUD {
     icon: string,
     name: string,
     minDisplayTime: number = 1,
-    hideSubtext: boolean = false
+    hideSubtext: boolean = false,
+    variant: BigMessageVariant = 'announcement'
   ): void {
-    const iconElement = this.powerUpBigDisplay.querySelector('.powerup-big-icon') as HTMLDivElement;
-    const textElement = this.powerUpBigDisplay.querySelector('.powerup-big-text') as HTMLDivElement;
-    const subtextElement = this.powerUpBigDisplay.querySelector(
-      '.powerup-big-subtext'
-    ) as HTMLDivElement;
-
-    if (iconElement) iconElement.textContent = icon;
-    if (textElement) textElement.textContent = name;
-    if (subtextElement) subtextElement.style.display = hideSubtext ? 'none' : 'block';
-
-    this.powerUpBigDisplay.style.opacity = '1';
+    this.applyBigMessageVariant(variant);
+    this.setTextContent(this.powerUpBigIcon, icon);
+    this.setTextContent(this.powerUpBigText, name);
+    const shouldHideSubtext = variant === 'announcement' ? true : hideSubtext;
+    this.setTextContent(
+      this.powerUpBigSubtext,
+      variant === 'powerup' ? '获得道具！' : ''
+    );
+    this.setStyleValue(this.powerUpBigSubtext, 'display', shouldHideSubtext ? 'none' : 'block');
+    this.setStyleValue(this.powerUpBigDisplay, 'opacity', '1');
     this.powerUpBigTimer = minDisplayTime;
   }
 
@@ -451,41 +524,85 @@ export class HUD {
    * 隐藏道具大字提示
    */
   private hidePowerUpBig(): void {
-    this.powerUpBigDisplay.style.opacity = '0';
+    this.setStyleValue(this.powerUpBigDisplay, 'opacity', '0');
     this.powerUpBigTimer = 0;
+  }
+
+  private applyBigMessageVariant(variant: BigMessageVariant): void {
+    if (variant === 'powerup') {
+      this.setStyleValue(
+        this.powerUpBigIcon,
+        'textShadow',
+        '0 0 30px rgba(255, 215, 0, 0.8), 0 0 60px rgba(255, 215, 0, 0.4)'
+      );
+      this.setStyleValue(this.powerUpBigText, 'color', '#ffff00');
+      this.setStyleValue(
+        this.powerUpBigText,
+        'textShadow',
+        '0 0 20px rgba(255, 215, 0, 0.8), 4px 4px 8px rgba(0, 0, 0, 1)'
+      );
+      this.setStyleValue(this.powerUpBigSubtext, 'color', '#ffffff');
+      this.setStyleValue(
+        this.powerUpBigSubtext,
+        'textShadow',
+        '2px 2px 4px rgba(0, 0, 0, 1)'
+      );
+      return;
+    }
+
+    this.setStyleValue(
+      this.powerUpBigIcon,
+      'textShadow',
+      '0 0 24px rgba(120, 220, 255, 0.55), 0 0 48px rgba(80, 140, 255, 0.2)'
+    );
+    this.setStyleValue(this.powerUpBigText, 'color', '#f3fbff');
+    this.setStyleValue(
+      this.powerUpBigText,
+      'textShadow',
+      '0 0 18px rgba(120, 220, 255, 0.45), 4px 4px 8px rgba(0, 0, 0, 0.95)'
+    );
+    this.setStyleValue(this.powerUpBigSubtext, 'color', '#d9f4ff');
+    this.setStyleValue(
+      this.powerUpBigSubtext,
+      'textShadow',
+      '0 0 12px rgba(120, 220, 255, 0.25), 2px 2px 4px rgba(0, 0, 0, 0.95)'
+    );
   }
 
   /**
    * 隐藏 HUD
    */
   public hide(): void {
-    this.container.style.display = 'none';
+    this.setStyleValue(this.container, 'display', 'none');
   }
 
   /**
    * 显示 HUD
    */
   public show(): void {
-    this.container.style.display = 'block';
+    this.setStyleValue(this.container, 'display', 'block');
   }
 
   /**
    * 显示游戏结束
    */
   public showGameOver(finalScore: number): void {
-    const scoreElement = this.gameOverDisplay.querySelector('#final-score');
-    if (scoreElement) {
-      scoreElement.textContent = `最终得分: ${finalScore}`;
-    }
-    this.gameOverDisplay.style.opacity = '1';
-    this.gameOverDisplay.style.pointerEvents = 'auto';
+    this.setTextContent(this.finalScoreDisplay, `最终得分: ${finalScore}`);
+    this.setStyleValue(this.gameOverDisplay, 'opacity', '1');
+    this.setStyleValue(this.gameOverDisplay, 'pointerEvents', 'auto');
   }
 
   /**
    * 隐藏游戏结束
    */
   public hideGameOver(): void {
-    this.gameOverDisplay.style.opacity = '0';
-    this.gameOverDisplay.style.pointerEvents = 'none';
+    this.setStyleValue(this.gameOverDisplay, 'opacity', '0');
+    this.setStyleValue(this.gameOverDisplay, 'pointerEvents', 'none');
+  }
+
+  public dispose(): void {
+    this.container.remove();
+    this.powerUpBigDisplay.remove();
+    this.gameOverDisplay.remove();
   }
 }

@@ -1,4 +1,4 @@
-import * as THREE from 'three';
+import type { Object3D, Vector3 } from 'three';
 import { EnemyType, EnemyConfig } from '@/features/enemy/EnemyTypes';
 import { PowerUpType, PowerUpConfig } from '@/features/powerups/PowerUpSystem';
 import { Faction } from '@/core/Faction';
@@ -36,22 +36,22 @@ export enum GameEventType {
 }
 
 export interface GameEventPayloads {
-  [GameEventType.PLAYER_FIRED]: { position: THREE.Vector3; direction: THREE.Vector3 };
-  [GameEventType.PLAYER_HIT]: { damage: number; position: THREE.Vector3 };
-  [GameEventType.PLAYER_DEATH]: { position: THREE.Vector3; lives: number };
-  [GameEventType.PLAYER_RESPAWN]: { position: THREE.Vector3 };
+  [GameEventType.PLAYER_FIRED]: { position: Vector3; direction: Vector3 };
+  [GameEventType.PLAYER_HIT]: { damage: number; position: Vector3 };
+  [GameEventType.PLAYER_DEATH]: { position: Vector3; lives: number };
+  [GameEventType.PLAYER_RESPAWN]: { position: Vector3 };
 
   [GameEventType.ENEMY_SPAWNED]: {
     enemyId: string;
     enemyType: EnemyType;
-    position: THREE.Vector3;
+    position: Vector3;
   };
   [GameEventType.ENEMY_FIRED]: {
-    position: THREE.Vector3;
-    direction: THREE.Vector3;
+    position: Vector3;
+    direction: Vector3;
     damage: number;
     faction: Faction;
-    owner?: THREE.Object3D;
+    owner?: Object3D;
   };
   [GameEventType.ENEMY_HIT]: {
     enemyId: string;
@@ -60,22 +60,22 @@ export interface GameEventPayloads {
   };
   [GameEventType.ENEMY_DEATH]: {
     enemyId: string;
-    position: THREE.Vector3;
+    position: Vector3;
     config: EnemyConfig;
   };
 
-  [GameEventType.FRIENDLY_SPAWNED]: { friendlyId: string; position: THREE.Vector3 };
+  [GameEventType.FRIENDLY_SPAWNED]: { friendlyId: string; position: Vector3 };
   [GameEventType.FRIENDLY_FIRED]: {
-    position: THREE.Vector3;
-    direction: THREE.Vector3;
+    position: Vector3;
+    direction: Vector3;
     damage: number;
     faction: Faction;
-    owner?: THREE.Object3D;
+    owner?: Object3D;
   };
-  [GameEventType.FRIENDLY_DEATH]: { friendlyId: string; position: THREE.Vector3 };
+  [GameEventType.FRIENDLY_DEATH]: { friendlyId: string; position: Vector3 };
 
-  [GameEventType.MISSILE_FIRED]: { position: THREE.Vector3; target?: THREE.Object3D };
-  [GameEventType.MISSILE_HIT]: { position: THREE.Vector3; target: THREE.Object3D };
+  [GameEventType.MISSILE_FIRED]: { position: Vector3; target?: Object3D };
+  [GameEventType.MISSILE_HIT]: { position: Vector3; target: Object3D };
 
   [GameEventType.WAVE_START]: { wave: number; level: number };
   [GameEventType.WAVE_COMPLETE]: { wave: number; enemiesKilled: number };
@@ -103,10 +103,12 @@ class EventBusImpl {
   private listeners: Map<GameEventType, Set<EventHandler<GameEventType>>> = new Map();
 
   on<K extends GameEventType>(eventType: K, handler: EventHandler<K>): () => void {
-    if (!this.listeners.has(eventType)) {
-      this.listeners.set(eventType, new Set());
+    let handlers = this.listeners.get(eventType);
+    if (!handlers) {
+      handlers = new Set<EventHandler<GameEventType>>();
+      this.listeners.set(eventType, handlers);
     }
-    this.listeners.get(eventType)!.add(handler as EventHandler<GameEventType>);
+    handlers.add(handler as EventHandler<GameEventType>);
 
     return () => this.off(eventType, handler);
   }

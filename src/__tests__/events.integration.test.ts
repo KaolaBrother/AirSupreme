@@ -1,6 +1,8 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import * as THREE from 'three';
 import { GameEventType, EventBus } from '@/core/EventBus';
 import { PowerUpType } from '@/features/powerups/PowerUpSystem';
+import { ENEMY_CONFIGS, EnemyType } from '@/features/enemy/EnemyTypes';
 
 describe('Game Events Integration', () => {
   beforeEach(() => {
@@ -12,12 +14,12 @@ describe('Game Events Integration', () => {
       const handler = vi.fn();
       EventBus.on(GameEventType.PLAYER_FIRED, handler);
 
-      const position = { x: 0, y: 100, z: 0 };
-      const direction = { x: 0, y: 0, z: -1 };
+      const position = new THREE.Vector3(0, 100, 0);
+      const direction = new THREE.Vector3(0, 0, -1);
 
       EventBus.emit(GameEventType.PLAYER_FIRED, {
-        position: position as any,
-        direction: direction as any,
+        position,
+        direction,
       });
 
       expect(handler).toHaveBeenCalledWith(
@@ -33,7 +35,7 @@ describe('Game Events Integration', () => {
       EventBus.on(GameEventType.PLAYER_DEATH, handler);
 
       EventBus.emit(GameEventType.PLAYER_DEATH, {
-        position: { x: 0, y: 50, z: 100 } as any,
+        position: new THREE.Vector3(0, 50, 100),
         lives: 2,
       });
 
@@ -50,8 +52,8 @@ describe('Game Events Integration', () => {
 
       EventBus.emit(GameEventType.ENEMY_DEATH, {
         enemyId: 'enemy-001',
-        position: { x: 100, y: 80, z: -50 } as any,
-        config: { type: 'FIGHTER', scoreValue: 100 } as any,
+        position: new THREE.Vector3(100, 80, -50),
+        config: ENEMY_CONFIGS[EnemyType.FIGHTER],
       });
 
       expect(handler).toHaveBeenCalled();
@@ -78,7 +80,15 @@ describe('Game Events Integration', () => {
 
       EventBus.emit(GameEventType.POWERUP_COLLECTED, {
         type: PowerUpType.HEALTH,
-        config: { name: '生命恢复', duration: 0 } as any,
+        config: {
+          type: PowerUpType.HEALTH,
+          name: '生命恢复',
+          description: '恢复生命值',
+          icon: '❤️',
+          color: 0xff0000,
+          duration: 0,
+          value: 0,
+        },
       });
 
       expect(handler).toHaveBeenCalled();
@@ -105,7 +115,7 @@ describe('Game Events Integration', () => {
       EventBus.on(GameEventType.MISSILE_FIRED, handler);
 
       EventBus.emit(GameEventType.MISSILE_FIRED, {
-        position: { x: 0, y: 0, z: 0 } as any,
+        position: new THREE.Vector3(0, 0, 0),
         target: undefined,
       });
 

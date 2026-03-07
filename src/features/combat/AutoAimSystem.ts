@@ -1,4 +1,5 @@
-import * as THREE from 'three';
+import { Vector3 } from 'three';
+import type { Camera, Object3D } from 'three';
 
 /**
  * 自动瞄准系统
@@ -12,7 +13,7 @@ export class AutoAimSystem {
   private lastTargetSwitch: number = 0;
 
   // 当前锁定的目标
-  private currentTarget: THREE.Object3D | null = null;
+  private currentTarget: Object3D | null = null;
 
   /**
    * 更新自动瞄准系统
@@ -24,13 +25,13 @@ export class AutoAimSystem {
    * @returns 锁定的目标，如果没有则返回 null
    */
   public update(
-    playerPosition: THREE.Vector3,
-    playerDirection: THREE.Vector3,
-    camera: THREE.Camera,
-    enemies: THREE.Object3D[],
+    playerPosition: Vector3,
+    playerDirection: Vector3,
+    camera: Camera,
+    enemies: Object3D[],
     currentTime: number
-  ): THREE.Object3D | null {
-    let bestTarget: THREE.Object3D | null = null;
+  ): Object3D | null {
+    let bestTarget: Object3D | null = null;
     let bestScore = Infinity;
 
     for (const enemy of enemies) {
@@ -95,8 +96,8 @@ export class AutoAimSystem {
    * 世界坐标转屏幕坐标
    */
   private worldToScreen(
-    position: THREE.Vector3,
-    camera: THREE.Camera
+    position: Vector3,
+    camera: Camera
   ): { x: number; y: number } {
     const vector = position.clone();
     vector.project(camera);
@@ -110,7 +111,7 @@ export class AutoAimSystem {
   /**
    * 获取当前锁定的目标
    */
-  public getCurrentTarget(): THREE.Object3D | null {
+  public getCurrentTarget(): Object3D | null {
     return this.currentTarget;
   }
 
@@ -122,11 +123,11 @@ export class AutoAimSystem {
    * @param homingStrength 追踪强度 (0-1)
    */
   public getHomingDirection(
-    origin: THREE.Vector3,
-    baseDirection: THREE.Vector3,
-    target: THREE.Object3D | null,
+    origin: Vector3,
+    baseDirection: Vector3,
+    target: Object3D | null,
     homingStrength: number = 0.3
-  ): THREE.Vector3 {
+  ): Vector3 {
     if (!target) {
       return baseDirection.clone().normalize();
     }
@@ -135,7 +136,7 @@ export class AutoAimSystem {
     const toTarget = target.position.clone().sub(origin).normalize();
 
     // 插值：部分追踪
-    const homingDirection = new THREE.Vector3().lerpVectors(
+    const homingDirection = new Vector3().lerpVectors(
       baseDirection,
       toTarget,
       homingStrength
@@ -148,9 +149,9 @@ export class AutoAimSystem {
    * 计算完全自动瞄准的方向（用于自动瞄准模式）
    */
   public getAutoAimDirection(
-    origin: THREE.Vector3,
-    target: THREE.Object3D
-  ): THREE.Vector3 {
+    origin: Vector3,
+    target: Object3D
+  ): Vector3 {
     return target.position.clone().sub(origin).normalize();
   }
 

@@ -1,17 +1,19 @@
 import type { Component, ComponentClass } from './Component';
 
+type ComponentKey = abstract new (...args: never[]) => Component;
+
 /**
  * 组件容器
  * 管理单个实体的所有组件
  */
 export class ComponentContainer {
-  private map = new Map<Function, Component>();
+  private map = new Map<ComponentKey, Component>();
 
   /**
    * 添加组件
    */
   public add(component: Component): void {
-    this.map.set(component.constructor, component);
+    this.map.set(component.constructor as ComponentKey, component);
   }
 
   /**
@@ -24,14 +26,14 @@ export class ComponentContainer {
   /**
    * 检查是否有组件
    */
-  public has(componentClass: Function): boolean {
+  public has(componentClass: ComponentKey): boolean {
     return this.map.has(componentClass);
   }
 
   /**
    * 检查是否有所有指定组件
    */
-  public hasAll(componentClasses: Iterable<Function>): boolean {
+  public hasAll(componentClasses: Iterable<ComponentKey>): boolean {
     for (const cls of componentClasses) {
       if (!this.map.has(cls)) {
         return false;
@@ -43,7 +45,7 @@ export class ComponentContainer {
   /**
    * 删除组件
    */
-  public delete(componentClass: Function): void {
+  public delete(componentClass: ComponentKey): void {
     this.map.delete(componentClass);
   }
 }

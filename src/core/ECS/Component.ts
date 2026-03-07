@@ -7,4 +7,4 @@ export abstract class Component {}
 /**
  * 组件类类型
  */
-export type ComponentClass<T extends Component> = new (...args: any[]) => T;
+export type ComponentClass<T extends Component> = new (...args: never[]) => T;

@@ -24,7 +24,7 @@ describe('EnemyTypes', () => {
       for (const type of Object.values(EnemyType)) {
         const config = ENEMY_CONFIGS[type];
         for (const prop of requiredProps) {
-          expect(config[prop]).toBeDefined(), `Missing ${prop} in ${type}`;
+          expect(config[prop], `Missing ${prop} in ${type}`).toBeDefined();
         }
       }
     });

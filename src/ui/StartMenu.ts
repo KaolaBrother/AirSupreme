@@ -1,29 +1,85 @@
-import { ModelPreview } from './ModelPreview';
+import { type QualityPreset } from '@/config';
+import {
+  DEFAULT_START_FLOW_SETTINGS,
+  getAudioSettings,
+  getPresentationSettings,
+  normalizeStartFlowSettings,
+  type StartFlowSettings,
+} from '@/core/SessionSettings';
+import type { ModelPreview } from './ModelPreview';
 
 export class StartMenu {
+  private static readonly STORAGE_KEY = 'air-supreme:start-menu-settings';
   private container: HTMLDivElement;
   private settingsContainer: HTMLDivElement;
   private onStart?: (settings: GameSettings) => void;
-  private modelPreview: ModelPreview;
+  private modelPreview: ModelPreview | null = null;
+  private modelPreviewPromise: Promise<ModelPreview> | null = null;
+  private isDisposed: boolean = false;
 
-  private settings: GameSettings = {
-    difficulty: 1,
-    soundVolume: 0.7,
-    playerLives: 3,
-    startLevel: 1,
-    gameMode: 'normal',
-    testScore: 0,
-  };
+  private settings: GameSettings = { ...DEFAULT_START_FLOW_SETTINGS };
 
   constructor() {
-    this.modelPreview = new ModelPreview();
-    this.modelPreview.setOnBack(() => {
-      this.container.style.display = 'flex';
-    });
+    this.loadSettings();
     this.container = this.createContainer();
     this.settingsContainer = this.createSettingsPanel();
     this.container.appendChild(this.settingsContainer);
     document.body.appendChild(this.container);
+  }
+
+  private async ensureModelPreview(): Promise<ModelPreview> {
+    if (this.modelPreview) {
+      return this.modelPreview;
+    }
+
+    if (!this.modelPreviewPromise) {
+      this.modelPreviewPromise = import('./ModelPreview').then(({ ModelPreview }) => {
+        const preview = new ModelPreview();
+        preview.setOnBack(() => {
+          if (!this.isDisposed) {
+            this.container.style.display = 'flex';
+          }
+        });
+
+        if (this.isDisposed) {
+          preview.dispose();
+          throw new Error('StartMenu 已销毁，取消模型预览初始化');
+        }
+
+        this.modelPreview = preview;
+        return preview;
+      });
+    }
+
+    try {
+      return await this.modelPreviewPromise;
+    } catch (error) {
+      this.modelPreviewPromise = null;
+      throw error;
+    }
+  }
+
+  private loadSettings(): void {
+    const raw = window.localStorage.getItem(StartMenu.STORAGE_KEY);
+    if (!raw) {
+      return;
+    }
+
+    try {
+      const parsed = JSON.parse(raw) as Partial<GameSettings>;
+      this.settings = normalizeStartFlowSettings({
+        ...this.settings,
+        ...parsed,
+      });
+    } catch {
+      window.localStorage.removeItem(StartMenu.STORAGE_KEY);
+    }
+  }
+
+  private saveSettings(): void {
+    const normalizedSettings = normalizeStartFlowSettings(this.settings);
+    this.settings = normalizedSettings;
+    window.localStorage.setItem(StartMenu.STORAGE_KEY, JSON.stringify(normalizedSettings));
   }
 
   private createContainer(): HTMLDivElement {
@@ -240,19 +296,67 @@ export class StartMenu {
     difficultyRow.id = 'difficulty-row';
 
     // 音量设置
-    const soundRow = this.createSettingRow(
+    const sfxRow = this.createSettingRow(
       '音效音量',
-      `${Math.round(this.settings.soundVolume * 100)}%`,
+      `${Math.round(this.settings.sfxVolume * 100)}%`,
       () => {
-        this.settings.soundVolume = Math.max(0, this.settings.soundVolume - 0.1);
+        this.settings.sfxVolume = Math.max(0, this.settings.sfxVolume - 0.1);
         this.updateDisplay();
       },
       () => {
-        this.settings.soundVolume = Math.min(1, this.settings.soundVolume + 0.1);
+        this.settings.sfxVolume = Math.min(1, this.settings.sfxVolume + 0.1);
         this.updateDisplay();
       }
     );
-    soundRow.id = 'sound-row';
+    sfxRow.id = 'sfx-row';
+
+    const musicRow = this.createSettingRow(
+      '音乐音量',
+      `${Math.round(this.settings.musicVolume * 100)}%`,
+      () => {
+        this.settings.musicVolume = Math.max(0, this.settings.musicVolume - 0.1);
+        this.updateDisplay();
+      },
+      () => {
+        this.settings.musicVolume = Math.min(1, this.settings.musicVolume + 0.1);
+        this.updateDisplay();
+      }
+    );
+    musicRow.id = 'music-row';
+
+    const qualityRow = this.createSettingRow(
+      '画质',
+      this.getQualityPresetText(this.settings.qualityPreset),
+      () => {
+        const presetList: QualityPreset[] = ['auto', 'performance', 'balanced', 'quality'];
+        const index = presetList.indexOf(this.settings.qualityPreset);
+        const nextIndex = (index - 1 + presetList.length) % presetList.length;
+        this.settings.qualityPreset = presetList[nextIndex];
+        this.updateDisplay();
+      },
+      () => {
+        const presetList: QualityPreset[] = ['auto', 'performance', 'balanced', 'quality'];
+        const index = presetList.indexOf(this.settings.qualityPreset);
+        const nextIndex = (index + 1) % presetList.length;
+        this.settings.qualityPreset = presetList[nextIndex];
+        this.updateDisplay();
+      }
+    );
+    qualityRow.id = 'quality-row';
+
+    const tutorialRow = this.createSettingRow(
+      '试玩关卡',
+      this.settings.tutorialEnabled ? '开启' : '关闭',
+      () => {
+        this.settings.tutorialEnabled = !this.settings.tutorialEnabled;
+        this.updateDisplay();
+      },
+      () => {
+        this.settings.tutorialEnabled = !this.settings.tutorialEnabled;
+        this.updateDisplay();
+      }
+    );
+    tutorialRow.id = 'tutorial-row';
 
     // 生命值设置
     const livesRow = this.createSettingRow(
@@ -285,7 +389,10 @@ export class StartMenu {
     levelRow.id = 'level-row';
 
     panel.appendChild(difficultyRow);
-    panel.appendChild(soundRow);
+    panel.appendChild(sfxRow);
+    panel.appendChild(musicRow);
+    panel.appendChild(qualityRow);
+    panel.appendChild(tutorialRow);
     panel.appendChild(livesRow);
     panel.appendChild(levelRow);
 
@@ -339,10 +446,29 @@ export class StartMenu {
     // 模型预览按钮
     const previewBtn = document.createElement('button');
     previewBtn.className = 'preview-btn';
+    previewBtn.id = 'preview-btn';
     previewBtn.innerHTML = '✈️ 模型预览';
-    previewBtn.onclick = () => {
-      this.container.style.display = 'none';
-      this.modelPreview.show();
+    previewBtn.onclick = async () => {
+      if (previewBtn.disabled) {
+        return;
+      }
+
+      const originalLabel = previewBtn.innerHTML;
+      previewBtn.disabled = true;
+      previewBtn.innerHTML = '⏳ 加载中...';
+
+      try {
+        const preview = await this.ensureModelPreview();
+        this.container.style.display = 'none';
+        preview.show();
+      } catch (error) {
+        console.error('Failed to load model preview', error);
+      } finally {
+        if (!this.isDisposed) {
+          previewBtn.disabled = false;
+          previewBtn.innerHTML = originalLabel;
+        }
+      }
     };
     buttonContainer.appendChild(previewBtn);
 
@@ -424,17 +550,39 @@ export class StartMenu {
   }
 
   private getDifficultyText(level: number): string {
-    const texts = ['简单', '普通', '困难', '专家', '地狱'];
+    const texts = ['简单', '普通', '标准', '困难', '专家'];
     return texts[level - 1];
   }
 
+  private getQualityPresetText(preset: QualityPreset): string {
+    const labels: Record<QualityPreset, string> = {
+      auto: '自动',
+      performance: '性能',
+      balanced: '平衡',
+      quality: '高质量',
+    };
+    return labels[preset];
+  }
+
   private updateDisplay(): void {
+    const audioSettings = getAudioSettings(this.settings);
+    const presentationSettings = getPresentationSettings(this.settings);
+
     const difficultyValue =
       document.getElementById('难度-value') ||
       document.querySelector('#difficulty-row .setting-value');
-    const soundValue =
+    const sfxValue =
       document.getElementById('音效音量-value') ||
-      document.querySelector('#sound-row .setting-value');
+      document.querySelector('#sfx-row .setting-value');
+    const musicValue =
+      document.getElementById('音乐音量-value') ||
+      document.querySelector('#music-row .setting-value');
+    const qualityValue =
+      document.getElementById('画质-value') ||
+      document.querySelector('#quality-row .setting-value');
+    const tutorialValue =
+      document.getElementById('教程-value') ||
+      document.querySelector('#tutorial-row .setting-value');
     const livesValue =
       document.getElementById('生命数-value') ||
       document.querySelector('#lives-row .setting-value');
@@ -451,7 +599,12 @@ export class StartMenu {
 
     if (difficultyValue)
       difficultyValue.textContent = this.getDifficultyText(this.settings.difficulty);
-    if (soundValue) soundValue.textContent = `${Math.round(this.settings.soundVolume * 100)}%`;
+    if (sfxValue) sfxValue.textContent = `${Math.round(audioSettings.sfxVolume * 100)}%`;
+    if (musicValue) musicValue.textContent = `${Math.round(audioSettings.musicVolume * 100)}%`;
+    if (qualityValue)
+      qualityValue.textContent = this.getQualityPresetText(presentationSettings.qualityPreset);
+    if (tutorialValue)
+      tutorialValue.textContent = presentationSettings.tutorialEnabled ? '开启' : '关闭';
     if (livesValue) livesValue.textContent = `${this.settings.playerLives}`;
     if (levelValue) levelValue.textContent = `第${this.settings.startLevel}关`;
     if (modeValue)
@@ -461,6 +614,8 @@ export class StartMenu {
         this.settings.testScore === 0 ? '关闭' : `${this.settings.testScore}`;
     if (startBtn)
       startBtn.textContent = this.settings.gameMode === 'normal' ? '🎮 开始游戏' : '👹 Boss 挑战';
+
+    this.saveSettings();
   }
 
   private startGame(): void {
@@ -479,13 +634,22 @@ export class StartMenu {
   public hide(): void {
     this.container.style.display = 'none';
   }
+
+  public dispose(): void {
+    this.isDisposed = true;
+    this.modelPreview?.dispose();
+    this.container.remove();
+  }
 }
 
 export interface GameSettings {
-  difficulty: number;
-  soundVolume: number;
-  playerLives: number;
-  startLevel: number;
-  gameMode: 'normal' | 'boss';
-  testScore: number;
+  difficulty: StartFlowSettings['difficulty'];
+  sfxVolume: StartFlowSettings['sfxVolume'];
+  musicVolume: StartFlowSettings['musicVolume'];
+  qualityPreset: StartFlowSettings['qualityPreset'];
+  tutorialEnabled: StartFlowSettings['tutorialEnabled'];
+  playerLives: StartFlowSettings['playerLives'];
+  startLevel: StartFlowSettings['startLevel'];
+  gameMode: StartFlowSettings['gameMode'];
+  testScore: StartFlowSettings['testScore'];
 }

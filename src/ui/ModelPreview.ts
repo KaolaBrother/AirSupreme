@@ -1,18 +1,17 @@
 import * as THREE from 'three';
 import { EnemyType, ENEMY_CONFIGS } from '@/features/enemy/EnemyTypes';
 import { BossType, BOSS_CONFIGS, BOSS_MISSILE_CONFIG } from '@/features/boss/BossTypes';
-import { createBossMesh } from '@/features/boss/BossAI';
-import { createDesertFortressMesh } from '@/features/boss/DesertFortressAI';
-import { createOctopusWarshipMesh } from '@/features/boss/OctopusWarshipAI';
-import { createMissileDestroyerMesh } from '@/features/boss/MissileDestroyerAI';
-import { createSkyCarrierMesh } from '@/features/boss/SkyCarrierAI';
-import { createPlayerMesh, createEnemyMesh } from '@/features/aircraft/AircraftMeshFactory';
+
+interface AircraftMeshFactoryModule {
+  createPlayerMesh: () => THREE.Group;
+  createEnemyMesh: (config: (typeof ENEMY_CONFIGS)[EnemyType]) => THREE.Group;
+}
 
 interface AircraftInfo {
   id: string;
   name: string;
   type: 'player' | 'enemy' | 'boss' | 'missile';
-  createMesh: () => THREE.Group;
+  createMesh: () => THREE.Group | Promise<THREE.Group>;
 }
 
 export class ModelPreview {
@@ -27,6 +26,9 @@ export class ModelPreview {
   private autoRotate: boolean = true;
   private nameDisplay: HTMLDivElement;
   private onBack?: () => void;
+  private resizeHandler!: () => void;
+  private meshLoadSequence: number = 0;
+  private aircraftMeshFactoryPromise: Promise<AircraftMeshFactoryModule> | null = null;
 
   constructor() {
     this.container = this.createContainer();
@@ -50,7 +52,8 @@ export class ModelPreview {
     this.setupAircrafts();
     this.setupControls();
 
-    window.addEventListener('resize', () => this.resizeRenderer());
+    this.resizeHandler = () => this.resizeRenderer();
+    window.addEventListener('resize', this.resizeHandler);
   }
 
   private createContainer(): HTMLDivElement {
@@ -219,7 +222,10 @@ export class ModelPreview {
       id: 'player',
       name: '玩家飞机',
       type: 'player',
-      createMesh: () => createPlayerMesh(),
+      createMesh: async () => {
+        const { createPlayerMesh } = await this.loadAircraftMeshFactory();
+        return createPlayerMesh();
+      },
     });
 
     // 敌机 - 使用工厂函数
@@ -230,7 +236,10 @@ export class ModelPreview {
         id: type,
         name: config.name,
         type: 'enemy',
-        createMesh: () => createEnemyMesh(config),
+        createMesh: async () => {
+          const { createEnemyMesh } = await this.loadAircraftMeshFactory();
+          return createEnemyMesh(config);
+        },
       });
     }
 
@@ -243,35 +252,50 @@ export class ModelPreview {
           id: type,
           name: config.name,
           type: 'boss',
-          createMesh: () => createDesertFortressMesh(config),
+          createMesh: async () => {
+            const module = await import('@/features/boss/DesertFortressAI');
+            return module.createDesertFortressMesh(config);
+          },
         });
       } else if (type === BossType.OCTOPUS_WARSHIP) {
         this.aircrafts.push({
           id: type,
           name: config.name,
           type: 'boss',
-          createMesh: () => createOctopusWarshipMesh(config),
+          createMesh: async () => {
+            const module = await import('@/features/boss/OctopusWarshipAI');
+            return module.createOctopusWarshipMesh(config);
+          },
         });
       } else if (type === BossType.MISSILE_DESTROYER) {
         this.aircrafts.push({
           id: type,
           name: config.name,
           type: 'boss',
-          createMesh: () => createMissileDestroyerMesh(config),
+          createMesh: async () => {
+            const module = await import('@/features/boss/MissileDestroyerAI');
+            return module.createMissileDestroyerMesh(config);
+          },
         });
       } else if (type === BossType.SKY_CARRIER) {
         this.aircrafts.push({
           id: type,
           name: config.name,
           type: 'boss',
-          createMesh: () => createSkyCarrierMesh(config),
+          createMesh: async () => {
+            const module = await import('@/features/boss/SkyCarrierAI');
+            return module.createSkyCarrierMesh(config);
+          },
         });
       } else {
         this.aircrafts.push({
           id: type,
           name: config.name,
           type: 'boss',
-          createMesh: () => createBossMesh(config),
+          createMesh: async () => {
+            const module = await import('@/features/boss/BossAI');
+            return module.createBossMesh(config);
+          },
         });
       }
     }
@@ -282,6 +306,14 @@ export class ModelPreview {
       type: 'missile',
       createMesh: () => this.createBossMissileMesh(),
     });
+  }
+
+  private loadAircraftMeshFactory(): Promise<AircraftMeshFactoryModule> {
+    if (!this.aircraftMeshFactoryPromise) {
+      this.aircraftMeshFactoryPromise = import('@/features/aircraft/AircraftMeshFactory');
+    }
+
+    return this.aircraftMeshFactoryPromise;
   }
 
   private createBossMissileMesh(): THREE.Group {
@@ -446,14 +478,34 @@ export class ModelPreview {
     }
   }
 
-  private showAircraft(index: number): void {
-    if (this.currentMesh) {
-      this.scene.remove(this.currentMesh);
-    }
+  private async showAircraft(index: number): Promise<void> {
+    this.disposeCurrentMesh();
+    const loadSequence = ++this.meshLoadSequence;
 
     this.currentIndex = index;
     const aircraft = this.aircrafts[index];
-    this.currentMesh = aircraft.createMesh();
+    this.nameDisplay.textContent = `加载中: ${aircraft.name}`;
+    const indicator = document.getElementById('page-indicator');
+    if (indicator) {
+      indicator.textContent = `${index + 1} / ${this.aircrafts.length}`;
+    }
+
+    const mesh = await aircraft.createMesh();
+    if (loadSequence !== this.meshLoadSequence || this.container.style.display === 'none') {
+      mesh.traverse((object) => {
+        if (object instanceof THREE.Mesh) {
+          object.geometry.dispose();
+          if (Array.isArray(object.material)) {
+            object.material.forEach((material) => material.dispose());
+          } else {
+            object.material.dispose();
+          }
+        }
+      });
+      return;
+    }
+
+    this.currentMesh = mesh;
 
     let scale: number;
     if (aircraft.type === 'boss') {
@@ -468,10 +520,25 @@ export class ModelPreview {
     this.scene.add(this.currentMesh);
 
     this.nameDisplay.textContent = aircraft.name;
-    const indicator = document.getElementById('page-indicator');
-    if (indicator) {
-      indicator.textContent = `${index + 1} / ${this.aircrafts.length}`;
+  }
+
+  private disposeCurrentMesh(): void {
+    if (!this.currentMesh) {
+      return;
     }
+
+    this.scene.remove(this.currentMesh);
+    this.currentMesh.traverse((object) => {
+      if (object instanceof THREE.Mesh) {
+        object.geometry.dispose();
+        if (Array.isArray(object.material)) {
+          object.material.forEach((material) => material.dispose());
+        } else {
+          object.material.dispose();
+        }
+      }
+    });
+    this.currentMesh = null;
   }
 
   private showNext(): void {
@@ -500,7 +567,7 @@ export class ModelPreview {
 
   public show(): void {
     this.container.style.display = 'flex';
-    this.showAircraft(0);
+    void this.showAircraft(0);
     requestAnimationFrame(() => {
       this.resizeRenderer();
       this.animate();
@@ -509,17 +576,23 @@ export class ModelPreview {
 
   public hide(): void {
     this.container.style.display = 'none';
+    this.meshLoadSequence++;
     if (this.animationId) {
       cancelAnimationFrame(this.animationId);
     }
+    this.disposeCurrentMesh();
     this.onBack?.();
   }
 
   public dispose(): void {
+    this.meshLoadSequence++;
     if (this.animationId) {
       cancelAnimationFrame(this.animationId);
     }
+    window.removeEventListener('resize', this.resizeHandler);
+    this.disposeCurrentMesh();
     this.renderer.dispose();
+    this.renderer.domElement.remove();
     this.container.remove();
   }
 }

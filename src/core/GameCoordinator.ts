@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { GameLoop } from '@/core/GameLoop';
 import { GameScene } from '@/scenes/GameScene';
-import { GameState, GameStatus } from '@/core/GameState';
+import { GameState } from '@/core/GameState';
 import { EventBus, GameEventType } from '@/core/EventBus';
 import { CombatSystem } from '@/core/systems/CombatSystem';
 import { PlayerSystem } from '@/core/systems/PlayerSystem';
@@ -22,27 +22,44 @@ import { EnemyHealthBars } from '@/ui/EnemyHealthBars';
 import { LockOnIndicator } from '@/ui/LockOnIndicator';
 import { ThirdPersonCamera } from '@/features/camera/ThirdPersonCamera';
 import { BossMissileIndicator } from '@/ui/BossMissileIndicator';
-import { GAME_CONSTANTS } from '@/config';
-import { BossAI, createBossMesh } from '@/features/boss/BossAI';
-import { DesertFortressAI, createDesertFortressMesh } from '@/features/boss/DesertFortressAI';
-import { OctopusWarshipAI, createOctopusWarshipMesh } from '@/features/boss/OctopusWarshipAI';
-import { MissileDestroyerAI, createMissileDestroyerMesh } from '@/features/boss/MissileDestroyerAI';
-import { SkyCarrierAI, createSkyCarrierMesh } from '@/features/boss/SkyCarrierAI';
-import {
-  BOSS_CONFIGS,
-  BOSS_MISSILE_CONFIG,
-  FLAK_CANNON_CONFIG,
-  getBossForLevel,
-  BossType,
-  BossConfig,
-} from '@/features/boss/BossTypes';
-import { Faction } from '@/core/Faction';
+import { GameConfig, GAME_CONSTANTS, type QualityPreset } from '@/config';
+import { BOSS_CONFIGS, BossType, BossConfig } from '@/features/boss/BossTypes';
 import { createPlayerMesh, createEnemyMesh } from '@/features/aircraft/AircraftMeshFactory';
+import { getDifficultyProfile } from '@/core/Difficulty';
+import { getLevelConfig } from '@/features/terrain/LevelConfig';
+import { GameSessionState } from '@/core/GameSessionState';
+import { ResourceRegistry } from '@/core/ResourceRegistry';
+import { PresentationController } from '@/core/PresentationController';
+import { BossBattleController } from '@/core/BossBattleController';
+
+interface EyeBossHealthData {
+  current: number;
+  max: number;
+}
+
+interface EyeBossSystem {
+  getCollisionParts(): Array<{ index: number; mesh: THREE.Object3D }>;
+  getEyeHealth(index: number): EyeBossHealthData | undefined;
+}
+
+interface EyeBoss {
+  isAlive(): boolean;
+  getEyeSystem(): EyeBossSystem;
+}
 
 export class GameCoordinator {
+  private static readonly TUTORIAL_STAGE_DURATION_MS = 2200;
+  private static readonly TUTORIAL_STAGE_GAP_MS = 350;
+  private static readonly TUTORIAL_WAVE_READY_BUFFER_MS = 1000;
+  private static readonly TUTORIAL_POST_WAVE_HINT_DELAY_MS = 2200;
+  private static readonly TUTORIAL_FRIENDLY_SPAWN_DELAY_MS = 5200;
+  private static readonly TUTORIAL_FRIENDLY_SPAWN_BUFFER_MS = 1200;
+
   private gameLoop: GameLoop;
   private gameScene: GameScene;
   private gameState: GameState;
+  private resourceRegistry: ResourceRegistry;
+  private sessionState: GameSessionState;
   private inputHandler: InputHandler;
   private audioManager: AudioManager;
   private musicSystem: MusicSystem;
@@ -58,6 +75,7 @@ export class GameCoordinator {
   private startMenu: StartMenu;
   private lockOnIndicator: LockOnIndicator;
   private enemyHealthBars: EnemyHealthBars;
+  private presentationController: PresentationController;
 
   private playerStats: PlayerStats;
   private playerAircraft: THREE.Group;
@@ -67,33 +85,30 @@ export class GameCoordinator {
   private missileFiringScheduled: boolean = false;
   private multiShotActive: boolean = false;
 
-  private currentLevelId: number = 1;
   private audioInitialized: boolean = false;
 
-  // Boss 战相关
-  private bossMode: boolean = false; // Boss 模式：直接 Boss 战，跳过波次
-  private inLevelBossBattle: boolean = false; // 普通模式：波次完成后的 Boss 战
-  private currentBoss:
-    | BossAI
-    | DesertFortressAI
-    | OctopusWarshipAI
-    | MissileDestroyerAI
-    | SkyCarrierAI
-    | null = null;
-  private bossFriendlySpawnTimer: number = 0;
   private bossIndicator: BossMissileIndicator;
-  private laserDamageCooldown: number = 0;
+  private bossBattleController: BossBattleController;
 
-  private isPaused: boolean = false;
   private upgradeMenu: UpgradeMenu | null = null;
 
-  // 资源清理追踪
-  private eventUnsubscribers: (() => void)[] = [];
-  private pendingTimeouts: Set<ReturnType<typeof setTimeout>> = new Set();
+  private lastAppliedQualityPreset: Exclude<QualityPreset, 'auto'> =
+    GameConfig.getEffectiveQualityPreset();
+  private readonly previousCameraTargetPosition = new THREE.Vector3();
+  private readonly currentCameraTargetPosition = new THREE.Vector3();
+  private readonly interpolatedCameraTargetPosition = new THREE.Vector3();
+  private readonly previousCameraTargetQuaternion = new THREE.Quaternion();
+  private readonly currentCameraTargetQuaternion = new THREE.Quaternion();
+  private readonly interpolatedCameraTargetQuaternion = new THREE.Quaternion();
+  private lastRenderTimestamp: number = 0;
 
   constructor() {
     this.gameLoop = new GameLoop();
+    this.resourceRegistry = new ResourceRegistry();
+    this.sessionState = new GameSessionState();
+    this.setQualityPreset(GameConfig.getQualityPreset());
     this.gameScene = new GameScene();
+    this.applyQualityRuntime();
     this.inputHandler = new InputHandler();
     this.gameState = new GameState();
     this.audioManager = new AudioManager();
@@ -103,6 +118,7 @@ export class GameCoordinator {
 
     this.playerAircraft = createPlayerMesh();
     this.gameScene.scene.add(this.playerAircraft);
+    this.syncCameraInterpolationState();
 
     this.thirdPersonCamera = new ThirdPersonCamera(this.gameScene.camera, this.playerAircraft);
 
@@ -118,7 +134,7 @@ export class GameCoordinator {
       this.playerAircraft
     );
 
-    this.enemySystem = new EnemySystem(this.gameScene.scene);
+    this.enemySystem = new EnemySystem(this.gameScene.scene, this.sessionState);
 
     this.powerUpSystem = new PowerUpSystem(this.gameScene.scene, this.particleSystem);
 
@@ -128,12 +144,40 @@ export class GameCoordinator {
     this.enemyHealthBars = new EnemyHealthBars();
     this.startMenu = new StartMenu();
     this.bossIndicator = new BossMissileIndicator();
+    this.presentationController = new PresentationController({
+      hud: this.hud,
+      startMenu: this.startMenu,
+      enemyHealthBars: this.enemyHealthBars,
+      bossIndicator: this.bossIndicator,
+      lockOnIndicator: this.lockOnIndicator,
+    });
 
     this.upgradeMenu = new UpgradeMenu(
       this.playerStats.getUpgrades(),
       (type: UpgradeType) => this.handleUpgrade(type),
       () => this.resumeGame()
     );
+    this.bossBattleController = new BossBattleController({
+      scene: this.gameScene.scene,
+      camera: this.gameScene.camera,
+      particleSystem: this.particleSystem,
+      combatSystem: this.combatSystem,
+      enemySystem: this.enemySystem,
+      playerSystem: this.playerSystem,
+      playerAircraft: this.playerAircraft,
+      audioManager: this.audioManager,
+      musicSystem: this.musicSystem,
+      hud: this.hud,
+      bossIndicator: this.bossIndicator,
+      resolveBossConfig: (bossType: BossType) => this.getAdjustedBossConfig(BOSS_CONFIGS[bossType]),
+      onBossDestroyed: (position, config, isBossMode) =>
+        this.handleBossDestroy(position, config, isBossMode),
+      onSpawnFriendly: () => this.spawnFriendlyAI(),
+      onSpawnEnemyFromBoss: (position, enemyType) => this.spawnEnemyFromBoss(position, enemyType),
+      scheduleTimeout: (callback, delay) => this.scheduleTimeout(callback, delay),
+    });
+
+    this.enemySystem.setDifficultyProfile(getDifficultyProfile(this.sessionState.getDifficulty()));
 
     this.initSystems();
     this.setupEventListeners();
@@ -148,7 +192,7 @@ export class GameCoordinator {
   }
 
   private setupEventListeners(): void {
-    this.eventUnsubscribers.push(
+    this.resourceRegistry.addUnsubscriber(
       EventBus.on(GameEventType.PLAYER_HIT, ({ payload }) => {
         if (!this.playerSystem.isShieldActive()) {
           this.audioManager.playHit();
@@ -157,7 +201,7 @@ export class GameCoordinator {
       })
     );
 
-    this.eventUnsubscribers.push(
+    this.resourceRegistry.addUnsubscriber(
       EventBus.on(GameEventType.PLAYER_DEATH, ({ payload }) => {
         this.audioManager.stopEngine();
         this.audioManager.playExplosion();
@@ -166,7 +210,7 @@ export class GameCoordinator {
         this.playerAircraft.visible = false;
 
         if (this.playerSystem.getLives() <= 0) {
-          this.gameState.setStatus(GameStatus.GAME_OVER);
+          this.sessionState.setGameOver();
           this.audioManager.playGameOver();
           this.musicSystem.stopMusic();
           this.hud.showGameOver(this.gameState.getScore());
@@ -174,12 +218,16 @@ export class GameCoordinator {
       })
     );
 
-    this.eventUnsubscribers.push(
+    this.resourceRegistry.addUnsubscriber(
       EventBus.on(GameEventType.PLAYER_RESPAWN, ({ payload }) => {
         this.particleSystem.createExplosion(payload.position, 1.5);
         this.playerAircraft.visible = true;
         this.missileCount = GAME_CONSTANTS.MISSILE.STARTING_MISSILES;
-        this.hud.updateMissiles(this.missileCount);
+        this.presentationController.updateMissileHud(
+          0,
+          { missileCount: this.missileCount, missileProgress: 0 },
+          true
+        );
         this.audioManager.startEngine();
 
         this.playerSystem.activateShield(this.gameScene.scene);
@@ -190,25 +238,25 @@ export class GameCoordinator {
       })
     );
 
-    this.eventUnsubscribers.push(
+    this.resourceRegistry.addUnsubscriber(
       EventBus.on(GameEventType.ENEMY_FIRED, () => {
         this.audioManager.playShoot();
       })
     );
 
-    this.eventUnsubscribers.push(
+    this.resourceRegistry.addUnsubscriber(
       EventBus.on(GameEventType.FRIENDLY_FIRED, () => {
         this.audioManager.playShoot();
       })
     );
 
-    this.eventUnsubscribers.push(
+    this.resourceRegistry.addUnsubscriber(
       EventBus.on(GameEventType.PLAYER_FIRED, () => {
         this.audioManager.playShoot();
       })
     );
 
-    this.eventUnsubscribers.push(
+    this.resourceRegistry.addUnsubscriber(
       EventBus.on(GameEventType.ENEMY_DEATH, ({ payload }) => {
         this.gameState.addScore(payload.config.scoreValue);
         this.playerStats.addScore(payload.config.scoreValue);
@@ -216,19 +264,19 @@ export class GameCoordinator {
         this.audioManager.playExplosion();
         this.particleSystem.createExplosion(payload.position, payload.config.scale);
 
-        if (Math.random() < GAME_CONSTANTS.POWERUP.SPAWN_CHANCE) {
-          this.powerUpSystem.spawn(payload.position);
+        if (this.shouldSpawnPowerUp()) {
+          this.spawnPowerUpForCurrentLevel(payload.position);
         }
       })
     );
 
-    this.eventUnsubscribers.push(
+    this.resourceRegistry.addUnsubscriber(
       EventBus.on(GameEventType.WAVE_START, () => {
         this.audioManager.playWaveStart();
       })
     );
 
-    this.eventUnsubscribers.push(
+    this.resourceRegistry.addUnsubscriber(
       EventBus.on(GameEventType.LEVEL_COMPLETE, () => {
         this.audioManager.playLevelUp();
 
@@ -247,7 +295,7 @@ export class GameCoordinator {
       })
     );
 
-    this.eventUnsubscribers.push(
+    this.resourceRegistry.addUnsubscriber(
       EventBus.on(GameEventType.POWERUP_COLLECTED, ({ payload }) => {
         this.audioManager.playPowerUp();
         this.hud.showPowerUp(payload.config.name, payload.config.icon, payload.config.duration);
@@ -256,7 +304,7 @@ export class GameCoordinator {
       })
     );
 
-    this.eventUnsubscribers.push(
+    this.resourceRegistry.addUnsubscriber(
       EventBus.on(GameEventType.POWERUP_EXPIRED, ({ payload }) => {
         this.handlePowerUpExpired(payload.type);
       })
@@ -314,18 +362,33 @@ export class GameCoordinator {
   }
 
   private setupStartMenu(): void {
-    this.startMenu.setOnStart((settings: GameSettings) => {
+    this.presentationController.wireStartMenu((settings: GameSettings) => {
+      this.sessionState.applySettings({
+        difficulty: settings.difficulty,
+        audioSettings: {
+          sfxVolume: settings.sfxVolume,
+          musicVolume: settings.musicVolume,
+        },
+        tutorialEnabled: settings.tutorialEnabled,
+        mode: settings.gameMode,
+        level: settings.startLevel,
+      });
+      this.enemySystem.setDifficultyProfile(this.getCurrentDifficultyProfile());
       this.playerSystem.setLives(settings.playerLives);
-      this.audioManager.setSFXVolume(settings.soundVolume);
-      this.currentLevelId = settings.startLevel;
-      this.bossMode = settings.gameMode === 'boss';
+      this.setQualityPreset(settings.qualityPreset);
+      this.audioManager.setSFXVolume(settings.sfxVolume);
+      this.audioManager.setMusicVolume(settings.musicVolume);
+      this.musicSystem.setVolume(settings.musicVolume);
+      this.sessionState.setWave(0);
+      this.gameState.reset();
+      this.sessionState.setInBossBattle(false);
+      this.sessionState.resume();
 
       if (settings.testScore > 0) {
         this.playerStats.addScore(settings.testScore);
         this.hud.updateUpgradePoints(this.playerStats.getUpgrades().getAvailablePoints());
       }
 
-      this.gameState.start();
       this.start();
     });
   }
@@ -350,22 +413,36 @@ export class GameCoordinator {
     this.enemySystem.spawnFriendly(friendly);
   }
 
-  private spawnFighterFromBoss(position: THREE.Vector3): void {
+  private spawnEnemyFromBoss(position: THREE.Vector3, enemyType: EnemyType = EnemyType.FIGHTER): void {
     const MAX_ENEMIES = 8;
     if (this.enemySystem.getAliveEnemyCount() >= MAX_ENEMIES) {
       return;
     }
-    this.enemySystem.spawnEnemyAt(EnemyType.FIGHTER, position);
+    this.enemySystem.spawnEnemyAt(enemyType, position);
     this.hud.showPowerUpBig('⚠️', '敌机起飞！');
   }
 
+  private syncCameraInterpolationState(): void {
+    this.previousCameraTargetPosition.copy(this.playerAircraft.position);
+    this.currentCameraTargetPosition.copy(this.playerAircraft.position);
+    this.previousCameraTargetQuaternion.copy(this.playerAircraft.quaternion);
+    this.currentCameraTargetQuaternion.copy(this.playerAircraft.quaternion);
+    this.lastRenderTimestamp = 0;
+  }
+
   private update(deltaTime: number): void {
-    if (this.gameState.getStatus() !== GameStatus.PLAYING) {
+    if (!this.sessionState.isPlaying()) {
       return;
     }
 
+    this.playerSystem.capturePreviousVisualState();
+    this.previousCameraTargetPosition.copy(this.currentCameraTargetPosition);
+    this.previousCameraTargetQuaternion.copy(this.currentCameraTargetQuaternion);
+
+    this.syncRuntimeQuality();
+
     if (this.inputHandler.isPauseToggled() || this.inputHandler.isUpgradeToggled()) {
-      if (this.isPaused) {
+      if (this.sessionState.isPaused()) {
         this.resumeGame();
       } else {
         this.pauseGame();
@@ -373,7 +450,7 @@ export class GameCoordinator {
       return;
     }
 
-    if (this.isPaused) {
+    if (this.sessionState.isPaused()) {
       return;
     }
 
@@ -386,14 +463,17 @@ export class GameCoordinator {
         this.playerSystem.fire();
       }
 
-      this.handleMissileInput(input);
+      this.handleMissileInput(input, deltaTime);
     }
 
     this.playerSystem.update(deltaTime);
     this.combatSystem.update(deltaTime);
 
-    if ((this.bossMode || this.inLevelBossBattle) && this.currentBoss) {
-      this.updateBossBattle(deltaTime);
+    if (
+      (this.sessionState.isBossMode() || this.sessionState.isInBossBattle()) &&
+      this.bossBattleController.hasActiveBoss()
+    ) {
+      this.bossBattleController.update(deltaTime);
     } else {
       this.enemySystem.updateWithPlayer(deltaTime, this.playerSystem.getPosition());
     }
@@ -434,258 +514,27 @@ export class GameCoordinator {
       engineGlow.scale.setScalar(scale);
     }
 
-    this.updateUI();
+    this.updateUI(deltaTime);
     this.updateMissileRespawn(deltaTime);
+    this.playerSystem.captureCurrentVisualState();
+    this.currentCameraTargetPosition.copy(this.playerAircraft.position);
+    this.currentCameraTargetQuaternion.copy(this.playerAircraft.quaternion);
   }
 
-  private updateBossBattle(deltaTime: number): void {
-    if (!this.currentBoss) return;
-
-    const friendlyMeshes = this.enemySystem.getFriendlyAIs().map((f) => f.getMesh());
-
-    const bossMissileSystem = this.currentBoss.getMissileSystem();
-    const bossAllParts = this.currentBoss.getCollisionParts();
-    const missileMeshes = bossMissileSystem ? bossMissileSystem.getMissileMeshes() : [];
-    const bossAndMissiles = [...bossAllParts, ...missileMeshes];
-    this.enemySystem.updateWithPlayer(deltaTime, this.playerSystem.getPosition(), bossAndMissiles);
-
-    this.currentBoss.update(deltaTime, this.playerSystem.getMesh(), friendlyMeshes);
-
-    if (bossMissileSystem) {
-      bossMissileSystem.checkCollisions(
-        [this.playerAircraft, ...friendlyMeshes],
-        (target: THREE.Object3D, _damage: number) => {
-          this.particleSystem.createExplosion(target.position.clone(), 1);
-          if (target === this.playerAircraft) {
-            if (!this.playerSystem.isShieldActive()) {
-              this.playerSystem.getHealth().takeDamage(BOSS_MISSILE_CONFIG.DAMAGE);
-            }
-          } else {
-            const friendly = this.enemySystem.getFriendlyAIs().find((f) => f.getMesh() === target);
-            friendly?.takeDamage(BOSS_MISSILE_CONFIG.DAMAGE);
-          }
-        }
-      );
-    }
-
-    // 对于 OctopusWarship，眼睛碰撞检查必须先于 Boss 本体检查
-    // 因为导弹在碰撞后会被停用，所以需要先检查眼睛再检查本体
-    if (this.currentBoss instanceof OctopusWarshipAI) {
-      const octopusBoss = this.currentBoss;
-      const eyeParts = octopusBoss.getEyeCollisionParts();
-      const eyeMeshes = eyeParts.map((p) => p.mesh);
-
-      this.combatSystem.getMissileSystem().checkCollisions(eyeMeshes, (target) => {
-        const part = eyeParts.find((p) => p.mesh === target);
-        if (part) {
-          octopusBoss.takeEyeDamage(part.index, GAME_CONSTANTS.MISSILE.DAMAGE);
-          const hitWorldPos = new THREE.Vector3();
-          target.getWorldPosition(hitWorldPos);
-          this.particleSystem.createExplosion(hitWorldPos, 1);
-          this.audioManager.playExplosion();
-        }
-      });
-
-      this.combatSystem.getPlayerProjectilePool().checkCollisions(eyeMeshes, (target) => {
-        const part = eyeParts.find((p) => p.mesh === target);
-        if (part) {
-          octopusBoss.takeEyeDamage(part.index, this.combatSystem['damageMultiplier'] * 12.5);
-          const hitWorldPos = new THREE.Vector3();
-          target.getWorldPosition(hitWorldPos);
-          this.particleSystem.createHit(hitWorldPos);
-        }
-      });
-    }
-
-    // Boss 本体和 Boss 导弹的碰撞检查
-    const missileTargets = [this.currentBoss.getMesh(), ...bossAllParts, ...missileMeshes];
-    this.combatSystem.getMissileSystem().checkCollisions(missileTargets, (target) => {
-      const hitWorldPos = new THREE.Vector3();
-      target.getWorldPosition(hitWorldPos);
-
-      const isBossPart = bossAllParts.some((p) => p === target);
-      if (target === this.currentBoss?.getMesh() || isBossPart) {
-        this.currentBoss?.takeDamage(GAME_CONSTANTS.MISSILE.DAMAGE);
-        this.particleSystem.createExplosion(hitWorldPos, 1.5);
-        this.audioManager.playExplosion();
-      } else if (bossMissileSystem) {
-        const missile = bossMissileSystem.getMissiles().find((m) => m.getMesh() === target);
-        if (missile) {
-          missile.takeDamage(GAME_CONSTANTS.MISSILE.DAMAGE);
-          this.particleSystem.createExplosion(hitWorldPos, 0.8);
-        }
-      }
-    });
-
-    const bossTargets = [...bossAllParts, ...missileMeshes];
-
-    this.combatSystem.getPlayerProjectilePool().checkCollisions(bossTargets, (target) => {
-      const isBossPart = bossAllParts.some((p) => p === target);
-      if (isBossPart || target === this.currentBoss?.getMesh()) {
-        this.currentBoss?.takeDamage(this.combatSystem['damageMultiplier'] * 12.5);
-        const hitWorldPos = new THREE.Vector3();
-        target.getWorldPosition(hitWorldPos);
-        this.particleSystem.createHit(hitWorldPos);
-      } else if (bossMissileSystem) {
-        const missile = bossMissileSystem.getMissiles().find((m) => m.getMesh() === target);
-        if (missile) {
-          missile.takeDamage(this.combatSystem['damageMultiplier'] * 12.5);
-        }
-      }
-    });
-
-    this.combatSystem
-      .getEnemyProjectilePool()
-      .checkCollisions(bossTargets, (target: THREE.Object3D, _projectile, damage: number) => {
-        const isBossPart = bossAllParts.some((p) => p === target);
-        if (isBossPart || target === this.currentBoss?.getMesh()) {
-          this.currentBoss?.takeDamage(damage);
-          const hitWorldPos = new THREE.Vector3();
-          target.getWorldPosition(hitWorldPos);
-          this.particleSystem.createHit(hitWorldPos);
-        } else if (bossMissileSystem) {
-          const missile = bossMissileSystem.getMissiles().find((m) => m.getMesh() === target);
-          if (missile) {
-            missile.takeDamage(damage);
-            this.particleSystem.createExplosion(target.position.clone(), 0.5);
-          }
-        }
-      });
-
-    if (this.currentBoss instanceof OctopusWarshipAI) {
-      this.updateOctopusWarshipBattle(deltaTime);
-    }
-
-    this.bossFriendlySpawnTimer += deltaTime;
-    if (this.bossFriendlySpawnTimer >= 30) {
-      this.bossFriendlySpawnTimer = 0;
-      this.spawnFriendlyAI();
-      this.hud.showPowerUpBig('✈️', '友军支援');
-    }
-
-    this.updateBossMissileIndicators();
-  }
-
-  private updateOctopusWarshipBattle(deltaTime: number): void {
-    if (!(this.currentBoss instanceof OctopusWarshipAI)) return;
-
-    const octopusBoss = this.currentBoss;
-    const playerPos = this.playerAircraft.position;
-
-    if (this.laserDamageCooldown > 0) {
-      this.laserDamageCooldown -= deltaTime;
-    }
-
-    if (octopusBoss.checkLaserCollision(playerPos)) {
-      if (!this.playerSystem.isShieldActive() && this.laserDamageCooldown <= 0) {
-        this.playerSystem.getHealth().takeDamage(octopusBoss.getConfig().damage);
-        this.particleSystem.createHit(playerPos);
-        this.laserDamageCooldown = 1.0;
-      }
-    }
-
-    const eyeParts = octopusBoss.getEyeCollisionParts();
-    const eyeMeshes = eyeParts.map((p) => p.mesh);
-    const eyeBulletMeshes = octopusBoss.getEyeBulletMeshes();
-
-    // 友军子弹对眼睛的碰撞检查（玩家导弹和机枪已在 updateBossBattle 中处理）
-    const allEyeTargets = [...eyeMeshes, ...eyeBulletMeshes];
-    this.combatSystem
-      .getEnemyProjectilePool()
-      .checkCollisions(allEyeTargets, (target: THREE.Object3D, _projectile, _damage: number) => {
-        const part = eyeParts.find((p) => p.mesh === target);
-        if (part) {
-          octopusBoss.takeEyeDamage(part.index, this.combatSystem['damageMultiplier'] * 12.5);
-          const hitWorldPos = new THREE.Vector3();
-          target.getWorldPosition(hitWorldPos);
-          this.particleSystem.createHit(hitWorldPos);
-        }
-      });
-
-    const eyeBulletCollideRadius = 5;
-    for (const bulletMesh of eyeBulletMeshes) {
-      const bulletPos = bulletMesh.position;
-
-      const playerPos = this.playerSystem.getPosition();
-      if (bulletPos.distanceTo(playerPos) < eyeBulletCollideRadius) {
-        if (!this.playerSystem.isShieldActive()) {
-          this.playerSystem.getHealth().takeDamage(octopusBoss.getEyeDamage());
-          this.particleSystem.createHit(playerPos);
-          this.audioManager.playHit();
-        }
-        octopusBoss.getEyeSystem().removeBullet(bulletMesh);
-        break;
-      }
-
-      const friendlies = this.enemySystem.getFriendlyAIs();
-      for (const friendly of friendlies) {
-        if (!friendly.isAlive()) continue;
-        const friendlyPos = friendly.getMesh().position;
-        if (bulletPos.distanceTo(friendlyPos) < eyeBulletCollideRadius) {
-          friendly.takeDamage(octopusBoss.getEyeDamage());
-          this.particleSystem.createHit(friendlyPos);
-          octopusBoss.getEyeSystem().removeBullet(bulletMesh);
-          break;
-        }
-      }
-    }
-  }
-
-  private updateBossMissileIndicators(): void {
-    if (!this.currentBoss) {
-      this.bossIndicator.clear();
-      return;
-    }
-
-    const bossMissileSystem = this.currentBoss.getMissileSystem();
-    if (!bossMissileSystem) {
-      this.bossIndicator.clear();
-      return;
-    }
-
-    const missiles = bossMissileSystem.getMissiles();
-    const playerPosition = this.playerSystem.getPosition();
-    const camera = this.gameScene.camera;
-
-    // 只显示锁定玩家的导弹指示器
-    const indicatorData = missiles
-      .filter((missile) => missile.isTargetingPlayer)
-      .filter((missile) => {
-        // 验证导弹位置有效性，过滤掉位置无效的导弹
-        const pos = missile.getMesh().position;
-        return isFinite(pos.x) && isFinite(pos.y) && isFinite(pos.z);
-      })
-      .map((missile, index) => {
-        const worldPos = missile.getMesh().position.clone();
-        const distance = playerPosition.distanceTo(worldPos);
-        const inView = this.isPositionInView(worldPos);
-
-        return {
-          id: `boss-missile-${index}`,
-          worldPos,
-          distance,
-          inView,
-        };
-      });
-
-    this.bossIndicator.update(indicatorData, camera);
-  }
-
-  private isPositionInView(worldPos: THREE.Vector3): boolean {
-    const camera = this.gameScene.camera;
-    const vector = worldPos.clone();
-    vector.project(camera);
-
-    return vector.x >= -1 && vector.x <= 1 && vector.y >= -1 && vector.y <= 1 && vector.z <= 1;
-  }
-
-  private handleMissileInput(input: ReturnType<InputHandler['getState']>): void {
+  private handleMissileInput(
+    input: ReturnType<InputHandler['getState']>,
+    deltaTime: number
+  ): void {
     let targetMeshes: THREE.Object3D[] = this.enemySystem.getEnemyMeshes();
+    const currentBoss = this.bossBattleController.getCurrentBoss();
 
-    if ((this.bossMode || this.inLevelBossBattle) && this.currentBoss) {
-      const bossPartMeshes = this.currentBoss.getCollisionParts();
+    if (
+      (this.sessionState.isBossMode() || this.sessionState.isInBossBattle()) &&
+      currentBoss
+    ) {
+      const bossPartMeshes = currentBoss.getCollisionParts();
       targetMeshes = [...bossPartMeshes, ...targetMeshes];
-      const bossMissileSystem = this.currentBoss.getMissileSystem();
+      const bossMissileSystem = currentBoss.getMissileSystem();
       if (bossMissileSystem) {
         const bossMissiles = bossMissileSystem.getMissileMeshes();
         targetMeshes = [...targetMeshes, ...bossMissiles];
@@ -710,7 +559,7 @@ export class GameCoordinator {
         this.playerSystem.getPosition(),
         targetMeshes,
         this.gameScene.camera,
-        0.016,
+        deltaTime,
         enemyScreenPos
       );
 
@@ -757,7 +606,11 @@ export class GameCoordinator {
         this.audioManager.playMissileLaunch();
 
         this.missileCount--;
-        this.hud.updateMissiles(this.missileCount);
+        this.presentationController.updateMissileHud(
+          0,
+          { missileCount: this.missileCount, missileProgress: 0 },
+          true
+        );
         this.lockOnIndicator.onMissileFired();
       }, i * 100);
     }
@@ -772,7 +625,7 @@ export class GameCoordinator {
     this.powerUpSystem.checkProjectileCollisions(projectilePositions, (_balloon, type) => {
       const config = POWER_UP_CONFIGS[type];
       this.audioManager.playBalloonPop();
-      this.hud.showPowerUpBig(config.icon, config.name, 1);
+      this.hud.showPowerUpBig(config.icon, config.name, 1, false, 'powerup');
 
       if (config.duration > 0) {
         this.hud.showPowerUp(config.name, config.icon, config.duration);
@@ -787,20 +640,26 @@ export class GameCoordinator {
     });
   }
 
-  private updateUI(): void {
-    this.hud.updateHealth(this.playerSystem.getHealth().getHealthPercent());
-    this.hud.updateSpeed(this.playerSystem.getSpeed());
-    this.hud.updateScore(this.gameState.getScore());
-    this.hud.updateEnemies(this.enemySystem.getAliveEnemyCount());
-
+  private updateUI(deltaTime: number): void {
     const totalEnemies = this.enemySystem.getTotalEnemyCount();
     const spawnedEnemies = this.enemySystem.getSpawnedEnemyCount();
     const aliveEnemies = this.enemySystem.getAliveEnemyCount();
     const killedEnemies = spawnedEnemies - aliveEnemies;
     const remaining = totalEnemies - killedEnemies;
-    this.hud.updateRemainingEnemies(remaining);
-    this.hud.updateLives(this.playerSystem.getLives());
-    this.hud.update(this.gameState.getStatus() === GameStatus.PLAYING ? 0.016 : 0);
+
+    const didUpdateHud = this.presentationController.updateHud(deltaTime, {
+      healthPercent: this.playerSystem.getHealth().getHealthPercent(),
+      speed: this.playerSystem.getSpeed(),
+      score: this.gameState.getScore(),
+      aliveEnemies,
+      remainingEnemies: remaining,
+      lives: this.playerSystem.getLives(),
+      isPlaying: this.sessionState.isPlaying(),
+    });
+
+    if (!didUpdateHud) {
+      return;
+    }
 
     this.updateEnemyHealthBars();
   }
@@ -808,6 +667,7 @@ export class GameCoordinator {
   private updateEnemyHealthBars(): void {
     const enemies = this.enemySystem.getEnemies();
     const friendlies = this.enemySystem.getFriendlyAIs();
+    const currentBoss = this.bossBattleController.getCurrentBoss();
 
     const enemyData = enemies
       .filter((e) => e.isAlive())
@@ -828,25 +688,25 @@ export class GameCoordinator {
     // Boss 血条数据
     const bossData: Array<{ mesh: THREE.Object3D; currentHealth: number; maxHealth: number }> = [];
     if (
-      (this.bossMode || this.inLevelBossBattle) &&
-      this.currentBoss &&
-      this.currentBoss.isAlive()
+      (this.sessionState.isBossMode() || this.sessionState.isInBossBattle()) &&
+      currentBoss &&
+      currentBoss.isAlive()
     ) {
       bossData.push({
-        mesh: this.currentBoss.getMesh(),
-        currentHealth: this.currentBoss.getHealth().current,
-        maxHealth: this.currentBoss.getHealth().max,
+        mesh: currentBoss.getMesh(),
+        currentHealth: currentBoss.getHealth().current,
+        maxHealth: currentBoss.getHealth().max,
       });
     }
 
     // Boss 眼睛血条数据（第三关 Boss）
     const eyeData: Array<{ mesh: THREE.Object3D; currentHealth: number; maxHealth: number }> = [];
     if (
-      (this.bossMode || this.inLevelBossBattle) &&
-      this.currentBoss instanceof OctopusWarshipAI &&
-      this.currentBoss.isAlive()
+      (this.sessionState.isBossMode() || this.sessionState.isInBossBattle()) &&
+      this.hasEyeBoss(currentBoss) &&
+      currentBoss.isAlive()
     ) {
-      const eyeSystem = this.currentBoss.getEyeSystem();
+      const eyeSystem = currentBoss.getEyeSystem();
       const eyeParts = eyeSystem.getCollisionParts();
       for (const part of eyeParts) {
         const health = eyeSystem.getEyeHealth(part.index);
@@ -860,7 +720,7 @@ export class GameCoordinator {
       }
     }
 
-    this.enemyHealthBars.update(
+    this.presentationController.updateEnemyHealthBars(
       [...enemyData, ...bossData, ...eyeData],
       friendlyData,
       this.gameScene.camera,
@@ -868,29 +728,121 @@ export class GameCoordinator {
     );
   }
 
+  private hasEyeBoss(boss: unknown): boss is EyeBoss {
+    if (!boss || typeof boss !== 'object') {
+      return false;
+    }
+
+    const candidate = boss as Partial<EyeBoss>;
+    return typeof candidate.getEyeSystem === 'function' && typeof candidate.isAlive === 'function';
+  }
+
   private updateMissileRespawn(deltaTime: number): void {
+    const missileReloadTime = this.playerStats.getMissileReloadTime();
     if (this.missileCount < GAME_CONSTANTS.MISSILE.MAX_RESPAWN_MISSILES) {
       this.missileRespawnTimer += deltaTime;
-      if (this.missileRespawnTimer >= GAME_CONSTANTS.MISSILE.MISSILE_RESPAWN_TIME) {
+      if (this.missileRespawnTimer >= missileReloadTime) {
         this.missileCount++;
-        this.hud.updateMissiles(this.missileCount);
         this.missileRespawnTimer = 0;
       }
     }
 
-    this.hud.updateMissileProgress(
-      this.missileRespawnTimer / GAME_CONSTANTS.MISSILE.MISSILE_RESPAWN_TIME
-    );
+    this.presentationController.updateMissileHud(deltaTime, {
+      missileCount: this.missileCount,
+      missileProgress: this.missileRespawnTimer / missileReloadTime,
+    });
   }
 
-  private render(): void {
-    this.thirdPersonCamera.update();
-    this.gameScene.render();
+  private shouldSpawnPowerUp(): boolean {
+    const currentLevel =
+      this.enemySystem.getCurrentLevelConfig() ||
+      getLevelConfig(this.sessionState.getLevel());
+    const baseChance = currentLevel?.powerUpFrequency ?? GAME_CONSTANTS.POWERUP.SPAWN_CHANCE;
+    const difficultyProfile = this.getCurrentDifficultyProfile();
+    const finalChance = Math.max(
+      0,
+      Math.min(1, baseChance * difficultyProfile.powerUpDropMultiplier)
+    );
+
+    return Math.random() < finalChance;
+  }
+
+  private spawnPowerUpForCurrentLevel(position: THREE.Vector3): void {
+    const currentLevel =
+      this.enemySystem.getCurrentLevelConfig() ||
+      getLevelConfig(this.sessionState.getLevel());
+    const allowedTypes = currentLevel?.powerUpTypes ?? Object.values(PowerUpType);
+    const filteredTypes = Object.values(PowerUpType).filter((type) => allowedTypes.includes(type));
+    const availableTypes = filteredTypes.length > 0 ? filteredTypes : Object.values(PowerUpType);
+    const randomType = availableTypes[Math.floor(Math.random() * availableTypes.length)];
+
+    this.powerUpSystem.spawn(position, randomType, POWER_UP_CONFIGS[randomType].icon);
+  }
+
+  private getAdjustedBossConfig(config: BossConfig): BossConfig {
+    const difficultyProfile = this.getCurrentDifficultyProfile();
+    return {
+      ...config,
+      health: Math.max(1, Math.round(config.health * difficultyProfile.enemyHealthMultiplier)),
+      damage: Math.max(1, Math.round(config.damage * difficultyProfile.enemyDamageMultiplier)),
+      cannonFireInterval: config.cannonFireInterval * difficultyProfile.bossCooldownMultiplier,
+      missileFireInterval: config.missileFireInterval * difficultyProfile.bossCooldownMultiplier,
+      missileDamage: Math.max(
+        1,
+        Math.round(config.missileDamage * difficultyProfile.enemyDamageMultiplier)
+      ),
+    };
+  }
+
+  private getCurrentDifficultyProfile(): ReturnType<typeof getDifficultyProfile> {
+    return getDifficultyProfile(this.sessionState.getDifficulty());
+  }
+
+  private render(alpha: number): void {
+    const clampedAlpha = Math.max(0, Math.min(1, alpha));
+    this.playerSystem.applyInterpolatedVisual(clampedAlpha);
+    this.enemySystem.applyInterpolatedVisuals(clampedAlpha);
+    this.interpolatedCameraTargetPosition.lerpVectors(
+      this.previousCameraTargetPosition,
+      this.currentCameraTargetPosition,
+      clampedAlpha
+    );
+    this.interpolatedCameraTargetQuaternion.slerpQuaternions(
+      this.previousCameraTargetQuaternion,
+      this.currentCameraTargetQuaternion,
+      clampedAlpha
+    );
+
+    const now = performance.now();
+    const renderDeltaTime = this.lastRenderTimestamp > 0
+      ? Math.min((now - this.lastRenderTimestamp) / 1000, 0.05)
+      : 0;
+    this.lastRenderTimestamp = now;
+
+    if (this.sessionState.isPlaying() && !this.sessionState.isPaused()) {
+      this.enemySystem.updateVisuals(renderDeltaTime, this.playerSystem.getPosition());
+    }
+
+    try {
+      this.thirdPersonCamera.update(
+        this.interpolatedCameraTargetPosition,
+        this.interpolatedCameraTargetQuaternion
+      );
+      this.gameScene.render();
+    } finally {
+      this.enemySystem.restoreCurrentVisuals();
+      this.playerSystem.restoreCurrentVisual();
+    }
   }
 
   public start(): void {
-    this.gameState.setStatus(GameStatus.PLAYING);
+    this.sessionState.setPlaying();
+    this.presentationController.resetHudThrottle();
     this.playerSystem.getHealth().reset();
+    this.enemySystem.setDifficultyProfile(this.getCurrentDifficultyProfile());
+    this.sessionState.setInBossBattle(this.sessionState.isBossMode());
+    this.applyCurrentLevelEnvironment();
+    this.syncCameraInterpolationState();
 
     if (!this.audioInitialized) {
       this.audioManager.resume();
@@ -899,285 +851,156 @@ export class GameCoordinator {
     }
 
     this.missileCount = GAME_CONSTANTS.MISSILE.STARTING_MISSILES;
-    this.hud.updateMissiles(this.missileCount);
+    this.presentationController.updateMissileHud(
+      0,
+      { missileCount: this.missileCount, missileProgress: 0 },
+      true
+    );
 
     this.gameLoop.start(
       (dt) => this.update(dt),
-      () => this.render()
+      (alpha) => this.render(alpha)
     );
     this.audioManager.startEngine();
 
-    if (this.bossMode) {
+    if (this.sessionState.isBossMode()) {
       this.startBossBattle();
     } else {
-      this.enemySystem.loadLevel(this.currentLevelId);
+      const level = this.sessionState.getLevel();
+      this.enemySystem.loadLevel(level);
+      this.applyCurrentLevelEnvironment(level);
+      const shouldRunTutorialIntro = this.shouldRunTutorialIntro();
+      const tutorialWaveDelayMs = shouldRunTutorialIntro ? this.getTutorialWaveDelayMs() : 0;
+
+      if (shouldRunTutorialIntro) {
+        this.startTutorialIntroSequence();
+        this.startTutorialCombatSequence(tutorialWaveDelayMs);
+      }
 
       this.scheduleTimeout(() => {
         this.enemySystem.startWave(this.playerSystem.getPosition());
-      }, GAME_CONSTANTS.LEVEL.START_DELAY * 1000);
+      }, GAME_CONSTANTS.LEVEL.START_DELAY * 1000 + tutorialWaveDelayMs);
 
-      this.musicSystem.playLevelMusic(this.getLevelMusic(this.currentLevelId));
+      this.musicSystem.playLevelMusic(this.getLevelMusic(level));
 
       this.scheduleTimeout(() => {
         this.spawnFriendlyAI();
-        this.hud.showPowerUpBig('✈️', '召唤友军');
-      }, 1000);
+        this.hud.showPowerUpBig(
+          '✈️',
+          shouldRunTutorialIntro ? '友军编队已入场' : '召唤友军'
+        );
+      }, shouldRunTutorialIntro ? tutorialWaveDelayMs + GameCoordinator.TUTORIAL_FRIENDLY_SPAWN_DELAY_MS : 1000);
     }
+  }
+
+  private shouldRunTutorialIntro(): boolean {
+    if (this.sessionState.isBossMode()) {
+      return false;
+    }
+
+    if (!this.sessionState.isTutorialEnabled()) {
+      return false;
+    }
+
+    return this.sessionState.getLevel() === 1 && this.sessionState.getWave() === 0;
+  }
+
+  private getTutorialIntroDurationMs(): number {
+    const stageCount = this.getTutorialStages().length;
+    return stageCount * GameCoordinator.TUTORIAL_STAGE_DURATION_MS
+      + Math.max(0, stageCount - 1) * GameCoordinator.TUTORIAL_STAGE_GAP_MS;
+  }
+
+  private getTutorialWaveDelayMs(): number {
+    return this.getTutorialIntroDurationMs() + GameCoordinator.TUTORIAL_WAVE_READY_BUFFER_MS;
+  }
+
+  private getTutorialStages(): Array<{ icon: string; text: string; hideSubtext?: boolean }> {
+    return [
+      { icon: '🎮', text: '试玩关卡已开启', hideSubtext: true },
+      { icon: '🕹️', text: '先熟悉机动与转向' },
+      { icon: '⚡', text: '用加速拉开距离与高度' },
+      { icon: '🔥', text: '按住开火键持续压制' },
+      { icon: '🚀', text: '锁定完成后再发射导弹' },
+      { icon: '🎯', text: '准备接敌，完成首波进入正式节奏' },
+    ];
+  }
+
+  private startTutorialIntroSequence(): void {
+    const tutorialStages = this.getTutorialStages();
+
+    tutorialStages.forEach((stage, index) => {
+      const delay =
+        index * (GameCoordinator.TUTORIAL_STAGE_DURATION_MS + GameCoordinator.TUTORIAL_STAGE_GAP_MS);
+
+      this.scheduleTimeout(() => {
+        this.hud.showPowerUpBig(
+          stage.icon,
+          stage.text,
+          GameCoordinator.TUTORIAL_STAGE_DURATION_MS / 1000,
+          stage.hideSubtext ?? false
+        );
+      }, delay);
+    });
+  }
+
+  private startTutorialCombatSequence(tutorialWaveDelayMs: number): void {
+    const combatStartDelayMs =
+      GAME_CONSTANTS.LEVEL.START_DELAY * 1000 + tutorialWaveDelayMs;
+    const waveReadyDelayMs = Math.max(0, combatStartDelayMs - 1200);
+
+    this.scheduleTimeout(() => {
+      this.hud.showPowerUpBig('📡', '敌机即将进入空域');
+    }, waveReadyDelayMs);
+
+    this.scheduleTimeout(() => {
+      this.hud.showPowerUpBig('⚔️', '第一波接敌，保持移动', 1.8);
+    }, combatStartDelayMs);
+
+    this.scheduleTimeout(() => {
+      this.hud.showPowerUpBig('🚀', '高威胁目标优先使用导弹', 1.8);
+    }, combatStartDelayMs + GameCoordinator.TUTORIAL_POST_WAVE_HINT_DELAY_MS);
+
+    this.scheduleTimeout(() => {
+      this.hud.showPowerUpBig('🤝', '友军即将加入战斗', 1.8);
+    }, combatStartDelayMs + GameCoordinator.TUTORIAL_FRIENDLY_SPAWN_BUFFER_MS);
+  }
+
+  public setQualityPreset(preset: QualityPreset): void {
+    GameConfig.clearRuntimeQualityOverride();
+    GameConfig.setQualityPreset(preset);
+    this.sessionState.setQualityPreset(preset);
+    this.gameLoop.setQualityPreset(preset);
+    this.lastAppliedQualityPreset = GameConfig.getEffectiveQualityPreset();
+    this.applyQualityRuntime();
+  }
+
+  private applyQualityRuntime(): void {
+    if (!this.gameScene) {
+      return;
+    }
+
+    this.gameScene.applyQualitySettings();
+  }
+
+  private syncRuntimeQuality(): void {
+    const currentQualityPreset = GameConfig.getEffectiveQualityPreset();
+    if (currentQualityPreset === this.lastAppliedQualityPreset) {
+      return;
+    }
+
+    this.lastAppliedQualityPreset = currentQualityPreset;
+    this.applyQualityRuntime();
   }
 
   private startBossBattle(): void {
-    this.musicSystem.playBossMusic(this.currentLevelId);
-
-    this.enemySystem.loadLevel(this.currentLevelId);
-
-    const bossType = getBossForLevel(this.currentLevelId);
-    if (!bossType) return;
-
-    const config = BOSS_CONFIGS[bossType];
-
-    if (bossType === BossType.DESERT_FORTRESS) {
-      this.createDesertFortressBoss(config);
-    } else if (bossType === BossType.OCTOPUS_WARSHIP) {
-      this.createOctopusWarshipBoss(config);
-    } else if (bossType === BossType.MISSILE_DESTROYER) {
-      this.createMissileDestroyerBoss(config);
-    } else if (bossType === BossType.SKY_CARRIER) {
-      this.createSkyCarrierBoss(config);
-    } else {
-      this.createHeavyBomberBoss(config);
+    this.sessionState.setInBossBattle(true);
+    this.applyCurrentLevelEnvironment();
+    const level = this.sessionState.getLevel();
+    if (!this.bossBattleController.start(level, true)) {
+      this.sessionState.setInBossBattle(false);
+      return;
     }
-
-    this.bossFriendlySpawnTimer = 0;
-
-    this.scheduleTimeout(() => {
-      this.spawnFriendlyAI();
-      this.hud.showPowerUpBig('✈️', '召唤友军');
-    }, 1000);
-  }
-
-  private createHeavyBomberBoss(config: BossConfig): void {
-    const mesh = createBossMesh(config);
-
-    const playerPos = this.playerSystem.getPosition();
-    const spawnOffset = new THREE.Vector3(
-      (Math.random() - 0.5) * 200,
-      50 + Math.random() * 50,
-      (Math.random() - 0.5) * 200
-    );
-    mesh.position.copy(playerPos).add(spawnOffset);
-
-    this.gameScene.scene.add(mesh);
-
-    this.currentBoss = new BossAI(mesh, config, this.gameScene.scene, this.particleSystem);
-
-    this.currentBoss.onFire = (position, direction, damage) => {
-      this.combatSystem
-        .getBossProjectilePool()
-        .fire(position, direction, damage, this.currentBoss?.getMesh(), Faction.ENEMY);
-      this.audioManager.playShoot();
-    };
-
-    this.currentBoss.onDestroy = (position, bossConfig) => {
-      this.handleBossDestroy(position, bossConfig, true);
-    };
-
-    this.currentBoss.onMissileFired = () => {
-      this.audioManager.playMissileLaunch();
-    };
-  }
-
-  private createDesertFortressBoss(config: BossConfig): void {
-    const mesh = createDesertFortressMesh(config);
-
-    const playerPos = this.playerSystem.getPosition();
-    mesh.position.set(playerPos.x, -50, playerPos.z + 200);
-
-    this.gameScene.scene.add(mesh);
-
-    const desertFortress = new DesertFortressAI(
-      mesh,
-      config,
-      this.gameScene.scene,
-      this.particleSystem
-    );
-    this.currentBoss = desertFortress;
-
-    desertFortress.onFlakFire = (_position) => {
-      this.audioManager.playFlakCannonFire();
-    };
-
-    desertFortress.onFlakExplode = (position, _radius, _damage) => {
-      this.particleSystem.createFlakExplosion(position, FLAK_CANNON_CONFIG.AOE_RADIUS);
-      this.audioManager.playFlakCannonExplosion();
-
-      const targets = [
-        this.playerAircraft,
-        ...this.enemySystem.getFriendlyAIs().map((f) => f.getMesh()),
-      ];
-      desertFortress.getFlakCannonSystem().checkAoeCollisions(targets, (target, damage) => {
-        this.particleSystem.createHit(target.position);
-        if (target === this.playerAircraft) {
-          if (!this.playerSystem.isShieldActive()) {
-            this.playerSystem.getHealth().takeDamage(damage);
-          }
-        } else {
-          const friendly = this.enemySystem.getFriendlyAIs().find((f) => f.getMesh() === target);
-          friendly?.takeDamage(damage);
-        }
-      });
-    };
-
-    desertFortress.onDestroy = (position, bossConfig) => {
-      if (this.currentBoss) {
-        const missileSystem = this.currentBoss.getMissileSystem();
-        if (missileSystem) {
-          missileSystem.dispose();
-        }
-        (this.currentBoss as DesertFortressAI).getFlakCannonSystem().dispose();
-      }
-      this.handleBossDestroy(position, bossConfig, true);
-    };
-
-    desertFortress.onMissileFired = () => {
-      this.audioManager.playMissileLaunch();
-    };
-  }
-
-  private createOctopusWarshipBoss(config: BossConfig): void {
-    const mesh = createOctopusWarshipMesh(config);
-
-    const playerPos = this.playerSystem.getPosition();
-    mesh.position.set(playerPos.x + (Math.random() - 0.5) * 100, 150, playerPos.z + 200);
-
-    this.gameScene.scene.add(mesh);
-
-    const octopusWarship = new OctopusWarshipAI(mesh, config, this.particleSystem);
-    this.currentBoss = octopusWarship;
-
-    octopusWarship.init();
-
-    octopusWarship.onTeleport = (from, to) => {
-      this.particleSystem.createTeleportOut(from);
-      this.particleSystem.createTeleportIn(to);
-    };
-
-    octopusWarship.onLaserWarning = () => {
-      this.hud.showPowerUpBig('⚠️', '激光预警！', 1, true);
-    };
-
-    octopusWarship.onLaserSweep = () => {
-      this.hud.showPowerUpBig('💣', '激光扫射！', 1, true);
-    };
-
-    octopusWarship.onLaserHit = () => {
-      if (!this.playerSystem.isShieldActive()) {
-        this.playerSystem.getHealth().takeDamage(config.damage);
-        this.particleSystem.createHit(this.playerAircraft.position);
-      }
-    };
-
-    octopusWarship.onDestroy = (position, bossConfig) => {
-      octopusWarship.getLaserSystem().dispose();
-      octopusWarship.getEyeSystem().dispose();
-      this.handleBossDestroy(position, bossConfig, true);
-    };
-  }
-
-  private createMissileDestroyerBoss(config: BossConfig): void {
-    const mesh = createMissileDestroyerMesh(config);
-
-    const playerPos = this.playerSystem.getPosition();
-    mesh.position.set(playerPos.x, -50, playerPos.z + 200);
-
-    this.gameScene.scene.add(mesh);
-
-    const missileDestroyer = new MissileDestroyerAI(
-      mesh,
-      config,
-      this.gameScene.scene,
-      this.particleSystem
-    );
-    this.currentBoss = missileDestroyer;
-
-    missileDestroyer.onFlakFire = (_position) => {
-      this.audioManager.playFlakCannonFire();
-    };
-
-    missileDestroyer.onFlakExplode = (position, _radius, _damage) => {
-      this.particleSystem.createFlakExplosion(position, FLAK_CANNON_CONFIG.AOE_RADIUS);
-      this.audioManager.playFlakCannonExplosion();
-
-      const targets = [
-        this.playerAircraft,
-        ...this.enemySystem.getFriendlyAIs().map((f) => f.getMesh()),
-      ];
-      missileDestroyer.getFlakCannonSystem().checkAoeCollisions(targets, (target, damage) => {
-        this.particleSystem.createHit(target.position);
-        if (target === this.playerAircraft) {
-          if (!this.playerSystem.isShieldActive()) {
-            this.playerSystem.getHealth().takeDamage(damage);
-          }
-        } else {
-          const friendly = this.enemySystem.getFriendlyAIs().find((f) => f.getMesh() === target);
-          friendly?.takeDamage(damage);
-        }
-      });
-    };
-
-    missileDestroyer.onDestroy = (position, bossConfig) => {
-      if (this.currentBoss) {
-        const missileSystem = this.currentBoss.getMissileSystem();
-        if (missileSystem) {
-          missileSystem.dispose();
-        }
-        (this.currentBoss as MissileDestroyerAI).getFlakCannonSystem().dispose();
-      }
-      this.handleBossDestroy(position, bossConfig, true);
-    };
-
-    missileDestroyer.onMissileFired = () => {
-      this.audioManager.playMissileLaunch();
-    };
-
-    missileDestroyer.onFighterSpawn = (position) => {
-      this.spawnFighterFromBoss(position);
-    };
-  }
-
-  private createSkyCarrierBoss(config: BossConfig): void {
-    const mesh = createSkyCarrierMesh(config);
-
-    const playerPos = this.playerSystem.getPosition();
-    mesh.position.set(playerPos.x, 200, playerPos.z + 200);
-
-    this.gameScene.scene.add(mesh);
-
-    const skyCarrier = new SkyCarrierAI(mesh, config, this.gameScene.scene, this.particleSystem);
-    this.currentBoss = skyCarrier;
-
-    skyCarrier.onFire = (position, direction, damage) => {
-      this.combatSystem
-        .getBossProjectilePool()
-        .fire(position, direction, damage, this.currentBoss?.getMesh(), Faction.ENEMY);
-      this.audioManager.playShoot();
-    };
-
-    skyCarrier.onDestroy = (position, bossConfig) => {
-      this.handleBossDestroy(position, bossConfig, true);
-    };
-
-    skyCarrier.onMissileFired = () => {
-      this.audioManager.playMissileLaunch();
-    };
-
-    skyCarrier.onEnemySpawn = (position, enemyType) => {
-      const MAX_ENEMIES = 8;
-      if (this.enemySystem.getAliveEnemyCount() >= MAX_ENEMIES) {
-        return;
-      }
-      this.enemySystem.spawnEnemyAt(enemyType, position);
-      this.hud.showPowerUpBig('⚠️', '敌机起飞！');
-    };
   }
 
   private handleBossDestroy(
@@ -1190,44 +1013,38 @@ export class GameCoordinator {
     this.gameState.addScore(bossConfig.scoreValue);
     this.playerStats.addScore(bossConfig.scoreValue);
 
-    this.bossIndicator.clear();
+    this.presentationController.clearBossMissileIndicators();
 
-    if (this.currentBoss) {
-      const missileSystem = this.currentBoss.getMissileSystem();
-      if (missileSystem) {
-        missileSystem.dispose();
-      }
-    }
-
-    for (const friendly of this.enemySystem.getFriendlyAIs()) {
-      friendly.dispose();
-    }
-    this.enemySystem['friendlyAIs'] = [];
+    this.bossBattleController.clear();
+    this.enemySystem.clearFriendlies();
 
     this.combatSystem.getPlayerProjectilePool().clear();
     this.combatSystem.getEnemyProjectilePool().clear();
     this.particleSystem.clear();
 
     this.hud.showPowerUpBig('🏆', 'Boss 已击败！');
-    this.currentBoss?.dispose();
-    this.currentBoss = null;
 
     this.scheduleTimeout(() => {
-      this.currentLevelId++;
-      if (this.currentLevelId <= 5) {
-        this.hud.showPowerUpBig('⏭️', `进入第 ${this.currentLevelId} 关`);
+      const nextLevel = this.sessionState.getLevel() + 1;
+      this.sessionState.setLevel(nextLevel);
+      this.sessionState.setInBossBattle(false);
+
+      if (nextLevel <= 5) {
+        this.hud.showPowerUpBig('⏭️', `进入第 ${nextLevel} 关`);
         this.scheduleTimeout(() => {
+          this.applyCurrentLevelEnvironment(nextLevel);
           if (isBossMode) {
             this.startBossBattle();
           } else {
-            this.enemySystem.loadLevel(this.currentLevelId);
+            this.enemySystem.loadLevel(nextLevel);
+            this.applyCurrentLevelEnvironment(nextLevel);
             this.hud.updateRemainingEnemies(this.enemySystem.getTotalEnemyCount());
-            this.musicSystem.playLevelMusic(this.getLevelMusic(this.currentLevelId));
+            this.musicSystem.playLevelMusic(this.getLevelMusic(nextLevel));
             this.enemySystem.startWave(this.playerSystem.getPosition());
           }
         }, 2000);
       } else {
-        this.gameState.setStatus(GameStatus.GAME_OVER);
+        this.sessionState.setGameOver();
         this.musicSystem.stopMusic();
         this.hud.showGameOver(this.gameState.getScore());
       }
@@ -1235,262 +1052,22 @@ export class GameCoordinator {
   }
 
   private startLevelBossBattle(): void {
-    this.inLevelBossBattle = true;
-    this.musicSystem.playBossMusic(this.currentLevelId);
+    this.sessionState.setInBossBattle(true);
+    this.applyCurrentLevelEnvironment();
+    const level = this.sessionState.getLevel();
+    if (!this.bossBattleController.start(level, false)) {
+      this.sessionState.setInBossBattle(false);
+      return;
+    }
+  }
 
-    const bossType = getBossForLevel(this.currentLevelId);
-    if (!bossType) return;
-
-    const config = BOSS_CONFIGS[bossType];
-
-    if (bossType === BossType.DESERT_FORTRESS) {
-      this.createDesertFortressBossForLevel(config);
-    } else if (bossType === BossType.OCTOPUS_WARSHIP) {
-      this.createOctopusWarshipBossForLevel(config);
-    } else if (bossType === BossType.MISSILE_DESTROYER) {
-      this.createMissileDestroyerBossForLevel(config);
-    } else if (bossType === BossType.SKY_CARRIER) {
-      this.createSkyCarrierBossForLevel(config);
-    } else {
-      this.createHeavyBomberBossForLevel(config);
+  private applyCurrentLevelEnvironment(level: number = this.sessionState.getLevel()): void {
+    const levelConfig = getLevelConfig(level);
+    if (!levelConfig) {
+      return;
     }
 
-    this.bossFriendlySpawnTimer = 0;
-
-    this.scheduleTimeout(() => {
-      this.spawnFriendlyAI();
-      this.hud.showPowerUpBig('✈️', '召唤友军');
-    }, 1000);
-  }
-
-  private createHeavyBomberBossForLevel(config: BossConfig): void {
-    const mesh = createBossMesh(config);
-
-    const playerPos = this.playerSystem.getPosition();
-    const spawnOffset = new THREE.Vector3(
-      (Math.random() - 0.5) * 200,
-      50 + Math.random() * 50,
-      (Math.random() - 0.5) * 200
-    );
-    mesh.position.copy(playerPos).add(spawnOffset);
-
-    this.gameScene.scene.add(mesh);
-
-    this.currentBoss = new BossAI(mesh, config, this.gameScene.scene, this.particleSystem);
-
-    this.currentBoss.onFire = (position, direction, damage) => {
-      this.combatSystem
-        .getBossProjectilePool()
-        .fire(position, direction, damage, this.currentBoss?.getMesh(), Faction.ENEMY);
-      this.audioManager.playShoot();
-    };
-
-    this.currentBoss.onDestroy = (position, bossConfig) => {
-      this.handleBossDestroy(position, bossConfig, false);
-      this.inLevelBossBattle = false;
-    };
-
-    this.currentBoss.onMissileFired = () => {
-      this.audioManager.playMissileLaunch();
-    };
-  }
-
-  private createDesertFortressBossForLevel(config: BossConfig): void {
-    const mesh = createDesertFortressMesh(config);
-
-    const playerPos = this.playerSystem.getPosition();
-    mesh.position.set(playerPos.x, -50, playerPos.z + 200);
-
-    this.gameScene.scene.add(mesh);
-
-    const desertFortress = new DesertFortressAI(
-      mesh,
-      config,
-      this.gameScene.scene,
-      this.particleSystem
-    );
-    this.currentBoss = desertFortress;
-
-    desertFortress.onFlakFire = (_position) => {
-      this.audioManager.playFlakCannonFire();
-    };
-
-    desertFortress.onFlakExplode = (position, _radius, _damage) => {
-      this.particleSystem.createFlakExplosion(position, FLAK_CANNON_CONFIG.AOE_RADIUS);
-      this.audioManager.playFlakCannonExplosion();
-
-      const targets = [
-        this.playerAircraft,
-        ...this.enemySystem.getFriendlyAIs().map((f) => f.getMesh()),
-      ];
-      desertFortress.getFlakCannonSystem().checkAoeCollisions(targets, (target, damage) => {
-        this.particleSystem.createHit(target.position);
-        if (target === this.playerAircraft) {
-          if (!this.playerSystem.isShieldActive()) {
-            this.playerSystem.getHealth().takeDamage(damage);
-          }
-        } else {
-          const friendly = this.enemySystem.getFriendlyAIs().find((f) => f.getMesh() === target);
-          friendly?.takeDamage(damage);
-        }
-      });
-    };
-
-    desertFortress.onDestroy = (position, bossConfig) => {
-      if (this.currentBoss) {
-        const missileSystem = this.currentBoss.getMissileSystem();
-        if (missileSystem) {
-          missileSystem.dispose();
-        }
-        (this.currentBoss as DesertFortressAI).getFlakCannonSystem().dispose();
-      }
-      this.handleBossDestroy(position, bossConfig, false);
-      this.inLevelBossBattle = false;
-    };
-
-    desertFortress.onMissileFired = () => {
-      this.audioManager.playMissileLaunch();
-    };
-  }
-
-  private createOctopusWarshipBossForLevel(config: BossConfig): void {
-    const mesh = createOctopusWarshipMesh(config);
-
-    const playerPos = this.playerSystem.getPosition();
-    mesh.position.set(playerPos.x + (Math.random() - 0.5) * 100, 150, playerPos.z + 200);
-
-    this.gameScene.scene.add(mesh);
-
-    const octopusWarship = new OctopusWarshipAI(mesh, config, this.particleSystem);
-    this.currentBoss = octopusWarship;
-
-    octopusWarship.init();
-
-    octopusWarship.onTeleport = (from, to) => {
-      this.particleSystem.createTeleportOut(from);
-      this.particleSystem.createTeleportIn(to);
-    };
-
-    octopusWarship.onLaserWarning = () => {
-      this.hud.showPowerUpBig('⚠️', '激光预警！', 1, true);
-    };
-
-    octopusWarship.onLaserSweep = () => {
-      this.hud.showPowerUpBig('💣', '激光扫射！', 1, true);
-    };
-
-    octopusWarship.onLaserHit = () => {
-      if (!this.playerSystem.isShieldActive()) {
-        this.playerSystem.getHealth().takeDamage(config.damage);
-        this.particleSystem.createHit(this.playerAircraft.position);
-      }
-    };
-
-    octopusWarship.onDestroy = (position, bossConfig) => {
-      octopusWarship.getLaserSystem().dispose();
-      octopusWarship.getEyeSystem().dispose();
-      this.handleBossDestroy(position, bossConfig, false);
-      this.inLevelBossBattle = false;
-    };
-  }
-
-  private createMissileDestroyerBossForLevel(config: BossConfig): void {
-    const mesh = createMissileDestroyerMesh(config);
-
-    const playerPos = this.playerSystem.getPosition();
-    mesh.position.set(playerPos.x, -50, playerPos.z + 200);
-
-    this.gameScene.scene.add(mesh);
-
-    const missileDestroyer = new MissileDestroyerAI(
-      mesh,
-      config,
-      this.gameScene.scene,
-      this.particleSystem
-    );
-    this.currentBoss = missileDestroyer;
-
-    missileDestroyer.onFlakFire = (_position) => {
-      this.audioManager.playFlakCannonFire();
-    };
-
-    missileDestroyer.onFlakExplode = (position, _radius, _damage) => {
-      this.particleSystem.createFlakExplosion(position, FLAK_CANNON_CONFIG.AOE_RADIUS);
-      this.audioManager.playFlakCannonExplosion();
-
-      const targets = [
-        this.playerAircraft,
-        ...this.enemySystem.getFriendlyAIs().map((f) => f.getMesh()),
-      ];
-      missileDestroyer.getFlakCannonSystem().checkAoeCollisions(targets, (target, damage) => {
-        this.particleSystem.createHit(target.position);
-        if (target === this.playerAircraft) {
-          if (!this.playerSystem.isShieldActive()) {
-            this.playerSystem.getHealth().takeDamage(damage);
-          }
-        } else {
-          const friendly = this.enemySystem.getFriendlyAIs().find((f) => f.getMesh() === target);
-          friendly?.takeDamage(damage);
-        }
-      });
-    };
-
-    missileDestroyer.onDestroy = (position, bossConfig) => {
-      if (this.currentBoss) {
-        const missileSystem = this.currentBoss.getMissileSystem();
-        if (missileSystem) {
-          missileSystem.dispose();
-        }
-        (this.currentBoss as MissileDestroyerAI).getFlakCannonSystem().dispose();
-      }
-      this.handleBossDestroy(position, bossConfig, false);
-      this.inLevelBossBattle = false;
-    };
-
-    missileDestroyer.onMissileFired = () => {
-      this.audioManager.playMissileLaunch();
-    };
-
-    missileDestroyer.onFighterSpawn = (position) => {
-      this.spawnFighterFromBoss(position);
-    };
-  }
-
-  private createSkyCarrierBossForLevel(config: BossConfig): void {
-    const mesh = createSkyCarrierMesh(config);
-
-    const playerPos = this.playerSystem.getPosition();
-    mesh.position.set(playerPos.x, 200, playerPos.z + 200);
-
-    this.gameScene.scene.add(mesh);
-
-    const skyCarrier = new SkyCarrierAI(mesh, config, this.gameScene.scene, this.particleSystem);
-    this.currentBoss = skyCarrier;
-
-    skyCarrier.onFire = (position, direction, damage) => {
-      this.combatSystem
-        .getBossProjectilePool()
-        .fire(position, direction, damage, this.currentBoss?.getMesh(), Faction.ENEMY);
-      this.audioManager.playShoot();
-    };
-
-    skyCarrier.onDestroy = (position, bossConfig) => {
-      this.handleBossDestroy(position, bossConfig, false);
-      this.inLevelBossBattle = false;
-    };
-
-    skyCarrier.onMissileFired = () => {
-      this.audioManager.playMissileLaunch();
-    };
-
-    skyCarrier.onEnemySpawn = (position, enemyType) => {
-      const MAX_ENEMIES = 8;
-      if (this.enemySystem.getAliveEnemyCount() >= MAX_ENEMIES) {
-        return;
-      }
-      this.enemySystem.spawnEnemyAt(enemyType, position);
-      this.hud.showPowerUpBig('⚠️', '敌机起飞！');
-    };
+    this.gameScene.applyLevelEnvironment(levelConfig);
   }
 
   public stop(): void {
@@ -1511,14 +1088,15 @@ export class GameCoordinator {
   }
 
   private pauseGame(): void {
-    this.isPaused = true;
+    this.sessionState.pause();
     this.upgradeMenu?.show();
     this.inputHandler.resetPauseState();
     this.inputHandler.resetUpgradeState();
   }
 
   private resumeGame(): void {
-    this.isPaused = false;
+    this.sessionState.resume();
+    this.presentationController.resetHudThrottle();
     this.upgradeMenu?.hide();
     this.inputHandler.resetPauseState();
     this.inputHandler.resetUpgradeState();
@@ -1537,28 +1115,20 @@ export class GameCoordinator {
   }
 
   private scheduleTimeout(callback: () => void, delay: number): ReturnType<typeof setTimeout> {
-    const timeoutId = setTimeout(() => {
-      this.pendingTimeouts.delete(timeoutId);
-      callback();
-    }, delay);
-    this.pendingTimeouts.add(timeoutId);
-    return timeoutId;
+    return this.resourceRegistry.scheduleTimeout(callback, delay);
   }
 
   public dispose(): void {
-    for (const timeoutId of this.pendingTimeouts) {
-      clearTimeout(timeoutId);
-    }
-    this.pendingTimeouts.clear();
-
-    this.eventUnsubscribers.forEach((unsub) => unsub());
-    this.eventUnsubscribers = [];
-
     this.stop();
+    this.resourceRegistry.dispose();
+    this.bossBattleController.clear();
     this.enemySystem.dispose();
     this.particleSystem.clear();
     this.powerUpSystem.dispose();
+    this.presentationController.dispose();
+    this.upgradeMenu?.dispose();
     this.gameScene.dispose();
+    this.audioManager.dispose();
     this.musicSystem.dispose();
   }
 }

@@ -23,12 +23,19 @@ export class PlayerSystem implements IGameSystem {
   private shieldMesh?: THREE.Mesh;
 
   private fireCooldown: number = 0;
+  private readonly previousVisualPosition = new THREE.Vector3();
+  private readonly currentVisualPosition = new THREE.Vector3();
+  private readonly interpolatedVisualPosition = new THREE.Vector3();
+  private readonly previousVisualQuaternion = new THREE.Quaternion();
+  private readonly currentVisualQuaternion = new THREE.Quaternion();
+  private readonly interpolatedVisualQuaternion = new THREE.Quaternion();
 
   constructor(scene: THREE.Scene, mesh: THREE.Group, stats: PlayerStats) {
     this.mesh = mesh;
     this.stats = stats;
     this.controller = new PlayerController(mesh, scene, stats);
     this.health = new HealthSystem(stats.getMaxHealth());
+    this.syncVisualState();
   }
 
   init(): void {
@@ -72,6 +79,7 @@ export class PlayerSystem implements IGameSystem {
     });
 
     this.mesh.visible = false;
+    this.syncVisualState();
 
     if (this.lives <= 0) {
       // Game over handled by Game.ts
@@ -89,6 +97,7 @@ export class PlayerSystem implements IGameSystem {
     }
 
     this.mesh.visible = true;
+    this.syncVisualState();
 
     this.isRespawning = false;
     EventBus.emit(GameEventType.PLAYER_RESPAWN, {
@@ -222,5 +231,42 @@ export class PlayerSystem implements IGameSystem {
 
   getFireCooldown(): number {
     return this.fireCooldown;
+  }
+
+  public capturePreviousVisualState(): void {
+    this.previousVisualPosition.copy(this.currentVisualPosition);
+    this.previousVisualQuaternion.copy(this.currentVisualQuaternion);
+  }
+
+  public captureCurrentVisualState(): void {
+    this.currentVisualPosition.copy(this.mesh.position);
+    this.currentVisualQuaternion.copy(this.mesh.quaternion);
+  }
+
+  public syncVisualState(): void {
+    this.previousVisualPosition.copy(this.mesh.position);
+    this.currentVisualPosition.copy(this.mesh.position);
+    this.previousVisualQuaternion.copy(this.mesh.quaternion);
+    this.currentVisualQuaternion.copy(this.mesh.quaternion);
+  }
+
+  public applyInterpolatedVisual(alpha: number): void {
+    this.interpolatedVisualPosition.lerpVectors(
+      this.previousVisualPosition,
+      this.currentVisualPosition,
+      alpha
+    );
+    this.interpolatedVisualQuaternion.slerpQuaternions(
+      this.previousVisualQuaternion,
+      this.currentVisualQuaternion,
+      alpha
+    );
+    this.mesh.position.copy(this.interpolatedVisualPosition);
+    this.mesh.quaternion.copy(this.interpolatedVisualQuaternion);
+  }
+
+  public restoreCurrentVisual(): void {
+    this.mesh.position.copy(this.currentVisualPosition);
+    this.mesh.quaternion.copy(this.currentVisualQuaternion);
   }
 }

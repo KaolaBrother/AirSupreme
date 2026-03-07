@@ -4,6 +4,8 @@ import { DesertFortressAI, createDesertFortressMesh } from '@/features/boss/Dese
 import { BOSS_CONFIGS, BossType, FlakCannonPosition } from '@/features/boss/BossTypes';
 import { ParticleSystem } from '@/features/effects/ParticleSystem';
 
+type BossPartsGroup = THREE.Group & { bossParts?: THREE.Mesh[] };
+
 function createPlayerMesh(x: number, y: number, z: number): THREE.Object3D {
   const mesh = new THREE.Object3D();
   mesh.position.set(x, y, z);
@@ -43,13 +45,13 @@ describe('DesertFortressAI', () => {
 
     it('should store bossParts reference', () => {
       const mesh = createDesertFortressMesh(config);
-      expect((mesh as any).bossParts).toBeDefined();
-      expect((mesh as any).bossParts.length).toBeGreaterThan(0);
+      const bossParts = (mesh as BossPartsGroup).bossParts ?? [];
+      expect(bossParts.length).toBeGreaterThan(0);
     });
 
     it('should have named body parts', () => {
       const mesh = createDesertFortressMesh(config);
-      const partNames = (mesh as any).bossParts.map((p: THREE.Mesh) => p.name);
+      const partNames = ((mesh as BossPartsGroup).bossParts ?? []).map((p) => p.name);
 
       expect(partNames).toContain('fortress_body');
       expect(partNames).toContain('fortress_left_track');
@@ -59,7 +61,7 @@ describe('DesertFortressAI', () => {
 
     it('should have four flak cannon bases', () => {
       const mesh = createDesertFortressMesh(config);
-      const partNames = (mesh as any).bossParts.map((p: THREE.Mesh) => p.name);
+      const partNames = ((mesh as BossPartsGroup).bossParts ?? []).map((p) => p.name);
 
       expect(partNames).toContain('fortress_flak_base_front_left');
       expect(partNames).toContain('fortress_flak_base_front_right');
@@ -69,7 +71,7 @@ describe('DesertFortressAI', () => {
 
     it('should have two missile launchers', () => {
       const mesh = createDesertFortressMesh(config);
-      const partNames = (mesh as any).bossParts.map((p: THREE.Mesh) => p.name);
+      const partNames = ((mesh as BossPartsGroup).bossParts ?? []).map((p) => p.name);
 
       expect(partNames).toContain('fortress_missile_left');
       expect(partNames).toContain('fortress_missile_right');
@@ -135,6 +137,15 @@ describe('DesertFortressAI', () => {
       const friendlies: THREE.Object3D[] = [];
 
       expect(() => boss.update(0.016, playerMesh, friendlies)).not.toThrow();
+    });
+
+    it('should safely update visual state at critical health even when cached visual refs are missing', () => {
+      boss.takeDamage(config.health - 1);
+      (boss as unknown as { coreGlow: THREE.Mesh | null }).coreGlow = null;
+      (boss as unknown as { flakMuzzles: THREE.Mesh[] }).flakMuzzles = [];
+      (boss as unknown as { missileGlowCaps: THREE.Mesh[] }).missileGlowCaps = [];
+
+      expect(() => boss.update(0.016, createPlayerMesh(0, 100, 0), [])).not.toThrow();
     });
 
     it('should not move during update (ground unit)', () => {
@@ -219,6 +230,27 @@ describe('DesertFortressAI', () => {
       friendly.position.set(50, 50, 50);
 
       expect(() => boss.update(0.016, createPlayerMesh(0, 0, 0), [friendly])).not.toThrow();
+    });
+  });
+
+  describe('visual cache robustness', () => {
+    it('should update safely when visual-node names are absent from mesh', () => {
+      const mesh = createDesertFortressMesh(config);
+      const removable = mesh.children.filter(
+        (child) =>
+          child.name === 'fortress_core_glow'
+          || child.name.startsWith('fortress_flak_muzzle_')
+          || (child.name.startsWith('fortress_missile_') && child.name.endsWith('_glow'))
+      );
+      for (const node of removable) {
+        mesh.remove(node);
+      }
+
+      scene.add(mesh);
+      const fortress = new DesertFortressAI(mesh, config, scene, mockParticleSystem);
+      fortress.takeDamage(config.health - 1);
+
+      expect(() => fortress.update(0.016, createPlayerMesh(120, 80, -20), [])).not.toThrow();
     });
   });
 

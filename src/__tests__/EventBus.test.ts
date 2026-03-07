@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import * as THREE from 'three';
 import { EventBus, GameEventType } from '@/core/EventBus';
+import { ENEMY_CONFIGS, EnemyType } from '@/features/enemy/EnemyTypes';
 
 describe('EventBus', () => {
   beforeEach(() => {
@@ -40,7 +42,7 @@ describe('EventBus', () => {
     const unsubscribe = EventBus.on(GameEventType.PLAYER_DEATH, handler);
     unsubscribe();
 
-    EventBus.emit(GameEventType.PLAYER_DEATH, { position: { x: 0, y: 0, z: 0 } as any, lives: 0 });
+    EventBus.emit(GameEventType.PLAYER_DEATH, { position: new THREE.Vector3(0, 0, 0), lives: 0 });
 
     expect(handler).not.toHaveBeenCalled();
   });
@@ -77,8 +79,8 @@ describe('EventBus', () => {
 
     EventBus.emit(GameEventType.ENEMY_DEATH, {
       enemyId: 'test',
-      position: { x: 0, y: 0, z: 0 } as any,
-      config: {} as any,
+      position: new THREE.Vector3(0, 0, 0),
+      config: ENEMY_CONFIGS[EnemyType.FIGHTER],
     });
 
     expect(handler).not.toHaveBeenCalled();

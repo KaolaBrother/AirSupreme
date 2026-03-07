@@ -4,6 +4,8 @@ import { BossAI, createBossMesh } from '@/features/boss/BossAI';
 import { BOSS_CONFIGS, BossType, BossCannonPosition } from '@/features/boss/BossTypes';
 import { ParticleSystem } from '@/features/effects/ParticleSystem';
 
+type BossPartsGroup = THREE.Group & { bossParts?: THREE.Mesh[] };
+
 function createPlayerMesh(x: number, y: number, z: number): THREE.Object3D {
   const mesh = new THREE.Object3D();
   mesh.position.set(x, y, z);
@@ -42,13 +44,13 @@ describe('BossAI', () => {
 
     it('should store bossParts reference', () => {
       const mesh = createBossMesh(config);
-      expect((mesh as any).bossParts).toBeDefined();
-      expect((mesh as any).bossParts.length).toBeGreaterThan(0);
+      const bossParts = (mesh as BossPartsGroup).bossParts ?? [];
+      expect(bossParts.length).toBeGreaterThan(0);
     });
 
     it('should have named body parts', () => {
       const mesh = createBossMesh(config);
-      const partNames = (mesh as any).bossParts.map((p: THREE.Mesh) => p.name);
+      const partNames = ((mesh as BossPartsGroup).bossParts ?? []).map((p) => p.name);
 
       expect(partNames).toContain('boss_body');
       expect(partNames).toContain('boss_nose');
@@ -58,7 +60,7 @@ describe('BossAI', () => {
 
     it('should have four turrets', () => {
       const mesh = createBossMesh(config);
-      const partNames = (mesh as any).bossParts.map((p: THREE.Mesh) => p.name);
+      const partNames = ((mesh as BossPartsGroup).bossParts ?? []).map((p) => p.name);
 
       expect(partNames).toContain('boss_left_turret');
       expect(partNames).toContain('boss_right_turret');
@@ -121,7 +123,7 @@ describe('BossAI', () => {
     it('should return missile system', () => {
       const missileSystem = boss.getMissileSystem();
       expect(missileSystem).toBeDefined();
-      expect(missileSystem.getMissiles()).toBeDefined;
+      expect(missileSystem.getMissiles()).toBeDefined();
     });
 
     it('should update without errors', () => {

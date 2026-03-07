@@ -96,6 +96,10 @@ export class CombatSystem implements IGameSystem {
     this.damageMultiplier = multiplier;
   }
 
+  getDamageMultiplier(): number {
+    return this.damageMultiplier;
+  }
+
   private getPlayerDamage(): number {
     const baseDamage = 12.5;
     return baseDamage * this.damageMultiplier;

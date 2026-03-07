@@ -22,10 +22,12 @@ export interface LoggerConfig {
 }
 
 class LoggerManager {
+  private readonly isDevMode = import.meta.env.MODE === 'development';
+
   private config: LoggerConfig = {
-    minLevel: Boolean(import.meta.env.DEV) ? LogLevel.DEBUG : LogLevel.INFO,
+    minLevel: this.isDevMode ? LogLevel.DEBUG : LogLevel.INFO,
     enableConsole: true,
-    enableStorage: Boolean(import.meta.env.DEV),
+    enableStorage: this.isDevMode,
     maxStorageEntries: 1000,
   };
 
@@ -41,10 +43,12 @@ class LoggerManager {
   }
 
   getLogger(module: string): Logger {
-    if (!this.moduleLoggers.has(module)) {
-      this.moduleLoggers.set(module, new Logger(module, this));
+    let logger = this.moduleLoggers.get(module);
+    if (!logger) {
+      logger = new Logger(module, this);
+      this.moduleLoggers.set(module, logger);
     }
-    return this.moduleLoggers.get(module)!;
+    return logger;
   }
 
   log(entry: LogEntry): void {

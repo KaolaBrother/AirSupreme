@@ -35,6 +35,12 @@ export class EnemyAI {
   // 回调
   public onFire?: (position: THREE.Vector3, direction: THREE.Vector3, damage: number) => void;
   public onDestroy?: (position: THREE.Vector3) => void;
+  private readonly previousVisualPosition = new THREE.Vector3();
+  private readonly currentVisualPosition = new THREE.Vector3();
+  private readonly interpolatedVisualPosition = new THREE.Vector3();
+  private readonly previousVisualQuaternion = new THREE.Quaternion();
+  private readonly currentVisualQuaternion = new THREE.Quaternion();
+  private readonly interpolatedVisualQuaternion = new THREE.Quaternion();
 
   constructor(mesh: THREE.Group, config: EnemyConfig, scene: THREE.Scene) {
     this.mesh = mesh;
@@ -60,6 +66,7 @@ export class EnemyAI {
     this.health.onDeath = () => {
       this.onDestroy?.(this.mesh.position.clone());
     };
+    this.syncVisualState();
   }
 
   /**
@@ -78,6 +85,8 @@ export class EnemyAI {
     friendlyMeshes?: THREE.Object3D[],
     fireTarget: THREE.Vector3 | null = null
   ): void {
+    this.capturePreviousVisualState();
+
     const pos = this.mesh.position;
     if (!isFinite(pos.x) || !isFinite(pos.y) || !isFinite(pos.z)) {
       log.error('Enemy position is NaN or Infinity, resetting', {
@@ -147,6 +156,7 @@ export class EnemyAI {
     }
 
     this.trail.update(deltaTime);
+    this.captureCurrentVisualState();
   }
 
   /**
@@ -427,6 +437,11 @@ export class EnemyAI {
     return this.config;
   }
 
+  public setConfig(config: EnemyConfig): void {
+    this.config = config;
+    this.health.setMaxHealth(config.health, true);
+  }
+
   /**
    * 获取网格
    */
@@ -476,6 +491,7 @@ export class EnemyAI {
     // 重置状态
     this.selectNewState();
     this.stateTimer = this.randomStateDuration();
+    this.syncVisualState();
   }
 
   /**
@@ -506,5 +522,42 @@ export class EnemyAI {
         }
       }
     }
+  }
+
+  public applyInterpolatedVisual(alpha: number): void {
+    this.interpolatedVisualPosition.lerpVectors(
+      this.previousVisualPosition,
+      this.currentVisualPosition,
+      alpha
+    );
+    this.interpolatedVisualQuaternion.slerpQuaternions(
+      this.previousVisualQuaternion,
+      this.currentVisualQuaternion,
+      alpha
+    );
+    this.mesh.position.copy(this.interpolatedVisualPosition);
+    this.mesh.quaternion.copy(this.interpolatedVisualQuaternion);
+  }
+
+  public restoreCurrentVisual(): void {
+    this.mesh.position.copy(this.currentVisualPosition);
+    this.mesh.quaternion.copy(this.currentVisualQuaternion);
+  }
+
+  private capturePreviousVisualState(): void {
+    this.previousVisualPosition.copy(this.currentVisualPosition);
+    this.previousVisualQuaternion.copy(this.currentVisualQuaternion);
+  }
+
+  private captureCurrentVisualState(): void {
+    this.currentVisualPosition.copy(this.mesh.position);
+    this.currentVisualQuaternion.copy(this.mesh.quaternion);
+  }
+
+  private syncVisualState(): void {
+    this.previousVisualPosition.copy(this.mesh.position);
+    this.currentVisualPosition.copy(this.mesh.position);
+    this.previousVisualQuaternion.copy(this.mesh.quaternion);
+    this.currentVisualQuaternion.copy(this.mesh.quaternion);
   }
 }

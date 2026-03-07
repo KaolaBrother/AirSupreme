@@ -4,16 +4,19 @@ import { EventBus, GameEventType } from '@/core/EventBus';
 import { LevelManager } from '@/features/levels/LevelManager';
 import { FriendlyAI } from '@/features/enemy/FriendlyAI';
 import { Faction } from '@/core/Faction';
+import type { DifficultyProfile } from '@/core/Difficulty';
+import { GameSessionState } from '@/core/GameSessionState';
 
 export class EnemySystem implements IGameSystem {
   readonly name = 'EnemySystem';
 
   private levelManager: LevelManager;
+  private sessionState: GameSessionState;
   private friendlyAIs: FriendlyAI[] = [];
-  private currentLevel: number = 1;
 
-  constructor(scene: THREE.Scene) {
+  constructor(scene: THREE.Scene, sessionState?: GameSessionState) {
     this.levelManager = new LevelManager(scene);
+    this.sessionState = sessionState ?? new GameSessionState();
   }
 
   init(): void {
@@ -39,13 +42,15 @@ export class EnemySystem implements IGameSystem {
     };
 
     this.levelManager.onWaveStart = (wave) => {
+      this.sessionState.setWave(wave);
       EventBus.emit(GameEventType.WAVE_START, {
         wave,
-        level: this.currentLevel,
+        level: this.sessionState.getLevel(),
       });
     };
 
     this.levelManager.onWaveComplete = (wave) => {
+      this.sessionState.setWave(wave);
       EventBus.emit(GameEventType.WAVE_COMPLETE, {
         wave,
         enemiesKilled: 0,
@@ -53,7 +58,6 @@ export class EnemySystem implements IGameSystem {
     };
 
     this.levelManager.onLevelComplete = (level) => {
-      this.currentLevel++;
       EventBus.emit(GameEventType.LEVEL_COMPLETE, { level });
     };
   }
@@ -78,6 +82,38 @@ export class EnemySystem implements IGameSystem {
       } else {
         friendly.dispose();
         this.friendlyAIs.splice(i, 1);
+      }
+    }
+  }
+
+  updateVisuals(deltaTime: number, playerPosition: THREE.Vector3): void {
+    this.levelManager.updateVisuals(deltaTime, playerPosition);
+  }
+
+  applyInterpolatedVisuals(alpha: number): void {
+    for (const enemy of this.levelManager.getEnemies()) {
+      if (enemy.isAlive()) {
+        enemy.applyInterpolatedVisual(alpha);
+      }
+    }
+
+    for (const friendly of this.friendlyAIs) {
+      if (friendly.isAlive()) {
+        friendly.getEnemy().applyInterpolatedVisual(alpha);
+      }
+    }
+  }
+
+  restoreCurrentVisuals(): void {
+    for (const enemy of this.levelManager.getEnemies()) {
+      if (enemy.isAlive()) {
+        enemy.restoreCurrentVisual();
+      }
+    }
+
+    for (const friendly of this.friendlyAIs) {
+      if (friendly.isAlive()) {
+        friendly.getEnemy().restoreCurrentVisual();
       }
     }
   }
@@ -118,6 +154,14 @@ export class EnemySystem implements IGameSystem {
     this.levelManager.loadLevel(levelId);
   }
 
+  setDifficultyProfile(profile: DifficultyProfile): void {
+    this.levelManager.setDifficultyProfile(profile);
+  }
+
+  getCurrentLevelConfig(): import('@/features/terrain/LevelConfig').LevelConfig | null {
+    return this.levelManager.getCurrentLevelConfig();
+  }
+
   startWave(playerPosition: THREE.Vector3): void {
     this.levelManager.startWave(playerPosition);
   }
@@ -129,7 +173,7 @@ export class EnemySystem implements IGameSystem {
   spawnFriendly(friendly: FriendlyAI): void {
     this.friendlyAIs.push(friendly);
 
-    const enemy = friendly['enemy'];
+    const enemy = friendly.getEnemy();
     enemy.onFire = (position, direction, damage) => {
       EventBus.emit(GameEventType.FRIENDLY_FIRED, {
         position,
@@ -151,6 +195,13 @@ export class EnemySystem implements IGameSystem {
     if (index !== -1) {
       this.friendlyAIs.splice(index, 1);
     }
+  }
+
+  clearFriendlies(): void {
+    for (const friendly of this.friendlyAIs) {
+      friendly.dispose();
+    }
+    this.friendlyAIs = [];
   }
 
   spawnEnemyAt(

@@ -1,10 +1,11 @@
-import * as THREE from 'three';
+import { Vector3 } from 'three';
+import type { Quaternion } from 'three';
 import { getLogger } from '@/core/utils/Logger';
 
 const log = getLogger('RadarMinimap');
 
 interface EnemyRadarInfo {
-  position: THREE.Vector3;
+  position: Vector3;
   isSpawning: boolean; // 是否正在生成（传送门动画中）
 }
 
@@ -12,7 +13,7 @@ interface EnemyRadarInfo {
  * 气球状态（用于雷达显示）
  */
 interface BalloonRadarInfo {
-  position: THREE.Vector3;
+  position: Vector3;
 }
 
 /**
@@ -23,7 +24,7 @@ interface BalloonRadarInfo {
 export class RadarMinimap {
   private container: HTMLDivElement;
   private radarCanvas: HTMLCanvasElement;
-  private ctx: CanvasRenderingContext2D;
+  private ctx: CanvasRenderingContext2D | null = null;
   private size: number = 150; // 雷达大小
   private range: number = 600; // 雷达显示范围（米）
 
@@ -54,7 +55,7 @@ export class RadarMinimap {
       border-radius: 6px;
     `;
 
-    this.ctx = this.radarCanvas.getContext('2d')!;
+    this.ctx = this.radarCanvas.getContext('2d');
     if (!this.ctx) {
       log.error('Failed to get 2D context');
       return;
@@ -72,11 +73,15 @@ export class RadarMinimap {
    * @param playerRotation 玩家朝向
    */
   public update(
-    playerPos: THREE.Vector3,
+    playerPos: Vector3,
     enemies: EnemyRadarInfo[],
     balloons: BalloonRadarInfo[],
-    playerRotation: THREE.Quaternion
+    playerRotation: Quaternion
   ): void {
+    if (!this.ctx) {
+      return;
+    }
+
     // 清空画布
     this.ctx.clearRect(0, 0, this.size, this.size);
 
@@ -97,70 +102,85 @@ export class RadarMinimap {
    * 绘制雷达背景
    */
   private drawBackground(): void {
+    const ctx = this.ctx;
+    if (!ctx) {
+      return;
+    }
+
     const centerX = this.size / 2;
     const centerY = this.size / 2;
 
     // 绘制雷达网格
-    this.ctx.strokeStyle = 'rgba(0, 255, 100, 0.2)';
-    this.ctx.lineWidth = 1;
+    ctx.strokeStyle = 'rgba(0, 255, 100, 0.2)';
+    ctx.lineWidth = 1;
 
     // 同心圆
     for (let i = 1; i <= 3; i++) {
-      this.ctx.beginPath();
-      this.ctx.arc(centerX, centerY, (this.size / 2 - 10) * (i / 3), 0, Math.PI * 2);
-      this.ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(centerX, centerY, (this.size / 2 - 10) * (i / 3), 0, Math.PI * 2);
+      ctx.stroke();
     }
 
     // 十字线
-    this.ctx.beginPath();
-    this.ctx.moveTo(centerX, 0);
-    this.ctx.lineTo(centerX, this.size);
-    this.ctx.moveTo(0, centerY);
-    this.ctx.lineTo(this.size, centerY);
-    this.ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(centerX, 0);
+    ctx.lineTo(centerX, this.size);
+    ctx.moveTo(0, centerY);
+    ctx.lineTo(this.size, centerY);
+    ctx.stroke();
 
     // 前向标记（↑）
-    this.ctx.font = 'bold 12px Arial';
-    this.ctx.fillStyle = 'rgba(0, 255, 100, 0.5)';
-    this.ctx.textAlign = 'center';
-    this.ctx.fillText('↑', centerX, 15);
+    ctx.font = 'bold 12px Arial';
+    ctx.fillStyle = 'rgba(0, 255, 100, 0.5)';
+    ctx.textAlign = 'center';
+    ctx.fillText('↑', centerX, 15);
   }
 
   /**
    * 绘制玩家位置
    */
   private drawPlayer(): void {
+    const ctx = this.ctx;
+    if (!ctx) {
+      return;
+    }
+
     const centerX = this.size / 2;
     const centerY = this.size / 2;
 
     // 玩家点（绿色）
-    this.ctx.beginPath();
-    this.ctx.arc(centerX, centerY, 5, 0, Math.PI * 2);
-    this.ctx.fillStyle = 'rgba(0, 255, 0, 0.8)';
-    this.ctx.fill();
+    ctx.beginPath();
+    ctx.arc(centerX, centerY, 5, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(0, 255, 0, 0.8)';
+    ctx.fill();
 
     // 外圈效果
-    this.ctx.beginPath();
-    this.ctx.arc(centerX, centerY, 8, 0, Math.PI * 2);
-    this.ctx.strokeStyle = 'rgba(0, 255, 0, 0.3)';
-    this.ctx.lineWidth = 2;
-    this.ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(centerX, centerY, 8, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(0, 255, 0, 0.3)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
   }
 
   /**
    * 绘制敌人
    */
   private drawEnemies(
-    playerPos: THREE.Vector3,
+    playerPos: Vector3,
     enemies: EnemyRadarInfo[],
-    playerRotation: THREE.Quaternion
+    playerRotation: Quaternion
   ): void {
+    const ctx = this.ctx;
+    if (!ctx) {
+      return;
+    }
+
     const centerX = this.size / 2;
     const centerY = this.size / 2;
     const scale = this.size / this.range; // 缩放因子
 
     // 获取玩家的朝向角度（偏航角 Yaw）
-    const playerDirection = new THREE.Vector3(0, 0, -1);
+    const playerDirection = new Vector3(0, 0, -1);
     playerDirection.applyQuaternion(playerRotation);
     const playerAngle = Math.atan2(playerDirection.x, playerDirection.z);
 
@@ -180,30 +200,30 @@ export class RadarMinimap {
       // 绘制敌人点
       if (enemy.isSpawning) {
         // 生成中：黄色点
-        this.ctx.beginPath();
-        this.ctx.arc(centerX + dx, centerY + dy, 4, 0, Math.PI * 2);
-        this.ctx.fillStyle = 'rgba(255, 200, 0, 0.9)';
-        this.ctx.fill();
+        ctx.beginPath();
+        ctx.arc(centerX + dx, centerY + dy, 4, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(255, 200, 0, 0.9)';
+        ctx.fill();
 
         // 黄色外圈
-        this.ctx.beginPath();
-        this.ctx.arc(centerX + dx, centerY + dy, 6, 0, Math.PI * 2);
-        this.ctx.strokeStyle = 'rgba(255, 200, 0, 0.6)';
-        this.ctx.lineWidth = 1.5;
-        this.ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(centerX + dx, centerY + dy, 6, 0, Math.PI * 2);
+        ctx.strokeStyle = 'rgba(255, 200, 0, 0.6)';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
       } else {
         // 已生成：红色点
-        this.ctx.beginPath();
-        this.ctx.arc(centerX + dx, centerY + dy, 4, 0, Math.PI * 2);
-        this.ctx.fillStyle = 'rgba(255, 50, 50, 0.9)';
-        this.ctx.fill();
+        ctx.beginPath();
+        ctx.arc(centerX + dx, centerY + dy, 4, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(255, 50, 50, 0.9)';
+        ctx.fill();
 
         // 红色外圈
-        this.ctx.beginPath();
-        this.ctx.arc(centerX + dx, centerY + dy, 6, 0, Math.PI * 2);
-        this.ctx.strokeStyle = 'rgba(255, 0, 0, 0.6)';
-        this.ctx.lineWidth = 1.5;
-        this.ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(centerX + dx, centerY + dy, 6, 0, Math.PI * 2);
+        ctx.strokeStyle = 'rgba(255, 0, 0, 0.6)';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
       }
     }
   }
@@ -212,16 +232,21 @@ export class RadarMinimap {
    * 绘制气球
    */
   private drawBalloons(
-    playerPos: THREE.Vector3,
+    playerPos: Vector3,
     balloons: BalloonRadarInfo[],
-    playerRotation: THREE.Quaternion
+    playerRotation: Quaternion
   ): void {
+    const ctx = this.ctx;
+    if (!ctx) {
+      return;
+    }
+
     const centerX = this.size / 2;
     const centerY = this.size / 2;
     const scale = this.size / this.range; // 缩放因子
 
     // 获取玩家的朝向角度（偏航角 Yaw）
-    const playerDirection = new THREE.Vector3(0, 0, -1);
+    const playerDirection = new Vector3(0, 0, -1);
     playerDirection.applyQuaternion(playerRotation);
     const playerAngle = Math.atan2(playerDirection.x, playerDirection.z);
 
@@ -239,17 +264,17 @@ export class RadarMinimap {
       const dy = -rotatedZ * scale; // 修正：Z轴正方向对应屏幕Y负方向（向上），需要取反
 
       // 绘制气球点（青色/亮蓝色）
-      this.ctx.beginPath();
-      this.ctx.arc(centerX + dx, centerY + dy, 4, 0, Math.PI * 2);
-      this.ctx.fillStyle = 'rgba(0, 255, 255, 0.9)';
-      this.ctx.fill();
+      ctx.beginPath();
+      ctx.arc(centerX + dx, centerY + dy, 4, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(0, 255, 255, 0.9)';
+      ctx.fill();
 
       // 青色外圈
-      this.ctx.beginPath();
-      this.ctx.arc(centerX + dx, centerY + dy, 6, 0, Math.PI * 2);
-      this.ctx.strokeStyle = 'rgba(0, 200, 255, 0.6)';
-      this.ctx.lineWidth = 1.5;
-      this.ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(centerX + dx, centerY + dy, 6, 0, Math.PI * 2);
+      ctx.strokeStyle = 'rgba(0, 200, 255, 0.6)';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
     }
   }
 

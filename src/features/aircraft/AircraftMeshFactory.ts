@@ -27,10 +27,110 @@ interface CachedMaterials {
   wing: THREE.MeshStandardMaterial;
   cockpit: THREE.MeshStandardMaterial;
   engine: THREE.MeshBasicMaterial;
+  accent: THREE.MeshStandardMaterial;
+  detail: THREE.MeshStandardMaterial;
+  light: THREE.MeshBasicMaterial;
 }
 
 const geometryCache: Map<EnemyType, CachedGeometry> = new Map();
 const materialsCache: Map<EnemyType, CachedMaterials> = new Map();
+const detailGeometries = {
+  panel: new THREE.BoxGeometry(0.12, 0.04, 1),
+  blade: new THREE.BoxGeometry(0.18, 0.04, 0.8),
+  light: new THREE.SphereGeometry(0.08, 8, 8),
+  sensor: new THREE.SphereGeometry(0.12, 8, 8),
+  pod: new THREE.BoxGeometry(0.24, 0.18, 0.9),
+  rail: new THREE.BoxGeometry(0.08, 0.08, 1.3),
+  fin: new THREE.BoxGeometry(0.08, 0.45, 0.5),
+};
+
+function createAircraftMaterial(
+  color: number,
+  metalness: number,
+  roughness: number,
+  emissiveIntensity: number = 0
+): THREE.MeshStandardMaterial {
+  return new THREE.MeshStandardMaterial({
+    color,
+    metalness,
+    roughness,
+    emissive: color,
+    emissiveIntensity,
+  });
+}
+
+function getEnemyMaterialTuning(type: EnemyType): {
+  body: { metalness: number; roughness: number; emissiveIntensity: number };
+  wing: { metalness: number; roughness: number; emissiveIntensity: number };
+  cockpit: { metalness: number; roughness: number; emissiveIntensity: number };
+  accent: { metalness: number; roughness: number; emissiveIntensity: number };
+  detailColor: number;
+  lightOpacity: number;
+  engineOpacity: number;
+} {
+  switch (type) {
+    case EnemyType.SCOUT:
+      return {
+        body: { metalness: 0.58, roughness: 0.42, emissiveIntensity: 0.04 },
+        wing: { metalness: 0.52, roughness: 0.44, emissiveIntensity: 0.03 },
+        cockpit: { metalness: 0.9, roughness: 0.14, emissiveIntensity: 0.28 },
+        accent: { metalness: 0.72, roughness: 0.3, emissiveIntensity: 0.08 },
+        detailColor: 0xaab8ca,
+        lightOpacity: 0.82,
+        engineOpacity: 0.68,
+      };
+    case EnemyType.FIGHTER:
+      return {
+        body: { metalness: 0.74, roughness: 0.28, emissiveIntensity: 0.06 },
+        wing: { metalness: 0.66, roughness: 0.34, emissiveIntensity: 0.05 },
+        cockpit: { metalness: 0.94, roughness: 0.1, emissiveIntensity: 0.34 },
+        accent: { metalness: 0.84, roughness: 0.22, emissiveIntensity: 0.12 },
+        detailColor: 0xd8c4b2,
+        lightOpacity: 0.94,
+        engineOpacity: 0.86,
+      };
+    case EnemyType.HEAVY:
+      return {
+        body: { metalness: 0.52, roughness: 0.52, emissiveIntensity: 0.03 },
+        wing: { metalness: 0.48, roughness: 0.58, emissiveIntensity: 0.02 },
+        cockpit: { metalness: 0.86, roughness: 0.18, emissiveIntensity: 0.22 },
+        accent: { metalness: 0.56, roughness: 0.38, emissiveIntensity: 0.06 },
+        detailColor: 0x8d949c,
+        lightOpacity: 0.74,
+        engineOpacity: 0.72,
+      };
+    case EnemyType.SNIPER:
+      return {
+        body: { metalness: 0.68, roughness: 0.32, emissiveIntensity: 0.05 },
+        wing: { metalness: 0.6, roughness: 0.36, emissiveIntensity: 0.04 },
+        cockpit: { metalness: 0.96, roughness: 0.08, emissiveIntensity: 0.42 },
+        accent: { metalness: 0.86, roughness: 0.2, emissiveIntensity: 0.15 },
+        detailColor: 0xc7b7e8,
+        lightOpacity: 0.98,
+        engineOpacity: 0.78,
+      };
+    case EnemyType.ACE:
+      return {
+        body: { metalness: 0.78, roughness: 0.24, emissiveIntensity: 0.07 },
+        wing: { metalness: 0.7, roughness: 0.28, emissiveIntensity: 0.06 },
+        cockpit: { metalness: 0.98, roughness: 0.08, emissiveIntensity: 0.4 },
+        accent: { metalness: 0.92, roughness: 0.16, emissiveIntensity: 0.18 },
+        detailColor: 0xf2d88a,
+        lightOpacity: 1,
+        engineOpacity: 0.9,
+      };
+    default:
+      return {
+        body: { metalness: 0.7, roughness: 0.3, emissiveIntensity: 0.05 },
+        wing: { metalness: 0.62, roughness: 0.38, emissiveIntensity: 0.04 },
+        cockpit: { metalness: 0.92, roughness: 0.12, emissiveIntensity: 0.32 },
+        accent: { metalness: 0.82, roughness: 0.24, emissiveIntensity: 0.1 },
+        detailColor: 0xcfd6df,
+        lightOpacity: 0.95,
+        engineOpacity: 0.8,
+      };
+  }
+}
 
 function getOrCreateGeometry(
   type: EnemyType,
@@ -62,29 +162,43 @@ function getOrCreateMaterials(
 ): CachedMaterials {
   const cached = materialsCache.get(type);
   if (cached) return cached;
+  const tuning = getEnemyMaterialTuning(type);
 
   const materials: CachedMaterials = {
-    body: new THREE.MeshStandardMaterial({
-      color: bodyColor,
-      metalness: 0.7,
-      roughness: 0.3,
-    }),
-    wing: new THREE.MeshStandardMaterial({
-      color: wingColor,
-      metalness: 0.6,
-      roughness: 0.4,
-    }),
-    cockpit: new THREE.MeshStandardMaterial({
-      color: accentColor,
-      metalness: 0.9,
-      roughness: 0.1,
-      emissive: accentColor,
-      emissiveIntensity: 0.3,
-    }),
+    body: createAircraftMaterial(
+      bodyColor,
+      tuning.body.metalness,
+      tuning.body.roughness,
+      tuning.body.emissiveIntensity
+    ),
+    wing: createAircraftMaterial(
+      wingColor,
+      tuning.wing.metalness,
+      tuning.wing.roughness,
+      tuning.wing.emissiveIntensity
+    ),
+    cockpit: createAircraftMaterial(
+      accentColor,
+      tuning.cockpit.metalness,
+      tuning.cockpit.roughness,
+      tuning.cockpit.emissiveIntensity
+    ),
     engine: new THREE.MeshBasicMaterial({
       color: 0xff6600,
       transparent: true,
-      opacity: 0.8,
+      opacity: tuning.engineOpacity,
+    }),
+    accent: createAircraftMaterial(
+      accentColor,
+      tuning.accent.metalness,
+      tuning.accent.roughness,
+      tuning.accent.emissiveIntensity
+    ),
+    detail: createAircraftMaterial(tuning.detailColor, 0.45, 0.6, 0),
+    light: new THREE.MeshBasicMaterial({
+      color: accentColor,
+      transparent: true,
+      opacity: tuning.lightOpacity,
     }),
   };
 
@@ -99,37 +213,35 @@ function getOrCreateMaterials(
 export function createPlayerMesh(): THREE.Group {
   const group = new THREE.Group();
 
-  const bodyMaterial = new THREE.MeshStandardMaterial({
-    color: 0xe8e8e8,
-    metalness: 0.8,
-    roughness: 0.2,
-  });
-
-  const wingMaterial = new THREE.MeshStandardMaterial({
-    color: 0xa0a0a0,
-    metalness: 0.7,
-    roughness: 0.3,
-  });
-
+  const bodyMaterial = createAircraftMaterial(0xe8e8e8, 0.82, 0.22, 0.04);
+  const wingMaterial = createAircraftMaterial(0xa0a0a0, 0.72, 0.32, 0.03);
   const cockpitMaterial = new THREE.MeshStandardMaterial({
     color: 0x1a1a1a,
     metalness: 0.95,
     roughness: 0.1,
     transparent: true,
     opacity: 0.85,
+    emissive: 0x4fc3ff,
+    emissiveIntensity: 0.08,
   });
-
-  const accentMaterial = new THREE.MeshStandardMaterial({
-    color: 0x707070,
-    metalness: 0.9,
-    roughness: 0.2,
+  const accentMaterial = createAircraftMaterial(0x707070, 0.9, 0.2, 0.06);
+  const detailMaterial = createAircraftMaterial(0x45505c, 0.72, 0.4, 0.02);
+  const playerLightMaterial = new THREE.MeshBasicMaterial({
+    color: 0x58d5ff,
+    transparent: true,
+    opacity: 0.95,
   });
-
-  const engineMaterial = new THREE.MeshStandardMaterial({
-    color: 0x404040,
-    metalness: 0.8,
-    roughness: 0.3,
+  const navRedMaterial = new THREE.MeshBasicMaterial({
+    color: 0xff5544,
+    transparent: true,
+    opacity: 0.9,
   });
+  const navGreenMaterial = new THREE.MeshBasicMaterial({
+    color: 0x6dff8c,
+    transparent: true,
+    opacity: 0.9,
+  });
+  const engineMaterial = createAircraftMaterial(0x404040, 0.82, 0.28, 0.04);
 
   // === 机身 - 流线型 fuselage ===
   // 使用多个部分组成机身
@@ -170,6 +282,16 @@ export function createPlayerMesh(): THREE.Group {
   cockpit.castShadow = true;
   group.add(cockpit);
 
+  const canopyFrame = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.06, 1.05), accentMaterial);
+  canopyFrame.position.set(0, 0.44, -0.82);
+  canopyFrame.castShadow = true;
+  group.add(canopyFrame);
+
+  const noseSensor = new THREE.Mesh(new THREE.SphereGeometry(0.12, 10, 10), playerLightMaterial);
+  noseSensor.scale.set(0.75, 0.45, 1.1);
+  noseSensor.position.set(0, 0.03, -2.18);
+  group.add(noseSensor);
+
   // === 主翼 ===
   // ExtrudeGeometry 在 XY 平面创建，rotation.x = PI/2 后 Y→-Z
   // 所以 Y 值大 = Z 负（前方），Y 值小 = Z 正（后方）
@@ -198,6 +320,18 @@ export function createPlayerMesh(): THREE.Group {
   rightWing.position.set(0.4, 0, 0);
   rightWing.castShadow = true;
   group.add(rightWing);
+
+  const leftWingPanel = new THREE.Mesh(new THREE.BoxGeometry(1.15, 0.04, 0.22), detailMaterial);
+  leftWingPanel.position.set(-1.28, 0.06, -0.25);
+  leftWingPanel.rotation.y = -0.22;
+  leftWingPanel.castShadow = true;
+  group.add(leftWingPanel);
+
+  const rightWingPanel = new THREE.Mesh(new THREE.BoxGeometry(1.15, 0.04, 0.22), detailMaterial);
+  rightWingPanel.position.set(1.28, 0.06, -0.25);
+  rightWingPanel.rotation.y = 0.22;
+  rightWingPanel.castShadow = true;
+  group.add(rightWingPanel);
 
   // === 前缘延伸 (LERX - Leading Edge Root Extension) ===
   const lerxGeometry = new THREE.BoxGeometry(0.3, 0.08, 1.2);
@@ -323,6 +457,10 @@ export function createPlayerMesh(): THREE.Group {
   leftGlow.name = 'engineGlow';
   group.add(leftGlow);
 
+  const leftEngineCore = new THREE.Mesh(new THREE.SphereGeometry(0.08, 8, 8), playerLightMaterial);
+  leftEngineCore.position.set(-0.3, -0.05, 1.96);
+  group.add(leftEngineCore);
+
   // 右喷口
   const rightNozzle = new THREE.Mesh(nozzleGeometry, engineMaterial);
   rightNozzle.rotation.x = -Math.PI / 2;
@@ -335,6 +473,10 @@ export function createPlayerMesh(): THREE.Group {
   rightGlow.position.set(0.3, -0.05, 2.15);
   rightGlow.name = 'engineGlow2';
   group.add(rightGlow);
+
+  const rightEngineCore = new THREE.Mesh(new THREE.SphereGeometry(0.08, 8, 8), playerLightMaterial);
+  rightEngineCore.position.set(0.3, -0.05, 1.96);
+  group.add(rightEngineCore);
 
   // === 武器挂点 (Weapon Hardpoints) ===
   const pylonGeometry = new THREE.BoxGeometry(0.08, 0.15, 0.4);
@@ -358,9 +500,26 @@ export function createPlayerMesh(): THREE.Group {
   spine.position.set(0, 0.45, -0.2);
   group.add(spine);
 
+  const dorsalStripe = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.03, 1.7), detailMaterial);
+  dorsalStripe.position.set(0, 0.19, -0.1);
+  dorsalStripe.castShadow = true;
+  group.add(dorsalStripe);
+
+  const leftNavLight = new THREE.Mesh(new THREE.SphereGeometry(0.05, 8, 8), navRedMaterial);
+  leftNavLight.position.set(-2.18, 0.03, -0.48);
+  group.add(leftNavLight);
+
+  const rightNavLight = new THREE.Mesh(new THREE.SphereGeometry(0.05, 8, 8), navGreenMaterial);
+  rightNavLight.position.set(2.18, 0.03, -0.48);
+  group.add(rightNavLight);
+
   // 设置阴影
   group.traverse((child) => {
-    if (child instanceof THREE.Mesh && !child.name.includes('Glow')) {
+    if (
+      child instanceof THREE.Mesh
+      && !child.name.includes('Glow')
+      && !(child.material instanceof THREE.MeshBasicMaterial)
+    ) {
       child.castShadow = true;
       child.receiveShadow = true;
     }
@@ -478,6 +637,123 @@ export function createEnemyMesh(config: EnemyConfig): THREE.Group {
   engine.position.set(0, 0, -bodyLength * 0.5 - 0.3);
   engine.name = 'engineGlow';
   group.add(engine);
+
+  const spinePanel = new THREE.Mesh(detailGeometries.panel, materials.detail);
+  spinePanel.scale.z = bodyLength * 0.18;
+  spinePanel.position.set(0, bodySize * 0.18, bodyLength * 0.02);
+  spinePanel.castShadow = true;
+  group.add(spinePanel);
+
+  const ventralPanel = new THREE.Mesh(detailGeometries.panel, materials.detail);
+  ventralPanel.scale.set(0.8, 0.8, bodyLength * 0.14);
+  ventralPanel.position.set(0, -bodySize * 0.1, -bodyLength * 0.05);
+  ventralPanel.castShadow = true;
+  group.add(ventralPanel);
+
+  const leftWingBlade = new THREE.Mesh(detailGeometries.blade, materials.accent);
+  leftWingBlade.position.set(-wingSpan * 0.24, 0.04, -bodyLength * 0.12);
+  leftWingBlade.rotation.y = 0.16;
+  leftWingBlade.castShadow = true;
+  group.add(leftWingBlade);
+
+  const rightWingBlade = new THREE.Mesh(detailGeometries.blade, materials.accent);
+  rightWingBlade.position.set(wingSpan * 0.24, 0.04, -bodyLength * 0.12);
+  rightWingBlade.rotation.y = -0.16;
+  rightWingBlade.castShadow = true;
+  group.add(rightWingBlade);
+
+  const noseSensor = new THREE.Mesh(detailGeometries.sensor, materials.light);
+  noseSensor.scale.set(0.8, 0.55, 1.2);
+  noseSensor.position.set(0, bodySize * 0.08, bodyLength * 0.46);
+  group.add(noseSensor);
+
+  const dorsalLight = new THREE.Mesh(detailGeometries.light, materials.light);
+  dorsalLight.position.set(0, bodySize * 0.32, bodyLength * 0.18);
+  group.add(dorsalLight);
+
+  const leftWingTipLight = new THREE.Mesh(detailGeometries.light, materials.light);
+  leftWingTipLight.scale.setScalar(0.9);
+  leftWingTipLight.position.set(-wingSpan * 0.48, 0.03, -bodyLength * 0.18);
+  group.add(leftWingTipLight);
+
+  const rightWingTipLight = new THREE.Mesh(detailGeometries.light, materials.light);
+  rightWingTipLight.scale.setScalar(0.9);
+  rightWingTipLight.position.set(wingSpan * 0.48, 0.03, -bodyLength * 0.18);
+  group.add(rightWingTipLight);
+
+  switch (config.type) {
+    case EnemyType.SCOUT: {
+      const scoutRail = new THREE.Mesh(detailGeometries.rail, materials.detail);
+      scoutRail.scale.set(0.75, 0.55, 0.75);
+      scoutRail.position.set(0, bodySize * 0.14, bodyLength * 0.18);
+      scoutRail.castShadow = true;
+      group.add(scoutRail);
+
+      const scoutFin = new THREE.Mesh(detailGeometries.fin, materials.light);
+      scoutFin.scale.set(0.8, 0.8, 0.65);
+      scoutFin.position.set(0, bodySize * 0.32, -bodyLength * 0.08);
+      group.add(scoutFin);
+      break;
+    }
+    case EnemyType.FIGHTER: {
+      const leftPylon = new THREE.Mesh(detailGeometries.pod, materials.accent);
+      leftPylon.scale.set(0.82, 0.8, 0.72);
+      leftPylon.position.set(-wingSpan * 0.26, -0.08, -bodyLength * 0.16);
+      leftPylon.rotation.y = 0.08;
+      leftPylon.castShadow = true;
+      group.add(leftPylon);
+
+      const rightPylon = new THREE.Mesh(detailGeometries.pod, materials.accent);
+      rightPylon.scale.set(0.82, 0.8, 0.72);
+      rightPylon.position.set(wingSpan * 0.26, -0.08, -bodyLength * 0.16);
+      rightPylon.rotation.y = -0.08;
+      rightPylon.castShadow = true;
+      group.add(rightPylon);
+      break;
+    }
+    case EnemyType.HEAVY: {
+      const leftArmor = new THREE.Mesh(detailGeometries.pod, materials.detail);
+      leftArmor.scale.set(1.15, 0.95, 1.05);
+      leftArmor.position.set(-bodySize * 0.34, -0.02, -bodyLength * 0.04);
+      leftArmor.castShadow = true;
+      group.add(leftArmor);
+
+      const rightArmor = new THREE.Mesh(detailGeometries.pod, materials.detail);
+      rightArmor.scale.set(1.15, 0.95, 1.05);
+      rightArmor.position.set(bodySize * 0.34, -0.02, -bodyLength * 0.04);
+      rightArmor.castShadow = true;
+      group.add(rightArmor);
+
+      engine.scale.set(1.2, 1.2, 1.35);
+      break;
+    }
+    case EnemyType.SNIPER: {
+      const sniperRail = new THREE.Mesh(detailGeometries.rail, materials.accent);
+      sniperRail.scale.set(0.55, 0.55, 1.5);
+      sniperRail.position.set(0, bodySize * 0.18, bodyLength * 0.22);
+      sniperRail.castShadow = true;
+      group.add(sniperRail);
+
+      const sniperSensor = new THREE.Mesh(detailGeometries.sensor, materials.light);
+      sniperSensor.scale.set(0.55, 0.55, 0.9);
+      sniperSensor.position.set(0, bodySize * 0.42, 0);
+      group.add(sniperSensor);
+      break;
+    }
+    case EnemyType.ACE: {
+      const aceCrest = new THREE.Mesh(detailGeometries.rail, materials.accent);
+      aceCrest.scale.set(0.9, 0.45, 1.08);
+      aceCrest.position.set(0, bodySize * 0.28, -bodyLength * 0.04);
+      aceCrest.castShadow = true;
+      group.add(aceCrest);
+
+      const aceRearLight = new THREE.Mesh(detailGeometries.light, materials.light);
+      aceRearLight.scale.setScalar(1.15);
+      aceRearLight.position.set(0, bodySize * 0.18, -bodyLength * 0.42);
+      group.add(aceRearLight);
+      break;
+    }
+  }
 
   group.name = config.type;
   return group;

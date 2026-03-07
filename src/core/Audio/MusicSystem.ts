@@ -2,6 +2,32 @@ import { getLogger } from '@/core/utils/Logger';
 
 const log = getLogger('MusicSystem');
 
+const clamp01 = (value: number): number => Math.max(0, Math.min(1, value));
+const DEFAULT_CROSSFADE_MS = 800;
+type WebkitAudioWindow = Window & typeof globalThis & {
+  webkitAudioContext?: typeof AudioContext;
+};
+
+type MusicDuckListener = (amount: number, durationMs: number) => void;
+
+const duckListeners = new Set<MusicDuckListener>();
+
+export const musicDuckingBridge = {
+  subscribe(listener: MusicDuckListener): () => void {
+    duckListeners.add(listener);
+    return () => {
+      duckListeners.delete(listener);
+    };
+  },
+  request(amount: number, durationMs: number): void {
+    const normalizedAmount = clamp01(amount);
+    const safeDurationMs = Math.max(0, durationMs);
+    duckListeners.forEach((listener) => {
+      listener(normalizedAmount, safeDurationMs);
+    });
+  },
+};
+
 const NOTE = {
   C3: 130.81,
   D3: 146.83,
@@ -60,40 +86,97 @@ export enum LevelMusic {
   SKY_CARRIER_BOSS = 'SKY_CARRIER_BOSS',
 }
 
+export interface MusicCrossfadeOptions {
+  durationMs?: number;
+}
+
+interface MusicSession {
+  id: number;
+  level: LevelMusic;
+  bpm: number;
+  styleVolume: number;
+  gain: GainNode;
+  loopTimeout: number | null;
+  notes: Set<OscillatorNode>;
+  disposed: boolean;
+}
+
+interface LevelMusicStyle {
+  bpm: number;
+  volume: number;
+}
+
 export class MusicSystem {
+  private static readonly MASTER_OUTPUT_GAIN = 1;
+  private static readonly USER_MUSIC_GAIN_BOOST = 1.2;
   private context: AudioContext | null = null;
   private masterGain: GainNode | null = null;
   private isPlaying: boolean = false;
+  private isDisposed: boolean = false;
+  private sessionId = 0;
+  private currentSession: MusicSession | null = null;
   private currentMusic: LevelMusic | null = null;
-  private scheduledNotes: OscillatorNode[] = [];
-  private loopTimeout: number | null = null;
-  private musicVolume: number = 0.3;
-  private bpm: number = 140;
+  private musicVolume: number = 1;
+  private sessions = new Map<number, MusicSession>();
+  private unsubscribeDucking?: () => void;
+  private duckingReleaseTime: number = 0;
 
-  constructor() {}
+  constructor() {
+    this.unsubscribeDucking = musicDuckingBridge.subscribe((amount, durationMs) => {
+      this.applyMusicDuck(amount, durationMs);
+    });
+  }
 
   private initContext(): void {
-    if (this.context) return;
+    if (this.context && this.context.state !== 'closed') return;
 
     try {
-      this.context = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const AudioContextCtor =
+        window.AudioContext || (window as WebkitAudioWindow).webkitAudioContext;
+      if (!AudioContextCtor) {
+        log.warn('Web Audio API not supported for music');
+        return;
+      }
+
+      this.context = new AudioContextCtor();
       this.masterGain = this.context.createGain();
-      this.masterGain.gain.value = this.musicVolume;
+      this.masterGain.gain.value = MusicSystem.MASTER_OUTPUT_GAIN;
       this.masterGain.connect(this.context.destination);
-    } catch (e) {
+    } catch {
       log.warn('Web Audio API not supported for music');
     }
   }
 
-  public resume(): void {
-    this.initContext();
-    if (this.context?.state === 'suspended') {
-      this.context.resume();
-    }
+  private canPlay(): boolean {
+    return (
+      !this.isDisposed &&
+      !!this.context &&
+      !!this.masterGain &&
+      this.context.state === 'running'
+    );
   }
 
-  private get beatDuration(): number {
-    return 60 / this.bpm;
+  private isContextReady(): boolean {
+    return (
+      !this.isDisposed &&
+      !!this.context &&
+      !!this.masterGain &&
+      this.context.state !== 'closed'
+    );
+  }
+
+  public get isClosed(): boolean {
+    return this.isDisposed || !this.context || this.context.state === 'closed';
+  }
+
+  public resume(): void {
+    if (this.isDisposed) return;
+    this.initContext();
+    if (this.context?.state === 'suspended') {
+      this.context.resume().catch(() => {
+        log.warn('Music AudioContext resume blocked by autoplay policy');
+      });
+    }
   }
 
   // ==================== 关卡1: 湖畔 - 平和、流畅的A小调 ====================
@@ -1623,16 +1706,123 @@ export class MusicSystem {
     return { notes, waveform: 'sine', volume: 0.12 };
   }
 
+  private createSession(level: LevelMusic, style: LevelMusicStyle): MusicSession {
+    if (!this.context || !this.masterGain) {
+      throw new Error('Music context not initialized');
+    }
+
+    const sessionGain = this.context.createGain();
+    const session: MusicSession = {
+      id: this.sessionId++,
+      level,
+      bpm: style.bpm,
+      styleVolume: style.volume,
+      gain: sessionGain,
+      loopTimeout: null,
+      notes: new Set(),
+      disposed: false,
+    };
+
+    sessionGain.gain.value = 0;
+    sessionGain.connect(this.masterGain);
+    this.sessions.set(session.id, session);
+    return session;
+  }
+
+  private getSessionGain(session: MusicSession): number {
+    return clamp01(this.musicVolume * MusicSystem.USER_MUSIC_GAIN_BOOST * session.styleVolume);
+  }
+
+  private disposeSession(session: MusicSession): void {
+    if (session.loopTimeout !== null) {
+      clearTimeout(session.loopTimeout);
+      session.loopTimeout = null;
+    }
+
+    for (const osc of session.notes) {
+      try {
+        osc.stop();
+      } catch {
+        // 已停止
+      }
+    }
+    session.notes.clear();
+    session.disposed = true;
+
+    try {
+      session.gain.disconnect();
+    } catch {
+      // Ignore
+    }
+
+    this.sessions.delete(session.id);
+    if (this.currentSession?.id === session.id) {
+      this.currentSession = null;
+    }
+    if (this.currentMusic === session.level) {
+      this.currentMusic = null;
+    }
+  }
+
+  private stopSession(session: MusicSession, fadeMs: number): void {
+    if (!session || session.disposed) return;
+
+    session.disposed = true;
+    if (session.loopTimeout !== null) {
+      clearTimeout(session.loopTimeout);
+      session.loopTimeout = null;
+    }
+
+    if (!this.context || !this.canPlay() || fadeMs <= 0) {
+      this.disposeSession(session);
+      return;
+    }
+
+    const context = this.context;
+    if (!context) {
+      this.disposeSession(session);
+      return;
+    }
+
+    const now = context.currentTime;
+    const gain = session.gain.gain;
+    try {
+      gain.cancelScheduledValues(now);
+      gain.setValueAtTime(gain.value, now);
+      gain.linearRampToValueAtTime(0, now + fadeMs / 1000);
+    } catch {
+      // Ignore
+    }
+
+    const safeTimeout = window.setTimeout(() => {
+      this.disposeSession(session);
+    }, fadeMs + 20);
+
+    session.loopTimeout = safeTimeout;
+  }
+
+  private getSessionBeatDuration(session: MusicSession): number {
+    return 60 / session.bpm;
+  }
+
+  private trackDuration(track: MusicTrack, beatDuration: number): number {
+    return track.notes.reduce((sum, n) => sum + n.duration * beatDuration, 0);
+  }
+
   private playNote(
+    session: MusicSession,
     frequency: number,
     duration: number,
     waveform: OscillatorType,
     volume: number,
     startTime: number
-  ): OscillatorNode | null {
-    if (!this.context || !this.masterGain || frequency === NOTE.REST) {
-      return null;
+  ): void {
+    if (!this.context || this.masterGain === null || frequency === NOTE.REST || duration <= 0) {
+      return;
     }
+
+    const finalVolume = clamp01(volume * this.getSessionGain(session));
+    if (finalVolume <= 0) return;
 
     const osc = this.context.createOscillator();
     const gain = this.context.createGain();
@@ -1644,29 +1834,32 @@ export class MusicSystem {
     const releaseTime = 0.05;
 
     gain.gain.setValueAtTime(0, startTime);
-    gain.gain.linearRampToValueAtTime(volume, startTime + attackTime);
-    gain.gain.setValueAtTime(volume, startTime + duration - releaseTime);
-    gain.gain.linearRampToValueAtTime(0, startTime + duration);
+    gain.gain.linearRampToValueAtTime(finalVolume, startTime + attackTime);
+    gain.gain.setValueAtTime(finalVolume, startTime + duration - releaseTime);
+    gain.gain.linearRampToValueAtTime(0.001, startTime + duration);
 
     osc.connect(gain);
-    gain.connect(this.masterGain);
+    gain.connect(session.gain);
 
     osc.start(startTime);
     osc.stop(startTime + duration);
 
-    this.scheduledNotes.push(osc);
-
-    return osc;
+    session.notes.add(osc);
+    osc.addEventListener('ended', () => {
+      session.notes.delete(osc);
+    });
   }
 
-  private playTrack(track: MusicTrack, startTime: number): void {
+  private playTrack(
+    session: MusicSession,
+    track: MusicTrack,
+    startTime: number,
+    beatDuration: number
+  ): void {
     let currentTime = startTime;
-
     for (const noteEvent of track.notes) {
-      const durationInSeconds = noteEvent.duration * this.beatDuration;
-
-      this.playNote(noteEvent.note, durationInSeconds, track.waveform, track.volume, currentTime);
-
+      const durationInSeconds = noteEvent.duration * beatDuration;
+      this.playNote(session, noteEvent.note, durationInSeconds, track.waveform, track.volume, currentTime);
       currentTime += durationInSeconds;
     }
   }
@@ -1753,114 +1946,132 @@ export class MusicSystem {
     }
   }
 
-  private playMusicLoop(): void {
-    if (!this.context || !this.isPlaying || !this.currentMusic) return;
+  private playMusicLoop(session: MusicSession): void {
+    if (!this.canPlay() || !session || session.disposed || !this.isPlaying || this.currentSession?.id !== session.id) {
+      return;
+    }
 
-    const now = this.context.currentTime;
-    const tracks = this.getTracksForLevel(this.currentMusic);
+    const context = this.context;
+    if (!context) {
+      return;
+    }
 
-    const totalBeats =
-      tracks.melodyA.notes.reduce((sum, n) => sum + n.duration, 0) +
-      tracks.melodyB.notes.reduce((sum, n) => sum + n.duration, 0) +
-      (tracks.melodyC?.notes.reduce((sum, n) => sum + n.duration, 0) ?? 0);
-    const totalDuration = totalBeats * this.beatDuration;
+    const now = context.currentTime;
+    const tracks = this.getTracksForLevel(session.level);
+    const beatDuration = this.getSessionBeatDuration(session);
 
-    this.playTrack(tracks.melodyA, now);
+    const totalDuration =
+      this.trackDuration(tracks.melodyA, beatDuration) +
+      this.trackDuration(tracks.melodyB, beatDuration) +
+      (tracks.melodyC ? this.trackDuration(tracks.melodyC, beatDuration) : 0);
+
+    this.playTrack(session, tracks.melodyA, now, beatDuration);
 
     const aDuration =
-      tracks.melodyA.notes.reduce((sum, n) => sum + n.duration, 0) * this.beatDuration;
-    this.playTrack(tracks.melodyB, now + aDuration);
+      this.trackDuration(tracks.melodyA, beatDuration);
+    this.playTrack(session, tracks.melodyB, now + aDuration, beatDuration);
 
     if (tracks.melodyC) {
       const bDuration =
-        tracks.melodyB.notes.reduce((sum, n) => sum + n.duration, 0) * this.beatDuration;
-      this.playTrack(tracks.melodyC, now + aDuration + bDuration);
+        this.trackDuration(tracks.melodyB, beatDuration);
+      this.playTrack(session, tracks.melodyC, now + aDuration + bDuration, beatDuration);
     }
 
-    this.playTrack(tracks.bass, now);
+    this.playTrack(session, tracks.bass, now, beatDuration);
 
     if (tracks.pad) {
-      this.playTrack(tracks.pad, now);
+      this.playTrack(session, tracks.pad, now, beatDuration);
     }
 
     if (this.isPlaying) {
-      this.loopTimeout = window.setTimeout(
+      session.loopTimeout = window.setTimeout(
         () => {
-          this.playMusicLoop();
+          this.playMusicLoop(session);
         },
         totalDuration * 1000 - 100
       );
     }
   }
 
-  public playLevelMusic(level: LevelMusic): void {
+  public crossfadeTo(level: LevelMusic, options: MusicCrossfadeOptions = {}): void {
     this.initContext();
-
-    if (this.context?.state === 'suspended') {
-      this.context.resume();
-    }
-
-    if (this.isPlaying && this.currentMusic === level) {
+    if (!this.isContextReady()) {
       return;
     }
 
-    this.stopMusic();
+    if (this.context?.state === 'suspended') {
+      this.context
+        .resume()
+        .then(() => {
+          this.crossfadeTo(level, options);
+        })
+        .catch(() => {
+          log.warn('Music AudioContext resume blocked by autoplay policy');
+        });
+      return;
+    }
 
-    this.isPlaying = true;
+    if (!this.canPlay()) {
+      return;
+    }
+
+    if (this.currentSession && !this.currentSession.disposed && this.currentMusic === level) {
+      return;
+    }
+
+    const style = this.getLevelStyle(level);
+    const nextSession = this.createSession(level, style);
+    const oldSession = this.currentSession;
+    const fadeMs = Math.max(0, options.durationMs ?? DEFAULT_CROSSFADE_MS);
+
     this.currentMusic = level;
+    this.currentSession = nextSession;
+    this.isPlaying = true;
 
-    this.applyLevelStyle(level);
+    const context = this.context;
+    if (!context) {
+      return;
+    }
 
-    this.playMusicLoop();
+    const now = context.currentTime;
+    const targetGain = this.getSessionGain(nextSession);
+    nextSession.gain.gain.setValueAtTime(0, now);
+    nextSession.gain.gain.linearRampToValueAtTime(targetGain, now + fadeMs / 1000);
+    this.playMusicLoop(nextSession);
+
+    if (oldSession && oldSession.id !== nextSession.id) {
+      this.stopSession(oldSession, fadeMs);
+    }
   }
 
-  private applyLevelStyle(level: LevelMusic): void {
+  public playLevelMusic(level: LevelMusic): void {
+    this.crossfadeTo(level);
+  }
+
+  private getLevelStyle(level: LevelMusic): LevelMusicStyle {
     switch (level) {
       case LevelMusic.LAKE:
-        this.bpm = 130;
-        this.musicVolume = 0.25;
-        break;
+        return { bpm: 130, volume: 0.25 };
       case LevelMusic.DESERT:
-        this.bpm = 150;
-        this.musicVolume = 0.3;
-        break;
+        return { bpm: 150, volume: 0.3 };
       case LevelMusic.SNOW:
-        this.bpm = 120;
-        this.musicVolume = 0.28;
-        break;
+        return { bpm: 120, volume: 0.28 };
       case LevelMusic.OCEAN:
-        this.bpm = 125;
-        this.musicVolume = 0.22;
-        break;
+        return { bpm: 125, volume: 0.22 };
       case LevelMusic.CITY:
-        this.bpm = 160;
-        this.musicVolume = 0.32;
-        break;
+        return { bpm: 160, volume: 0.32 };
       case LevelMusic.BOSS:
-        this.bpm = 90;
-        this.musicVolume = 0.35;
-        break;
+        return { bpm: 90, volume: 0.35 };
       case LevelMusic.DESERT_BOSS:
-        this.bpm = 95;
-        this.musicVolume = 0.38;
-        break;
+        return { bpm: 95, volume: 0.38 };
       case LevelMusic.OCTOPUS_BOSS:
-        this.bpm = 100;
-        this.musicVolume = 0.35;
-        break;
+        return { bpm: 100, volume: 0.35 };
       case LevelMusic.OCEAN_BOSS:
-        this.bpm = 105;
-        this.musicVolume = 0.35;
-        break;
+        return { bpm: 105, volume: 0.35 };
       case LevelMusic.SKY_CARRIER_BOSS:
-        this.bpm = 110;
-        this.musicVolume = 0.38;
-        break;
+        return { bpm: 110, volume: 0.38 };
     }
-
-    if (this.masterGain) {
-      this.masterGain.gain.value = this.musicVolume;
-    }
+    return { bpm: 130, volume: 0.25 };
   }
 
   public playBossMusic(level?: number): void {
@@ -1880,30 +2091,59 @@ export class MusicSystem {
   public stopMusic(): void {
     this.isPlaying = false;
     this.currentMusic = null;
+    this.currentSession = null;
 
-    if (this.loopTimeout !== null) {
-      clearTimeout(this.loopTimeout);
-      this.loopTimeout = null;
+    for (const session of this.sessions.values()) {
+      this.stopSession(session, 0);
     }
-
-    this.scheduledNotes.forEach((osc) => {
-      try {
-        osc.stop();
-      } catch {
-        // Already stopped
-      }
-    });
-    this.scheduledNotes = [];
   }
 
   public pauseMusic(): void {
     this.stopMusic();
   }
 
+  public close(): void {
+    this.dispose();
+  }
+
   public setVolume(volume: number): void {
-    this.musicVolume = Math.max(0, Math.min(1, volume));
+    this.musicVolume = clamp01(volume);
     if (this.masterGain) {
-      this.masterGain.gain.value = this.musicVolume;
+      for (const session of this.sessions.values()) {
+        const sessionVolume = this.getSessionGain(session);
+        try {
+          session.gain.gain.setValueAtTime(sessionVolume, this.context?.currentTime || 0);
+        } catch {
+          // Ignore
+        }
+      }
+      if (!this.currentSession) {
+        this.masterGain.gain.value = MusicSystem.MASTER_OUTPUT_GAIN;
+      }
+    }
+  }
+
+  private applyMusicDuck(amount: number, durationMs: number): void {
+    if (!this.context || !this.masterGain || this.context.state === 'closed') {
+      return;
+    }
+
+    const now = this.context.currentTime;
+    const duckGain = 1 - amount;
+    const releaseTime = now + durationMs / 1000;
+    const effectiveReleaseTime = Math.max(releaseTime, this.duckingReleaseTime);
+
+    try {
+      this.masterGain.gain.cancelScheduledValues(now);
+      this.masterGain.gain.setValueAtTime(this.masterGain.gain.value, now);
+      this.masterGain.gain.linearRampToValueAtTime(duckGain, now + 0.02);
+      this.masterGain.gain.linearRampToValueAtTime(
+        MusicSystem.MASTER_OUTPUT_GAIN,
+        effectiveReleaseTime + 0.12
+      );
+      this.duckingReleaseTime = effectiveReleaseTime;
+    } catch {
+      // Ignore
     }
   }
 
@@ -1917,10 +2157,17 @@ export class MusicSystem {
 
   public dispose(): void {
     this.stopMusic();
+    this.unsubscribeDucking?.();
+    this.unsubscribeDucking = undefined;
     if (this.context) {
-      this.context.close();
+      void this.context.close().catch(() => {
+        // Ignore
+      });
       this.context = null;
       this.masterGain = null;
+      this.currentSession = null;
+      this.sessions.clear();
+      this.isDisposed = true;
     }
   }
 }

@@ -1,8 +1,47 @@
 import * as THREE from 'three';
-import { TerrainType, LevelConfig } from './LevelConfig';
+import { TerrainType, LevelConfig, LevelSurfaceProfile, LevelWeatherConfig } from './LevelConfig';
 import { getLogger } from '@/core/utils/Logger';
 
 const log = getLogger('TerrainGenerator');
+
+type WeatherType = 'clear' | 'rain' | 'snow' | 'dust' | 'mist' | 'storm' | 'smog';
+type SurfacePattern = 'grass' | 'sand' | 'snow' | 'rock' | 'asphalt' | 'water' | 'beach';
+const WEATHER_PRESET_OVERLAYS: Record<
+  WeatherType,
+  {
+    overlayColor: THREE.ColorRepresentation;
+    overlayAlpha: number;
+    horizonAlpha: number;
+    streakBoost: number;
+  }
+> = {
+  clear: { overlayColor: 0xffffff, overlayAlpha: 0.02, horizonAlpha: 0.1, streakBoost: 0 },
+  mist: { overlayColor: 0xf2fbff, overlayAlpha: 0.08, horizonAlpha: 0.18, streakBoost: 8 },
+  snow: { overlayColor: 0xe4f4ff, overlayAlpha: 0.07, horizonAlpha: 0.16, streakBoost: 10 },
+  dust: { overlayColor: 0xffd39a, overlayAlpha: 0.12, horizonAlpha: 0.2, streakBoost: 12 },
+  storm: { overlayColor: 0x8aa7c4, overlayAlpha: 0.14, horizonAlpha: 0.22, streakBoost: 16 },
+  smog: { overlayColor: 0xa9afba, overlayAlpha: 0.12, horizonAlpha: 0.24, streakBoost: 14 },
+  rain: { overlayColor: 0xb8cbe2, overlayAlpha: 0.1, horizonAlpha: 0.18, streakBoost: 12 },
+};
+
+interface WeatherProfile {
+  type: WeatherType;
+  intensity: number;
+  fogDensity: number;
+  cloudCount: number;
+  cloudOpacity: number;
+  cloudTint: THREE.ColorRepresentation;
+  cloudSpeed: number;
+  cloudHeightMin: number;
+  cloudHeightMax: number;
+  particleCount: number;
+  particleSize: number;
+  particleSpeed: number;
+  particleDrift: number;
+  particleColor: THREE.ColorRepresentation;
+  waterWaveScale: number;
+  skyGlow: THREE.ColorRepresentation;
+}
 
 export class TerrainGenerator {
   private scene: THREE.Scene;
@@ -13,6 +52,11 @@ export class TerrainGenerator {
   private grass: THREE.InstancedMesh | null = null;
   private rocks: THREE.Mesh[] = [];
   private time: number = 0;
+  private weatherParticles?: THREE.Points;
+  private weatherParticleBaseHeight: number = 260;
+  private weatherParticleSpread: number = 1600;
+  private weatherParticleFloor: number = -40;
+  private weatherProfile: WeatherProfile = this.getDefaultWeatherProfile(TerrainType.LAKE);
 
   constructor(scene: THREE.Scene) {
     this.scene = scene;
@@ -28,11 +72,15 @@ export class TerrainGenerator {
     log.debug('Generating terrain:', { terrain: config.terrain });
 
     this.clearTerrain();
+    this.weatherProfile = this.resolveWeatherProfile(config);
+    this.weatherParticleBaseHeight = Math.max(140, this.weatherProfile.cloudHeightMax + 30);
+    this.weatherParticleSpread = 1200 + this.weatherProfile.intensity * 700;
+    this.weatherParticleFloor = this.weatherProfile.type === 'storm' ? -80 : -40;
 
     log.debug('After clear, terrainGroup children:', { count: this.terrainGroup.children.length });
 
     // 设置天空
-    this.createSky(config.skyColors);
+    this.createSky(config.skyColors, this.weatherProfile);
 
     // 根据地形类型生成
     switch (config.terrain) {
@@ -54,18 +102,24 @@ export class TerrainGenerator {
     }
 
     // 添加云朵
-    this.createClouds();
+    this.createClouds(this.weatherProfile);
 
-    // 设置雾
-    this.scene.fog = new THREE.FogExp2(config.fogColor, 0.0008);
+    // 添加轻量天气表现
+    this.createWeatherEffect(this.weatherProfile);
+
+    // 设置雾（优先使用环境雾色，保持与 GameScene 环境配置一致）
+    this.scene.fog = new THREE.FogExp2(config.environment.fogColor ?? config.fogColor, this.weatherProfile.fogDensity);
   }
 
   /**
    * 生成湖面地形 - 美化版
    */
   private generateLakeTerrain(config: LevelConfig): void {
+    const surfaceProfile = this.getSurfaceProfile(config);
     // 创建渐变草地
     const groundGeometry = new THREE.PlaneGeometry(2000, 2000, 200, 200);
+    const lakeRadius = 220;
+    const beachRadius = 260;
 
     // 添加起伏地形
     const positions = groundGeometry.attributes.position;
@@ -77,17 +131,42 @@ export class TerrainGenerator {
       const noise1 = Math.sin(x * 0.01) * Math.cos(y * 0.01) * 8;
       const noise2 = Math.sin(x * 0.03 + 1) * Math.cos(y * 0.03) * 3;
       const noise3 = Math.sin(x * 0.005) * Math.cos(y * 0.005) * 15;
+      const distanceFromCenter = Math.sqrt(x * x + y * y);
 
-      positions.setZ(i, noise1 + noise2 + noise3);
+      // 为中央湖区挖出浅盆地，避免起伏地形遮挡水面
+      let lakeDepression = 0;
+      if (distanceFromCenter < beachRadius) {
+        const basinT = THREE.MathUtils.clamp(
+          (beachRadius - distanceFromCenter) / (beachRadius - lakeRadius),
+          0,
+          1
+        );
+        lakeDepression -= basinT * 5.5;
+      }
+      if (distanceFromCenter < lakeRadius) {
+        const centerT = 1 - distanceFromCenter / lakeRadius;
+        lakeDepression -= 6.5 + centerT * 3.5;
+      }
+
+      positions.setZ(i, noise1 + noise2 + noise3 + lakeDepression);
     }
     groundGeometry.computeVertexNormals();
 
     // 创建草地材质
     const groundMaterial = new THREE.MeshStandardMaterial({
-      color: config.groundColor,
-      roughness: 0.9,
+      color: surfaceProfile.groundBaseColor ?? this.tintColor(config.groundColor, 0.1, 0.28, 0.12),
+      roughness: 0.68,
       metalness: 0,
+      emissive:
+        surfaceProfile.groundEmissiveColor ?? this.tintColor(config.groundColor, 0.06, 0.4, 0.02),
+      emissiveIntensity: 0.42,
       flatShading: false,
+      map: this.createDetailTexture(
+        surfaceProfile.groundBaseColor ?? 0x79b64d,
+        surfaceProfile.groundAccentColor ?? 0x9ddf70,
+        surfaceProfile.groundDetailColor ?? 0x5c9a38,
+        'grass'
+      ),
     });
 
     const ground = new THREE.Mesh(groundGeometry, groundMaterial);
@@ -97,7 +176,7 @@ export class TerrainGenerator {
     this.terrainGroup.add(ground);
 
     // 创建中央湖泊
-    this.createBeautifulLake(config);
+    this.createBeautifulLake(config, surfaceProfile);
 
     // 添加森林
     this.createForest(80, -49, 1000, 200);
@@ -115,7 +194,7 @@ export class TerrainGenerator {
   /**
    * 创建美丽的湖泊
    */
-  private createBeautifulLake(config: LevelConfig): void {
+  private createBeautifulLake(config: LevelConfig, surfaceProfile: LevelSurfaceProfile): void {
     // 湖泊形状 - 不规则圆形
     const lakeShape = new THREE.Shape();
     const points = 64;
@@ -132,16 +211,33 @@ export class TerrainGenerator {
     }
 
     const lakeGeometry = new THREE.ShapeGeometry(lakeShape, 32);
+    const waterBaseColor =
+      surfaceProfile.waterBaseColor ?? this.tintColor(config.waterColor || 0x1e90ff, 0.01, 0.08, 0.02);
+    const waterAccentColor = surfaceProfile.waterAccentColor ?? 0x7fd8ff;
+    const waterDetailColor = surfaceProfile.waterDetailColor ?? 0x0f5f87;
+    const shorelineBaseColor = surfaceProfile.shorelineBaseColor ?? 0xf4e4bc;
+    const shorelineAccentColor = surfaceProfile.shorelineAccentColor ?? 0xe2ce9b;
+    const shorelineDetailColor = surfaceProfile.shorelineDetailColor ?? 0xc7b18a;
+
     const lakeMaterial = new THREE.MeshStandardMaterial({
-      color: config.waterColor || 0x1e90ff,
+      color: waterBaseColor,
       transparent: true,
-      opacity: 0.85,
+      opacity: 0.92,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      polygonOffset: true,
+      polygonOffsetFactor: -1,
+      polygonOffsetUnits: -1,
       roughness: 0.1,
       metalness: 0.3,
+      emissive: this.tintColor(waterBaseColor, 0.02, 0.2, -0.05),
+      emissiveIntensity: 0.28,
+      map: this.createDetailTexture(waterBaseColor, waterAccentColor, waterDetailColor, 'water'),
     });
     const lake = new THREE.Mesh(lakeGeometry, lakeMaterial);
     lake.rotation.x = -Math.PI / 2;
-    lake.position.y = -48.5;
+    lake.position.y = -47.9;
+    lake.renderOrder = 2;
     this.terrainGroup.add(lake);
     this.waterMesh = lake;
 
@@ -163,13 +259,21 @@ export class TerrainGenerator {
 
     const beachGeometry = new THREE.ShapeGeometry(beachShape);
     const beachMaterial = new THREE.MeshStandardMaterial({
-      color: 0xf4e4bc,
-      roughness: 1,
+      color: shorelineBaseColor,
+      roughness: 0.95,
       metalness: 0,
+      emissive: this.tintColor(shorelineAccentColor, 0, 0.08, 0.01),
+      emissiveIntensity: 0.06,
+      map: this.createDetailTexture(
+        shorelineBaseColor,
+        shorelineAccentColor,
+        shorelineDetailColor,
+        'beach'
+      ),
     });
     const beach = new THREE.Mesh(beachGeometry, beachMaterial);
     beach.rotation.x = -Math.PI / 2;
-    beach.position.y = -48.8;
+    beach.position.y = -49.1;
     beach.receiveShadow = true;
     this.terrainGroup.add(beach);
   }
@@ -263,11 +367,17 @@ export class TerrainGenerator {
   private createGrassField(radius: number, count: number): void {
     const grassGeometry = new THREE.ConeGeometry(0.1, 0.5, 4);
     const grassMaterial = new THREE.MeshStandardMaterial({
-      color: 0x7cfc00,
-      roughness: 0.9,
+      color: 0xa7ff54,
+      emissive: 0x4f8b24,
+      emissiveIntensity: 0.52,
+      roughness: 0.84,
+      metalness: 0,
+      side: THREE.DoubleSide,
     });
 
     this.grass = new THREE.InstancedMesh(grassGeometry, grassMaterial, count);
+    this.grass.castShadow = false;
+    this.grass.receiveShadow = false;
 
     const dummy = new THREE.Object3D();
     for (let i = 0; i < count; i++) {
@@ -380,9 +490,12 @@ export class TerrainGenerator {
     groundGeometry.computeVertexNormals();
 
     const groundMaterial = new THREE.MeshStandardMaterial({
-      color: config.groundColor,
+      color: this.tintColor(config.groundColor, 0.01, 0.08, 0.01),
       roughness: 1,
       metalness: 0,
+      emissive: this.tintColor(config.groundColor, -0.01, 0.2, -0.15),
+      emissiveIntensity: 0.08,
+      map: this.createDetailTexture(config.groundColor, 0xe0ba74, 0xa6752d, 'sand'),
       polygonOffset: true, // 修复Z-fighting闪烁
       polygonOffsetFactor: 1, // 偏移因子
       polygonOffsetUnits: 1,
@@ -548,9 +661,10 @@ export class TerrainGenerator {
     groundGeometry.computeVertexNormals();
 
     const groundMaterial = new THREE.MeshStandardMaterial({
-      color: config.groundColor,
+      color: this.tintColor(config.groundColor, 0, -0.1, 0.03),
       roughness: 0.8,
       metalness: 0,
+      map: this.createDetailTexture(config.groundColor, 0xeaf4ff, 0xb8c8d8, 'snow'),
       polygonOffset: true, // 修复Z-fighting闪烁
       polygonOffsetFactor: 1, // 偏移因子
       polygonOffsetUnits: 1,
@@ -587,9 +701,10 @@ export class TerrainGenerator {
       const peakWidth = 30 + Math.random() * 20;
 
       const peakMaterial = new THREE.MeshStandardMaterial({
-        color: 0x696969,
+        color: this.tintColor(0x696969, 0, -0.05, -0.05),
         roughness: 0.9,
         flatShading: true,
+        map: this.createDetailTexture(0x696969, 0x848484, 0x424242, 'rock'),
       });
 
       const peak = new THREE.Mesh(
@@ -603,7 +718,10 @@ export class TerrainGenerator {
       // 雪顶
       const snowMaterial = new THREE.MeshStandardMaterial({
         color: 0xffffff,
-        roughness: 0.5,
+        roughness: 0.45,
+        emissive: 0xbfd7ff,
+        emissiveIntensity: 0.06,
+        map: this.createDetailTexture(0xffffff, 0xe6f3ff, 0xd7dde5, 'snow'),
       });
       const snow = new THREE.Mesh(
         new THREE.ConeGeometry(peakWidth * 0.5, peakHeight * 0.35, 6),
@@ -690,6 +808,7 @@ export class TerrainGenerator {
    * 生成海洋地形
    */
   private generateOceanTerrain(config: LevelConfig): void {
+    const surfaceProfile = this.getSurfaceProfile(config);
     // 海面 - 波浪效果
     const oceanGeometry = new THREE.PlaneGeometry(2000, 2000, 200, 200);
     const positions = oceanGeometry.attributes.position;
@@ -703,11 +822,25 @@ export class TerrainGenerator {
     oceanGeometry.computeVertexNormals();
 
     const oceanMaterial = new THREE.MeshStandardMaterial({
-      color: config.waterColor || 0x006994,
+      color:
+        surfaceProfile.waterBaseColor ?? this.tintColor(config.waterColor || 0x006994, 0, 0.08, 0.02),
       transparent: true,
       opacity: 0.9,
-      roughness: 0.1,
-      metalness: 0.3,
+      roughness: 0.14,
+      metalness: 0.34,
+      emissive: this.tintColor(
+        surfaceProfile.waterDetailColor ?? (config.waterColor || 0x006994),
+        0.01,
+        0.18,
+        -0.02
+      ),
+      emissiveIntensity: 0.24,
+      map: this.createDetailTexture(
+        surfaceProfile.waterBaseColor ?? (config.waterColor || 0x006994),
+        surfaceProfile.waterAccentColor ?? 0x7bd6ff,
+        surfaceProfile.waterDetailColor ?? 0x03415d,
+        'water'
+      ),
     });
 
     const ocean = new THREE.Mesh(oceanGeometry, oceanMaterial);
@@ -834,12 +967,21 @@ export class TerrainGenerator {
    * 生成城市地形
    */
   private generateCityTerrain(config: LevelConfig): void {
+    const surfaceProfile = this.getSurfaceProfile(config);
     // 地面
     const groundGeometry = new THREE.PlaneGeometry(2000, 2000);
     const groundMaterial = new THREE.MeshStandardMaterial({
-      color: config.groundColor,
-      roughness: 0.7,
+      color: surfaceProfile.groundBaseColor ?? this.tintColor(config.groundColor, 0.04, 0.12, 0.04),
+      roughness: 0.72,
       metalness: 0,
+      emissive: surfaceProfile.groundEmissiveColor ?? 0x242833,
+      emissiveIntensity: 0.18,
+      map: this.createDetailTexture(
+        surfaceProfile.groundBaseColor ?? config.groundColor,
+        surfaceProfile.groundAccentColor ?? 0x7d8798,
+        surfaceProfile.groundDetailColor ?? 0x4e5664,
+        'asphalt'
+      ),
     });
 
     const ground = new THREE.Mesh(groundGeometry, groundMaterial);
@@ -848,20 +990,28 @@ export class TerrainGenerator {
     ground.receiveShadow = true;
     this.terrainGroup.add(ground);
 
-    // 添加道路
-    this.createRoads();
+    this.createCityBlocks(surfaceProfile);
+    this.createRoads(surfaceProfile);
 
     // 添加建筑物
-    this.createBuildings(120);
+    this.createBuildings(108, surfaceProfile);
   }
 
   /**
    * 创建道路
    */
-  private createRoads(): void {
+  private createRoads(surfaceProfile: LevelSurfaceProfile): void {
     const roadMaterial = new THREE.MeshStandardMaterial({
-      color: 0x333333,
-      roughness: 0.9,
+      color: surfaceProfile.roadBaseColor ?? 0x566072,
+      roughness: 0.78,
+      emissive: 0x1f2530,
+      emissiveIntensity: 0.12,
+      map: this.createDetailTexture(
+        surfaceProfile.roadBaseColor ?? 0x566072,
+        surfaceProfile.roadAccentColor ?? 0x8590a2,
+        surfaceProfile.roadDetailColor ?? 0x39414f,
+        'asphalt'
+      ),
     });
 
     // 水平道路
@@ -872,12 +1022,32 @@ export class TerrainGenerator {
       this.terrainGroup.add(road);
 
       // 道路标线
-      const lineMaterial = new THREE.MeshStandardMaterial({ color: 0xffffff });
+      const lineMaterial = new THREE.MeshStandardMaterial({
+        color: surfaceProfile.roadLineColor ?? 0xf0f4ff,
+        emissive: 0x9eb2d6,
+        emissiveIntensity: 0.14,
+      });
       for (let j = -20; j <= 20; j++) {
         const line = new THREE.Mesh(new THREE.PlaneGeometry(15, 1), lineMaterial);
         line.rotation.x = -Math.PI / 2;
         line.position.set(j * 50, -49.8, i * 250);
         this.terrainGroup.add(line);
+      }
+
+      for (let j = -3; j <= 3; j++) {
+        const roadLight = new THREE.Mesh(
+          new THREE.PlaneGeometry(5, 1.4),
+          new THREE.MeshStandardMaterial({
+            color: 0xffd997,
+            emissive: 0xffc56b,
+            emissiveIntensity: 0.46,
+            roughness: 0.24,
+            metalness: 0.1,
+          })
+        );
+        roadLight.rotation.x = -Math.PI / 2;
+        roadLight.position.set(j * 250, -49.76, i * 250 + 8);
+        this.terrainGroup.add(roadLight);
       }
     }
 
@@ -890,10 +1060,64 @@ export class TerrainGenerator {
     }
   }
 
+  private createCityBlocks(surfaceProfile: LevelSurfaceProfile): void {
+    const plazaMaterial = new THREE.MeshStandardMaterial({
+      color: surfaceProfile.plazaBaseColor ?? 0x808a98,
+      roughness: 0.82,
+      metalness: 0.04,
+      emissive: 0x2b313a,
+      emissiveIntensity: 0.1,
+      map: this.createDetailTexture(
+        surfaceProfile.plazaBaseColor ?? 0x808a98,
+        surfaceProfile.plazaAccentColor ?? 0xaab3bf,
+        surfaceProfile.plazaDetailColor ?? 0x616976,
+        'asphalt'
+      ),
+    });
+
+    const basePadMaterial = new THREE.MeshStandardMaterial({
+      color: surfaceProfile.buildingBaseColor ?? 0x6e8196,
+      roughness: 0.74,
+      metalness: 0.08,
+      emissive: 0x232a34,
+      emissiveIntensity: 0.1,
+    });
+
+    for (let gx = -3; gx <= 2; gx++) {
+      for (let gz = -3; gz <= 2; gz++) {
+        const plaza = new THREE.Mesh(new THREE.PlaneGeometry(190, 190), plazaMaterial);
+        plaza.rotation.x = -Math.PI / 2;
+        plaza.position.set(gx * 250 + 125, -49.92, gz * 250 + 125);
+        this.terrainGroup.add(plaza);
+
+        const basePad = new THREE.Mesh(new THREE.PlaneGeometry(162, 162), basePadMaterial);
+        basePad.rotation.x = -Math.PI / 2;
+        basePad.position.set(gx * 250 + 125, -49.86, gz * 250 + 125);
+        this.terrainGroup.add(basePad);
+
+        if ((gx + gz) % 2 === 0) {
+          const plazaLight = new THREE.Mesh(
+            new THREE.PlaneGeometry(26, 4),
+            new THREE.MeshStandardMaterial({
+              color: 0xffd595,
+              emissive: 0xffc266,
+              emissiveIntensity: 0.42,
+              roughness: 0.26,
+              metalness: 0.08,
+            })
+          );
+          plazaLight.rotation.x = -Math.PI / 2;
+          plazaLight.position.set(gx * 250 + 125, -49.8, gz * 250 + 50);
+          this.terrainGroup.add(plazaLight);
+        }
+      }
+    }
+  }
+
   /**
    * 创建建筑物
    */
-  private createBuildings(count: number): void {
+  private createBuildings(count: number, surfaceProfile: LevelSurfaceProfile): void {
     for (let i = 0; i < count; i++) {
       const gridX = Math.floor((Math.random() - 0.5) * 6);
       const gridZ = Math.floor((Math.random() - 0.5) * 6);
@@ -902,7 +1126,7 @@ export class TerrainGenerator {
       const x = gridX * 250 + (Math.random() - 0.5) * 200;
       const z = gridZ * 250 + (Math.random() - 0.5) * 200;
 
-      const building = this.createBeautifulBuilding();
+      const building = this.createBeautifulBuilding(surfaceProfile);
       building.position.set(x, -50, z);
       this.terrainGroup.add(building);
     }
@@ -911,7 +1135,7 @@ export class TerrainGenerator {
   /**
    * 创建美丽的建筑
    */
-  private createBeautifulBuilding(): THREE.Group {
+  private createBeautifulBuilding(surfaceProfile: LevelSurfaceProfile): THREE.Group {
     const building = new THREE.Group();
 
     const height = 15 + Math.random() * 60;
@@ -920,13 +1144,15 @@ export class TerrainGenerator {
 
     // 建筑主体
     const bodyMaterial = new THREE.MeshStandardMaterial({
-      color: new THREE.Color().setHSL(
-        Math.random() * 0.1 + 0.55, // 蓝色系
-        0.1 + Math.random() * 0.1,
-        0.2 + Math.random() * 0.3
+      color: new THREE.Color(surfaceProfile.buildingBaseColor ?? 0x6e8196).offsetHSL(
+        (Math.random() - 0.5) * 0.02,
+        -0.02 + Math.random() * 0.04,
+        -0.08 + Math.random() * 0.14
       ),
-      roughness: 0.5,
-      metalness: 0.3,
+      roughness: 0.42,
+      metalness: 0.18,
+      emissive: 0x10131a,
+      emissiveIntensity: 0.06,
     });
 
     const body = new THREE.Mesh(new THREE.BoxGeometry(width, height, depth), bodyMaterial);
@@ -937,9 +1163,9 @@ export class TerrainGenerator {
 
     // 窗户
     const windowMaterial = new THREE.MeshStandardMaterial({
-      color: 0xffff99,
-      emissive: 0xffff00,
-      emissiveIntensity: 0.3,
+      color: surfaceProfile.windowColor ?? 0xffe3a6,
+      emissive: surfaceProfile.windowColor ?? 0xffcf6b,
+      emissiveIntensity: 0.95,
     });
 
     const windowSize = 1.5;
@@ -968,6 +1194,51 @@ export class TerrainGenerator {
       building.add(roof);
     }
 
+    if (Math.random() > 0.35) {
+      const trim = new THREE.Mesh(
+        new THREE.BoxGeometry(width * 0.92, 0.6, depth * 0.92),
+        new THREE.MeshStandardMaterial({
+          color: surfaceProfile.buildingTrimColor ?? 0xd2dce6,
+          roughness: 0.3,
+          metalness: 0.36,
+          emissive: 0x243042,
+          emissiveIntensity: 0.08,
+        })
+      );
+      trim.position.y = 0.4;
+      building.add(trim);
+    }
+
+    if (Math.random() > 0.45) {
+      const facadeLight = new THREE.Mesh(
+        new THREE.PlaneGeometry(width * 0.45, 1.2),
+        new THREE.MeshStandardMaterial({
+          color: 0xffd9a0,
+          emissive: 0xffca78,
+          emissiveIntensity: 0.65,
+          roughness: 0.18,
+          metalness: 0.06,
+        })
+      );
+      facadeLight.position.set(0, height * 0.4, depth * 0.5 + 0.12);
+      building.add(facadeLight);
+    }
+
+    if (Math.random() > 0.65) {
+      const rooftopBeacon = new THREE.Mesh(
+        new THREE.SphereGeometry(0.45, 8, 8),
+        new THREE.MeshStandardMaterial({
+          color: 0x8fd6ff,
+          emissive: 0x74c8ff,
+          emissiveIntensity: 0.9,
+          roughness: 0.12,
+          metalness: 0.18,
+        })
+      );
+      rooftopBeacon.position.set(0, height + 3, 0);
+      building.add(rooftopBeacon);
+    }
+
     // 天线
     if (Math.random() > 0.7) {
       const antenna = new THREE.Mesh(
@@ -984,37 +1255,147 @@ export class TerrainGenerator {
   /**
    * 创建天空渐变
    */
-  private createSky(colors: [string, string, string, string]): void {
+  private createSky(colors: [string, string, string, string], profile: WeatherProfile): void {
     const canvas = document.createElement('canvas');
-    canvas.width = 2;
-    canvas.height = 512;
-    const ctx = canvas.getContext('2d')!;
+    canvas.width = 1024;
+    canvas.height = 1024;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      return;
+    }
 
-    const gradient = ctx.createLinearGradient(0, 0, 0, 512);
+    const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
     gradient.addColorStop(0, colors[0]);
     gradient.addColorStop(0.3, colors[1]);
     gradient.addColorStop(0.6, colors[2]);
     gradient.addColorStop(1, colors[3]);
 
     ctx.fillStyle = gradient;
-    ctx.fillRect(0, 0, 2, 512);
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    const presetOverlay = WEATHER_PRESET_OVERLAYS[profile.type];
+
+    ctx.fillStyle = this.toCanvasColor(
+      presetOverlay.overlayColor,
+      presetOverlay.overlayAlpha + profile.intensity * 0.06
+    );
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    const glow = ctx.createRadialGradient(
+      canvas.width * 0.5,
+      canvas.height * 0.18,
+      40,
+      canvas.width * 0.5,
+      canvas.height * 0.18,
+      canvas.width * 0.34
+    );
+    glow.addColorStop(0, this.toCanvasColor(profile.skyGlow, 0.28));
+    glow.addColorStop(0.3, this.toCanvasColor(profile.skyGlow, 0.1));
+    glow.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = glow;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    const haze = ctx.createLinearGradient(0, canvas.height * 0.45, 0, canvas.height);
+    haze.addColorStop(0, 'rgba(255,255,255,0)');
+    haze.addColorStop(
+      1,
+      this.toCanvasColor(
+        presetOverlay.overlayColor,
+        presetOverlay.horizonAlpha + profile.intensity * 0.08
+      )
+    );
+    ctx.fillStyle = haze;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    const veilCount = 5 + Math.floor(profile.intensity * 5) + Math.floor(presetOverlay.streakBoost * 0.08);
+    ctx.save();
+    ctx.globalCompositeOperation = 'screen';
+    for (let i = 0; i < veilCount; i++) {
+      const clusterCenterX = canvas.width * (0.08 + Math.random() * 0.84);
+      const clusterCenterY = canvas.height * (0.12 + Math.random() * 0.42);
+      const clusterWidth = canvas.width * (0.16 + Math.random() * 0.22);
+      const clusterHeight = 24 + Math.random() * 42;
+      const clusterAlpha = 0.012 + Math.random() * 0.016;
+      const puffCount = 3 + Math.floor(Math.random() * 3);
+
+      for (let puffIndex = 0; puffIndex < puffCount; puffIndex++) {
+        const offsetX = (Math.random() - 0.5) * clusterWidth * 0.7;
+        const offsetY = (Math.random() - 0.5) * clusterHeight * 1.3;
+        const radiusX = clusterWidth * (0.45 + Math.random() * 0.35);
+        const radiusY = clusterHeight * (0.45 + Math.random() * 0.55);
+        const alpha = clusterAlpha * (0.85 + Math.random() * 0.45);
+        const centerX = clusterCenterX + offsetX;
+        const centerY = clusterCenterY + offsetY;
+
+        const veil = ctx.createRadialGradient(
+          centerX,
+          centerY,
+          radiusY * 0.12,
+          centerX,
+          centerY,
+          radiusX
+        );
+        veil.addColorStop(0, this.toCanvasColor(profile.cloudTint, alpha));
+        veil.addColorStop(0.35, this.toCanvasColor(profile.cloudTint, alpha * 0.78));
+        veil.addColorStop(0.72, this.toCanvasColor(profile.cloudTint, alpha * 0.24));
+        veil.addColorStop(1, 'rgba(255,255,255,0)');
+        ctx.fillStyle = veil;
+        ctx.beginPath();
+        ctx.ellipse(
+          centerX,
+          centerY,
+          radiusX,
+          radiusY,
+          (Math.random() - 0.5) * 0.22,
+          0,
+          Math.PI * 2
+        );
+        ctx.fill();
+      }
+    }
+
+    const hazeClusterCount = 4 + Math.floor(profile.intensity * 4);
+    for (let i = 0; i < hazeClusterCount; i++) {
+      const centerX = canvas.width * (0.12 + Math.random() * 0.76);
+      const centerY = canvas.height * (0.18 + Math.random() * 0.34);
+      const radiusX = canvas.width * (0.22 + Math.random() * 0.18);
+      const radiusY = 28 + Math.random() * 34;
+      const alpha = 0.01 + Math.random() * 0.014;
+      const mist = ctx.createRadialGradient(centerX, centerY, radiusY * 0.15, centerX, centerY, radiusX);
+      mist.addColorStop(0, this.toCanvasColor(profile.skyGlow, alpha));
+      mist.addColorStop(0.4, this.toCanvasColor(profile.cloudTint, alpha * 0.75));
+      mist.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.fillStyle = mist;
+      ctx.beginPath();
+      ctx.ellipse(centerX, centerY, radiusX, radiusY, (Math.random() - 0.5) * 0.12, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
 
     const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
     this.scene.background = texture;
   }
 
   /**
    * 创建云朵
    */
-  private createClouds(): void {
-    for (let i = 0; i < 30; i++) {
-      const cloud = this.createFluffyCloud();
+  private createClouds(profile: WeatherProfile): void {
+    for (let i = 0; i < profile.cloudCount; i++) {
+      const cloud = this.createFluffyCloud(profile);
+      const initialY =
+        profile.cloudHeightMin + Math.random() * (profile.cloudHeightMax - profile.cloudHeightMin);
       cloud.position.set(
         (Math.random() - 0.5) * 2000,
-        80 + Math.random() * 150,
+        initialY,
         (Math.random() - 0.5) * 2000
       );
-      cloud.scale.setScalar(8 + Math.random() * 15);
+      cloud.scale.setScalar(8 + Math.random() * (10 + profile.intensity * 10));
+      cloud.userData.baseY = initialY;
+      cloud.userData.floatAmplitude = 1 + Math.random() * (1.5 + profile.intensity * 2);
+      cloud.userData.floatSpeed = 0.12 + Math.random() * 0.18 + profile.intensity * 0.08;
+      cloud.userData.floatPhase = Math.random() * Math.PI * 2;
+      cloud.userData.spinSpeed = (Math.random() - 0.5) * (0.02 + profile.intensity * 0.04);
+      cloud.renderOrder = 6;
       this.terrainGroup.add(cloud);
       this.clouds.push(cloud);
     }
@@ -1023,28 +1404,94 @@ export class TerrainGenerator {
   /**
    * 创建蓬松云朵
    */
-  private createFluffyCloud(): THREE.Group {
+  private createFluffyCloud(profile: WeatherProfile): THREE.Group {
     const cloud = new THREE.Group();
-    const material = new THREE.MeshStandardMaterial({
-      color: 0xffffff,
+    const backMaterial = new THREE.MeshBasicMaterial({
+      color: profile.cloudTint,
       transparent: true,
-      opacity: 0.9,
+      opacity: profile.cloudOpacity * 0.34,
+      depthWrite: false,
+      depthTest: true,
+      fog: true,
+      toneMapped: false,
+      side: THREE.BackSide,
+    });
+    const frontMaterial = new THREE.MeshBasicMaterial({
+      color: profile.cloudTint,
+      transparent: true,
+      opacity: profile.cloudOpacity * 0.22,
+      depthWrite: false,
+      depthTest: true,
+      fog: true,
+      toneMapped: false,
+      side: THREE.FrontSide,
     });
 
-    // 多个球体组成云朵
     const puffs = 5 + Math.floor(Math.random() * 4);
     for (let i = 0; i < puffs; i++) {
       const size = 0.5 + Math.random() * 0.5;
-      const puff = new THREE.Mesh(new THREE.SphereGeometry(size, 12, 12), material);
-      puff.position.set(
-        (Math.random() - 0.5) * 2,
-        (Math.random() - 0.5) * 0.5,
-        (Math.random() - 0.5) * 1.5
+      const geometry = new THREE.SphereGeometry(size, 10, 10);
+      const position = new THREE.Vector3(
+        (Math.random() - 0.5) * 2.6,
+        (Math.random() - 0.5) * 0.65,
+        (Math.random() - 0.5) * 1.9
       );
-      cloud.add(puff);
+      const scale = new THREE.Vector3(
+        1 + Math.random() * 0.35,
+        0.7 + Math.random() * 0.25,
+        1 + Math.random() * 0.45
+      );
+      const backPuff = new THREE.Mesh(geometry, backMaterial);
+      backPuff.position.copy(position);
+      backPuff.scale.copy(scale);
+      backPuff.castShadow = false;
+      backPuff.receiveShadow = false;
+      backPuff.renderOrder = 6;
+      cloud.add(backPuff);
+
+      const frontPuff = new THREE.Mesh(geometry, frontMaterial);
+      frontPuff.position.copy(position);
+      frontPuff.scale.copy(scale);
+      frontPuff.castShadow = false;
+      frontPuff.receiveShadow = false;
+      frontPuff.renderOrder = 7;
+      cloud.add(frontPuff);
     }
 
     return cloud;
+  }
+
+  /**
+   * 创建轻量天气粒子
+   */
+  private createWeatherEffect(profile: WeatherProfile): void {
+    if (profile.particleCount <= 0) {
+      return;
+    }
+
+    const geometry = new THREE.BufferGeometry();
+    const positions = new Float32Array(profile.particleCount * 3);
+
+    for (let i = 0; i < profile.particleCount; i++) {
+      const offset = i * 3;
+      positions[offset] = (Math.random() - 0.5) * this.weatherParticleSpread;
+      positions[offset + 1] = 40 + Math.random() * this.weatherParticleBaseHeight;
+      positions[offset + 2] = (Math.random() - 0.5) * this.weatherParticleSpread;
+    }
+
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+
+    const material = new THREE.PointsMaterial({
+      color: profile.particleColor,
+      size: profile.particleSize,
+      transparent: true,
+      opacity: this.getParticleBaseOpacity(profile),
+      depthWrite: false,
+    });
+
+    this.weatherParticles = new THREE.Points(geometry, material);
+    this.weatherParticles.position.y = -20;
+    this.terrainGroup.add(this.weatherParticles);
   }
 
   /**
@@ -1056,21 +1503,90 @@ export class TerrainGenerator {
     if (this.waterMesh && this.waterMesh.geometry) {
       // 水面波动
       const positions = this.waterMesh.geometry.attributes.position;
+      const waveScale = this.weatherProfile.waterWaveScale;
 
       for (let i = 0; i < positions.count; i++) {
         const x = positions.getX(i);
         const y = positions.getY(i);
-        const wave = Math.sin(x * 0.05 + this.time) * Math.cos(y * 0.05 + this.time * 0.7) * 2;
+        const wave =
+          (Math.sin(x * 0.05 + this.time * (1 + this.weatherProfile.intensity * 0.25)) *
+            Math.cos(y * 0.05 + this.time * 0.7) +
+            Math.sin(x * 0.03 - this.time * 0.6) * 0.4) *
+          waveScale;
         positions.setZ(i, wave);
       }
       positions.needsUpdate = true;
+
+      const waterMaterial = this.waterMesh.material;
+      if (waterMaterial instanceof THREE.MeshStandardMaterial) {
+        const shimmer =
+          Math.sin(this.time * (0.9 + this.weatherProfile.intensity * 0.4)) * 0.5 + 0.5;
+        const waterResponse = this.getWaterVisualResponse(this.weatherProfile);
+        waterMaterial.emissiveIntensity =
+          waterResponse.baseEmissive
+          + shimmer * waterResponse.emissiveAmplitude
+          + this.weatherProfile.intensity * 0.04;
+        waterMaterial.opacity = THREE.MathUtils.clamp(
+          waterResponse.baseOpacity + shimmer * waterResponse.opacityAmplitude,
+          0.78,
+          0.97
+        );
+        waterMaterial.roughness = waterResponse.roughness;
+        waterMaterial.metalness = waterResponse.metalness;
+      }
     }
 
     // 云朵移动
     for (const cloud of this.clouds) {
-      cloud.position.x += deltaTime * 3;
+      const baseY =
+        typeof cloud.userData.baseY === 'number' ? cloud.userData.baseY : cloud.position.y;
+      const floatAmplitude =
+        typeof cloud.userData.floatAmplitude === 'number' ? cloud.userData.floatAmplitude : 1;
+      const floatSpeed =
+        typeof cloud.userData.floatSpeed === 'number' ? cloud.userData.floatSpeed : 0.15;
+      const floatPhase =
+        typeof cloud.userData.floatPhase === 'number' ? cloud.userData.floatPhase : 0;
+      const spinSpeed =
+        typeof cloud.userData.spinSpeed === 'number' ? cloud.userData.spinSpeed : 0;
+
+      cloud.position.x += deltaTime * this.weatherProfile.cloudSpeed;
+      cloud.position.y =
+        baseY + Math.sin(this.time * floatSpeed + floatPhase) * floatAmplitude;
+      cloud.rotation.y += deltaTime * spinSpeed;
       if (cloud.position.x > 1200) {
         cloud.position.x = -1200;
+      }
+    }
+
+    if (this.weatherParticles) {
+      const positions = this.weatherParticles.geometry.getAttribute(
+        'position'
+      ) as THREE.BufferAttribute;
+      for (let i = 0; i < positions.count; i++) {
+        const index = i * 3;
+        const y = positions.array[index + 1] as number;
+        const x = positions.array[index] as number;
+        const z = positions.array[index + 2] as number;
+
+        positions.array[index] = x + deltaTime * this.weatherProfile.particleDrift;
+        positions.array[index + 1] = y - deltaTime * this.weatherProfile.particleSpeed;
+        positions.array[index + 2] =
+          z + deltaTime * Math.sin(this.time * 0.7 + i * 0.31) * this.weatherProfile.intensity * 1.5;
+
+        if ((positions.array[index + 1] as number) < this.weatherParticleFloor) {
+          positions.array[index] = (Math.random() - 0.5) * this.weatherParticleSpread;
+          positions.array[index + 1] = 60 + Math.random() * this.weatherParticleBaseHeight;
+          positions.array[index + 2] = (Math.random() - 0.5) * this.weatherParticleSpread;
+        }
+      }
+      positions.needsUpdate = true;
+
+      if (this.weatherParticles.material instanceof THREE.PointsMaterial) {
+        this.weatherParticles.material.opacity = THREE.MathUtils.clamp(
+          this.getParticleBaseOpacity(this.weatherProfile) + Math.sin(this.time * 0.6) * 0.03,
+          0.12,
+          0.72
+        );
       }
     }
   }
@@ -1118,31 +1634,34 @@ export class TerrainGenerator {
 
       // 清理 Mesh
       if (child instanceof THREE.Mesh) {
-        child.geometry.dispose();
-        if (Array.isArray(child.material)) {
-          child.material.forEach((m) => m.dispose());
-        } else {
-          child.material.dispose();
-        }
+        this.disposeRenderable(child.geometry, child.material);
       }
       // 清理 InstancedMesh（草地、花）
       else if (child instanceof THREE.InstancedMesh) {
-        child.geometry.dispose();
-        child.material.dispose();
+        this.disposeRenderable(child.geometry, child.material);
+      }
+      // 清理天气粒子
+      else if (child instanceof THREE.Points) {
+        this.disposeRenderable(child.geometry, child.material);
       }
       // 清理 Group（树木、云朵等）
       else if (child instanceof THREE.Group) {
         child.traverse((obj) => {
           if (obj instanceof THREE.Mesh) {
-            obj.geometry.dispose();
-            if (Array.isArray(obj.material)) {
-              obj.material.forEach((m) => m.dispose());
+            this.disposeRenderable(obj.geometry, obj.material);
+          } else if (obj instanceof THREE.Sprite) {
+            const spriteMaterial = obj.material;
+            if (Array.isArray(spriteMaterial)) {
+              for (const material of spriteMaterial) {
+                material.dispose();
+              }
             } else {
-              obj.material.dispose();
+              spriteMaterial.dispose();
             }
           } else if (obj instanceof THREE.InstancedMesh) {
-            obj.geometry.dispose();
-            obj.material.dispose();
+            this.disposeRenderable(obj.geometry, obj.material);
+          } else if (obj instanceof THREE.Points) {
+            this.disposeRenderable(obj.geometry, obj.material);
           }
         });
       }
@@ -1153,7 +1672,453 @@ export class TerrainGenerator {
     this.waterMesh = undefined;
     this.grass = null;
     this.rocks = [];
+    this.weatherParticles = undefined;
 
     log.debug('clearTerrain: Complete', { remainingChildren: this.terrainGroup.children.length });
+  }
+
+  private resolveWeatherProfile(config: LevelConfig): WeatherProfile {
+    const baseProfile = this.getDefaultWeatherProfile(config.terrain);
+    const weatherPresetMap: Record<LevelWeatherConfig['preset'], WeatherType> = {
+      clear: 'clear',
+      mist: 'mist',
+      windy: 'mist',
+      sandstorm: 'dust',
+      snow: 'snow',
+      storm: 'storm',
+      smog: 'smog',
+    };
+    const weatherConfig = config.weather;
+    const environmentConfig = config.environment;
+    const cloudCover = environmentConfig.cloudCover ?? weatherConfig.cloudCoverage;
+
+    const resolvedProfile: WeatherProfile = {
+      ...baseProfile,
+      type: weatherPresetMap[weatherConfig.preset] ?? baseProfile.type,
+      intensity: THREE.MathUtils.clamp(
+        environmentConfig.weatherIntensity ?? weatherConfig.intensity ?? baseProfile.intensity,
+        0,
+        1
+      ),
+      fogDensity: environmentConfig.fogDensity ?? weatherConfig.fogDensity ?? baseProfile.fogDensity,
+      cloudCount: Math.max(
+        4,
+        Math.round(
+          typeof cloudCover === 'number'
+            ? cloudCover <= 1
+              ? 12 + cloudCover * 40
+              : cloudCover
+            : baseProfile.cloudCount
+        )
+      ),
+      cloudOpacity:
+        weatherConfig.cloudOpacity ?? baseProfile.cloudOpacity + (environmentConfig.cloudCover ?? 0) * 0.08,
+      cloudTint: environmentConfig.cloudTint ?? weatherConfig.cloudTint ?? baseProfile.cloudTint,
+      cloudSpeed: environmentConfig.cloudSpeed ?? weatherConfig.cloudSpeed ?? baseProfile.cloudSpeed,
+      cloudHeightMin:
+        environmentConfig.cloudHeightMin ?? weatherConfig.cloudHeightMin ?? baseProfile.cloudHeightMin,
+      cloudHeightMax:
+        environmentConfig.cloudHeightMax ?? weatherConfig.cloudHeightMax ?? baseProfile.cloudHeightMax,
+      particleCount:
+        environmentConfig.particleCount ?? weatherConfig.particleCount ?? baseProfile.particleCount,
+      particleSize:
+        environmentConfig.particleSize ?? weatherConfig.particleSize ?? baseProfile.particleSize,
+      particleSpeed:
+        environmentConfig.particleSpeed ?? weatherConfig.particleSpeed ?? baseProfile.particleSpeed,
+      particleDrift:
+        environmentConfig.particleDrift ?? weatherConfig.particleDrift ?? baseProfile.particleDrift,
+      particleColor:
+        environmentConfig.particleColor ?? weatherConfig.particleColor ?? baseProfile.particleColor,
+      waterWaveScale:
+        environmentConfig.waterWaveScale ?? weatherConfig.waterWaveScale ?? baseProfile.waterWaveScale,
+      skyGlow: environmentConfig.skyGlow ?? weatherConfig.skyGlow ?? baseProfile.skyGlow,
+    };
+
+    switch (resolvedProfile.type) {
+      case 'storm':
+        resolvedProfile.cloudOpacity = THREE.MathUtils.clamp(
+          resolvedProfile.cloudOpacity + 0.06,
+          0.3,
+          0.92
+        );
+        resolvedProfile.cloudSpeed += 0.8;
+        resolvedProfile.particleCount = Math.round(resolvedProfile.particleCount * 1.1);
+        break;
+      case 'mist':
+        resolvedProfile.cloudOpacity = THREE.MathUtils.clamp(
+          resolvedProfile.cloudOpacity + 0.04,
+          0.3,
+          0.9
+        );
+        resolvedProfile.particleSize += 0.6;
+        break;
+      case 'dust':
+        resolvedProfile.particleCount = Math.round(resolvedProfile.particleCount * 1.08);
+        resolvedProfile.fogDensity *= 1.06;
+        break;
+      case 'smog':
+        resolvedProfile.cloudOpacity = THREE.MathUtils.clamp(
+          resolvedProfile.cloudOpacity + 0.03,
+          0.3,
+          0.88
+        );
+        resolvedProfile.fogDensity *= 1.08;
+        break;
+      case 'snow':
+        resolvedProfile.particleSize = Math.max(2.8, resolvedProfile.particleSize * 0.95);
+        resolvedProfile.cloudSpeed *= 0.92;
+        break;
+    }
+
+    resolvedProfile.cloudOpacity = THREE.MathUtils.clamp(resolvedProfile.cloudOpacity, 0.18, 0.92);
+    resolvedProfile.particleCount = Math.max(0, Math.round(resolvedProfile.particleCount));
+    resolvedProfile.particleSize = Math.max(0, resolvedProfile.particleSize);
+    resolvedProfile.fogDensity = Math.max(0, resolvedProfile.fogDensity);
+
+    return resolvedProfile;
+  }
+
+  private getDefaultWeatherProfile(terrain: TerrainType): WeatherProfile {
+    switch (terrain) {
+      case TerrainType.DESERT:
+        return {
+          type: 'dust',
+          intensity: 0.55,
+          fogDensity: 0.0012,
+          cloudCount: 12,
+          cloudOpacity: 0.48,
+          cloudTint: 0xe8c58d,
+          cloudSpeed: 4.5,
+          cloudHeightMin: 110,
+          cloudHeightMax: 220,
+          particleCount: 180,
+          particleSize: 6,
+          particleSpeed: 14,
+          particleDrift: 8,
+          particleColor: 0xd6b77d,
+          waterWaveScale: 0.6,
+          skyGlow: 0xffc978,
+        };
+      case TerrainType.MOUNTAINS:
+        return {
+          type: 'snow',
+          intensity: 0.45,
+          fogDensity: 0.00105,
+          cloudCount: 24,
+          cloudOpacity: 0.78,
+          cloudTint: 0xf6fbff,
+          cloudSpeed: 2.2,
+          cloudHeightMin: 90,
+          cloudHeightMax: 230,
+          particleCount: 220,
+          particleSize: 3.5,
+          particleSpeed: 10,
+          particleDrift: 2,
+          particleColor: 0xf5fbff,
+          waterWaveScale: 0.8,
+          skyGlow: 0xddeeff,
+        };
+      case TerrainType.OCEAN:
+        return {
+          type: 'storm',
+          intensity: 0.5,
+          fogDensity: 0.0011,
+          cloudCount: 28,
+          cloudOpacity: 0.72,
+          cloudTint: 0xd8e4ee,
+          cloudSpeed: 5.2,
+          cloudHeightMin: 100,
+          cloudHeightMax: 240,
+          particleCount: 160,
+          particleSize: 7,
+          particleSpeed: 6,
+          particleDrift: 5,
+          particleColor: 0xc9d7e2,
+          waterWaveScale: 3.4,
+          skyGlow: 0x8fb9ff,
+        };
+      case TerrainType.CITY:
+        return {
+          type: 'smog',
+          intensity: 0.4,
+          fogDensity: 0.00115,
+          cloudCount: 22,
+          cloudOpacity: 0.68,
+          cloudTint: 0xc8d0dc,
+          cloudSpeed: 3.5,
+          cloudHeightMin: 120,
+          cloudHeightMax: 260,
+          particleCount: 120,
+          particleSize: 5,
+          particleSpeed: 7,
+          particleDrift: 3,
+          particleColor: 0xb0b9c8,
+          waterWaveScale: 0.5,
+          skyGlow: 0xb5c4ff,
+        };
+      case TerrainType.LAKE:
+      default:
+        return {
+          type: 'clear',
+          intensity: 0.2,
+          fogDensity: 0.00072,
+          cloudCount: 18,
+          cloudOpacity: 0.74,
+          cloudTint: 0xffffff,
+          cloudSpeed: 2.8,
+          cloudHeightMin: 90,
+          cloudHeightMax: 220,
+          particleCount: 0,
+          particleSize: 0,
+          particleSpeed: 0,
+          particleDrift: 0,
+          particleColor: 0xffffff,
+          waterWaveScale: 1.6,
+          skyGlow: 0xfff0b2,
+        };
+    }
+  }
+
+  private getSurfaceProfile(config: LevelConfig): LevelSurfaceProfile {
+    return config.environment.surfaceProfile ?? {};
+  }
+
+  private tintColor(
+    color: THREE.ColorRepresentation,
+    hueOffset: number,
+    saturationOffset: number,
+    lightnessOffset: number
+  ): THREE.Color {
+    const tinted = new THREE.Color(color);
+    const hsl = { h: 0, s: 0, l: 0 };
+    tinted.getHSL(hsl);
+    tinted.setHSL(
+      (hsl.h + hueOffset + 1) % 1,
+      THREE.MathUtils.clamp(hsl.s + saturationOffset, 0, 1),
+      THREE.MathUtils.clamp(hsl.l + lightnessOffset, 0, 1)
+    );
+    return tinted;
+  }
+
+  private getParticleBaseOpacity(profile: WeatherProfile): number {
+    switch (profile.type) {
+      case 'mist':
+        return 0.14 + profile.intensity * 0.1;
+      case 'snow':
+        return 0.4 + profile.intensity * 0.12;
+      case 'dust':
+        return 0.34 + profile.intensity * 0.16;
+      case 'storm':
+        return 0.42 + profile.intensity * 0.18;
+      case 'smog':
+        return 0.24 + profile.intensity * 0.12;
+      case 'rain':
+        return 0.36 + profile.intensity * 0.18;
+      case 'clear':
+      default:
+        return 0.18 + profile.intensity * 0.08;
+    }
+  }
+
+  private getWaterVisualResponse(profile: WeatherProfile): {
+    baseEmissive: number;
+    emissiveAmplitude: number;
+    baseOpacity: number;
+    opacityAmplitude: number;
+    roughness: number;
+    metalness: number;
+  } {
+    switch (profile.type) {
+      case 'storm':
+        return {
+          baseEmissive: 0.1,
+          emissiveAmplitude: 0.025,
+          baseOpacity: 0.84,
+          opacityAmplitude: 0.035,
+          roughness: 0.2,
+          metalness: 0.34,
+        };
+      case 'mist':
+        return {
+          baseEmissive: 0.14,
+          emissiveAmplitude: 0.035,
+          baseOpacity: 0.88,
+          opacityAmplitude: 0.045,
+          roughness: 0.14,
+          metalness: 0.28,
+        };
+      case 'snow':
+        return {
+          baseEmissive: 0.12,
+          emissiveAmplitude: 0.02,
+          baseOpacity: 0.9,
+          opacityAmplitude: 0.03,
+          roughness: 0.16,
+          metalness: 0.24,
+        };
+      case 'dust':
+      case 'smog':
+        return {
+          baseEmissive: 0.09,
+          emissiveAmplitude: 0.018,
+          baseOpacity: 0.83,
+          opacityAmplitude: 0.028,
+          roughness: 0.22,
+          metalness: 0.26,
+        };
+      case 'rain':
+        return {
+          baseEmissive: 0.11,
+          emissiveAmplitude: 0.024,
+          baseOpacity: 0.87,
+          opacityAmplitude: 0.04,
+          roughness: 0.15,
+          metalness: 0.32,
+        };
+      case 'clear':
+      default:
+        return {
+          baseEmissive: 0.13,
+          emissiveAmplitude: 0.03,
+          baseOpacity: 0.89,
+          opacityAmplitude: 0.035,
+          roughness: 0.12,
+          metalness: 0.3,
+        };
+    }
+  }
+
+  private createDetailTexture(
+    base: THREE.ColorRepresentation,
+    accent: THREE.ColorRepresentation,
+    detail: THREE.ColorRepresentation,
+    pattern: SurfacePattern
+  ): THREE.CanvasTexture {
+    const canvas = document.createElement('canvas');
+    canvas.width = 256;
+    canvas.height = 256;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      const texture = new THREE.CanvasTexture(canvas);
+      return texture;
+    }
+
+    ctx.fillStyle = this.toCanvasColor(base);
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    const accentAlpha = pattern === 'grass' ? 0.34 : pattern === 'asphalt' ? 0.24 : 0.16;
+    const detailAlpha = pattern === 'grass' ? 0.28 : pattern === 'asphalt' ? 0.28 : 0.18;
+    const accentColor = this.toCanvasColor(accent, accentAlpha);
+    const detailColor = this.toCanvasColor(detail, detailAlpha);
+
+    for (let i = 0; i < 140; i++) {
+      const x = Math.random() * canvas.width;
+      const y = Math.random() * canvas.height;
+      const size = 2 + Math.random() * 20;
+      ctx.fillStyle = i % 2 === 0 ? accentColor : detailColor;
+      switch (pattern) {
+        case 'grass':
+          ctx.fillRect(x, y, 1 + Math.random() * 4, size * (1.3 + Math.random() * 0.9));
+          break;
+        case 'sand':
+        case 'snow':
+        case 'rock':
+          ctx.beginPath();
+          ctx.arc(x, y, size * 0.3, 0, Math.PI * 2);
+          ctx.fill();
+          break;
+        case 'asphalt': {
+          const grain = 0.8 + Math.random() * 2.2;
+          ctx.fillRect(x, y, grain, grain);
+          if (Math.random() < 0.08) {
+            const crackLen = 3 + Math.random() * 8;
+            ctx.strokeStyle = this.toCanvasColor(detail, 0.14);
+            ctx.beginPath();
+            ctx.moveTo(x, y);
+            ctx.lineTo(x + crackLen, y + (Math.random() - 0.5) * 2);
+            ctx.stroke();
+          }
+          break;
+        }
+        case 'water':
+          ctx.fillRect(x, y, size * 1.8, 1 + Math.random() * 2);
+          break;
+        case 'beach':
+          ctx.fillRect(x, y, size * 0.6, size * 0.2);
+          break;
+      }
+    }
+
+    if (pattern === 'asphalt') {
+      ctx.strokeStyle = this.toCanvasColor(0xffffff, 0.05);
+      for (let i = 0; i < 8; i++) {
+        const y = (i / 8) * canvas.height;
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(canvas.width, y + Math.random() * 4 - 2);
+        ctx.stroke();
+      }
+
+      ctx.strokeStyle = this.toCanvasColor(0xbfc7d6, 0.08);
+      for (let i = 0; i < 6; i++) {
+        const x = (i / 6) * canvas.width;
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x + Math.random() * 8 - 4, canvas.height);
+        ctx.stroke();
+      }
+
+      for (let i = 0; i < 20; i++) {
+        const blockX = Math.random() * canvas.width;
+        const blockY = Math.random() * canvas.height;
+        const blockW = 14 + Math.random() * 40;
+        const blockH = 14 + Math.random() * 40;
+        ctx.fillStyle = this.toCanvasColor(0xa8b2c2, 0.05 + Math.random() * 0.05);
+        ctx.fillRect(blockX, blockY, blockW, blockH);
+      }
+
+      for (let i = 0; i < 10; i++) {
+        const lineX = Math.random() * canvas.width;
+        const lineY = Math.random() * canvas.height;
+        const lineW = 24 + Math.random() * 48;
+        const lineH = 2 + Math.random() * 3;
+        ctx.fillStyle = this.toCanvasColor(0xf2f5fa, 0.05 + Math.random() * 0.03);
+        ctx.fillRect(lineX, lineY, lineW, lineH);
+      }
+    }
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapT = THREE.RepeatWrapping;
+    texture.repeat.set(pattern === 'water' ? 12 : 18, pattern === 'water' ? 12 : 18);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    return texture;
+  }
+
+  private toCanvasColor(color: THREE.ColorRepresentation, alpha: number = 1): string {
+    const resolved = new THREE.Color(color).convertLinearToSRGB();
+    const r = Math.round(resolved.r * 255);
+    const g = Math.round(resolved.g * 255);
+    const b = Math.round(resolved.b * 255);
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+  }
+
+  private disposeRenderable(
+    geometry: THREE.BufferGeometry,
+    material: THREE.Material | THREE.Material[]
+  ): void {
+    geometry.dispose();
+    const materials = Array.isArray(material) ? material : [material];
+    for (const entry of materials) {
+      const typedMaterial = entry as THREE.Material & {
+        map?: THREE.Texture | null;
+        alphaMap?: THREE.Texture | null;
+        emissiveMap?: THREE.Texture | null;
+      };
+      typedMaterial.map?.dispose();
+      typedMaterial.alphaMap?.dispose();
+      typedMaterial.emissiveMap?.dispose();
+      typedMaterial.dispose();
+    }
   }
 }

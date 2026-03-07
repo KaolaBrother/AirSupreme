@@ -48,8 +48,12 @@ export class PowerUpSystem implements IGameSystem {
     return this.manager;
   }
 
-  spawn(position: THREE.Vector3): void {
-    this.manager.spawn(position);
+  spawn(
+    position: THREE.Vector3,
+    type?: import('@/features/powerups/PowerUpSystem').PowerUpType,
+    icon?: string
+  ): void {
+    this.manager.spawn(position, type, icon);
   }
 
   hasEffect(type: PowerUpType): boolean {

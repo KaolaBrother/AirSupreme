@@ -3,6 +3,8 @@ import { ParticleSystem } from '@/features/effects/ParticleSystem';
 import { HealthSystem } from '@/features/combat/HealthSystem';
 import { BOSS_MISSILE_CONFIG } from './BossTypes';
 
+const BOSS_MISSILE_TRAIL_INTERVAL = 0.04;
+
 export class BossMissile {
   public mesh: THREE.Group;
   public velocity: THREE.Vector3;
@@ -18,6 +20,15 @@ export class BossMissile {
   private startPosition: THREE.Vector3;
   private potentialTargets: THREE.Object3D[] = [];
   private playerMesh: THREE.Object3D | null = null;
+  private trailTimer: number = BOSS_MISSILE_TRAIL_INTERVAL;
+  private readonly lookTarget = new THREE.Vector3();
+  private readonly orientationHelper = new THREE.Object3D();
+  private readonly trailPosition = new THREE.Vector3();
+  private readonly backwardDirection = new THREE.Vector3();
+  private readonly trailColor = new THREE.Color();
+  private readonly targetPosition = new THREE.Vector3();
+  private readonly targetDirection = new THREE.Vector3();
+  private readonly currentDirection = new THREE.Vector3();
 
   constructor(
     scene: THREE.Scene,
@@ -136,7 +147,8 @@ export class BossMissile {
 
     this.velocity = new THREE.Vector3(0, this.speed, 0);
 
-    this.mesh.lookAt(this.mesh.position.clone().add(this.velocity));
+    this.lookTarget.copy(this.mesh.position).add(this.velocity);
+    this.mesh.lookAt(this.lookTarget);
   }
 
   public update(deltaTime: number): void {
@@ -164,24 +176,20 @@ export class BossMissile {
       this.huntTarget(deltaTime);
     }
 
-    this.mesh.position.add(this.velocity.clone().multiplyScalar(deltaTime));
+    this.mesh.position.addScaledVector(this.velocity, deltaTime);
 
     if (this.velocity.length() > 0) {
-      const targetPos = this.mesh.position.clone().add(this.velocity);
-      const dummy = new THREE.Object3D();
-      dummy.position.copy(this.mesh.position);
-      dummy.lookAt(targetPos);
-      this.mesh.quaternion.slerp(dummy.quaternion, 0.3);
+      this.lookTarget.copy(this.mesh.position).add(this.velocity);
+      this.orientationHelper.position.copy(this.mesh.position);
+      this.orientationHelper.lookAt(this.lookTarget);
+      this.mesh.quaternion.slerp(this.orientationHelper.quaternion, 0.3);
     }
 
-    const trailPosition = this.mesh.position.clone();
-    const backwardDirection = this.velocity
-      .clone()
-      .normalize()
-      .multiplyScalar(-1.5 * BOSS_MISSILE_CONFIG.SCALE);
-    trailPosition.add(backwardDirection);
-    const trailColor = new THREE.Color().setHSL(0.05 + Math.random() * 0.03, 1, 0.6);
-    this.particleSystem.createTrail(trailPosition, trailColor);
+    this.trailTimer += deltaTime;
+    while (this.trailTimer >= BOSS_MISSILE_TRAIL_INTERVAL) {
+      this.trailTimer -= BOSS_MISSILE_TRAIL_INTERVAL;
+      this.emitTrail();
+    }
   }
 
   private findNewTarget(): void {
@@ -214,28 +222,32 @@ export class BossMissile {
   }
 
   private huntTarget(deltaTime: number): void {
-    let targetPosition: THREE.Vector3;
-
     if (this.isTargetingPlayer && this.playerMesh) {
-      targetPosition = this.playerMesh.position.clone();
+      this.targetPosition.copy(this.playerMesh.position);
     } else if (this.target) {
-      targetPosition = this.target.position.clone();
+      this.targetPosition.copy(this.target.position);
     } else {
       return;
     }
 
-    const targetDirection = new THREE.Vector3()
-      .subVectors(targetPosition, this.mesh.position)
-      .normalize();
-
-    const currentDirection = this.velocity.clone().normalize();
+    this.targetDirection.subVectors(this.targetPosition, this.mesh.position).normalize();
+    this.currentDirection.copy(this.velocity).normalize();
     const turnAngle = this.turnSpeed * deltaTime;
 
-    const newDirection = currentDirection.clone();
-    newDirection.lerp(targetDirection, turnAngle * 2);
-    newDirection.normalize();
+    this.currentDirection.lerp(this.targetDirection, turnAngle * 2);
+    this.currentDirection.normalize();
+    this.velocity.copy(this.currentDirection).multiplyScalar(this.speed);
+  }
 
-    this.velocity.copy(newDirection).multiplyScalar(this.speed);
+  private emitTrail(): void {
+    this.trailPosition.copy(this.mesh.position);
+    this.backwardDirection
+      .copy(this.velocity)
+      .normalize()
+      .multiplyScalar(-1.5 * BOSS_MISSILE_CONFIG.SCALE);
+    this.trailPosition.add(this.backwardDirection);
+    this.trailColor.setHSL(0.05 + Math.random() * 0.03, 1, 0.6);
+    this.particleSystem.createTrail(this.trailPosition, this.trailColor);
   }
 
   public takeDamage(damage: number): void {

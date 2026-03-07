@@ -1,4 +1,11 @@
-import * as THREE from 'three';
+import { Quaternion, Vector3 } from 'three';
+import type { Camera, Object3D } from 'three';
+
+const CAMERA_POSITION_THRESHOLD_SQ = 0.01;
+const PLAYER_POSITION_THRESHOLD_SQ = 0.01;
+const TARGET_POSITION_THRESHOLD_SQ = 0.01;
+const CAMERA_ROTATION_THRESHOLD = 0.0025;
+const HEALTH_PERCENT_THRESHOLD = 0.001;
 
 /**
  * 敌人血条管理器
@@ -13,9 +20,25 @@ export class EnemyHealthBars {
       background: HTMLDivElement;
       targetName: HTMLSpanElement;
       arrow: HTMLDivElement | null;
-      screenPos: { x: number; y: number } | null; // 缓存屏幕位置
+      arrowShape: HTMLDivElement | null;
+      arrowDistanceLabel: HTMLSpanElement | null;
+      screenPos: { x: number; y: number; z: number } | null; // 缓存屏幕位置
+      lastBarWorldPosition: Vector3;
+      lastHealthPercent: number;
+      wasInView: boolean;
     }
   > = new Map();
+  private readonly textContentCache = new WeakMap<HTMLElement, string>();
+  private readonly styleValueCache = new WeakMap<HTMLElement, Map<string, string>>();
+  private readonly worldPosition = new Vector3();
+  private readonly barWorldPosition = new Vector3();
+  private readonly screenVector = new Vector3();
+  private readonly cameraLocal = new Vector3();
+  private readonly invertedCameraQuaternion = new Quaternion();
+  private readonly lastCameraPosition = new Vector3();
+  private readonly lastCameraQuaternion = new Quaternion();
+  private readonly lastPlayerPosition = new Vector3();
+  private cameraStateInitialized: boolean = false;
 
   constructor() {
     this.container = document.createElement('div');
@@ -41,18 +64,26 @@ export class EnemyHealthBars {
    */
   public update(
     enemies: Array<{
-      mesh: THREE.Object3D;
+      mesh: Object3D;
       currentHealth: number;
       maxHealth: number;
     }>,
     friendlies: Array<{
-      mesh: THREE.Object3D;
+      mesh: Object3D;
       currentHealth: number;
       maxHealth: number;
     }>,
-    camera: THREE.Camera,
-    playerPosition: THREE.Vector3
+    camera: Camera,
+    playerPosition: Vector3
   ): void {
+    const cameraMoved =
+      !this.cameraStateInitialized ||
+      this.lastCameraPosition.distanceToSquared(camera.position) > CAMERA_POSITION_THRESHOLD_SQ ||
+      this.lastCameraQuaternion.angleTo(camera.quaternion) > CAMERA_ROTATION_THRESHOLD;
+    const playerMoved =
+      !this.cameraStateInitialized ||
+      this.lastPlayerPosition.distanceToSquared(playerPosition) > PLAYER_POSITION_THRESHOLD_SQ;
+
     const enemyIds = new Set(enemies.map((e) => e.mesh.uuid));
     const friendlyIds = new Set(friendlies.map((f) => f.mesh.uuid));
     const activeIds = new Set([...enemyIds, ...friendlyIds]);
@@ -66,22 +97,59 @@ export class EnemyHealthBars {
 
     // 更新或创建敌人血条
     for (const enemy of enemies) {
-      this.updateOrCreateHealthBar(enemy, camera, playerPosition, false);
+      this.updateOrCreateHealthBar(enemy, camera, playerPosition, cameraMoved, playerMoved, false);
     }
 
     // 更新或创建友军血条
     for (const friendly of friendlies) {
-      this.updateOrCreateHealthBar(friendly, camera, playerPosition, true);
+      this.updateOrCreateHealthBar(
+        friendly,
+        camera,
+        playerPosition,
+        cameraMoved,
+        playerMoved,
+        true
+      );
     }
+
+    this.lastCameraPosition.copy(camera.position);
+    this.lastCameraQuaternion.copy(camera.quaternion);
+    this.lastPlayerPosition.copy(playerPosition);
+    this.cameraStateInitialized = true;
   }
 
   /**
    * 获取目标的实际世界坐标
    */
-  private getTargetWorldPosition(mesh: THREE.Object3D): THREE.Vector3 {
-    const worldPos = new THREE.Vector3();
-    mesh.getWorldPosition(worldPos);
-    return worldPos;
+  private getTargetWorldPosition(mesh: Object3D, target: Vector3): Vector3 {
+    mesh.getWorldPosition(target);
+    return target;
+  }
+
+  private setTextContent(element: HTMLElement, text: string): boolean {
+    if (this.textContentCache.get(element) === text) {
+      return false;
+    }
+
+    element.textContent = text;
+    this.textContentCache.set(element, text);
+    return true;
+  }
+
+  private setStyleValue(element: HTMLElement, property: string, value: string): void {
+    let cache = this.styleValueCache.get(element);
+    if (!cache) {
+      cache = new Map<string, string>();
+      this.styleValueCache.set(element, cache);
+    }
+
+    if (cache.get(property) === value) {
+      return;
+    }
+
+    const style = element.style as CSSStyleDeclaration & Record<string, string>;
+    style[property] = value;
+    cache.set(property, value);
   }
 
   /**
@@ -89,12 +157,14 @@ export class EnemyHealthBars {
    */
   private updateOrCreateHealthBar(
     enemy: {
-      mesh: THREE.Object3D;
+      mesh: Object3D;
       currentHealth: number;
       maxHealth: number;
     },
-    camera: THREE.Camera,
-    playerPosition: THREE.Vector3,
+    camera: Camera,
+    playerPosition: Vector3,
+    cameraMoved: boolean,
+    playerMoved: boolean,
     isFriendly: boolean = false
   ): void {
     const id = enemy.mesh.uuid;
@@ -104,11 +174,57 @@ export class EnemyHealthBars {
     const isBoss = name.includes('BOSS') || name.includes('boss_eye');
     const barWidth = isBoss ? 120 : 60;
 
-    const worldPos = this.getTargetWorldPosition(enemy.mesh);
-    const screenPos = this.worldToScreen(worldPos, camera);
+    const worldPos = this.getTargetWorldPosition(enemy.mesh, this.worldPosition);
+    this.barWorldPosition.copy(worldPos);
+    this.barWorldPosition.y += this.getBarHeightOffset(enemy.mesh);
 
-    if (barData) {
-      barData.screenPos = { x: screenPos.x, y: screenPos.y };
+    if (!barData) {
+      const bar = this.createHealthBar();
+      const background = this.createBackgroundBar(barWidth, isBoss);
+      const targetName = this.createTargetName(isFriendly, isBoss);
+      const arrowData = isFriendly ? null : this.createArrowIndicator();
+
+      bar.appendChild(background);
+      bar.appendChild(targetName);
+      this.container.appendChild(bar);
+      if (arrowData) {
+        this.container.appendChild(arrowData.root);
+      }
+
+      barData = {
+        bar,
+        background,
+        targetName,
+        arrow: arrowData?.root ?? null,
+        arrowShape: arrowData?.shape ?? null,
+        arrowDistanceLabel: arrowData?.distanceLabel ?? null,
+        screenPos: null,
+        lastBarWorldPosition: this.barWorldPosition.clone(),
+        lastHealthPercent: Number.NaN,
+        wasInView: false,
+      };
+      this.healthBars.set(id, barData);
+    }
+
+    const healthPercent = enemy.currentHealth / enemy.maxHealth;
+    const targetMoved =
+      barData.lastBarWorldPosition.distanceToSquared(this.barWorldPosition) >
+      TARGET_POSITION_THRESHOLD_SQ;
+    const needsHealthUpdate =
+      Math.abs(barData.lastHealthPercent - healthPercent) > HEALTH_PERCENT_THRESHOLD;
+    const shouldRecalculateScreen = !barData.screenPos || cameraMoved || targetMoved;
+
+    let screenPos = barData.screenPos;
+    if (!screenPos || shouldRecalculateScreen) {
+      const projected = this.worldToScreen(this.barWorldPosition, camera);
+      if (screenPos) {
+        screenPos.x = projected.x;
+        screenPos.y = projected.y;
+        screenPos.z = projected.z;
+      } else {
+        screenPos = { ...projected };
+        barData.screenPos = screenPos;
+      }
     }
 
     const inView =
@@ -117,61 +233,69 @@ export class EnemyHealthBars {
       screenPos.y >= 0 &&
       screenPos.y <= 1 &&
       screenPos.z < 1;
+    const visibilityChanged = inView !== barData.wasInView;
+    const needsPositionUpdate = inView && (visibilityChanged || cameraMoved || targetMoved);
+    const needsArrowUpdate = !inView && (visibilityChanged || cameraMoved || targetMoved || playerMoved);
 
-    if (!barData) {
-      const bar = this.createHealthBar();
-      const background = this.createBackgroundBar(barWidth, isBoss);
-      const targetName = this.createTargetName(isFriendly, isBoss);
-      const arrow = isFriendly ? null : this.createArrowIndicator();
-
-      bar.appendChild(background);
-      bar.appendChild(targetName);
-      this.container.appendChild(bar);
-      if (arrow) {
-        this.container.appendChild(arrow);
-      }
-
-      barData = { bar, background, targetName, arrow, screenPos: null };
-      this.healthBars.set(id, barData);
+    if (!needsHealthUpdate && !needsPositionUpdate && !needsArrowUpdate && !visibilityChanged) {
+      return;
     }
 
-    const healthPercent = enemy.currentHealth / enemy.maxHealth;
     const color = this.getHealthColor(healthPercent);
 
     if (inView) {
       const barWidth = isBoss ? 120 : 60;
       const barHeight = isBoss ? 10 : 6;
 
-      barData.bar.style.display = 'block';
+      this.setStyleValue(barData.bar, 'display', 'block');
       if (barData.arrow) {
-        barData.arrow.style.display = 'none';
+        this.resetArrowIndicator(barData.arrow, barData.arrowDistanceLabel);
       }
 
-      const { x, y } = this.calculateBarPosition(enemy.mesh, camera, barWidth, barHeight);
-      barData.bar.style.left = `${x}px`;
-      barData.bar.style.top = `${y}px`;
+      if (needsPositionUpdate) {
+        const { x, y } = this.getBarPositionFromScreen(screenPos, barWidth, barHeight);
+        this.setStyleValue(barData.bar, 'left', `${x}px`);
+        this.setStyleValue(barData.bar, 'top', `${y}px`);
+      }
 
-      barData.background.style.background = color;
-      barData.background.style.width = `${barWidth * healthPercent}px`;
+      if (needsHealthUpdate || visibilityChanged) {
+        this.setStyleValue(barData.background, 'background', color);
+        this.setStyleValue(barData.background, 'width', `${barWidth * healthPercent}px`);
+      }
 
-      const name = this.getTargetName(enemy.mesh, isFriendly);
-      barData.targetName.textContent = name;
-      const textWidth = barData.targetName.offsetWidth;
-      const centeredLeft = (barWidth - textWidth) / 2;
-      barData.targetName.style.left = `${centeredLeft}px`;
+      const targetName = this.getTargetName(enemy.mesh, isFriendly);
+      if (this.setTextContent(barData.targetName, targetName)) {
+        const textWidth = barData.targetName.offsetWidth;
+        const centeredLeft = (barWidth - textWidth) / 2;
+        this.setStyleValue(barData.targetName, 'left', `${centeredLeft}px`);
+      }
     } else {
-      barData.bar.style.display = 'none';
+      this.setStyleValue(barData.bar, 'display', 'none');
       if (barData.arrow) {
-        barData.arrow.style.display = 'block';
-        const worldPos = this.getTargetWorldPosition(enemy.mesh);
-        const distance = playerPosition.distanceTo(worldPos);
-        // 使用相机位置计算方向向量，而不是玩家位置
-        // 因为箭头指示器是相对于相机视野的方向
-        const fromCamera = worldPos.clone().sub(camera.position);
-        const cameraLocal = fromCamera.applyQuaternion(camera.quaternion.clone().invert());
-        this.updateArrowIndicator(barData.arrow, cameraLocal, distance);
+        this.setStyleValue(barData.arrow, 'display', 'block');
+        this.setStyleValue(barData.arrow, 'opacity', '1');
+        this.setStyleValue(barData.arrow, 'visibility', 'visible');
+        if (needsArrowUpdate) {
+          const distance = playerPosition.distanceTo(worldPos);
+          // 使用相机位置计算方向向量，而不是玩家位置
+          // 因为箭头指示器是相对于相机视野的方向
+          this.cameraLocal.copy(worldPos).sub(camera.position);
+          this.invertedCameraQuaternion.copy(camera.quaternion).invert();
+          this.cameraLocal.applyQuaternion(this.invertedCameraQuaternion);
+          this.updateArrowIndicator(
+            barData.arrow,
+            barData.arrowShape,
+            barData.arrowDistanceLabel,
+            this.cameraLocal,
+            distance
+          );
+        }
       }
     }
+
+    barData.lastBarWorldPosition.copy(this.barWorldPosition);
+    barData.lastHealthPercent = healthPercent;
+    barData.wasInView = inView;
   }
 
   /**
@@ -236,30 +360,39 @@ export class EnemyHealthBars {
   /**
    * 创建箭头指示器
    */
-  private createArrowIndicator(): HTMLDivElement {
-    const arrow = document.createElement('div');
-    arrow.className = 'enemy-arrow-indicator';
-    arrow.style.cssText = `
+  private createArrowIndicator(): {
+    root: HTMLDivElement;
+    shape: HTMLDivElement;
+    distanceLabel: HTMLSpanElement;
+  } {
+    const root = document.createElement('div');
+    root.className = 'enemy-arrow-indicator';
+    root.style.cssText = `
       position: absolute;
       width: 30px;
       height: 30px;
       display: none;
+      opacity: 0;
+      visibility: hidden;
       pointer-events: none;
       justify-content: center;
       align-items: center;
+      transform: translate(-50%, -50%) rotate(0deg);
+      contain: layout style paint;
+      backface-visibility: hidden;
+      will-change: transform, left, top, opacity;
     `;
 
     // 创建三角形箭头 - 使用更显眼的亮黄色
-    const arrowShape = document.createElement('div');
-    arrowShape.style.cssText = `
+    const shape = document.createElement('div');
+    shape.style.cssText = `
       width: 0;
       height: 0;
       border-left: 8px solid transparent;
       border-right: 8px solid transparent;
       border-bottom: 16px solid #ffff00;
-      filter: drop-shadow(0 0 6px rgba(255, 255, 0, 0.9));
     `;
-    arrow.appendChild(arrowShape);
+    root.appendChild(shape);
 
     // 创建距离标签
     const distanceLabel = document.createElement('span');
@@ -272,14 +405,14 @@ export class EnemyHealthBars {
       color: #ffff00;
       font-size: 11px;
       font-weight: bold;
-      text-shadow: 0 0 3px rgba(0, 0, 0, 0.9), 0 0 2px black;
+      text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.95);
       white-space: nowrap;
       margin-top: 4px;
     `;
     distanceLabel.textContent = '';
-    arrow.appendChild(distanceLabel);
+    root.appendChild(distanceLabel);
 
-    return arrow;
+    return { root, shape, distanceLabel };
   }
 
   /**
@@ -288,7 +421,9 @@ export class EnemyHealthBars {
    */
   private updateArrowIndicator(
     arrow: HTMLDivElement,
-    cameraLocal: THREE.Vector3,
+    arrowShape: HTMLDivElement | null,
+    distanceLabel: HTMLSpanElement | null,
+    cameraLocal: Vector3,
     distance: number
   ): void {
     const centerX = 0.5;
@@ -362,21 +497,40 @@ export class EnemyHealthBars {
     // - 左方 (x<0): atan2(-1, 0) = -90°
     const rotationAngle = Math.atan2(cameraLocal.x, cameraLocal.y) * (180 / Math.PI);
 
-    arrow.style.left = `${arrowX * 100}%`;
-    arrow.style.top = `${arrowY * 100}%`;
-    arrow.style.transform = `translate(-50%, -50%) rotate(${rotationAngle}deg)`;
+    this.setStyleValue(arrow, 'left', `${arrowX * 100}%`);
+    this.setStyleValue(arrow, 'top', `${arrowY * 100}%`);
+    this.setStyleValue(
+      arrow,
+      'transform',
+      `translate(-50%, -50%) rotate(${rotationAngle}deg)`
+    );
 
     // 更新箭头颜色（亮黄色）
-    const arrowShape = arrow.querySelector('div');
     if (arrowShape) {
-      arrowShape.style.borderBottomColor = '#ffff00';
+      this.setStyleValue(arrowShape, 'borderBottomColor', '#ffff00');
     }
 
     // 更新距离标签
-    const distanceLabel = arrow.querySelector('.arrow-distance-label') as HTMLSpanElement;
     if (distanceLabel) {
-      distanceLabel.textContent = `${Math.round(distance)}m`;
-      distanceLabel.style.transform = 'none';
+      this.setTextContent(distanceLabel, `${Math.round(distance)}m`);
+      this.setStyleValue(distanceLabel, 'transform', 'translateX(-50%)');
+    }
+  }
+
+  private resetArrowIndicator(
+    arrow: HTMLDivElement,
+    distanceLabel: HTMLSpanElement | null
+  ): void {
+    this.setStyleValue(arrow, 'display', 'none');
+    this.setStyleValue(arrow, 'opacity', '0');
+    this.setStyleValue(arrow, 'visibility', 'hidden');
+    this.setStyleValue(arrow, 'left', '50%');
+    this.setStyleValue(arrow, 'top', '50%');
+    this.setStyleValue(arrow, 'transform', 'translate(-50%, -50%) rotate(0deg)');
+
+    if (distanceLabel) {
+      this.setTextContent(distanceLabel, '');
+      this.setStyleValue(distanceLabel, 'transform', 'translateX(-50%)');
     }
   }
 
@@ -384,18 +538,17 @@ export class EnemyHealthBars {
    * 世界坐标转屏幕坐标
    */
   private worldToScreen(
-    position: THREE.Vector3,
-    camera: THREE.Camera
+    position: Vector3,
+    camera: Camera
   ): { x: number; y: number; z: number } {
-    const vector = position.clone();
-    vector.project(camera);
+    this.screenVector.copy(position).project(camera);
 
     // NDC: x, y 范围是 -1 到 1
     // 屏幕: x 范围 0 到 width, y 范围 0 到 height (Y 向下为正)
     return {
-      x: (vector.x + 1) / 2,
-      y: 1 - (vector.y + 1) / 2, // 反转 Y 轴，因为屏幕 Y 向下为正
-      z: vector.z,
+      x: (this.screenVector.x + 1) / 2,
+      y: 1 - (this.screenVector.y + 1) / 2, // 反转 Y 轴，因为屏幕 Y 向下为正
+      z: this.screenVector.z,
     };
   }
 
@@ -421,7 +574,7 @@ export class EnemyHealthBars {
   /**
    * 获取敌人名称
    */
-  private getEnemyName(mesh: THREE.Object3D): string {
+  private getEnemyName(mesh: Object3D): string {
     const name = mesh.name || '';
     if (name.includes('boss_eye')) return 'Eye';
     if (name.includes('HEAVY_BOMBER')) return 'Heavy Bomber';
@@ -440,7 +593,7 @@ export class EnemyHealthBars {
   /**
    * 获取目标名称（敌人和友军）
    */
-  private getTargetName(mesh: THREE.Object3D, isFriendly: boolean): string {
+  private getTargetName(mesh: Object3D, isFriendly: boolean): string {
     if (isFriendly) {
       const name = mesh.name || '';
       if (name === 'SCOUT' || name.includes('Scout')) return 'Scout';
@@ -453,23 +606,18 @@ export class EnemyHealthBars {
     return this.getEnemyName(mesh);
   }
 
-  private calculateBarPosition(
-    enemyMesh: THREE.Object3D,
-    camera: THREE.Camera,
-    barWidth: number,
-    barHeight: number
-  ): { x: number; y: number } {
+  private getBarHeightOffset(enemyMesh: Object3D): number {
     const name = enemyMesh.name || '';
     const isBoss = name.includes('BOSS');
     const isEye = name.includes('boss_eye');
-    const heightOffset = isBoss ? 15 : isEye ? 5 : 2;
+    return isBoss ? 15 : isEye ? 5 : 2;
+  }
 
-    const worldPos = new THREE.Vector3();
-    enemyMesh.getWorldPosition(worldPos);
-    worldPos.y += heightOffset;
-
-    const screenPos = this.worldToScreen(worldPos, camera);
-
+  private getBarPositionFromScreen(
+    screenPos: { x: number; y: number },
+    barWidth: number,
+    barHeight: number
+  ): { x: number; y: number } {
     const offsetX = barWidth / 2;
     const offsetY = barHeight + 15;
 
@@ -485,10 +633,11 @@ export class EnemyHealthBars {
   private removeHealthBar(id: string): void {
     const barData = this.healthBars.get(id);
     if (barData) {
-      barData.bar.remove();
       if (barData.arrow) {
-        barData.arrow.remove();
+        this.resetArrowIndicator(barData.arrow, barData.arrowDistanceLabel);
       }
+      barData.bar.remove();
+      barData.arrow?.remove();
       this.healthBars.delete(id);
     }
   }
@@ -498,9 +647,17 @@ export class EnemyHealthBars {
    */
   public clear(): void {
     for (const barData of this.healthBars.values()) {
+      if (barData.arrow) {
+        this.resetArrowIndicator(barData.arrow, barData.arrowDistanceLabel);
+      }
       barData.bar.remove();
+      barData.arrow?.remove();
     }
     this.healthBars.clear();
+  }
+
+  public dispose(): void {
+    this.clear();
     this.container.remove();
   }
 
@@ -511,7 +668,7 @@ export class EnemyHealthBars {
   public getFirstEnemyScreenPos(): { x: number; y: number } | null {
     for (const barData of this.healthBars.values()) {
       if (barData.screenPos && barData.bar.style.display !== 'none') {
-        return barData.screenPos;
+        return { x: barData.screenPos.x, y: barData.screenPos.y };
       }
     }
     return null;

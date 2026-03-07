@@ -122,7 +122,7 @@ describe('BossMissileSystem', () => {
 
   describe('BossMissileSystem', () => {
     it('should fire missiles', () => {
-      const system = new BossMissileSystem(scene, mockParticleSystem as any);
+      const system = new BossMissileSystem(scene, mockParticleSystem);
 
       system.fire(new THREE.Vector3(), null);
 
@@ -130,7 +130,7 @@ describe('BossMissileSystem', () => {
     });
 
     it('should track active missiles', () => {
-      const system = new BossMissileSystem(scene, mockParticleSystem as any);
+      const system = new BossMissileSystem(scene, mockParticleSystem);
 
       system.fire(new THREE.Vector3(), null);
       system.fire(new THREE.Vector3(), null);
@@ -140,7 +140,7 @@ describe('BossMissileSystem', () => {
     });
 
     it('should return missile meshes', () => {
-      const system = new BossMissileSystem(scene, mockParticleSystem as any);
+      const system = new BossMissileSystem(scene, mockParticleSystem);
       system.fire(new THREE.Vector3(), null);
 
       const meshes = system.getMissileMeshes();
@@ -150,7 +150,7 @@ describe('BossMissileSystem', () => {
     });
 
     it('should update all missiles', () => {
-      const system = new BossMissileSystem(scene, mockParticleSystem as any);
+      const system = new BossMissileSystem(scene, mockParticleSystem);
       system.fire(new THREE.Vector3(), null);
       system.fire(new THREE.Vector3(), null);
 
@@ -162,7 +162,7 @@ describe('BossMissileSystem', () => {
     });
 
     it('should remove inactive missiles', () => {
-      const system = new BossMissileSystem(scene, mockParticleSystem as any);
+      const system = new BossMissileSystem(scene, mockParticleSystem);
       system.fire(new THREE.Vector3(), null);
 
       const missile = system.getMissiles()[0];
@@ -174,7 +174,7 @@ describe('BossMissileSystem', () => {
     });
 
     it('should detect collisions with targets', () => {
-      const system = new BossMissileSystem(scene, mockParticleSystem as any);
+      const system = new BossMissileSystem(scene, mockParticleSystem);
       system.fire(new THREE.Vector3(), null);
 
       const target = new THREE.Object3D();
@@ -189,7 +189,7 @@ describe('BossMissileSystem', () => {
     });
 
     it('should apply correct damage on collision', () => {
-      const system = new BossMissileSystem(scene, mockParticleSystem as any);
+      const system = new BossMissileSystem(scene, mockParticleSystem);
       system.fire(new THREE.Vector3(), null);
 
       const target = new THREE.Object3D();
@@ -205,7 +205,7 @@ describe('BossMissileSystem', () => {
     });
 
     it('should clear all missiles on dispose', () => {
-      const system = new BossMissileSystem(scene, mockParticleSystem as any);
+      const system = new BossMissileSystem(scene, mockParticleSystem);
       system.fire(new THREE.Vector3(), null);
       system.fire(new THREE.Vector3(), null);
 
@@ -215,7 +215,7 @@ describe('BossMissileSystem', () => {
     });
 
     it('should pass potential targets to missiles', () => {
-      const system = new BossMissileSystem(scene, mockParticleSystem as any);
+      const system = new BossMissileSystem(scene, mockParticleSystem);
       const friendly = new THREE.Object3D();
       friendly.position.set(50, 50, 50);
       scene.add(friendly);
@@ -225,7 +225,10 @@ describe('BossMissileSystem', () => {
       const missile = system.getMissiles()[0];
       missile.update(0.016);
 
-      expect(missile['potentialTargets']).toContain(friendly);
+      const potentialTargets = Reflect.get(missile, 'potentialTargets') as
+        | THREE.Object3D[]
+        | undefined;
+      expect(potentialTargets).toContain(friendly);
     });
   });
 });

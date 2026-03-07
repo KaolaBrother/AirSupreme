@@ -2,8 +2,158 @@
  * 游戏配置
  * 自动检测设备类型并调整游戏参数
  */
+export type QualityPreset = 'auto' | 'performance' | 'balanced' | 'quality';
+type ResolvedQualityPreset = Exclude<QualityPreset, 'auto'>;
+
+type QualityParams = {
+  maxPixelRatio: number;
+  maxEnemies: number;
+  particleCount: number;
+  projectilePoolSize: number;
+  targetFPS: number;
+  shadowEnabled: boolean;
+  antialiasEnabled: boolean;
+};
+
+type DeviceQualityParams = {
+  mobile: QualityParams;
+  desktop: QualityParams;
+};
+
 export class GameConfig {
   public static isMobile: boolean = this.detectMobile();
+  private static qualityPreset: QualityPreset = 'auto';
+  private static runtimeQualityOverride?: ResolvedQualityPreset;
+
+  private static readonly QUALITY_PRESETS: Record<ResolvedQualityPreset, DeviceQualityParams> = {
+    performance: {
+      mobile: {
+        maxPixelRatio: 1.2,
+        maxEnemies: 4,
+        particleCount: 12,
+        projectilePoolSize: 80,
+        targetFPS: 30,
+        shadowEnabled: false,
+        antialiasEnabled: false,
+      },
+      desktop: {
+        maxPixelRatio: 1.5,
+        maxEnemies: 6,
+        particleCount: 35,
+        projectilePoolSize: 160,
+        targetFPS: 45,
+        shadowEnabled: false,
+        antialiasEnabled: false,
+      },
+    },
+    balanced: {
+      mobile: {
+        maxPixelRatio: 1.5,
+        maxEnemies: 5,
+        particleCount: 20,
+        projectilePoolSize: 100,
+        targetFPS: 30,
+        shadowEnabled: false,
+        antialiasEnabled: false,
+      },
+      desktop: {
+        maxPixelRatio: 2,
+        maxEnemies: 10,
+        particleCount: 50,
+        projectilePoolSize: 200,
+        targetFPS: 60,
+        shadowEnabled: true,
+        antialiasEnabled: true,
+      },
+    },
+    quality: {
+      mobile: {
+        maxPixelRatio: 1.5,
+        maxEnemies: 7,
+        particleCount: 30,
+        projectilePoolSize: 130,
+        targetFPS: 45,
+        shadowEnabled: false,
+        antialiasEnabled: true,
+      },
+      desktop: {
+        maxPixelRatio: 2,
+        maxEnemies: 14,
+        particleCount: 75,
+        projectilePoolSize: 260,
+        targetFPS: 75,
+        shadowEnabled: true,
+        antialiasEnabled: true,
+      },
+    },
+  };
+
+  public static setQualityPreset(preset: QualityPreset): void {
+    this.qualityPreset = preset;
+    this.normalizeRuntimeQualityOverride();
+  }
+
+  public static getQualityPreset(): QualityPreset {
+    return this.qualityPreset;
+  }
+
+  public static setRuntimeQualityOverride(preset?: ResolvedQualityPreset): void {
+    this.runtimeQualityOverride = preset;
+    this.normalizeRuntimeQualityOverride();
+  }
+
+  public static clearRuntimeQualityOverride(): void {
+    this.runtimeQualityOverride = undefined;
+  }
+
+  public static getRuntimeQualityOverride(): ResolvedQualityPreset | undefined {
+    return this.runtimeQualityOverride;
+  }
+
+  public static getResolvedQualityPreset(): ResolvedQualityPreset {
+    return this.resolveQualityPreset(this.qualityPreset);
+  }
+
+  public static getEffectiveQualityPreset(): ResolvedQualityPreset {
+    return this.runtimeQualityOverride ?? this.getResolvedQualityPreset();
+  }
+
+  public static getTargetFPSForPreset(preset: QualityPreset): number {
+    return this.getQualityProfileForPreset(preset).targetFPS;
+  }
+
+  private static getQualityRank(preset: ResolvedQualityPreset): number {
+    const order: ResolvedQualityPreset[] = ['performance', 'balanced', 'quality'];
+    return order.indexOf(preset);
+  }
+
+  private static resolveQualityPreset(preset: QualityPreset): ResolvedQualityPreset {
+    if (preset === 'auto') {
+      return this.isMobile ? 'performance' : 'balanced';
+    }
+    return preset;
+  }
+
+  private static normalizeRuntimeQualityOverride(): void {
+    if (!this.runtimeQualityOverride) {
+      return;
+    }
+
+    const resolvedPreset = this.getResolvedQualityPreset();
+    if (this.getQualityRank(this.runtimeQualityOverride) >= this.getQualityRank(resolvedPreset)) {
+      this.runtimeQualityOverride = undefined;
+    }
+  }
+
+  private static getQualityProfileForPreset(preset: QualityPreset): QualityParams {
+    const resolvedPreset = this.resolveQualityPreset(preset);
+    const data = this.QUALITY_PRESETS[resolvedPreset];
+    return this.isMobile ? data.mobile : data.desktop;
+  }
+
+  private static getQualityProfile(): QualityParams {
+    return this.getQualityProfileForPreset(this.getEffectiveQualityPreset());
+  }
 
   // 设备检测
   private static detectMobile(): boolean {
@@ -14,33 +164,33 @@ export class GameConfig {
 
   // 渲染设置
   public static getPixelRatio(): number {
-    return this.isMobile ? Math.min(window.devicePixelRatio, 1.5) : Math.min(window.devicePixelRatio, 2);
+    return Math.min(window.devicePixelRatio, this.getQualityProfile().maxPixelRatio);
   }
 
   public static getShadowEnabled(): boolean {
-    return !this.isMobile;
+    return this.getQualityProfile().shadowEnabled;
   }
 
   public static getAntialiasEnabled(): boolean {
-    return !this.isMobile;
+    return this.getQualityProfile().antialiasEnabled;
   }
 
   // 游戏参数
   public static getMaxEnemies(): number {
-    return this.isMobile ? 5 : 10;
+    return this.getQualityProfile().maxEnemies;
   }
 
   public static getParticleCount(): number {
-    return this.isMobile ? 20 : 50;
+    return this.getQualityProfile().particleCount;
   }
 
   public static getProjectilePoolSize(): number {
-    return this.isMobile ? 100 : 200;
+    return this.getQualityProfile().projectilePoolSize;
   }
 
   // 性能目标
   public static getTargetFPS(): number {
-    return this.isMobile ? 30 : 60;
+    return this.getQualityProfile().targetFPS;
   }
 
   // 调试模式

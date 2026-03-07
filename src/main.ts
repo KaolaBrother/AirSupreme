@@ -1,4 +1,3 @@
-import { GameCoordinator } from './core/GameCoordinator';
 import { getLogger } from './core/utils/Logger';
 import { configLoader } from './core/utils/ConfigLoader';
 
@@ -31,7 +30,7 @@ function checkWebGL(): boolean {
     const canvas = document.createElement('canvas');
     const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
     return gl !== null;
-  } catch (_e) {
+  } catch {
     return false;
   }
 }
@@ -45,6 +44,7 @@ async function main(): Promise<void> {
   try {
     await configLoader.load();
 
+    const [{ GameCoordinator }] = await Promise.all([import('./core/GameCoordinator')]);
     const game = new GameCoordinator();
 
     hideLoadingScreen();

@@ -11,6 +11,8 @@ import {
 import { ParticleSystem } from '@/features/effects/ParticleSystem';
 import { EventBus } from '@/core/EventBus';
 
+type BossPartsGroup = THREE.Group & { bossParts?: THREE.Mesh[] };
+
 function createPlayerMesh(x: number, y: number, z: number): THREE.Object3D {
   const mesh = new THREE.Object3D();
   mesh.position.set(x, y, z);
@@ -39,7 +41,8 @@ describe('Boss System Integration', () => {
       const bossType = getBossForLevel(1);
       expect(bossType).toBe(BossType.HEAVY_BOMBER);
 
-      const config = BOSS_CONFIGS[bossType!];
+      expect(bossType).not.toBeNull();
+      const config = BOSS_CONFIGS[bossType as BossType];
       const mesh = createBossMesh(config);
       scene.add(mesh);
 
@@ -160,7 +163,7 @@ describe('Boss System Integration', () => {
       const config = BOSS_CONFIGS[BossType.HEAVY_BOMBER];
       const mesh = createBossMesh(config);
 
-      const parts = (mesh as any).bossParts as THREE.Mesh[];
+      const parts = (mesh as BossPartsGroup).bossParts ?? [];
 
       expect(parts.length).toBeGreaterThan(10);
 
@@ -184,13 +187,17 @@ describe('Boss System Integration', () => {
       const config = BOSS_CONFIGS[BossType.HEAVY_BOMBER];
       const mesh = createBossMesh(config);
 
-      const parts = (mesh as any).bossParts as THREE.Mesh[];
+      const parts = (mesh as BossPartsGroup).bossParts ?? [];
 
       const targetPart = parts.find((p) => p.name === 'boss_left_wing');
       expect(targetPart).toBeDefined();
 
+      if (!targetPart) {
+        throw new Error('Expected boss_left_wing part to exist');
+      }
+
       const worldPos = new THREE.Vector3();
-      targetPart!.getWorldPosition(worldPos);
+      targetPart.getWorldPosition(worldPos);
       expect(worldPos.x).toBeLessThan(0);
     });
   });
@@ -201,7 +208,8 @@ describe('Boss System Integration', () => {
         const bossType = getBossForLevel(level);
         expect(bossType).not.toBeNull();
 
-        const config = BOSS_CONFIGS[bossType!];
+        expect(bossType).not.toBeNull();
+        const config = BOSS_CONFIGS[bossType as BossType];
         expect(config).toBeDefined();
         expect(config.health).toBeGreaterThan(0);
       }

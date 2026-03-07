@@ -65,7 +65,10 @@ export class BalloonPowerUp {
     const iconCanvas = document.createElement('canvas');
     iconCanvas.width = 128; // 放大一倍（64 → 128）
     iconCanvas.height = 128;
-    const ctx = iconCanvas.getContext('2d')!;
+    const ctx = iconCanvas.getContext('2d');
+    if (!ctx) {
+      return;
+    }
 
     // 绘制背景（白色圆形）
     ctx.fillStyle = '#ffffff';

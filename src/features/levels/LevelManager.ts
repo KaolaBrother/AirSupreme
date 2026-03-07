@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { LevelConfig, getLevelConfig } from '@/features/terrain/LevelConfig';
 import {
+  EnemyConfig,
   EnemyType,
   ENEMY_CONFIGS,
   getRandomEnemyType,
@@ -11,6 +12,8 @@ import { TerrainGenerator } from '@/features/terrain/TerrainGenerator';
 import { SpawnPortal } from '@/features/effects/SpawnPortal';
 import { createEnemyMesh } from '@/features/aircraft/AircraftMeshFactory';
 import { getLogger } from '@/core/utils/Logger';
+import type { DifficultyProfile } from '@/core/Difficulty';
+import { GameConfig } from '@/config';
 
 const log = getLogger('LevelManager');
 
@@ -62,6 +65,7 @@ export class LevelManager {
   private spawnInterval: number = 0.5; // 敌人生成间隔（秒）
   private waveDelayTimer: number = 0; // 波次延迟计时器
   private waveGroupCenter?: THREE.Vector3; // 当前波次的敌人群中心
+  private difficultyProfile: DifficultyProfile | null = null;
 
   // 回调
   public onWaveStart?: (wave: number) => void;
@@ -90,12 +94,21 @@ export class LevelManager {
     this.state = LevelState.IDLE;
     this.totalEnemiesSpawned = 0;
     this.enemiesSpawnedThisWave = 0;
+    this.spawnInterval = 0.5;
 
     log.info('Loading level', { levelId, name: config.name, terrain: config.terrain });
 
     this.terrainGenerator.generateTerrain(config);
 
     log.info('Level loaded', { levelId, name: config.name });
+  }
+
+  public setDifficultyProfile(profile: DifficultyProfile): void {
+    this.difficultyProfile = profile;
+  }
+
+  public getCurrentLevelConfig(): LevelConfig | null {
+    return this.currentLevel;
   }
 
   /**
@@ -196,7 +209,7 @@ export class LevelManager {
     this.totalEnemiesSpawned++; // 总已生成敌人计数
 
     // 获取当前波次可用的敌人类型
-    const availableTypes = getEnemyTypesForWave(this.currentLevel.id, this.currentWave);
+    const availableTypes = this.getAvailableEnemyTypes();
     if (availableTypes.length === 0) {
       // 如果没有特定配置，默认使用SCOUT
       availableTypes.push(EnemyType.SCOUT);
@@ -232,12 +245,6 @@ export class LevelManager {
     playerPosition: THREE.Vector3,
     friendlyMeshes?: THREE.Object3D[]
   ): void {
-    // 更新地形（水面动画、云朵移动）
-    this.terrainGenerator.update(deltaTime);
-
-    // 更新地形 LOD
-    this.terrainGenerator.updateLOD(playerPosition);
-
     // 更新传送门动画
     for (let i = this.activePortals.length - 1; i >= 0; i--) {
       const portal = this.activePortals[i];
@@ -270,9 +277,13 @@ export class LevelManager {
     if (this.state === LevelState.WAVE_ACTIVE && this.currentLevel) {
       const maxEnemies = this.currentLevel.enemiesPerWave[this.currentWave] || 0;
       const aliveEnemies = this.enemies.filter((e) => e.isAlive()).length;
+      const maxConcurrentEnemies = GameConfig.getMaxEnemies();
 
       // 只要还没达到最大生成数量，就继续生成
-      if (this.enemiesSpawnedThisWave < maxEnemies) {
+      if (
+        this.enemiesSpawnedThisWave < maxEnemies &&
+        aliveEnemies < maxConcurrentEnemies
+      ) {
         this.spawnTimer += deltaTime;
         if (this.spawnTimer >= this.spawnInterval) {
           this.spawnTimer = 0;
@@ -286,7 +297,7 @@ export class LevelManager {
         log.debug('Wave complete', { wave: this.currentWave });
         this.state = LevelState.WAVE_COMPLETE;
         this.enemiesSpawnedThisWave = 0;
-        this.waveDelayTimer = 3;
+        this.waveDelayTimer = this.currentLevel.waveInterval;
         this.onWaveComplete?.(this.currentWave);
       }
     }
@@ -304,6 +315,14 @@ export class LevelManager {
         this.enemies.splice(i, 1);
       }
     }
+  }
+
+  /**
+   * 更新纯视觉环境动画，跟随渲染帧而不是固定玩法步长。
+   */
+  public updateVisuals(deltaTime: number, playerPosition: THREE.Vector3): void {
+    this.terrainGenerator.update(deltaTime);
+    this.terrainGenerator.updateLOD(playerPosition);
   }
 
   /**
@@ -526,13 +545,14 @@ export class LevelManager {
 
     if (pooledIndex !== -1) {
       const enemy = this.enemyPool.splice(pooledIndex, 1)[0];
+      enemy.setConfig(this.getAdjustedEnemyConfig(type));
       // 重要：从池中取出的敌人也要添加回 enemies 数组
       this.enemies.push(enemy);
       return enemy;
     }
 
     // 创建新敌人 - 使用统一的工厂函数
-    const config = ENEMY_CONFIGS[type];
+    const config = this.getAdjustedEnemyConfig(type);
     const mesh = createEnemyMesh(config);
     this.scene.add(mesh);
 
@@ -563,5 +583,47 @@ export class LevelManager {
       enemy.dispose();
     }
     this.enemies = [];
+  }
+
+  private getAvailableEnemyTypes(): EnemyType[] {
+    if (!this.currentLevel) {
+      return getEnemyTypesForWave(1, this.currentWave);
+    }
+
+    const weightedTypes: EnemyType[] = [];
+    const waveNumber = this.currentWave + 1;
+
+    for (const entry of this.currentLevel.enemyTypes) {
+      if (waveNumber < entry.minWave) {
+        continue;
+      }
+
+      const type = entry.type as EnemyType;
+      for (let i = 0; i < entry.maxCount; i++) {
+        weightedTypes.push(type);
+      }
+    }
+
+    if (weightedTypes.length === 0) {
+      return getEnemyTypesForWave(this.currentLevel.id, this.currentWave);
+    }
+
+    return weightedTypes;
+  }
+
+  private getAdjustedEnemyConfig(type: EnemyType): EnemyConfig {
+    const baseConfig = ENEMY_CONFIGS[type];
+    const levelDifficultyScale = this.currentLevel ? 1 + (this.currentLevel.difficulty - 5) * 0.04 : 1;
+    const profile = this.difficultyProfile;
+    const healthMultiplier = (profile?.enemyHealthMultiplier ?? 1) * levelDifficultyScale;
+    const damageMultiplier = (profile?.enemyDamageMultiplier ?? 1) * levelDifficultyScale;
+    const cooldownMultiplier = profile?.enemyAttackCooldownMultiplier ?? 1;
+
+    return {
+      ...baseConfig,
+      health: Math.max(1, Math.round(baseConfig.health * healthMultiplier)),
+      damage: Math.max(1, Math.round(baseConfig.damage * damageMultiplier * 10) / 10),
+      attackCooldown: Math.max(0.1, baseConfig.attackCooldown * cooldownMultiplier),
+    };
   }
 }
