@@ -180,6 +180,9 @@ export class TerrainGenerator {
 
     // 添加森林
     this.createForest(80, -49, 1000, 200);
+    this.createForestCluster(28, -420, -260, 180, -49);
+    this.createForestCluster(32, 520, -160, 220, -49);
+    this.createForestCluster(26, 360, 420, 170, -49);
 
     // 添加草地细节
     this.createGrassField(500, 100000);
@@ -189,6 +192,10 @@ export class TerrainGenerator {
 
     // 添加岩石
     this.createRocks(30);
+
+    // 添加农田和远处山体，提升第一关自然层次
+    this.createLakeFarmland(surfaceProfile);
+    this.createLakeRidges(surfaceProfile);
   }
 
   /**
@@ -465,6 +472,186 @@ export class TerrainGenerator {
       rock.receiveShadow = true;
       this.terrainGroup.add(rock);
       this.rocks.push(rock);
+    }
+  }
+
+  private createForestCluster(
+    count: number,
+    centerX: number,
+    centerZ: number,
+    radius: number,
+    groundY: number
+  ): void {
+    const treeTypes = [
+      { color: 0x2f7d32, height: 11, width: 5 },
+      { color: 0x3a8b4a, height: 16, width: 5.5 },
+      { color: 0x5aa04b, height: 9, width: 4.2 },
+      { color: 0x1f6130, height: 14, width: 6.5 },
+    ];
+
+    for (let i = 0; i < count; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const distance = Math.random() * radius;
+      const x = centerX + Math.cos(angle) * distance;
+      const z = centerZ + Math.sin(angle) * distance;
+      const treeType = treeTypes[Math.floor(Math.random() * treeTypes.length)];
+      const tree = this.createBeautifulTree(treeType.color, treeType.height, treeType.width);
+      tree.position.set(x, groundY, z);
+      tree.scale.setScalar(0.7 + Math.random() * 0.65);
+      tree.rotation.y = Math.random() * Math.PI * 2;
+      this.terrainGroup.add(tree);
+      this.trees.push(tree);
+    }
+  }
+
+  private createLakeFarmland(surfaceProfile: LevelSurfaceProfile): void {
+    const fieldGroup = new THREE.Group();
+    fieldGroup.name = 'lakeFarmland';
+    const fieldColors = [
+      surfaceProfile.groundAccentColor ?? 0x98c96b,
+      0xc8b86d,
+      0x8db15b,
+      0xb89f58,
+    ];
+
+    const baseX = -620;
+    const baseZ = 360;
+    const rows = 3;
+    const cols = 4;
+
+    for (let row = 0; row < rows; row++) {
+      for (let col = 0; col < cols; col++) {
+        const fieldWidth = 90 + Math.random() * 45;
+        const fieldDepth = 70 + Math.random() * 50;
+        const color = fieldColors[(row * cols + col) % fieldColors.length];
+        const field = new THREE.Mesh(
+          new THREE.PlaneGeometry(fieldWidth, fieldDepth),
+          new THREE.MeshStandardMaterial({
+            color,
+            roughness: 0.92,
+            metalness: 0,
+            emissive: this.tintColor(color, -0.02, 0.12, -0.04),
+            emissiveIntensity: 0.05,
+            map: this.createDetailTexture(
+              color,
+              this.tintColor(color, 0.01, 0.08, 0.03),
+              this.tintColor(color, -0.01, 0.12, -0.06),
+              'grass'
+            ),
+          })
+        );
+        field.rotation.x = -Math.PI / 2;
+        field.position.set(
+          baseX + col * 110 + (Math.random() - 0.5) * 18,
+          -48.6 + row * 0.03,
+          baseZ + row * 95 + (Math.random() - 0.5) * 12
+        );
+        field.rotation.z = (Math.random() - 0.5) * 0.12;
+        field.receiveShadow = true;
+        fieldGroup.add(field);
+
+        const border = new THREE.Mesh(
+          new THREE.BoxGeometry(fieldWidth + 6, 0.4, 3.2),
+          new THREE.MeshStandardMaterial({
+            color: 0x705733,
+            roughness: 0.95,
+            metalness: 0,
+          })
+        );
+        border.position.set(field.position.x, -48.45, field.position.z - fieldDepth * 0.5);
+        border.rotation.y = field.rotation.z;
+        border.castShadow = true;
+        border.receiveShadow = true;
+        fieldGroup.add(border);
+      }
+    }
+
+    const barn = new THREE.Group();
+    const barnBody = new THREE.Mesh(
+      new THREE.BoxGeometry(36, 16, 26),
+      new THREE.MeshStandardMaterial({
+        color: 0x9c5038,
+        roughness: 0.82,
+        metalness: 0.05,
+      })
+    );
+    barnBody.position.y = 8;
+    barnBody.castShadow = true;
+    barnBody.receiveShadow = true;
+    barn.add(barnBody);
+
+    const barnRoof = new THREE.Mesh(
+      new THREE.ConeGeometry(22, 10, 4),
+      new THREE.MeshStandardMaterial({
+        color: 0x5c3c32,
+        roughness: 0.76,
+        metalness: 0.08,
+      })
+    );
+    barnRoof.rotation.y = Math.PI / 4;
+    barnRoof.position.y = 19;
+    barnRoof.scale.set(1.1, 1, 0.7);
+    barnRoof.castShadow = true;
+    barn.add(barnRoof);
+
+    barn.position.set(baseX + 80, -49, baseZ + 70);
+    this.terrainGroup.add(fieldGroup);
+    this.terrainGroup.add(barn);
+  }
+
+  private createLakeRidges(surfaceProfile: LevelSurfaceProfile): void {
+    const ridgeColor = this.tintColor(
+      surfaceProfile.groundDetailColor ?? 0x5c9a38,
+      -0.02,
+      0.22,
+      -0.08
+    );
+    const ridgeCapColor = this.tintColor(
+      surfaceProfile.groundAccentColor ?? 0x9ddf70,
+      0.02,
+      0.1,
+      0.08
+    );
+
+    for (let i = 0; i < 7; i++) {
+      const ridge = new THREE.Group();
+      const width = 180 + Math.random() * 120;
+      const height = 120 + Math.random() * 90;
+      const depth = 120 + Math.random() * 80;
+
+      const base = new THREE.Mesh(
+        new THREE.ConeGeometry(width * 0.42, height, 6),
+        new THREE.MeshStandardMaterial({
+          color: ridgeColor,
+          roughness: 0.92,
+          metalness: 0.03,
+        })
+      );
+      base.position.y = height * 0.5;
+      base.scale.z = depth / width;
+      base.castShadow = true;
+      base.receiveShadow = true;
+      ridge.add(base);
+
+      const cap = new THREE.Mesh(
+        new THREE.ConeGeometry(width * 0.2, height * 0.26, 6),
+        new THREE.MeshStandardMaterial({
+          color: ridgeCapColor,
+          roughness: 0.88,
+          metalness: 0,
+        })
+      );
+      cap.position.y = height * 0.92;
+      cap.scale.z = depth / width;
+      cap.castShadow = true;
+      ridge.add(cap);
+
+      const angle = (i / 7) * Math.PI * 2 + (Math.random() - 0.5) * 0.18;
+      const radius = 820 + Math.random() * 280;
+      ridge.position.set(Math.cos(angle) * radius, -50, Math.sin(angle) * radius);
+      ridge.rotation.y = Math.random() * Math.PI * 2;
+      this.terrainGroup.add(ridge);
+      this.rocks.push(base);
     }
   }
 
