@@ -54,6 +54,14 @@ export class GameCoordinator {
   private static readonly TUTORIAL_POST_WAVE_HINT_DELAY_MS = 2200;
   private static readonly TUTORIAL_FRIENDLY_SPAWN_DELAY_MS = 5200;
   private static readonly TUTORIAL_FRIENDLY_SPAWN_BUFFER_MS = 1200;
+  private static readonly UPGRADE_FEEDBACK: Record<UpgradeType, { icon: string; label: string }> = {
+    [UpgradeType.MAX_HEALTH]: { icon: '❤️', label: '最大生命值升级' },
+    [UpgradeType.SPEED]: { icon: '⚡', label: '飞行速度升级' },
+    [UpgradeType.FIRE_RATE]: { icon: '🔫', label: '射速升级' },
+    [UpgradeType.DAMAGE]: { icon: '💥', label: '武器伤害升级' },
+    [UpgradeType.MISSILE_RELOAD_TIME]: { icon: '🚀', label: '导弹装填升级' },
+    [UpgradeType.MISSILE_LOCK_TIME]: { icon: '🎯', label: '导弹锁定升级' },
+  };
 
   private gameLoop: GameLoop;
   private gameScene: GameScene;
@@ -851,6 +859,7 @@ export class GameCoordinator {
     }
 
     this.missileCount = GAME_CONSTANTS.MISSILE.STARTING_MISSILES;
+    this.hud.updateUpgradePoints(this.playerStats.getUpgrades().getAvailablePoints());
     this.presentationController.updateMissileHud(
       0,
       { missileCount: this.missileCount, missileProgress: 0 },
@@ -1089,6 +1098,7 @@ export class GameCoordinator {
 
   private pauseGame(): void {
     this.sessionState.pause();
+    this.upgradeMenu?.updateDisplay();
     this.upgradeMenu?.show();
     this.inputHandler.resetPauseState();
     this.inputHandler.resetUpgradeState();
@@ -1111,6 +1121,9 @@ export class GameCoordinator {
         this.lockOnIndicator.setLockTime(this.playerStats.getMissileLockTime());
       }
       this.hud.updateUpgradePoints(this.playerStats.getUpgrades().getAvailablePoints());
+      this.audioManager.playPowerUp();
+      const feedback = GameCoordinator.UPGRADE_FEEDBACK[type];
+      this.hud.showPowerUpBig(feedback.icon, feedback.label, 1.2, true);
     }
   }
 

@@ -10,22 +10,24 @@ describe('Game Events Integration', () => {
   });
 
   describe('Player Events', () => {
-    it('should emit PLAYER_FIRED with position and direction', () => {
+    it('should emit PLAYER_FIRED with position, direction and damage', () => {
       const handler = vi.fn();
       EventBus.on(GameEventType.PLAYER_FIRED, handler);
 
       const position = new THREE.Vector3(0, 100, 0);
       const direction = new THREE.Vector3(0, 0, -1);
+      const damage = 18;
 
       EventBus.emit(GameEventType.PLAYER_FIRED, {
         position,
         direction,
+        damage,
       });
 
       expect(handler).toHaveBeenCalledWith(
         expect.objectContaining({
           type: GameEventType.PLAYER_FIRED,
-          payload: { position, direction },
+          payload: { position, direction, damage },
         })
       );
     });

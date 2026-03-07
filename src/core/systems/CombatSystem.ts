@@ -1,4 +1,5 @@
-import * as THREE from 'three';
+import { Vector3 } from 'three';
+import type { Group, Object3D, Scene } from 'three';
 import { IGameSystem } from '@/core/interfaces/IGameSystem';
 import { EventBus, GameEventType } from '@/core/EventBus';
 import { ProjectilePool } from '@/features/combat/ProjectilePool';
@@ -8,7 +9,7 @@ import { ParticleSystem } from '@/features/effects/ParticleSystem';
 import { Faction, areHostile } from '@/core/Faction';
 
 interface TargetInfo {
-  mesh: THREE.Object3D;
+  mesh: Object3D;
   faction: Faction;
   ai?: unknown;
 }
@@ -21,25 +22,25 @@ export class CombatSystem implements IGameSystem {
   private bossProjectilePool: BossProjectilePool;
   private missileSystem: MissileSystem;
 
-  private playerMesh: THREE.Group;
-  private playerPosition: THREE.Vector3;
+  private playerMesh: Group;
+  private playerPosition: Vector3;
 
   private damageMultiplier: number = 1;
   private eventUnsubscribers: (() => void)[] = [];
 
-  constructor(scene: THREE.Scene, particleSystem: ParticleSystem, playerMesh: THREE.Group) {
+  constructor(scene: Scene, particleSystem: ParticleSystem, playerMesh: Group) {
     this.playerProjectilePool = new ProjectilePool(scene);
     this.enemyProjectilePool = new ProjectilePool(scene);
     this.bossProjectilePool = new BossProjectilePool(scene);
     this.missileSystem = new MissileSystem(scene, particleSystem);
     this.playerMesh = playerMesh;
-    this.playerPosition = new THREE.Vector3();
+    this.playerPosition = new Vector3();
   }
 
   init(): void {
     this.eventUnsubscribers.push(
       EventBus.on(GameEventType.PLAYER_FIRED, ({ payload }) => {
-        this.playerProjectilePool.fire(payload.position, payload.direction, this.getPlayerDamage());
+        this.playerProjectilePool.fire(payload.position, payload.direction, payload.damage);
       })
     );
 
@@ -69,7 +70,7 @@ export class CombatSystem implements IGameSystem {
 
     this.eventUnsubscribers.push(
       EventBus.on(GameEventType.MISSILE_FIRED, ({ payload }) => {
-        this.missileSystem.fire(payload.position, new THREE.Vector3(0, 0, -1), payload.target);
+        this.missileSystem.fire(payload.position, new Vector3(0, 0, -1), payload.target);
       })
     );
   }
@@ -100,17 +101,12 @@ export class CombatSystem implements IGameSystem {
     return this.damageMultiplier;
   }
 
-  private getPlayerDamage(): number {
-    const baseDamage = 12.5;
-    return baseDamage * this.damageMultiplier;
-  }
-
   checkProjectileCollisions(
-    enemyMeshes: THREE.Object3D[],
-    friendlyMeshes: THREE.Object3D[],
-    onEnemyHit: (target: THREE.Object3D, damage: number) => void,
+    enemyMeshes: Object3D[],
+    friendlyMeshes: Object3D[],
+    onEnemyHit: (target: Object3D, damage: number) => void,
     onPlayerHit: (damage: number) => void,
-    onFriendlyHit: (target: THREE.Object3D, damage: number) => void
+    onFriendlyHit: (target: Object3D, damage: number) => void
   ): void {
     const targets: TargetInfo[] = [
       { mesh: this.playerMesh, faction: Faction.NEUTRAL },
@@ -118,8 +114,8 @@ export class CombatSystem implements IGameSystem {
       ...friendlyMeshes.map((m) => ({ mesh: m, faction: Faction.FRIENDLY })),
     ];
 
-    this.playerProjectilePool.checkCollisions(enemyMeshes, (target) => {
-      onEnemyHit(target, this.getPlayerDamage());
+    this.playerProjectilePool.checkCollisions(enemyMeshes, (target, _projectileMesh, damage) => {
+      onEnemyHit(target, damage);
     });
 
     this.missileSystem.checkCollisions(enemyMeshes, (target) => {
@@ -175,7 +171,7 @@ export class CombatSystem implements IGameSystem {
     );
   }
 
-  updateEnemyMeshes(enemyMeshes: THREE.Object3D[]): void {
+  updateEnemyMeshes(enemyMeshes: Object3D[]): void {
     this.missileSystem.updateEnemies(enemyMeshes);
   }
 

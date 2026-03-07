@@ -6,6 +6,7 @@ type BigMessageVariant = 'announcement' | 'powerup';
  * 游戏界面 (HUD)
  */
 export class HUD {
+  private static readonly UPGRADE_HINT_STYLE_ID = 'hud-upgrade-hint-style';
   private container: HTMLDivElement;
   private healthBarContainer: HTMLDivElement;
   private healthBarFill!: HTMLDivElement;
@@ -36,6 +37,7 @@ export class HUD {
   private readonly styleValueCache = new WeakMap<HTMLElement, Map<string, string>>();
 
   constructor() {
+    this.ensureUpgradeHintStyle();
     this.container = document.createElement('div');
     this.container.id = 'hud';
 
@@ -65,6 +67,11 @@ export class HUD {
       top: ${isMobile ? '25px' : '40px'};
       left: ${padding};
       color: #FFD700;
+      background: rgba(20, 24, 32, 0.75);
+      border: 1px solid rgba(255, 215, 0, 0.45);
+      border-radius: 8px;
+      padding: ${isMobile ? '4px 8px' : '5px 10px'};
+      text-shadow: 0 0 8px rgba(255, 215, 0, 0.35);
       display: none;
     `;
     this.setTextContent(this.upgradePointsDisplay, '⭐ 0');
@@ -337,6 +344,32 @@ export class HUD {
     cache.set(property, value);
   }
 
+  private ensureUpgradeHintStyle(): void {
+    if (document.getElementById(HUD.UPGRADE_HINT_STYLE_ID)) {
+      return;
+    }
+
+    const style = document.createElement('style');
+    style.id = HUD.UPGRADE_HINT_STYLE_ID;
+    style.textContent = `
+      .hud-upgrade-ready {
+        animation: hud-upgrade-pulse 1.9s ease-in-out infinite;
+      }
+
+      @keyframes hud-upgrade-pulse {
+        0%, 100% {
+          box-shadow: 0 0 0 rgba(255, 215, 0, 0);
+          border-color: rgba(255, 215, 0, 0.45);
+        }
+        50% {
+          box-shadow: 0 0 14px rgba(255, 215, 0, 0.45);
+          border-color: rgba(255, 236, 140, 0.75);
+        }
+      }
+    `;
+    document.head.appendChild(style);
+  }
+
   private updatePowerUpTimerText(): void {
     if (!this.activePowerUpName || !this.activePowerUpIcon) {
       return;
@@ -411,8 +444,20 @@ export class HUD {
   }
 
   public updateUpgradePoints(points: number): void {
-    this.setTextContent(this.upgradePointsDisplay, `⭐ ${points}`);
-    this.setStyleValue(this.upgradePointsDisplay, 'display', points > 0 ? 'block' : 'none');
+    if (points > 0) {
+      const isMobile = GameConfig.isMobile;
+      const hintText = isMobile
+        ? `⭐ 可升级 ${points} 点`
+        : `⭐ 可升级 ${points} 点 · 按 U 打开`;
+      this.setTextContent(this.upgradePointsDisplay, hintText);
+      this.setStyleValue(this.upgradePointsDisplay, 'display', 'block');
+      this.upgradePointsDisplay.classList.add('hud-upgrade-ready');
+      return;
+    }
+
+    this.setTextContent(this.upgradePointsDisplay, '⭐ 0');
+    this.setStyleValue(this.upgradePointsDisplay, 'display', 'none');
+    this.upgradePointsDisplay.classList.remove('hud-upgrade-ready');
   }
 
   public updateMissiles(count: number): void {

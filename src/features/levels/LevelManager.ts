@@ -1,4 +1,5 @@
-import * as THREE from 'three';
+import { Vector3 } from 'three';
+import type { Object3D, Scene } from 'three';
 import { LevelConfig, getLevelConfig } from '@/features/terrain/LevelConfig';
 import {
   EnemyConfig,
@@ -29,7 +30,7 @@ export enum LevelState {
  * 关卡管理器
  */
 export class LevelManager {
-  private scene: THREE.Scene;
+  private scene: Scene;
   private terrainGenerator: TerrainGenerator;
 
   // 战斗区域边界
@@ -64,7 +65,7 @@ export class LevelManager {
   private spawnTimer: number = 0;
   private spawnInterval: number = 0.5; // 敌人生成间隔（秒）
   private waveDelayTimer: number = 0; // 波次延迟计时器
-  private waveGroupCenter?: THREE.Vector3; // 当前波次的敌人群中心
+  private waveGroupCenter?: Vector3; // 当前波次的敌人群中心
   private difficultyProfile: DifficultyProfile | null = null;
 
   // 回调
@@ -74,7 +75,7 @@ export class LevelManager {
   public onEnemySpawned?: (enemy: EnemyAI) => void;
   public onEnemyKilled?: (enemy: EnemyAI) => void;
 
-  constructor(scene: THREE.Scene) {
+  constructor(scene: Scene) {
     this.scene = scene;
     this.terrainGenerator = new TerrainGenerator(scene);
   }
@@ -121,20 +122,20 @@ export class LevelManager {
   /**
    * 计算敌人群中心，确保在战场范围内
    */
-  private calculateWaveGroupCenter(playerPosition: THREE.Vector3): THREE.Vector3 {
+  private calculateWaveGroupCenter(playerPosition: Vector3): Vector3 {
     // 计算相对于玩家的方向和距离（600-800m）
     const angle = Math.random() * Math.PI * 2;
     const distance = 600 + Math.random() * 200;
 
     // 计算原始群中心位置
-    const rawCenter = new THREE.Vector3(
+    const rawCenter = new Vector3(
       playerPosition.x + Math.cos(angle) * distance,
       playerPosition.y,
       playerPosition.z + Math.sin(angle) * distance
     );
 
     // 限制在战场范围内（±750米）
-    const clampedCenter = new THREE.Vector3(
+    const clampedCenter = new Vector3(
       this.clampToBattlefield(rawCenter.x),
       rawCenter.y,
       this.clampToBattlefield(rawCenter.z)
@@ -155,7 +156,7 @@ export class LevelManager {
    * @param playerPosition 玩家位置（第一次调用时必需，用于计算群中心）
    * @param isNextWave 是否是下一波（波次完成后的开始）
    */
-  public startWave(playerPosition?: THREE.Vector3, isNextWave: boolean = false): void {
+  public startWave(playerPosition?: Vector3, isNextWave: boolean = false): void {
     if (!this.currentLevel) return;
 
     // 第一次调用：设置第一波
@@ -201,7 +202,7 @@ export class LevelManager {
   /**
    * 生成敌人（保留传送门，但完成后立即出现）
    */
-  private spawnEnemy(playerPosition: THREE.Vector3): void {
+  private spawnEnemy(playerPosition: Vector3): void {
     if (!this.currentLevel) return;
 
     // 立即递增生成计数（防止重复生成）
@@ -242,8 +243,8 @@ export class LevelManager {
    */
   public update(
     deltaTime: number,
-    playerPosition: THREE.Vector3,
-    friendlyMeshes?: THREE.Object3D[]
+    playerPosition: Vector3,
+    friendlyMeshes?: Object3D[]
   ): void {
     // 更新传送门动画
     for (let i = this.activePortals.length - 1; i >= 0; i--) {
@@ -320,7 +321,7 @@ export class LevelManager {
   /**
    * 更新纯视觉环境动画，跟随渲染帧而不是固定玩法步长。
    */
-  public updateVisuals(deltaTime: number, playerPosition: THREE.Vector3): void {
+  public updateVisuals(deltaTime: number, playerPosition: Vector3): void {
     this.terrainGenerator.update(deltaTime);
     this.terrainGenerator.updateLOD(playerPosition);
   }
@@ -398,7 +399,7 @@ export class LevelManager {
   /**
    * 开始下一波（波次完成后的调用）
    */
-  private startNextWave(playerPosition: THREE.Vector3): void {
+  private startNextWave(playerPosition: Vector3): void {
     if (!this.currentLevel) return;
 
     // 增加波次
@@ -415,7 +416,7 @@ export class LevelManager {
    * 获取生成位置，确保敌人批量生成在群内
    * 使用当前波次的固定群中心（waveGroupCenter），所有敌人在群中心60m半径内分布
    */
-  private getSpawnPosition(playerPosition: THREE.Vector3): THREE.Vector3 {
+  private getSpawnPosition(playerPosition: Vector3): Vector3 {
     const minGroupDistanceFromPlayer = 600; // 群中心最小距离
     const maxGroupDistanceFromPlayer = 800; // 群中心最大距离
     const distributionRadius = 60; // 敌人在群内分布半径
@@ -426,7 +427,7 @@ export class LevelManager {
     const minHeight = this.combatBounds.minHeight;
     const horizontalDistance = this.combatBounds.horizontalDistance;
 
-    let bestPosition: THREE.Vector3 | null = null;
+    let bestPosition: Vector3 | null = null;
     let bestMinDistance = 0;
 
     const maxAttempts = 20;
@@ -474,7 +475,7 @@ export class LevelManager {
           minHeight,
           Math.min(maxHeight, playerPosition.y + (Math.random() - 0.5) * 30)
         );
-        bestPosition = new THREE.Vector3(x, spawnY, z);
+        bestPosition = new Vector3(x, spawnY, z);
         break;
       }
 
@@ -497,7 +498,7 @@ export class LevelManager {
         Math.min(maxHeight, playerPosition.y + (Math.random() - 0.5) * 30)
       );
 
-      const position = new THREE.Vector3(x, spawnY, z);
+      const position = new Vector3(x, spawnY, z);
 
       // 计算与其他敌人的最小距离
       let minDistToOthers = Infinity;
@@ -530,7 +531,7 @@ export class LevelManager {
       x = this.clampToBattlefield(x);
       z = this.clampToBattlefield(z);
 
-      bestPosition = new THREE.Vector3(x, defaultY, z);
+      bestPosition = new Vector3(x, defaultY, z);
     }
 
     return bestPosition;
@@ -565,7 +566,7 @@ export class LevelManager {
   /**
    * 在指定位置生成敌人（用于 Boss 召唤）
    */
-  public spawnEnemyAtPosition(type: EnemyType, position: THREE.Vector3): EnemyAI | null {
+  public spawnEnemyAtPosition(type: EnemyType, position: Vector3): EnemyAI | null {
     const enemy = this.getOrCreateEnemy(type);
     enemy.reset(position);
     enemy.getMesh().visible = true;
@@ -578,7 +579,7 @@ export class LevelManager {
   /**
    * 清理敌人资源
    */
-  public dispose(_scene: THREE.Scene): void {
+  public dispose(_scene: Scene): void {
     for (const enemy of this.enemies) {
       enemy.dispose();
     }

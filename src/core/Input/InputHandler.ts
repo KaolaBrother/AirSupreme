@@ -50,12 +50,18 @@ export class InputHandler {
       if (e.code === 'Escape' || e.code === 'KeyP') {
         this.pausePressed = true;
       }
+      if (e.code === 'KeyU') {
+        this.upgradePressed = true;
+      }
     });
 
     window.addEventListener('keyup', (e) => {
       this.keys.delete(e.code);
       if (e.code === 'Escape' || e.code === 'KeyP') {
         this.pausePressed = false;
+      }
+      if (e.code === 'KeyU') {
+        this.upgradePressed = false;
       }
     });
 

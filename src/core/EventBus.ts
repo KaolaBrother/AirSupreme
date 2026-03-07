@@ -36,7 +36,7 @@ export enum GameEventType {
 }
 
 export interface GameEventPayloads {
-  [GameEventType.PLAYER_FIRED]: { position: Vector3; direction: Vector3 };
+  [GameEventType.PLAYER_FIRED]: { position: Vector3; direction: Vector3; damage: number };
   [GameEventType.PLAYER_HIT]: { damage: number; position: Vector3 };
   [GameEventType.PLAYER_DEATH]: { position: Vector3; lives: number };
   [GameEventType.PLAYER_RESPAWN]: { position: Vector3 };

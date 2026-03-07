@@ -1,4 +1,4 @@
-import * as THREE from 'three';
+import type { Scene, Vector3 } from 'three';
 import { IGameSystem } from '@/core/interfaces/IGameSystem';
 import { EventBus, GameEventType } from '@/core/EventBus';
 import {
@@ -14,7 +14,7 @@ export class PowerUpSystem implements IGameSystem {
 
   private manager: PowerUpManager;
 
-  constructor(scene: THREE.Scene, particleSystem: ParticleSystem) {
+  constructor(scene: Scene, particleSystem: ParticleSystem) {
     this.manager = new PowerUpManager(scene, particleSystem);
   }
 
@@ -49,7 +49,7 @@ export class PowerUpSystem implements IGameSystem {
   }
 
   spawn(
-    position: THREE.Vector3,
+    position: Vector3,
     type?: import('@/features/powerups/PowerUpSystem').PowerUpType,
     icon?: string
   ): void {
@@ -61,14 +61,14 @@ export class PowerUpSystem implements IGameSystem {
   }
 
   checkProjectileCollisions(
-    projectilePositions: THREE.Vector3[],
+    projectilePositions: Vector3[],
     onBalloonDestroyed: (balloon: unknown, type: PowerUpType) => void
   ): void {
     this.manager.checkProjectileCollisions(projectilePositions, onBalloonDestroyed);
   }
 
   checkPlayerCollisions(
-    playerPosition: THREE.Vector3,
+    playerPosition: Vector3,
     onCollect: (type: PowerUpType, config: PowerUpConfig) => void
   ): void {
     this.manager.checkPlayerCollisions(playerPosition, onCollect);

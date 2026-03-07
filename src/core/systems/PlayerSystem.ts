@@ -171,6 +171,7 @@ export class PlayerSystem implements IGameSystem {
     EventBus.emit(GameEventType.PLAYER_FIRED, {
       position,
       direction: forward,
+      damage: this.stats.getDamage(),
     });
   }
 

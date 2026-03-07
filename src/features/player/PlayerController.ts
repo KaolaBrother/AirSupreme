@@ -1,4 +1,5 @@
-import * as THREE from 'three';
+import { AdditiveBlending, CanvasTexture, Color, Material, Sprite, SpriteMaterial, Vector3 } from 'three';
+import type { Group, Quaternion, Scene } from 'three';
 import type { InputState } from '@/core/Input/InputHandler';
 import { GAME_CONSTANTS } from '@/config';
 import { PlayerStats } from '@/features/upgrade/UpgradeSystem';
@@ -8,43 +9,43 @@ import { PlayerStats } from '@/features/upgrade/UpgradeSystem';
  * 使用四元数控制飞机旋转（避免万向节锁）
  */
 export class PlayerController {
-  private aircraft: THREE.Group;
+  private aircraft: Group;
   private currentSpeed: number;
   private playerStats: PlayerStats;
 
   // 缓存向量（避免每帧创建）
-  private forward: THREE.Vector3;
+  private forward: Vector3;
 
   // 自动回中速度（弧度/秒）
   private readonly autoLevelSpeed: number = 2.0;
 
   // 发动机火焰效果（使用Sprite）
-  private flameSprite: THREE.Sprite;
+  private flameSprite: Sprite;
   private readonly normalFlameSize: number = 3.0;  // 正常火焰大小
   private readonly boostFlameSize: number = 5.0;    // 加速火焰大小
   private currentFlameSize: number = 3.0;
-  private readonly normalFlameColor = new THREE.Color(0xff8844);  // 正常火焰颜色（橙黄）
-  private readonly boostFlameColor = new THREE.Color(0xffaa00);    // 加速火焰颜色（金黄）
-  private readonly flameColor = new THREE.Color();
+  private readonly normalFlameColor = new Color(0xff8844);  // 正常火焰颜色（橙黄）
+  private readonly boostFlameColor = new Color(0xffaa00);    // 加速火焰颜色（金黄）
+  private readonly flameColor = new Color();
 
-  constructor(aircraft: THREE.Group, _scene: THREE.Scene, playerStats: PlayerStats) {
+  constructor(aircraft: Group, _scene: Scene, playerStats: PlayerStats) {
     this.aircraft = aircraft;
     this.playerStats = playerStats;
     this.currentSpeed = playerStats.getMaxSpeed() * 0.5; // 初始速度为最大速度的一半
-    this.forward = new THREE.Vector3();
+    this.forward = new Vector3();
 
     // 创建火焰Sprite效果
     const flameTexture = this.createFlameTexture();
-    const flameMaterial = new THREE.SpriteMaterial({
+    const flameMaterial = new SpriteMaterial({
       map: flameTexture,
       color: 0xff8844,              // 橙黄色
       transparent: true,
       opacity: 0.8,
-      blending: THREE.AdditiveBlending,  // 加性混合实现发光效果
+      blending: AdditiveBlending,  // 加性混合实现发光效果
       depthWrite: false,                // 不写入深度缓冲
     });
 
-    this.flameSprite = new THREE.Sprite(flameMaterial);
+    this.flameSprite = new Sprite(flameMaterial);
 
     // 设置初始大小
     this.flameSprite.scale.set(this.normalFlameSize, this.normalFlameSize, 1);
@@ -59,7 +60,7 @@ export class PlayerController {
   /**
    * 创建火焰纹理（径向渐变）
    */
-  private createFlameTexture(): THREE.CanvasTexture {
+  private createFlameTexture(): CanvasTexture {
     const size = 128;
     const canvas = document.createElement('canvas');
     canvas.width = size;
@@ -91,7 +92,7 @@ export class PlayerController {
     context.fillStyle = gradient;
     context.fillRect(0, 0, size, size);
 
-    const texture = new THREE.CanvasTexture(canvas);
+    const texture = new CanvasTexture(canvas);
     texture.needsUpdate = true;
     return texture;
   }
@@ -148,7 +149,7 @@ export class PlayerController {
     // 只修正滚转（Roll），保持机翼水平，不修正俯仰和偏航
     if (!hasInput) {
       // 获取飞机的本地右向量（X轴方向）
-      const rightVector = new THREE.Vector3(1, 0, 0);
+      const rightVector = new Vector3(1, 0, 0);
       rightVector.applyQuaternion(this.aircraft.quaternion);
 
       // 右向量的Y分量代表机翼的倾斜程度
@@ -185,7 +186,7 @@ export class PlayerController {
     // 应用大小和颜色
     this.flameSprite.scale.set(this.currentFlameSize, this.currentFlameSize, 1);
 
-    if (this.flameSprite.material instanceof THREE.SpriteMaterial) {
+    if (this.flameSprite.material instanceof SpriteMaterial) {
       this.flameSprite.material.color.copy(this.flameColor);
     }
   }
@@ -193,14 +194,14 @@ export class PlayerController {
   /**
    * 获取飞机位置
    */
-  public getPosition(): THREE.Vector3 {
+  public getPosition(): Vector3 {
     return this.aircraft.position.clone();
   }
 
   /**
    * 获取飞机四元数
    */
-  public getQuaternion(): THREE.Quaternion {
+  public getQuaternion(): Quaternion {
     return this.aircraft.quaternion.clone();
   }
 
@@ -214,7 +215,7 @@ export class PlayerController {
   /**
    * 获取飞机对象
    */
-  public getAircraft(): THREE.Group {
+  public getAircraft(): Group {
     return this.aircraft;
   }
 
@@ -225,7 +226,7 @@ export class PlayerController {
     // 移除火焰Sprite
     if (this.flameSprite) {
       this.aircraft.remove(this.flameSprite);
-      if (this.flameSprite.material instanceof THREE.Material) {
+      if (this.flameSprite.material instanceof Material) {
         this.flameSprite.material.dispose();
       }
     }

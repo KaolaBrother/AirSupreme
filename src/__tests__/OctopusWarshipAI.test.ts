@@ -66,6 +66,37 @@ describe('OctopusWarshipAI', () => {
 
       expect(() => boss.update(0.016, playerMesh, [])).not.toThrow();
     });
+
+    it('should safely update at critical health when cached visual nodes are missing', () => {
+      const criticalBossMesh = createOctopusWarshipMesh(config);
+      const criticalScene = new THREE.Scene();
+      criticalScene.add(criticalBossMesh);
+      const criticalParticleSystem = new ParticleSystem(criticalScene);
+      const criticalBoss = new OctopusWarshipAI(criticalBossMesh, config, criticalParticleSystem);
+      criticalBoss.init();
+
+      const removable = criticalBossMesh.children.filter(
+        (child) =>
+          child.name === 'octopus_core_glow'
+          || child.name.startsWith('octopus_plate_edge_')
+          || child.name.startsWith('octopus_antenna_tip_')
+      );
+      for (const node of removable) {
+        criticalBossMesh.remove(node);
+      }
+      (criticalBoss as unknown as { coreGlow: THREE.Mesh | null }).coreGlow = null;
+      (criticalBoss as unknown as { plateEdges: THREE.Mesh[] }).plateEdges = [];
+      (criticalBoss as unknown as { antennaTips: THREE.Mesh[] }).antennaTips = [];
+
+      criticalBoss.takeDamage(config.health - 1);
+      const playerMesh = new THREE.Object3D();
+      playerMesh.position.set(20, 130, 60);
+
+      expect(() => criticalBoss.update(0.016, playerMesh, [])).not.toThrow();
+
+      criticalBoss.dispose();
+      criticalParticleSystem.dispose();
+    });
   });
 
   describe('takeDamage', () => {
