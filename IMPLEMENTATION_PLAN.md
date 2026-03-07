@@ -238,6 +238,9 @@
 - [done] `EnemySystem` 已从 `GameCoordinator` 构造阶段后移到 `start()` / 战斗开始阶段
   - 现在仅在实际开始游戏时动态导入并初始化
   - `BossBattleController` 创建也会等待 `EnemySystem` 就绪
+- [done] 战斗 runtime 三件套已从构造阶段后移
+  - `ParticleSystem`、`CombatSystem`、`PowerUpSystem` 现在仅在实际开局时动态导入并初始化
+  - `GameCoordinator` chunk 已进一步下降到约 `122 kB`
 - [done] 菜单启动与游戏运行时已拆出一层边界
   - `main.ts` 现在先启动 `StartMenu`
   - 点击开始后才动态导入并实例化 `GameCoordinator`
@@ -271,10 +274,10 @@
 ## 近期施工顺序
 
 ### 接下来 1-2 轮
-1. `vendor-three` 更深一轮治理，尝试切运行时边界
-2. 飞机模型视觉终版第二批
-3. 子弹 / 导弹 / 爆炸特效统一升级第二批
-4. 武器音效 / 混音第一批收口
+1. `vendor-three` 更深一轮治理，继续缩 `three` 运行时导入面
+2. 飞机模型视觉终版继续收口
+3. 子弹 / 导弹 / 爆炸特效统一升级继续收口
+4. 武器音效 / 混音继续收口
 
 ### 接下来 3-5 轮
 1. 武器音效 / 场景音效 / 音乐混音统一升级

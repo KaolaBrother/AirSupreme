@@ -3,14 +3,14 @@ import { GameLoop } from '@/core/GameLoop';
 import { GameScene } from '@/scenes/GameScene';
 import { GameState } from '@/core/GameState';
 import { EventBus, GameEventType } from '@/core/EventBus';
-import { CombatSystem } from '@/core/systems/CombatSystem';
 import { PlayerSystem } from '@/core/systems/PlayerSystem';
+import type { CombatSystem } from '@/core/systems/CombatSystem';
 import type { EnemySystem } from '@/core/systems/EnemySystem';
-import { PowerUpSystem } from '@/core/systems/PowerUpSystem';
+import type { PowerUpSystem } from '@/core/systems/PowerUpSystem';
 import { InputHandler } from '@/core/Input/InputHandler';
 import { AudioManager } from '@/core/Audio/AudioManager';
 import { MusicSystem, LevelMusic } from '@/core/Audio/MusicSystem';
-import { ParticleSystem } from '@/features/effects/ParticleSystem';
+import type { ParticleSystem } from '@/features/effects/ParticleSystem';
 import { PlayerStats, UpgradeType } from '@/features/upgrade/UpgradeSystem';
 import { FriendlyAI } from '@/features/enemy/FriendlyAI';
 import { EnemyType, ENEMY_CONFIGS } from '@/features/enemy/EnemyTypes';
@@ -71,6 +71,12 @@ interface EscortWaveState {
   wave: number;
 }
 
+interface CombatRuntimeSystems {
+  particleSystem: ParticleSystem;
+  combatSystem: CombatSystem;
+  powerUpSystem: PowerUpSystem;
+}
+
 export class GameCoordinator {
   private static readonly TUTORIAL_STAGE_DURATION_MS = 2200;
   private static readonly TUTORIAL_STAGE_GAP_MS = 350;
@@ -97,14 +103,15 @@ export class GameCoordinator {
   private inputHandler: InputHandler;
   private audioManager: AudioManager;
   private musicSystem: MusicSystem;
-  private particleSystem: ParticleSystem;
+  private particleSystem: ParticleSystem | null = null;
   private thirdPersonCamera: ThirdPersonCamera;
 
   private playerSystem: PlayerSystem;
-  private combatSystem: CombatSystem;
+  private combatSystem: CombatSystem | null = null;
+  private combatRuntimePromise: Promise<CombatRuntimeSystems> | null = null;
   private enemySystem: EnemySystem | null = null;
   private enemySystemPromise: Promise<EnemySystem> | null = null;
-  private powerUpSystem: PowerUpSystem;
+  private powerUpSystem: PowerUpSystem | null = null;
 
   private hud: HUD;
   private startMenu: StartMenu | null;
@@ -169,7 +176,6 @@ export class GameCoordinator {
     this.gameState = new GameState();
     this.audioManager = new AudioManager();
     this.musicSystem = new MusicSystem();
-    this.particleSystem = new ParticleSystem(this.gameScene.scene);
     this.playerStats = new PlayerStats();
 
     this.playerAircraft = createPlayerMesh();
@@ -183,14 +189,6 @@ export class GameCoordinator {
       this.playerAircraft,
       this.playerStats
     );
-
-    this.combatSystem = new CombatSystem(
-      this.gameScene.scene,
-      this.particleSystem,
-      this.playerAircraft
-    );
-
-    this.powerUpSystem = new PowerUpSystem(this.gameScene.scene, this.particleSystem);
 
     this.hud = new HUD();
     this.lockOnIndicator = new LockOnIndicator();
@@ -215,8 +213,43 @@ export class GameCoordinator {
 
   private initSystems(): void {
     this.playerSystem.init();
-    this.combatSystem.init();
-    this.powerUpSystem.init();
+  }
+
+  private async ensureCombatRuntimeSystems(): Promise<CombatRuntimeSystems> {
+    if (this.particleSystem && this.combatSystem && this.powerUpSystem) {
+      return {
+        particleSystem: this.particleSystem,
+        combatSystem: this.combatSystem,
+        powerUpSystem: this.powerUpSystem,
+      };
+    }
+
+    if (!this.combatRuntimePromise) {
+      this.combatRuntimePromise = Promise.all([
+        import('@/features/effects/ParticleSystem'),
+        import('@/core/systems/CombatSystem'),
+        import('@/core/systems/PowerUpSystem'),
+      ]).then(([{ ParticleSystem }, { CombatSystem }, { PowerUpSystem }]) => {
+        const particleSystem = new ParticleSystem(this.gameScene.scene);
+        const combatSystem = new CombatSystem(
+          this.gameScene.scene,
+          particleSystem,
+          this.playerAircraft
+        );
+        const powerUpSystem = new PowerUpSystem(this.gameScene.scene, particleSystem);
+
+        combatSystem.init();
+        powerUpSystem.init();
+
+        this.particleSystem = particleSystem;
+        this.combatSystem = combatSystem;
+        this.powerUpSystem = powerUpSystem;
+
+        return { particleSystem, combatSystem, powerUpSystem };
+      });
+    }
+
+    return this.combatRuntimePromise;
   }
 
   private async ensureEnemySystem(): Promise<EnemySystem> {
@@ -244,7 +277,7 @@ export class GameCoordinator {
         if (!this.playerSystem.isShieldActive()) {
           const hitIntensity = THREE.MathUtils.clamp(payload.damage / 18, 0.8, 2.1);
           this.audioManager.playHit(hitIntensity);
-          this.particleSystem.createHit(payload.position, hitIntensity);
+          this.particleSystem?.createHit(payload.position, hitIntensity);
           this.hud.triggerDamageFlash(hitIntensity);
         }
       })
@@ -254,7 +287,7 @@ export class GameCoordinator {
       EventBus.on(GameEventType.PLAYER_DEATH, ({ payload }) => {
         this.audioManager.stopEngine();
         this.audioManager.playExplosion();
-        this.particleSystem.createExplosion(payload.position, 2);
+        this.particleSystem?.createExplosion(payload.position, 2);
         this.lockOnIndicator.cancelLockOn();
         this.playerAircraft.visible = false;
 
@@ -269,7 +302,7 @@ export class GameCoordinator {
 
     this.resourceRegistry.addUnsubscriber(
       EventBus.on(GameEventType.PLAYER_RESPAWN, ({ payload }) => {
-        this.particleSystem.createExplosion(payload.position, 1.5);
+        this.particleSystem?.createExplosion(payload.position, 1.5);
         this.playerAircraft.visible = true;
         this.missileCount = GAME_CONSTANTS.MISSILE.STARTING_MISSILES;
         this.presentationController.updateMissileHud(
@@ -280,7 +313,7 @@ export class GameCoordinator {
         this.audioManager.startEngine();
 
         this.playerSystem.activateShield(this.gameScene.scene);
-        this.powerUpSystem.addActivePowerUp(
+        this.powerUpSystem?.addActivePowerUp(
           PowerUpType.SHIELD,
           POWER_UP_CONFIGS[PowerUpType.SHIELD]
         );
@@ -313,7 +346,7 @@ export class GameCoordinator {
         this.hud.updateUpgradePoints(this.playerStats.getUpgrades().getAvailablePoints());
         this.notifyEarnedUpgradePoints(earnedPoints);
         this.audioManager.playExplosion();
-        this.particleSystem.createExplosion(payload.position, payload.config.scale);
+        this.particleSystem?.createExplosion(payload.position, payload.config.scale);
         this.handleTutorialEnemyDeath();
 
         if (this.shouldSpawnPowerUp()) {
@@ -354,10 +387,10 @@ export class GameCoordinator {
         this.playerSystem.getHealth().healToMax();
         this.hud.updateHealth(this.playerSystem.getHealth().getHealthPercent());
 
-        this.combatSystem.getPlayerProjectilePool().clear();
-        this.combatSystem.getEnemyProjectilePool().clear();
-        this.particleSystem.clear();
-        this.powerUpSystem.clear();
+        this.combatSystem?.getPlayerProjectilePool().clear();
+        this.combatSystem?.getEnemyProjectilePool().clear();
+        this.particleSystem?.clear();
+        this.powerUpSystem?.clear();
 
         this.musicSystem.stopMusic();
 
@@ -400,7 +433,7 @@ export class GameCoordinator {
         break;
       case PowerUpType.DAMAGE:
         this.playerStats.setDamageMultiplier(config.value);
-        this.combatSystem.setDamageMultiplier(config.value);
+        this.combatSystem?.setDamageMultiplier(config.value);
         break;
       case PowerUpType.MULTISHOT:
         this.playerStats.setRapidFire(3, 30);
@@ -422,7 +455,7 @@ export class GameCoordinator {
         break;
       case PowerUpType.DAMAGE:
         this.playerStats.resetDamageMultiplier();
-        this.combatSystem.setDamageMultiplier(1);
+        this.combatSystem?.setDamageMultiplier(1);
         break;
       case PowerUpType.MULTISHOT:
         this.playerStats.resetRapidFire();
@@ -551,7 +584,7 @@ export class GameCoordinator {
     }
 
     this.playerSystem.update(deltaTime);
-    this.combatSystem.update(deltaTime);
+    this.combatSystem?.update(deltaTime);
 
     if (
       (this.sessionState.isBossMode() || this.sessionState.isInBossBattle()) &&
@@ -562,15 +595,15 @@ export class GameCoordinator {
       this.enemySystem?.updateWithPlayer(deltaTime, this.playerSystem.getPosition());
     }
 
-    this.powerUpSystem.update(deltaTime);
+    this.powerUpSystem?.update(deltaTime);
     this.updateTutorialCombatState();
 
     const enemyMeshes = this.enemySystem?.getEnemyMeshes() ?? [];
     const friendlyMeshes = this.enemySystem?.getFriendlyAIs().map((f) => f.getMesh()) ?? [];
 
-    this.combatSystem.updateEnemyMeshes(enemyMeshes);
+    this.combatSystem?.updateEnemyMeshes(enemyMeshes);
 
-    this.combatSystem.checkProjectileCollisions(
+    this.combatSystem?.checkProjectileCollisions(
       enemyMeshes,
       friendlyMeshes,
       (target, damage) => {
@@ -590,7 +623,7 @@ export class GameCoordinator {
 
     this.handleBalloonCollisions();
 
-    this.particleSystem.update(deltaTime);
+    this.particleSystem?.update(deltaTime);
     this.audioManager.updateEngine(this.playerSystem.getSpeed());
 
     const engineGlow = this.playerAircraft.getObjectByName('engineGlow');
@@ -671,7 +704,7 @@ export class GameCoordinator {
   }
 
   private fireMissile(target?: THREE.Object3D): void {
-    if (this.missileCount <= 0) return;
+    if (this.missileCount <= 0 || !this.combatSystem) return;
 
     const missileCount = this.multiShotActive ? Math.min(3, this.missileCount) : 1;
 
@@ -689,7 +722,7 @@ export class GameCoordinator {
         const forward = new THREE.Vector3(0, 0, -1);
         forward.applyQuaternion(quaternion);
 
-        this.combatSystem.getMissileSystem().fire(position, forward, target);
+        this.combatSystem?.getMissileSystem().fire(position, forward, target);
         this.audioManager.playMissileLaunch();
 
         this.missileCount--;
@@ -704,12 +737,15 @@ export class GameCoordinator {
   }
 
   private handleBalloonCollisions(): void {
-    if (this.playerSystem.isPlayerRespawning()) return;
+    if (this.playerSystem.isPlayerRespawning() || !this.combatSystem || !this.powerUpSystem) {
+      return;
+    }
 
+    const powerUpSystem = this.powerUpSystem;
     const projectiles = this.combatSystem.getPlayerProjectilePool().getActiveProjectiles();
     const projectilePositions = projectiles.map((p) => p.position);
 
-    this.powerUpSystem.checkProjectileCollisions(projectilePositions, (_balloon, type) => {
+    powerUpSystem.checkProjectileCollisions(projectilePositions, (_balloon, type) => {
       const config = POWER_UP_CONFIGS[type];
       this.audioManager.playBalloonPop();
       this.hud.showPowerUpBig(config.icon, config.name, 1, false, 'powerup');
@@ -718,10 +754,10 @@ export class GameCoordinator {
         this.hud.showPowerUp(config.name, config.icon, config.duration);
       }
 
-      this.powerUpSystem.addActivePowerUp(type, config);
+      powerUpSystem.addActivePowerUp(type, config);
     });
 
-    this.powerUpSystem.checkPlayerCollisions(this.playerSystem.getPosition(), (_type, config) => {
+    powerUpSystem.checkPlayerCollisions(this.playerSystem.getPosition(), (_type, config) => {
       this.audioManager.playPowerUp();
       this.hud.showPowerUp(config.name, config.icon, 0);
     });
@@ -863,7 +899,7 @@ export class GameCoordinator {
     const availableTypes = filteredTypes.length > 0 ? filteredTypes : Object.values(PowerUpType);
     const randomType = availableTypes[Math.floor(Math.random() * availableTypes.length)];
 
-    this.powerUpSystem.spawn(position, randomType, POWER_UP_CONFIGS[randomType].icon);
+    this.powerUpSystem?.spawn(position, randomType, POWER_UP_CONFIGS[randomType].icon);
   }
 
   private getAdjustedBossConfig(config: BossConfig): BossConfig {
@@ -945,13 +981,15 @@ export class GameCoordinator {
       true
     );
 
-    void this.ensureEnemySystem()
-      .then((enemySystem) => {
+    void Promise.all([this.ensureCombatRuntimeSystems(), this.ensureEnemySystem()])
+      .then(([runtimeSystems, enemySystem]) => {
         if (!this.sessionState.isPlaying()) {
           return;
         }
 
+        this.applyCurrentLevelEnvironment();
         enemySystem.setDifficultyProfile(this.getCurrentDifficultyProfile());
+        runtimeSystems.combatSystem.setDamageMultiplier(1);
 
         this.gameLoop.start(
           (dt) => this.update(dt),
@@ -1255,13 +1293,16 @@ export class GameCoordinator {
     }
 
     if (!this.bossBattleControllerPromise) {
-      this.bossBattleControllerPromise = this.ensureEnemySystem().then((enemySystem) =>
+      this.bossBattleControllerPromise = Promise.all([
+        this.ensureCombatRuntimeSystems(),
+        this.ensureEnemySystem(),
+      ]).then(([runtimeSystems, enemySystem]) =>
         import('@/core/BossBattleController').then(({ BossBattleController }) => {
           const controller = new BossBattleController({
             scene: this.gameScene.scene,
             camera: this.gameScene.camera,
-            particleSystem: this.particleSystem,
-            combatSystem: this.combatSystem,
+            particleSystem: runtimeSystems.particleSystem,
+            combatSystem: runtimeSystems.combatSystem,
             enemySystem,
             playerSystem: this.playerSystem,
             playerAircraft: this.playerAircraft,
@@ -1331,7 +1372,7 @@ export class GameCoordinator {
     isBossMode: boolean
   ): void {
     this.audioManager.playExplosion();
-    this.particleSystem.createExplosion(position, bossConfig.scale);
+    this.particleSystem?.createExplosion(position, bossConfig.scale);
     this.gameState.addScore(bossConfig.scoreValue);
     const earnedPoints = this.playerStats.addScore(bossConfig.scoreValue);
     this.hud.updateUpgradePoints(this.playerStats.getUpgrades().getAvailablePoints());
@@ -1342,9 +1383,9 @@ export class GameCoordinator {
     this.bossBattleController?.clear();
     this.enemySystem?.clearFriendlies();
 
-    this.combatSystem.getPlayerProjectilePool().clear();
-    this.combatSystem.getEnemyProjectilePool().clear();
-    this.particleSystem.clear();
+    this.combatSystem?.getPlayerProjectilePool().clear();
+    this.combatSystem?.getEnemyProjectilePool().clear();
+    this.particleSystem?.clear();
 
     this.hud.showPowerUpBig('🏆', 'Boss 已击败！');
 
@@ -1397,6 +1438,10 @@ export class GameCoordinator {
   }
 
   private configureEnvironmentImpactFeedback(levelConfig: ReturnType<typeof getLevelConfig>): void {
+    if (!this.combatSystem) {
+      return;
+    }
+
     if (!levelConfig) {
       this.combatSystem.setEnvironmentImpactHandler(null);
       return;
@@ -1406,12 +1451,12 @@ export class GameCoordinator {
     this.combatSystem.setEnvironmentImpactHandler(impactHeight, (position, source) => {
       const isWaterImpact = this.isWaterImpact(levelConfig.terrain, position);
       if (isWaterImpact) {
-        this.particleSystem.createWaterImpact(position, source === 'boss' ? 1.2 : 0.9);
+        this.particleSystem?.createWaterImpact(position, source === 'boss' ? 1.2 : 0.9);
         this.audioManager.playWaterImpact(source === 'boss' ? 1.1 : 0.85);
         return;
       }
 
-      this.particleSystem.createGroundImpact(position, source === 'boss' ? 1.15 : 0.85);
+      this.particleSystem?.createGroundImpact(position, source === 'boss' ? 1.15 : 0.85);
       this.audioManager.playHit(source === 'boss' ? 1.05 : 0.8);
     });
   }
@@ -1501,8 +1546,9 @@ export class GameCoordinator {
     this.resourceRegistry.dispose();
     this.bossBattleController?.clear();
     this.enemySystem?.dispose();
-    this.particleSystem.clear();
-    this.powerUpSystem.dispose();
+    this.particleSystem?.clear();
+    this.powerUpSystem?.dispose();
+    this.combatSystem?.dispose();
     this.presentationController.dispose();
     this.upgradeMenu?.dispose();
     this.upgradeMenuPromise = null;
