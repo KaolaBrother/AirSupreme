@@ -691,6 +691,8 @@ export class LevelManager {
         return 0.8;
       case LevelWaveEventType.INTERCEPT:
         return 0.35;
+      case LevelWaveEventType.ESCORT_DEFENSE:
+        return 0.6;
       default:
         return 0.5;
     }
@@ -704,7 +706,9 @@ export class LevelManager {
     const preferredTypes =
       this.currentWaveEvent === LevelWaveEventType.ELITE_HUNT
         ? [EnemyType.HEAVY, EnemyType.ACE, EnemyType.SNIPER, EnemyType.FIGHTER]
-        : [EnemyType.SCOUT, EnemyType.FIGHTER, EnemyType.SNIPER];
+        : this.currentWaveEvent === LevelWaveEventType.INTERCEPT
+          ? [EnemyType.SCOUT, EnemyType.FIGHTER, EnemyType.SNIPER]
+          : [EnemyType.FIGHTER, EnemyType.HEAVY, EnemyType.SCOUT];
     const filteredTypes = weightedTypes.filter((type) => preferredTypes.includes(type));
 
     return filteredTypes.length > 0 ? filteredTypes : weightedTypes;

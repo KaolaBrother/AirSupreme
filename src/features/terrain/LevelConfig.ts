@@ -187,6 +187,7 @@ export interface EnemyTypeConfig {
 export enum LevelWaveEventType {
   ELITE_HUNT = 'ELITE_HUNT',
   INTERCEPT = 'INTERCEPT',
+  ESCORT_DEFENSE = 'ESCORT_DEFENSE',
 }
 
 /**
@@ -363,7 +364,11 @@ export const LEVELS: LevelConfig[] = [
       { type: 'SNIPER', minWave: 3, maxCount: 1 },
     ],
     waveInterval: 12,
-    eventTemplates: [LevelWaveEventType.INTERCEPT, LevelWaveEventType.ELITE_HUNT],
+    eventTemplates: [
+      LevelWaveEventType.INTERCEPT,
+      LevelWaveEventType.ELITE_HUNT,
+      LevelWaveEventType.ESCORT_DEFENSE,
+    ],
     powerUpFrequency: 0.25,
     powerUpTypes: ['HEALTH', 'DAMAGE', 'SPEED'],
     difficulty: 4,
@@ -445,7 +450,11 @@ export const LEVELS: LevelConfig[] = [
       { type: 'SNIPER', minWave: 3, maxCount: 2 },
     ],
     waveInterval: 10,
-    eventTemplates: [LevelWaveEventType.ELITE_HUNT, LevelWaveEventType.INTERCEPT],
+    eventTemplates: [
+      LevelWaveEventType.ELITE_HUNT,
+      LevelWaveEventType.INTERCEPT,
+      LevelWaveEventType.ESCORT_DEFENSE,
+    ],
     powerUpFrequency: 0.35,
     powerUpTypes: ['HEALTH', 'SHIELD', 'DAMAGE', 'SPEED'],
     difficulty: 6,
@@ -535,7 +544,11 @@ export const LEVELS: LevelConfig[] = [
       { type: 'ACE', minWave: 5, maxCount: 1 },
     ],
     waveInterval: 8,
-    eventTemplates: [LevelWaveEventType.INTERCEPT, LevelWaveEventType.ELITE_HUNT],
+    eventTemplates: [
+      LevelWaveEventType.INTERCEPT,
+      LevelWaveEventType.ELITE_HUNT,
+      LevelWaveEventType.ESCORT_DEFENSE,
+    ],
     powerUpFrequency: 0.4,
     powerUpTypes: ['HEALTH', 'SHIELD', 'DAMAGE', 'SPEED', 'MULTISHOT'],
     difficulty: 8,
@@ -638,7 +651,11 @@ export const LEVELS: LevelConfig[] = [
       { type: 'ACE', minWave: 6, maxCount: 2 },
     ],
     waveInterval: 6,
-    eventTemplates: [LevelWaveEventType.ELITE_HUNT, LevelWaveEventType.INTERCEPT],
+    eventTemplates: [
+      LevelWaveEventType.ELITE_HUNT,
+      LevelWaveEventType.INTERCEPT,
+      LevelWaveEventType.ESCORT_DEFENSE,
+    ],
     powerUpFrequency: 0.5,
     powerUpTypes: ['HEALTH', 'SHIELD', 'DAMAGE', 'SPEED', 'MULTISHOT', 'BOMB'],
     difficulty: 10,

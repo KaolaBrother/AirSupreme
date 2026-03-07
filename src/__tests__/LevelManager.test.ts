@@ -159,5 +159,18 @@ describe('LevelManager', () => {
 
       expect(onWaveEventStart).toHaveBeenCalledWith(LevelWaveEventType.INTERCEPT, 1);
     });
+
+    it('should rotate into escort defense event on later template slots', () => {
+      const onWaveEventStart = vi.fn();
+      levelManager.onWaveEventStart = onWaveEventStart;
+
+      (levelManager as unknown as { currentWave: number; state: LevelState }).currentWave = 3;
+      (levelManager as unknown as { currentWave: number; state: LevelState }).state =
+        LevelState.WAVE_COMPLETE;
+
+      levelManager.startWave(undefined, true);
+
+      expect(onWaveEventStart).toHaveBeenCalledWith(LevelWaveEventType.ESCORT_DEFENSE, 3);
+    });
   });
 });

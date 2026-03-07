@@ -12,12 +12,12 @@ import { AudioManager } from '@/core/Audio/AudioManager';
 import { MusicSystem, LevelMusic } from '@/core/Audio/MusicSystem';
 import { ParticleSystem } from '@/features/effects/ParticleSystem';
 import { PlayerStats, UpgradeType } from '@/features/upgrade/UpgradeSystem';
-import { UpgradeMenu } from '@/ui/UpgradeMenu';
 import { FriendlyAI } from '@/features/enemy/FriendlyAI';
 import { EnemyType, ENEMY_CONFIGS } from '@/features/enemy/EnemyTypes';
 import { PowerUpType, POWER_UP_CONFIGS } from '@/features/powerups/PowerUpSystem';
 import { HUD } from '@/ui/HUD';
-import { StartMenu, GameSettings } from '@/ui/StartMenu';
+import type { UpgradeMenu } from '@/ui/UpgradeMenu';
+import { StartMenu, type GameSettings } from '@/ui/StartMenu';
 import { EnemyHealthBars } from '@/ui/EnemyHealthBars';
 import { LockOnIndicator } from '@/ui/LockOnIndicator';
 import { ThirdPersonCamera } from '@/features/camera/ThirdPersonCamera';
@@ -30,7 +30,7 @@ import { getLevelConfig, LevelWaveEventType } from '@/features/terrain/LevelConf
 import { GameSessionState } from '@/core/GameSessionState';
 import { ResourceRegistry } from '@/core/ResourceRegistry';
 import { PresentationController } from '@/core/PresentationController';
-import { BossBattleController } from '@/core/BossBattleController';
+import type { BossBattleController } from '@/core/BossBattleController';
 
 interface EyeBossHealthData {
   current: number;
@@ -57,9 +57,16 @@ interface TutorialCombatState {
   movementHintShown: boolean;
   speedHintShown: boolean;
   fireHintShown: boolean;
+  lockHintShown: boolean;
   missileHintShown: boolean;
   killHintShown: boolean;
   hitHintShown: boolean;
+}
+
+interface EscortWaveState {
+  active: boolean;
+  friendlyId: string | null;
+  wave: number;
 }
 
 export class GameCoordinator {
@@ -70,6 +77,7 @@ export class GameCoordinator {
   private static readonly TUTORIAL_FRIENDLY_SPAWN_BUFFER_MS = 1200;
   private static readonly TUTORIAL_MOVE_DISTANCE = 90;
   private static readonly TUTORIAL_SPEED_THRESHOLD_RATIO = 0.72;
+  private static readonly ESCORT_WAVE_SCORE_BONUS = 180;
   private static readonly UPGRADE_FEEDBACK: Record<UpgradeType, { icon: string; label: string }> = {
     [UpgradeType.MAX_HEALTH]: { icon: '❤️', label: '最大生命值升级' },
     [UpgradeType.SPEED]: { icon: '⚡', label: '飞行速度升级' },
@@ -110,9 +118,11 @@ export class GameCoordinator {
   private multiShotActive: boolean = false;
 
   private audioInitialized: boolean = false;
+  private upgradeMenuPromise: Promise<UpgradeMenu> | null = null;
 
   private bossIndicator: BossMissileIndicator;
-  private bossBattleController: BossBattleController;
+  private bossBattleController: BossBattleController | null = null;
+  private bossBattleControllerPromise: Promise<BossBattleController> | null = null;
 
   private upgradeMenu: UpgradeMenu | null = null;
 
@@ -130,9 +140,15 @@ export class GameCoordinator {
     movementHintShown: false,
     speedHintShown: false,
     fireHintShown: false,
+    lockHintShown: false,
     missileHintShown: false,
     killHintShown: false,
     hitHintShown: false,
+  };
+  private readonly escortWaveState: EscortWaveState = {
+    active: false,
+    friendlyId: null,
+    wave: -1,
   };
   private lastRenderTimestamp: number = 0;
 
@@ -185,31 +201,6 @@ export class GameCoordinator {
       enemyHealthBars: this.enemyHealthBars,
       bossIndicator: this.bossIndicator,
       lockOnIndicator: this.lockOnIndicator,
-    });
-
-    this.upgradeMenu = new UpgradeMenu(
-      this.playerStats.getUpgrades(),
-      (type: UpgradeType) => this.handleUpgrade(type),
-      () => this.resumeGame()
-    );
-    this.bossBattleController = new BossBattleController({
-      scene: this.gameScene.scene,
-      camera: this.gameScene.camera,
-      particleSystem: this.particleSystem,
-      combatSystem: this.combatSystem,
-      enemySystem: this.enemySystem,
-      playerSystem: this.playerSystem,
-      playerAircraft: this.playerAircraft,
-      audioManager: this.audioManager,
-      musicSystem: this.musicSystem,
-      hud: this.hud,
-      bossIndicator: this.bossIndicator,
-      resolveBossConfig: (bossType: BossType) => this.getAdjustedBossConfig(BOSS_CONFIGS[bossType]),
-      onBossDestroyed: (position, config, isBossMode) =>
-        this.handleBossDestroy(position, config, isBossMode),
-      onSpawnFriendly: () => this.spawnFriendlyAI(),
-      onSpawnEnemyFromBoss: (position, enemyType) => this.spawnEnemyFromBoss(position, enemyType),
-      scheduleTimeout: (callback, delay) => this.scheduleTimeout(callback, delay),
     });
 
     this.enemySystem.setDifficultyProfile(getDifficultyProfile(this.sessionState.getDifficulty()));
@@ -320,6 +311,12 @@ export class GameCoordinator {
     this.resourceRegistry.addUnsubscriber(
       EventBus.on(GameEventType.WAVE_START, () => {
         this.audioManager.playWaveStart();
+      })
+    );
+
+    this.resourceRegistry.addUnsubscriber(
+      EventBus.on(GameEventType.WAVE_COMPLETE, ({ payload }) => {
+        this.handleEscortWaveComplete(payload.wave);
       })
     );
 
@@ -454,7 +451,7 @@ export class GameCoordinator {
     }
   }
 
-  private spawnFriendlyAI(): void {
+  private spawnFriendlyAI(): FriendlyAI {
     const enemyTypes = Object.values(EnemyType);
     const randomType = enemyTypes[Math.floor(Math.random() * enemyTypes.length)];
     const config = ENEMY_CONFIGS[randomType];
@@ -472,6 +469,7 @@ export class GameCoordinator {
 
     this.gameScene.scene.add(mesh);
     this.enemySystem.spawnFriendly(friendly);
+    return friendly;
   }
 
   private spawnEnemyFromBoss(position: THREE.Vector3, enemyType: EnemyType = EnemyType.FIGHTER): void {
@@ -532,7 +530,7 @@ export class GameCoordinator {
 
     if (
       (this.sessionState.isBossMode() || this.sessionState.isInBossBattle()) &&
-      this.bossBattleController.hasActiveBoss()
+      this.bossBattleController?.hasActiveBoss()
     ) {
       this.bossBattleController.update(deltaTime);
     } else {
@@ -588,7 +586,7 @@ export class GameCoordinator {
     deltaTime: number
   ): void {
     let targetMeshes: THREE.Object3D[] = this.enemySystem.getEnemyMeshes();
-    const currentBoss = this.bossBattleController.getCurrentBoss();
+    const currentBoss = this.bossBattleController?.getCurrentBoss() ?? null;
 
     if (
       (this.sessionState.isBossMode() || this.sessionState.isInBossBattle()) &&
@@ -638,6 +636,7 @@ export class GameCoordinator {
         }
       }
     } else if (input.missile) {
+      this.handleTutorialMissileLockStarted();
       this.audioManager.playMissileLock();
       this.lockOnIndicator.startLockOn();
     } else {
@@ -729,7 +728,7 @@ export class GameCoordinator {
   private updateEnemyHealthBars(): void {
     const enemies = this.enemySystem.getEnemies();
     const friendlies = this.enemySystem.getFriendlyAIs();
-    const currentBoss = this.bossBattleController.getCurrentBoss();
+    const currentBoss = this.bossBattleController?.getCurrentBoss() ?? null;
 
     const enemyData = enemies
       .filter((e) => e.isAlive())
@@ -1033,6 +1032,7 @@ export class GameCoordinator {
     this.tutorialCombatState.movementHintShown = false;
     this.tutorialCombatState.speedHintShown = false;
     this.tutorialCombatState.fireHintShown = false;
+    this.tutorialCombatState.lockHintShown = false;
     this.tutorialCombatState.missileHintShown = false;
     this.tutorialCombatState.killHintShown = false;
     this.tutorialCombatState.hitHintShown = false;
@@ -1085,6 +1085,15 @@ export class GameCoordinator {
     this.hud.showPowerUpBig('🔥', '火力确认，锁定后再发射导弹', 1.8);
   }
 
+  private handleTutorialMissileLockStarted(): void {
+    if (!this.tutorialCombatState.active || this.tutorialCombatState.lockHintShown) {
+      return;
+    }
+
+    this.tutorialCombatState.lockHintShown = true;
+    this.hud.showPowerUpBig('🎯', '保持目标在准星内，等待锁定完成', 1.8);
+  }
+
   private handleTutorialMissileFired(): void {
     if (!this.tutorialCombatState.active || this.tutorialCombatState.missileHintShown) {
       return;
@@ -1114,6 +1123,10 @@ export class GameCoordinator {
   }
 
   private handleWaveEventStart(eventType: LevelWaveEventType, wave: number): void {
+    this.escortWaveState.active = false;
+    this.escortWaveState.friendlyId = null;
+    this.escortWaveState.wave = wave;
+
     const waveNumber = wave + 1;
     switch (eventType) {
       case LevelWaveEventType.ELITE_HUNT:
@@ -1122,7 +1135,100 @@ export class GameCoordinator {
       case LevelWaveEventType.INTERCEPT:
         this.hud.showPowerUpBig('⚠️', `限时拦截波次 · 第 ${waveNumber} 波`, 1.8, true);
         break;
+      case LevelWaveEventType.ESCORT_DEFENSE:
+        if (this.enemySystem.getFriendlyAIs().length < 4) {
+          const escortFriendly = this.spawnFriendlyAI();
+          this.escortWaveState.active = true;
+          this.escortWaveState.friendlyId = escortFriendly.getMesh().uuid;
+        }
+        this.hud.showPowerUpBig('🛡️', `护送防守波次 · 第 ${waveNumber} 波`, 1.8, true);
+        break;
     }
+  }
+
+  private handleEscortWaveComplete(wave: number): void {
+    if (!this.escortWaveState.active || this.escortWaveState.wave !== wave) {
+      return;
+    }
+
+    const escortFriendlyAlive = this.enemySystem
+      .getFriendlyAIs()
+      .some(
+        (friendly) =>
+          friendly.isAlive() && friendly.getMesh().uuid === this.escortWaveState.friendlyId
+      );
+
+    if (escortFriendlyAlive) {
+      this.gameState.addScore(GameCoordinator.ESCORT_WAVE_SCORE_BONUS);
+      const earnedPoints = this.playerStats.addScore(GameCoordinator.ESCORT_WAVE_SCORE_BONUS);
+      this.hud.updateUpgradePoints(this.playerStats.getUpgrades().getAvailablePoints());
+      this.notifyEarnedUpgradePoints(earnedPoints);
+      this.hud.showPowerUpBig('✅', '护送完成，获得额外奖励', 1.6, true);
+    } else {
+      this.hud.showPowerUpBig('⚠️', '护送失利，继续保持空域压制', 1.6, true);
+    }
+
+    this.escortWaveState.active = false;
+    this.escortWaveState.friendlyId = null;
+    this.escortWaveState.wave = -1;
+  }
+
+  private async ensureUpgradeMenu(): Promise<UpgradeMenu> {
+    if (this.upgradeMenu) {
+      return this.upgradeMenu;
+    }
+
+    if (!this.upgradeMenuPromise) {
+      this.upgradeMenuPromise = import('@/ui/UpgradeMenu').then(({ UpgradeMenu }) => {
+        const menu = new UpgradeMenu(
+          this.playerStats.getUpgrades(),
+          (type: UpgradeType) => this.handleUpgrade(type),
+          () => this.resumeGame()
+        );
+        this.upgradeMenu = menu;
+        return menu;
+      });
+    }
+
+    return this.upgradeMenuPromise;
+  }
+
+  private async ensureBossBattleController(): Promise<BossBattleController> {
+    if (this.bossBattleController) {
+      return this.bossBattleController;
+    }
+
+    if (!this.bossBattleControllerPromise) {
+      this.bossBattleControllerPromise = import('@/core/BossBattleController').then(
+        ({ BossBattleController }) => {
+          const controller = new BossBattleController({
+            scene: this.gameScene.scene,
+            camera: this.gameScene.camera,
+            particleSystem: this.particleSystem,
+            combatSystem: this.combatSystem,
+            enemySystem: this.enemySystem,
+            playerSystem: this.playerSystem,
+            playerAircraft: this.playerAircraft,
+            audioManager: this.audioManager,
+            musicSystem: this.musicSystem,
+            hud: this.hud,
+            bossIndicator: this.bossIndicator,
+            resolveBossConfig: (bossType: BossType) =>
+              this.getAdjustedBossConfig(BOSS_CONFIGS[bossType]),
+            onBossDestroyed: (position, config, isBossMode) =>
+              this.handleBossDestroy(position, config, isBossMode),
+            onSpawnFriendly: () => this.spawnFriendlyAI(),
+            onSpawnEnemyFromBoss: (position, enemyType) =>
+              this.spawnEnemyFromBoss(position, enemyType),
+            scheduleTimeout: (callback, delay) => this.scheduleTimeout(callback, delay),
+          });
+          this.bossBattleController = controller;
+          return controller;
+        }
+      );
+    }
+
+    return this.bossBattleControllerPromise;
   }
 
   public setQualityPreset(preset: QualityPreset): void {
@@ -1156,10 +1262,11 @@ export class GameCoordinator {
     this.sessionState.setInBossBattle(true);
     this.applyCurrentLevelEnvironment();
     const level = this.sessionState.getLevel();
-    if (!this.bossBattleController.start(level, true)) {
-      this.sessionState.setInBossBattle(false);
-      return;
-    }
+    void this.ensureBossBattleController().then((bossBattleController) => {
+      if (!bossBattleController.start(level, true)) {
+        this.sessionState.setInBossBattle(false);
+      }
+    });
   }
 
   private handleBossDestroy(
@@ -1176,7 +1283,7 @@ export class GameCoordinator {
 
     this.presentationController.clearBossMissileIndicators();
 
-    this.bossBattleController.clear();
+    this.bossBattleController?.clear();
     this.enemySystem.clearFriendlies();
 
     this.combatSystem.getPlayerProjectilePool().clear();
@@ -1216,10 +1323,11 @@ export class GameCoordinator {
     this.sessionState.setInBossBattle(true);
     this.applyCurrentLevelEnvironment();
     const level = this.sessionState.getLevel();
-    if (!this.bossBattleController.start(level, false)) {
-      this.sessionState.setInBossBattle(false);
-      return;
-    }
+    void this.ensureBossBattleController().then((bossBattleController) => {
+      if (!bossBattleController.start(level, false)) {
+        this.sessionState.setInBossBattle(false);
+      }
+    });
   }
 
   private applyCurrentLevelEnvironment(level: number = this.sessionState.getLevel()): void {
@@ -1250,10 +1358,16 @@ export class GameCoordinator {
 
   private pauseGame(): void {
     this.sessionState.pause();
-    this.upgradeMenu?.updateDisplay();
-    this.upgradeMenu?.show();
     this.inputHandler.resetPauseState();
     this.inputHandler.resetUpgradeState();
+    void this.ensureUpgradeMenu().then((upgradeMenu) => {
+      if (!this.sessionState.isPaused()) {
+        return;
+      }
+
+      upgradeMenu.updateDisplay();
+      upgradeMenu.show();
+    });
   }
 
   private resumeGame(): void {
@@ -1295,12 +1409,14 @@ export class GameCoordinator {
   public dispose(): void {
     this.stop();
     this.resourceRegistry.dispose();
-    this.bossBattleController.clear();
+    this.bossBattleController?.clear();
     this.enemySystem.dispose();
     this.particleSystem.clear();
     this.powerUpSystem.dispose();
     this.presentationController.dispose();
     this.upgradeMenu?.dispose();
+    this.upgradeMenuPromise = null;
+    this.bossBattleControllerPromise = null;
     this.gameScene.dispose();
     this.audioManager.dispose();
     this.musicSystem.dispose();

@@ -39,8 +39,8 @@
 - [active] 子弹 / 导弹 / 爆炸特效统一升级下一批
 - [active] 武器音效 / 混音第一批
 - [done] HUD 左上角状态区与升级反馈已完成当前轮收口
-- [active] 阶段式 onboarding 第一批
-- [active] 事件型波次第一批
+- [active] 阶段式 onboarding 第二批
+- [active] 事件型波次第二批
 
 ### 已知未收尾
 - [watch] `vendor-three` 构建块仍约 `503 kB`，warning 仍在
@@ -156,21 +156,25 @@
 
 #### D1. 试玩关卡与新手引导
 - [done] 试玩关卡已可开关，并接入首关开场
-- [active] 从“提示驱动”升级到“阶段式 onboarding”第一批已落地
+- [active] 从“提示驱动”升级到“阶段式 onboarding”第二批已落地
   - 已加入战斗内阶段提示: 机动、加速、开火、导弹、首击杀
   - 已加入首次受击规避提示
-- [next] 阶段式 onboarding 第二批
+- [done] 已加入导弹锁定阶段提示
+- [next] 阶段式 onboarding 第三批
   - 导弹锁定完成时机更精确
   - 首关目标优先级和友军配合提示继续收口
 - [later] 首关开场演出与环境表现联动
 
 #### D2. 事件型波次
-- [active] 事件型波次第一批已开始
+- [active] 事件型波次第二批已开始
   - `精英歼灭` 与 `限时拦截` 已接入 `LevelConfig -> LevelManager -> HUD` 链路
+- [done] `护送 / 防守` 第一版已接入
+  - 波次开始时生成护送友军
+  - 波次结束时按友军是否存活发放额外奖励
 - [next] 实装至少 3 类事件波次
   - 已完成: 精英歼灭
   - 已完成: 限时拦截
-  - 待完成: 护送 / 防守
+  - 已完成: 护送 / 防守（第一版）
 - [later] 按关卡主题定制波次节奏，而不只是刷敌数量变化
 
 #### D3. 升级系统 UI 闭环
@@ -203,6 +207,8 @@
   - `main.ts` 现在先启动 `StartMenu`
   - 点击开始后才动态导入并实例化 `GameCoordinator`
 - [done] `LevelManager` 的 `TerrainGenerator` 已改成真正按需动态导入
+- [done] `UpgradeMenu` 已延后到首次暂停时才动态导入
+- [done] `BossBattleController` 已延后到首次进入 Boss 流程时才动态导入
 - [later] 继续隔离非首屏 Three 依赖和高画质附加路径
 
 #### E2. 结构优化
