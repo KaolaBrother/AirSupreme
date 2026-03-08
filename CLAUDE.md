@@ -2,9 +2,9 @@
 
 AirSupreme 是一个基于 Three.js 和 TypeScript 的 3D 飞机战斗游戏，具有复杂的敌人AI、多个游戏系统和跨平台支持（桌面和移动端）。
 
-> **当前分支**: `v2` - 事件驱动架构重构版本
+> **分支说明**: 不要假设固定分支，先用 `git branch --show-current` 确认当前工作分支。
 >
-> **架构变更**: Game.ts 已重构为模块化子系统架构，使用 EventBus 进行解耦通信。
+> **当前主线状态**: 事件驱动架构已稳定，`GameCoordinator` 继续承担装配职责；战斗 runtime、Boss 控制器、升级菜单与 presentation runtime 都已接入按需初始化/预热路径。
 
 ## 常用命令
 
@@ -76,6 +76,7 @@ npx tsc --noEmit        # 仅进行 TypeScript 类型检查，不生成文件
 | 文件                                | 行数 | 职责                 |
 | ----------------------------------- | ---- | -------------------- |
 | `src/core/GameCoordinator.ts`       | 711  | 主协调器，组装子系统 |
+| `src/core/PresentationRuntimeLoader.ts` | - | 表现层 runtime 延迟加载 |
 | `src/core/EventBus.ts`              | 142  | 类型安全事件总线     |
 | `src/core/systems/PlayerSystem.ts`  | 213  | 玩家控制、生命、护盾 |
 | `src/core/systems/CombatSystem.ts`  | 158  | 投射物、导弹、碰撞   |

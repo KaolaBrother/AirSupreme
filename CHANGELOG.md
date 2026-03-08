@@ -1,5 +1,26 @@
 # AirSupreme 更新日志
 
+## [2.2.0] - 2026-03-08
+
+### 视觉与战斗反馈收口
+
+- 飞机模型终版继续收口，玩家机与敌机补齐翼根、进气、机腹、尾段等中近景细节
+- 玩家机炮、敌机炮弹、Boss 炮击的飞行轮廓与命中反馈继续拉开
+- 普通弹道碰撞链路已补齐 `source/tone` 透传，命中音画不再只按目标类型近似路由
+- Boss 命中玩家时的双重 `PLAYER_HIT` 默认反馈已去重，HUD 受击闪与教程统计仍保留
+
+### 运行时边界与包体积
+
+- 新增 `PresentationRuntimeLoader`，将 `HUD / EnemyHealthBars / LockOnIndicator / BossMissileIndicator / PresentationController` 从 `GameCoordinator` 顶层运行时导入移到按需路径
+- `GameCoordinator` 构建产物从上一轮约 `155.99 kB` 继续下降到约 `105.10 kB`
+- 构建已拆出 `PresentationRuntimeLoader`、`PresentationController`、`HUD`、`EnemyHealthBars`、`LockOnIndicator`、`BossMissileIndicator` 等独立 chunk
+
+### 测试与工程状态
+
+- 新增 `PresentationRuntimeLoader.test.ts`
+- 当前测试规模为 **28 个测试文件 / 304 个测试**
+- 全量门槛持续通过：`npx tsc --noEmit`、`npm run lint`、`npm run test:run`、`npm run build`
+
 ## [2.1.0] - 2026-02-19
 
 ### 配置外置系统

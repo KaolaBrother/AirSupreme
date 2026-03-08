@@ -96,6 +96,7 @@ npx vitest run path/to/file.test.ts
 
 ## Key Files
 - Core orchestration: `src/core/GameCoordinator.ts`
+- Presentation/runtime boundary: `src/core/PresentationRuntimeLoader.ts`, `src/core/PresentationController.ts`
 - Event system: `src/core/EventBus.ts`
 - Game config: `src/config.ts`
 - Session/settings: `src/core/GameSessionState.ts`, `src/core/SessionSettings.ts`

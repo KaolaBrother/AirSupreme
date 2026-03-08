@@ -1,6 +1,6 @@
 # ✈️ Air Supreme - 3D 空战游戏
 
-一款使用 Three.js + TypeScript 开发的 3D 飞机空战游戏，支持桌面和移动端。当前版本已包含 5 个关卡、5 个 Boss、试玩关卡、升级菜单、事件波次和模型预览。
+一款使用 Three.js + TypeScript 开发的 3D 飞机空战游戏，支持桌面和移动端。当前版本已包含 5 个关卡、5 个 Boss、试玩关卡、升级菜单、事件波次和模型预览，并完成了主要战斗反馈与运行时边界收口。
 
 ![Game Preview](https://via.placeholder.com/800x400?text=Air+Supreme+3D+Combat+Game)
 
@@ -12,6 +12,10 @@
 - **普通模式 / Boss 模式**
 - **试玩关卡开关**
 - **升级菜单**
+- **运行时边界与按需加载**
+  - 开始菜单与游戏运行时已拆边界
+  - 战斗 UI / presentation runtime 已按需创建
+  - 菜单空闲与开始前会预热深层运行时 chunk
 - **事件波次**
   - 精英歼灭
   - 限时拦截
@@ -147,12 +151,20 @@ npm run dev
 npm run build
 ```
 
+## ✅ 当前工程状态
+
+- 主要功能与表现层已经进入阶段性收口，当前没有已知阻塞性开发项
+- `GameCoordinator`、战斗运行时、Boss 控制器、presentation/UI runtime 都已后移到按需初始化路径
+- 当前测试规模为 **28 个测试文件 / 304 个测试**
+- 已知观察项仅剩构建中的 `vendor-three` chunk 约 `503.67 kB` warning
+
 ## 📁 项目结构
 
 ```
 src/
 ├── core/                    # 核心系统
 │   ├── GameCoordinator.ts   # 主协调器 (v2)
+│   ├── PresentationRuntimeLoader.ts # 表现层 runtime 延迟加载器
 │   ├── EventBus.ts          # 事件总线 (v2)
 │   ├── GameLoop.ts          # 游戏循环
 │   ├── GameState.ts         # 游戏状态
@@ -200,7 +212,7 @@ src/
 │   ├── LockOnIndicator.ts  # 导弹锁定
 │   └── UpgradeMenu.ts       # 升级菜单
 │
-├── __tests__/              # 测试文件 (285 个测试)
+├── __tests__/              # 测试文件 (304 个测试)
 │
 ├── Game.ts                  # 向后兼容导出
 ├── Game.legacy.ts           # 旧实现 (@deprecated)

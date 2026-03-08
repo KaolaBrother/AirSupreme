@@ -4,6 +4,14 @@
 
 AirSupreme 是一个基于 Three.js 和 TypeScript 的 3D 飞机战斗游戏。
 
+### 当前实现状态（2026-03）
+
+- 主流程已拆成 `main.ts -> StartMenu -> 动态导入 GameCoordinator -> 按需初始化战斗 / 表现层 runtime`
+- `GameCoordinator` 负责装配，但战斗 runtime、Boss 控制器、升级菜单、presentation runtime 都已从构造阶段后移
+- 新增 `PresentationRuntimeLoader` 负责按需创建 `HUD / EnemyHealthBars / LockOnIndicator / BossMissileIndicator / PresentationController`
+- 普通弹道碰撞链路已支持 `source/tone` 透传，玩家机炮、敌弹、Boss 炮弹、导弹命中可按来源映射不同反馈
+- 当前验证状态：**28 个测试文件 / 304 个测试** 全通过
+
 ### 技术栈
 
 - **渲染引擎**: Three.js (WebGL)
@@ -21,6 +29,7 @@ AirSupreme 是一个基于 Three.js 和 TypeScript 的 3D 飞机战斗游戏。
 6. **UI系统** - HUD、小地图、血条
 7. **配置系统** - JSON 配置加载、默认值 fallback
 8. **日志系统** - 结构化日志、模块标记、级别控制
+9. **运行时边界系统** - 动态导入、预热、表现层 runtime loader
 
 ---
 
