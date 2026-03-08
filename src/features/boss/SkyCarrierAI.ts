@@ -31,6 +31,13 @@ export class SkyCarrierAI {
   private readonly muzzleMeshes: THREE.Mesh[];
   private readonly launcherGlowMeshes: THREE.Mesh[];
   private readonly engineGlowMeshes: THREE.Mesh[];
+  private readonly weakpointBaseColor = new THREE.Color(0xff6f3d);
+  private readonly weakpointCriticalColor = new THREE.Color(0xffb97e);
+  private readonly weaponBaseColor = new THREE.Color(0xff9552);
+  private readonly weaponCriticalColor = new THREE.Color(0xffd99e);
+  private readonly energyBaseColor = new THREE.Color(0x57d5ff);
+  private readonly energyCriticalColor = new THREE.Color(0x9ceeff);
+  private readonly terminalColor = new THREE.Color(0xff331a);
   private visualPulseTime: number = 0;
   private damageFlashTimer: number = 0;
 
@@ -156,54 +163,95 @@ export class SkyCarrierAI {
       0.25,
       Math.min(1.15, this.velocity.length() / Math.max(this.config.speed, 0.001))
     );
+    const healthRatio = this.getHealth().current / this.getHealth().max;
+    const criticalState = THREE.MathUtils.clamp((0.24 - healthRatio) / 0.24, 0, 1);
+    const terminalState = THREE.MathUtils.clamp((0.16 - healthRatio) / 0.16, 0, 1);
     this.damageFlashTimer = Math.max(0, this.damageFlashTimer - deltaTime);
     const damageFlash = this.damageFlashTimer > 0 ? this.damageFlashTimer / 0.24 : 0;
     const deckWave = Math.sin(this.visualPulseTime * 2.2) * 0.5 + 0.5;
     const engineWave = Math.sin(this.visualPulseTime * 8.5) * 0.5 + 0.5;
+    const criticalPulse = (Math.sin(this.visualPulseTime * 12.5) * 0.5 + 0.5) * criticalState;
+    const terminalPulse = (Math.sin(this.visualPulseTime * 21) * 0.5 + 0.5) * terminalState;
 
     for (const mesh of this.weakpointMeshes) {
-      this.setEmissiveIntensity(
+      this.setEmissiveState(
         mesh,
-        0.85 + deckWave * 0.95 + missileCharge * 0.45 + damageFlash * 1.45
+        0.85 +
+          deckWave * 0.95 +
+          missileCharge * 0.45 +
+          criticalPulse * 0.8 +
+          terminalPulse * 1.15 +
+          damageFlash * 1.45,
+        this.weakpointBaseColor
+          .clone()
+          .lerp(this.weakpointCriticalColor, criticalState + criticalPulse * 0.35)
+          .lerp(this.terminalColor, terminalState * 0.65 + terminalPulse * 0.35)
       );
       if (mesh.name === 'carrier_deck_core_glow') {
-        mesh.scale.z = 1 + deckWave * 0.12 + damageFlash * 0.08;
+        mesh.scale.z = 1 + deckWave * 0.12 + terminalPulse * 0.08 + damageFlash * 0.08;
       }
     }
 
     for (let i = 0; i < this.muzzleMeshes.length; i++) {
       const activeBoost = i === this.currentCannon ? 0.75 + cannonCharge * 1.4 : 0.2 + cannonCharge * 0.25;
-      this.setEmissiveIntensity(
+      this.setEmissiveState(
         this.muzzleMeshes[i],
         0.45 +
           activeBoost +
           (Math.sin(this.visualPulseTime * 12 + i) * 0.5 + 0.5) * 0.18 +
-          damageFlash * 0.95
+          criticalPulse * 0.75 +
+          terminalPulse * 0.95 +
+          damageFlash * 0.95,
+        this.weaponBaseColor
+          .clone()
+          .lerp(this.weaponCriticalColor, criticalState + criticalPulse * 0.25)
+          .lerp(this.terminalColor, terminalState * 0.55 + terminalPulse * 0.3)
       );
     }
 
     for (const mesh of this.launcherGlowMeshes) {
-      this.setEmissiveIntensity(
+      this.setEmissiveState(
         mesh,
-        0.7 + missileCharge * 1.1 + deckWave * 0.35 + damageFlash * 1.05
+        0.7 +
+          missileCharge * 1.1 +
+          deckWave * 0.35 +
+          criticalPulse * 0.7 +
+          terminalPulse * 0.9 +
+          damageFlash * 0.95,
+        this.weaponBaseColor
+          .clone()
+          .lerp(this.weaponCriticalColor, criticalState + missileCharge * 0.2)
+          .lerp(this.terminalColor, terminalState * 0.5 + terminalPulse * 0.3)
       );
-      const flashScale = 1 + damageFlash * 0.07;
+      const flashScale = 1 + terminalPulse * 0.05 + damageFlash * 0.07;
       mesh.scale.setScalar(flashScale);
     }
 
     for (const mesh of this.engineGlowMeshes) {
-      this.setEmissiveIntensity(
+      this.setEmissiveState(
         mesh,
-        0.95 + engineWave * 1.1 * engineRatio + damageFlash * 0.8
+        0.95 +
+          engineWave * 1.1 * engineRatio +
+          criticalPulse * 0.6 +
+          terminalPulse * 0.8 +
+          damageFlash * 0.8,
+        this.energyBaseColor
+          .clone()
+          .lerp(this.energyCriticalColor, criticalState + criticalPulse * 0.2)
+          .lerp(this.terminalColor, terminalState * 0.3 + terminalPulse * 0.2)
       );
-      mesh.scale.x = 1 + engineWave * 0.08 + damageFlash * 0.04;
-      mesh.scale.z = 1 + engineWave * 0.08 + damageFlash * 0.04;
+      mesh.scale.x = 1 + engineWave * 0.08 + terminalPulse * 0.04 + damageFlash * 0.04;
+      mesh.scale.z = 1 + engineWave * 0.08 + terminalPulse * 0.04 + damageFlash * 0.04;
     }
   }
 
-  private setEmissiveIntensity(mesh: THREE.Mesh, intensity: number): void {
+  private setEmissiveState(mesh: THREE.Mesh, intensity: number, color?: THREE.Color): void {
     if (mesh.material instanceof THREE.MeshStandardMaterial) {
       mesh.material.emissiveIntensity = intensity;
+      if (color) {
+        mesh.material.emissive.copy(color);
+        mesh.material.color.copy(color);
+      }
     }
   }
 

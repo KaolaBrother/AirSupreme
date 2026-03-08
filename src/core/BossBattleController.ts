@@ -272,10 +272,11 @@ export class BossBattleController {
         ...this.deps.enemySystem.getFriendlyAIs().map((friendly) => friendly.getMesh()),
       ];
       boss.getFlakCannonSystem().checkAoeCollisions(targets, (target, damage) => {
-        this.createHeavyDamageFeedback(target.position, Math.max(1.2, damage / 12), 'flak-hit');
-        this.createDamageFeedback(
+        this.createWeaponHitFeedback(
           target.position,
-          Math.max(0.9, damage / 24),
+          Math.max(1.1, damage / 13),
+          'flak-hit',
+          Math.max(0.82, damage / 30),
           this.getTargetHitProfile(target)
         );
         if (target === this.deps.playerAircraft) {
@@ -328,14 +329,11 @@ export class BossBattleController {
     boss.onLaserHit = () => {
       if (!this.deps.playerSystem.isShieldActive()) {
         this.deps.playerSystem.getHealth().takeDamage(config.damage);
-        this.createHeavyDamageFeedback(
+        this.createWeaponHitFeedback(
           this.deps.playerAircraft.position,
-          Math.max(1.2, config.damage / 16),
-          'laser'
-        );
-        this.createDamageFeedback(
-          this.deps.playerAircraft.position,
-          Math.max(0.9, config.damage / 26),
+          Math.max(1.08, config.damage / 18),
+          'laser',
+          Math.max(0.82, config.damage / 30),
           'player'
         );
       }
@@ -371,10 +369,11 @@ export class BossBattleController {
         ...this.deps.enemySystem.getFriendlyAIs().map((friendly) => friendly.getMesh()),
       ];
       boss.getFlakCannonSystem().checkAoeCollisions(targets, (target, damage) => {
-        this.createHeavyDamageFeedback(target.position, Math.max(1.2, damage / 12), 'flak-hit');
-        this.createDamageFeedback(
+        this.createWeaponHitFeedback(
           target.position,
-          Math.max(0.9, damage / 24),
+          Math.max(1.1, damage / 13),
+          'flak-hit',
+          Math.max(0.82, damage / 30),
           this.getTargetHitProfile(target)
         );
         if (target === this.deps.playerAircraft) {
@@ -443,12 +442,13 @@ export class BossBattleController {
       (target: Object3D) => {
         this.deps.particleSystem.createBossMissileExplosion(target.position.clone(), 1.15);
         this.deps.audioManager.playMissileExplosion('boss');
-        this.createHeavyDamageFeedback(
+        this.createWeaponHitFeedback(
           target.position,
-          target === this.deps.playerAircraft ? 1.4 : 1.05,
-          'boss-cannon'
+          target === this.deps.playerAircraft ? 1.22 : 0.98,
+          'boss-cannon',
+          target === this.deps.playerAircraft ? 0.96 : 0.82,
+          this.getTargetHitProfile(target)
         );
-        this.createDamageFeedback(target.position, 0.94, this.getTargetHitProfile(target));
         if (target === this.deps.playerAircraft) {
           if (!this.deps.playerSystem.isShieldActive()) {
             this.deps.playerSystem.getHealth().takeDamage(BOSS_MISSILE_CONFIG.DAMAGE);
@@ -483,7 +483,7 @@ export class BossBattleController {
         }
 
         octopusBoss.takeEyeDamage(part.index, GAME_CONSTANTS.MISSILE.DAMAGE);
-        this.createHeavyDamageFeedback(impactPosition, 1.2, 'boss-armor');
+        this.createArmorHitFeedback(impactPosition, 1.14, true);
         this.deps.particleSystem.createMissileImpact(impactPosition, 1.25);
         this.deps.audioManager.playMissileExplosion();
       });
@@ -500,7 +500,7 @@ export class BossBattleController {
         );
         const hitWorldPos = new Vector3();
         target.getWorldPosition(hitWorldPos);
-        this.createHeavyDamageFeedback(hitWorldPos, 1.08, 'boss-armor');
+        this.createArmorHitFeedback(hitWorldPos, 0.98);
       });
     }
 
@@ -511,8 +511,7 @@ export class BossBattleController {
 
       if (target === this.currentBoss?.getMesh() || isBossPart) {
         this.currentBoss?.takeDamage(GAME_CONSTANTS.MISSILE.DAMAGE);
-        this.createHeavyDamageFeedback(hitWorldPos, 1.28, 'boss-armor');
-        this.createDamageFeedback(hitWorldPos, 1.02, 'boss');
+        this.createArmorHitFeedback(hitWorldPos, 1.18, true);
         this.deps.particleSystem.createMissileImpact(hitWorldPos, 1.55);
         this.deps.audioManager.playMissileExplosion();
         return;
@@ -533,7 +532,7 @@ export class BossBattleController {
         this.currentBoss?.takeDamage(this.deps.combatSystem.getDamageMultiplier() * 12.5);
         const hitWorldPos = new Vector3();
         target.getWorldPosition(hitWorldPos);
-        this.createHeavyDamageFeedback(hitWorldPos, 0.98, 'boss-armor');
+        this.createArmorHitFeedback(hitWorldPos, 0.92);
         return;
       }
 
@@ -549,7 +548,7 @@ export class BossBattleController {
           this.currentBoss?.takeDamage(damage);
           const hitWorldPos = new Vector3();
           target.getWorldPosition(hitWorldPos);
-          this.createHeavyDamageFeedback(hitWorldPos, Math.max(0.9, damage / 14), 'boss-armor');
+          this.createArmorHitFeedback(hitWorldPos, Math.max(0.88, damage / 16));
           return;
         }
 
@@ -572,12 +571,13 @@ export class BossBattleController {
     if (boss.checkLaserCollision(playerPosition)) {
       if (!this.deps.playerSystem.isShieldActive() && this.laserDamageCooldown <= 0) {
         this.deps.playerSystem.getHealth().takeDamage(boss.getConfig().damage);
-        this.createHeavyDamageFeedback(
+        this.createWeaponHitFeedback(
           playerPosition,
-          Math.max(1.2, boss.getConfig().damage / 16),
-          'laser'
+          Math.max(1.08, boss.getConfig().damage / 18),
+          'laser',
+          Math.max(0.82, boss.getConfig().damage / 30),
+          'player'
         );
-        this.createDamageFeedback(playerPosition, Math.max(0.9, boss.getConfig().damage / 26), 'player');
         this.laserDamageCooldown = 1.0;
       }
     }
@@ -598,7 +598,7 @@ export class BossBattleController {
         boss.takeEyeDamage(part.index, this.deps.combatSystem.getDamageMultiplier() * 12.5);
         const hitWorldPos = new Vector3();
         target.getWorldPosition(hitWorldPos);
-        this.createHeavyDamageFeedback(hitWorldPos, 1.05, 'boss-armor');
+        this.createArmorHitFeedback(hitWorldPos, 0.95);
       });
 
     const eyeBulletCollideRadius = 5;
@@ -608,10 +608,12 @@ export class BossBattleController {
       if (bulletPosition.distanceTo(currentPlayerPosition) < eyeBulletCollideRadius) {
         if (!this.deps.playerSystem.isShieldActive()) {
           this.deps.playerSystem.getHealth().takeDamage(boss.getEyeDamage());
-          this.createHeavyDamageFeedback(
+          this.createWeaponHitFeedback(
             currentPlayerPosition,
-            Math.max(1.05, boss.getEyeDamage() / 16),
-            'boss-cannon'
+            Math.max(0.98, boss.getEyeDamage() / 18),
+            'boss-cannon',
+            Math.max(0.8, boss.getEyeDamage() / 32),
+            'player'
           );
         }
         this.createHeavyDamageFeedback(bulletPosition, 0.94, 'boss-cannon');
@@ -627,10 +629,12 @@ export class BossBattleController {
         const friendlyPosition = friendly.getMesh().position;
         if (bulletPosition.distanceTo(friendlyPosition) < eyeBulletCollideRadius) {
           friendly.takeDamage(boss.getEyeDamage());
-          this.createHeavyDamageFeedback(
+          this.createWeaponHitFeedback(
             friendlyPosition,
-            Math.max(0.95, boss.getEyeDamage() / 20),
-            'boss-cannon'
+            Math.max(0.9, boss.getEyeDamage() / 24),
+            'boss-cannon',
+            Math.max(0.75, boss.getEyeDamage() / 36),
+            'enemy'
           );
           this.createHeavyDamageFeedback(bulletPosition, 0.84, 'boss-cannon');
           boss.getEyeSystem().removeBullet(bulletMesh);
@@ -723,8 +727,31 @@ export class BossBattleController {
     intensity: number = 1,
     profile: 'boss-cannon' | 'laser' | 'flak-hit' | 'boss-armor' = 'boss-cannon'
   ): void {
-    this.deps.particleSystem.createHeavyWeaponImpact(position, intensity, profile);
-    this.deps.audioManager.playHeavyWeaponImpact(profile, intensity);
+    const clampedIntensity = Math.max(0.75, Math.min(2.2, intensity));
+    this.deps.particleSystem.createHeavyWeaponImpact(position, clampedIntensity, profile);
+    this.deps.audioManager.playHeavyWeaponImpact(profile, clampedIntensity);
+  }
+
+  private createWeaponHitFeedback(
+    position: Vector3,
+    heavyIntensity: number,
+    weaponProfile: 'boss-cannon' | 'laser' | 'flak-hit' | 'boss-armor',
+    hitIntensity: number,
+    hitProfile: 'player' | 'enemy' | 'boss'
+  ): void {
+    this.createHeavyDamageFeedback(position, heavyIntensity, weaponProfile);
+    this.createDamageFeedback(position, hitIntensity, hitProfile);
+  }
+
+  private createArmorHitFeedback(
+    position: Vector3,
+    heavyIntensity: number,
+    withHitLayer: boolean = false
+  ): void {
+    this.createHeavyDamageFeedback(position, heavyIntensity, 'boss-armor');
+    if (withHitLayer) {
+      this.createDamageFeedback(position, Math.max(0.9, heavyIntensity * 0.86), 'boss');
+    }
   }
 
   private getTargetHitProfile(target: Object3D): 'player' | 'enemy' {

@@ -35,11 +35,13 @@ export class OctopusWarshipAI {
   private apertures: THREE.Mesh[] = [];
   private antennaTips: THREE.Mesh[] = [];
   private readonly hitFlashColor = new THREE.Color(0xd8fbff);
-  private readonly coreBaseColor = new THREE.Color(0x66eeff);
-  private readonly coreTeleportColor = new THREE.Color(0xa855ff);
-  private readonly apertureBaseColor = new THREE.Color(0x5ae7ff);
-  private readonly criticalApertureColor = new THREE.Color(0xff7be7);
-  private readonly antennaBaseColor = new THREE.Color(0x74f1ff);
+  private readonly weakpointBaseColor = new THREE.Color(0xff6c3b);
+  private readonly weakpointCriticalColor = new THREE.Color(0xffb67a);
+  private readonly weaponBaseColor = new THREE.Color(0xff9456);
+  private readonly weaponCriticalColor = new THREE.Color(0xffd7a0);
+  private readonly energyBaseColor = new THREE.Color(0x56d8ff);
+  private readonly energyCriticalColor = new THREE.Color(0x9bf0ff);
+  private readonly terminalColor = new THREE.Color(0xff321a);
 
   public onDestroy?: (position: THREE.Vector3, config: BossConfig) => void;
   public onTeleport?: (from: THREE.Vector3, to: THREE.Vector3) => void;
@@ -146,6 +148,7 @@ export class OctopusWarshipAI {
     const healthRatio = this.getHealth().current / this.getHealth().max;
     const lowHealthBoost = 1 + (1 - healthRatio) * 0.9;
     const criticalState = THREE.MathUtils.clamp((0.25 - healthRatio) / 0.25, 0, 1);
+    const terminalState = THREE.MathUtils.clamp((0.16 - healthRatio) / 0.16, 0, 1);
     const hitFlash = this.getHitFlashStrength();
     const teleportCharge =
       this.teleportCooldown > 0
@@ -153,23 +156,45 @@ export class OctopusWarshipAI {
           THREE.MathUtils.clamp(this.teleportCooldown / Math.max(TELEPORT_CONFIG.COOLDOWN, 0.001), 0, 1)
         : 1;
     const criticalPulse = (Math.sin(this.animationTime * 11.5) * 0.5 + 0.5) * criticalState;
+    const terminalPulse = (Math.sin(this.animationTime * 20.5) * 0.5 + 0.5) * terminalState;
     const corePulse =
       (Math.sin(this.animationTime * (this.isTeleporting ? 10 : 3.5)) * 0.5 + 0.5) * lowHealthBoost;
     this.setGlowState(this.coreGlow, {
       intensity:
-        0.95 + corePulse * 1.35 + (this.isTeleporting ? 0.9 : 0) + criticalPulse * 1.1 + hitFlash * 1.45,
-      scale: 1 + corePulse * 0.09 + (this.isTeleporting ? 0.08 : 0) + criticalPulse * 0.06 + hitFlash * 0.06,
-      color: this.coreBaseColor
+        0.95 +
+        corePulse * 1.35 +
+        (this.isTeleporting ? 0.9 : 0) +
+        criticalPulse * 1.1 +
+        terminalPulse * 1.2 +
+        hitFlash * 1.45,
+      scale:
+        1 +
+        corePulse * 0.09 +
+        (this.isTeleporting ? 0.08 : 0) +
+        criticalPulse * 0.06 +
+        terminalPulse * 0.06 +
+        hitFlash * 0.06,
+      color: this.weakpointBaseColor
         .clone()
-        .lerp(this.coreTeleportColor, (this.isTeleporting ? 0.5 : 0.1) + criticalPulse * 0.25)
+        .lerp(this.weakpointCriticalColor, (this.isTeleporting ? 0.5 : 0.1) + criticalPulse * 0.25)
+        .lerp(this.terminalColor, terminalState * 0.65 + terminalPulse * 0.35)
         .lerp(this.hitFlashColor, hitFlash * 0.7),
     });
 
     for (let i = 0; i < this.plateEdges.length; i++) {
       const pulse = Math.sin(this.animationTime * 4.2 + i * 0.9) * 0.5 + 0.5;
       this.setGlowState(this.plateEdges[i], {
-        intensity: 0.6 + pulse * 0.85 * lowHealthBoost + criticalPulse * 0.6 + hitFlash * 0.85,
-        scale: 1 + pulse * 0.04 + criticalPulse * 0.03 + hitFlash * 0.03,
+        intensity:
+          0.6 +
+          pulse * 0.85 * lowHealthBoost +
+          criticalPulse * 0.6 +
+          terminalPulse * 0.8 +
+          hitFlash * 0.85,
+        scale: 1 + pulse * 0.04 + criticalPulse * 0.03 + terminalPulse * 0.03 + hitFlash * 0.03,
+        color: this.energyBaseColor
+          .clone()
+          .lerp(this.energyCriticalColor, criticalState * 0.65 + criticalPulse * 0.25)
+          .lerp(this.terminalColor, terminalState * 0.35 + terminalPulse * 0.25),
       });
     }
 
@@ -177,11 +202,23 @@ export class OctopusWarshipAI {
       const pulse = Math.sin(this.animationTime * 5.5 + i * Math.PI) * 0.5 + 0.5;
       this.setGlowState(this.apertures[i], {
         intensity:
-          0.7 + teleportCharge * 0.9 + pulse * 0.45 + criticalPulse * 0.85 + hitFlash * 0.95,
-        scale: 1 + teleportCharge * 0.08 + pulse * 0.03 + criticalPulse * 0.04 + hitFlash * 0.04,
-        color: this.apertureBaseColor
+          0.7 +
+          teleportCharge * 0.9 +
+          pulse * 0.45 +
+          criticalPulse * 0.85 +
+          terminalPulse * 0.9 +
+          hitFlash * 0.95,
+        scale:
+          1 +
+          teleportCharge * 0.08 +
+          pulse * 0.03 +
+          criticalPulse * 0.04 +
+          terminalPulse * 0.04 +
+          hitFlash * 0.04,
+        color: this.weaponBaseColor
           .clone()
-          .lerp(this.criticalApertureColor, criticalState + criticalPulse * 0.3)
+          .lerp(this.weaponCriticalColor, criticalState + criticalPulse * 0.3)
+          .lerp(this.terminalColor, terminalState * 0.5 + terminalPulse * 0.3)
           .lerp(this.hitFlashColor, hitFlash * 0.35),
       });
     }
@@ -189,11 +226,13 @@ export class OctopusWarshipAI {
     for (let i = 0; i < this.antennaTips.length; i++) {
       const pulse = Math.sin(this.animationTime * 6.4 + i * 1.1) * 0.5 + 0.5;
       this.setGlowState(this.antennaTips[i], {
-        intensity: 0.55 + pulse * 0.9 + criticalPulse * 0.7 + hitFlash * 0.75,
-        scale: 1 + pulse * 0.06 + criticalPulse * 0.04 + hitFlash * 0.03,
-        color: this.antennaBaseColor
+        intensity:
+          0.55 + pulse * 0.9 + criticalPulse * 0.7 + terminalPulse * 0.75 + hitFlash * 0.75,
+        scale: 1 + pulse * 0.06 + criticalPulse * 0.04 + terminalPulse * 0.03 + hitFlash * 0.03,
+        color: this.energyBaseColor
           .clone()
-          .lerp(this.criticalApertureColor, criticalState * 0.5 + criticalPulse * 0.15)
+          .lerp(this.energyCriticalColor, criticalState * 0.5 + criticalPulse * 0.15)
+          .lerp(this.terminalColor, terminalState * 0.32 + terminalPulse * 0.2)
           .lerp(this.hitFlashColor, hitFlash * 0.35),
       });
     }

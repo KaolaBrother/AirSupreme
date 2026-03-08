@@ -22,6 +22,32 @@ interface CachedMaterials {
   light: THREE.MeshBasicMaterial;
 }
 
+interface JetProportionProfile {
+  intakeX: number;
+  intakeY: number;
+  intakeZ: number;
+  intakeWidthScale: number;
+  intakeDepthScale: number;
+  intakeYaw: number;
+  bellyY: number;
+  bellyZ: number;
+  bellyDepth: number;
+  pylonX: number;
+  pylonY: number;
+  pylonZ: number;
+  pylonWidth: number;
+  pylonDepth: number;
+  pylonYaw: number;
+  tailRootX: number;
+  tailRootY: number;
+  tailRootZ: number;
+  tailRootDepth: number;
+  nozzleX: number;
+  nozzleY: number;
+  nozzleZ: number;
+  twinEngine: boolean;
+}
+
 const materialsCache: Map<EnemyType, CachedMaterials> = new Map();
 const detailGeometries = {
   panel: new THREE.BoxGeometry(0.12, 0.04, 1),
@@ -586,6 +612,18 @@ export function createPlayerMesh(): THREE.Group {
   rightIntakeCavity.castShadow = true;
   group.add(rightIntakeCavity);
 
+  const leftIntakeThroat = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.32), playerIntakeCavityMaterial);
+  leftIntakeThroat.position.set(-0.66, -0.1, -0.04);
+  leftIntakeThroat.rotation.y = 0.08;
+  leftIntakeThroat.castShadow = true;
+  group.add(leftIntakeThroat);
+
+  const rightIntakeThroat = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.32), playerIntakeCavityMaterial);
+  rightIntakeThroat.position.set(0.66, -0.1, -0.04);
+  rightIntakeThroat.rotation.y = -0.08;
+  rightIntakeThroat.castShadow = true;
+  group.add(rightIntakeThroat);
+
   // === 发动机喷口 ===
   // CylinderGeometry 默认轴向 +Y
   // rotation.x = -PI/2 使轴向 -Z/+Z
@@ -782,6 +820,17 @@ export function createPlayerMesh(): THREE.Group {
   centerlineStoreBrace.castShadow = true;
   group.add(centerlineStoreBrace);
 
+  const centerlineBellyPanel = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.1, 0.78), heroPanelMaterial);
+  centerlineBellyPanel.position.set(0, -0.24, -0.02);
+  centerlineBellyPanel.rotation.x = 0.04;
+  centerlineBellyPanel.castShadow = true;
+  group.add(centerlineBellyPanel);
+
+  const centerlineBellyRail = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.08, 0.62), weaponMaterial);
+  centerlineBellyRail.position.set(0, -0.28, 0.06);
+  centerlineBellyRail.castShadow = true;
+  group.add(centerlineBellyRail);
+
   const leftOuterRail = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 0.52), accentMaterial);
   leftOuterRail.position.set(-1.78, -0.06, -0.12);
   leftOuterRail.rotation.y = -0.22;
@@ -875,6 +924,18 @@ export function createPlayerMesh(): THREE.Group {
   rightTailRootFairing.rotation.y = -0.12;
   rightTailRootFairing.castShadow = true;
   group.add(rightTailRootFairing);
+
+  const leftTailRootShoulder = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.12, 0.44), detailMaterial);
+  leftTailRootShoulder.position.set(-0.48, 0.12, 1.1);
+  leftTailRootShoulder.rotation.y = 0.14;
+  leftTailRootShoulder.castShadow = true;
+  group.add(leftTailRootShoulder);
+
+  const rightTailRootShoulder = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.12, 0.44), detailMaterial);
+  rightTailRootShoulder.position.set(0.48, 0.12, 1.1);
+  rightTailRootShoulder.rotation.y = -0.14;
+  rightTailRootShoulder.castShadow = true;
+  group.add(rightTailRootShoulder);
 
   const rightTailplaneRoot = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.08, 0.42), wingMaterial);
   rightTailplaneRoot.position.set(0.34, 0.08, 1.1);
@@ -1090,6 +1151,142 @@ export function createEnemyMesh(config: EnemyConfig): THREE.Group {
       accentColor = config.color;
   }
 
+  const jetProfile: JetProportionProfile = (() => {
+    switch (config.type) {
+      case EnemyType.SCOUT:
+        return {
+          intakeX: bodySize * 0.25,
+          intakeY: -0.03,
+          intakeZ: bodyLength * 0.12,
+          intakeWidthScale: 0.9,
+          intakeDepthScale: 0.64,
+          intakeYaw: 0.13,
+          bellyY: -bodySize * 0.24,
+          bellyZ: bodyLength * 0.08,
+          bellyDepth: 0.38,
+          pylonX: wingSpan * 0.28,
+          pylonY: -0.09,
+          pylonZ: -bodyLength * 0.04,
+          pylonWidth: 0.15,
+          pylonDepth: 0.34,
+          pylonYaw: 0.07,
+          tailRootX: bodySize * 0.16,
+          tailRootY: 0.1,
+          tailRootZ: -bodyLength * 0.46,
+          tailRootDepth: 0.46,
+          nozzleX: 0,
+          nozzleY: -0.01,
+          nozzleZ: -bodyLength * 0.61,
+          twinEngine: false,
+        };
+      case EnemyType.FIGHTER:
+        return {
+          intakeX: bodySize * 0.4,
+          intakeY: -0.02,
+          intakeZ: bodyLength * 0.15,
+          intakeWidthScale: 1.12,
+          intakeDepthScale: 0.82,
+          intakeYaw: 0.16,
+          bellyY: -bodySize * 0.26,
+          bellyZ: bodyLength * 0.12,
+          bellyDepth: 0.52,
+          pylonX: wingSpan * 0.29,
+          pylonY: -0.09,
+          pylonZ: 0.08,
+          pylonWidth: 0.18,
+          pylonDepth: 0.5,
+          pylonYaw: 0.08,
+          tailRootX: bodySize * 0.24,
+          tailRootY: 0.12,
+          tailRootZ: -bodyLength * 0.47,
+          tailRootDepth: 0.56,
+          nozzleX: bodySize * 0.18,
+          nozzleY: -0.02,
+          nozzleZ: -bodyLength * 0.62,
+          twinEngine: true,
+        };
+      case EnemyType.HEAVY:
+        return {
+          intakeX: bodySize * 0.64,
+          intakeY: 0,
+          intakeZ: bodyLength * 0.1,
+          intakeWidthScale: 1.34,
+          intakeDepthScale: 1.02,
+          intakeYaw: 0.14,
+          bellyY: -bodySize * 0.32,
+          bellyZ: 0,
+          bellyDepth: 0.82,
+          pylonX: wingSpan * 0.3,
+          pylonY: -0.11,
+          pylonZ: -bodyLength * 0.04,
+          pylonWidth: 0.22,
+          pylonDepth: 0.66,
+          pylonYaw: 0.06,
+          tailRootX: bodySize * 0.28,
+          tailRootY: 0.14,
+          tailRootZ: -bodyLength * 0.54,
+          tailRootDepth: 0.72,
+          nozzleX: bodySize * 0.22,
+          nozzleY: 0,
+          nozzleZ: -bodyLength * 0.62,
+          twinEngine: true,
+        };
+      case EnemyType.SNIPER:
+        return {
+          intakeX: bodySize * 0.27,
+          intakeY: -0.02,
+          intakeZ: bodyLength * 0.16,
+          intakeWidthScale: 0.94,
+          intakeDepthScale: 0.7,
+          intakeYaw: 0.15,
+          bellyY: -bodySize * 0.2,
+          bellyZ: bodyLength * 0.24,
+          bellyDepth: 0.56,
+          pylonX: wingSpan * 0.2,
+          pylonY: -0.08,
+          pylonZ: 0.26,
+          pylonWidth: 0.12,
+          pylonDepth: 0.5,
+          pylonYaw: 0.05,
+          tailRootX: bodySize * 0.16,
+          tailRootY: 0.12,
+          tailRootZ: -bodyLength * 0.46,
+          tailRootDepth: 0.52,
+          nozzleX: 0,
+          nozzleY: 0,
+          nozzleZ: -bodyLength * 0.58,
+          twinEngine: false,
+        };
+      case EnemyType.ACE:
+      default:
+        return {
+          intakeX: bodySize * 0.38,
+          intakeY: -0.02,
+          intakeZ: bodyLength * 0.14,
+          intakeWidthScale: 1.06,
+          intakeDepthScale: 0.8,
+          intakeYaw: 0.15,
+          bellyY: -bodySize * 0.23,
+          bellyZ: bodyLength * 0.1,
+          bellyDepth: 0.58,
+          pylonX: wingSpan * 0.24,
+          pylonY: -0.1,
+          pylonZ: 0.04,
+          pylonWidth: 0.16,
+          pylonDepth: 0.46,
+          pylonYaw: 0.07,
+          tailRootX: bodySize * 0.22,
+          tailRootY: 0.12,
+          tailRootZ: -bodyLength * 0.44,
+          tailRootDepth: 0.58,
+          nozzleX: 0,
+          nozzleY: 0,
+          nozzleZ: -bodyLength * 0.62,
+          twinEngine: false,
+        };
+    }
+  })();
+
   group.scale.set(scaleMultiplier, scaleMultiplier, scaleMultiplier);
   const materials = getOrCreateMaterials(config.type, bodyColor, wingColor, accentColor);
   const weaponMaterial = createAircraftMaterial(accentColor, 0.88, 0.24, 0.05);
@@ -1254,6 +1451,54 @@ export function createEnemyMesh(config: EnemyConfig): THREE.Group {
       rotation: [0.08, -yaw * 0.72, 0.06],
     });
   };
+  const applyUnifiedJetProportionLayer = (): void => {
+    addIntakeLipPair(
+      jetProfile.intakeX,
+      jetProfile.intakeY,
+      jetProfile.intakeZ,
+      jetProfile.intakeWidthScale,
+      jetProfile.intakeDepthScale,
+      jetProfile.intakeYaw
+    );
+    addMeshPart(group, new THREE.BoxGeometry(0.14, 0.12, jetProfile.bellyDepth), materials.detail, [0, jetProfile.bellyY, jetProfile.bellyZ], {
+      rotation: [0.04, 0, 0],
+    });
+    addUndersideRailPair(
+      jetProfile.pylonX,
+      jetProfile.pylonY,
+      jetProfile.pylonZ,
+      jetProfile.pylonDepth,
+      jetProfile.pylonYaw
+    );
+    addOutboardRailPair(
+      jetProfile.pylonX,
+      jetProfile.pylonY,
+      jetProfile.pylonZ,
+      jetProfile.pylonWidth,
+      jetProfile.pylonDepth,
+      jetProfile.pylonYaw
+    );
+    addTailRootFairingPair(
+      jetProfile.tailRootX,
+      jetProfile.tailRootY,
+      jetProfile.tailRootZ,
+      0.16,
+      0.14,
+      jetProfile.tailRootDepth,
+      0.1
+    );
+
+    if (jetProfile.twinEngine) {
+      addNozzlePetalPair(jetProfile.nozzleX, jetProfile.nozzleY, jetProfile.nozzleZ);
+    } else {
+      addMeshPart(group, detailGeometries.nozzlePetal, materials.detail, [0, jetProfile.nozzleY + 0.08, jetProfile.nozzleZ], {
+        castShadow: false,
+      });
+      addMeshPart(group, detailGeometries.nozzlePetal, materials.detail, [0, jetProfile.nozzleY - 0.08, jetProfile.nozzleZ], {
+        castShadow: false,
+      });
+    }
+  };
   if (config.type === EnemyType.SCOUT) {
     addMeshPart(group, new THREE.CylinderGeometry(bodySize * 0.14, bodySize * 0.26, bodyLength * 0.34, 8), materials.body, [0, 0, bodyLength * 0.26], {
       rotation: [Math.PI / 2, 0, 0],
@@ -1357,6 +1602,7 @@ export function createEnemyMesh(config: EnemyConfig): THREE.Group {
     addMeshPart(group, new THREE.BoxGeometry(0.14, 0.12, 0.38), materials.detail, [bodySize * 0.22, 0.08, -bodyLength * 0.5], {
       rotation: [0.02, -0.12, -0.04],
     });
+    applyUnifiedJetProportionLayer();
     addMeshPart(group, new THREE.ConeGeometry(bodySize * 0.14, 0.7, 8), materials.engine, [0, 0, -bodyLength * 0.56], {
       rotation: [-Math.PI / 2, 0, 0],
       name: 'engineGlow',
@@ -1484,6 +1730,7 @@ export function createEnemyMesh(config: EnemyConfig): THREE.Group {
     addMeshPart(group, new THREE.CylinderGeometry(bodySize * 0.14, bodySize * 0.18, 0.18, 10), materials.detail, [bodySize * 0.18, -0.02, -bodyLength * 0.66], {
       rotation: [-Math.PI / 2, 0, 0],
     });
+    applyUnifiedJetProportionLayer();
     addNozzlePetalPair(bodySize * 0.18, -0.02, -bodyLength * 0.62);
     addMeshPart(group, new THREE.ConeGeometry(bodySize * 0.12, 0.6, 8), materials.engine, [-bodySize * 0.18, -0.02, -bodyLength * 0.58], {
       rotation: [-Math.PI / 2, 0, 0],
@@ -1600,6 +1847,7 @@ export function createEnemyMesh(config: EnemyConfig): THREE.Group {
     addMeshPart(group, new THREE.CylinderGeometry(bodySize * 0.17, bodySize * 0.2, 0.28, 10), materials.detail, [bodySize * 0.26, 0, -bodyLength * 0.66], {
       rotation: [-Math.PI / 2, 0, 0],
     });
+    applyUnifiedJetProportionLayer();
     addNozzlePetalPair(bodySize * 0.22, 0, -bodyLength * 0.62);
     addMeshPart(group, new THREE.CylinderGeometry(bodySize * 0.18, bodySize * 0.22, 0.86, 8), materials.engine, [-bodySize * 0.22, 0, -bodyLength * 0.58], {
       rotation: [-Math.PI / 2, 0, 0],
@@ -1716,6 +1964,7 @@ export function createEnemyMesh(config: EnemyConfig): THREE.Group {
     addMeshPart(group, new THREE.BoxGeometry(0.16, 0.14, 0.5), materials.detail, [bodySize * 0.18, 0.08, -bodyLength * 0.5], {
       rotation: [0.02, -0.08, -0.03],
     });
+    applyUnifiedJetProportionLayer();
     addMeshPart(group, new THREE.BoxGeometry(0.1, 0.1, 0.5), materials.detail, [0, 0.14, -bodyLength * 0.5], {
       rotation: [0.02, 0, 0],
     });
@@ -1844,6 +2093,7 @@ export function createEnemyMesh(config: EnemyConfig): THREE.Group {
     addMeshPart(group, new THREE.BoxGeometry(0.12, 0.12, 0.46), intakeCavityMaterial, [bodySize * 0.44, -0.08, 0.02], {
       rotation: [0.02, -0.18, 0],
     });
+    applyUnifiedJetProportionLayer();
     addMeshPart(group, new THREE.ConeGeometry(bodySize * 0.12, 0.68, 8), materials.engine, [0, 0, -bodyLength * 0.58], {
       rotation: [-Math.PI / 2, 0, 0],
       name: 'engineGlow',

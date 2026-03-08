@@ -102,6 +102,7 @@ export class GameCoordinator {
   private static readonly TUTORIAL_FRIENDLY_SPAWN_DELAY_MS = 5200;
   private static readonly TUTORIAL_MOVE_DISTANCE = 90;
   private static readonly TUTORIAL_SPEED_THRESHOLD_RATIO = 0.72;
+  private static readonly OBJECTIVE_COMPLETE_HOLD_MS = 1600;
   private static readonly ESCORT_WAVE_SCORE_BONUS = 180;
   private static readonly UPGRADE_FEEDBACK: Record<UpgradeType, { icon: string; label: string }> = {
     [UpgradeType.MAX_HEALTH]: { icon: '❤️', label: '最大生命值升级' },
@@ -1195,6 +1196,12 @@ export class GameCoordinator {
     this.presentationController.resetHudThrottle();
     this.presentationController.clearEventObjective();
     this.resetTutorialCombatState();
+    this.waveCompletionObjective = null;
+    this.waveEventState.type = null;
+    this.waveEventState.wave = -1;
+    this.escortWaveState.active = false;
+    this.escortWaveState.friendlyId = null;
+    this.escortWaveState.wave = -1;
     this.playerSystem.getHealth().reset();
     this.sessionState.setInBossBattle(this.sessionState.isBossMode());
     this.applyCurrentLevelEnvironment();
@@ -1434,7 +1441,14 @@ export class GameCoordinator {
     this.tutorialCombatState.killHintShown = true;
     this.hud.showPowerUpBig('🎯', '确认击杀，清空首波进入正式节奏', 1.8);
     this.tutorialCombatState.active = false;
-    this.updatePlayerFacingObjective();
+    this.showTransientObjective(
+      {
+        title: '试玩引导 · 完成',
+        objective: '首轮教学目标已完成，进入正式战斗循环',
+        status: '已解锁常规波次节奏',
+      },
+      1800
+    );
   }
 
   private handleTutorialPlayerHit(): void {
@@ -1458,6 +1472,7 @@ export class GameCoordinator {
   }
 
   private handleWaveEventStart(eventType: LevelWaveEventType, wave: number): void {
+    this.waveCompletionObjective = null;
     this.escortWaveState.active = false;
     this.escortWaveState.friendlyId = null;
     this.escortWaveState.wave = wave;
@@ -1490,9 +1505,9 @@ export class GameCoordinator {
     }
   }
 
-  private handleEscortWaveComplete(wave: number): void {
+  private handleEscortWaveComplete(wave: number): boolean {
     if (!this.escortWaveState.active || this.escortWaveState.wave !== wave) {
-      return;
+      return false;
     }
 
     const escortFriendlyAlive = (this.enemySystem?.getFriendlyAIs() ?? [])
@@ -1514,31 +1529,77 @@ export class GameCoordinator {
     this.escortWaveState.active = false;
     this.escortWaveState.friendlyId = null;
     this.escortWaveState.wave = -1;
+    return escortFriendlyAlive;
   }
 
   private handleWaveEventComplete(wave: number): void {
     if (this.waveEventState.wave !== wave || !this.waveEventState.type) {
-      this.presentationController.clearEventObjective();
+      this.updatePlayerFacingObjective();
       return;
     }
 
+    let completionObjective: WaveObjectiveDisplay | null = null;
     switch (this.waveEventState.type) {
       case LevelWaveEventType.ELITE_HUNT:
         this.hud.showPowerUpBig('✅', '精英歼灭完成，空域威胁已压制', 1.6, true);
+        completionObjective = {
+          title: `第 ${wave + 1} 波 · 精英歼灭完成`,
+          objective: '高威胁目标已清空，当前空域压力下降',
+          status: '阶段结果：精英机群歼灭',
+        };
         break;
       case LevelWaveEventType.INTERCEPT:
         this.hud.showPowerUpBig('✅', '拦截成功，敌方前锋已被击退', 1.6, true);
+        completionObjective = {
+          title: `第 ${wave + 1} 波 · 拦截完成`,
+          objective: '前锋突防已被压制，准备接续下一波接敌',
+          status: '阶段结果：前锋编队击退',
+        };
         break;
-      case LevelWaveEventType.ESCORT_DEFENSE:
-        this.handleEscortWaveComplete(wave);
+      case LevelWaveEventType.ESCORT_DEFENSE: {
+        const escortSuccess = this.handleEscortWaveComplete(wave);
+        completionObjective = escortSuccess
+          ? {
+              title: `第 ${wave + 1} 波 · 护送完成`,
+              objective: '友军成功生还，已发放额外护送奖励',
+              status: '阶段结果：护送成功',
+            }
+          : {
+              title: `第 ${wave + 1} 波 · 护送结束`,
+              objective: '友军未能生还，继续稳住空域压制节奏',
+              status: '阶段结果：护送失利',
+            };
         break;
+      }
       default:
         break;
     }
 
     this.waveEventState.type = null;
     this.waveEventState.wave = -1;
+    if (completionObjective) {
+      this.showTransientObjective(completionObjective);
+      return;
+    }
+
     this.updatePlayerFacingObjective();
+  }
+
+  private showTransientObjective(
+    objective: WaveObjectiveDisplay,
+    holdMs: number = GameCoordinator.OBJECTIVE_COMPLETE_HOLD_MS
+  ): void {
+    this.waveCompletionObjective = objective;
+    this.updatePlayerFacingObjective();
+
+    const objectiveRef = objective;
+    this.scheduleTimeout(() => {
+      if (this.waveCompletionObjective !== objectiveRef) {
+        return;
+      }
+      this.waveCompletionObjective = null;
+      this.updatePlayerFacingObjective();
+    }, holdMs);
   }
 
   private getWaveObjectiveDisplay(

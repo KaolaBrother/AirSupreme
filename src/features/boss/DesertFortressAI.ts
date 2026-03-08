@@ -21,10 +21,13 @@ export class DesertFortressAI {
   private flakMuzzles: THREE.Mesh[] = [];
   private missileGlowCaps: THREE.Mesh[] = [];
   private readonly hitFlashColor = new THREE.Color(0xfff1c1);
-  private readonly coreBaseColor = new THREE.Color(0xff9f57);
-  private readonly coreCriticalColor = new THREE.Color(0xff4a00);
-  private readonly weaponBaseColor = new THREE.Color(0xff9248);
-  private readonly weaponCriticalColor = new THREE.Color(0xffebad64);
+  private readonly weakpointBaseColor = new THREE.Color(0xff6e3a);
+  private readonly weakpointCriticalColor = new THREE.Color(0xffb47a);
+  private readonly weaponBaseColor = new THREE.Color(0xff9350);
+  private readonly weaponCriticalColor = new THREE.Color(0xffd89d);
+  private readonly energyBaseColor = new THREE.Color(0x4fcfff);
+  private readonly energyCriticalColor = new THREE.Color(0x95eeff);
+  private readonly terminalColor = new THREE.Color(0xff321a);
 
   private flakCooldown: number = 0;
   private currentFlakCannon: FlakCannonPosition = FlakCannonPosition.FRONT_LEFT;
@@ -124,15 +127,18 @@ export class DesertFortressAI {
     const healthState = this.getHealth().current / this.getHealth().max;
     const damagePulse = 1 + (1 - healthState) * 0.55;
     const criticalState = THREE.MathUtils.clamp((0.22 - healthState) / 0.22, 0, 1);
+    const terminalState = THREE.MathUtils.clamp((0.16 - healthState) / 0.16, 0, 1);
     const hitFlash = this.getHitFlashStrength();
     const criticalPulse = (Math.sin(this.animationTime * 12.5) * 0.5 + 0.5) * criticalState;
+    const terminalPulse = (Math.sin(this.animationTime * 20) * 0.5 + 0.5) * terminalState;
     const corePulse = 0.55 + (Math.sin(this.animationTime * 2.6) * 0.5 + 0.5) * 0.9 * damagePulse;
     this.setGlowState(this.coreGlow, {
-      intensity: 0.7 + corePulse + criticalPulse * 1.05 + hitFlash * 1.35,
-      scale: 1 + corePulse * 0.08 + criticalPulse * 0.08 + hitFlash * 0.08,
-      color: this.coreBaseColor
+      intensity: 0.7 + corePulse + criticalPulse * 1.05 + terminalPulse * 1.2 + hitFlash * 1.35,
+      scale: 1 + corePulse * 0.08 + criticalPulse * 0.08 + terminalPulse * 0.08 + hitFlash * 0.08,
+      color: this.weakpointBaseColor
         .clone()
-        .lerp(this.coreCriticalColor, 1 - healthState + criticalPulse * 0.25)
+        .lerp(this.weakpointCriticalColor, 1 - healthState + criticalPulse * 0.25)
+        .lerp(this.terminalColor, terminalState * 0.7 + terminalPulse * 0.3)
         .lerp(this.hitFlashColor, hitFlash * 0.75),
     });
 
@@ -146,13 +152,25 @@ export class DesertFortressAI {
     for (let i = 0; i < this.flakMuzzles.length; i++) {
       const offsetPulse = Math.sin(this.animationTime * 6 + i * 1.4) * 0.5 + 0.5;
       const intensity =
-        0.45 + flakCharge * 1.35 + offsetPulse * 0.35 + criticalPulse * 0.7 + hitFlash * 0.8;
+        0.45 +
+        flakCharge * 1.35 +
+        offsetPulse * 0.35 +
+        criticalPulse * 0.7 +
+        terminalPulse * 0.9 +
+        hitFlash * 0.8;
       this.setGlowState(this.flakMuzzles[i], {
-        intensity,
-        scale: 1 + flakCharge * 0.22 + offsetPulse * 0.05 + criticalPulse * 0.05 + hitFlash * 0.05,
+        intensity: intensity,
+        scale:
+          1 +
+          flakCharge * 0.22 +
+          offsetPulse * 0.05 +
+          criticalPulse * 0.05 +
+          terminalPulse * 0.05 +
+          hitFlash * 0.05,
         color: this.weaponBaseColor
           .clone()
           .lerp(this.weaponCriticalColor, criticalState + criticalPulse * 0.25)
+          .lerp(this.terminalColor, terminalState * 0.55 + terminalPulse * 0.3)
           .lerp(this.hitFlashColor, hitFlash * 0.45),
       });
     }
@@ -170,11 +188,24 @@ export class DesertFortressAI {
       const activeBoost = isActiveLauncher ? 0.35 : 0;
       this.setGlowState(this.missileGlowCaps[i], {
         intensity:
-          0.4 + missileCharge * 1.1 + pulse * 0.25 + activeBoost + criticalPulse * 0.65 + hitFlash * 0.7,
-        scale: 1 + missileCharge * 0.16 + activeBoost * 0.05 + criticalPulse * 0.04 + hitFlash * 0.04,
-        color: this.weaponBaseColor
+          0.4 +
+          missileCharge * 1.1 +
+          pulse * 0.25 +
+          activeBoost +
+          criticalPulse * 0.65 +
+          terminalPulse * 0.85 +
+          hitFlash * 0.7,
+        scale:
+          1 +
+          missileCharge * 0.16 +
+          activeBoost * 0.05 +
+          criticalPulse * 0.04 +
+          terminalPulse * 0.04 +
+          hitFlash * 0.04,
+        color: this.energyBaseColor
           .clone()
-          .lerp(this.coreCriticalColor, criticalState + activeBoost * 0.2)
+          .lerp(this.energyCriticalColor, criticalState + activeBoost * 0.2)
+          .lerp(this.terminalColor, terminalState * 0.45 + terminalPulse * 0.3)
           .lerp(this.hitFlashColor, hitFlash * 0.35),
       });
     }

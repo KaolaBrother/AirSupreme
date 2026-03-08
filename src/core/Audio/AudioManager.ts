@@ -761,6 +761,7 @@ export class AudioManager {
     const isFlak = profile === 'flak-hit';
     const isArmor = profile === 'boss-armor';
     const isCannon = profile === 'boss-cannon';
+    const profileGain = isLaser ? 0.92 : isFlak ? 0.98 : isArmor ? 0.9 : 0.96;
 
     try {
       const impactOsc = context.createOscillator();
@@ -776,7 +777,7 @@ export class AudioManager {
       );
       impactGain.gain.setValueAtTime(0, now);
       impactGain.gain.linearRampToValueAtTime(
-        (isLaser ? 0.18 : isArmor ? 0.24 : 0.3) * this.sfxVolume * hitIntensity,
+        (isLaser ? 0.18 : isArmor ? 0.24 : 0.3) * this.sfxVolume * hitIntensity * profileGain,
         now + 0.006
       );
       impactGain.gain.exponentialRampToValueAtTime(0.01, now + (isLaser ? 0.18 : 0.24));
@@ -798,7 +799,7 @@ export class AudioManager {
       );
       crackGain.gain.setValueAtTime(0, now + 0.008);
       crackGain.gain.linearRampToValueAtTime(
-        (isLaser ? 0.08 : isArmor ? 0.12 : 0.15) * this.sfxVolume * hitIntensity,
+        (isLaser ? 0.08 : isArmor ? 0.12 : 0.15) * this.sfxVolume * hitIntensity * profileGain,
         now + 0.02
       );
       crackGain.gain.exponentialRampToValueAtTime(0.01, now + (isLaser ? 0.15 : 0.24));
@@ -815,7 +816,10 @@ export class AudioManager {
         subOsc.frequency.exponentialRampToValueAtTime(isFlak ? 28 : isCannon ? 20 : 22, now + 0.32);
         subGain.gain.setValueAtTime(0, now + 0.014);
         subGain.gain.linearRampToValueAtTime(
-          (isArmor ? 0.09 : isCannon ? 0.14 : 0.12) * this.sfxVolume * Math.min(2.1, hitIntensity),
+          (isArmor ? 0.09 : isCannon ? 0.14 : 0.12)
+            * this.sfxVolume
+            * Math.min(2.1, hitIntensity)
+            * profileGain,
           now + 0.03
         );
         subGain.gain.exponentialRampToValueAtTime(0.01, now + 0.34);
@@ -833,7 +837,7 @@ export class AudioManager {
         metallicOsc.frequency.exponentialRampToValueAtTime(isArmor ? 420 : 320, now + 0.11);
         metallicGain.gain.setValueAtTime(0, now + 0.004);
         metallicGain.gain.linearRampToValueAtTime(
-          (isArmor ? 0.08 : 0.06) * this.sfxVolume * Math.min(2, hitIntensity),
+          (isArmor ? 0.08 : 0.06) * this.sfxVolume * Math.min(2, hitIntensity) * profileGain,
           now + 0.014
         );
         metallicGain.gain.exponentialRampToValueAtTime(0.01, now + 0.12);
@@ -846,7 +850,10 @@ export class AudioManager {
       this.playFilteredNoise(
         isLaser ? 0.12 : 0.2,
         0.004,
-        (isLaser ? 0.08 : isArmor ? 0.12 : 0.16) * this.sfxVolume * Math.min(2, hitIntensity),
+        (isLaser ? 0.08 : isArmor ? 0.12 : 0.16)
+          * this.sfxVolume
+          * Math.min(2, hitIntensity)
+          * profileGain,
         isLaser ? 'bandpass' : 'highpass',
         isLaser ? 2200 : isArmor ? 1700 : isCannon ? 1220 : 1350,
         isLaser ? 1.15 : isArmor ? 1.05 : isCannon ? 0.9 : 0.95
@@ -854,7 +861,10 @@ export class AudioManager {
       this.playFilteredNoise(
         isLaser ? 0.16 : 0.24,
         0.014,
-        (isLaser ? 0.06 : isArmor ? 0.11 : 0.14) * this.sfxVolume * Math.min(2, hitIntensity),
+        (isLaser ? 0.06 : isArmor ? 0.11 : 0.14)
+          * this.sfxVolume
+          * Math.min(2, hitIntensity)
+          * profileGain,
         'bandpass',
         isLaser ? 980 : isArmor ? 920 : 760,
         isLaser ? 1.5 : 1.1
@@ -1399,7 +1409,7 @@ export class AudioManager {
       boomOsc.frequency.setValueAtTime(isBoss ? 76 : 88, now);
       boomOsc.frequency.exponentialRampToValueAtTime(isBoss ? 18 : 24, now + (isBoss ? 0.68 : 0.58));
       boomGain.gain.setValueAtTime(0, now);
-      boomGain.gain.linearRampToValueAtTime((isBoss ? 0.66 : 0.56) * this.sfxVolume, now + 0.016);
+      boomGain.gain.linearRampToValueAtTime((isBoss ? 0.6 : 0.54) * this.sfxVolume, now + 0.016);
       boomGain.gain.exponentialRampToValueAtTime(0.01, now + (isBoss ? 0.68 : 0.58));
       boomOsc.connect(boomGain);
       boomGain.connect(sfxGain);
@@ -1412,7 +1422,7 @@ export class AudioManager {
       subOsc.frequency.setValueAtTime(isBoss ? 52 : 62, now);
       subOsc.frequency.exponentialRampToValueAtTime(isBoss ? 18 : 24, now + (isBoss ? 0.6 : 0.5));
       subGain.gain.setValueAtTime(0, now);
-      subGain.gain.linearRampToValueAtTime((isBoss ? 0.3 : 0.22) * this.sfxVolume, now + 0.022);
+      subGain.gain.linearRampToValueAtTime((isBoss ? 0.26 : 0.2) * this.sfxVolume, now + 0.022);
       subGain.gain.exponentialRampToValueAtTime(0.01, now + (isBoss ? 0.6 : 0.5));
       subOsc.connect(subGain);
       subGain.connect(sfxGain);
@@ -1425,7 +1435,7 @@ export class AudioManager {
       crackOsc.frequency.setValueAtTime(isBoss ? 620 : 760, now + 0.008);
       crackOsc.frequency.exponentialRampToValueAtTime(isBoss ? 120 : 170, now + (isBoss ? 0.24 : 0.2));
       crackGain.gain.setValueAtTime(0, now);
-      crackGain.gain.linearRampToValueAtTime((isBoss ? 0.22 : 0.2) * this.sfxVolume, now + 0.012);
+      crackGain.gain.linearRampToValueAtTime((isBoss ? 0.2 : 0.18) * this.sfxVolume, now + 0.012);
       crackGain.gain.exponentialRampToValueAtTime(0.01, now + (isBoss ? 0.26 : 0.22));
       crackOsc.connect(crackGain);
       crackGain.connect(sfxGain);

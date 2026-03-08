@@ -27,11 +27,13 @@ export class MissileDestroyerAI {
   private launcherCaps: THREE.Mesh[] = [];
   private exhaustGlows: THREE.Mesh[] = [];
   private readonly hitFlashColor = new THREE.Color(0xd8f7ff);
-  private readonly bridgeBaseColor = new THREE.Color(0x4ad2ff);
-  private readonly bridgeAlertColor = new THREE.Color(0x88f0ff);
-  private readonly launcherBaseColor = new THREE.Color(0x5fdcff);
-  private readonly launcherCriticalColor = new THREE.Color(0xffb176);
-  private readonly exhaustBaseColor = new THREE.Color(0x58d8ff);
+  private readonly weakpointBaseColor = new THREE.Color(0xff703e);
+  private readonly weakpointCriticalColor = new THREE.Color(0xffb87d);
+  private readonly weaponBaseColor = new THREE.Color(0xff9453);
+  private readonly weaponCriticalColor = new THREE.Color(0xffd8a0);
+  private readonly energyBaseColor = new THREE.Color(0x56d4ff);
+  private readonly energyCriticalColor = new THREE.Color(0x9aedff);
+  private readonly terminalColor = new THREE.Color(0xff321a);
 
   private flakCooldown: number = 0;
   private currentFlakCannon: FlakCannonPosition = FlakCannonPosition.FRONT_LEFT;
@@ -147,15 +149,23 @@ export class MissileDestroyerAI {
     const healthRatio = this.getHealth().current / this.getHealth().max;
     const alertBoost = 1 + (1 - healthRatio) * 0.65;
     const criticalState = THREE.MathUtils.clamp((0.24 - healthRatio) / 0.24, 0, 1);
+    const terminalState = THREE.MathUtils.clamp((0.16 - healthRatio) / 0.16, 0, 1);
     const hitFlash = this.getHitFlashStrength();
     const criticalPulse = (Math.sin(this.animationTime * 10.5) * 0.5 + 0.5) * criticalState;
+    const terminalPulse = (Math.sin(this.animationTime * 20.5) * 0.5 + 0.5) * terminalState;
     const bridgePulse = Math.sin(this.animationTime * 2.2) * 0.5 + 0.5;
     this.setGlowState(this.bridgeWindow, {
-      intensity: 0.35 + bridgePulse * 0.55 * alertBoost + criticalPulse * 0.85 + hitFlash * 0.9,
+      intensity:
+        0.35 +
+        bridgePulse * 0.55 * alertBoost +
+        criticalPulse * 0.85 +
+        terminalPulse * 0.95 +
+        hitFlash * 0.9,
       scale: 1,
-      color: this.bridgeBaseColor
+      color: this.weakpointBaseColor
         .clone()
-        .lerp(this.bridgeAlertColor, bridgePulse * 0.35 + criticalPulse * 0.15)
+        .lerp(this.weakpointCriticalColor, bridgePulse * 0.35 + criticalPulse * 0.15)
+        .lerp(this.terminalColor, terminalState * 0.65 + terminalPulse * 0.35)
         .lerp(this.hitFlashColor, hitFlash * 0.65),
     });
 
@@ -169,10 +179,24 @@ export class MissileDestroyerAI {
     for (let i = 0; i < this.flakMuzzles.length; i++) {
       const pulse = Math.sin(this.animationTime * 5.5 + i * 1.3) * 0.5 + 0.5;
       this.setGlowState(this.flakMuzzles[i], {
-        intensity: 0.45 + flakCharge * 1.2 + pulse * 0.25 + criticalPulse * 0.65 + hitFlash * 0.7,
-        scale: 1 + flakCharge * 0.18 + pulse * 0.04 + criticalPulse * 0.04 + hitFlash * 0.04,
-        color: this.launcherCriticalColor
+        intensity:
+          0.45 +
+          flakCharge * 1.2 +
+          pulse * 0.25 +
+          criticalPulse * 0.65 +
+          terminalPulse * 0.8 +
+          hitFlash * 0.7,
+        scale:
+          1 +
+          flakCharge * 0.18 +
+          pulse * 0.04 +
+          criticalPulse * 0.04 +
+          terminalPulse * 0.04 +
+          hitFlash * 0.04,
+        color: this.weaponBaseColor
           .clone()
+          .lerp(this.weaponCriticalColor, criticalState + criticalPulse * 0.25)
+          .lerp(this.terminalColor, terminalState * 0.52 + terminalPulse * 0.3)
           .lerp(this.hitFlashColor, hitFlash * 0.25),
       });
     }
@@ -194,12 +218,19 @@ export class MissileDestroyerAI {
           pulse * 0.2 +
           (isNextLauncher ? 0.25 : 0) +
           criticalPulse * 0.85 +
+          terminalPulse * 0.9 +
           hitFlash * 0.8,
         scale:
-          1 + missileCharge * 0.12 + (isNextLauncher ? 0.04 : 0) + criticalPulse * 0.04 + hitFlash * 0.04,
-        color: this.launcherBaseColor
+          1 +
+          missileCharge * 0.12 +
+          (isNextLauncher ? 0.04 : 0) +
+          criticalPulse * 0.04 +
+          terminalPulse * 0.04 +
+          hitFlash * 0.04,
+        color: this.weaponBaseColor
           .clone()
-          .lerp(this.launcherCriticalColor, criticalState + (isNextLauncher ? 0.1 : 0))
+          .lerp(this.weaponCriticalColor, criticalState + (isNextLauncher ? 0.1 : 0))
+          .lerp(this.terminalColor, terminalState * 0.48 + terminalPulse * 0.28)
           .lerp(this.hitFlashColor, hitFlash * 0.3),
       });
     }
@@ -207,12 +238,15 @@ export class MissileDestroyerAI {
     const enginePulse = Math.sin(this.animationTime * 7.5) * 0.5 + 0.5;
     for (const exhaustGlow of this.exhaustGlows) {
       this.setGlowState(exhaustGlow, {
-        intensity: 0.7 + enginePulse * 0.8 + criticalPulse * 0.6 + hitFlash * 0.5,
-        scale: 1 + enginePulse * 0.08 + criticalPulse * 0.05 + hitFlash * 0.03,
-        color: this.exhaustBaseColor
+        intensity:
+          0.7 + enginePulse * 0.8 + criticalPulse * 0.6 + terminalPulse * 0.65 + hitFlash * 0.5,
+        scale:
+          1 + enginePulse * 0.08 + criticalPulse * 0.05 + terminalPulse * 0.04 + hitFlash * 0.03,
+        color: this.energyBaseColor
           .clone()
           .lerp(this.hitFlashColor, hitFlash * 0.25)
-          .lerp(this.launcherCriticalColor, criticalState * 0.25),
+          .lerp(this.energyCriticalColor, criticalState * 0.25)
+          .lerp(this.terminalColor, terminalState * 0.35 + terminalPulse * 0.22),
       });
     }
   }

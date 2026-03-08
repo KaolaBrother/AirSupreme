@@ -737,11 +737,11 @@ export class LevelManager {
   private getWaveSpawnInterval(): number {
     switch (this.currentWaveEvent) {
       case LevelWaveEventType.ELITE_HUNT:
-        return this.currentWave >= 3 ? 0.72 : 0.84;
+        return 0.8;
       case LevelWaveEventType.INTERCEPT:
-        return this.currentWave >= 3 ? 0.28 : 0.38;
+        return 0.35;
       case LevelWaveEventType.ESCORT_DEFENSE:
-        return this.currentWave >= 3 ? 0.52 : 0.64;
+        return 0.6;
       default:
         return 0.5;
     }

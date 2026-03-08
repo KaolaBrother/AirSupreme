@@ -561,11 +561,14 @@ export class ParticleSystem {
     const isLaser = profile === 'laser';
     const isFlak = profile === 'flak-hit';
     const isArmor = profile === 'boss-armor';
-    const flashCount = Math.max(5, Math.floor(6 + impactScale * 3));
-    const fireCount = Math.max(6, Math.floor(7 + impactScale * 4));
-    const sparkCount = Math.max(12, Math.floor(12 + impactScale * 6));
-    const smokeCount = Math.max(5, Math.floor(6 + impactScale * 3));
-    const debrisCount = isLaser ? 0 : Math.max(3, Math.floor(3 + impactScale * 2));
+    const flashWeight = isLaser ? 1.05 : isFlak ? 0.95 : isArmor ? 0.9 : 1;
+    const sparkWeight = isLaser ? 0.92 : isFlak ? 1.12 : isArmor ? 0.84 : 1;
+    const smokeWeight = isLaser ? 0.9 : isFlak ? 1.04 : isArmor ? 0.88 : 0.94;
+    const flashCount = Math.max(4, Math.floor((5 + impactScale * 2.8) * flashWeight));
+    const fireCount = Math.max(5, Math.floor((6 + impactScale * 3.2) * flashWeight));
+    const sparkCount = Math.max(10, Math.floor((11 + impactScale * 5.2) * sparkWeight));
+    const smokeCount = Math.max(4, Math.floor((5 + impactScale * 2.6) * smokeWeight));
+    const debrisCount = isLaser ? 0 : Math.max(2, Math.floor((2 + impactScale * 1.8) * (isArmor ? 0.9 : 1)));
     const fireHue = isLaser ? 0.06 : isFlak ? 0.02 : isArmor ? 0.055 : 0.025;
     const flashLightness = isLaser ? 0.72 : isFlak ? 0.62 : 0.7;
     const smokeLightness = isLaser ? 0.26 : isFlak ? 0.16 : isArmor ? 0.24 : 0.2;
@@ -599,7 +602,7 @@ export class ParticleSystem {
 
     for (let i = 0; i < sparkCount; i++) {
       this.spawnParticle(ParticleType.SPARK, position, {
-        speed: (isFlak ? 34 : 26) + Math.random() * (18 + impactScale * 10),
+        speed: (isFlak ? 32 : isArmor ? 24 : 26) + Math.random() * (16 + impactScale * 9),
         life: 0.18 + Math.random() * 0.18,
         size: 0.1 + Math.random() * (0.08 + impactScale * 0.06),
         color: isLaser
@@ -622,11 +625,11 @@ export class ParticleSystem {
 
     this.emitFlakRing(
       position,
-      0.5 + impactScale * (isFlak ? 0.78 : isLaser ? 0.62 : 0.54),
+      0.46 + impactScale * (isFlak ? 0.74 : isLaser ? 0.58 : 0.5),
       Math.max(7, Math.floor(7 + impactScale * 3)),
       isFlak ? 0.13 : isLaser ? 0.11 : 0.1,
       isFlak ? 0.56 : isLaser ? 0.42 : 0.48,
-      isFlak ? 16 : isLaser ? 12 : 14,
+      isFlak ? 14 : isLaser ? 11 : 13,
       isLaser ? 0.08 : 0.12,
       ringColor
     );
