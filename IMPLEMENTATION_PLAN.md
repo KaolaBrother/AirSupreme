@@ -106,6 +106,8 @@
   - [done] 菜单空闲预热已继续下沉到深层战斗模块、升级菜单与地形模块
   - [done] HUD 已改成战斗期惰性挂载，由 `PresentationController.initializeCombatUi()` 统一初始化
   - [done] `ModelPreview` 模块已加菜单空闲预取与按钮 hover/focus 预取，减少首次打开等待
+  - [done] Presentation runtime 已从 `GameCoordinator` 顶层导入移到异步 loader
+  - [done] `GameCoordinator` chunk 已继续从约 `156 kB` 降到约 `105 kB`
 
 ### 本轮交付门槛
 - `npx tsc --noEmit`
@@ -471,6 +473,10 @@
   - 菜单启动与游戏运行时进一步拆边界
   - `EnemySystem -> LevelManager -> TerrainGenerator` 延后实例化
   - Boss 控制器继续后移到按需路径
+- [done] 表现层 runtime 边界重排第一轮已完成
+  - `HUD`、`EnemyHealthBars`、`LockOnIndicator`、`BossMissileIndicator`、`PresentationController` 已通过 `PresentationRuntimeLoader` 按需创建
+  - `GameCoordinator` 仅保留类型依赖，并在 `boot()` / `start()` 前通过 `ensurePresentationRuntime()` 完成初始化门禁
+  - 构建已拆出 `PresentationRuntimeLoader`、`PresentationController`、`HUD`、`EnemyHealthBars`、`LockOnIndicator`、`BossMissileIndicator` 独立 chunk
 - [done] `EnemySystem` 已从 `GameCoordinator` 构造阶段后移到 `start()` / 战斗开始阶段
   - 现在仅在实际开始游戏时动态导入并初始化
   - `BossBattleController` 创建也会等待 `EnemySystem` 就绪

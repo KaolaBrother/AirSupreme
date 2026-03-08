@@ -15,13 +15,13 @@ import { PlayerStats, UpgradeType } from '@/features/upgrade/UpgradeSystem';
 import { FriendlyAI } from '@/features/enemy/FriendlyAI';
 import { EnemyType, ENEMY_CONFIGS } from '@/features/enemy/EnemyTypes';
 import { PowerUpType, POWER_UP_CONFIGS } from '@/features/powerups/PowerUpSystem';
-import { HUD } from '@/ui/HUD';
 import type { UpgradeMenu } from '@/ui/UpgradeMenu';
-import { StartMenu, type GameSettings } from '@/ui/StartMenu';
-import { EnemyHealthBars } from '@/ui/EnemyHealthBars';
-import { LockOnIndicator } from '@/ui/LockOnIndicator';
+import type { HUD } from '@/ui/HUD';
+import type { GameSettings } from '@/ui/StartMenu';
+import type { EnemyHealthBars } from '@/ui/EnemyHealthBars';
+import type { LockOnIndicator } from '@/ui/LockOnIndicator';
 import { ThirdPersonCamera } from '@/features/camera/ThirdPersonCamera';
-import { BossMissileIndicator } from '@/ui/BossMissileIndicator';
+import type { BossMissileIndicator } from '@/ui/BossMissileIndicator';
 import { GameConfig, GAME_CONSTANTS, type QualityPreset } from '@/config';
 import { BOSS_CONFIGS, BossType, BossConfig } from '@/features/boss/BossTypes';
 import { createPlayerMesh, createEnemyMesh } from '@/features/aircraft/AircraftMeshFactory';
@@ -30,8 +30,9 @@ import { getLevelConfig, LevelWaveEventType, TerrainType } from '@/features/terr
 import { LevelState } from '@/features/levels/LevelManager';
 import { GameSessionState } from '@/core/GameSessionState';
 import { ResourceRegistry } from '@/core/ResourceRegistry';
-import { PresentationController } from '@/core/PresentationController';
+import type { PresentationController } from '@/core/PresentationController';
 import type { BossBattleController } from '@/core/BossBattleController';
+import type { PresentationRuntime } from '@/core/PresentationRuntimeLoader';
 import type { SurfaceImpactType } from '@/features/effects/ParticleSystem';
 import {
   DEFAULT_ONBOARDING_BEAT_PROFILE,
@@ -143,6 +144,10 @@ export class GameCoordinator {
   private musicSystem: MusicSystem;
   private particleSystem: ParticleSystem | null = null;
   private thirdPersonCamera: ThirdPersonCamera;
+  private readonly showStartMenu: boolean;
+  private presentationRuntimePromise: Promise<void> | null = null;
+  private presentationRuntimeReady: boolean = false;
+  private isDisposed: boolean = false;
 
   private playerSystem: PlayerSystem;
   private combatSystem: CombatSystem | null = null;
@@ -151,11 +156,10 @@ export class GameCoordinator {
   private enemySystemPromise: Promise<EnemySystem> | null = null;
   private powerUpSystem: PowerUpSystem | null = null;
 
-  private hud: HUD;
-  private startMenu: StartMenu | null;
-  private lockOnIndicator: LockOnIndicator;
-  private enemyHealthBars: EnemyHealthBars;
-  private presentationController: PresentationController;
+  private hud!: HUD;
+  private lockOnIndicator!: LockOnIndicator;
+  private enemyHealthBars!: EnemyHealthBars;
+  private presentationController!: PresentationController;
 
   private playerStats: PlayerStats;
   private playerAircraft: THREE.Group;
@@ -168,7 +172,7 @@ export class GameCoordinator {
   private audioInitialized: boolean = false;
   private upgradeMenuPromise: Promise<UpgradeMenu> | null = null;
 
-  private bossIndicator: BossMissileIndicator;
+  private bossIndicator!: BossMissileIndicator;
   private bossBattleController: BossBattleController | null = null;
   private bossBattleControllerPromise: Promise<BossBattleController> | null = null;
 
@@ -223,6 +227,9 @@ export class GameCoordinator {
         import('@/core/BossBattleController'),
         import('@/ui/UpgradeMenu'),
         import('@/features/terrain/TerrainGenerator'),
+        import('@/core/PresentationRuntimeLoader').then(({ warmPresentationRuntimeChunks }) =>
+          warmPresentationRuntimeChunks()
+        ),
       ]).then(() => undefined);
     }
 
@@ -230,7 +237,7 @@ export class GameCoordinator {
   }
 
   constructor(options: GameCoordinatorOptions = {}) {
-    const showStartMenu = options.showStartMenu ?? true;
+    this.showStartMenu = options.showStartMenu ?? true;
     this.gameLoop = new GameLoop();
     this.resourceRegistry = new ResourceRegistry();
     this.sessionState = new GameSessionState();
@@ -249,38 +256,51 @@ export class GameCoordinator {
 
     this.thirdPersonCamera = new ThirdPersonCamera(this.gameScene.camera, this.playerAircraft);
 
-    this.playerSystem = new PlayerSystem(
-      this.gameScene.scene,
-      this.playerAircraft,
-      this.playerStats
-    );
-
-    this.hud = new HUD();
-    this.lockOnIndicator = new LockOnIndicator();
-    this.lockOnIndicator.setLockTime(this.playerStats.getMissileLockTime());
-    this.lockOnIndicator.setLockCircleScale(
-      this.playerStats.getMissileLockRadiusMultiplier()
-    );
-    this.enemyHealthBars = new EnemyHealthBars();
-    this.startMenu = showStartMenu ? new StartMenu() : null;
-    this.bossIndicator = new BossMissileIndicator();
-    this.presentationController = new PresentationController({
-      hud: this.hud,
-      startMenu: this.startMenu,
-      enemyHealthBars: this.enemyHealthBars,
-      bossIndicator: this.bossIndicator,
-      lockOnIndicator: this.lockOnIndicator,
-    });
+    this.playerSystem = new PlayerSystem(this.gameScene.scene, this.playerAircraft, this.playerStats);
 
     this.initSystems();
     this.setupEventListeners();
-    if (showStartMenu) {
-      this.setupStartMenu();
+    if (this.showStartMenu) {
+      void this.ensurePresentationRuntime().then(() => {
+        if (!this.isDisposed) {
+          this.setupStartMenu();
+        }
+      });
     }
   }
 
   private initSystems(): void {
     this.playerSystem.init();
+  }
+
+  private async ensurePresentationRuntime(): Promise<void> {
+    if (this.presentationRuntimeReady) {
+      return;
+    }
+
+    if (!this.presentationRuntimePromise) {
+      this.presentationRuntimePromise = import('@/core/PresentationRuntimeLoader')
+        .then(({ createPresentationRuntime }) => createPresentationRuntime(this.showStartMenu))
+        .then((runtime: PresentationRuntime) => {
+          if (this.isDisposed) {
+            runtime.presentationController.dispose();
+            return;
+          }
+
+          this.hud = runtime.hud;
+          this.lockOnIndicator = runtime.lockOnIndicator;
+          this.enemyHealthBars = runtime.enemyHealthBars;
+          this.bossIndicator = runtime.bossIndicator;
+          this.presentationController = runtime.presentationController;
+          this.lockOnIndicator.setLockTime(this.playerStats.getMissileLockTime());
+          this.lockOnIndicator.setLockCircleScale(
+            this.playerStats.getMissileLockRadiusMultiplier()
+          );
+          this.presentationRuntimeReady = true;
+        });
+    }
+
+    return this.presentationRuntimePromise;
   }
 
   private async ensureCombatRuntimeSystems(): Promise<CombatRuntimeSystems> {
@@ -549,6 +569,10 @@ export class GameCoordinator {
   }
 
   private setupStartMenu(): void {
+    if (!this.presentationRuntimeReady) {
+      return;
+    }
+
     this.presentationController.wireStartMenu((settings: GameSettings) => {
       this.applyGameSettings(settings);
       this.start();
@@ -556,8 +580,17 @@ export class GameCoordinator {
   }
 
   public boot(settings: GameSettings): void {
+    void this.bootWhenReady(settings);
+  }
+
+  private async bootWhenReady(settings: GameSettings): Promise<void> {
+    await this.ensurePresentationRuntime();
+    if (this.isDisposed || !this.presentationRuntimeReady) {
+      return;
+    }
+
     this.applyGameSettings(settings);
-    this.start();
+    this.startInternal();
   }
 
   private applyGameSettings(settings: GameSettings): void {
@@ -1243,6 +1276,24 @@ export class GameCoordinator {
   }
 
   public start(): void {
+    if (!this.presentationRuntimeReady) {
+      void this.startWhenReady();
+      return;
+    }
+
+    this.startInternal();
+  }
+
+  private async startWhenReady(): Promise<void> {
+    await this.ensurePresentationRuntime();
+    if (this.isDisposed || !this.presentationRuntimeReady) {
+      return;
+    }
+
+    this.startInternal();
+  }
+
+  private startInternal(): void {
     this.sessionState.setPlaying();
     this.presentationController.initializeCombatUi();
     this.presentationController.resetHudThrottle();
@@ -2172,6 +2223,7 @@ export class GameCoordinator {
   }
 
   public dispose(): void {
+    this.isDisposed = true;
     this.stop();
     this.resourceRegistry.dispose();
     this.bossBattleController?.clear();
@@ -2179,7 +2231,9 @@ export class GameCoordinator {
     this.particleSystem?.clear();
     this.powerUpSystem?.dispose();
     this.combatSystem?.dispose();
-    this.presentationController.dispose();
+    if (this.presentationRuntimeReady) {
+      this.presentationController.dispose();
+    }
     this.upgradeMenu?.dispose();
     this.upgradeMenuPromise = null;
     this.bossBattleControllerPromise = null;
