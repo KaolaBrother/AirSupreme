@@ -1,4 +1,4 @@
-import { GameConfig } from '@/config';
+import { GAME_CONSTANTS, GameConfig } from '@/config';
 
 type BigMessageVariant = 'announcement' | 'powerup';
 type EventObjectiveTone = 'default' | 'complete';
@@ -7,6 +7,7 @@ type EventObjectiveTone = 'default' | 'complete';
  * 游戏界面 (HUD)
  */
 export class HUD {
+  private static readonly MAX_DISPLAY_LIVES = 5;
   private static readonly UPGRADE_HINT_STYLE_ID = 'hud-upgrade-hint-style';
   private initialized: boolean = false;
   private container: HTMLDivElement;
@@ -719,7 +720,12 @@ export class HUD {
    */
   public updateLives(lives: number): void {
     this.ensureInitialized();
-    const hearts = '❤️'.repeat(Math.max(0, lives)) + '🖤'.repeat(Math.max(0, 3 - lives));
+    const displayLives = Math.max(
+      0,
+      Math.min(lives, HUD.MAX_DISPLAY_LIVES)
+    );
+    const emptyLives = Math.max(0, HUD.MAX_DISPLAY_LIVES - displayLives);
+    const hearts = '❤️'.repeat(displayLives) + '🖤'.repeat(emptyLives);
     this.setTextContent(this.livesDisplay, `生命: ${hearts}`);
   }
 
@@ -743,8 +749,9 @@ export class HUD {
 
   public updateMissiles(count: number): void {
     this.ensureInitialized();
-    const maxMissiles = 10; // 假设最多10发
-    const icons = '🚀'.repeat(Math.max(0, count)) + '⬜'.repeat(Math.max(0, maxMissiles - count));
+    const maxMissiles = GAME_CONSTANTS.MISSILE.MAX_MISSILES;
+    const displayCount = Math.max(0, Math.min(count, maxMissiles));
+    const icons = '🚀'.repeat(displayCount) + '⬜'.repeat(Math.max(0, maxMissiles - displayCount));
     this.setTextContent(this.missilesDisplay, `导弹: ${icons}`);
   }
 

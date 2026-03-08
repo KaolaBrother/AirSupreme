@@ -178,6 +178,9 @@ export class TerrainGenerator {
     // 创建中央湖泊
     this.createBeautifulLake(config, surfaceProfile);
 
+    // 增加湖岸/水面读边层次
+    this.createLakeLayering(surfaceProfile);
+
     // 添加森林
     this.createForest(80, -49, 1000, 200);
     this.createForestCluster(28, -420, -260, 180, -49);
@@ -206,20 +209,16 @@ export class TerrainGenerator {
    * 创建美丽的湖泊
    */
   private createBeautifulLake(config: LevelConfig, surfaceProfile: LevelSurfaceProfile): void {
-    // 湖泊形状 - 不规则圆形
-    const lakeShape = new THREE.Shape();
-    const points = 64;
-    for (let i = 0; i <= points; i++) {
-      const angle = (i / points) * Math.PI * 2;
-      const radius = 180 + Math.sin(angle * 3) * 20 + Math.cos(angle * 5) * 15;
-      const x = Math.cos(angle) * radius;
-      const y = Math.sin(angle) * radius;
-      if (i === 0) {
-        lakeShape.moveTo(x, y);
-      } else {
-        lakeShape.lineTo(x, y);
-      }
-    }
+    // 湖泊形状 - 多频扰动不规则环形
+    const lakeShape = this.createIrregularShape({
+      baseRadius: 180,
+      radiusJitter: 20,
+      pointCount: 64,
+      wobbleFreqA: 3,
+      wobbleFreqB: 5,
+      phaseA: 0.16,
+      phaseB: 0.48,
+    });
 
     const lakeGeometry = new THREE.ShapeGeometry(lakeShape, 32);
     const waterBaseColor =
@@ -253,18 +252,15 @@ export class TerrainGenerator {
     this.waterMesh = lake;
 
     // 添加湖泊边缘的沙滩
-    const beachShape = new THREE.Shape();
-    for (let i = 0; i <= points; i++) {
-      const angle = (i / points) * Math.PI * 2;
-      const radius = 200 + Math.sin(angle * 3) * 20 + Math.cos(angle * 5) * 15;
-      const x = Math.cos(angle) * radius;
-      const y = Math.sin(angle) * radius;
-      if (i === 0) {
-        beachShape.moveTo(x, y);
-      } else {
-        beachShape.lineTo(x, y);
-      }
-    }
+    const beachShape = this.createIrregularShape({
+      baseRadius: 202,
+      radiusJitter: 20,
+      pointCount: 64,
+      wobbleFreqA: 2.8,
+      wobbleFreqB: 4.4,
+      phaseA: 0.6,
+      phaseB: 1.12,
+    });
     // 减去湖泊区域
     beachShape.holes.push(lakeShape);
 
@@ -289,18 +285,15 @@ export class TerrainGenerator {
     this.terrainGroup.add(beach);
 
     // 湖边湿沙层，增加水岸层次
-    const wetShoreShape = new THREE.Shape();
-    for (let i = 0; i <= points; i++) {
-      const angle = (i / points) * Math.PI * 2;
-      const radius = 191 + Math.sin(angle * 3) * 18 + Math.cos(angle * 5) * 13;
-      const x = Math.cos(angle) * radius;
-      const y = Math.sin(angle) * radius;
-      if (i === 0) {
-        wetShoreShape.moveTo(x, y);
-      } else {
-        wetShoreShape.lineTo(x, y);
-      }
-    }
+    const wetShoreShape = this.createIrregularShape({
+      baseRadius: 190,
+      radiusJitter: 18,
+      pointCount: 64,
+      wobbleFreqA: 3.2,
+      wobbleFreqB: 5.4,
+      phaseA: 1.1,
+      phaseB: 0.22,
+    });
     wetShoreShape.holes.push(lakeShape);
 
     const wetShore = new THREE.Mesh(
@@ -325,18 +318,15 @@ export class TerrainGenerator {
     this.terrainGroup.add(wetShore);
 
     // 外缘草甸过渡层
-    const meadowRingShape = new THREE.Shape();
-    for (let i = 0; i <= points; i++) {
-      const angle = (i / points) * Math.PI * 2;
-      const radius = 250 + Math.sin(angle * 3) * 24 + Math.cos(angle * 5) * 16;
-      const x = Math.cos(angle) * radius;
-      const y = Math.sin(angle) * radius;
-      if (i === 0) {
-        meadowRingShape.moveTo(x, y);
-      } else {
-        meadowRingShape.lineTo(x, y);
-      }
-    }
+    const meadowRingShape = this.createIrregularShape({
+      baseRadius: 252,
+      radiusJitter: 24,
+      pointCount: 64,
+      wobbleFreqA: 2.9,
+      wobbleFreqB: 4.7,
+      phaseA: 1.9,
+      phaseB: 0.77,
+    });
     meadowRingShape.holes.push(beachShape);
 
     const meadowColor = this.tintColor(surfaceProfile.groundBaseColor ?? 0x79b64d, 0.01, 0.12, 0.03);
@@ -360,6 +350,496 @@ export class TerrainGenerator {
     meadow.position.y = -48.95;
     meadow.receiveShadow = true;
     this.terrainGroup.add(meadow);
+  }
+
+  private createLakeLayering(surfaceProfile: LevelSurfaceProfile): void {
+    const waterBaseColor = this.tintColor(surfaceProfile.waterBaseColor ?? 0x1e90ff, 0, 0.02, 0.02);
+    const waterAccentColor = surfaceProfile.waterAccentColor ?? 0x7fd8ff;
+    const waterDetailColor = surfaceProfile.waterDetailColor ?? 0x0f5f87;
+    const ringTexture = this.createDetailTexture(waterBaseColor, waterAccentColor, waterDetailColor, 'water');
+
+    const shorelineTint = this.tintColor(waterBaseColor, 0.04, -0.12, -0.24);
+    const deepTint = this.tintColor(waterBaseColor, 0, -0.25, -0.45);
+
+    const shoreRing = this.createIrregularShape({
+      baseRadius: 185,
+      radiusJitter: 15,
+      pointCount: 80,
+      wobbleFreqA: 2.7,
+      wobbleFreqB: 4.6,
+      phaseA: 0.9,
+      phaseB: 0.34,
+    });
+    const shoreHole = this.createIrregularShape({
+      baseRadius: 175,
+      radiusJitter: 14,
+      pointCount: 80,
+      wobbleFreqA: 2.7,
+      wobbleFreqB: 4.6,
+      phaseA: 0.9,
+      phaseB: 0.34,
+    });
+    shoreRing.holes.push(shoreHole);
+    const shoreMaterial = new THREE.MeshStandardMaterial({
+      color: shorelineTint,
+      transparent: true,
+      opacity: 0.22,
+      roughness: 0.28,
+      metalness: 0.45,
+      map: ringTexture,
+      side: THREE.DoubleSide,
+      emissive: this.tintColor(shorelineTint, 0.03, 0.2, -0.05),
+      emissiveIntensity: 0.22,
+    });
+    const shoreLayer = new THREE.Mesh(new THREE.ShapeGeometry(shoreRing, 28), shoreMaterial);
+    shoreLayer.rotation.x = -Math.PI / 2;
+    shoreLayer.position.y = -47.82;
+    shoreLayer.renderOrder = 3;
+    this.terrainGroup.add(shoreLayer);
+
+    const glossRing = this.createIrregularShape({
+      baseRadius: 190,
+      radiusJitter: 13,
+      pointCount: 80,
+      wobbleFreqA: 2.4,
+      wobbleFreqB: 5.1,
+      phaseA: 1.4,
+      phaseB: 0.65,
+    });
+    const glossHole = this.createIrregularShape({
+      baseRadius: 171,
+      radiusJitter: 11,
+      pointCount: 80,
+      wobbleFreqA: 2.4,
+      wobbleFreqB: 5.1,
+      phaseA: 1.4,
+      phaseB: 0.65,
+    });
+    glossRing.holes.push(glossHole);
+    const glossMaterial = new THREE.MeshStandardMaterial({
+      color: waterBaseColor,
+      transparent: true,
+      opacity: 0.14,
+      roughness: 0.05,
+      metalness: 0.75,
+      map: ringTexture,
+      side: THREE.DoubleSide,
+      emissive: this.tintColor(waterBaseColor, 0.05, 0.18, 0.06),
+      emissiveIntensity: 0.32,
+    });
+    const glossLayer = new THREE.Mesh(new THREE.ShapeGeometry(glossRing, 28), glossMaterial);
+    glossLayer.rotation.x = -Math.PI / 2;
+    glossLayer.position.y = -47.72;
+    glossLayer.renderOrder = 4;
+    this.terrainGroup.add(glossLayer);
+
+    const lakeMist = new THREE.Mesh(
+      new THREE.PlaneGeometry(520, 180),
+      new THREE.MeshStandardMaterial({
+        color: deepTint,
+        transparent: true,
+        opacity: 0.34,
+        roughness: 1,
+        metalness: 0,
+        emissive: this.tintColor(deepTint, 0.1, 0.15, -0.08),
+        emissiveIntensity: 0.24,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+      })
+    );
+    lakeMist.rotation.x = -Math.PI / 2;
+    lakeMist.position.set(0, -48.7, -140);
+    lakeMist.renderOrder = 5;
+    this.terrainGroup.add(lakeMist);
+  }
+
+  private createIrregularShape(options: {
+    baseRadius: number;
+    radiusJitter: number;
+    pointCount: number;
+    wobbleFreqA?: number;
+    wobbleFreqB?: number;
+    phaseA?: number;
+    phaseB?: number;
+  }): THREE.Shape {
+    const shape = new THREE.Shape();
+    const freqA = options.wobbleFreqA ?? 3;
+    const freqB = options.wobbleFreqB ?? 5;
+    const phaseA = options.phaseA ?? 0;
+    const phaseB = options.phaseB ?? 0;
+    const jitter = options.radiusJitter;
+
+    for (let i = 0; i <= options.pointCount; i++) {
+      const angle = (i / options.pointCount) * Math.PI * 2;
+      const radius =
+        options.baseRadius +
+        Math.sin(angle * freqA + phaseA) * jitter * 0.9 +
+        Math.cos(angle * freqB + phaseB) * jitter * 0.65 +
+        Math.sin(angle * 1.5 + phaseA * 0.8) * (jitter * 0.2);
+      const x = Math.cos(angle) * radius;
+      const y = Math.sin(angle) * radius;
+
+      if (i === 0) {
+        shape.moveTo(x, y);
+      } else {
+        shape.lineTo(x, y);
+      }
+    }
+
+    return shape;
+  }
+
+  private createDesertDunePerspective(surfaceProfile: LevelSurfaceProfile): void {
+    const duneColor = this.tintColor(surfaceProfile.groundBaseColor ?? 0xdab88b, 0.01, 0.04, 0.01);
+    const duneMaterial = new THREE.MeshStandardMaterial({
+      color: duneColor,
+      roughness: 0.94,
+      metalness: 0,
+      emissive: this.tintColor(duneColor, 0.02, 0.2, 0.04),
+      emissiveIntensity: 0.04,
+      map: this.createDetailTexture(
+        duneColor,
+        surfaceProfile.groundAccentColor ?? 0xffd58e,
+        surfaceProfile.groundDetailColor ?? 0xa67d46,
+        'sand'
+      ),
+      transparent: true,
+      opacity: 0.9,
+      depthWrite: false,
+    });
+
+    for (let i = 0; i < 9; i++) {
+      const ridgeLength = 240 + Math.random() * 520;
+      const ridge = new THREE.Mesh(new THREE.PlaneGeometry(ridgeLength, 12), duneMaterial);
+      ridge.rotation.x = -Math.PI / 2 + Math.random() * 0.08;
+      ridge.rotation.z = (Math.random() - 0.5) * 0.46;
+      ridge.rotation.y = (Math.random() - 0.5) * 1.2;
+      ridge.position.set(
+        (Math.random() - 0.5) * 1400,
+        -49.05,
+        (Math.random() - 0.5) * 1400
+      );
+      ridge.scale.setScalar(0.5 + Math.random() * 0.8);
+      this.terrainGroup.add(ridge);
+    }
+  }
+
+  private createDesertHeatHaze(surfaceProfile: LevelSurfaceProfile): void {
+    const hazeBase = this.tintColor(surfaceProfile.groundAccentColor ?? 0xffd58e, 0.04, -0.08, 0.08);
+
+    for (let i = 0; i < 4; i++) {
+      const haze = new THREE.Mesh(
+        new THREE.PlaneGeometry(2400, 180 + i * 70),
+        new THREE.MeshStandardMaterial({
+          color: hazeBase,
+          transparent: true,
+          opacity: 0.085 - i * 0.012,
+          roughness: 1,
+          metalness: 0,
+          emissive: this.tintColor(hazeBase, 0.02, 0.15, -0.02),
+          emissiveIntensity: 0.14,
+          side: THREE.DoubleSide,
+          depthWrite: false,
+        })
+      );
+      haze.rotation.x = -Math.PI / 2 + 0.06;
+      haze.rotation.z = (Math.random() - 0.5) * 0.16;
+      haze.position.set(
+        (Math.random() - 0.5) * 180,
+        -49.6 + i * 0.05,
+        -420 + i * 150
+      );
+      haze.renderOrder = 5;
+      this.terrainGroup.add(haze);
+    }
+  }
+
+  private createMountainAtmosphere(surfaceProfile: LevelSurfaceProfile): void {
+    const snowColor = this.tintColor(surfaceProfile.groundDetailColor ?? 0xe8f4ff, 0.05, 0.08, 0.2);
+    const frostColor = this.tintColor(surfaceProfile.groundBaseColor ?? 0xf4f8ff, -0.01, -0.08, -0.02);
+
+    const fogLayers = [
+      { width: 2600, depth: 320, y: -48.4, z: -520, opacity: 0.18 },
+      { width: 2600, depth: 220, y: -47.9, z: -320, opacity: 0.14 },
+      { width: 2300, depth: 180, y: -47.3, z: -120, opacity: 0.12 },
+    ];
+
+    for (const layer of fogLayers) {
+      const haze = new THREE.Mesh(
+        new THREE.PlaneGeometry(layer.width, layer.depth),
+        new THREE.MeshStandardMaterial({
+          color: snowColor,
+          transparent: true,
+          opacity: layer.opacity,
+          roughness: 1,
+          metalness: 0.1,
+          emissive: this.tintColor(snowColor, 0.08, 0.12, 0.18),
+          emissiveIntensity: 0.2,
+          side: THREE.DoubleSide,
+          depthWrite: false,
+        })
+      );
+      haze.rotation.x = -Math.PI / 2 + 0.05;
+      haze.position.set(0, layer.y, layer.z);
+      haze.renderOrder = 5;
+      this.terrainGroup.add(haze);
+    }
+
+    const glow = new THREE.Mesh(
+      new THREE.PlaneGeometry(1600, 900),
+      new THREE.MeshStandardMaterial({
+        color: frostColor,
+        transparent: true,
+        opacity: 0.17,
+        roughness: 0.2,
+        metalness: 0.45,
+        emissive: this.tintColor(frostColor, 0.08, 0.06, 0.22),
+        emissiveIntensity: 0.24,
+      })
+    );
+    glow.rotation.x = -Math.PI / 2;
+    glow.position.set(0, -49.0, -220);
+    glow.renderOrder = 4;
+    this.terrainGroup.add(glow);
+  }
+
+  private createSnowflakeSurfaceLayer(surfaceProfile: LevelSurfaceProfile): void {
+    const flakeCount = 420;
+    const flakeGeometry = new THREE.PlaneGeometry(0.45, 0.45);
+    const flakeMaterial = new THREE.MeshStandardMaterial({
+      color: surfaceProfile.groundDetailColor ?? 0xe6f3ff,
+      transparent: true,
+      opacity: 0.2,
+      roughness: 0.5,
+      metalness: 0.1,
+      emissive: this.tintColor(surfaceProfile.groundDetailColor ?? 0xe6f3ff, 0.05, 0.2, 0.15),
+      emissiveIntensity: 0.26,
+      side: THREE.DoubleSide,
+    });
+    const snowFlakes = new THREE.InstancedMesh(flakeGeometry, flakeMaterial, flakeCount);
+
+    const dummy = new THREE.Object3D();
+    for (let i = 0; i < flakeCount; i++) {
+      dummy.position.set(
+        (Math.random() - 0.5) * 1900,
+        -48.6 + Math.random() * 4,
+        (Math.random() - 0.5) * 1900
+      );
+      dummy.rotation.set(
+        (Math.random() - 0.5) * Math.PI * 0.4,
+        (Math.random() - 0.5) * Math.PI * 2,
+        (Math.random() - 0.5) * Math.PI * 0.4
+      );
+      dummy.scale.setScalar(0.4 + Math.random() * 1.4);
+      dummy.updateMatrix();
+      snowFlakes.setMatrixAt(i, dummy.matrix);
+    }
+    snowFlakes.instanceMatrix.needsUpdate = true;
+    this.terrainGroup.add(snowFlakes);
+  }
+
+  private createOceanNightFog(surfaceProfile: LevelSurfaceProfile): void {
+    const deepWater = this.tintColor(surfaceProfile.waterDetailColor ?? 0x09385f, -0.02, -0.16, -0.18);
+    const oceanFog = this.tintColor(surfaceProfile.waterBaseColor ?? 0x1a4d76, 0.01, -0.1, -0.12);
+
+    const abyss = new THREE.Mesh(
+      new THREE.PlaneGeometry(2350, 2350),
+      new THREE.MeshStandardMaterial({
+        color: deepWater,
+        transparent: true,
+        opacity: 0.44,
+        roughness: 0.98,
+        metalness: 0.05,
+        emissive: this.tintColor(deepWater, 0.02, 0.04, -0.06),
+        emissiveIntensity: 0.12,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      })
+    );
+    abyss.rotation.x = -Math.PI / 2;
+    abyss.position.y = -50.08;
+    this.terrainGroup.add(abyss);
+
+    const hazeLayers = [
+      { width: 2200, height: 220, z: -520, opacity: 0.18, tint: oceanFog },
+      { width: 2200, height: 260, z: -260, opacity: 0.14, tint: this.tintColor(oceanFog, 0.02, 0.06, -0.04) },
+      { width: 1900, height: 180, z: -40, opacity: 0.1, tint: this.tintColor(oceanFog, -0.02, 0.04, -0.07) },
+    ];
+
+    for (const layer of hazeLayers) {
+      const fogLayer = new THREE.Mesh(
+        new THREE.PlaneGeometry(layer.width, layer.height),
+        new THREE.MeshStandardMaterial({
+          color: layer.tint,
+          transparent: true,
+          opacity: layer.opacity,
+          roughness: 1,
+          metalness: 0.05,
+          emissive: this.tintColor(layer.tint, 0.04, 0.08, -0.05),
+          emissiveIntensity: 0.14,
+          depthWrite: false,
+          side: THREE.DoubleSide,
+        })
+      );
+      fogLayer.rotation.x = -Math.PI / 2 + 0.02;
+      fogLayer.position.set(0, -49.82, layer.z);
+      fogLayer.renderOrder = 6;
+      this.terrainGroup.add(fogLayer);
+    }
+  }
+
+  private createCityNightLights(surfaceProfile: LevelSurfaceProfile): void {
+    const windowLightColor = surfaceProfile.windowColor ?? 0x7ee6ff;
+    const accentColor = this.tintColor(windowLightColor, 0.03, 0.15, 0.28);
+    const lightMatrix = new THREE.Object3D();
+    const windowGeometry = new THREE.PlaneGeometry(2.2, 1.2);
+    const windowMaterial = new THREE.MeshStandardMaterial({
+      color: windowLightColor,
+      transparent: true,
+      opacity: 0.94,
+      roughness: 0.1,
+      metalness: 0.1,
+      emissive: accentColor,
+      emissiveIntensity: 0.98,
+      side: THREE.DoubleSide,
+    });
+    const windowLights = new THREE.InstancedMesh(windowGeometry, windowMaterial, 140);
+
+    for (let i = 0; i < 140; i++) {
+      lightMatrix.position.set(
+        (Math.random() - 0.5) * 1850,
+        -49.0 - Math.random() * 4,
+        (Math.random() - 0.5) * 1850
+      );
+      lightMatrix.rotation.set(Math.PI / 2, (Math.random() - 0.5) * Math.PI * 0.12, 0);
+      lightMatrix.scale.setScalar(0.55 + Math.random() * 1.25);
+      lightMatrix.updateMatrix();
+      windowLights.setMatrixAt(i, lightMatrix.matrix);
+    }
+    windowLights.instanceMatrix.needsUpdate = true;
+    this.terrainGroup.add(windowLights);
+
+    const roadGlowMaterial = new THREE.MeshStandardMaterial({
+      color: this.tintColor(surfaceProfile.roadLineColor ?? 0xf0f4ff, 0.02, 0.15, 0.2),
+      emissive: this.tintColor(surfaceProfile.roadLineColor ?? 0xf0f4ff, 0.03, 0.22, 0.18),
+      emissiveIntensity: 0.72,
+      roughness: 0.2,
+      metalness: 0.12,
+      transparent: true,
+      opacity: 0.35,
+      depthWrite: false,
+    });
+    const lowBandColor = this.tintColor(surfaceProfile.roadLineColor ?? 0xffd88a, 0.04, 0.18, 0.1);
+    const lowBandMaterial = new THREE.MeshStandardMaterial({
+      color: lowBandColor,
+      transparent: true,
+      opacity: 0.16,
+      roughness: 0.28,
+      metalness: 0.08,
+      emissive: this.tintColor(lowBandColor, 0.03, 0.24, 0.12),
+      emissiveIntensity: 0.66,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    });
+    const sideLineColor = this.tintColor(surfaceProfile.windowColor ?? 0x7ee6ff, 0.01, 0.18, 0.2);
+    const sideBandMaterial = new THREE.MeshStandardMaterial({
+      color: sideLineColor,
+      emissive: this.tintColor(sideLineColor, 0.02, 0.2, 0.14),
+      emissiveIntensity: 0.55,
+      roughness: 0.2,
+      metalness: 0.14,
+      transparent: true,
+      opacity: 0.12,
+      depthWrite: false,
+    });
+
+    for (let i = -3; i <= 3; i++) {
+      const line = new THREE.Mesh(new THREE.PlaneGeometry(2000, 3.2), roadGlowMaterial);
+      line.rotation.x = -Math.PI / 2;
+      line.position.set(0, -49.2, i * 250 + 7);
+      this.terrainGroup.add(line);
+
+      const corridorBand = new THREE.Mesh(new THREE.PlaneGeometry(2000, 16), lowBandMaterial);
+      corridorBand.rotation.x = -Math.PI / 2;
+      corridorBand.position.set(0, -49.34, i * 250);
+      this.terrainGroup.add(corridorBand);
+
+      for (let side = -1; side <= 1; side += 2) {
+        const sideBand = new THREE.Mesh(new THREE.PlaneGeometry(2000, 2.2), sideBandMaterial);
+        sideBand.rotation.x = -Math.PI / 2;
+        sideBand.position.set(0, -49.22, i * 250 + side * 9);
+        this.terrainGroup.add(sideBand);
+      }
+    }
+
+    for (let i = -3; i <= 3; i++) {
+      const line = new THREE.Mesh(new THREE.PlaneGeometry(3.2, 2000), roadGlowMaterial);
+      line.rotation.x = -Math.PI / 2;
+      line.position.set(i * 250 - 7, -49.2, 0);
+      this.terrainGroup.add(line);
+
+      const corridorBand = new THREE.Mesh(new THREE.PlaneGeometry(16, 2000), lowBandMaterial);
+      corridorBand.rotation.x = -Math.PI / 2;
+      corridorBand.position.set(i * 250, -49.34, 0);
+      this.terrainGroup.add(corridorBand);
+
+      for (let side = -1; side <= 1; side += 2) {
+        const sideBand = new THREE.Mesh(new THREE.PlaneGeometry(2.2, 2000), sideBandMaterial);
+        sideBand.rotation.x = -Math.PI / 2;
+        sideBand.position.set(i * 250 + side * 9, -49.22, 0);
+        this.terrainGroup.add(sideBand);
+      }
+    }
+  }
+
+  private createCitySurfaceBoundary(surfaceProfile: LevelSurfaceProfile): void {
+    const borderColor = this.tintColor(surfaceProfile.plazaBaseColor ?? 0x808a98, 0.02, -0.15, -0.05);
+    const boundaryMaterial = new THREE.MeshStandardMaterial({
+      color: borderColor,
+      transparent: true,
+      opacity: 0.5,
+      roughness: 0.24,
+      metalness: 0.35,
+      emissive: this.tintColor(borderColor, 0.04, 0.1, 0.08),
+      emissiveIntensity: 0.2,
+      side: THREE.DoubleSide,
+    });
+    const laneGlowMaterial = new THREE.MeshStandardMaterial({
+      color: this.tintColor(surfaceProfile.plazaBaseColor ?? 0x808a98, 0.02, 0.1, -0.02),
+      transparent: true,
+      opacity: 0.22,
+      roughness: 0.28,
+      metalness: 0.3,
+      emissive: this.tintColor(surfaceProfile.plazaBaseColor ?? 0x808a98, 0.02, 0.22, 0.06),
+      emissiveIntensity: 0.32,
+      side: THREE.DoubleSide,
+    });
+
+    for (let gx = -3; gx <= 2; gx++) {
+      for (let gz = -3; gz <= 2; gz++) {
+        const cx = gx * 250 + 125;
+        const cz = gz * 250 + 125;
+
+        const edges = [
+          { w: 198, h: 1.6, x: 0, z: 95 },
+          { w: 198, h: 1.6, x: 0, z: -95 },
+          { w: 1.6, h: 198, x: 95, z: 0 },
+          { w: 1.6, h: 198, x: -95, z: 0 },
+        ];
+
+        for (const edge of edges) {
+          const segment = new THREE.Mesh(new THREE.PlaneGeometry(edge.w, edge.h), boundaryMaterial);
+          segment.rotation.x = -Math.PI / 2;
+          segment.position.set(cx + edge.x, -49.72, cz + edge.z);
+          this.terrainGroup.add(segment);
+        }
+
+        const boundaryGlow = new THREE.Mesh(new THREE.PlaneGeometry(198, 1.3), laneGlowMaterial);
+        boundaryGlow.rotation.x = -Math.PI / 2;
+        boundaryGlow.position.set(cx, -49.66, cz);
+        this.terrainGroup.add(boundaryGlow);
+      }
+    }
   }
 
   /**
@@ -833,6 +1313,8 @@ export class TerrainGenerator {
    * 生成沙漠地形
    */
   private generateDesertTerrain(config: LevelConfig): void {
+    const surfaceProfile = this.getSurfaceProfile(config);
+    const dunesBase = surfaceProfile.groundBaseColor ?? config.groundColor;
     // 沙漠地面 - 沙丘效果
     const groundGeometry = new THREE.PlaneGeometry(2000, 2000, 200, 200); // 提高细节到200x200
     const positions = groundGeometry.attributes.position;
@@ -851,12 +1333,17 @@ export class TerrainGenerator {
     groundGeometry.computeVertexNormals();
 
     const groundMaterial = new THREE.MeshStandardMaterial({
-      color: this.tintColor(config.groundColor, 0.01, 0.08, 0.01),
+      color: this.tintColor(dunesBase, 0.01, 0.08, 0.01),
       roughness: 1,
       metalness: 0,
-      emissive: this.tintColor(config.groundColor, -0.01, 0.2, -0.15),
+      emissive: this.tintColor(dunesBase, -0.01, 0.2, -0.15),
       emissiveIntensity: 0.08,
-      map: this.createDetailTexture(config.groundColor, 0xe0ba74, 0xa6752d, 'sand'),
+      map: this.createDetailTexture(
+        dunesBase,
+        surfaceProfile.groundAccentColor ?? 0xe0ba74,
+        surfaceProfile.groundDetailColor ?? 0xa6752d,
+        'sand'
+      ),
       polygonOffset: true, // 修复Z-fighting闪烁
       polygonOffsetFactor: 1, // 偏移因子
       polygonOffsetUnits: 1,
@@ -876,6 +1363,10 @@ export class TerrainGenerator {
 
     // 添加枯木
     this.createDeadTrees(15);
+
+    // 增强沙尘透视与热浪层次
+    this.createDesertDunePerspective(surfaceProfile);
+    this.createDesertHeatHaze(surfaceProfile);
   }
 
   /**
@@ -1004,6 +1495,7 @@ export class TerrainGenerator {
    * 生成山地地形
    */
   private generateMountainTerrain(config: LevelConfig): void {
+    const surfaceProfile = this.getSurfaceProfile(config);
     // 雪地基础
     const groundGeometry = new THREE.PlaneGeometry(2000, 2000, 150, 150);
     const positions = groundGeometry.attributes.position;
@@ -1022,10 +1514,15 @@ export class TerrainGenerator {
     groundGeometry.computeVertexNormals();
 
     const groundMaterial = new THREE.MeshStandardMaterial({
-      color: this.tintColor(config.groundColor, 0, -0.1, 0.03),
+      color: this.tintColor(surfaceProfile.groundBaseColor ?? config.groundColor, 0, -0.1, 0.03),
       roughness: 0.8,
       metalness: 0,
-      map: this.createDetailTexture(config.groundColor, 0xeaf4ff, 0xb8c8d8, 'snow'),
+      map: this.createDetailTexture(
+        this.tintColor(surfaceProfile.groundBaseColor ?? config.groundColor, 0, -0.04, 0.02),
+        surfaceProfile.groundAccentColor ?? 0xeaf4ff,
+        surfaceProfile.groundDetailColor ?? 0xb8c8d8,
+        'snow'
+      ),
       polygonOffset: true, // 修复Z-fighting闪烁
       polygonOffsetFactor: 1, // 偏移因子
       polygonOffsetUnits: 1,
@@ -1042,6 +1539,10 @@ export class TerrainGenerator {
 
     // 添加雪松
     this.createPineForest(60, -50, 800, 200);
+
+    // 冷雾与雪光层次
+    this.createMountainAtmosphere(surfaceProfile);
+    this.createSnowflakeSurfaceLayer(surfaceProfile);
   }
 
   /**
@@ -1215,6 +1716,9 @@ export class TerrainGenerator {
 
     // 添加棕榈树
     this.createPalmTrees(40);
+
+    // 深海夜雾与海面层次
+    this.createOceanNightFog(surfaceProfile);
   }
 
   /**
@@ -1356,6 +1860,69 @@ export class TerrainGenerator {
 
     // 添加建筑物
     this.createBuildings(108, surfaceProfile);
+
+    // 夜景灯光与地表边界读图层
+    this.createCityNightLights(surfaceProfile);
+    this.createCitySurfaceBoundary(surfaceProfile);
+    this.createCityGroundFill(surfaceProfile);
+  }
+
+  /**
+   * 创建城市地表补光层
+   */
+  private createCityGroundFill(surfaceProfile: LevelSurfaceProfile): void {
+    const ambientCore = this.tintColor(
+      surfaceProfile.groundEmissiveColor ?? 0x293744,
+      0.01,
+      0.08,
+      0.13
+    );
+    const ambientEdge = this.tintColor(surfaceProfile.plazaBaseColor ?? 0x808a98, -0.01, 0.12, 0.04);
+
+    const ambientFill = new THREE.Mesh(
+      new THREE.PlaneGeometry(2000, 2000),
+      new THREE.MeshStandardMaterial({
+        color: ambientCore,
+        transparent: true,
+        opacity: 0.24,
+        roughness: 0.9,
+        metalness: 0.02,
+        emissive: ambientCore,
+        emissiveIntensity: 0.42,
+        side: THREE.DoubleSide,
+      })
+    );
+    ambientFill.rotation.x = -Math.PI / 2;
+    ambientFill.position.set(0, -49.58, 0);
+    ambientFill.renderOrder = 3;
+    ambientFill.receiveShadow = true;
+    this.terrainGroup.add(ambientFill);
+
+    const contourMaterial = new THREE.MeshStandardMaterial({
+      color: ambientEdge,
+      transparent: true,
+      opacity: 0.16,
+      roughness: 0.88,
+      metalness: 0.05,
+      emissive: this.tintColor(ambientEdge, 0.03, 0.2, -0.04),
+      emissiveIntensity: 0.3,
+      side: THREE.DoubleSide,
+    });
+
+    const contourHeights = [-49.56, -49.535, -49.51];
+    const contourWidths = [2000, 1640, 1280];
+    const contourHeightsLength = [130, 168, 205];
+    for (let i = 0; i < contourHeights.length; i++) {
+      const strip = new THREE.Mesh(
+        new THREE.PlaneGeometry(contourWidths[i], contourHeightsLength[i]),
+        contourMaterial
+      );
+      strip.rotation.x = -Math.PI / 2;
+      strip.position.set(0, contourHeights[i], -110 + i * 95);
+      strip.renderOrder = 4;
+      strip.receiveShadow = true;
+      this.terrainGroup.add(strip);
+    }
   }
 
   /**
@@ -1374,9 +1941,49 @@ export class TerrainGenerator {
         'asphalt'
       ),
     });
+    const corridorCoreColor = this.tintColor(
+      surfaceProfile.roadLineColor ?? 0xffd88a,
+      0.01,
+      0.22,
+      0.08
+    );
+    const corridorCoreMaterial = new THREE.MeshStandardMaterial({
+      color: corridorCoreColor,
+      transparent: true,
+      opacity: 0.22,
+      roughness: 0.24,
+      metalness: 0.08,
+      emissive: this.tintColor(corridorCoreColor, 0.02, 0.28, 0.08),
+      emissiveIntensity: 0.86,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    });
+    const corridorSideMaterial = new THREE.MeshStandardMaterial({
+      color: this.tintColor(corridorCoreColor, -0.02, 0.18, 0.2),
+      transparent: true,
+      opacity: 0.16,
+      roughness: 0.22,
+      metalness: 0.12,
+      emissive: this.tintColor(corridorCoreColor, 0.02, 0.26, 0.12),
+      emissiveIntensity: 0.74,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    });
 
     // 水平道路
     for (let i = -3; i <= 3; i++) {
+      const corridor = new THREE.Mesh(new THREE.PlaneGeometry(2000, 26), corridorCoreMaterial);
+      corridor.rotation.x = -Math.PI / 2;
+      corridor.position.set(0, -49.64, i * 250);
+      this.terrainGroup.add(corridor);
+
+      for (let j = -1; j <= 1; j += 2) {
+        const sideRibbon = new THREE.Mesh(new THREE.PlaneGeometry(2000, 3.4), corridorSideMaterial);
+        sideRibbon.rotation.x = -Math.PI / 2;
+        sideRibbon.position.set(0, -49.6, i * 250 + j * 13);
+        this.terrainGroup.add(sideRibbon);
+      }
+
       const road = new THREE.Mesh(new THREE.PlaneGeometry(2000, 20), roadMaterial);
       road.rotation.x = -Math.PI / 2;
       road.position.set(0, -49.9, i * 250);
@@ -1414,6 +2021,18 @@ export class TerrainGenerator {
 
     // 垂直道路
     for (let i = -3; i <= 3; i++) {
+      const corridor = new THREE.Mesh(new THREE.PlaneGeometry(26, 2000), corridorCoreMaterial);
+      corridor.rotation.x = -Math.PI / 2;
+      corridor.position.set(i * 250, -49.64, 0);
+      this.terrainGroup.add(corridor);
+
+      for (let j = -1; j <= 1; j += 2) {
+        const sideRibbon = new THREE.Mesh(new THREE.PlaneGeometry(3.4, 2000), corridorSideMaterial);
+        sideRibbon.rotation.x = -Math.PI / 2;
+        sideRibbon.position.set(i * 250 + j * 13, -49.6, 0);
+        this.terrainGroup.add(sideRibbon);
+      }
+
       const road = new THREE.Mesh(new THREE.PlaneGeometry(20, 2000), roadMaterial);
       road.rotation.x = -Math.PI / 2;
       road.position.set(i * 250, -49.9, 0);
@@ -1443,6 +2062,15 @@ export class TerrainGenerator {
       emissive: 0x232a34,
       emissiveIntensity: 0.1,
     });
+    const plazaGlowMaterial = new THREE.MeshStandardMaterial({
+      color: this.tintColor(surfaceProfile.plazaBaseColor ?? 0x808a98, 0.04, 0.18, 0.08),
+      emissive: this.tintColor(surfaceProfile.plazaBaseColor ?? 0x808a98, 0.04, 0.2, 0.14),
+      emissiveIntensity: 0.28,
+      roughness: 0.36,
+      metalness: 0.06,
+      transparent: true,
+      opacity: 0.12,
+    });
 
     for (let gx = -3; gx <= 2; gx++) {
       for (let gz = -3; gz <= 2; gz++) {
@@ -1470,6 +2098,14 @@ export class TerrainGenerator {
           plazaLight.rotation.x = -Math.PI / 2;
           plazaLight.position.set(gx * 250 + 125, -49.8, gz * 250 + 50);
           this.terrainGroup.add(plazaLight);
+
+          const plazaRibbon = new THREE.Mesh(
+            new THREE.PlaneGeometry(30, 2.4),
+            plazaGlowMaterial
+          );
+          plazaRibbon.rotation.x = -Math.PI / 2;
+          plazaRibbon.position.set(gx * 250 + 125, -49.72, gz * 250 - 30);
+          this.terrainGroup.add(plazaRibbon);
         }
       }
     }
@@ -1568,6 +2204,41 @@ export class TerrainGenerator {
       );
       trim.position.y = 0.4;
       building.add(trim);
+    }
+
+    const glowBandHeight = 0.45 + Math.random() * 0.35;
+    const lightBandColor = this.tintColor(surfaceProfile.windowColor ?? 0xffe3a6, 0.03, 0.2, 0.12);
+    const lightBandMaterial = new THREE.MeshStandardMaterial({
+      color: this.tintColor(lightBandColor, -0.02, -0.05, 0.08),
+      emissive: lightBandColor,
+      emissiveIntensity: 0.78,
+      roughness: 0.22,
+      metalness: 0.28,
+      transparent: true,
+      opacity: 0.75,
+    });
+    const baseGlow = new THREE.Mesh(
+      new THREE.BoxGeometry(width + 0.2, glowBandHeight, depth + 0.2),
+      lightBandMaterial
+    );
+    baseGlow.position.set(0, glowBandHeight / 2, 0);
+    building.add(baseGlow);
+
+    if (Math.random() > 0.5) {
+      const rooftopGlow = new THREE.Mesh(
+        new THREE.CylinderGeometry(width * 0.07, width * 0.11, 0.9 + Math.random() * 0.9, 10),
+        new THREE.MeshStandardMaterial({
+          color: 0x8fd6ff,
+          emissive: 0x74c8ff,
+          emissiveIntensity: 0.58,
+          roughness: 0.22,
+          metalness: 0.34,
+          transparent: true,
+          opacity: 0.72,
+        })
+      );
+      rooftopGlow.position.set(0, height + 1.2, 0);
+      building.add(rooftopGlow);
     }
 
     if (Math.random() > 0.45) {
@@ -2388,19 +3059,19 @@ export class TerrainGenerator {
           ctx.arc(x, y, size * 0.3, 0, Math.PI * 2);
           ctx.fill();
           break;
-        case 'asphalt': {
-          const grain = 0.8 + Math.random() * 2.2;
-          ctx.fillRect(x, y, grain, grain);
-          if (Math.random() < 0.08) {
-            const crackLen = 3 + Math.random() * 8;
+      case 'asphalt': {
+        const grain = 0.8 + Math.random() * 2.2;
+        ctx.fillRect(x, y, grain, grain);
+        if (Math.random() < 0.08) {
+          const crackLen = 3 + Math.random() * 8;
             ctx.strokeStyle = this.toCanvasColor(detail, 0.14);
             ctx.beginPath();
             ctx.moveTo(x, y);
             ctx.lineTo(x + crackLen, y + (Math.random() - 0.5) * 2);
             ctx.stroke();
           }
-          break;
-        }
+        break;
+      }
         case 'water':
           ctx.fillRect(x, y, size * 1.8, 1 + Math.random() * 2);
           break;

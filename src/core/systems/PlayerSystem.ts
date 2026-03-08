@@ -7,6 +7,8 @@ import { PlayerStats } from '@/features/upgrade/UpgradeSystem';
 
 export class PlayerSystem implements IGameSystem {
   readonly name = 'PlayerSystem';
+  private static readonly GROUND_COLLISION_Y = -45;
+  private static readonly RESPAWN_ALTITUDE_BUFFER = 10;
 
   private controller: PlayerController;
   private health: HealthSystem;
@@ -17,7 +19,7 @@ export class PlayerSystem implements IGameSystem {
   private isRespawning: boolean = false;
   private respawnTimer: number = 0;
   private respawnDelay: number = 2;
-  private deathPosition?: THREE.Vector3;
+  private lastSafeRespawnPosition: THREE.Vector3;
 
   private shieldActive: boolean = false;
   private shieldMesh?: THREE.Mesh;
@@ -35,6 +37,7 @@ export class PlayerSystem implements IGameSystem {
     this.stats = stats;
     this.controller = new PlayerController(mesh, scene, stats);
     this.health = new HealthSystem(stats.getMaxHealth());
+    this.lastSafeRespawnPosition = mesh.position.clone();
     this.syncVisualState();
   }
 
@@ -65,13 +68,13 @@ export class PlayerSystem implements IGameSystem {
     this.fireCooldown = Math.max(0, this.fireCooldown - deltaTime);
     this.updateShieldPosition();
     this.checkGroundCollision();
+    this.updateLastSafeRespawnPosition();
   }
 
   dispose(): void {}
 
   private handleDeath(): void {
     this.lives--;
-    this.deathPosition = this.mesh.position.clone();
 
     EventBus.emit(GameEventType.PLAYER_DEATH, {
       position: this.mesh.position.clone(),
@@ -91,10 +94,9 @@ export class PlayerSystem implements IGameSystem {
 
   private respawn(): void {
     this.health.reset();
+    const safeRespawnPosition = this.getSafeRespawnPosition();
 
-    if (this.deathPosition) {
-      this.mesh.position.copy(this.deathPosition);
-    }
+    this.mesh.position.copy(safeRespawnPosition);
 
     this.mesh.visible = true;
     this.syncVisualState();
@@ -112,10 +114,27 @@ export class PlayerSystem implements IGameSystem {
   }
 
   private checkGroundCollision(): void {
-    const groundLevel = -45;
+    const groundLevel = PlayerSystem.GROUND_COLLISION_Y;
     if (this.mesh.position.y < groundLevel) {
       this.health.takeDamage(1000);
     }
+  }
+
+  private updateLastSafeRespawnPosition(): void {
+    const minSafeY = PlayerSystem.GROUND_COLLISION_Y + PlayerSystem.RESPAWN_ALTITUDE_BUFFER;
+    if (this.mesh.position.y > minSafeY) {
+      this.lastSafeRespawnPosition.copy(this.mesh.position);
+    }
+  }
+
+  private getSafeRespawnPosition(): THREE.Vector3 {
+    const safeRespawnPosition = this.lastSafeRespawnPosition.clone();
+    safeRespawnPosition.y = Math.max(
+      safeRespawnPosition.y,
+      PlayerSystem.GROUND_COLLISION_Y + PlayerSystem.RESPAWN_ALTITUDE_BUFFER
+    );
+
+    return safeRespawnPosition;
   }
 
   getController(): PlayerController {

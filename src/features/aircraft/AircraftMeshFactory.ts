@@ -52,6 +52,60 @@ interface JetProportionProfile {
   twinEngine: boolean;
 }
 
+interface EnemyContourProfile {
+  nose: {
+    tipLength: number;
+    tipWidth: number;
+    tipOffsetY: number;
+    tipOffsetZ: number;
+    chineWidth: number;
+    chineHeight: number;
+    chineDepth: number;
+    chineOffsetY: number;
+    chineOffsetZ: number;
+  };
+  bellyFin: {
+    offsetY: number;
+    offsetX: number;
+    offsetZ: number;
+    width: number;
+    height: number;
+    depth: number;
+    sideYaw: number;
+    includeTwin: boolean;
+  };
+  wingRoot: {
+    insetWidth: number;
+    insetHeight: number;
+    insetDepth: number;
+    insetY: number;
+    insetZ: number;
+    insetYaw: number;
+    bridgeWidth: number;
+    bridgeHeight: number;
+    bridgeDepth: number;
+    bridgeY: number;
+    bridgeZ: number;
+  };
+  pylon: {
+    anchorWidth: number;
+    anchorHeight: number;
+    anchorDepth: number;
+    anchorYaw: number;
+    braceWidth: number;
+    braceHeight: number;
+    braceDepth: number;
+    braceYaw: number;
+  };
+  tail: {
+    fairingWidth: number;
+    fairingHeight: number;
+    fairingDepth: number;
+    fairingY: number;
+    fairingZOffset: number;
+  };
+}
+
 const materialsCache: Map<EnemyType, CachedMaterials> = new Map();
 const detailGeometries = {
   panel: new THREE.BoxGeometry(0.12, 0.04, 1),
@@ -1335,6 +1389,282 @@ export function createEnemyMesh(config: EnemyConfig): THREE.Group {
     }
   })();
 
+  const contourProfile: EnemyContourProfile = (() => {
+    switch (config.type) {
+      case EnemyType.SCOUT:
+        return {
+          nose: {
+            tipLength: 0.22,
+            tipWidth: bodySize * 0.18,
+            tipOffsetY: 0,
+            tipOffsetZ: bodyLength * 0.62,
+            chineWidth: bodySize * 0.34,
+            chineHeight: bodySize * 0.09,
+            chineDepth: bodySize * 0.18,
+            chineOffsetY: -0.01,
+            chineOffsetZ: bodyLength * 0.48,
+          },
+          bellyFin: {
+            offsetY: -bodySize * 0.28,
+            offsetX: bodySize * 0.02,
+            offsetZ: bodyLength * 0.12,
+            width: bodySize * 0.22,
+            height: bodySize * 0.16,
+            depth: bodySize * 0.52,
+            sideYaw: 0.1,
+            includeTwin: false,
+          },
+          wingRoot: {
+            insetWidth: bodySize * 0.18,
+            insetHeight: 0.09,
+            insetDepth: bodySize * 0.24,
+            insetY: -0.02,
+            insetZ: -bodyLength * 0.14,
+            insetYaw: 0.14,
+            bridgeWidth: bodySize * 0.2,
+            bridgeHeight: 0.1,
+            bridgeDepth: 0.58,
+            bridgeY: 0.03,
+            bridgeZ: -bodyLength * 0.06,
+          },
+          pylon: {
+            anchorWidth: bodySize * 0.16,
+            anchorHeight: 0.1,
+            anchorDepth: 0.3,
+            anchorYaw: 0.08,
+            braceWidth: 0.08,
+            braceHeight: bodySize * 0.08,
+            braceDepth: bodySize * 0.4,
+            braceYaw: 0.14,
+          },
+          tail: {
+            fairingWidth: 0.14,
+            fairingHeight: bodySize * 0.14,
+            fairingDepth: bodySize * 0.34,
+            fairingY: -0.02,
+            fairingZOffset: -bodyLength * 0.62,
+          },
+        };
+      case EnemyType.FIGHTER:
+        return {
+          nose: {
+            tipLength: 0.28,
+            tipWidth: bodySize * 0.2,
+            tipOffsetY: 0,
+            tipOffsetZ: bodyLength * 0.64,
+            chineWidth: bodySize * 0.38,
+            chineHeight: bodySize * 0.1,
+            chineDepth: bodySize * 0.2,
+            chineOffsetY: -0.01,
+            chineOffsetZ: bodyLength * 0.5,
+          },
+          bellyFin: {
+            offsetY: -bodySize * 0.3,
+            offsetX: 0.02,
+            offsetZ: bodyLength * 0.18,
+            width: bodySize * 0.24,
+            height: bodySize * 0.18,
+            depth: bodySize * 0.56,
+            sideYaw: 0.11,
+            includeTwin: true,
+          },
+          wingRoot: {
+            insetWidth: bodySize * 0.2,
+            insetHeight: 0.1,
+            insetDepth: bodySize * 0.28,
+            insetY: 0,
+            insetZ: -bodyLength * 0.12,
+            insetYaw: 0.18,
+            bridgeWidth: bodySize * 0.24,
+            bridgeHeight: 0.11,
+            bridgeDepth: 0.66,
+            bridgeY: 0.04,
+            bridgeZ: -bodyLength * 0.04,
+          },
+          pylon: {
+            anchorWidth: bodySize * 0.2,
+            anchorHeight: 0.11,
+            anchorDepth: 0.34,
+            anchorYaw: 0.1,
+            braceWidth: 0.08,
+            braceHeight: bodySize * 0.1,
+            braceDepth: bodySize * 0.42,
+            braceYaw: 0.16,
+          },
+          tail: {
+            fairingWidth: 0.16,
+            fairingHeight: bodySize * 0.18,
+            fairingDepth: bodySize * 0.38,
+            fairingY: -0.01,
+            fairingZOffset: -bodyLength * 0.64,
+          },
+        };
+      case EnemyType.HEAVY:
+        return {
+          nose: {
+            tipLength: 0.34,
+            tipWidth: bodySize * 0.22,
+            tipOffsetY: 0.01,
+            tipOffsetZ: bodyLength * 0.64,
+            chineWidth: bodySize * 0.4,
+            chineHeight: bodySize * 0.12,
+            chineDepth: bodySize * 0.22,
+            chineOffsetY: 0,
+            chineOffsetZ: bodyLength * 0.52,
+          },
+          bellyFin: {
+            offsetY: -bodySize * 0.3,
+            offsetX: 0.03,
+            offsetZ: bodyLength * 0.12,
+            width: bodySize * 0.28,
+            height: bodySize * 0.18,
+            depth: bodySize * 0.62,
+            sideYaw: 0.12,
+            includeTwin: true,
+          },
+          wingRoot: {
+            insetWidth: bodySize * 0.24,
+            insetHeight: 0.12,
+            insetDepth: bodySize * 0.34,
+            insetY: 0.02,
+            insetZ: -bodyLength * 0.1,
+            insetYaw: 0.16,
+            bridgeWidth: bodySize * 0.3,
+            bridgeHeight: 0.12,
+            bridgeDepth: 0.74,
+            bridgeY: 0.05,
+            bridgeZ: 0,
+          },
+          pylon: {
+            anchorWidth: bodySize * 0.22,
+            anchorHeight: 0.12,
+            anchorDepth: 0.38,
+            anchorYaw: 0.08,
+            braceWidth: 0.1,
+            braceHeight: bodySize * 0.1,
+            braceDepth: bodySize * 0.46,
+            braceYaw: 0.16,
+          },
+          tail: {
+            fairingWidth: 0.18,
+            fairingHeight: bodySize * 0.22,
+            fairingDepth: bodySize * 0.4,
+            fairingY: -0.01,
+            fairingZOffset: -bodyLength * 0.64,
+          },
+        };
+      case EnemyType.SNIPER:
+        return {
+          nose: {
+            tipLength: 0.3,
+            tipWidth: bodySize * 0.16,
+            tipOffsetY: -0.02,
+            tipOffsetZ: bodyLength * 0.62,
+            chineWidth: bodySize * 0.34,
+            chineHeight: bodySize * 0.1,
+            chineDepth: bodySize * 0.2,
+            chineOffsetY: -0.01,
+            chineOffsetZ: bodyLength * 0.48,
+          },
+          bellyFin: {
+            offsetY: -bodySize * 0.26,
+            offsetX: 0.01,
+            offsetZ: bodyLength * 0.2,
+            width: bodySize * 0.2,
+            height: bodySize * 0.14,
+            depth: bodySize * 0.54,
+            sideYaw: 0.09,
+            includeTwin: false,
+          },
+          wingRoot: {
+            insetWidth: bodySize * 0.18,
+            insetHeight: 0.08,
+            insetDepth: bodySize * 0.24,
+            insetY: 0,
+            insetZ: -bodyLength * 0.05,
+            insetYaw: 0.12,
+            bridgeWidth: bodySize * 0.2,
+            bridgeHeight: 0.09,
+            bridgeDepth: 0.6,
+            bridgeY: 0.02,
+            bridgeZ: -bodyLength * 0.02,
+          },
+          pylon: {
+            anchorWidth: bodySize * 0.16,
+            anchorHeight: 0.1,
+            anchorDepth: 0.32,
+            anchorYaw: 0.06,
+            braceWidth: 0.08,
+            braceHeight: bodySize * 0.08,
+            braceDepth: bodySize * 0.38,
+            braceYaw: 0.12,
+          },
+          tail: {
+            fairingWidth: 0.14,
+            fairingHeight: bodySize * 0.15,
+            fairingDepth: bodySize * 0.34,
+            fairingY: -0.02,
+            fairingZOffset: -bodyLength * 0.6,
+          },
+        };
+      case EnemyType.ACE:
+      default:
+        return {
+          nose: {
+            tipLength: 0.34,
+            tipWidth: bodySize * 0.2,
+            tipOffsetY: 0.01,
+            tipOffsetZ: bodyLength * 0.62,
+            chineWidth: bodySize * 0.38,
+            chineHeight: bodySize * 0.11,
+            chineDepth: bodySize * 0.22,
+            chineOffsetY: 0,
+            chineOffsetZ: bodyLength * 0.5,
+          },
+          bellyFin: {
+            offsetY: -bodySize * 0.28,
+            offsetX: 0.02,
+            offsetZ: bodyLength * 0.18,
+            width: bodySize * 0.22,
+            height: bodySize * 0.16,
+            depth: bodySize * 0.56,
+            sideYaw: 0.1,
+            includeTwin: true,
+          },
+          wingRoot: {
+            insetWidth: bodySize * 0.22,
+            insetHeight: 0.11,
+            insetDepth: bodySize * 0.3,
+            insetY: 0.01,
+            insetZ: -bodyLength * 0.08,
+            insetYaw: 0.14,
+            bridgeWidth: bodySize * 0.26,
+            bridgeHeight: 0.11,
+            bridgeDepth: 0.68,
+            bridgeY: 0.03,
+            bridgeZ: -bodyLength * 0.04,
+          },
+          pylon: {
+            anchorWidth: bodySize * 0.18,
+            anchorHeight: 0.1,
+            anchorDepth: 0.34,
+            anchorYaw: 0.08,
+            braceWidth: 0.09,
+            braceHeight: bodySize * 0.09,
+            braceDepth: bodySize * 0.42,
+            braceYaw: 0.14,
+          },
+          tail: {
+            fairingWidth: 0.16,
+            fairingHeight: bodySize * 0.16,
+            fairingDepth: bodySize * 0.36,
+            fairingY: -0.01,
+            fairingZOffset: -bodyLength * 0.62,
+          },
+        };
+    }
+  })();
+
   group.scale.set(scaleMultiplier, scaleMultiplier, scaleMultiplier);
   const materials = getOrCreateMaterials(config.type, bodyColor, wingColor, accentColor);
   const weaponMaterial = createAircraftMaterial(accentColor, 0.88, 0.24, 0.02);
@@ -1548,6 +1878,69 @@ export function createEnemyMesh(config: EnemyConfig): THREE.Group {
       rotation: [0.04, 0, -0.06],
     });
   };
+  const addNoseContour = (profile: EnemyContourProfile['nose']): void => {
+    addMeshPart(group, new THREE.ConeGeometry(profile.tipWidth, profile.tipLength, 10), materials.detail, [0, profile.tipOffsetY, profile.tipOffsetZ], {
+      rotation: [-Math.PI / 2, 0, 0],
+    });
+    addMeshPart(group, new THREE.BoxGeometry(profile.chineWidth, profile.chineHeight, profile.chineDepth), materials.accent, [profile.chineWidth * 0.18, profile.chineOffsetY, profile.chineOffsetZ], {
+      rotation: [0.02, 0.05, 0],
+    });
+    addMeshPart(group, new THREE.BoxGeometry(profile.chineWidth, profile.chineHeight, profile.chineDepth), materials.accent, [-profile.chineWidth * 0.18, profile.chineOffsetY, profile.chineOffsetZ], {
+      rotation: [0.02, -0.05, 0],
+    });
+  };
+  const addBellyFin = (profile: EnemyContourProfile['bellyFin']): void => {
+    addMeshPart(group, new THREE.BoxGeometry(profile.width, profile.height, profile.depth), materials.detail, [profile.offsetX, profile.offsetY, profile.offsetZ], {
+      rotation: [0, profile.sideYaw, 0],
+    });
+    addMeshPart(group, new THREE.BoxGeometry(profile.width, profile.height, profile.depth), materials.detail, [-profile.offsetX, profile.offsetY, profile.offsetZ], {
+      rotation: [0, -profile.sideYaw, 0],
+    });
+    if (profile.includeTwin) {
+      addMeshPart(group, new THREE.BoxGeometry(profile.width * 0.72, profile.height * 0.76, profile.depth * 0.6), structureMaterial, [profile.offsetX * 1.04, profile.offsetY + profile.height * 0.08, profile.offsetZ + profile.depth * 0.24], {
+        rotation: [0.06, profile.sideYaw * 0.45, 0],
+      });
+      addMeshPart(group, new THREE.BoxGeometry(profile.width * 0.72, profile.height * 0.76, profile.depth * 0.6), structureMaterial, [-profile.offsetX * 1.04, profile.offsetY + profile.height * 0.08, profile.offsetZ + profile.depth * 0.24], {
+        rotation: [0.06, -profile.sideYaw * 0.45, 0],
+      });
+    }
+  };
+  const addWingRootTransitions = (profile: EnemyContourProfile['wingRoot']): void => {
+    addMeshPart(group, new THREE.BoxGeometry(profile.insetWidth, profile.insetHeight, profile.insetDepth), materials.detail, [-profile.insetWidth * 0.5, profile.insetY, profile.insetZ], {
+      rotation: [0.03, profile.insetYaw, 0],
+    });
+    addMeshPart(group, new THREE.BoxGeometry(profile.insetWidth, profile.insetHeight, profile.insetDepth), materials.detail, [profile.insetWidth * 0.5, profile.insetY, profile.insetZ], {
+      rotation: [0.03, -profile.insetYaw, 0],
+    });
+    addMeshPart(group, new THREE.BoxGeometry(profile.bridgeWidth, profile.bridgeHeight, profile.bridgeDepth), materials.accent, [-profile.bridgeWidth * 0.5, profile.bridgeY, profile.bridgeZ], {
+      rotation: [0.04, profile.insetYaw * 0.9, 0.04],
+    });
+    addMeshPart(group, new THREE.BoxGeometry(profile.bridgeWidth, profile.bridgeHeight, profile.bridgeDepth), materials.accent, [profile.bridgeWidth * 0.5, profile.bridgeY, profile.bridgeZ], {
+      rotation: [0.04, -profile.insetYaw * 0.9, -0.04],
+    });
+  };
+  const addPylonRig = (profile: EnemyContourProfile['pylon']): void => {
+    addMeshPart(group, new THREE.BoxGeometry(profile.anchorWidth, profile.anchorHeight, profile.anchorDepth), materials.accent, [-wingSpan * 0.22, jetProfile.pylonY - 0.02, jetProfile.pylonZ], {
+      rotation: [0.04, -profile.anchorYaw, 0],
+    });
+    addMeshPart(group, new THREE.BoxGeometry(profile.anchorWidth, profile.anchorHeight, profile.anchorDepth), materials.accent, [wingSpan * 0.22, jetProfile.pylonY - 0.02, jetProfile.pylonZ], {
+      rotation: [0.04, profile.anchorYaw, 0],
+    });
+    addMeshPart(group, new THREE.BoxGeometry(profile.braceWidth, profile.braceHeight, profile.braceDepth), materials.detail, [-wingSpan * 0.28, jetProfile.pylonY + 0.08, jetProfile.pylonZ + 0.06], {
+      rotation: [0, -profile.braceYaw, 0],
+    });
+    addMeshPart(group, new THREE.BoxGeometry(profile.braceWidth, profile.braceHeight, profile.braceDepth), materials.detail, [wingSpan * 0.28, jetProfile.pylonY + 0.08, jetProfile.pylonZ + 0.06], {
+      rotation: [0, profile.braceYaw, 0],
+    });
+  };
+  const addTailTransition = (profile: EnemyContourProfile['tail']): void => {
+    addMeshPart(group, new THREE.BoxGeometry(profile.fairingWidth, profile.fairingHeight, profile.fairingDepth), materials.detail, [0, profile.fairingY, profile.fairingZOffset], {
+      rotation: [0.04, 0, 0],
+    });
+    addMeshPart(group, new THREE.BoxGeometry(profile.fairingWidth * 0.88, profile.fairingHeight * 0.76, profile.fairingDepth * 0.66), materials.accent, [0, profile.fairingY + 0.03, profile.fairingZOffset - 0.02], {
+      rotation: [0.05, 0, 0],
+    });
+  };
   const applyUnifiedJetProportionLayer = (): void => {
     addIntakeLipPair(
       jetProfile.intakeX,
@@ -1595,6 +1988,13 @@ export function createEnemyMesh(config: EnemyConfig): THREE.Group {
         castShadow: false,
       });
     }
+  };
+  const applyEnemyContourRefinement = (): void => {
+    addNoseContour(contourProfile.nose);
+    addBellyFin(contourProfile.bellyFin);
+    addWingRootTransitions(contourProfile.wingRoot);
+    addPylonRig(contourProfile.pylon);
+    addTailTransition(contourProfile.tail);
   };
   if (config.type === EnemyType.SCOUT) {
     addMeshPart(group, new THREE.CylinderGeometry(bodySize * 0.14, bodySize * 0.26, bodyLength * 0.34, 8), materials.body, [0, 0, bodyLength * 0.26], {
@@ -2222,6 +2622,7 @@ export function createEnemyMesh(config: EnemyConfig): THREE.Group {
   addWingRootTransitionPair(jetProfile.pylonX, jetProfile.pylonY - 0.03, jetProfile.pylonZ + 0.04);
   addPylonAnchorPair(jetProfile.pylonX, jetProfile.pylonY - 0.06, jetProfile.pylonZ + 0.08);
   addTailRootSaddle();
+  applyEnemyContourRefinement();
 
   group.name = config.type;
   return group;

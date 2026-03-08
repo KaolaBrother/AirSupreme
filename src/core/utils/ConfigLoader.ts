@@ -258,9 +258,9 @@ const DEFAULT_CONFIG: GameConfigData = {
     maxLockDistance: 600,
     maxFlightDistance: 2400,
     startingMissiles: 2,
-    maxMissiles: 10,
+    maxMissiles: 5,
     respawnTime: 7.5,
-    maxRespawnMissiles: 10,
+    maxRespawnMissiles: 5,
   },
   bossMissile: {
     scale: 4,

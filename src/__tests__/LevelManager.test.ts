@@ -172,5 +172,20 @@ describe('LevelManager', () => {
 
       expect(onWaveEventStart).toHaveBeenCalledWith(LevelWaveEventType.ESCORT_DEFENSE, 3);
     });
+
+    it('should expose onboarding beat data in wave progress snapshots', () => {
+      (levelManager as unknown as { currentWave: number; state: LevelState }).currentWave = 1;
+      (levelManager as unknown as { currentWave: number; state: LevelState }).state =
+        LevelState.WAVE_COMPLETE;
+
+      levelManager.startWave(undefined, true);
+
+      const snapshot = levelManager.getWaveProgressSnapshot();
+      expect(snapshot).not.toBeNull();
+      expect(snapshot?.eventType).toBe(LevelWaveEventType.INTERCEPT);
+      expect(snapshot?.onboardingBeat.eventTypeLabel).toBe('限时拦截');
+      expect(snapshot?.onboardingBeat.eventPromptDelayMs).toBeGreaterThan(0);
+      expect(levelManager.getCurrentWaveOnboardingBeat().eventBannerLabel).toContain('限时拦截');
+    });
   });
 });

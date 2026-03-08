@@ -97,14 +97,20 @@ interface CombatRuntimeSystems {
 }
 
 export class GameCoordinator {
-  private static readonly TUTORIAL_STAGE_DURATION_MS = 2200;
-  private static readonly TUTORIAL_STAGE_GAP_MS = 350;
-  private static readonly TUTORIAL_WAVE_READY_BUFFER_MS = 1000;
-  private static readonly TUTORIAL_FRIENDLY_SPAWN_DELAY_MS = 5200;
+  private static readonly TUTORIAL_STAGE_DURATION_MS = 1800;
+  private static readonly TUTORIAL_STAGE_GAP_MS = 240;
+  private static readonly TUTORIAL_WAVE_READY_BUFFER_MS = 700;
+  private static readonly TUTORIAL_PRE_WAVE_WARNING_LEAD_MS = 900;
+  private static readonly TUTORIAL_FRIENDLY_SPAWN_DELAY_MS = 3800;
   private static readonly TUTORIAL_MOVE_DISTANCE = 90;
   private static readonly TUTORIAL_SPEED_THRESHOLD_RATIO = 0.72;
-  private static readonly OBJECTIVE_COMPLETE_HOLD_MS = 1700;
+  private static readonly OBJECTIVE_COMPLETE_HOLD_MS = 1200;
   private static readonly ESCORT_WAVE_SCORE_BONUS = 180;
+  private static readonly TUTORIAL_HINT_SHORT_MS = 1300;
+  private static readonly TUTORIAL_HINT_MED_MS = 1500;
+  private static readonly TUTORIAL_HINT_LONG_MS = 1700;
+  private static readonly WAVE_EVENT_START_COOLDOWN_MS = 1000;
+  private static readonly WAVE_EVENT_COMPLETE_COOLDOWN_MS = 900;
   private static readonly UPGRADE_FEEDBACK: Record<UpgradeType, { icon: string; label: string }> = {
     [UpgradeType.MAX_HEALTH]: { icon: '❤️', label: '最大生命值升级' },
     [UpgradeType.SPEED]: { icon: '⚡', label: '飞行速度升级' },
@@ -191,6 +197,10 @@ export class GameCoordinator {
   private lastRenderTimestamp: number = 0;
   private upgradeMenuHintShown: boolean = false;
   private waveCompletionObjective: WaveObjectiveDisplay | null = null;
+  private lastWaveEventPromptSignature: string = '';
+  private lastWaveEventCompleteSignature: string = '';
+  private lastWaveEventPromptAt: number = 0;
+  private lastWaveEventCompleteAt: number = 0;
 
   public static warmRuntimeChunks(): Promise<void> {
     if (!this.runtimeWarmupPromise) {
@@ -1224,6 +1234,10 @@ export class GameCoordinator {
     this.presentationController.resetHudThrottle();
     this.presentationController.clearEventObjective();
     this.resetTutorialCombatState();
+    this.lastWaveEventPromptSignature = '';
+    this.lastWaveEventCompleteSignature = '';
+    this.lastWaveEventPromptAt = 0;
+    this.lastWaveEventCompleteAt = 0;
     this.waveCompletionObjective = null;
     this.waveEventState.type = null;
     this.waveEventState.wave = -1;
@@ -1344,7 +1358,7 @@ export class GameCoordinator {
         this.hud.showPowerUpBig(
           stage.icon,
           stage.text,
-          GameCoordinator.TUTORIAL_STAGE_DURATION_MS / 1000,
+          GameCoordinator.TUTORIAL_HINT_MED_MS / 1000,
           stage.hideSubtext ?? false
         );
       }, delay);
@@ -1354,15 +1368,18 @@ export class GameCoordinator {
   private startTutorialCombatSequence(tutorialWaveDelayMs: number): void {
     const combatStartDelayMs =
       GAME_CONSTANTS.LEVEL.START_DELAY * 1000 + tutorialWaveDelayMs;
-    const waveReadyDelayMs = Math.max(0, combatStartDelayMs - 1200);
+    const waveReadyDelayMs = Math.max(
+      0,
+      combatStartDelayMs - GameCoordinator.TUTORIAL_PRE_WAVE_WARNING_LEAD_MS
+    );
 
     this.scheduleTimeout(() => {
-      this.hud.showPowerUpBig('📡', '前方有敌，准备接敌', 1.5);
+      this.hud.showPowerUpBig('📡', '前方有敌，准备接敌', GameCoordinator.TUTORIAL_HINT_MED_MS / 1000);
     }, waveReadyDelayMs);
 
     this.scheduleTimeout(() => {
       this.activateTutorialCombatStage();
-      this.hud.showPowerUpBig('⚔️', '第一波到来，先稳机动再开火', 1.8);
+      this.hud.showPowerUpBig('⚔️', '第一波到来，先稳机动再开火', GameCoordinator.TUTORIAL_HINT_LONG_MS / 1000);
     }, combatStartDelayMs);
   }
 
@@ -1404,7 +1421,7 @@ export class GameCoordinator {
       const movedDistance = this.playerSystem.getPosition().distanceTo(startPosition);
       if (movedDistance >= GameCoordinator.TUTORIAL_MOVE_DISTANCE) {
         this.tutorialCombatState.movementHintShown = true;
-        this.hud.showPowerUpBig('🕹️', '机动确认，继续提速拉距', 1.8);
+        this.hud.showPowerUpBig('🕹️', '机动确认，继续提速拉距', GameCoordinator.TUTORIAL_HINT_MED_MS / 1000);
         this.updatePlayerFacingObjective();
       }
     }
@@ -1416,7 +1433,7 @@ export class GameCoordinator {
         >= this.playerStats.getMaxSpeed() * GameCoordinator.TUTORIAL_SPEED_THRESHOLD_RATIO
     ) {
       this.tutorialCombatState.speedHintShown = true;
-      this.hud.showPowerUpBig('⚡', '速度到位，按住开火压制', 1.8);
+      this.hud.showPowerUpBig('⚡', '速度到位，按住开火压制', GameCoordinator.TUTORIAL_HINT_MED_MS / 1000);
       this.updatePlayerFacingObjective();
     }
   }
@@ -1427,7 +1444,7 @@ export class GameCoordinator {
     }
 
     this.tutorialCombatState.fireHintShown = true;
-    this.hud.showPowerUpBig('🔥', '火力确认，准备导弹锁定', 1.8);
+    this.hud.showPowerUpBig('🔥', '火力确认，准备导弹锁定', GameCoordinator.TUTORIAL_HINT_MED_MS / 1000);
     this.updatePlayerFacingObjective();
   }
 
@@ -1437,7 +1454,7 @@ export class GameCoordinator {
     }
 
     this.tutorialCombatState.lockHintShown = true;
-    this.hud.showPowerUpBig('🎯', '稳住准星，等待锁定圈闭合', 1.8);
+    this.hud.showPowerUpBig('🎯', '稳住准星，等待锁定圈闭合', GameCoordinator.TUTORIAL_HINT_MED_MS / 1000);
     this.updatePlayerFacingObjective();
   }
 
@@ -1447,7 +1464,7 @@ export class GameCoordinator {
     }
 
     this.tutorialCombatState.missileHintShown = true;
-    this.hud.showPowerUpBig('🚀', '导弹已发射，优先点杀高威胁', 1.8);
+    this.hud.showPowerUpBig('🚀', '导弹已发射，优先点杀高威胁', GameCoordinator.TUTORIAL_HINT_MED_MS / 1000);
     this.updatePlayerFacingObjective();
   }
 
@@ -1457,7 +1474,7 @@ export class GameCoordinator {
     }
 
     this.tutorialCombatState.lockCompleteHintShown = true;
-    this.hud.showPowerUpBig('✅', '锁定完成，立刻发射', 1.7);
+    this.hud.showPowerUpBig('✅', '锁定完成，立刻发射', GameCoordinator.TUTORIAL_HINT_SHORT_MS / 1000);
     this.updatePlayerFacingObjective();
   }
 
@@ -1467,7 +1484,7 @@ export class GameCoordinator {
     }
 
     this.tutorialCombatState.killHintShown = true;
-    this.hud.showPowerUpBig('🎯', '首杀确认，继续清空本波后正式', 1.8);
+    this.hud.showPowerUpBig('🎯', '首杀确认，继续清空本波后正式', GameCoordinator.TUTORIAL_HINT_LONG_MS / 1000);
     this.tutorialCombatState.active = false;
     this.showTransientObjective(
       {
@@ -1475,7 +1492,7 @@ export class GameCoordinator {
         objective: '首轮引导完成，进入常规波次。',
         status: '教学完成 · 常规战斗已解锁',
       },
-      2600
+      GameCoordinator.TUTORIAL_HINT_LONG_MS + 1000
     );
   }
 
@@ -1485,7 +1502,7 @@ export class GameCoordinator {
     }
 
     this.tutorialCombatState.hitHintShown = true;
-    this.hud.showPowerUpBig('↪️', '被命中后立刻横移或加速脱离', 1.7);
+    this.hud.showPowerUpBig('↪️', '被命中后立刻横移或加速脱离', GameCoordinator.TUTORIAL_HINT_SHORT_MS / 1000);
     this.updatePlayerFacingObjective();
   }
 
@@ -1495,7 +1512,7 @@ export class GameCoordinator {
     }
 
     this.tutorialCombatState.friendlySupportHintShown = true;
-    this.hud.showPowerUpBig('🤝', '友军到位，先护航再压制', 1.8);
+    this.hud.showPowerUpBig('🤝', '友军到位，先护航再压制', GameCoordinator.TUTORIAL_HINT_MED_MS / 1000);
     this.updatePlayerFacingObjective();
   }
 
@@ -1508,6 +1525,11 @@ export class GameCoordinator {
     this.waveEventState.wave = wave;
 
     const waveNumber = wave + 1;
+    const now = Date.now();
+    const promptSignature = `${wave}|${eventType}`;
+    const shouldShowPrompt =
+      promptSignature !== this.lastWaveEventPromptSignature
+      || now - this.lastWaveEventPromptAt >= GameCoordinator.WAVE_EVENT_START_COOLDOWN_MS;
     const objectiveDisplay = this.getWaveObjectiveDisplay(eventType, waveNumber);
     this.presentationController.showEventObjective(
       objectiveDisplay.title,
@@ -1515,12 +1537,29 @@ export class GameCoordinator {
       objectiveDisplay.status
     );
 
+    if (!shouldShowPrompt) {
+      return;
+    }
+
+    this.lastWaveEventPromptSignature = promptSignature;
+    this.lastWaveEventPromptAt = now;
+
     switch (eventType) {
       case LevelWaveEventType.ELITE_HUNT:
-        this.hud.showPowerUpBig('💠', `精英歼灭波次 · 第${waveNumber}波`, 1.8, true);
+        this.hud.showPowerUpBig(
+          '💠',
+          `精英歼灭波次 · 第${waveNumber}波`,
+          GameCoordinator.TUTORIAL_HINT_LONG_MS / 1000,
+          true
+        );
         break;
       case LevelWaveEventType.INTERCEPT:
-        this.hud.showPowerUpBig('⚠️', `限时拦截波次 · 第${waveNumber}波`, 1.8, true);
+        this.hud.showPowerUpBig(
+          '⚠️',
+          `限时拦截波次 · 第${waveNumber}波`,
+          GameCoordinator.TUTORIAL_HINT_LONG_MS / 1000,
+          true
+        );
         break;
       case LevelWaveEventType.ESCORT_DEFENSE:
         if ((this.enemySystem?.getFriendlyAIs().length ?? 0) < 4) {
@@ -1528,7 +1567,12 @@ export class GameCoordinator {
           this.escortWaveState.active = true;
           this.escortWaveState.friendlyId = escortFriendly.getMesh().uuid;
         }
-        this.hud.showPowerUpBig('🛡️', `护送防守波次 · 第${waveNumber}波`, 1.8, true);
+        this.hud.showPowerUpBig(
+          '🛡️',
+          `护送防守波次 · 第${waveNumber}波`,
+          GameCoordinator.TUTORIAL_HINT_LONG_MS / 1000,
+          true
+        );
         break;
     }
   }
@@ -1549,9 +1593,9 @@ export class GameCoordinator {
       const earnedPoints = this.playerStats.addScore(GameCoordinator.ESCORT_WAVE_SCORE_BONUS);
       this.hud.updateUpgradePoints(this.playerStats.getUpgrades().getAvailablePoints());
       this.notifyEarnedUpgradePoints(earnedPoints);
-      this.hud.showPowerUpBig('✅', '护送完成，奖励到位', 1.6, true);
+      this.hud.showPowerUpBig('✅', '护送完成，奖励到位', GameCoordinator.TUTORIAL_HINT_MED_MS / 1000, true);
     } else {
-      this.hud.showPowerUpBig('⚠️', '护送失利，继续压制', 1.6, true);
+      this.hud.showPowerUpBig('⚠️', '护送失利，继续压制', GameCoordinator.TUTORIAL_HINT_MED_MS / 1000, true);
     }
 
     this.escortWaveState.active = false;
@@ -1566,10 +1610,10 @@ export class GameCoordinator {
       return;
     }
 
+    const now = Date.now();
     let completionObjective: WaveObjectiveDisplay | null = null;
     switch (this.waveEventState.type) {
       case LevelWaveEventType.ELITE_HUNT:
-        this.hud.showPowerUpBig('✅', '精英歼灭完成，威胁已压', 1.6, true);
         completionObjective = {
           title: `第 ${wave + 1} 波 · 精英歼灭完成`,
           objective: '高威胁目标已清空，空域压力下降。',
@@ -1577,7 +1621,6 @@ export class GameCoordinator {
         };
         break;
       case LevelWaveEventType.INTERCEPT:
-        this.hud.showPowerUpBig('✅', '拦截成功，前锋被压制', 1.6, true);
         completionObjective = {
           title: `第 ${wave + 1} 波 · 拦截完成`,
           objective: '前锋突防已压制，准备接续下一波。',
@@ -1605,7 +1648,31 @@ export class GameCoordinator {
 
     this.waveEventState.type = null;
     this.waveEventState.wave = -1;
-    if (completionObjective) {
+
+    const completionSignature = `${wave}|${completionObjective?.title ?? 'unknown'}`;
+    const shouldShowCompletion =
+      completionSignature !== this.lastWaveEventCompleteSignature
+      || now - this.lastWaveEventCompleteAt >= GameCoordinator.WAVE_EVENT_COMPLETE_COOLDOWN_MS;
+
+    if (shouldShowCompletion) {
+      this.lastWaveEventCompleteSignature = completionSignature;
+      this.lastWaveEventCompleteAt = now;
+
+      if (completionObjective) {
+        const completionStatus = completionObjective.status ?? '';
+        const isSuccess = completionStatus.includes('达成')
+          || completionStatus.includes('威胁')
+          || completionStatus.includes('拦截完成');
+        this.hud.showPowerUpBig(
+          isSuccess ? '✅' : '⚠️',
+          isSuccess ? '本波事件完成' : '事件收束',
+          GameCoordinator.TUTORIAL_HINT_MED_MS / 1000,
+          true
+        );
+      }
+    }
+
+    if (completionObjective && shouldShowCompletion) {
       this.showTransientObjective(completionObjective);
       return;
     }

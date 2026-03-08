@@ -567,12 +567,12 @@ window.game.levelManager; // 查看关卡状态
 
 #### 导弹补给系统
 
-- **自动补给**: 每7.5秒自动补充1个导弹（最多10个）
+- **自动补给**: 每7.5秒自动补充1个导弹（最多5个）
 - **UI显示**: 右上角白色进度条显示到下一个导弹的进度
 - **进度更新**: 基于 `updateMissileProgress()` 实时更新进度条宽度
 - **配置**：
   - MISSILE_RESPAWN_TIME: 7.5（秒）
-  - MAX_RESPAWN_MISSILES: 10（上限）
+  - MAX_RESPAWN_MISSILES: 5（上限）
 
 ---
 

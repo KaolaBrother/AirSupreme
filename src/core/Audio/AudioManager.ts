@@ -78,6 +78,8 @@ export class AudioManager {
   private activeSoundCounts: Map<SoundType, number> = new Map();
   private lastSoundPlayTimes: Map<SoundType, number> = new Map();
   private soundReleaseTimeouts: Set<number> = new Set();
+  private readonly hitToneSeeds: Map<string, number> = new Map();
+  private readonly heavyWeaponSeeds: Map<string, number> = new Map();
   private readonly sfxBusBalanceBoost = 0.78;
   private readonly engineBoostStartBlend = 0.62;
   private readonly engineBoostStopBlend = 0.55;
@@ -283,6 +285,38 @@ export class AudioManager {
     const duckCompensation = clamp01(1 - (policy?.duckAmount ?? 0) * 0.4);
     const musicCompensation = 1 - musicPressure * 0.18;
     return clamp01(profileScale * duckCompensation * musicCompensation * this.sfxBusBalanceBoost);
+  }
+
+  private nextSoundSeed(source: Map<string, number>, key: string, maxSteps: number = 8): number {
+    const steps = Math.max(1, Math.floor(maxSteps));
+    const current = source.get(key) ?? 0;
+    const next = (current + 1) % steps;
+    source.set(key, next);
+    return current;
+  }
+
+  private profileDetuneCents(step: number, maxSteps: number, stepSize = 14): number {
+    const steps = Math.max(1, Math.floor(maxSteps));
+    const centsPerStep = Math.max(1, stepSize);
+    const normalizedStep = Math.max(0, Math.floor(step)) % steps;
+
+    if (steps === 1) {
+      return 0;
+    }
+
+    if (steps % 2 === 0) {
+      const magnitude = Math.floor(normalizedStep / 2) + 0.5;
+      const direction = normalizedStep % 2 === 0 ? 1 : -1;
+      return direction * magnitude * centsPerStep;
+    }
+
+    if (normalizedStep === 0) {
+      return 0;
+    }
+
+    const magnitude = Math.ceil(normalizedStep / 2);
+    const direction = normalizedStep % 2 === 1 ? -1 : 1;
+    return direction * magnitude * centsPerStep;
   }
 
   private beginSound(
@@ -888,6 +922,9 @@ export class AudioManager {
     const isMissileTone = hitTone === 'missile';
     const isFlakTone = hitTone === 'flak';
     const isHeavyTone = hitTone === 'heavy';
+    const hitSeed = this.nextSoundSeed(this.hitToneSeeds, `${profile}-${hitTone}`, 12);
+    const detuneCents = this.profileDetuneCents(hitSeed, 12, 12);
+    const profileOffset = isBoss ? 0.05 : isEnemy ? 0.02 : isMissileTone ? 0.03 : -0.01;
 
     const bodyType: OscillatorType = isMissileTone
       ? 'square'
@@ -906,7 +943,9 @@ export class AudioManager {
         ? 'square'
         : isHeavyTone
           ? 'triangle'
-          : 'square';
+          : isBoss
+            ? 'sine'
+            : 'square';
     const bodyStartHz = isMissileTone
       ? 360
       : isFlakTone
@@ -952,7 +991,16 @@ export class AudioManager {
     const durationSec = isBoss ? 0.16 : isMissileTone ? 0.14 : 0.11;
     const sparkleDurationSec = isFlakTone ? 0.09 : isMissileTone ? 0.08 : 0.06;
     const filterType: BiquadFilterType = isHeavyTone || isMissileTone ? 'bandpass' : 'highpass';
-    const noiseFreq = isMissileTone ? 1900 : isFlakTone ? 1500 : isHeavyTone ? 2200 : isBoss ? 1400 : 2200;
+    const noiseFreq = isMissileTone
+      ? 1900
+      : isFlakTone
+        ? 1500
+        : isHeavyTone
+          ? 2200
+          : isBoss
+            ? 1400
+            : 2200;
+    const bodyStartHzOffset = bodyStartHz + profileOffset * 140 + detuneCents * 0.35;
     const noiseQ = isHeavyTone
       ? 1.3
       : isFlakTone
@@ -965,7 +1013,8 @@ export class AudioManager {
       const bodyOsc = context.createOscillator();
       const bodyGain = context.createGain();
       bodyOsc.type = bodyType;
-      bodyOsc.frequency.setValueAtTime(bodyStartHz - hitIntensity * 36, now);
+      bodyOsc.detune.setValueAtTime(detuneCents, now);
+      bodyOsc.frequency.setValueAtTime(bodyStartHzOffset - hitIntensity * 36, now);
       bodyOsc.frequency.exponentialRampToValueAtTime(bodyEndHz - hitIntensity * 8, now + durationSec);
       bodyGain.gain.setValueAtTime(0, now);
       bodyGain.gain.linearRampToValueAtTime(
@@ -983,8 +1032,15 @@ export class AudioManager {
       const sparkOsc = context.createOscillator();
       const sparkGain = context.createGain();
       sparkOsc.type = sparkleType;
-      sparkOsc.frequency.setValueAtTime(sparkleStartHz + hitIntensity * 120, now);
-      sparkOsc.frequency.exponentialRampToValueAtTime(sparkleEndHz + hitIntensity * 10, now + sparkleDurationSec);
+      sparkOsc.detune.setValueAtTime(-detuneCents * 0.35, now);
+      sparkOsc.frequency.setValueAtTime(
+        sparkleStartHz + profileOffset * 160 + hitIntensity * 120,
+        now
+      );
+      sparkOsc.frequency.exponentialRampToValueAtTime(
+        sparkleEndHz + hitIntensity * 10,
+        now + sparkleDurationSec
+      );
       sparkGain.gain.setValueAtTime(0, now);
       sparkGain.gain.linearRampToValueAtTime(
         (isMissileTone || isFlakTone
@@ -1021,7 +1077,7 @@ export class AudioManager {
                     ? 0.07
                     : 0.08) * this.sfxVolume * hitIntensity,
         filterType,
-        noiseFreq,
+        noiseFreq + detuneCents * 0.9,
         noiseQ
       );
     } catch {
@@ -1036,26 +1092,25 @@ export class AudioManager {
     const durationMs =
       profile === 'laser' ? 180 : profile === 'flak-hit' ? 240 : profile === 'boss-armor' ? 210 : 220;
     const isFlak = profile === 'flak-hit';
-    const sound = this.beginSound(
-      isFlak
-        ? SoundType.FLAK_HIT
-        : profile === 'boss-armor'
-          ? SoundType.HEAVY_WEAPON_HIT
-          : SoundType.BULLET_HIT,
-      durationMs
-    );
-    if (!sound) return;
-    const { now, context, sfxGain } = sound;
-    const hitIntensity = Math.max(0.8, Math.min(2.4, intensity));
     const isLaser = profile === 'laser';
     const isArmor = profile === 'boss-armor';
     const isCannon = profile === 'boss-cannon';
+    const profileSeed = this.nextSoundSeed(this.heavyWeaponSeeds, `heavy-${profile}`, 10);
+    const detuneCents = this.profileDetuneCents(profileSeed, 10, 16);
+    const soundType = isFlak
+      ? SoundType.FLAK_HIT
+      : SoundType.HEAVY_WEAPON_HIT;
+    const sound = this.beginSound(soundType, durationMs);
+    if (!sound) return;
+    const { now, context, sfxGain } = sound;
+    const hitIntensity = Math.max(0.8, Math.min(2.4, intensity));
     const profileGain = isLaser ? 0.92 : isFlak ? 0.98 : isArmor ? 0.9 : 0.96;
 
     try {
       const impactOsc = context.createOscillator();
       const impactGain = context.createGain();
       impactOsc.type = isLaser ? 'triangle' : isArmor ? 'square' : 'sawtooth';
+      impactOsc.detune.setValueAtTime(detuneCents, now);
       impactOsc.frequency.setValueAtTime(
         isLaser ? 420 : isFlak ? 210 : isArmor ? 190 : isCannon ? 150 : 160,
         now
@@ -1078,6 +1133,7 @@ export class AudioManager {
       const crackOsc = context.createOscillator();
       const crackGain = context.createGain();
       crackOsc.type = isLaser ? 'sine' : 'triangle';
+      crackOsc.detune.setValueAtTime(-detuneCents * 0.6, now);
       crackOsc.frequency.setValueAtTime(
         isLaser ? 1480 : isFlak ? 820 : isArmor ? 980 : isCannon ? 620 : 700,
         now + 0.01
@@ -1101,6 +1157,7 @@ export class AudioManager {
         const subOsc = context.createOscillator();
         const subGain = context.createGain();
         subOsc.type = 'sine';
+        subOsc.detune.setValueAtTime(detuneCents * 0.2, now);
         subOsc.frequency.setValueAtTime(isFlak ? 82 : isCannon ? 58 : 64, now + 0.014);
         subOsc.frequency.exponentialRampToValueAtTime(isFlak ? 28 : isCannon ? 20 : 22, now + 0.32);
         subGain.gain.setValueAtTime(0, now + 0.014);
@@ -1122,6 +1179,7 @@ export class AudioManager {
         const metallicOsc = context.createOscillator();
         const metallicGain = context.createGain();
         metallicOsc.type = 'triangle';
+        metallicOsc.detune.setValueAtTime(-detuneCents * 0.55, now);
         metallicOsc.frequency.setValueAtTime(isArmor ? 1280 : 960, now + 0.006);
         metallicOsc.frequency.exponentialRampToValueAtTime(isArmor ? 420 : 320, now + 0.11);
         metallicGain.gain.setValueAtTime(0, now + 0.004);

@@ -260,8 +260,8 @@ export const GAME_CONSTANTS = {
     MAX_LOCK_DISTANCE: 600, // 最大锁定距离
     MAX_FLIGHT_DISTANCE: 2400, // 最大飞行距离（是锁定距离的4倍）
     STARTING_MISSILES: 2,  // 初始导弹数量
-    MAX_MISSILES: 10,       // 最大导弹数量
+    MAX_MISSILES: 5,       // 最大导弹数量
     MISSILE_RESPAWN_TIME: 7.5, // 导弹补给时间（秒）
-    MAX_RESPAWN_MISSILES: 10, // 导弹补给上限
+    MAX_RESPAWN_MISSILES: 5, // 导弹补给上限
   },
 };

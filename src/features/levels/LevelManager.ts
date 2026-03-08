@@ -19,6 +19,11 @@ import { createEnemyMesh } from '@/features/aircraft/AircraftMeshFactory';
 import { getLogger } from '@/core/utils/Logger';
 import type { DifficultyProfile } from '@/core/Difficulty';
 import { GameConfig } from '@/config';
+import {
+  DEFAULT_ONBOARDING_BEAT_PROFILE,
+  getWaveOnboardingBeat,
+  type OnboardingWaveBeatProfile,
+} from '@/ui/OnboardingManager';
 
 const log = getLogger('LevelManager');
 
@@ -39,6 +44,7 @@ export interface WaveProgressSnapshot {
   eventType: LevelWaveEventType | null;
   state: LevelState;
   nextWaveDelaySeconds: number;
+  onboardingBeat: OnboardingWaveBeatProfile;
 }
 
 /**
@@ -87,6 +93,7 @@ export class LevelManager {
   private waveGroupCenter?: Vector3; // 当前波次的敌人群中心
   private currentWaveEvent: LevelWaveEventType | null = null;
   private difficultyProfile: DifficultyProfile | null = null;
+  private currentWaveBeatProfile: OnboardingWaveBeatProfile = DEFAULT_ONBOARDING_BEAT_PROFILE;
 
   // 回调
   public onWaveStart?: (wave: number) => void;
@@ -232,6 +239,7 @@ export class LevelManager {
       this.state = LevelState.WAVE_ACTIVE;
       this.enemiesSpawnedThisWave = 0;
       this.currentWaveEvent = this.resolveWaveEvent();
+      this.currentWaveBeatProfile = getWaveOnboardingBeat(this.currentWave, this.currentWaveEvent);
       this.spawnTimer = 0;
       this.spawnInterval = this.getWaveSpawnInterval();
       this.onWaveStart?.(this.currentWave);
@@ -257,6 +265,7 @@ export class LevelManager {
     this.state = LevelState.WAVE_ACTIVE;
     this.enemiesSpawnedThisWave = 0;
     this.currentWaveEvent = this.resolveWaveEvent();
+    this.currentWaveBeatProfile = getWaveOnboardingBeat(this.currentWave, this.currentWaveEvent);
     this.spawnTimer = 0;
     this.spawnInterval = this.getWaveSpawnInterval();
     this.onWaveStart?.(this.currentWave);
@@ -482,7 +491,12 @@ export class LevelManager {
       eventType: this.currentWaveEvent,
       state: this.state,
       nextWaveDelaySeconds: Math.max(0, nextWaveDelaySeconds),
+      onboardingBeat: { ...this.currentWaveBeatProfile },
     };
+  }
+
+  public getCurrentWaveOnboardingBeat(): OnboardingWaveBeatProfile {
+    return { ...this.currentWaveBeatProfile };
   }
 
   /**

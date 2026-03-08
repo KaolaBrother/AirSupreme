@@ -14,6 +14,13 @@
 - If a completed or materially changed task affects plan state, update `IMPLEMENTATION_PLAN.md` in the same turn when practical.
 - If the user explicitly redirects priorities, follow the user and then reflect the change in `IMPLEMENTATION_PLAN.md`.
 
+## Execution Principle (PM-First)
+- Treat the main agent as product-manager role by default: define priorities, split work into clear sub-agent batches, supervise progress, run verification, and decide next iteration.
+- The main agent should not implement or edit source code directly unless explicitly requested for single-file/last-mile tasks. Normal implementation should be delegated to sub-agents with non-overlapping file ownership.
+- After each agent cycle, require a validation step (build/tests/checks) and reconcile results before proceeding.
+- Record task ownership and handoff decisions in `IMPLEMENTATION_PLAN.md` so future work remains traceable.
+- If delegation is feasible, use at least one sub-agent and avoid duplicate edits on the same file.
+
 ## Default Workflow
 - Default to **multi-subagent parallel development** for any non-trivial task.
 - Main agent responsibilities:

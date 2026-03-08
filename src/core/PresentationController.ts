@@ -42,6 +42,8 @@ interface PresentationControllerOptions {
   uiUpdateInterval?: number;
 }
 
+type EventObjectiveTone = 'default' | 'complete';
+
 /**
  * 表现层控制器
  * 只负责 UI/指示器编排，不持有游戏玩法状态。
@@ -53,10 +55,16 @@ export class PresentationController {
   private readonly bossIndicator: BossMissileIndicator;
   private readonly lockOnIndicator: LockOnIndicator;
   private readonly uiUpdateInterval: number;
+  private static readonly EVENT_OBJECTIVE_STATUS_THROTTLE_MS = 300;
 
   private uiUpdateAccumulator: number = 0;
   private missileUiAccumulator: number = 0;
   private lastMissileCount: number | null = null;
+  private lastEventObjectiveTone: EventObjectiveTone = 'default';
+  private lastEventObjectiveTitle: string = '';
+  private lastEventObjectiveText: string = '';
+  private lastEventObjectiveStatus: string = '';
+  private lastEventObjectiveStatusUpdatedAt: number = 0;
 
   constructor(options: PresentationControllerOptions) {
     this.hud = options.hud;
@@ -150,11 +158,51 @@ export class PresentationController {
   }
 
   public showEventObjective(title: string, objective: string, status?: string): void {
-    this.hud.showEventObjective(title, objective, status);
+    this.updateEventObjective('default', title, objective, status);
   }
 
   public showCompletedEventObjective(title: string, objective: string, status?: string): void {
-    this.hud.showCompletedEventObjective(title, objective, status);
+    this.updateEventObjective('complete', title, objective, status);
+  }
+
+  private updateEventObjective(
+    tone: EventObjectiveTone,
+    title: string,
+    objective: string,
+    status?: string
+  ): void {
+    const normalizedStatus = status ?? '';
+    const now = Date.now();
+
+    const titleChanged =
+      this.lastEventObjectiveTone !== tone ||
+      this.lastEventObjectiveTitle !== title ||
+      this.lastEventObjectiveText !== objective;
+    const statusChanged = this.lastEventObjectiveStatus !== normalizedStatus;
+
+    if (!titleChanged && !statusChanged) {
+      return;
+    }
+
+    if (!titleChanged && now - this.lastEventObjectiveStatusUpdatedAt < PresentationController.EVENT_OBJECTIVE_STATUS_THROTTLE_MS) {
+      return;
+    }
+
+    if (titleChanged) {
+      if (tone === 'complete') {
+        this.hud.showCompletedEventObjective(title, objective, normalizedStatus);
+      } else {
+        this.hud.showEventObjective(title, objective, normalizedStatus);
+      }
+    } else {
+      this.hud.updateEventObjectiveStatus(normalizedStatus);
+    }
+
+    this.lastEventObjectiveTone = tone;
+    this.lastEventObjectiveTitle = title;
+    this.lastEventObjectiveText = objective;
+    this.lastEventObjectiveStatus = normalizedStatus;
+    this.lastEventObjectiveStatusUpdatedAt = now;
   }
 
   public updateEventObjectiveStatus(status: string): void {
@@ -163,6 +211,11 @@ export class PresentationController {
 
   public clearEventObjective(): void {
     this.hud.hideEventObjective();
+    this.lastEventObjectiveTone = 'default';
+    this.lastEventObjectiveTitle = '';
+    this.lastEventObjectiveText = '';
+    this.lastEventObjectiveStatus = '';
+    this.lastEventObjectiveStatusUpdatedAt = 0;
   }
 
   public dispose(): void {

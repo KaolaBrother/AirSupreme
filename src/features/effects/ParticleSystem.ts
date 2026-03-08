@@ -35,6 +35,47 @@ interface DelayedBurst {
   emit: () => void;
 }
 
+interface HitVisualProfileConfig {
+  sparkCountScale: number;
+  flashCountScale: number;
+  debrisCountScale: number;
+  smokeCountScale: number;
+  flashLifeScale: number;
+  flashSizeScale: number;
+  flashHue: number;
+  flashSat: number;
+  flashLightBase: number;
+  sparkHue: number;
+  sparkSat: number;
+  sparkLightBase: number;
+  smokeSat: number;
+  smokeLightBase: number;
+}
+
+interface HeavyWeaponVisualProfileConfig {
+  flashCountScale: number;
+  fireCountScale: number;
+  sparkCountScale: number;
+  smokeCountScale: number;
+  debrisScale: number;
+  flashLifeBase: number;
+  flashLifeJitter: number;
+  flashSizeScale: number;
+  flashHue: number;
+  flashSat: number;
+  flashLightBase: number;
+  fireLifeBase: number;
+  fireLifeJitter: number;
+  fireSat: number;
+  smokeHue: number;
+  smokeSat: number;
+  smokeLightBase: number;
+  sparkHue: number;
+  sparkHueJitter: number;
+  sparkSat: number;
+  ringColor: number;
+}
+
 /**
  * 粒子效果管理器
  */
@@ -417,6 +458,160 @@ export class ParticleSystem {
     });
   }
 
+  private getHitVisualProfile(profile: HitEffectProfile): HitVisualProfileConfig {
+    const defaultConfig: HitVisualProfileConfig = {
+      sparkCountScale: 1.2,
+      flashCountScale: 1.2,
+      debrisCountScale: 1.35,
+      smokeCountScale: 1.15,
+      flashLifeScale: 1.1,
+      flashSizeScale: 1.16,
+      flashHue: 0.038,
+      flashSat: 0.92,
+      flashLightBase: 0.58,
+      sparkHue: 0.04,
+      sparkSat: 0.86,
+      sparkLightBase: 0.54,
+      smokeSat: 0.12,
+      smokeLightBase: 0.23,
+    };
+
+    switch (profile) {
+      case 'player':
+        return {
+          ...defaultConfig,
+          sparkCountScale: 1.02,
+          flashCountScale: 1.06,
+          debrisCountScale: 1,
+          smokeCountScale: 0.92,
+          flashLifeScale: 0.98,
+          flashSizeScale: 0.94,
+          flashSat: 1,
+          flashLightBase: 0.66,
+          sparkHue: 0.1,
+          sparkSat: 1,
+          sparkLightBase: 0.62,
+          smokeSat: 0.08,
+          smokeLightBase: 0.34,
+        };
+      case 'enemy':
+        return {
+          ...defaultConfig,
+          sparkCountScale: 0.98,
+          flashCountScale: 0.98,
+          debrisCountScale: 0.88,
+          flashLifeScale: 1.04,
+          flashHue: 0.066,
+          flashSat: 1,
+          flashLightBase: 0.66,
+          sparkSat: 1,
+          sparkLightBase: 0.68,
+          smokeSat: 0.08,
+          smokeLightBase: 0.3,
+        };
+      default:
+        return {
+          ...defaultConfig,
+          sparkSat: 1,
+          sparkLightBase: 0.62,
+        };
+    }
+  }
+
+  private getHeavyWeaponVisualProfile(profile: HeavyWeaponImpactProfile): HeavyWeaponVisualProfileConfig {
+    const defaultConfig: HeavyWeaponVisualProfileConfig = {
+      flashCountScale: 1,
+      fireCountScale: 1,
+      sparkCountScale: 1,
+      smokeCountScale: 0.96,
+      debrisScale: 1,
+      flashLifeBase: 0.18,
+      flashLifeJitter: 0.14,
+      flashSizeScale: 1.2,
+      flashHue: 0.025,
+      flashSat: 1,
+      flashLightBase: 0.7,
+      fireLifeBase: 0.22,
+      fireLifeJitter: 0.16,
+      fireSat: 1,
+      smokeHue: 0,
+      smokeSat: 0,
+      smokeLightBase: 0.2,
+      sparkHue: 0.08,
+      sparkHueJitter: 0.03,
+      sparkSat: 0.94,
+      ringColor: 0xff7b4f,
+    };
+
+    switch (profile) {
+      case 'laser':
+        return {
+          ...defaultConfig,
+          flashCountScale: 0.9,
+          fireCountScale: 0.96,
+          smokeCountScale: 0.82,
+          flashLifeBase: 0.2,
+          flashLifeJitter: 0.13,
+          flashSizeScale: 1,
+          flashHue: 0.055,
+          flashSat: 0.78,
+          fireLifeBase: 0.2,
+          fireLifeJitter: 0.13,
+          fireSat: 0.88,
+          smokeHue: 0.56,
+          smokeSat: 0.12,
+          smokeLightBase: 0.2,
+          sparkHue: 0.82,
+          sparkHueJitter: 0.02,
+          sparkSat: 0.6,
+          ringColor: 0x66dfff,
+        };
+      case 'flak-hit':
+        return {
+          ...defaultConfig,
+          flashCountScale: 1.12,
+          fireCountScale: 1.08,
+          sparkCountScale: 1.18,
+          smokeCountScale: 1.22,
+          flashSizeScale: 1.3,
+          flashLifeBase: 0.16,
+          flashLifeJitter: 0.09,
+          fireLifeBase: 0.22,
+          fireLifeJitter: 0.12,
+          smokeSat: 0.12,
+          smokeLightBase: 0.13,
+          smokeHue: 0.02,
+          sparkHue: 0.03,
+          sparkHueJitter: 0.02,
+          ringColor: 0xff5f42,
+        };
+      case 'boss-armor':
+        return {
+          ...defaultConfig,
+          flashCountScale: 1,
+          fireCountScale: 1.04,
+          sparkCountScale: 1.05,
+          smokeCountScale: 1.1,
+          debrisScale: 1.2,
+          flashSizeScale: 1.1,
+          flashLifeBase: 0.2,
+          flashLifeJitter: 0.1,
+          fireLifeBase: 0.24,
+          fireLifeJitter: 0.11,
+          smokeSat: 0.1,
+          smokeLightBase: 0.22,
+          flashHue: 0.04,
+          flashSat: 0.94,
+          sparkHue: 0.04,
+          sparkHueJitter: 0.02,
+          sparkSat: 0.85,
+          ringColor: 0x8b8f95,
+        };
+      default:
+        return defaultConfig;
+    }
+  }
+
   /**
    * 创建击中效果
    */
@@ -426,23 +621,32 @@ export class ParticleSystem {
     profile: HitEffectProfile = 'player'
   ): void {
     const hitIntensity = THREE.MathUtils.clamp(intensity, 0.6, 2.2);
-    const sparkCount = Math.max(4, Math.floor(7 + hitIntensity * 3));
-    const flashCount = Math.max(2, Math.floor(2 + hitIntensity * 2));
+    const profileConfig = this.getHitVisualProfile(profile);
+    const sparkCount = Math.max(4, Math.floor((7 + hitIntensity * 3) * profileConfig.sparkCountScale));
+    const flashCount = Math.max(2, Math.floor((2 + hitIntensity * 2) * profileConfig.flashCountScale));
     const isBoss = profile === 'boss';
     const isEnemy = profile === 'enemy';
-    const sparkHueBase = isBoss ? 0.04 : isEnemy ? 0.065 : 0.1;
-    const sparkLightnessBase = isBoss ? 0.56 : isEnemy ? 0.66 : 0.62;
+    const sparkHueBase = isBoss ? 0.04 : isEnemy ? profileConfig.sparkHue : profileConfig.sparkHue;
+    const sparkLightnessBase = isBoss ? 0.56 : isEnemy ? profileConfig.sparkLightBase : profileConfig.sparkLightBase;
+    const flashHueBase = isBoss ? 0.025 : isEnemy ? profileConfig.flashHue : profileConfig.flashHue;
+    const flashSat = isBoss ? 0.9 : profileConfig.flashSat;
+    const flashLightBase = isBoss ? 0.58 : profileConfig.flashLightBase;
 
     // 高频火花层：命中边缘感
     for (let i = 0; i < sparkCount; i++) {
       const sparkLightness = sparkLightnessBase + Math.random() * 0.18 * hitIntensity;
       this.spawnParticle(ParticleType.SPARK, position, {
         speed:
-          (isBoss ? 20 : isEnemy ? 28 : 24) + Math.random() * (16 + hitIntensity * 12),
+          (isBoss ? 20 : isEnemy ? 28 : 24) +
+          Math.random() * (16 + hitIntensity * 12 * profileConfig.sparkCountScale),
         life: (isBoss ? 0.11 : 0.08) + Math.random() * (isBoss ? 0.16 : 0.11),
         size:
           (isBoss ? 0.1 : 0.07) + Math.random() * ((isBoss ? 0.09 : 0.05) + hitIntensity * 0.05),
-        color: this.tempColorA.setHSL(sparkHueBase + Math.random() * 0.02, 1, sparkLightness),
+        color: this.tempColorA.setHSL(
+          sparkHueBase + Math.random() * 0.02,
+          isBoss ? 0.95 : profileConfig.sparkSat,
+          sparkLightness
+        ),
       });
     }
 
@@ -452,22 +656,25 @@ export class ParticleSystem {
       const hue = isBoss
         ? 0.025 + Math.random() * 0.02
         : isEnemy
-          ? 0.085 + Math.random() * 0.02
+          ? flashHueBase + Math.random() * 0.02
           : isHeavy
             ? 0.06 + Math.random() * 0.03
             : 0.075 + Math.random() * 0.02;
-      const sat = isBoss ? 0.9 : isHeavy ? 1 : 0.92;
-      const light = isBoss
-        ? 0.58 + Math.random() * 0.08
-        : isHeavy
-          ? 0.74 + Math.random() * 0.08
+      const sat = isBoss ? 0.9 : isHeavy ? flashSat : flashSat;
+      const light =
+        isBoss || isHeavy
+          ? flashLightBase + Math.random() * (isBoss ? 0.08 : 0.08)
           : 0.66 + Math.random() * 0.08;
+      const flashLifeBase = isBoss ? 0.09 : 0.06;
+      const flashLifeJitter = (isBoss ? 0.1 : 0.06) + hitIntensity * 0.03;
       this.spawnParticle(ParticleType.EXPLOSION, position, {
         speed: (isBoss ? 7 : 9) + Math.random() * (7 + hitIntensity * 5),
         life:
-          (isBoss ? 0.09 : 0.06) + Math.random() * ((isBoss ? 0.1 : 0.06) + hitIntensity * 0.03),
+          flashLifeBase * profileConfig.flashLifeScale +
+          Math.random() * (flashLifeJitter * profileConfig.flashLifeScale),
         size:
-          (isBoss ? 0.22 : 0.12) + Math.random() * ((isBoss ? 0.16 : 0.1) + hitIntensity * 0.07),
+          ((isBoss ? 0.22 : 0.12) + Math.random() * ((isBoss ? 0.16 : 0.1) + hitIntensity * 0.07)) *
+          profileConfig.flashSizeScale,
         color: this.tempColorB.setHSL(hue, sat, light),
       });
     }
@@ -481,7 +688,10 @@ export class ParticleSystem {
         this.spawnParticle(ParticleType.DEBRIS, position, {
           speed: (isBoss ? 8 : 10) + Math.random() * 8,
           life: (isBoss ? 0.4 : 0.28) + Math.random() * (isBoss ? 0.34 : 0.22),
-          size: (isBoss ? 0.14 : 0.1) + Math.random() * (isBoss ? 0.12 : 0.08),
+          size:
+            ((isBoss ? 0.14 : 0.1) +
+              Math.random() * (isBoss ? 0.12 : 0.08)) *
+            profileConfig.debrisCountScale,
           color: this.tempColorC.setRGB(
             isBoss ? 0.32 : 0.38,
             isBoss ? 0.32 : 0.38,
@@ -496,19 +706,22 @@ export class ParticleSystem {
     const smokePosition = position.clone();
     this.scheduleBurst(0.03, () => {
       const smokeCount = isBoss
-        ? Math.max(2, Math.floor(2 + hitIntensity * 1.5))
-        : Math.max(1, Math.floor(1 + hitIntensity * 1.2));
+        ? Math.max(2, Math.floor((2 + hitIntensity * 1.5) * profileConfig.smokeCountScale))
+        : Math.max(1, Math.floor((1 + hitIntensity * 1.2) * profileConfig.smokeCountScale));
       for (let i = 0; i < smokeCount; i++) {
         this.spawnParticle(ParticleType.SMOKE, smokePosition, {
           speed: (isBoss ? 1.1 : 1.4) + Math.random() * (isBoss ? 2.8 : 2.2),
           life:
-            (isBoss ? 0.18 : 0.1) + Math.random() * ((isBoss ? 0.16 : 0.1) + hitIntensity * 0.04),
+            (isBoss ? 0.18 : 0.1) * (isBoss ? 1 : profileConfig.smokeCountScale) +
+            Math.random() * (((isBoss ? 0.16 : 0.1) + hitIntensity * 0.04) * profileConfig.smokeCountScale),
           size:
-            (isBoss ? 0.22 : 0.12) + Math.random() * ((isBoss ? 0.2 : 0.12) + hitIntensity * 0.08),
+            ((isBoss ? 0.22 : 0.12) +
+              Math.random() * ((isBoss ? 0.2 : 0.12) + hitIntensity * 0.08)) *
+            profileConfig.smokeCountScale,
           color: this.tempColorA.setHSL(
-            isBoss ? 0.04 : 0.08,
-            isBoss ? 0.12 : 0.1,
-            (isBoss ? 0.26 : 0.34) + Math.random() * 0.08
+            isBoss ? 0.04 : profileConfig.flashHue,
+            isBoss ? 0.12 : profileConfig.smokeSat,
+            (isBoss ? 0.26 : profileConfig.smokeLightBase) + Math.random() * 0.08
           ),
         });
       }
@@ -599,28 +812,30 @@ export class ParticleSystem {
     const isLaser = profile === 'laser';
     const isFlak = profile === 'flak-hit';
     const isArmor = profile === 'boss-armor';
-    const flashWeight = isLaser ? 1.05 : isFlak ? 0.95 : isArmor ? 0.9 : 1;
-    const sparkWeight = isLaser ? 0.92 : isFlak ? 1.12 : isArmor ? 0.84 : 1;
-    const smokeWeight = isLaser ? 0.9 : isFlak ? 1.04 : isArmor ? 0.88 : 0.94;
-    const flashCount = Math.max(4, Math.floor((5 + impactScale * 2.8) * flashWeight));
-    const fireCount = Math.max(5, Math.floor((6 + impactScale * 3.2) * flashWeight));
-    const sparkCount = Math.max(10, Math.floor((11 + impactScale * 5.2) * sparkWeight));
-    const smokeCount = Math.max(4, Math.floor((5 + impactScale * 2.6) * smokeWeight));
-    const debrisCount = isLaser ? 0 : Math.max(2, Math.floor((2 + impactScale * 1.8) * (isArmor ? 0.9 : 1)));
-    const fireHue = isLaser ? 0.06 : isFlak ? 0.02 : isArmor ? 0.055 : 0.025;
-    const flashLightness = isLaser ? 0.72 : isFlak ? 0.62 : 0.7;
-    const smokeLightness = isLaser ? 0.26 : isFlak ? 0.16 : isArmor ? 0.24 : 0.2;
-    const ringColor = isLaser ? 0x66dfff : isFlak ? 0xff5f42 : isArmor ? 0xffbf74 : 0xff7b4f;
+    const profileConfig = this.getHeavyWeaponVisualProfile(profile);
+    const flashCount = Math.max(4, Math.floor((5 + impactScale * 2.8) * profileConfig.flashCountScale));
+    const fireCount = Math.max(5, Math.floor((6 + impactScale * 3.2) * profileConfig.fireCountScale));
+    const sparkCount = Math.max(
+      10,
+      Math.floor((11 + impactScale * 5.2) * profileConfig.sparkCountScale)
+    );
+    const smokeCount = Math.max(4, Math.floor((5 + impactScale * 2.6) * profileConfig.smokeCountScale));
+    const debrisCount = isLaser
+      ? 0
+      : Math.max(2, Math.floor((2 + impactScale * 1.8) * profileConfig.debrisScale * (isArmor ? 0.9 : 1)));
 
     for (let i = 0; i < flashCount; i++) {
       this.spawnParticle(ParticleType.EXPLOSION, position, {
-        speed: 18 + Math.random() * (12 + impactScale * 6),
-        life: (isLaser ? 0.22 : 0.18) + Math.random() * 0.14,
-        size: 0.28 + Math.random() * (0.24 + impactScale * 0.2),
+        speed: 18 + Math.random() * (12 + impactScale * 6) * profileConfig.flashCountScale,
+        life:
+          profileConfig.flashLifeBase + Math.random() * (profileConfig.flashLifeJitter + impactScale * 0.06),
+        size:
+          (0.24 + Math.random() * (0.2 + impactScale * 0.18)) *
+          profileConfig.flashSizeScale,
         color: this.tempColorA.setHSL(
-          isLaser ? 0.54 + Math.random() * 0.02 : fireHue + Math.random() * 0.025,
-          isLaser ? 0.78 : 1,
-          flashLightness + Math.random() * 0.08
+          isLaser ? 0.54 + Math.random() * 0.02 : profileConfig.flashHue + Math.random() * 0.025,
+          isLaser ? 0.78 : profileConfig.flashSat,
+          profileConfig.flashLightBase + Math.random() * 0.08
         ),
       });
     }
@@ -628,12 +843,14 @@ export class ParticleSystem {
     for (let i = 0; i < fireCount; i++) {
       this.spawnParticle(ParticleType.FIRE, position, {
         speed: 16 + Math.random() * (12 + impactScale * 7),
-        life: (isLaser ? 0.2 : 0.22) + Math.random() * 0.16,
-        size: 0.26 + Math.random() * (0.22 + impactScale * 0.22),
+        life:
+          profileConfig.fireLifeBase +
+          Math.random() * (profileConfig.fireLifeJitter + impactScale * 0.16),
+        size: 0.26 + Math.random() * (0.22 + impactScale * 0.22) * profileConfig.fireCountScale,
         color: this.tempColorB.setHSL(
-          isLaser ? 0.56 + Math.random() * 0.02 : fireHue + Math.random() * 0.03,
-          isLaser ? 0.72 : 1,
-          isLaser ? 0.62 + Math.random() * 0.08 : 0.5 + Math.random() * 0.08
+          isLaser ? 0.56 + Math.random() * 0.02 : profileConfig.flashHue + Math.random() * 0.03,
+          isLaser ? 0.72 : profileConfig.fireSat,
+          isLaser ? 0.62 + Math.random() * 0.08 : profileConfig.flashLightBase + Math.random() * 0.08
         ),
       });
     }
@@ -642,12 +859,18 @@ export class ParticleSystem {
       this.spawnParticle(ParticleType.SPARK, position, {
         speed: (isFlak ? 32 : isArmor ? 24 : 26) + Math.random() * (16 + impactScale * 9),
         life: 0.18 + Math.random() * 0.18,
-        size: 0.1 + Math.random() * (0.08 + impactScale * 0.06),
+        size:
+          (0.09 + Math.random() * (0.08 + impactScale * 0.06)) *
+          profileConfig.sparkCountScale,
         color: isLaser
           ? this.tempColorC.setRGB(0.68, 0.96, 1)
           : isArmor
-            ? this.tempColorC.setRGB(1, 0.82, 0.52)
-            : this.tempColorC.setRGB(1, 0.62 + Math.random() * 0.14, 0.28),
+            ? this.tempColorC.setRGB(0.72, 0.76, 0.75)
+            : this.tempColorC.setHSL(
+                profileConfig.sparkHue + Math.random() * profileConfig.sparkHueJitter,
+                profileConfig.sparkSat,
+                0.62 + Math.random() * 0.07
+              ),
       });
     }
 
@@ -655,8 +878,11 @@ export class ParticleSystem {
       this.spawnParticle(ParticleType.DEBRIS, position, {
         speed: 12 + Math.random() * (10 + impactScale * 6),
         life: 0.42 + Math.random() * 0.35,
-        size: 0.12 + Math.random() * (0.1 + impactScale * 0.08),
-        color: this.tempColorA.setRGB(0.34, 0.35, 0.39),
+        size:
+          0.12 + Math.random() * (0.1 + impactScale * 0.08) * (isLaser ? 0.86 : profileConfig.debrisScale),
+        color: isArmor
+          ? this.tempColorA.setRGB(0.35, 0.34, 0.38)
+          : this.tempColorA.setRGB(0.34, 0.35, 0.39),
         gravity: true,
       });
     }
@@ -664,12 +890,12 @@ export class ParticleSystem {
     this.emitFlakRing(
       position,
       0.46 + impactScale * (isFlak ? 0.74 : isLaser ? 0.58 : 0.5),
-      Math.max(7, Math.floor(7 + impactScale * 3)),
+      Math.max(7, Math.floor((7 + impactScale * 3) * profileConfig.flashCountScale)),
       isFlak ? 0.13 : isLaser ? 0.11 : 0.1,
       isFlak ? 0.56 : isLaser ? 0.42 : 0.48,
       isFlak ? 14 : isLaser ? 11 : 13,
       isLaser ? 0.08 : 0.12,
-      ringColor
+      profileConfig.ringColor
     );
 
     const smokePosition = position.clone();
@@ -677,12 +903,15 @@ export class ParticleSystem {
       for (let i = 0; i < smokeCount; i++) {
         this.spawnParticle(ParticleType.SMOKE, smokePosition, {
           speed: 3.4 + Math.random() * (3.2 + impactScale * 1.8),
-          life: (isFlak ? 0.95 : isLaser ? 0.72 : 0.84) + Math.random() * 0.46,
+          life:
+            (isFlak ? 0.95 : isLaser ? 0.72 : 0.84) *
+              profileConfig.smokeCountScale +
+            Math.random() * 0.46,
           size: 0.62 + Math.random() * (0.46 + impactScale * (isFlak ? 0.44 : 0.32)),
           color: this.tempColorB.setHSL(
-            isLaser ? 0.56 : 0,
-            isLaser ? 0.08 : 0,
-            smokeLightness + Math.random() * 0.08
+            isLaser ? 0.56 : profileConfig.smokeHue,
+            isLaser ? 0.08 : profileConfig.smokeSat,
+            profileConfig.smokeLightBase + Math.random() * 0.08
           ),
         });
       }
@@ -696,7 +925,11 @@ export class ParticleSystem {
             speed: 7 + Math.random() * 6,
             life: 0.12 + Math.random() * 0.08,
             size: 0.16 + Math.random() * (0.12 + impactScale * 0.08),
-            color: this.tempColorC.setHSL(fireHue + Math.random() * 0.02, 1, 0.56 + Math.random() * 0.08),
+            color: this.tempColorC.setHSL(
+              profileConfig.flashHue + Math.random() * 0.02,
+              1,
+              0.56 + Math.random() * 0.08
+            ),
           });
         }
       });
