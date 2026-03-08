@@ -154,53 +154,53 @@ function getEnemyMaterialTuning(type: EnemyType): {
   switch (type) {
     case EnemyType.SCOUT:
       return {
-        body: { metalness: 0.78, roughness: 0.26, emissiveIntensity: 0.008 },
-        wing: { metalness: 0.72, roughness: 0.32, emissiveIntensity: 0.003 },
+        body: { metalness: 0.8, roughness: 0.24, emissiveIntensity: 0.007 },
+        wing: { metalness: 0.74, roughness: 0.3, emissiveIntensity: 0.002 },
         cockpit: { metalness: 0.96, roughness: 0.1, emissiveIntensity: 0.012 },
-        accent: { metalness: 0.82, roughness: 0.24, emissiveIntensity: 0.005 },
-        detailColor: 0xb4bcc6,
-        lightOpacity: 0.16,
-        engineOpacity: 0.26,
+        accent: { metalness: 0.86, roughness: 0.22, emissiveIntensity: 0.004 },
+        detailColor: 0xa7b0ba,
+        lightOpacity: 0.14,
+        engineOpacity: 0.22,
       };
     case EnemyType.FIGHTER:
       return {
-        body: { metalness: 0.82, roughness: 0.24, emissiveIntensity: 0.009 },
-        wing: { metalness: 0.76, roughness: 0.28, emissiveIntensity: 0.003 },
+        body: { metalness: 0.84, roughness: 0.22, emissiveIntensity: 0.008 },
+        wing: { metalness: 0.78, roughness: 0.26, emissiveIntensity: 0.002 },
         cockpit: { metalness: 0.96, roughness: 0.1, emissiveIntensity: 0.012 },
-        accent: { metalness: 0.86, roughness: 0.2, emissiveIntensity: 0.006 },
-        detailColor: 0xc0c7d0,
-        lightOpacity: 0.17,
-        engineOpacity: 0.28,
-      };
-    case EnemyType.HEAVY:
-      return {
-        body: { metalness: 0.72, roughness: 0.32, emissiveIntensity: 0.006 },
-        wing: { metalness: 0.68, roughness: 0.36, emissiveIntensity: 0.004 },
-        cockpit: { metalness: 0.92, roughness: 0.14, emissiveIntensity: 0.01 },
-        accent: { metalness: 0.78, roughness: 0.26, emissiveIntensity: 0.004 },
-        detailColor: 0xa0a8b2,
+        accent: { metalness: 0.88, roughness: 0.19, emissiveIntensity: 0.004 },
+        detailColor: 0xb3bbc4,
         lightOpacity: 0.14,
         engineOpacity: 0.24,
       };
+    case EnemyType.HEAVY:
+      return {
+        body: { metalness: 0.74, roughness: 0.3, emissiveIntensity: 0.005 },
+        wing: { metalness: 0.7, roughness: 0.34, emissiveIntensity: 0.003 },
+        cockpit: { metalness: 0.92, roughness: 0.14, emissiveIntensity: 0.01 },
+        accent: { metalness: 0.8, roughness: 0.24, emissiveIntensity: 0.003 },
+        detailColor: 0x949da7,
+        lightOpacity: 0.12,
+        engineOpacity: 0.22,
+      };
     case EnemyType.SNIPER:
       return {
-        body: { metalness: 0.8, roughness: 0.24, emissiveIntensity: 0.008 },
-        wing: { metalness: 0.74, roughness: 0.3, emissiveIntensity: 0.005 },
+        body: { metalness: 0.82, roughness: 0.22, emissiveIntensity: 0.007 },
+        wing: { metalness: 0.76, roughness: 0.28, emissiveIntensity: 0.003 },
         cockpit: { metalness: 0.96, roughness: 0.08, emissiveIntensity: 0.012 },
-        accent: { metalness: 0.84, roughness: 0.2, emissiveIntensity: 0.005 },
-        detailColor: 0xb7c0c9,
-        lightOpacity: 0.15,
-        engineOpacity: 0.23,
+        accent: { metalness: 0.86, roughness: 0.18, emissiveIntensity: 0.004 },
+        detailColor: 0xaab3bc,
+        lightOpacity: 0.13,
+        engineOpacity: 0.21,
       };
     case EnemyType.ACE:
       return {
-        body: { metalness: 0.84, roughness: 0.22, emissiveIntensity: 0.01 },
-        wing: { metalness: 0.8, roughness: 0.26, emissiveIntensity: 0.004 },
+        body: { metalness: 0.86, roughness: 0.2, emissiveIntensity: 0.009 },
+        wing: { metalness: 0.8, roughness: 0.24, emissiveIntensity: 0.003 },
         cockpit: { metalness: 0.98, roughness: 0.08, emissiveIntensity: 0.012 },
-        accent: { metalness: 0.9, roughness: 0.18, emissiveIntensity: 0.006 },
-        detailColor: 0xb3b0ac,
-        lightOpacity: 0.16,
-        engineOpacity: 0.26,
+        accent: { metalness: 0.9, roughness: 0.16, emissiveIntensity: 0.005 },
+        detailColor: 0xaaa6a2,
+        lightOpacity: 0.14,
+        engineOpacity: 0.23,
       };
     default:
       return {
@@ -498,6 +498,42 @@ export function createPlayerMesh(): THREE.Group {
   rightWingPanel.castShadow = true;
   group.add(rightWingPanel);
 
+  const leftUpperWingServicePanel = new THREE.Mesh(
+    new THREE.BoxGeometry(0.88, 0.03, 0.18),
+    heroPanelMaterial
+  );
+  leftUpperWingServicePanel.position.set(-1.04, 0.1, -0.58);
+  leftUpperWingServicePanel.rotation.y = -0.2;
+  leftUpperWingServicePanel.castShadow = true;
+  group.add(leftUpperWingServicePanel);
+
+  const rightUpperWingServicePanel = new THREE.Mesh(
+    new THREE.BoxGeometry(0.88, 0.03, 0.18),
+    heroPanelMaterial
+  );
+  rightUpperWingServicePanel.position.set(1.04, 0.1, -0.58);
+  rightUpperWingServicePanel.rotation.y = 0.2;
+  rightUpperWingServicePanel.castShadow = true;
+  group.add(rightUpperWingServicePanel);
+
+  const leftMidWingInspectionStrip = new THREE.Mesh(
+    new THREE.BoxGeometry(0.56, 0.025, 0.16),
+    detailMaterial
+  );
+  leftMidWingInspectionStrip.position.set(-0.88, 0.09, 0.08);
+  leftMidWingInspectionStrip.rotation.y = -0.16;
+  leftMidWingInspectionStrip.castShadow = true;
+  group.add(leftMidWingInspectionStrip);
+
+  const rightMidWingInspectionStrip = new THREE.Mesh(
+    new THREE.BoxGeometry(0.56, 0.025, 0.16),
+    detailMaterial
+  );
+  rightMidWingInspectionStrip.position.set(0.88, 0.09, 0.08);
+  rightMidWingInspectionStrip.rotation.y = 0.16;
+  rightMidWingInspectionStrip.castShadow = true;
+  group.add(rightMidWingInspectionStrip);
+
   // === 前缘延伸 (LERX - Leading Edge Root Extension) ===
   const lerxGeometry = new THREE.BoxGeometry(0.3, 0.08, 1.2);
 
@@ -625,6 +661,15 @@ export function createPlayerMesh(): THREE.Group {
   leftIntakeShoulder.castShadow = true;
   group.add(leftIntakeShoulder);
 
+  const leftIntakeRootWedge = new THREE.Mesh(
+    new THREE.BoxGeometry(0.16, 0.08, 0.42),
+    heroPanelMaterial
+  );
+  leftIntakeRootWedge.position.set(-0.48, 0.09, -0.38);
+  leftIntakeRootWedge.rotation.set(0.04, 0.2, -0.06);
+  leftIntakeRootWedge.castShadow = true;
+  group.add(leftIntakeRootWedge);
+
   const leftIntakeCavity = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.14, 0.42), playerIntakeCavityMaterial);
   leftIntakeCavity.position.set(-0.62, -0.08, -0.28);
   leftIntakeCavity.rotation.y = 0.08;
@@ -663,6 +708,15 @@ export function createPlayerMesh(): THREE.Group {
   rightIntakeShoulder.rotation.y = -0.18;
   rightIntakeShoulder.castShadow = true;
   group.add(rightIntakeShoulder);
+
+  const rightIntakeRootWedge = new THREE.Mesh(
+    new THREE.BoxGeometry(0.16, 0.08, 0.42),
+    heroPanelMaterial
+  );
+  rightIntakeRootWedge.position.set(0.48, 0.09, -0.38);
+  rightIntakeRootWedge.rotation.set(0.04, -0.2, 0.06);
+  rightIntakeRootWedge.castShadow = true;
+  group.add(rightIntakeRootWedge);
 
   const rightIntakeCavity = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.14, 0.42), playerIntakeCavityMaterial);
   rightIntakeCavity.position.set(0.62, -0.08, -0.28);
@@ -889,6 +943,42 @@ export function createPlayerMesh(): THREE.Group {
   centerlineBellyRail.castShadow = true;
   group.add(centerlineBellyRail);
 
+  const ventralDoorSeamFront = new THREE.Mesh(
+    new THREE.BoxGeometry(0.26, 0.025, 0.16),
+    detailMaterial
+  );
+  ventralDoorSeamFront.position.set(0, -0.23, -0.34);
+  ventralDoorSeamFront.rotation.x = 0.04;
+  ventralDoorSeamFront.castShadow = true;
+  group.add(ventralDoorSeamFront);
+
+  const ventralDoorSeamRear = new THREE.Mesh(
+    new THREE.BoxGeometry(0.26, 0.025, 0.16),
+    detailMaterial
+  );
+  ventralDoorSeamRear.position.set(0, -0.23, 0.44);
+  ventralDoorSeamRear.rotation.x = 0.04;
+  ventralDoorSeamRear.castShadow = true;
+  group.add(ventralDoorSeamRear);
+
+  const leftBellyReinforcement = new THREE.Mesh(
+    new THREE.BoxGeometry(0.1, 0.05, 0.62),
+    weaponMaterial
+  );
+  leftBellyReinforcement.position.set(-0.22, -0.24, 0.08);
+  leftBellyReinforcement.rotation.set(0.02, 0.08, -0.04);
+  leftBellyReinforcement.castShadow = true;
+  group.add(leftBellyReinforcement);
+
+  const rightBellyReinforcement = new THREE.Mesh(
+    new THREE.BoxGeometry(0.1, 0.05, 0.62),
+    weaponMaterial
+  );
+  rightBellyReinforcement.position.set(0.22, -0.24, 0.08);
+  rightBellyReinforcement.rotation.set(0.02, -0.08, 0.04);
+  rightBellyReinforcement.castShadow = true;
+  group.add(rightBellyReinforcement);
+
   const leftFuselageStation = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.1, 0.46), weaponMaterial);
   leftFuselageStation.position.set(-0.38, -0.22, 0.14);
   leftFuselageStation.rotation.y = 0.14;
@@ -988,6 +1078,24 @@ export function createPlayerMesh(): THREE.Group {
   dorsalCoolingFairing.position.set(0, 0.3, 0.72);
   dorsalCoolingFairing.castShadow = true;
   group.add(dorsalCoolingFairing);
+
+  const tailSaddleBridge = new THREE.Mesh(
+    new THREE.BoxGeometry(0.3, 0.1, 0.52),
+    detailMaterial
+  );
+  tailSaddleBridge.position.set(0, 0.16, 1.34);
+  tailSaddleBridge.rotation.x = 0.04;
+  tailSaddleBridge.castShadow = true;
+  group.add(tailSaddleBridge);
+
+  const tailSaddleCap = new THREE.Mesh(
+    new THREE.BoxGeometry(0.22, 0.06, 0.42),
+    heroPanelMaterial
+  );
+  tailSaddleCap.position.set(0, 0.22, 1.46);
+  tailSaddleCap.rotation.x = 0.05;
+  tailSaddleCap.castShadow = true;
+  group.add(tailSaddleCap);
 
   const leftTailRootFairing = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.16, 0.6), heroPanelMaterial);
   leftTailRootFairing.position.set(-0.42, 0.18, 1.28);
