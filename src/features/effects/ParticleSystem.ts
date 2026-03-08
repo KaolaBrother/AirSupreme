@@ -480,40 +480,56 @@ export class ParticleSystem {
       case 'player':
         return {
           ...defaultConfig,
-          sparkCountScale: 1.02,
-          flashCountScale: 1.06,
-          debrisCountScale: 1,
-          smokeCountScale: 0.92,
-          flashLifeScale: 0.98,
-          flashSizeScale: 0.94,
-          flashSat: 1,
-          flashLightBase: 0.66,
-          sparkHue: 0.1,
-          sparkSat: 1,
-          sparkLightBase: 0.62,
-          smokeSat: 0.08,
-          smokeLightBase: 0.34,
+          sparkCountScale: 1.08,
+          flashCountScale: 0.92,
+          debrisCountScale: 0.92,
+          smokeCountScale: 0.72,
+          flashLifeScale: 0.86,
+          flashSizeScale: 0.84,
+          flashHue: 0.092,
+          flashSat: 0.92,
+          flashLightBase: 0.62,
+          sparkHue: 0.11,
+          sparkSat: 0.92,
+          sparkLightBase: 0.58,
+          smokeSat: 0.04,
+          smokeLightBase: 0.28,
         };
       case 'enemy':
         return {
           ...defaultConfig,
-          sparkCountScale: 0.98,
-          flashCountScale: 0.98,
-          debrisCountScale: 0.88,
-          flashLifeScale: 1.04,
-          flashHue: 0.066,
+          sparkCountScale: 0.92,
+          flashCountScale: 1.04,
+          debrisCountScale: 0.82,
+          smokeCountScale: 0.96,
+          flashLifeScale: 0.96,
+          flashSizeScale: 1,
+          flashHue: 0.072,
           flashSat: 1,
-          flashLightBase: 0.66,
-          sparkSat: 1,
-          sparkLightBase: 0.68,
-          smokeSat: 0.08,
-          smokeLightBase: 0.3,
+          flashLightBase: 0.68,
+          sparkHue: 0.058,
+          sparkSat: 0.96,
+          sparkLightBase: 0.7,
+          smokeSat: 0.1,
+          smokeLightBase: 0.26,
         };
       default:
         return {
           ...defaultConfig,
-          sparkSat: 1,
-          sparkLightBase: 0.62,
+          sparkCountScale: 1.2,
+          flashCountScale: 1.12,
+          debrisCountScale: 1.3,
+          smokeCountScale: 1.08,
+          flashLifeScale: 1.08,
+          flashSizeScale: 1.12,
+          flashHue: 0.03,
+          flashSat: 0.86,
+          flashLightBase: 0.56,
+          sparkHue: 0.038,
+          sparkSat: 0.92,
+          sparkLightBase: 0.58,
+          smokeSat: 0.08,
+          smokeLightBase: 0.22,
         };
     }
   }
@@ -547,68 +563,97 @@ export class ParticleSystem {
       case 'laser':
         return {
           ...defaultConfig,
-          flashCountScale: 0.9,
-          fireCountScale: 0.96,
-          smokeCountScale: 0.82,
-          flashLifeBase: 0.2,
-          flashLifeJitter: 0.13,
-          flashSizeScale: 1,
-          flashHue: 0.055,
-          flashSat: 0.78,
-          fireLifeBase: 0.2,
-          fireLifeJitter: 0.13,
-          fireSat: 0.88,
-          smokeHue: 0.56,
-          smokeSat: 0.12,
-          smokeLightBase: 0.2,
-          sparkHue: 0.82,
-          sparkHueJitter: 0.02,
-          sparkSat: 0.6,
+          flashCountScale: 0.82,
+          fireCountScale: 0.72,
+          sparkCountScale: 0.9,
+          smokeCountScale: 0.72,
+          flashLifeBase: 0.18,
+          flashLifeJitter: 0.1,
+          flashSizeScale: 0.9,
+          flashHue: 0.555,
+          flashSat: 0.72,
+          flashLightBase: 0.64,
+          fireLifeBase: 0.16,
+          fireLifeJitter: 0.08,
+          fireSat: 0.62,
+          smokeHue: 0.57,
+          smokeSat: 0.08,
+          smokeLightBase: 0.22,
+          sparkHue: 0.55,
+          sparkHueJitter: 0.025,
+          sparkSat: 0.52,
           ringColor: 0x66dfff,
         };
       case 'flak-hit':
         return {
           ...defaultConfig,
-          flashCountScale: 1.12,
-          fireCountScale: 1.08,
-          sparkCountScale: 1.18,
-          smokeCountScale: 1.22,
-          flashSizeScale: 1.3,
-          flashLifeBase: 0.16,
-          flashLifeJitter: 0.09,
-          fireLifeBase: 0.22,
-          fireLifeJitter: 0.12,
-          smokeSat: 0.12,
-          smokeLightBase: 0.13,
+          flashCountScale: 1.22,
+          fireCountScale: 0.96,
+          sparkCountScale: 1.28,
+          smokeCountScale: 1.16,
+          flashSizeScale: 1.18,
+          flashLifeBase: 0.14,
+          flashLifeJitter: 0.08,
+          fireLifeBase: 0.18,
+          fireLifeJitter: 0.1,
+          flashHue: 0.022,
+          flashLightBase: 0.66,
+          smokeSat: 0.14,
+          smokeLightBase: 0.12,
           smokeHue: 0.02,
-          sparkHue: 0.03,
-          sparkHueJitter: 0.02,
+          sparkHue: 0.028,
+          sparkHueJitter: 0.015,
+          sparkSat: 1,
           ringColor: 0xff5f42,
         };
       case 'boss-armor':
         return {
           ...defaultConfig,
-          flashCountScale: 1,
-          fireCountScale: 1.04,
-          sparkCountScale: 1.05,
-          smokeCountScale: 1.1,
-          debrisScale: 1.2,
-          flashSizeScale: 1.1,
-          flashLifeBase: 0.2,
-          flashLifeJitter: 0.1,
-          fireLifeBase: 0.24,
-          fireLifeJitter: 0.11,
-          smokeSat: 0.1,
-          smokeLightBase: 0.22,
-          flashHue: 0.04,
-          flashSat: 0.94,
-          sparkHue: 0.04,
-          sparkHueJitter: 0.02,
-          sparkSat: 0.85,
+          flashCountScale: 0.94,
+          fireCountScale: 0.82,
+          sparkCountScale: 1.12,
+          smokeCountScale: 1.04,
+          debrisScale: 1.36,
+          flashSizeScale: 0.98,
+          flashLifeBase: 0.16,
+          flashLifeJitter: 0.08,
+          fireLifeBase: 0.18,
+          fireLifeJitter: 0.08,
+          smokeSat: 0.06,
+          smokeLightBase: 0.19,
+          flashHue: 0.055,
+          flashSat: 0.54,
+          flashLightBase: 0.62,
+          sparkHue: 0.08,
+          sparkHueJitter: 0.015,
+          sparkSat: 0.42,
           ringColor: 0x8b8f95,
         };
       default:
-        return defaultConfig;
+        return {
+          ...defaultConfig,
+          flashCountScale: 1.08,
+          fireCountScale: 1.12,
+          sparkCountScale: 1.04,
+          smokeCountScale: 0.92,
+          debrisScale: 1.08,
+          flashLifeBase: 0.2,
+          flashLifeJitter: 0.12,
+          flashSizeScale: 1.28,
+          flashHue: 0.026,
+          flashSat: 1,
+          flashLightBase: 0.72,
+          fireLifeBase: 0.24,
+          fireLifeJitter: 0.16,
+          fireSat: 0.98,
+          smokeHue: 0.02,
+          smokeSat: 0.06,
+          smokeLightBase: 0.18,
+          sparkHue: 0.07,
+          sparkHueJitter: 0.025,
+          sparkSat: 0.96,
+          ringColor: 0xff7b4f,
+        };
     }
   }
 
@@ -726,6 +771,53 @@ export class ParticleSystem {
         });
       }
     });
+
+    if (profile === 'player') {
+      const ricochetPosition = position.clone();
+      this.scheduleBurst(0.018, () => {
+        const ricochetCount = Math.max(2, Math.floor(2 + hitIntensity * 2));
+        for (let i = 0; i < ricochetCount; i++) {
+          this.spawnParticle(ParticleType.SPARK, ricochetPosition, {
+            speed: 22 + Math.random() * (10 + hitIntensity * 6),
+            life: 0.05 + Math.random() * 0.04,
+            size: 0.05 + Math.random() * 0.03,
+            color: this.tempColorB.setHSL(0.12 + Math.random() * 0.015, 0.82, 0.64 + Math.random() * 0.06),
+          });
+        }
+      });
+    } else if (profile === 'enemy') {
+      const emberPosition = position.clone();
+      this.scheduleBurst(0.04, () => {
+        const emberCount = Math.max(1, Math.floor(1 + hitIntensity * 1.6));
+        for (let i = 0; i < emberCount; i++) {
+          this.spawnParticle(ParticleType.FIRE, emberPosition, {
+            speed: 5 + Math.random() * 5,
+            life: 0.08 + Math.random() * 0.06,
+            size: 0.09 + Math.random() * 0.06,
+            color: this.tempColorC.setHSL(0.07 + Math.random() * 0.02, 0.96, 0.56 + Math.random() * 0.06),
+          });
+        }
+      });
+    } else {
+      const bossAftershockPosition = position.clone();
+      this.scheduleBurst(0.06, () => {
+        const aftershockSparkCount = Math.max(3, Math.floor(3 + hitIntensity * 2.2));
+        for (let i = 0; i < aftershockSparkCount; i++) {
+          this.spawnParticle(ParticleType.SPARK, bossAftershockPosition, {
+            speed: 14 + Math.random() * (12 + hitIntensity * 8),
+            life: 0.12 + Math.random() * 0.12,
+            size: 0.08 + Math.random() * 0.05,
+            color: this.tempColorC.setHSL(0.045 + Math.random() * 0.018, 0.82, 0.52 + Math.random() * 0.06),
+          });
+        }
+        this.spawnParticle(ParticleType.SMOKE, bossAftershockPosition, {
+          speed: 2.2 + Math.random() * 1.4,
+          life: 0.18 + Math.random() * 0.12,
+          size: 0.2 + Math.random() * 0.08,
+          color: this.tempColorA.setHSL(0.03, 0.06, 0.2 + Math.random() * 0.04),
+        });
+      });
+    }
   }
 
   public createGroundImpact(
@@ -809,6 +901,7 @@ export class ParticleSystem {
     profile: HeavyWeaponImpactProfile = 'boss-cannon'
   ): void {
     const impactScale = THREE.MathUtils.clamp(scale, 0.95, 2.8);
+    const isCannon = profile === 'boss-cannon';
     const isLaser = profile === 'laser';
     const isFlak = profile === 'flak-hit';
     const isArmor = profile === 'boss-armor';
@@ -889,12 +982,12 @@ export class ParticleSystem {
 
     this.emitFlakRing(
       position,
-      0.46 + impactScale * (isFlak ? 0.74 : isLaser ? 0.58 : 0.5),
+      0.46 + impactScale * (isFlak ? 0.68 : isLaser ? 0.52 : isArmor ? 0.44 : 0.58),
       Math.max(7, Math.floor((7 + impactScale * 3) * profileConfig.flashCountScale)),
-      isFlak ? 0.13 : isLaser ? 0.11 : 0.1,
-      isFlak ? 0.56 : isLaser ? 0.42 : 0.48,
-      isFlak ? 14 : isLaser ? 11 : 13,
-      isLaser ? 0.08 : 0.12,
+      isFlak ? 0.12 : isLaser ? 0.09 : isArmor ? 0.1 : 0.12,
+      isFlak ? 0.48 : isLaser ? 0.38 : isArmor ? 0.42 : 0.52,
+      isFlak ? 15 : isLaser ? 10 : isArmor ? 11 : 14,
+      isLaser ? 0.06 : isArmor ? 0.1 : 0.12,
       profileConfig.ringColor
     );
 
@@ -920,18 +1013,77 @@ export class ParticleSystem {
     if (!isLaser) {
       const followupPosition = position.clone();
       this.scheduleBurst(0.08, () => {
-        for (let i = 0; i < Math.max(3, Math.floor(3 + impactScale * 2)); i++) {
+        const followupFireCount = isArmor
+          ? Math.max(1, Math.floor(1 + impactScale))
+          : isFlak
+            ? Math.max(2, Math.floor(2 + impactScale))
+            : Math.max(4, Math.floor(4 + impactScale * 2));
+        for (let i = 0; i < followupFireCount; i++) {
           this.spawnParticle(ParticleType.FIRE, followupPosition, {
-            speed: 7 + Math.random() * 6,
-            life: 0.12 + Math.random() * 0.08,
-            size: 0.16 + Math.random() * (0.12 + impactScale * 0.08),
+            speed: (isArmor ? 5 : 7) + Math.random() * (isFlak ? 7 : 6),
+            life: (isArmor ? 0.08 : 0.12) + Math.random() * (isFlak ? 0.06 : 0.08),
+            size:
+              (isArmor ? 0.12 : 0.16) + Math.random() * ((isFlak ? 0.1 : 0.12) + impactScale * 0.08),
             color: this.tempColorC.setHSL(
               profileConfig.flashHue + Math.random() * 0.02,
-              1,
-              0.56 + Math.random() * 0.08
+              isArmor ? 0.58 : 1,
+              (isArmor ? 0.48 : 0.56) + Math.random() * 0.08
             ),
           });
         }
+      });
+    }
+
+    if (isLaser) {
+      const laserAfterglowPosition = position.clone();
+      this.scheduleBurst(0.05, () => {
+        for (let i = 0; i < Math.max(3, Math.floor(3 + impactScale * 1.4)); i++) {
+          this.spawnParticle(ParticleType.SPARK, laserAfterglowPosition, {
+            speed: 12 + Math.random() * 8,
+            life: 0.08 + Math.random() * 0.05,
+            size: 0.08 + Math.random() * 0.04,
+            color: this.tempColorC.setHSL(0.56 + Math.random() * 0.025, 0.5, 0.72 + Math.random() * 0.06),
+          });
+        }
+      });
+    } else if (isFlak) {
+      const flakScatterPosition = position.clone();
+      this.scheduleBurst(0.055, () => {
+        for (let i = 0; i < Math.max(5, Math.floor(5 + impactScale * 2)); i++) {
+          this.spawnParticle(ParticleType.SPARK, flakScatterPosition, {
+            speed: 20 + Math.random() * 14,
+            life: 0.09 + Math.random() * 0.06,
+            size: 0.07 + Math.random() * 0.04,
+            color: this.tempColorA.setHSL(0.03 + Math.random() * 0.015, 1, 0.66 + Math.random() * 0.05),
+          });
+        }
+      });
+    } else if (isArmor) {
+      const armorSpallPosition = position.clone();
+      this.scheduleBurst(0.07, () => {
+        for (let i = 0; i < Math.max(3, Math.floor(3 + impactScale * 1.6)); i++) {
+          this.spawnParticle(ParticleType.DEBRIS, armorSpallPosition, {
+            speed: 10 + Math.random() * 8,
+            life: 0.28 + Math.random() * 0.18,
+            size: 0.08 + Math.random() * 0.08,
+            color: this.tempColorB.setRGB(0.4, 0.4, 0.43),
+            gravity: true,
+          });
+        }
+      });
+    } else if (isCannon) {
+      const cannonAftershockPosition = position.clone();
+      this.scheduleBurst(0.09, () => {
+        this.emitFlakRing(
+          cannonAftershockPosition,
+          0.24 + impactScale * 0.22,
+          Math.max(5, Math.floor(5 + impactScale * 2)),
+          0.08,
+          0.22,
+          9,
+          0.08,
+          0xffa15c
+        );
       });
     }
   }

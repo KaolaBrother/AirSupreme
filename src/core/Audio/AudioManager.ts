@@ -925,89 +925,141 @@ export class AudioManager {
     const hitSeed = this.nextSoundSeed(this.hitToneSeeds, `${profile}-${hitTone}`, 12);
     const detuneCents = this.profileDetuneCents(hitSeed, 12, 12);
     const profileOffset = isBoss ? 0.05 : isEnemy ? 0.02 : isMissileTone ? 0.03 : -0.01;
+    let bodyType: OscillatorType = 'triangle';
+    let sparkleType: OscillatorType = 'square';
+    let bodyStartHz = 430;
+    let bodyEndHz = 120;
+    let sparkleStartHz = 1700;
+    let sparkleEndHz = 220;
+    let durationSec = 0.11;
+    let sparkleDurationSec = 0.06;
+    let filterType: BiquadFilterType = 'highpass';
+    let noiseFreq = 2200;
+    let noiseQ = 1.1 + hitIntensity * 0.15;
+    let bodyGainBase = 0.13;
+    let sparkleGainBase = 0.08;
+    let noiseDurationSec = 0.07;
+    let noiseGainBase = 0.08;
+    let bodyPitchBias = 0;
+    let sparklePitchBias = 0;
 
-    const bodyType: OscillatorType = isMissileTone
-      ? 'square'
-      : isFlakTone
-        ? 'triangle'
-        : isHeavyTone
-          ? 'sawtooth'
-          : isBoss
-            ? 'sawtooth'
-            : isEnemy
-              ? 'triangle'
-              : 'triangle';
-    const sparkleType: OscillatorType = isMissileTone
-      ? 'triangle'
-      : isFlakTone
-        ? 'square'
-        : isHeavyTone
-          ? 'triangle'
-          : isBoss
-            ? 'sine'
-            : 'square';
-    const bodyStartHz = isMissileTone
-      ? 360
-      : isFlakTone
-        ? 420
-        : isHeavyTone
-          ? 290
-          : isBoss
-            ? 250
-            : isEnemy
-              ? 400
-              : 430;
-    const bodyEndHz = isMissileTone
-      ? 100
-      : isFlakTone
-        ? 170
-        : isHeavyTone
-          ? 90
-          : isBoss
-            ? 72
-            : isEnvironment
-              ? 88
-              : isEnemy
-                ? 128
-                : 120;
-    const sparkleStartHz = isMissileTone
-      ? 1400
-      : isFlakTone
-        ? 900
-        : isHeavyTone
-          ? 1300
-          : isBoss
-            ? 980
-            : 1700;
-    const sparkleEndHz = isMissileTone
-      ? 260
-      : isFlakTone
-        ? 130
-        : isHeavyTone
-          ? 230
-          : isBoss
-            ? 72
-            : 220;
-    const durationSec = isBoss ? 0.16 : isMissileTone ? 0.14 : 0.11;
-    const sparkleDurationSec = isFlakTone ? 0.09 : isMissileTone ? 0.08 : 0.06;
-    const filterType: BiquadFilterType = isHeavyTone || isMissileTone ? 'bandpass' : 'highpass';
-    const noiseFreq = isMissileTone
-      ? 1900
-      : isFlakTone
-        ? 1500
-        : isHeavyTone
-          ? 2200
-          : isBoss
-            ? 1400
-            : 2200;
-    const bodyStartHzOffset = bodyStartHz + profileOffset * 140 + detuneCents * 0.35;
-    const noiseQ = isHeavyTone
-      ? 1.3
-      : isFlakTone
-        ? 1.7
-        : isBoss
-          ? 0.95
-          : 1.1 + hitIntensity * 0.15;
+    if (isEnvironment) {
+      bodyType = 'sine';
+      sparkleType = 'sine';
+      bodyStartHz = 250;
+      bodyEndHz = 92;
+      sparkleStartHz = 980;
+      sparkleEndHz = 180;
+      durationSec = 0.095;
+      sparkleDurationSec = 0.045;
+      filterType = 'bandpass';
+      noiseFreq = 1180;
+      noiseQ = 0.86;
+      bodyGainBase = 0.075;
+      sparkleGainBase = 0.038;
+      noiseDurationSec = 0.09;
+      noiseGainBase = 0.065;
+      bodyPitchBias = -18;
+      sparklePitchBias = -180;
+    } else if (isBoss) {
+      bodyType = isHeavyTone ? 'sawtooth' : 'triangle';
+      sparkleType = 'sine';
+      bodyStartHz = 268;
+      bodyEndHz = 72;
+      sparkleStartHz = 1080;
+      sparkleEndHz = 90;
+      durationSec = 0.17;
+      sparkleDurationSec = 0.07;
+      filterType = 'bandpass';
+      noiseFreq = 1500;
+      noiseQ = 0.98;
+      bodyGainBase = 0.16;
+      sparkleGainBase = 0.058;
+      noiseDurationSec = 0.11;
+      noiseGainBase = 0.11;
+      bodyPitchBias = -22;
+      sparklePitchBias = -120;
+    } else if (isEnemy) {
+      bodyType = 'triangle';
+      sparkleType = 'square';
+      bodyStartHz = 392;
+      bodyEndHz = 132;
+      sparkleStartHz = 1480;
+      sparkleEndHz = 210;
+      durationSec = 0.1;
+      sparkleDurationSec = 0.055;
+      filterType = 'highpass';
+      noiseFreq = 2050;
+      noiseQ = 1.02 + hitIntensity * 0.12;
+      bodyGainBase = 0.108;
+      sparkleGainBase = 0.064;
+      noiseDurationSec = 0.065;
+      noiseGainBase = 0.07;
+      bodyPitchBias = -12;
+      sparklePitchBias = -70;
+    } else {
+      bodyPitchBias = 8;
+      sparklePitchBias = 120;
+    }
+
+    if (isMissileTone) {
+      bodyType = 'square';
+      sparkleType = 'triangle';
+      bodyStartHz = 360;
+      bodyEndHz = 100;
+      sparkleStartHz = 1400;
+      sparkleEndHz = 260;
+      durationSec = 0.14;
+      sparkleDurationSec = 0.08;
+      filterType = 'bandpass';
+      noiseFreq = 1900;
+      noiseQ = 1.2;
+      bodyGainBase = 0.17;
+      sparkleGainBase = 0.09;
+      noiseDurationSec = 0.11;
+      noiseGainBase = 0.16;
+      bodyPitchBias += 14;
+      sparklePitchBias += 60;
+    } else if (isFlakTone) {
+      bodyType = 'triangle';
+      sparkleType = 'square';
+      bodyStartHz = 420;
+      bodyEndHz = 170;
+      sparkleStartHz = 900;
+      sparkleEndHz = 130;
+      durationSec = 0.12;
+      sparkleDurationSec = 0.09;
+      filterType = 'bandpass';
+      noiseFreq = 1500;
+      noiseQ = 1.7;
+      bodyGainBase = 0.13;
+      sparkleGainBase = 0.09;
+      noiseDurationSec = 0.09;
+      noiseGainBase = 0.11;
+      bodyPitchBias -= 16;
+      sparklePitchBias -= 80;
+    } else if (isHeavyTone) {
+      bodyType = 'sawtooth';
+      sparkleType = 'triangle';
+      bodyStartHz = 290;
+      bodyEndHz = 90;
+      sparkleStartHz = 1300;
+      sparkleEndHz = 230;
+      durationSec = 0.13;
+      sparkleDurationSec = 0.075;
+      filterType = 'bandpass';
+      noiseFreq = 2200;
+      noiseQ = 1.3;
+      bodyGainBase = 0.14;
+      sparkleGainBase = 0.08;
+      noiseDurationSec = 0.1;
+      noiseGainBase = 0.13;
+      bodyPitchBias -= 20;
+      sparklePitchBias += 20;
+    }
+
+    const bodyStartHzOffset =
+      bodyStartHz + bodyPitchBias + profileOffset * 140 + detuneCents * 0.35;
 
     try {
       const bodyOsc = context.createOscillator();
@@ -1018,9 +1070,7 @@ export class AudioManager {
       bodyOsc.frequency.exponentialRampToValueAtTime(bodyEndHz - hitIntensity * 8, now + durationSec);
       bodyGain.gain.setValueAtTime(0, now);
       bodyGain.gain.linearRampToValueAtTime(
-        (isMissileTone ? 0.17 : isFlakTone ? 0.13 : isHeavyTone ? 0.14 : isBoss ? 0.16 : isEnemy ? 0.11 : 0.13)
-          * this.sfxVolume
-          * hitIntensity,
+        bodyGainBase * this.sfxVolume * hitIntensity,
         now + 0.004
       );
       bodyGain.gain.exponentialRampToValueAtTime(0.01, now + durationSec);
@@ -1034,7 +1084,7 @@ export class AudioManager {
       sparkOsc.type = sparkleType;
       sparkOsc.detune.setValueAtTime(-detuneCents * 0.35, now);
       sparkOsc.frequency.setValueAtTime(
-        sparkleStartHz + profileOffset * 160 + hitIntensity * 120,
+        sparkleStartHz + sparklePitchBias + profileOffset * 160 + hitIntensity * 120,
         now
       );
       sparkOsc.frequency.exponentialRampToValueAtTime(
@@ -1043,15 +1093,7 @@ export class AudioManager {
       );
       sparkGain.gain.setValueAtTime(0, now);
       sparkGain.gain.linearRampToValueAtTime(
-        (isMissileTone || isFlakTone
-          ? 0.09
-          : isBoss
-            ? 0.06
-            : isEnemy
-              ? 0.07
-              : isHeavyTone
-                ? 0.08
-                : 0.08) * this.sfxVolume * hitIntensity,
+        sparkleGainBase * this.sfxVolume * hitIntensity,
         now + 0.002
       );
       sparkGain.gain.exponentialRampToValueAtTime(0.01, now + sparkleDurationSec);
@@ -1061,21 +1103,9 @@ export class AudioManager {
       sparkOsc.stop(now + sparkleDurationSec);
 
       this.playFilteredNoise(
-        isMissileTone ? 0.11 : isFlakTone ? 0.09 : isHeavyTone ? 0.1 : 0.07,
+        noiseDurationSec,
         0.003,
-        (isMissileTone
-          ? 0.16
-          : isFlakTone
-            ? 0.11
-            : isHeavyTone
-              ? 0.13
-              : isBoss
-                ? 0.11
-                : isEnvironment
-                  ? 0.1
-                  : isEnemy
-                    ? 0.07
-                    : 0.08) * this.sfxVolume * hitIntensity,
+        noiseGainBase * this.sfxVolume * hitIntensity,
         filterType,
         noiseFreq + detuneCents * 0.9,
         noiseQ
@@ -1105,67 +1135,154 @@ export class AudioManager {
     const { now, context, sfxGain } = sound;
     const hitIntensity = Math.max(0.8, Math.min(2.4, intensity));
     const profileGain = isLaser ? 0.92 : isFlak ? 0.98 : isArmor ? 0.9 : 0.96;
+    let impactType: OscillatorType = 'sawtooth';
+    let crackType: OscillatorType = 'triangle';
+    let impactStartHz = isCannon ? 150 : 160;
+    let impactEndHz = isCannon ? 42 : 46;
+    let impactDurationSec = 0.24;
+    let impactGainBase = 0.3;
+    let crackStartHz = isCannon ? 620 : 700;
+    let crackEndHz = isCannon ? 135 : 150;
+    let crackDurationSec = 0.24;
+    let crackGainBase = 0.15;
+    let subStartHz = isCannon ? 58 : 64;
+    let subEndHz = isCannon ? 20 : 22;
+    let subGainBase = 0.14;
+    let metallicStartHz = 960;
+    let metallicEndHz = 320;
+    let metallicGainBase = 0.06;
+    let noisePrimaryDuration = 0.2;
+    let noisePrimaryGain = 0.16;
+    let noisePrimaryType: BiquadFilterType = 'highpass';
+    let noisePrimaryFreq = isCannon ? 1220 : 1350;
+    let noisePrimaryQ = isCannon ? 0.9 : 0.95;
+    let noiseSecondaryDuration = 0.24;
+    let noiseSecondaryGain = 0.14;
+    let noiseSecondaryFreq = 760;
+    let noiseSecondaryQ = 1.1;
+
+    if (isLaser) {
+      impactType = 'triangle';
+      crackType = 'sine';
+      impactStartHz = 420;
+      impactEndHz = 120;
+      impactDurationSec = 0.18;
+      impactGainBase = 0.18;
+      crackStartHz = 1480;
+      crackEndHz = 420;
+      crackDurationSec = 0.15;
+      crackGainBase = 0.08;
+      noisePrimaryDuration = 0.12;
+      noisePrimaryGain = 0.08;
+      noisePrimaryType = 'bandpass';
+      noisePrimaryFreq = 2200;
+      noisePrimaryQ = 1.15;
+      noiseSecondaryDuration = 0.16;
+      noiseSecondaryGain = 0.06;
+      noiseSecondaryFreq = 980;
+      noiseSecondaryQ = 1.5;
+    } else if (isFlak) {
+      impactType = 'triangle';
+      crackType = 'square';
+      impactStartHz = 220;
+      impactEndHz = 54;
+      impactDurationSec = 0.24;
+      impactGainBase = 0.28;
+      crackStartHz = 860;
+      crackEndHz = 180;
+      crackDurationSec = 0.22;
+      crackGainBase = 0.17;
+      subStartHz = 82;
+      subEndHz = 28;
+      subGainBase = 0.12;
+      noisePrimaryDuration = 0.22;
+      noisePrimaryGain = 0.17;
+      noisePrimaryType = 'highpass';
+      noisePrimaryFreq = 1480;
+      noisePrimaryQ = 1.04;
+      noiseSecondaryDuration = 0.24;
+      noiseSecondaryGain = 0.13;
+      noiseSecondaryFreq = 780;
+      noiseSecondaryQ = 1.18;
+    } else if (isArmor) {
+      impactType = 'square';
+      crackType = 'triangle';
+      impactStartHz = 190;
+      impactEndHz = 70;
+      impactDurationSec = 0.24;
+      impactGainBase = 0.24;
+      crackStartHz = 980;
+      crackEndHz = 240;
+      crackDurationSec = 0.24;
+      crackGainBase = 0.12;
+      subStartHz = 64;
+      subEndHz = 22;
+      subGainBase = 0.09;
+      metallicStartHz = 1280;
+      metallicEndHz = 420;
+      metallicGainBase = 0.08;
+      noisePrimaryDuration = 0.2;
+      noisePrimaryGain = 0.12;
+      noisePrimaryType = 'highpass';
+      noisePrimaryFreq = 1700;
+      noisePrimaryQ = 1.05;
+      noiseSecondaryDuration = 0.24;
+      noiseSecondaryGain = 0.11;
+      noiseSecondaryFreq = 920;
+      noiseSecondaryQ = 1.1;
+    }
 
     try {
       const impactOsc = context.createOscillator();
       const impactGain = context.createGain();
-      impactOsc.type = isLaser ? 'triangle' : isArmor ? 'square' : 'sawtooth';
+      impactOsc.type = impactType;
       impactOsc.detune.setValueAtTime(detuneCents, now);
-      impactOsc.frequency.setValueAtTime(
-        isLaser ? 420 : isFlak ? 210 : isArmor ? 190 : isCannon ? 150 : 160,
-        now
-      );
+      impactOsc.frequency.setValueAtTime(impactStartHz, now);
       impactOsc.frequency.exponentialRampToValueAtTime(
-        isLaser ? 120 : isFlak ? 54 : isArmor ? 70 : isCannon ? 42 : 46,
-        now + (isLaser ? 0.18 : 0.24)
+        impactEndHz,
+        now + impactDurationSec
       );
       impactGain.gain.setValueAtTime(0, now);
       impactGain.gain.linearRampToValueAtTime(
-        (isLaser ? 0.18 : isArmor ? 0.24 : 0.3) * this.sfxVolume * hitIntensity * profileGain,
+        impactGainBase * this.sfxVolume * hitIntensity * profileGain,
         now + 0.006
       );
-      impactGain.gain.exponentialRampToValueAtTime(0.01, now + (isLaser ? 0.18 : 0.24));
+      impactGain.gain.exponentialRampToValueAtTime(0.01, now + impactDurationSec);
       impactOsc.connect(impactGain);
       impactGain.connect(sfxGain);
       impactOsc.start(now);
-      impactOsc.stop(now + (isLaser ? 0.18 : 0.24));
+      impactOsc.stop(now + impactDurationSec);
 
       const crackOsc = context.createOscillator();
       const crackGain = context.createGain();
-      crackOsc.type = isLaser ? 'sine' : 'triangle';
+      crackOsc.type = crackType;
       crackOsc.detune.setValueAtTime(-detuneCents * 0.6, now);
-      crackOsc.frequency.setValueAtTime(
-        isLaser ? 1480 : isFlak ? 820 : isArmor ? 980 : isCannon ? 620 : 700,
-        now + 0.01
-      );
+      crackOsc.frequency.setValueAtTime(crackStartHz, now + 0.01);
       crackOsc.frequency.exponentialRampToValueAtTime(
-        isLaser ? 420 : isFlak ? 190 : isArmor ? 240 : isCannon ? 135 : 150,
-        now + (isLaser ? 0.14 : 0.22)
+        crackEndHz,
+        now + crackDurationSec
       );
       crackGain.gain.setValueAtTime(0, now + 0.008);
       crackGain.gain.linearRampToValueAtTime(
-        (isLaser ? 0.08 : isArmor ? 0.12 : 0.15) * this.sfxVolume * hitIntensity * profileGain,
+        crackGainBase * this.sfxVolume * hitIntensity * profileGain,
         now + 0.02
       );
-      crackGain.gain.exponentialRampToValueAtTime(0.01, now + (isLaser ? 0.15 : 0.24));
+      crackGain.gain.exponentialRampToValueAtTime(0.01, now + crackDurationSec);
       crackOsc.connect(crackGain);
       crackGain.connect(sfxGain);
       crackOsc.start(now + 0.01);
-      crackOsc.stop(now + (isLaser ? 0.15 : 0.24));
+      crackOsc.stop(now + crackDurationSec);
 
       if (!isLaser) {
         const subOsc = context.createOscillator();
         const subGain = context.createGain();
         subOsc.type = 'sine';
         subOsc.detune.setValueAtTime(detuneCents * 0.2, now);
-        subOsc.frequency.setValueAtTime(isFlak ? 82 : isCannon ? 58 : 64, now + 0.014);
-        subOsc.frequency.exponentialRampToValueAtTime(isFlak ? 28 : isCannon ? 20 : 22, now + 0.32);
+        subOsc.frequency.setValueAtTime(subStartHz, now + 0.014);
+        subOsc.frequency.exponentialRampToValueAtTime(subEndHz, now + 0.32);
         subGain.gain.setValueAtTime(0, now + 0.014);
         subGain.gain.linearRampToValueAtTime(
-          (isArmor ? 0.09 : isCannon ? 0.14 : 0.12)
-            * this.sfxVolume
-            * Math.min(2.1, hitIntensity)
-            * profileGain,
+          subGainBase * this.sfxVolume * Math.min(2.1, hitIntensity) * profileGain,
           now + 0.03
         );
         subGain.gain.exponentialRampToValueAtTime(0.01, now + 0.34);
@@ -1180,11 +1297,11 @@ export class AudioManager {
         const metallicGain = context.createGain();
         metallicOsc.type = 'triangle';
         metallicOsc.detune.setValueAtTime(-detuneCents * 0.55, now);
-        metallicOsc.frequency.setValueAtTime(isArmor ? 1280 : 960, now + 0.006);
-        metallicOsc.frequency.exponentialRampToValueAtTime(isArmor ? 420 : 320, now + 0.11);
+        metallicOsc.frequency.setValueAtTime(metallicStartHz, now + 0.006);
+        metallicOsc.frequency.exponentialRampToValueAtTime(metallicEndHz, now + 0.11);
         metallicGain.gain.setValueAtTime(0, now + 0.004);
         metallicGain.gain.linearRampToValueAtTime(
-          (isArmor ? 0.08 : 0.06) * this.sfxVolume * Math.min(2, hitIntensity) * profileGain,
+          metallicGainBase * this.sfxVolume * Math.min(2, hitIntensity) * profileGain,
           now + 0.014
         );
         metallicGain.gain.exponentialRampToValueAtTime(0.01, now + 0.12);
@@ -1195,27 +1312,24 @@ export class AudioManager {
       }
 
       this.playFilteredNoise(
-        isLaser ? 0.12 : 0.2,
+        noisePrimaryDuration,
         0.004,
-        (isLaser ? 0.08 : isArmor ? 0.12 : 0.16)
+        noisePrimaryGain
           * this.sfxVolume
           * Math.min(2, hitIntensity)
           * profileGain
           * (isFlak ? 1.06 : 1),
-        isLaser ? 'bandpass' : 'highpass',
-        isLaser ? 2200 : isArmor ? 1700 : isCannon ? 1220 : 1350,
-        isLaser ? 1.15 : isArmor ? 1.05 : isCannon ? 0.9 : 0.95
+        noisePrimaryType,
+        noisePrimaryFreq,
+        noisePrimaryQ
       );
       this.playFilteredNoise(
-        isLaser ? 0.16 : 0.24,
+        noiseSecondaryDuration,
         0.014,
-        (isLaser ? 0.06 : isArmor ? 0.11 : 0.14)
-          * this.sfxVolume
-          * Math.min(2, hitIntensity)
-          * profileGain,
+        noiseSecondaryGain * this.sfxVolume * Math.min(2, hitIntensity) * profileGain,
         'bandpass',
-        isLaser ? 980 : isArmor ? 920 : 760,
-        isLaser ? 1.5 : 1.1
+        noiseSecondaryFreq,
+        noiseSecondaryQ
       );
     } catch {
       // Ignore
