@@ -358,8 +358,22 @@ export class GameCoordinator {
     );
 
     this.resourceRegistry.addUnsubscriber(
+      EventBus.on(GameEventType.FRIENDLY_DEATH, ({ payload }) => {
+        this.audioManager.playExplosion();
+        this.particleSystem?.createExplosion(payload.position, 1.15);
+        this.hud.showPowerUpBig('⚠️', '友军坠毁', 1, true);
+      })
+    );
+
+    this.resourceRegistry.addUnsubscriber(
       EventBus.on(GameEventType.MISSILE_FIRED, () => {
         this.handleTutorialMissileFired();
+      })
+    );
+
+    this.resourceRegistry.addUnsubscriber(
+      EventBus.on(GameEventType.MISSILE_HIT, () => {
+        this.audioManager.playMissileExplosion();
       })
     );
 
@@ -609,6 +623,7 @@ export class GameCoordinator {
       enemyMeshes,
       friendlyMeshes,
       (target, damage) => {
+        this.createCombatHitFeedback(target, damage, 1);
         const enemy = this.enemySystem?.getEnemies().find((e) => e.getMesh() === target);
         enemy?.takeDamage(damage);
       },
@@ -618,6 +633,7 @@ export class GameCoordinator {
         }
       },
       (target, damage) => {
+        this.createCombatHitFeedback(target, damage, 0.92);
         const friendly = this.enemySystem?.getFriendlyAIs().find((f) => f.getMesh() === target);
         friendly?.takeDamage(damage);
       }
@@ -1390,8 +1406,8 @@ export class GameCoordinator {
     bossConfig: BossConfig,
     isBossMode: boolean
   ): void {
-    this.audioManager.playExplosion();
-    this.particleSystem?.createExplosion(position, bossConfig.scale);
+    this.audioManager.playBossExplosion(bossConfig.scale);
+    this.particleSystem?.createBossDeathExplosion(position, bossConfig.scale);
     this.gameState.addScore(bossConfig.scoreValue);
     const earnedPoints = this.playerStats.addScore(bossConfig.scoreValue);
     this.hud.updateUpgradePoints(this.playerStats.getUpgrades().getAvailablePoints());
@@ -1433,6 +1449,18 @@ export class GameCoordinator {
         this.hud.showGameOver(this.gameState.getScore());
       }
     }, 1000);
+  }
+
+  private createCombatHitFeedback(
+    target: THREE.Object3D,
+    damage: number,
+    intensityMultiplier: number = 1
+  ): void {
+    const hitPosition = new THREE.Vector3();
+    target.getWorldPosition(hitPosition);
+    const hitIntensity = THREE.MathUtils.clamp((damage / 16) * intensityMultiplier, 0.82, 1.9);
+    this.audioManager.playHit(hitIntensity);
+    this.particleSystem?.createHit(hitPosition, hitIntensity);
   }
 
   private startLevelBossBattle(): void {

@@ -88,6 +88,10 @@ export class EnemySystem implements IGameSystem {
         const allTargets = additionalTargets ? [...enemyMeshes, ...additionalTargets] : enemyMeshes;
         friendly.update(deltaTime, allTargets, playerPosition);
       } else {
+        EventBus.emit(GameEventType.FRIENDLY_DEATH, {
+          friendlyId: friendly.getMesh().uuid,
+          position: friendly.getMesh().position.clone(),
+        });
         friendly.dispose();
         this.friendlyAIs.splice(i, 1);
       }

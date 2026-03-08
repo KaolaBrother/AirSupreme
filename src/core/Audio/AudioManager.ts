@@ -31,6 +31,7 @@ export enum SoundType {
   TENTACLE_HIT = 'TENTACLE_HIT',
   TENTACLE_DESTROY = 'TENTACLE_DESTROY',
   LOW_HEALTH = 'LOW_HEALTH',
+  BOSS_EXPLOSION = 'BOSS_EXPLOSION',
 }
 
 interface SoundPolicy {
@@ -103,6 +104,12 @@ export class AudioManager {
       maxConcurrent: 2,
       duckAmount: 0.3,
       duckDurationMs: 320,
+    },
+    [SoundType.BOSS_EXPLOSION]: {
+      minIntervalMs: 900,
+      maxConcurrent: 1,
+      duckAmount: 0.45,
+      duckDurationMs: 700,
     },
     [SoundType.TELEPORT]: {
       minIntervalMs: 250,
@@ -1236,6 +1243,73 @@ export class AudioManager {
 
       this.playFilteredNoise(0.3, 0.018, 0.24 * this.sfxVolume, 'bandpass', 680, 1.2);
       this.playFilteredNoise(0.42, 0.024, 0.3 * this.sfxVolume, 'highpass', 1650, 0.9);
+    } catch {
+      // Ignore
+    }
+  }
+
+  public playBossExplosion(scale: number = 1): void {
+    const sound = this.beginSound(SoundType.BOSS_EXPLOSION, 1200);
+    if (!sound) return;
+    const { now, context, sfxGain } = sound;
+    const bossScale = Math.max(1, Math.min(5, scale));
+
+    try {
+      const shockOsc = context.createOscillator();
+      const shockGain = context.createGain();
+      shockOsc.type = 'sawtooth';
+      shockOsc.frequency.setValueAtTime(72, now);
+      shockOsc.frequency.exponentialRampToValueAtTime(18, now + 0.82);
+      shockGain.gain.setValueAtTime(0, now);
+      shockGain.gain.linearRampToValueAtTime(0.62 * this.sfxVolume, now + 0.025);
+      shockGain.gain.exponentialRampToValueAtTime(0.01, now + 0.82);
+      shockOsc.connect(shockGain);
+      shockGain.connect(sfxGain);
+      shockOsc.start(now);
+      shockOsc.stop(now + 0.82);
+
+      const subOsc = context.createOscillator();
+      const subGain = context.createGain();
+      subOsc.type = 'sine';
+      subOsc.frequency.setValueAtTime(42, now);
+      subOsc.frequency.exponentialRampToValueAtTime(16, now + 0.96);
+      subGain.gain.setValueAtTime(0, now);
+      subGain.gain.linearRampToValueAtTime(0.24 * this.sfxVolume, now + 0.04);
+      subGain.gain.exponentialRampToValueAtTime(0.01, now + 0.96);
+      subOsc.connect(subGain);
+      subGain.connect(sfxGain);
+      subOsc.start(now);
+      subOsc.stop(now + 0.96);
+
+      const crackOsc = context.createOscillator();
+      const crackGain = context.createGain();
+      crackOsc.type = 'triangle';
+      crackOsc.frequency.setValueAtTime(520, now + 0.03);
+      crackOsc.frequency.exponentialRampToValueAtTime(110, now + 0.42);
+      crackGain.gain.setValueAtTime(0, now + 0.02);
+      crackGain.gain.linearRampToValueAtTime(0.18 * this.sfxVolume, now + 0.05);
+      crackGain.gain.exponentialRampToValueAtTime(0.01, now + 0.42);
+      crackOsc.connect(crackGain);
+      crackGain.connect(sfxGain);
+      crackOsc.start(now + 0.03);
+      crackOsc.stop(now + 0.42);
+
+      this.playFilteredNoise(
+        0.42 + bossScale * 0.04,
+        0.02,
+        0.24 * this.sfxVolume,
+        'bandpass',
+        720,
+        0.95
+      );
+      this.playFilteredNoise(
+        0.56 + bossScale * 0.05,
+        0.03,
+        0.18 * this.sfxVolume,
+        'highpass',
+        2200,
+        0.9
+      );
     } catch {
       // Ignore
     }
