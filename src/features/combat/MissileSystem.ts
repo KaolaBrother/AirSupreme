@@ -364,7 +364,7 @@ export class MissileSystem {
 
   public checkCollisions(
     targetMeshes: THREE.Object3D[],
-    onHit: (target: THREE.Object3D) => void
+    onHit: (target: THREE.Object3D, impactPosition: THREE.Vector3) => void
   ): void {
     for (const missile of this.missiles) {
       if (!missile.active) continue;
@@ -386,8 +386,9 @@ export class MissileSystem {
 
         if (distance < hitDistance) {
           missile.active = false;
-          this.particleSystem.createMissileImpact(targetWorldPos, 1.05);
-          onHit(targetMesh);
+          const impactPosition = missile.mesh.position.clone().lerp(targetWorldPos, 0.35);
+          this.particleSystem.createMissileImpact(impactPosition, 1.55);
+          onHit(targetMesh, impactPosition);
           break;
         }
       }

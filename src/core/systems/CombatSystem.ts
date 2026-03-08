@@ -136,10 +136,10 @@ export class CombatSystem implements IGameSystem {
       onEnemyHit(target, damage);
     });
 
-    this.missileSystem.checkCollisions(enemyMeshes, (target) => {
+    this.missileSystem.checkCollisions(enemyMeshes, (target, impactPosition) => {
       onEnemyHit(target, 50 * this.damageMultiplier);
       EventBus.emit(GameEventType.MISSILE_HIT, {
-        position: target.position.clone(),
+        position: impactPosition,
         target,
       });
     });

@@ -841,46 +841,46 @@ export function createEnemyMesh(config: EnemyConfig): THREE.Group {
       bodyColor = 0x4a5584;
       wingColor = 0x6b7b8e;
       accentColor = 0x3d5a87;
-      bodySize = 1.2;
-      bodyLength = 5;
-      wingSpan = 2.2;
-      scaleMultiplier = 0.85;
+      bodySize = 1.35;
+      bodyLength = 5.6;
+      wingSpan = 2.6;
+      scaleMultiplier = 1.0;
       break;
     case EnemyType.FIGHTER:
       bodyColor = 0xcc3300;
       wingColor = 0xe63900;
       accentColor = 0x8b2500;
-      bodySize = 1.8;
-      bodyLength = 7;
-      wingSpan = 3.5;
-      scaleMultiplier = 1.1;
+      bodySize = 1.9;
+      bodyLength = 7.4;
+      wingSpan = 3.8;
+      scaleMultiplier = 1.12;
       break;
     case EnemyType.HEAVY:
       bodyColor = 0x2c2c2c;
       wingColor = 0x3a3a3a;
       accentColor = 0x1a1a1a;
-      bodySize = 2.2;
-      bodyLength = 8;
-      wingSpan = 4.2;
-      scaleMultiplier = 1.3;
+      bodySize = 2.45;
+      bodyLength = 9.2;
+      wingSpan = 5.1;
+      scaleMultiplier = 1.42;
       break;
     case EnemyType.SNIPER:
       bodyColor = 0x4a235a;
       wingColor = 0x6b4c7a;
       accentColor = 0x7c3aed;
-      bodySize = 1.6;
-      bodyLength = 7.5;
-      wingSpan = 2.8;
-      scaleMultiplier = 0.95;
+      bodySize = 1.55;
+      bodyLength = 8.4;
+      wingSpan = 2.95;
+      scaleMultiplier = 1.07;
       break;
     case EnemyType.ACE:
       bodyColor = 0x8b0000;
       wingColor = 0xffd700;
       accentColor = 0xff4500;
-      bodySize = 1.9;
-      bodyLength = 7;
-      wingSpan = 3.3;
-      scaleMultiplier = 1.15;
+      bodySize = 2.0;
+      bodyLength = 7.8;
+      wingSpan = 3.8;
+      scaleMultiplier = 1.2;
       break;
     default:
       bodyColor = config.color;

@@ -448,16 +448,14 @@ export class BossBattleController {
       const eyeParts = octopusBoss.getEyeCollisionParts();
       const eyeMeshes = eyeParts.map((part) => part.mesh);
 
-      this.deps.combatSystem.getMissileSystem().checkCollisions(eyeMeshes, (target) => {
+      this.deps.combatSystem.getMissileSystem().checkCollisions(eyeMeshes, (target, impactPosition) => {
         const part = eyeParts.find((candidate) => candidate.mesh === target);
         if (!part) {
           return;
         }
 
         octopusBoss.takeEyeDamage(part.index, GAME_CONSTANTS.MISSILE.DAMAGE);
-        const hitWorldPos = new Vector3();
-        target.getWorldPosition(hitWorldPos);
-        this.deps.particleSystem.createMissileImpact(hitWorldPos, 1.15);
+        this.deps.particleSystem.createMissileImpact(impactPosition, 1.25);
         this.deps.audioManager.playMissileExplosion();
       });
 
@@ -478,9 +476,8 @@ export class BossBattleController {
     }
 
     const missileTargets = [this.currentBoss.getMesh(), ...bossParts, ...missileMeshes];
-    this.deps.combatSystem.getMissileSystem().checkCollisions(missileTargets, (target) => {
-      const hitWorldPos = new Vector3();
-      target.getWorldPosition(hitWorldPos);
+    this.deps.combatSystem.getMissileSystem().checkCollisions(missileTargets, (target, impactPosition) => {
+      const hitWorldPos = impactPosition.clone();
       const isBossPart = bossParts.includes(target);
 
       if (target === this.currentBoss?.getMesh() || isBossPart) {

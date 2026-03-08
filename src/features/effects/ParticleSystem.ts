@@ -555,17 +555,17 @@ export class ParticleSystem {
   }
 
   public createMissileImpact(position: THREE.Vector3, scale: number = 1): void {
-    const impactScale = THREE.MathUtils.clamp(scale, 0.8, 2.1);
-    const sparkCount = Math.max(8, Math.floor(9 + impactScale * 5));
-    const flashCount = Math.max(3, Math.floor(4 + impactScale * 2));
-    const fireCount = Math.max(4, Math.floor(5 + impactScale * 3));
+    const impactScale = THREE.MathUtils.clamp(scale, 1, 2.6);
+    const sparkCount = Math.max(10, Math.floor(11 + impactScale * 6));
+    const flashCount = Math.max(4, Math.floor(5 + impactScale * 3));
+    const fireCount = Math.max(6, Math.floor(6 + impactScale * 4));
 
     // 核心闪光：命中时刻更清晰
     for (let i = 0; i < flashCount; i++) {
       this.spawnParticle(ParticleType.EXPLOSION, position, {
-        speed: 14 + Math.random() * (10 + impactScale * 4),
-        life: 0.1 + Math.random() * 0.1,
-        size: 0.18 + Math.random() * (0.18 + impactScale * 0.16),
+        speed: 16 + Math.random() * (12 + impactScale * 6),
+        life: 0.14 + Math.random() * 0.12,
+        size: 0.24 + Math.random() * (0.22 + impactScale * 0.2),
         color: this.tempColorA.setHSL(0.08, 1, 0.7 + Math.random() * 0.08),
       });
     }
@@ -573,9 +573,9 @@ export class ParticleSystem {
     // 爆心火团：明显区别于机炮命中
     for (let i = 0; i < fireCount; i++) {
       this.spawnParticle(ParticleType.FIRE, position, {
-        speed: 12 + Math.random() * (10 + impactScale * 5),
-        life: 0.14 + Math.random() * 0.12,
-        size: 0.18 + Math.random() * (0.22 + impactScale * 0.16),
+        speed: 14 + Math.random() * (12 + impactScale * 6),
+        life: 0.2 + Math.random() * 0.14,
+        size: 0.26 + Math.random() * (0.26 + impactScale * 0.2),
         color: this.tempColorB.setHSL(0.05 + Math.random() * 0.03, 1, 0.52 + Math.random() * 0.08),
       });
     }
@@ -583,9 +583,9 @@ export class ParticleSystem {
     // 主体火花：体现冲击强度
     for (let i = 0; i < sparkCount; i++) {
       this.spawnParticle(ParticleType.SPARK, position, {
-        speed: 26 + Math.random() * (18 + impactScale * 12),
-        life: 0.14 + Math.random() * 0.14,
-        size: 0.08 + Math.random() * (0.08 + impactScale * 0.08),
+        speed: 30 + Math.random() * (22 + impactScale * 14),
+        life: 0.18 + Math.random() * 0.16,
+        size: 0.09 + Math.random() * (0.1 + impactScale * 0.09),
         color: this.tempColorB.setRGB(1, 0.76, 0.36),
       });
     }
@@ -602,11 +602,11 @@ export class ParticleSystem {
 
     const smokePosition = position.clone();
     this.scheduleBurst(0.04, () => {
-      for (let i = 0; i < Math.max(3, Math.floor(4 + impactScale * 2)); i++) {
+      for (let i = 0; i < Math.max(4, Math.floor(5 + impactScale * 3)); i++) {
         this.spawnParticle(ParticleType.SMOKE, smokePosition, {
-          speed: 3 + Math.random() * 3.6,
-          life: 0.42 + Math.random() * 0.34,
-          size: 0.42 + Math.random() * (0.34 + impactScale * 0.24),
+          speed: 3.6 + Math.random() * 4.2,
+          life: 0.58 + Math.random() * 0.42,
+          size: 0.54 + Math.random() * (0.42 + impactScale * 0.28),
           color: this.tempColorA.setHSL(0.08, 0.08, 0.32 + Math.random() * 0.08),
         });
       }
@@ -641,6 +641,27 @@ export class ParticleSystem {
             life: 0.12 + Math.random() * 0.08,
             size: 0.06 + Math.random() * 0.05,
             color: this.tempColorB.setRGB(1, 0.8, 0.46),
+          });
+        }
+      });
+    }
+
+    if (impactScale > 1.2) {
+      const secondaryBlastPosition = position.clone();
+      this.scheduleBurst(0.09, () => {
+        for (let i = 0; i < Math.max(3, Math.floor(3 + impactScale * 2)); i++) {
+          const angle = Math.random() * Math.PI * 2;
+          const offset = 0.35 + Math.random() * (0.4 + impactScale * 0.22);
+          const burstPos = new THREE.Vector3(
+            secondaryBlastPosition.x + Math.cos(angle) * offset,
+            secondaryBlastPosition.y + (Math.random() - 0.5) * 0.3,
+            secondaryBlastPosition.z + Math.sin(angle) * offset
+          );
+          this.spawnParticle(ParticleType.FIRE, burstPos, {
+            speed: 8 + Math.random() * 8,
+            life: 0.14 + Math.random() * 0.12,
+            size: 0.18 + Math.random() * 0.12,
+            color: this.tempColorC.setHSL(0.03 + Math.random() * 0.02, 1, 0.56 + Math.random() * 0.08),
           });
         }
       });

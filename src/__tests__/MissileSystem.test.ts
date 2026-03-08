@@ -37,7 +37,7 @@ describe('MissileSystem', () => {
 
     system.checkCollisions([target], onHit);
 
-    expect(onHit).toHaveBeenCalledWith(target);
+    expect(onHit).toHaveBeenCalledWith(target, expect.any(THREE.Vector3));
     expect(particleSystem.createMissileImpact).toHaveBeenCalled();
   });
 });
