@@ -44,6 +44,40 @@ describe('ProjectilePool', () => {
       const active = pool.getActiveProjectiles();
       expect(active.length).toBe(1);
     });
+
+    it('should apply distinct visual profiles for player, enemy, and friendly rounds', () => {
+      const position = new THREE.Vector3(0, 0, 0);
+      const direction = new THREE.Vector3(0, 0, -1);
+      const snapshotVisual = (mesh: THREE.Mesh) => ({
+        geometryType: mesh.geometry.type,
+        color: (mesh.material as THREE.MeshBasicMaterial).color.getHex(),
+        scale: mesh.scale.clone(),
+      });
+
+      pool.fire(position, direction, 10);
+      const playerVisual = snapshotVisual(pool.getActiveProjectiles()[0] as THREE.Mesh);
+
+      pool.clear();
+      pool.fire(position, direction, 10, undefined, 'ENEMY');
+      const enemyVisual = snapshotVisual(pool.getActiveProjectiles()[0] as THREE.Mesh);
+
+      pool.clear();
+      pool.fire(position, direction, 10, undefined, 'FRIENDLY');
+      const friendlyVisual = snapshotVisual(pool.getActiveProjectiles()[0] as THREE.Mesh);
+
+      expect(playerVisual.geometryType).toBe('BoxGeometry');
+      expect(enemyVisual.geometryType).toBe('OctahedronGeometry');
+      expect(friendlyVisual.geometryType).toBe('BoxGeometry');
+
+      expect(playerVisual.color).not.toBe(enemyVisual.color);
+      expect(playerVisual.color).not.toBe(friendlyVisual.color);
+      expect(enemyVisual.color).not.toBe(friendlyVisual.color);
+
+      expect(playerVisual.scale.z).toBeGreaterThan(enemyVisual.scale.z);
+      expect(playerVisual.scale.x).toBeLessThan(enemyVisual.scale.x);
+      expect(friendlyVisual.scale.z).toBeGreaterThan(enemyVisual.scale.z);
+      expect(friendlyVisual.scale.x).toBeLessThan(enemyVisual.scale.x);
+    });
   });
 
   describe('checkCollisions', () => {

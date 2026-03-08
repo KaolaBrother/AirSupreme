@@ -281,7 +281,7 @@ export class BossBattleController {
         );
         if (target === this.deps.playerAircraft) {
           if (!this.deps.playerSystem.isShieldActive()) {
-            this.deps.playerSystem.getHealth().takeDamage(damage);
+            this.deps.playerSystem.takeCombatDamage(damage, { suppressDefaultFeedback: true });
           }
           return;
         }
@@ -328,7 +328,9 @@ export class BossBattleController {
     };
     boss.onLaserHit = () => {
       if (!this.deps.playerSystem.isShieldActive()) {
-        this.deps.playerSystem.getHealth().takeDamage(config.damage);
+        this.deps.playerSystem.takeCombatDamage(config.damage, {
+          suppressDefaultFeedback: true,
+        });
         this.createWeaponHitFeedback(
           this.deps.playerAircraft.position,
           Math.max(1.08, config.damage / 18),
@@ -378,7 +380,9 @@ export class BossBattleController {
         );
         if (target === this.deps.playerAircraft) {
           if (!this.deps.playerSystem.isShieldActive()) {
-            this.deps.playerSystem.getHealth().takeDamage(damage);
+            this.deps.playerSystem.takeCombatDamage(damage, {
+              suppressDefaultFeedback: true,
+            });
           }
           return;
         }
@@ -454,7 +458,9 @@ export class BossBattleController {
         );
         if (isPlayerTarget) {
           if (!this.deps.playerSystem.isShieldActive()) {
-            this.deps.playerSystem.getHealth().takeDamage(BOSS_MISSILE_CONFIG.DAMAGE);
+            this.deps.playerSystem.takeCombatDamage(BOSS_MISSILE_CONFIG.DAMAGE, {
+              suppressDefaultFeedback: true,
+            });
           }
           return;
         }
@@ -571,7 +577,9 @@ export class BossBattleController {
 
     if (boss.checkLaserCollision(playerPosition)) {
       if (!this.deps.playerSystem.isShieldActive() && this.laserDamageCooldown <= 0) {
-        this.deps.playerSystem.getHealth().takeDamage(boss.getConfig().damage);
+        this.deps.playerSystem.takeCombatDamage(boss.getConfig().damage, {
+          suppressDefaultFeedback: true,
+        });
         this.createWeaponHitFeedback(
           playerPosition,
           Math.max(1.08, boss.getConfig().damage / 18),
@@ -608,7 +616,9 @@ export class BossBattleController {
       const currentPlayerPosition = this.deps.playerSystem.getPosition();
       if (bulletPosition.distanceTo(currentPlayerPosition) < eyeBulletCollideRadius) {
         if (!this.deps.playerSystem.isShieldActive()) {
-          this.deps.playerSystem.getHealth().takeDamage(boss.getEyeDamage());
+          this.deps.playerSystem.takeCombatDamage(boss.getEyeDamage(), {
+            suppressDefaultFeedback: true,
+          });
           this.createWeaponHitFeedback(
             currentPlayerPosition,
             Math.max(0.98, boss.getEyeDamage() / 18),

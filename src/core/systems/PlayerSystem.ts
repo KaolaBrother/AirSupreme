@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { IGameSystem } from '@/core/interfaces/IGameSystem';
+import type { PlayerHitFeedbackMetadata } from '@/core/EventBus';
 import { EventBus, GameEventType } from '@/core/EventBus';
 import { PlayerController } from '@/features/player/PlayerController';
 import { HealthSystem } from '@/features/combat/HealthSystem';
@@ -23,6 +24,7 @@ export class PlayerSystem implements IGameSystem {
 
   private shieldActive: boolean = false;
   private shieldMesh?: THREE.Mesh;
+  private pendingDamageOptions: PlayerHitFeedbackMetadata | null = null;
 
   private fireCooldown: number = 0;
   private readonly previousVisualPosition = new THREE.Vector3();
@@ -47,6 +49,7 @@ export class PlayerSystem implements IGameSystem {
         EventBus.emit(GameEventType.PLAYER_HIT, {
           damage: amount,
           position: this.mesh.position.clone(),
+          feedback: this.pendingDamageOptions ?? undefined,
         });
       }
     };
@@ -143,6 +146,15 @@ export class PlayerSystem implements IGameSystem {
 
   getHealth(): HealthSystem {
     return this.health;
+  }
+
+  takeCombatDamage(amount: number, feedback?: PlayerHitFeedbackMetadata): void {
+    this.pendingDamageOptions = feedback ?? null;
+    try {
+      this.health.takeDamage(amount);
+    } finally {
+      this.pendingDamageOptions = null;
+    }
   }
 
   getStats(): PlayerStats {

@@ -93,6 +93,11 @@
   - [done] 普通子弹与 Boss 炮弹已接入轻量飞行脉冲与更清楚的阵营轮廓
   - [done] 爆炸族谱第一轮已按玩家 / 敌机 / 友军分家
   - [done] 玩家机炮 / 敌机炮弹 / Boss 重武器命中 profile 已继续拉开一轮
+  - [done] 玩家 / 敌机 / 友军 / Boss 弹丸飞行 profile 第三轮已完成
+  - [done] Boss 命中玩家的通用 `PLAYER_HIT` 双重反馈已去重
+  - 交接：
+    - 飞行轮廓收口：`ProjectilePool.ts` / `BossProjectilePool.ts`
+    - 玩家受击反馈去重：`PlayerSystem.ts` / `GameCoordinator.ts` / `BossBattleController.ts` / `EventBus.ts`
 - `Batch C - 运行时边界与包体积`
   - [done] `EnemyHealthBars`、`LockOnIndicator`、`BossMissileIndicator` 已改成战斗期惰性挂载
   - [done] StartMenu 阶段不再提前创建这些战斗 DOM
@@ -254,12 +259,18 @@
   - 更清楚的炮口 flash
   - 更清楚的弹道存在感
   - 命中后有更明确的冲击层次
+- [done] 重炮 / Boss 炮击弹道可见性第二轮已完成
+  - 玩家黄白针状曳光、敌机橙红热团、友军冷色细长轮廓与 Boss 厚重炮弹已继续拉开
+  - 飞行期只做低成本脉冲/拉伸参数分流，没有引入新的热路径分配
 - [done] 重武器命中反馈第一轮已完成并接回 Boss 战链路
   - 已新增 `boss-cannon / laser / flak-hit / boss-armor` 四类重武器命中反馈
   - 已接回 Boss 战链路，用于 Flak AOE、激光命中、Boss 装甲命中和眼弹/重炮反馈
 - [done] 重武器命中反馈第二批已完成
   - 命中火花/爆裂/烟尘按敌机 / 玩家 / Boss 与 `boss-cannon / laser / flak-hit / boss-armor` 做深层参数分流
   - 视觉色调与尾段衰减更清晰，避免三类命中读感混在一起
+- [done] Boss 命中玩家反馈链路去重已完成
+  - Boss 专用重武器命中已不再叠加通用 `PLAYER_HIT` 的默认音画层
+  - HUD 受击闪与教程受击统计仍保留在统一事件链上
 - [done] 环境命中反馈第一批已接入
   - 普通子弹与 Boss 炮弹撞地时会触发地面火花/尘土反馈
   - 湖区与海洋关已接入水花反馈
@@ -334,6 +345,9 @@
   - 降低连续命中时重复同调现象，维持可分辨音色层次
 - [done] 武器音效第四批强化已完成
   - 玩家 / 敌机 / Boss / 环境命中已进一步按瞬态、噪声带宽与音高轮廓分流
+- [done] 玩家受击默认命中音画已支持按来源抑制
+  - 普通敌弹仍走通用 `PLAYER_HIT`
+  - Boss 专用命中已可只保留专用重武器反馈，不再叠通用层
 - [done] Boss 主炮音色已从玩家机炮音色中分家
 - [done] 八爪鱼 Boss 的瞬移 / 激光预警 / 激光扫射已补齐专属音效触发
 - [done] 玩家 / 敌机 / 友军爆炸音色已从通用爆炸中分家

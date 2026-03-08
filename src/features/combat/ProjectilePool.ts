@@ -24,6 +24,13 @@ interface Projectile {
   baseScale: Vector3;
   baseOpacity: number;
   pulseOffset: number;
+  widthPulseScale: number;
+  lengthPulseScale: number;
+  opacityPulseScale: number;
+  pulseFrequency: number;
+  stretchFrequency: number;
+  travelLengthBoost: number;
+  travelWidthBoost: number;
 }
 
 const FORWARD = new Vector3(0, 0, 1);
@@ -71,6 +78,13 @@ export class ProjectilePool {
         baseScale: new Vector3(1, 1, 1),
         baseOpacity: 0.9,
         pulseOffset: Math.random() * Math.PI * 2,
+        widthPulseScale: 0.08,
+        lengthPulseScale: 0.1,
+        opacityPulseScale: 0.08,
+        pulseFrequency: 0.18,
+        stretchFrequency: 0.12,
+        travelLengthBoost: 0.1,
+        travelWidthBoost: 0,
       });
     }
   }
@@ -180,19 +194,40 @@ export class ProjectilePool {
     const material = projectile.mesh.material as MeshBasicMaterial;
     if (faction === 'ENEMY') {
       projectile.mesh.geometry = this.enemyGeometry;
-      material.color.set(0xff7a3a);
-      projectile.baseOpacity = 0.84;
-      projectile.baseScale.set(0.9, 0.9, 1.3);
+      material.color.set(0xff7f36);
+      projectile.baseOpacity = 0.82;
+      projectile.baseScale.set(0.96, 0.96, 1.18);
+      projectile.widthPulseScale = 0.18;
+      projectile.lengthPulseScale = 0.08;
+      projectile.opacityPulseScale = 0.14;
+      projectile.pulseFrequency = 0.14;
+      projectile.stretchFrequency = 0.1;
+      projectile.travelLengthBoost = 0.06;
+      projectile.travelWidthBoost = 0.08;
     } else if (faction === 'FRIENDLY') {
       projectile.mesh.geometry = this.friendlyGeometry;
-      material.color.set(0x7af8ff);
-      projectile.baseOpacity = 0.82;
-      projectile.baseScale.set(0.78, 0.78, 1.55);
+      material.color.set(0x74f4ff);
+      projectile.baseOpacity = 0.84;
+      projectile.baseScale.set(0.72, 0.72, 1.72);
+      projectile.widthPulseScale = 0.09;
+      projectile.lengthPulseScale = 0.16;
+      projectile.opacityPulseScale = 0.09;
+      projectile.pulseFrequency = 0.16;
+      projectile.stretchFrequency = 0.11;
+      projectile.travelLengthBoost = 0.16;
+      projectile.travelWidthBoost = -0.04;
     } else {
       projectile.mesh.geometry = this.playerGeometry;
-      material.color.set(0xfff2a0);
+      material.color.set(0xfff4aa);
       projectile.baseOpacity = 0.96;
-      projectile.baseScale.set(0.62, 0.62, 1.95);
+      projectile.baseScale.set(0.56, 0.56, 2.18);
+      projectile.widthPulseScale = 0.06;
+      projectile.lengthPulseScale = 0.24;
+      projectile.opacityPulseScale = 0.07;
+      projectile.pulseFrequency = 0.22;
+      projectile.stretchFrequency = 0.16;
+      projectile.travelLengthBoost = 0.22;
+      projectile.travelWidthBoost = -0.06;
     }
 
     material.opacity = projectile.baseOpacity;
@@ -203,14 +238,22 @@ export class ProjectilePool {
   private updateProjectileVisual(projectile: Projectile): void {
     const material = projectile.mesh.material as MeshBasicMaterial;
     const travel = projectile.mesh.position.distanceTo(projectile.startPosition);
-    const pulse = Math.sin(travel * 0.18 + projectile.pulseOffset) * 0.08 + 1;
-    const stretchPulse = Math.sin(travel * 0.12 + projectile.pulseOffset * 0.7) * 0.06;
+    const travelAlpha = Math.min(1, travel / 70);
+    const pulse = Math.sin(travel * projectile.pulseFrequency + projectile.pulseOffset);
+    const stretchPulse = Math.sin(
+      travel * projectile.stretchFrequency + projectile.pulseOffset * 0.7
+    );
+    const widthResponse = 1 + travelAlpha * projectile.travelWidthBoost;
+    const lengthResponse = 1 + travelAlpha * projectile.travelLengthBoost;
 
-    material.opacity = Math.min(1, projectile.baseOpacity * (0.94 + (pulse - 1) * 1.2));
+    material.opacity = Math.min(
+      1,
+      projectile.baseOpacity * (0.92 + travelAlpha * 0.08 + pulse * projectile.opacityPulseScale)
+    );
     projectile.mesh.scale.set(
-      projectile.baseScale.x * (1 - stretchPulse * 0.45),
-      projectile.baseScale.y * (1 - stretchPulse * 0.45),
-      projectile.baseScale.z * (1 + stretchPulse)
+      projectile.baseScale.x * widthResponse * (1 - stretchPulse * projectile.widthPulseScale),
+      projectile.baseScale.y * widthResponse * (1 - stretchPulse * projectile.widthPulseScale),
+      projectile.baseScale.z * lengthResponse * (1 + stretchPulse * projectile.lengthPulseScale)
     );
   }
 

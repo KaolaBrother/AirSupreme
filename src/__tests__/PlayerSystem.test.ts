@@ -17,12 +17,15 @@ vi.mock('@/features/player/PlayerController', () => ({
 describe('PlayerSystem', () => {
   let scene: THREE.Scene;
   let deathHandler: ReturnType<typeof vi.fn>;
+  let hitHandler: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     EventBus.clear();
     scene = new THREE.Scene();
     deathHandler = vi.fn();
+    hitHandler = vi.fn();
     EventBus.on(GameEventType.PLAYER_DEATH, deathHandler);
+    EventBus.on(GameEventType.PLAYER_HIT, hitHandler);
   });
 
   const createPlayerSystem = (initialY: number): {
@@ -81,5 +84,17 @@ describe('PlayerSystem', () => {
 
     expect(deathHandler).toHaveBeenCalledTimes(1);
     expect(respawnHandler).toHaveBeenCalledTimes(1);
+  });
+
+  it('should propagate optional player-hit feedback suppression metadata', () => {
+    const { system } = createPlayerSystem(20);
+
+    system.takeCombatDamage(12, { suppressDefaultFeedback: true });
+    expect(hitHandler).toHaveBeenCalledTimes(1);
+    expect(hitHandler.mock.calls[0][0].payload.feedback?.suppressDefaultFeedback).toBe(true);
+
+    system.takeCombatDamage(8);
+    expect(hitHandler).toHaveBeenCalledTimes(2);
+    expect(hitHandler.mock.calls[1][0].payload.feedback).toBeUndefined();
   });
 });

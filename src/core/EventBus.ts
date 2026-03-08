@@ -37,9 +37,17 @@ export enum GameEventType {
   SCORE_CHANGED = 'SCORE_CHANGED',
 }
 
+export interface PlayerHitFeedbackMetadata {
+  suppressDefaultFeedback?: boolean;
+}
+
 export interface GameEventPayloads {
   [GameEventType.PLAYER_FIRED]: { position: Vector3; direction: Vector3; damage: number };
-  [GameEventType.PLAYER_HIT]: { damage: number; position: Vector3 };
+  [GameEventType.PLAYER_HIT]: {
+    damage: number;
+    position: Vector3;
+    feedback?: PlayerHitFeedbackMetadata;
+  };
   [GameEventType.PLAYER_DEATH]: { position: Vector3; lives: number };
   [GameEventType.PLAYER_RESPAWN]: { position: Vector3 };
 

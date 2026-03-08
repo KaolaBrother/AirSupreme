@@ -23,6 +23,13 @@ interface Projectile {
   baseScale: Vector3;
   baseOpacity: number;
   pulseOffset: number;
+  widthPulseScale: number;
+  lengthPulseScale: number;
+  opacityPulseScale: number;
+  pulseFrequency: number;
+  rippleFrequency: number;
+  travelLengthBoost: number;
+  travelWidthBoost: number;
 }
 
 const FORWARD = new Vector3(0, 0, 1);
@@ -66,6 +73,13 @@ export class BossProjectilePool {
         baseScale: new Vector3(1, 1, 1),
         baseOpacity: 0.94,
         pulseOffset: Math.random() * Math.PI * 2,
+        widthPulseScale: 0.08,
+        lengthPulseScale: 0.12,
+        opacityPulseScale: 0.08,
+        pulseFrequency: 0.09,
+        rippleFrequency: 0.06,
+        travelLengthBoost: 0.1,
+        travelWidthBoost: 0.04,
       });
     }
   }
@@ -172,9 +186,16 @@ export class BossProjectilePool {
   private applyProjectileVisual(projectile: Projectile): void {
     const material = projectile.mesh.material as MeshBasicMaterial;
     projectile.mesh.geometry = this.shellGeometry;
-    material.color.set(0xd84528);
-    projectile.baseOpacity = 0.94;
-    projectile.baseScale.set(1.15, 1.15, 2.8);
+    material.color.set(0xe04c2d);
+    projectile.baseOpacity = 0.95;
+    projectile.baseScale.set(1.2, 1.2, 3.1);
+    projectile.widthPulseScale = 0.12;
+    projectile.lengthPulseScale = 0.18;
+    projectile.opacityPulseScale = 0.09;
+    projectile.pulseFrequency = 0.075;
+    projectile.rippleFrequency = 0.048;
+    projectile.travelLengthBoost = 0.22;
+    projectile.travelWidthBoost = 0.1;
     material.opacity = projectile.baseOpacity;
     projectile.mesh.quaternion.setFromUnitVectors(FORWARD, projectile.direction);
     projectile.mesh.scale.copy(projectile.baseScale);
@@ -183,14 +204,20 @@ export class BossProjectilePool {
   private updateProjectileVisual(projectile: Projectile): void {
     const material = projectile.mesh.material as MeshBasicMaterial;
     const travel = projectile.mesh.position.distanceTo(projectile.startPosition);
-    const pulse = Math.sin(travel * 0.09 + projectile.pulseOffset) * 0.1;
-    const stretchPulse = Math.sin(travel * 0.06 + projectile.pulseOffset * 0.6) * 0.08;
+    const travelAlpha = Math.min(1, travel / 90);
+    const pulse = Math.sin(travel * projectile.pulseFrequency + projectile.pulseOffset);
+    const stretchPulse = Math.sin(travel * projectile.rippleFrequency + projectile.pulseOffset * 0.6);
+    const widthResponse = 1 + travelAlpha * projectile.travelWidthBoost;
+    const lengthResponse = 1 + travelAlpha * projectile.travelLengthBoost;
 
-    material.opacity = Math.min(1, projectile.baseOpacity + pulse * 0.08);
+    material.opacity = Math.min(
+      1,
+      projectile.baseOpacity * (0.94 + travelAlpha * 0.1 + pulse * projectile.opacityPulseScale)
+    );
     projectile.mesh.scale.set(
-      projectile.baseScale.x * (1 - stretchPulse * 0.35),
-      projectile.baseScale.y * (1 - stretchPulse * 0.35),
-      projectile.baseScale.z * (1 + stretchPulse)
+      projectile.baseScale.x * widthResponse * (1 - stretchPulse * projectile.widthPulseScale),
+      projectile.baseScale.y * widthResponse * (1 - stretchPulse * projectile.widthPulseScale),
+      projectile.baseScale.z * lengthResponse * (1 + stretchPulse * projectile.lengthPulseScale)
     );
   }
 

@@ -344,8 +344,10 @@ export class GameCoordinator {
         this.handleTutorialPlayerHit();
         if (!this.playerSystem.isShieldActive()) {
           const hitIntensity = THREE.MathUtils.clamp(payload.damage / 18, 0.8, 2.1);
-          this.audioManager.playHit(hitIntensity);
-          this.particleSystem?.createHit(payload.position, hitIntensity);
+          if (!payload.feedback?.suppressDefaultFeedback) {
+            this.audioManager.playHit(hitIntensity);
+            this.particleSystem?.createHit(payload.position, hitIntensity);
+          }
           this.hud.triggerDamageFlash(hitIntensity);
         }
       })
@@ -699,7 +701,7 @@ export class GameCoordinator {
       },
       (damage) => {
         if (!this.playerSystem.isShieldActive()) {
-          this.playerSystem.getHealth().takeDamage(damage);
+          this.playerSystem.takeCombatDamage(damage);
         }
       },
       (target, damage) => {
