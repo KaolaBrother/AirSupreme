@@ -69,53 +69,53 @@ function getEnemyMaterialTuning(type: EnemyType): {
   switch (type) {
     case EnemyType.SCOUT:
       return {
-        body: { metalness: 0.58, roughness: 0.42, emissiveIntensity: 0.04 },
-        wing: { metalness: 0.52, roughness: 0.44, emissiveIntensity: 0.03 },
-        cockpit: { metalness: 0.9, roughness: 0.14, emissiveIntensity: 0.28 },
-        accent: { metalness: 0.72, roughness: 0.3, emissiveIntensity: 0.08 },
-        detailColor: 0xaab8ca,
-        lightOpacity: 0.82,
-        engineOpacity: 0.68,
+        body: { metalness: 0.54, roughness: 0.46, emissiveIntensity: 0.015 },
+        wing: { metalness: 0.5, roughness: 0.48, emissiveIntensity: 0.01 },
+        cockpit: { metalness: 0.9, roughness: 0.14, emissiveIntensity: 0.08 },
+        accent: { metalness: 0.68, roughness: 0.34, emissiveIntensity: 0.02 },
+        detailColor: 0x8f99a4,
+        lightOpacity: 0.28,
+        engineOpacity: 0.38,
       };
     case EnemyType.FIGHTER:
       return {
-        body: { metalness: 0.74, roughness: 0.28, emissiveIntensity: 0.06 },
-        wing: { metalness: 0.66, roughness: 0.34, emissiveIntensity: 0.05 },
-        cockpit: { metalness: 0.94, roughness: 0.1, emissiveIntensity: 0.34 },
-        accent: { metalness: 0.84, roughness: 0.22, emissiveIntensity: 0.12 },
-        detailColor: 0xd8c4b2,
-        lightOpacity: 0.94,
-        engineOpacity: 0.86,
+        body: { metalness: 0.72, roughness: 0.3, emissiveIntensity: 0.018 },
+        wing: { metalness: 0.64, roughness: 0.36, emissiveIntensity: 0.012 },
+        cockpit: { metalness: 0.94, roughness: 0.1, emissiveIntensity: 0.09 },
+        accent: { metalness: 0.82, roughness: 0.24, emissiveIntensity: 0.025 },
+        detailColor: 0xb0b5bb,
+        lightOpacity: 0.3,
+        engineOpacity: 0.42,
       };
     case EnemyType.HEAVY:
       return {
-        body: { metalness: 0.52, roughness: 0.52, emissiveIntensity: 0.03 },
-        wing: { metalness: 0.48, roughness: 0.58, emissiveIntensity: 0.02 },
-        cockpit: { metalness: 0.86, roughness: 0.18, emissiveIntensity: 0.22 },
-        accent: { metalness: 0.56, roughness: 0.38, emissiveIntensity: 0.06 },
-        detailColor: 0x8d949c,
-        lightOpacity: 0.74,
-        engineOpacity: 0.72,
+        body: { metalness: 0.5, roughness: 0.54, emissiveIntensity: 0.01 },
+        wing: { metalness: 0.46, roughness: 0.6, emissiveIntensity: 0.008 },
+        cockpit: { metalness: 0.86, roughness: 0.18, emissiveIntensity: 0.06 },
+        accent: { metalness: 0.54, roughness: 0.4, emissiveIntensity: 0.015 },
+        detailColor: 0x7c848c,
+        lightOpacity: 0.22,
+        engineOpacity: 0.34,
       };
     case EnemyType.SNIPER:
       return {
-        body: { metalness: 0.68, roughness: 0.32, emissiveIntensity: 0.05 },
-        wing: { metalness: 0.6, roughness: 0.36, emissiveIntensity: 0.04 },
-        cockpit: { metalness: 0.96, roughness: 0.08, emissiveIntensity: 0.42 },
-        accent: { metalness: 0.86, roughness: 0.2, emissiveIntensity: 0.15 },
-        detailColor: 0xc7b7e8,
-        lightOpacity: 0.98,
-        engineOpacity: 0.78,
+        body: { metalness: 0.66, roughness: 0.34, emissiveIntensity: 0.016 },
+        wing: { metalness: 0.58, roughness: 0.38, emissiveIntensity: 0.01 },
+        cockpit: { metalness: 0.96, roughness: 0.08, emissiveIntensity: 0.08 },
+        accent: { metalness: 0.82, roughness: 0.24, emissiveIntensity: 0.02 },
+        detailColor: 0x9ea8b3,
+        lightOpacity: 0.24,
+        engineOpacity: 0.34,
       };
     case EnemyType.ACE:
       return {
-        body: { metalness: 0.78, roughness: 0.24, emissiveIntensity: 0.07 },
-        wing: { metalness: 0.7, roughness: 0.28, emissiveIntensity: 0.06 },
-        cockpit: { metalness: 0.98, roughness: 0.08, emissiveIntensity: 0.4 },
-        accent: { metalness: 0.92, roughness: 0.16, emissiveIntensity: 0.18 },
-        detailColor: 0xf2d88a,
-        lightOpacity: 1,
-        engineOpacity: 0.9,
+        body: { metalness: 0.76, roughness: 0.26, emissiveIntensity: 0.02 },
+        wing: { metalness: 0.68, roughness: 0.3, emissiveIntensity: 0.015 },
+        cockpit: { metalness: 0.98, roughness: 0.08, emissiveIntensity: 0.09 },
+        accent: { metalness: 0.88, roughness: 0.18, emissiveIntensity: 0.03 },
+        detailColor: 0x9b8e86,
+        lightOpacity: 0.28,
+        engineOpacity: 0.4,
       };
     default:
       return {
@@ -839,49 +839,49 @@ export function createEnemyMesh(config: EnemyConfig): THREE.Group {
 
   switch (config.type) {
     case EnemyType.SCOUT:
-      bodyColor = 0x4a5584;
-      wingColor = 0x6b7b8e;
-      accentColor = 0x3d5a87;
-      bodySize = 1.35;
+      bodyColor = 0x5b6670;
+      wingColor = 0x747f89;
+      accentColor = 0x3f4952;
+      bodySize = 1.28;
       bodyLength = 5.6;
-      wingSpan = 2.6;
+      wingSpan = 4.6;
       scaleMultiplier = 1.0;
       break;
     case EnemyType.FIGHTER:
-      bodyColor = 0xcc3300;
-      wingColor = 0xe63900;
-      accentColor = 0x8b2500;
-      bodySize = 1.9;
+      bodyColor = 0x70757d;
+      wingColor = 0x80868e;
+      accentColor = 0x4b525b;
+      bodySize = 1.72;
       bodyLength = 7.4;
-      wingSpan = 3.8;
-      scaleMultiplier = 1.12;
+      wingSpan = 6.1;
+      scaleMultiplier = 1.08;
       break;
     case EnemyType.HEAVY:
-      bodyColor = 0x2c2c2c;
-      wingColor = 0x3a3a3a;
-      accentColor = 0x1a1a1a;
-      bodySize = 2.45;
-      bodyLength = 9.2;
-      wingSpan = 5.1;
-      scaleMultiplier = 1.42;
+      bodyColor = 0x4b4f54;
+      wingColor = 0x5e6369;
+      accentColor = 0x33373c;
+      bodySize = 2.28;
+      bodyLength = 9.4;
+      wingSpan = 8.6;
+      scaleMultiplier = 1.36;
       break;
     case EnemyType.SNIPER:
-      bodyColor = 0x4a235a;
-      wingColor = 0x6b4c7a;
-      accentColor = 0x7c3aed;
-      bodySize = 1.55;
-      bodyLength = 8.4;
-      wingSpan = 2.95;
-      scaleMultiplier = 1.07;
+      bodyColor = 0x5f6771;
+      wingColor = 0x727b85;
+      accentColor = 0x49515b;
+      bodySize = 1.46;
+      bodyLength = 8.8;
+      wingSpan = 5.2;
+      scaleMultiplier = 1.06;
       break;
     case EnemyType.ACE:
-      bodyColor = 0x8b0000;
-      wingColor = 0xffd700;
-      accentColor = 0xff4500;
-      bodySize = 2.0;
+      bodyColor = 0x656a72;
+      wingColor = 0x7b8188;
+      accentColor = 0x8b4a40;
+      bodySize = 1.84;
       bodyLength = 7.8;
-      wingSpan = 3.8;
-      scaleMultiplier = 1.2;
+      wingSpan = 6.0;
+      scaleMultiplier = 1.14;
       break;
     default:
       bodyColor = config.color;
@@ -919,10 +919,7 @@ export function createEnemyMesh(config: EnemyConfig): THREE.Group {
       scale: [0.9, 0.6, 1.2],
       castShadow: false,
     });
-    addMeshPart(group, new THREE.TorusGeometry(bodySize * 0.2, bodySize * 0.03, 8, 12), energyMaterial, [0, bodySize * 0.08, bodyLength * 0.43], {
-      rotation: [Math.PI / 2, 0, 0],
-      castShadow: false,
-    });
+    addMeshPart(group, new THREE.BoxGeometry(0.18, 0.08, 0.2), materials.detail, [0, bodySize * 0.08, bodyLength * 0.4]);
     addMeshPart(group, new THREE.ConeGeometry(bodySize * 0.14, 0.7, 8), materials.engine, [0, 0, -bodyLength * 0.56], {
       rotation: [-Math.PI / 2, 0, 0],
       name: 'engineGlow',
@@ -1068,15 +1065,12 @@ export function createEnemyMesh(config: EnemyConfig): THREE.Group {
       name: 'engineGlow',
       castShadow: false,
     });
-    addMeshPart(group, new THREE.TorusGeometry(bodySize * 0.18, bodySize * 0.03, 8, 12), energyMaterial, [0, bodySize * 0.06, -bodyLength * 0.46], {
-      rotation: [Math.PI / 2, 0, 0],
-      castShadow: false,
+    addMeshPart(group, new THREE.BoxGeometry(0.24, 0.08, 0.24), materials.detail, [0, bodySize * 0.04, -bodyLength * 0.46]);
+    addMeshPart(group, new THREE.BoxGeometry(0.16, 0.08, 0.3), materials.accent, [-bodySize * 0.42, bodySize * 0.16, -bodyLength * 0.02], {
+      rotation: [0, 0.1, 0],
     });
-    addMeshPart(group, new THREE.SphereGeometry(bodySize * 0.12, 8, 8), materials.light, [-bodySize * 0.42, bodySize * 0.16, -bodyLength * 0.02], {
-      castShadow: false,
-    });
-    addMeshPart(group, new THREE.SphereGeometry(bodySize * 0.12, 8, 8), materials.light, [bodySize * 0.42, bodySize * 0.16, -bodyLength * 0.02], {
-      castShadow: false,
+    addMeshPart(group, new THREE.BoxGeometry(0.16, 0.08, 0.3), materials.accent, [bodySize * 0.42, bodySize * 0.16, -bodyLength * 0.02], {
+      rotation: [0, -0.1, 0],
     });
   }
 
