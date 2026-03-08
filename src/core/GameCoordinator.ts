@@ -33,6 +33,11 @@ import { ResourceRegistry } from '@/core/ResourceRegistry';
 import { PresentationController } from '@/core/PresentationController';
 import type { BossBattleController } from '@/core/BossBattleController';
 import type { SurfaceImpactType } from '@/features/effects/ParticleSystem';
+import {
+  DEFAULT_ONBOARDING_BEAT_PROFILE,
+  getWaveOnboardingText,
+  type OnboardingWaveBeatProfile,
+} from '@/ui/OnboardingManager';
 
 interface EyeBossHealthData {
   current: number;
@@ -88,6 +93,12 @@ interface TutorialObjectiveDisplay {
   title: string;
   objective: string;
   status: string;
+}
+
+interface WaveAnnouncementDisplay {
+  icon: string;
+  text: string;
+  durationSeconds: number;
 }
 
 interface CombatRuntimeSystems {
@@ -1366,12 +1377,14 @@ export class GameCoordinator {
   }
 
   private startTutorialCombatSequence(tutorialWaveDelayMs: number): void {
+    const onboardingBeat = this.getCurrentWaveOnboardingBeat();
     const combatStartDelayMs =
       GAME_CONSTANTS.LEVEL.START_DELAY * 1000 + tutorialWaveDelayMs;
-    const waveReadyDelayMs = Math.max(
-      0,
-      combatStartDelayMs - GameCoordinator.TUTORIAL_PRE_WAVE_WARNING_LEAD_MS
-    );
+    const waveReadyLeadMs = onboardingBeat.firstWaveLeadInMs > 0
+      ? onboardingBeat.firstWaveLeadInMs
+      : GameCoordinator.TUTORIAL_PRE_WAVE_WARNING_LEAD_MS;
+    const waveReadyDelayMs = Math.max(0, combatStartDelayMs - waveReadyLeadMs);
+    const firstWaveAnnouncement = this.getWaveAnnouncementDisplay(null, 1, false, onboardingBeat);
 
     this.scheduleTimeout(() => {
       this.hud.showPowerUpBig('📡', '前方有敌，准备接敌', GameCoordinator.TUTORIAL_HINT_MED_MS / 1000);
@@ -1379,8 +1392,53 @@ export class GameCoordinator {
 
     this.scheduleTimeout(() => {
       this.activateTutorialCombatStage();
-      this.hud.showPowerUpBig('⚔️', '第一波到来，先稳机动再开火', GameCoordinator.TUTORIAL_HINT_LONG_MS / 1000);
+      this.hud.showPowerUpBig(
+        firstWaveAnnouncement.icon,
+        firstWaveAnnouncement.text,
+        firstWaveAnnouncement.durationSeconds
+      );
     }, combatStartDelayMs);
+  }
+
+  private getCurrentWaveOnboardingBeat(): OnboardingWaveBeatProfile {
+    const levelManager = this.enemySystem?.getLevelManager();
+    if (!levelManager) {
+      return { ...DEFAULT_ONBOARDING_BEAT_PROFILE };
+    }
+
+    return levelManager.getCurrentWaveOnboardingBeat();
+  }
+
+  private getWaveAnnouncementDisplay(
+    eventType: LevelWaveEventType | null,
+    waveNumber: number,
+    isComplete: boolean,
+    onboardingBeat: OnboardingWaveBeatProfile = this.getCurrentWaveOnboardingBeat()
+  ): WaveAnnouncementDisplay {
+    const textProfile = getWaveOnboardingText(eventType, isComplete);
+    const fallbackDurationMs = eventType === null
+      ? onboardingBeat.firstWaveHintDurationMs
+      : isComplete
+        ? onboardingBeat.eventCompletionHoldMs
+        : onboardingBeat.eventPromptHoldMs;
+    const durationMs = Math.max(
+      200,
+      fallbackDurationMs > 0 ? fallbackDurationMs : textProfile.durationMs
+    );
+
+    if (eventType === null) {
+      return {
+        icon: textProfile.icon,
+        text: textProfile.text,
+        durationSeconds: durationMs / 1000,
+      };
+    }
+
+    return {
+      icon: textProfile.icon,
+      text: isComplete ? textProfile.title : `${textProfile.title} · 第${waveNumber}波`,
+      durationSeconds: durationMs / 1000,
+    };
   }
 
   private resetTutorialCombatState(): void {
@@ -1525,6 +1583,13 @@ export class GameCoordinator {
     this.waveEventState.wave = wave;
 
     const waveNumber = wave + 1;
+    const onboardingBeat = this.getCurrentWaveOnboardingBeat();
+    const promptAnnouncement = this.getWaveAnnouncementDisplay(
+      eventType,
+      waveNumber,
+      false,
+      onboardingBeat
+    );
     const now = Date.now();
     const promptSignature = `${wave}|${eventType}`;
     const shouldShowPrompt =
@@ -1544,37 +1609,31 @@ export class GameCoordinator {
     this.lastWaveEventPromptSignature = promptSignature;
     this.lastWaveEventPromptAt = now;
 
-    switch (eventType) {
-      case LevelWaveEventType.ELITE_HUNT:
-        this.hud.showPowerUpBig(
-          '💠',
-          `精英歼灭波次 · 第${waveNumber}波`,
-          GameCoordinator.TUTORIAL_HINT_LONG_MS / 1000,
-          true
-        );
-        break;
-      case LevelWaveEventType.INTERCEPT:
-        this.hud.showPowerUpBig(
-          '⚠️',
-          `限时拦截波次 · 第${waveNumber}波`,
-          GameCoordinator.TUTORIAL_HINT_LONG_MS / 1000,
-          true
-        );
-        break;
-      case LevelWaveEventType.ESCORT_DEFENSE:
-        if ((this.enemySystem?.getFriendlyAIs().length ?? 0) < 4) {
-          const escortFriendly = this.spawnFriendlyAI();
-          this.escortWaveState.active = true;
-          this.escortWaveState.friendlyId = escortFriendly.getMesh().uuid;
-        }
-        this.hud.showPowerUpBig(
-          '🛡️',
-          `护送防守波次 · 第${waveNumber}波`,
-          GameCoordinator.TUTORIAL_HINT_LONG_MS / 1000,
-          true
-        );
-        break;
+    if (
+      eventType === LevelWaveEventType.ESCORT_DEFENSE &&
+      (this.enemySystem?.getFriendlyAIs().length ?? 0) < 4
+    ) {
+      const escortFriendly = this.spawnFriendlyAI();
+      this.escortWaveState.active = true;
+      this.escortWaveState.friendlyId = escortFriendly.getMesh().uuid;
     }
+
+    this.scheduleTimeout(() => {
+      if (this.waveEventState.type !== eventType || this.waveEventState.wave !== wave) {
+        return;
+      }
+
+      if (this.lastWaveEventPromptSignature !== promptSignature) {
+        return;
+      }
+
+      this.hud.showPowerUpBig(
+        promptAnnouncement.icon,
+        promptAnnouncement.text,
+        promptAnnouncement.durationSeconds,
+        true
+      );
+    }, Math.max(0, onboardingBeat.eventPromptDelayMs));
   }
 
   private handleEscortWaveComplete(wave: number): boolean {
@@ -1610,9 +1669,11 @@ export class GameCoordinator {
       return;
     }
 
+    const completedEventType = this.waveEventState.type;
+    const onboardingBeat = this.getCurrentWaveOnboardingBeat();
     const now = Date.now();
     let completionObjective: WaveObjectiveDisplay | null = null;
-    switch (this.waveEventState.type) {
+    switch (completedEventType) {
       case LevelWaveEventType.ELITE_HUNT:
         completionObjective = {
           title: `第 ${wave + 1} 波 · 精英歼灭完成`,
@@ -1653,27 +1714,49 @@ export class GameCoordinator {
     const shouldShowCompletion =
       completionSignature !== this.lastWaveEventCompleteSignature
       || now - this.lastWaveEventCompleteAt >= GameCoordinator.WAVE_EVENT_COMPLETE_COOLDOWN_MS;
+    const completionAnnouncement = completionObjective
+      ? this.getWaveAnnouncementDisplay(
+          completedEventType,
+          wave + 1,
+          true,
+          onboardingBeat
+        )
+      : null;
+    const completionDelayMs = Math.max(0, onboardingBeat.eventCompletionDelayMs);
+    const objectiveHoldMs = Math.max(
+      GameCoordinator.OBJECTIVE_COMPLETE_HOLD_MS,
+      onboardingBeat.eventCompletionObjectiveHoldMs
+    );
 
     if (shouldShowCompletion) {
       this.lastWaveEventCompleteSignature = completionSignature;
       this.lastWaveEventCompleteAt = now;
 
-      if (completionObjective) {
-        const completionStatus = completionObjective.status ?? '';
-        const isSuccess = completionStatus.includes('达成')
-          || completionStatus.includes('威胁')
-          || completionStatus.includes('拦截完成');
-        this.hud.showPowerUpBig(
-          isSuccess ? '✅' : '⚠️',
-          isSuccess ? '本波事件完成' : '事件收束',
-          GameCoordinator.TUTORIAL_HINT_MED_MS / 1000,
-          true
-        );
+      if (completionAnnouncement) {
+        this.scheduleTimeout(() => {
+          if (this.lastWaveEventCompleteSignature !== completionSignature) {
+            return;
+          }
+
+          this.hud.showPowerUpBig(
+            completionAnnouncement.icon,
+            completionAnnouncement.text,
+            completionAnnouncement.durationSeconds,
+            true
+          );
+        }, completionDelayMs);
       }
     }
 
     if (completionObjective && shouldShowCompletion) {
-      this.showTransientObjective(completionObjective);
+      this.updatePlayerFacingObjective();
+      this.scheduleTimeout(() => {
+        if (this.lastWaveEventCompleteSignature !== completionSignature) {
+          return;
+        }
+
+        this.showTransientObjective(completionObjective as WaveObjectiveDisplay, objectiveHoldMs);
+      }, completionDelayMs);
       return;
     }
 

@@ -167,6 +167,7 @@ export class LevelManager {
     this.enemiesSpawnedThisWave = 0;
     this.spawnInterval = 0.5;
     this.currentWaveEvent = null;
+    this.currentWaveBeatProfile = DEFAULT_ONBOARDING_BEAT_PROFILE;
 
     log.info('Loading level', { levelId, name: config.name, terrain: config.terrain });
 
@@ -521,6 +522,7 @@ export class LevelManager {
     // 重置波次
     this.enemiesSpawnedThisWave = 0;
     this.currentWaveEvent = null;
+    this.currentWaveBeatProfile = DEFAULT_ONBOARDING_BEAT_PROFILE;
   }
 
   /**
