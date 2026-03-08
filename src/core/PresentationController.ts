@@ -153,6 +153,10 @@ export class PresentationController {
     this.hud.showEventObjective(title, objective, status);
   }
 
+  public showCompletedEventObjective(title: string, objective: string, status?: string): void {
+    this.hud.showCompletedEventObjective(title, objective, status);
+  }
+
   public updateEventObjectiveStatus(status: string): void {
     this.hud.updateEventObjectiveStatus(status);
   }

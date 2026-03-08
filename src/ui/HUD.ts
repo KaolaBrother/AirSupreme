@@ -1,6 +1,7 @@
 import { GameConfig } from '@/config';
 
 type BigMessageVariant = 'announcement' | 'powerup';
+type EventObjectiveTone = 'default' | 'complete';
 
 /**
  * 游戏界面 (HUD)
@@ -21,6 +22,7 @@ export class HUD {
   private eventObjectiveTitle: HTMLDivElement;
   private eventObjectiveText: HTMLDivElement;
   private eventObjectiveStatus: HTMLDivElement;
+  private eventObjectiveTone: EventObjectiveTone = 'default';
   private livesDisplay: HTMLDivElement;
   private missilesDisplay: HTMLDivElement;
   private missileProgressDisplay: HTMLDivElement; // 导弹补给进度条背景
@@ -608,6 +610,21 @@ export class HUD {
 
   public showEventObjective(title: string, objective: string, status?: string): void {
     this.ensureInitialized();
+    this.applyEventObjectiveTone('default');
+    this.setTextContent(this.eventObjectiveTitle, title);
+    this.setTextContent(this.eventObjectiveText, objective);
+    this.setTextContent(this.eventObjectiveStatus, status ?? '');
+    this.setStyleValue(
+      this.eventObjectiveStatus,
+      'display',
+      status && status.length > 0 ? 'block' : 'none'
+    );
+    this.setStyleValue(this.eventObjectiveDisplay, 'display', 'block');
+  }
+
+  public showCompletedEventObjective(title: string, objective: string, status?: string): void {
+    this.ensureInitialized();
+    this.applyEventObjectiveTone('complete');
     this.setTextContent(this.eventObjectiveTitle, title);
     this.setTextContent(this.eventObjectiveText, objective);
     this.setTextContent(this.eventObjectiveStatus, status ?? '');
@@ -631,10 +648,70 @@ export class HUD {
 
   public hideEventObjective(): void {
     this.ensureInitialized();
+    this.applyEventObjectiveTone('default');
     this.setTextContent(this.eventObjectiveText, '');
     this.setTextContent(this.eventObjectiveStatus, '');
     this.setStyleValue(this.eventObjectiveStatus, 'display', 'none');
     this.setStyleValue(this.eventObjectiveDisplay, 'display', 'none');
+  }
+
+  private applyEventObjectiveTone(tone: EventObjectiveTone): void {
+    if (this.eventObjectiveTone === tone) {
+      return;
+    }
+
+    this.eventObjectiveTone = tone;
+
+    if (tone === 'complete') {
+      this.setStyleValue(
+        this.eventObjectiveDisplay,
+        'background',
+        'linear-gradient(160deg, rgba(20, 40, 28, 0.9), rgba(8, 18, 12, 0.8))'
+      );
+      this.setStyleValue(
+        this.eventObjectiveDisplay,
+        'border',
+        '1px solid rgba(140, 255, 176, 0.34)'
+      );
+      this.setStyleValue(
+        this.eventObjectiveTitle,
+        'color',
+        '#9dffb8'
+      );
+      this.setStyleValue(
+        this.eventObjectiveText,
+        'textShadow',
+        '0 0 12px rgba(120, 255, 176, 0.14)'
+      );
+      this.setStyleValue(
+        this.eventObjectiveStatus,
+        'color',
+        'rgba(206, 255, 220, 0.9)'
+      );
+      return;
+    }
+
+    this.setStyleValue(
+      this.eventObjectiveDisplay,
+      'background',
+      'linear-gradient(160deg, rgba(18, 26, 42, 0.88), rgba(8, 12, 20, 0.76))'
+    );
+    this.setStyleValue(
+      this.eventObjectiveDisplay,
+      'border',
+      '1px solid rgba(132, 210, 255, 0.24)'
+    );
+    this.setStyleValue(this.eventObjectiveTitle, 'color', '#8fe4ff');
+    this.setStyleValue(
+      this.eventObjectiveText,
+      'textShadow',
+      '0 0 12px rgba(120, 220, 255, 0.16)'
+    );
+    this.setStyleValue(
+      this.eventObjectiveStatus,
+      'color',
+      'rgba(183, 231, 255, 0.86)'
+    );
   }
 
   /**

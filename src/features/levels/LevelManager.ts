@@ -37,6 +37,8 @@ export interface WaveProgressSnapshot {
   aliveInWave: number;
   remainingInWave: number;
   eventType: LevelWaveEventType | null;
+  state: LevelState;
+  nextWaveDelaySeconds: number;
 }
 
 /**
@@ -477,6 +479,8 @@ export class LevelManager {
       aliveInWave,
       remainingInWave: aliveInWave + remainingSpawn,
       eventType: this.currentWaveEvent,
+      state: this.state,
+      nextWaveDelaySeconds: Math.max(0, this.waveDelayTimer),
     };
   }
 

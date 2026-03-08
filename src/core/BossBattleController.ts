@@ -520,8 +520,7 @@ export class BossBattleController {
       const missile = bossMissileSystem?.getMissiles().find((candidate) => candidate.getMesh() === target);
       if (missile) {
         missile.takeDamage(GAME_CONSTANTS.MISSILE.DAMAGE);
-        this.deps.particleSystem.createBossMissileExplosion(hitWorldPos, 0.92);
-        this.deps.audioManager.playMissileExplosion('boss');
+        this.createBossMissileDestroyedFeedback(hitWorldPos, 0.92);
       }
     });
 
@@ -555,8 +554,7 @@ export class BossBattleController {
         const missile = bossMissileSystem?.getMissiles().find((candidate) => candidate.getMesh() === target);
         if (missile) {
           missile.takeDamage(damage);
-          this.deps.particleSystem.createBossMissileExplosion(target.position.clone(), 0.72);
-          this.deps.audioManager.playMissileExplosion('boss');
+          this.createBossMissileDestroyedFeedback(target.position, 0.72);
         }
       });
   }
@@ -761,7 +759,7 @@ export class BossBattleController {
   private scheduleBossDeathAftershocks(position: Vector3, config: BossConfig): void {
     const firstImpactPos = position.clone();
     const secondImpactPos = position.clone();
-    const intensity = Math.max(0.95, Math.min(1.8, config.scale * 0.22));
+    const intensity = Math.max(0.9, Math.min(1.65, config.scale * 0.2));
 
     this.deps.scheduleTimeout(() => {
       this.createHeavyDamageFeedback(firstImpactPos, intensity, 'boss-armor');
@@ -770,6 +768,13 @@ export class BossBattleController {
     this.deps.scheduleTimeout(() => {
       this.createHeavyDamageFeedback(secondImpactPos, intensity * 0.88, 'boss-cannon');
     }, 300);
+  }
+
+  private createBossMissileDestroyedFeedback(position: Vector3, scale: number): void {
+    const worldPos = position.clone();
+    this.deps.particleSystem.createBossMissileExplosion(worldPos, scale);
+    this.deps.audioManager.playMissileExplosion('boss');
+    this.createHeavyDamageFeedback(worldPos, Math.max(0.78, scale), 'boss-cannon');
   }
 
   private disposeBossSpecificSystems(boss: ActiveBoss, bossType: BossType | null): void {

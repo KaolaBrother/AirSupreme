@@ -10,6 +10,14 @@ type BossGroup = THREE.Group & {
 };
 
 export class DesertFortressAI {
+  private static readonly CRITICAL_HEALTH_THRESHOLD = 0.24;
+  private static readonly TERMINAL_HEALTH_THRESHOLD = 0.16;
+  private static readonly HIT_FLASH_DURATION = 0.2;
+  private static readonly WEAKPOINT_PULSE_SPEED = 3.2;
+  private static readonly WEAPON_PULSE_SPEED = 9.6;
+  private static readonly ENERGY_PULSE_SPEED = 7.8;
+  private static readonly CRITICAL_PULSE_SPEED = 13.2;
+  private static readonly TERMINAL_PULSE_SPEED = 20.5;
   private mesh: THREE.Group;
   private config: BossConfig;
   private health: HealthSystem;
@@ -126,12 +134,30 @@ export class DesertFortressAI {
   private updateVisualEffects(): void {
     const healthState = this.getHealth().current / this.getHealth().max;
     const damagePulse = 1 + (1 - healthState) * 0.55;
-    const criticalState = THREE.MathUtils.clamp((0.22 - healthState) / 0.22, 0, 1);
-    const terminalState = THREE.MathUtils.clamp((0.16 - healthState) / 0.16, 0, 1);
+    const criticalState = THREE.MathUtils.clamp(
+      (DesertFortressAI.CRITICAL_HEALTH_THRESHOLD - healthState)
+        / DesertFortressAI.CRITICAL_HEALTH_THRESHOLD,
+      0,
+      1
+    );
+    const terminalState = THREE.MathUtils.clamp(
+      (DesertFortressAI.TERMINAL_HEALTH_THRESHOLD - healthState)
+        / DesertFortressAI.TERMINAL_HEALTH_THRESHOLD,
+      0,
+      1
+    );
     const hitFlash = this.getHitFlashStrength();
-    const criticalPulse = (Math.sin(this.animationTime * 12.5) * 0.5 + 0.5) * criticalState;
-    const terminalPulse = (Math.sin(this.animationTime * 20) * 0.5 + 0.5) * terminalState;
-    const corePulse = 0.55 + (Math.sin(this.animationTime * 2.6) * 0.5 + 0.5) * 0.9 * damagePulse;
+    const criticalPulse =
+      (Math.sin(this.animationTime * DesertFortressAI.CRITICAL_PULSE_SPEED) * 0.5 + 0.5)
+      * criticalState;
+    const terminalPulse =
+      (Math.sin(this.animationTime * DesertFortressAI.TERMINAL_PULSE_SPEED) * 0.5 + 0.5)
+      * terminalState;
+    const corePulse =
+      0.55
+      + (Math.sin(this.animationTime * DesertFortressAI.WEAKPOINT_PULSE_SPEED) * 0.5 + 0.5)
+        * 0.9
+        * damagePulse;
     this.setGlowState(this.coreGlow, {
       intensity: 0.7 + corePulse + criticalPulse * 1.05 + terminalPulse * 1.2 + hitFlash * 1.35,
       scale: 1 + corePulse * 0.08 + criticalPulse * 0.08 + terminalPulse * 0.08 + hitFlash * 0.08,
@@ -150,7 +176,8 @@ export class DesertFortressAI {
         1
       );
     for (let i = 0; i < this.flakMuzzles.length; i++) {
-      const offsetPulse = Math.sin(this.animationTime * 6 + i * 1.4) * 0.5 + 0.5;
+      const offsetPulse =
+        Math.sin(this.animationTime * DesertFortressAI.WEAPON_PULSE_SPEED + i * 1.4) * 0.5 + 0.5;
       const intensity =
         0.45 +
         flakCharge * 1.35 +
@@ -184,7 +211,8 @@ export class DesertFortressAI {
       );
     for (let i = 0; i < this.missileGlowCaps.length; i++) {
       const isActiveLauncher = i === this.currentMissileLauncher;
-      const pulse = Math.sin(this.animationTime * 4.4 + i * 1.8) * 0.5 + 0.5;
+      const pulse =
+        Math.sin(this.animationTime * DesertFortressAI.ENERGY_PULSE_SPEED + i * 1.8) * 0.5 + 0.5;
       const activeBoost = isActiveLauncher ? 0.35 : 0;
       this.setGlowState(this.missileGlowCaps[i], {
         intensity:
@@ -216,7 +244,7 @@ export class DesertFortressAI {
       return 0;
     }
 
-    return THREE.MathUtils.clamp(this.hitFlashTimer / 0.18, 0, 1);
+    return THREE.MathUtils.clamp(this.hitFlashTimer / DesertFortressAI.HIT_FLASH_DURATION, 0, 1);
   }
 
   private setGlowState(
@@ -342,7 +370,7 @@ export class DesertFortressAI {
 
   public takeDamage(damage: number): void {
     this.health.takeDamage(damage);
-    this.hitFlashTimer = 0.18;
+    this.hitFlashTimer = DesertFortressAI.HIT_FLASH_DURATION;
   }
 
   public getHealth(): { current: number; max: number } {

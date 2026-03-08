@@ -22,6 +22,14 @@ type BossGroup = THREE.Group & {
  * - 每 60 秒从仓库口飞出 3 架敌机（除 Scout 以外）
  */
 export class SkyCarrierAI {
+  private static readonly CRITICAL_HEALTH_THRESHOLD = 0.24;
+  private static readonly TERMINAL_HEALTH_THRESHOLD = 0.16;
+  private static readonly HIT_FLASH_DURATION = 0.2;
+  private static readonly WEAKPOINT_PULSE_SPEED = 3.2;
+  private static readonly WEAPON_PULSE_SPEED = 9.6;
+  private static readonly ENERGY_PULSE_SPEED = 7.8;
+  private static readonly CRITICAL_PULSE_SPEED = 13.2;
+  private static readonly TERMINAL_PULSE_SPEED = 20.5;
   private mesh: THREE.Group;
   private config: BossConfig;
   private health: HealthSystem;
@@ -164,14 +172,27 @@ export class SkyCarrierAI {
       Math.min(1.15, this.velocity.length() / Math.max(this.config.speed, 0.001))
     );
     const healthRatio = this.getHealth().current / this.getHealth().max;
-    const criticalState = THREE.MathUtils.clamp((0.24 - healthRatio) / 0.24, 0, 1);
-    const terminalState = THREE.MathUtils.clamp((0.16 - healthRatio) / 0.16, 0, 1);
+    const criticalState = THREE.MathUtils.clamp(
+      (SkyCarrierAI.CRITICAL_HEALTH_THRESHOLD - healthRatio) / SkyCarrierAI.CRITICAL_HEALTH_THRESHOLD,
+      0,
+      1
+    );
+    const terminalState = THREE.MathUtils.clamp(
+      (SkyCarrierAI.TERMINAL_HEALTH_THRESHOLD - healthRatio) / SkyCarrierAI.TERMINAL_HEALTH_THRESHOLD,
+      0,
+      1
+    );
     this.damageFlashTimer = Math.max(0, this.damageFlashTimer - deltaTime);
-    const damageFlash = this.damageFlashTimer > 0 ? this.damageFlashTimer / 0.24 : 0;
-    const deckWave = Math.sin(this.visualPulseTime * 2.2) * 0.5 + 0.5;
-    const engineWave = Math.sin(this.visualPulseTime * 8.5) * 0.5 + 0.5;
-    const criticalPulse = (Math.sin(this.visualPulseTime * 12.5) * 0.5 + 0.5) * criticalState;
-    const terminalPulse = (Math.sin(this.visualPulseTime * 21) * 0.5 + 0.5) * terminalState;
+    const damageFlash =
+      this.damageFlashTimer > 0 ? this.damageFlashTimer / SkyCarrierAI.HIT_FLASH_DURATION : 0;
+    const deckWave = Math.sin(this.visualPulseTime * SkyCarrierAI.WEAKPOINT_PULSE_SPEED) * 0.5 + 0.5;
+    const engineWave = Math.sin(this.visualPulseTime * SkyCarrierAI.ENERGY_PULSE_SPEED) * 0.5 + 0.5;
+    const criticalPulse =
+      (Math.sin(this.visualPulseTime * SkyCarrierAI.CRITICAL_PULSE_SPEED) * 0.5 + 0.5)
+      * criticalState;
+    const terminalPulse =
+      (Math.sin(this.visualPulseTime * SkyCarrierAI.TERMINAL_PULSE_SPEED) * 0.5 + 0.5)
+      * terminalState;
 
     for (const mesh of this.weakpointMeshes) {
       this.setEmissiveState(
@@ -198,7 +219,7 @@ export class SkyCarrierAI {
         this.muzzleMeshes[i],
         0.45 +
           activeBoost +
-          (Math.sin(this.visualPulseTime * 12 + i) * 0.5 + 0.5) * 0.18 +
+          (Math.sin(this.visualPulseTime * SkyCarrierAI.WEAPON_PULSE_SPEED + i) * 0.5 + 0.5) * 0.18 +
           criticalPulse * 0.75 +
           terminalPulse * 0.95 +
           damageFlash * 0.95,
@@ -407,7 +428,7 @@ export class SkyCarrierAI {
 
   public takeDamage(damage: number): void {
     this.health.takeDamage(damage);
-    this.damageFlashTimer = 0.24;
+    this.damageFlashTimer = SkyCarrierAI.HIT_FLASH_DURATION;
   }
 
   public getHealth(): { current: number; max: number } {

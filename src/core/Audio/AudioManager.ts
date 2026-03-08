@@ -753,10 +753,12 @@ export class AudioManager {
     profile: 'boss-cannon' | 'laser' | 'flak-hit' | 'boss-armor' = 'boss-cannon',
     intensity: number = 1
   ): void {
-    const sound = this.beginSound(SoundType.HIT, 220);
+    const durationMs =
+      profile === 'laser' ? 180 : profile === 'flak-hit' ? 240 : profile === 'boss-armor' ? 210 : 220;
+    const sound = this.beginSound(SoundType.HIT, durationMs);
     if (!sound) return;
     const { now, context, sfxGain } = sound;
-    const hitIntensity = Math.max(0.85, Math.min(2.8, intensity));
+    const hitIntensity = Math.max(0.8, Math.min(2.4, intensity));
     const isLaser = profile === 'laser';
     const isFlak = profile === 'flak-hit';
     const isArmor = profile === 'boss-armor';
@@ -1409,7 +1411,7 @@ export class AudioManager {
       boomOsc.frequency.setValueAtTime(isBoss ? 76 : 88, now);
       boomOsc.frequency.exponentialRampToValueAtTime(isBoss ? 18 : 24, now + (isBoss ? 0.68 : 0.58));
       boomGain.gain.setValueAtTime(0, now);
-      boomGain.gain.linearRampToValueAtTime((isBoss ? 0.6 : 0.54) * this.sfxVolume, now + 0.016);
+      boomGain.gain.linearRampToValueAtTime((isBoss ? 0.56 : 0.52) * this.sfxVolume, now + 0.016);
       boomGain.gain.exponentialRampToValueAtTime(0.01, now + (isBoss ? 0.68 : 0.58));
       boomOsc.connect(boomGain);
       boomGain.connect(sfxGain);
@@ -1422,7 +1424,7 @@ export class AudioManager {
       subOsc.frequency.setValueAtTime(isBoss ? 52 : 62, now);
       subOsc.frequency.exponentialRampToValueAtTime(isBoss ? 18 : 24, now + (isBoss ? 0.6 : 0.5));
       subGain.gain.setValueAtTime(0, now);
-      subGain.gain.linearRampToValueAtTime((isBoss ? 0.26 : 0.2) * this.sfxVolume, now + 0.022);
+      subGain.gain.linearRampToValueAtTime((isBoss ? 0.23 : 0.19) * this.sfxVolume, now + 0.022);
       subGain.gain.exponentialRampToValueAtTime(0.01, now + (isBoss ? 0.6 : 0.5));
       subOsc.connect(subGain);
       subGain.connect(sfxGain);
@@ -1435,7 +1437,7 @@ export class AudioManager {
       crackOsc.frequency.setValueAtTime(isBoss ? 620 : 760, now + 0.008);
       crackOsc.frequency.exponentialRampToValueAtTime(isBoss ? 120 : 170, now + (isBoss ? 0.24 : 0.2));
       crackGain.gain.setValueAtTime(0, now);
-      crackGain.gain.linearRampToValueAtTime((isBoss ? 0.2 : 0.18) * this.sfxVolume, now + 0.012);
+      crackGain.gain.linearRampToValueAtTime((isBoss ? 0.18 : 0.17) * this.sfxVolume, now + 0.012);
       crackGain.gain.exponentialRampToValueAtTime(0.01, now + (isBoss ? 0.26 : 0.22));
       crackOsc.connect(crackGain);
       crackGain.connect(sfxGain);

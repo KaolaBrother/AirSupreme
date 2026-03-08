@@ -20,6 +20,14 @@ type BossGroup = THREE.Group & {
  * - 导弹发射器定期发射追踪导弹
  */
 export class BossAI {
+  private static readonly CRITICAL_HEALTH_THRESHOLD = 0.24;
+  private static readonly TERMINAL_HEALTH_THRESHOLD = 0.16;
+  private static readonly HIT_FLASH_DURATION = 0.2;
+  private static readonly WEAKPOINT_PULSE_SPEED = 3.2;
+  private static readonly WEAPON_PULSE_SPEED = 9.6;
+  private static readonly ENERGY_PULSE_SPEED = 7.8;
+  private static readonly CRITICAL_PULSE_SPEED = 13.2;
+  private static readonly TERMINAL_PULSE_SPEED = 20.5;
   private mesh: THREE.Group;
   private config: BossConfig;
   private health: HealthSystem;
@@ -146,18 +154,29 @@ export class BossAI {
     const cannonCharge = 1 - Math.max(0, Math.min(1, this.cannonCooldown / cannonInterval));
     const missileCharge = 1 - Math.max(0, Math.min(1, this.missileCooldown / missileInterval));
     const healthRatio = this.health.getCurrentHealth() / this.health.getMaxHealth();
-    const criticalState = THREE.MathUtils.clamp((0.28 - healthRatio) / 0.28, 0, 1);
-    const terminalState = THREE.MathUtils.clamp((0.16 - healthRatio) / 0.16, 0, 1);
+    const criticalState = THREE.MathUtils.clamp(
+      (BossAI.CRITICAL_HEALTH_THRESHOLD - healthRatio) / BossAI.CRITICAL_HEALTH_THRESHOLD,
+      0,
+      1
+    );
+    const terminalState = THREE.MathUtils.clamp(
+      (BossAI.TERMINAL_HEALTH_THRESHOLD - healthRatio) / BossAI.TERMINAL_HEALTH_THRESHOLD,
+      0,
+      1
+    );
     const speedRatio = Math.max(
       0.25,
       Math.min(1.2, this.velocity.length() / Math.max(this.config.speed, 0.001))
     );
     this.damageFlashTimer = Math.max(0, this.damageFlashTimer - deltaTime);
-    const damageFlash = this.damageFlashTimer > 0 ? this.damageFlashTimer / 0.22 : 0;
-    const weakpointWave = Math.sin(this.visualPulseTime * 2.8) * 0.5 + 0.5;
-    const engineWave = Math.sin(this.visualPulseTime * 10) * 0.5 + 0.5;
-    const criticalPulse = (Math.sin(this.visualPulseTime * 16) * 0.5 + 0.5) * criticalState;
-    const terminalPulse = (Math.sin(this.visualPulseTime * 22) * 0.5 + 0.5) * terminalState;
+    const damageFlash =
+      this.damageFlashTimer > 0 ? this.damageFlashTimer / BossAI.HIT_FLASH_DURATION : 0;
+    const weakpointWave = Math.sin(this.visualPulseTime * BossAI.WEAKPOINT_PULSE_SPEED) * 0.5 + 0.5;
+    const engineWave = Math.sin(this.visualPulseTime * BossAI.ENERGY_PULSE_SPEED) * 0.5 + 0.5;
+    const criticalPulse =
+      (Math.sin(this.visualPulseTime * BossAI.CRITICAL_PULSE_SPEED) * 0.5 + 0.5) * criticalState;
+    const terminalPulse =
+      (Math.sin(this.visualPulseTime * BossAI.TERMINAL_PULSE_SPEED) * 0.5 + 0.5) * terminalState;
 
     for (const mesh of this.weakpointMeshes) {
       this.setGlowState(
@@ -167,7 +186,7 @@ export class BossAI {
           missileCharge * 0.35 +
           criticalPulse * 1.1 +
           terminalPulse * 1.25 +
-          damageFlash * 1.6,
+          damageFlash * 1.45,
         this.weakpointBaseColor
           .clone()
           .lerp(this.weakpointCriticalColor, criticalState + criticalPulse * 0.35)
@@ -185,10 +204,10 @@ export class BossAI {
         this.muzzleMeshes[i],
         0.45 +
           activeBoost +
-          (Math.sin(this.visualPulseTime * 14 + i) * 0.5 + 0.5) * 0.2 +
+          (Math.sin(this.visualPulseTime * BossAI.WEAPON_PULSE_SPEED + i) * 0.5 + 0.5) * 0.2 +
           criticalPulse * 0.75 +
           terminalPulse * 0.9 +
-          damageFlash * 1.05,
+          damageFlash * 0.95,
         this.weaponBaseColor
           .clone()
           .lerp(this.weaponCriticalColor, criticalState + damageFlash * 0.2)
@@ -215,7 +234,7 @@ export class BossAI {
           missileCharge * 0.3 +
           criticalPulse * 0.8 +
           terminalPulse * 1.05 +
-          damageFlash * 0.9,
+          damageFlash * 0.78,
         this.energyBaseColor
           .clone()
           .lerp(this.energyCriticalColor, criticalState + criticalPulse * 0.4)
@@ -425,7 +444,7 @@ export class BossAI {
 
   public takeDamage(damage: number): void {
     this.health.takeDamage(damage);
-    this.damageFlashTimer = 0.22;
+    this.damageFlashTimer = BossAI.HIT_FLASH_DURATION;
   }
 
   public getHealth(): { current: number; max: number } {

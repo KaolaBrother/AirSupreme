@@ -261,7 +261,7 @@ export class ParticleSystem {
         speed: 24 + Math.random() * (18 + blastScale * 8),
         life: 0.22 + Math.random() * 0.18,
         size: 0.44 + Math.random() * (0.5 + blastScale * 0.26),
-        color: this.tempColorA.setHSL(0.045 + Math.random() * 0.03, 1, 0.78 + Math.random() * 0.08),
+        color: this.tempColorA.setHSL(0.045 + Math.random() * 0.03, 1, 0.74 + Math.random() * 0.07),
       });
     }
 
@@ -270,7 +270,7 @@ export class ParticleSystem {
         speed: 24 + Math.random() * (20 + blastScale * 10),
         life: 0.3 + Math.random() * 0.24,
         size: 0.5 + Math.random() * (0.44 + blastScale * 0.28),
-        color: this.tempColorB.setHSL(0.02 + Math.random() * 0.04, 1, 0.48 + Math.random() * 0.08),
+        color: this.tempColorB.setHSL(0.02 + Math.random() * 0.04, 1, 0.45 + Math.random() * 0.08),
       });
     }
 
@@ -911,10 +911,10 @@ export class ParticleSystem {
   }
 
   public createBossMissileExplosion(position: THREE.Vector3, scale: number = 1.6): void {
-    const blastScale = THREE.MathUtils.clamp(scale, 1.2, 2.6);
+    const blastScale = THREE.MathUtils.clamp(scale, 1.15, 2.4);
     const coreFlashCount = Math.max(6, Math.floor(7 + blastScale * 4));
-    const fireCount = Math.max(12, Math.floor(12 + blastScale * 6));
-    const sparkCount = Math.max(12, Math.floor(12 + blastScale * 7));
+    const fireCount = Math.max(10, Math.floor(11 + blastScale * 5));
+    const sparkCount = Math.max(11, Math.floor(11 + blastScale * 6));
     const debrisCount = Math.max(5, Math.floor(5 + blastScale * 3));
 
     // 1. 爆心高亮：更白、更硬，先读到“危险级别”
@@ -940,7 +940,7 @@ export class ParticleSystem {
     // 3. 外抛火花：更尖锐、更远
     for (let i = 0; i < sparkCount; i++) {
       this.spawnParticle(ParticleType.SPARK, position, {
-        speed: 34 + Math.random() * (24 + blastScale * 14),
+        speed: 30 + Math.random() * (22 + blastScale * 12),
         life: 0.16 + Math.random() * 0.16,
         size: 0.1 + Math.random() * (0.1 + blastScale * 0.08),
         color: this.tempColorC.setRGB(1, 0.52 + Math.random() * 0.18, 0.22),
@@ -961,11 +961,11 @@ export class ParticleSystem {
     // 5. 烟壳：延迟出现，体积更重
     const smokePosition = position.clone();
     this.scheduleBurst(0.05, () => {
-      for (let i = 0; i < Math.max(5, Math.floor(6 + blastScale * 4)); i++) {
+      for (let i = 0; i < Math.max(4, Math.floor(5 + blastScale * 3)); i++) {
         this.spawnParticle(ParticleType.SMOKE, smokePosition, {
           speed: 3.5 + Math.random() * 4.2,
           life: 0.72 + Math.random() * 0.52,
-          size: 0.72 + Math.random() * (0.56 + blastScale * 0.34),
+          size: 0.66 + Math.random() * (0.5 + blastScale * 0.28),
           color: this.tempColorB.setHSL(0.02, 0.08, 0.22 + Math.random() * 0.08),
         });
       }

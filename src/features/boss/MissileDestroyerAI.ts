@@ -15,6 +15,14 @@ type BossGroup = THREE.Group & {
 };
 
 export class MissileDestroyerAI {
+  private static readonly CRITICAL_HEALTH_THRESHOLD = 0.24;
+  private static readonly TERMINAL_HEALTH_THRESHOLD = 0.16;
+  private static readonly HIT_FLASH_DURATION = 0.2;
+  private static readonly WEAKPOINT_PULSE_SPEED = 3.2;
+  private static readonly WEAPON_PULSE_SPEED = 9.6;
+  private static readonly ENERGY_PULSE_SPEED = 7.8;
+  private static readonly CRITICAL_PULSE_SPEED = 13.2;
+  private static readonly TERMINAL_PULSE_SPEED = 20.5;
   private mesh: THREE.Group;
   private config: BossConfig;
   private health: HealthSystem;
@@ -148,12 +156,26 @@ export class MissileDestroyerAI {
   private updateVisualEffects(): void {
     const healthRatio = this.getHealth().current / this.getHealth().max;
     const alertBoost = 1 + (1 - healthRatio) * 0.65;
-    const criticalState = THREE.MathUtils.clamp((0.24 - healthRatio) / 0.24, 0, 1);
-    const terminalState = THREE.MathUtils.clamp((0.16 - healthRatio) / 0.16, 0, 1);
+    const criticalState = THREE.MathUtils.clamp(
+      (MissileDestroyerAI.CRITICAL_HEALTH_THRESHOLD - healthRatio)
+        / MissileDestroyerAI.CRITICAL_HEALTH_THRESHOLD,
+      0,
+      1
+    );
+    const terminalState = THREE.MathUtils.clamp(
+      (MissileDestroyerAI.TERMINAL_HEALTH_THRESHOLD - healthRatio)
+        / MissileDestroyerAI.TERMINAL_HEALTH_THRESHOLD,
+      0,
+      1
+    );
     const hitFlash = this.getHitFlashStrength();
-    const criticalPulse = (Math.sin(this.animationTime * 10.5) * 0.5 + 0.5) * criticalState;
-    const terminalPulse = (Math.sin(this.animationTime * 20.5) * 0.5 + 0.5) * terminalState;
-    const bridgePulse = Math.sin(this.animationTime * 2.2) * 0.5 + 0.5;
+    const criticalPulse =
+      (Math.sin(this.animationTime * MissileDestroyerAI.CRITICAL_PULSE_SPEED) * 0.5 + 0.5)
+      * criticalState;
+    const terminalPulse =
+      (Math.sin(this.animationTime * MissileDestroyerAI.TERMINAL_PULSE_SPEED) * 0.5 + 0.5)
+      * terminalState;
+    const bridgePulse = Math.sin(this.animationTime * MissileDestroyerAI.WEAKPOINT_PULSE_SPEED) * 0.5 + 0.5;
     this.setGlowState(this.bridgeWindow, {
       intensity:
         0.35 +
@@ -177,7 +199,8 @@ export class MissileDestroyerAI {
         1
       );
     for (let i = 0; i < this.flakMuzzles.length; i++) {
-      const pulse = Math.sin(this.animationTime * 5.5 + i * 1.3) * 0.5 + 0.5;
+      const pulse =
+        Math.sin(this.animationTime * MissileDestroyerAI.WEAPON_PULSE_SPEED + i * 1.3) * 0.5 + 0.5;
       this.setGlowState(this.flakMuzzles[i], {
         intensity:
           0.45 +
@@ -210,7 +233,8 @@ export class MissileDestroyerAI {
       );
     for (let i = 0; i < this.launcherCaps.length; i++) {
       const isNextLauncher = i === this.currentMissileLauncher;
-      const pulse = Math.sin(this.animationTime * 4 + i * 0.8) * 0.5 + 0.5;
+      const pulse =
+        Math.sin(this.animationTime * MissileDestroyerAI.WEAPON_PULSE_SPEED + i * 0.8) * 0.5 + 0.5;
       this.setGlowState(this.launcherCaps[i], {
         intensity:
           0.55 +
@@ -235,7 +259,7 @@ export class MissileDestroyerAI {
       });
     }
 
-    const enginePulse = Math.sin(this.animationTime * 7.5) * 0.5 + 0.5;
+    const enginePulse = Math.sin(this.animationTime * MissileDestroyerAI.ENERGY_PULSE_SPEED) * 0.5 + 0.5;
     for (const exhaustGlow of this.exhaustGlows) {
       this.setGlowState(exhaustGlow, {
         intensity:
@@ -256,7 +280,11 @@ export class MissileDestroyerAI {
       return 0;
     }
 
-    return THREE.MathUtils.clamp(this.hitFlashTimer / 0.18, 0, 1);
+    return THREE.MathUtils.clamp(
+      this.hitFlashTimer / MissileDestroyerAI.HIT_FLASH_DURATION,
+      0,
+      1
+    );
   }
 
   private setGlowState(
@@ -425,7 +453,7 @@ export class MissileDestroyerAI {
 
   public takeDamage(damage: number): void {
     this.health.takeDamage(damage);
-    this.hitFlashTimer = 0.18;
+    this.hitFlashTimer = MissileDestroyerAI.HIT_FLASH_DURATION;
   }
 
   public getHealth(): { current: number; max: number } {

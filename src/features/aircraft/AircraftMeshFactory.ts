@@ -31,6 +31,8 @@ interface JetProportionProfile {
   intakeYaw: number;
   bellyY: number;
   bellyZ: number;
+  bellyWidth: number;
+  bellyHeight: number;
   bellyDepth: number;
   pylonX: number;
   pylonY: number;
@@ -41,6 +43,8 @@ interface JetProportionProfile {
   tailRootX: number;
   tailRootY: number;
   tailRootZ: number;
+  tailRootWidth: number;
+  tailRootHeight: number;
   tailRootDepth: number;
   nozzleX: number;
   nozzleY: number;
@@ -831,6 +835,30 @@ export function createPlayerMesh(): THREE.Group {
   centerlineBellyRail.castShadow = true;
   group.add(centerlineBellyRail);
 
+  const leftFuselageStation = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.1, 0.46), weaponMaterial);
+  leftFuselageStation.position.set(-0.38, -0.22, 0.14);
+  leftFuselageStation.rotation.y = 0.14;
+  leftFuselageStation.castShadow = true;
+  group.add(leftFuselageStation);
+
+  const rightFuselageStation = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.1, 0.46), weaponMaterial);
+  rightFuselageStation.position.set(0.38, -0.22, 0.14);
+  rightFuselageStation.rotation.y = -0.14;
+  rightFuselageStation.castShadow = true;
+  group.add(rightFuselageStation);
+
+  const leftFuselageStationBrace = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.12, 0.3), detailMaterial);
+  leftFuselageStationBrace.position.set(-0.32, -0.16, 0.08);
+  leftFuselageStationBrace.rotation.set(0.06, 0.12, -0.08);
+  leftFuselageStationBrace.castShadow = true;
+  group.add(leftFuselageStationBrace);
+
+  const rightFuselageStationBrace = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.12, 0.3), detailMaterial);
+  rightFuselageStationBrace.position.set(0.32, -0.16, 0.08);
+  rightFuselageStationBrace.rotation.set(0.06, -0.12, 0.08);
+  rightFuselageStationBrace.castShadow = true;
+  group.add(rightFuselageStationBrace);
+
   const leftOuterRail = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 0.52), accentMaterial);
   leftOuterRail.position.set(-1.78, -0.06, -0.12);
   leftOuterRail.rotation.y = -0.22;
@@ -1163,6 +1191,8 @@ export function createEnemyMesh(config: EnemyConfig): THREE.Group {
           intakeYaw: 0.13,
           bellyY: -bodySize * 0.24,
           bellyZ: bodyLength * 0.08,
+          bellyWidth: 0.12,
+          bellyHeight: 0.1,
           bellyDepth: 0.38,
           pylonX: wingSpan * 0.28,
           pylonY: -0.09,
@@ -1173,6 +1203,8 @@ export function createEnemyMesh(config: EnemyConfig): THREE.Group {
           tailRootX: bodySize * 0.16,
           tailRootY: 0.1,
           tailRootZ: -bodyLength * 0.46,
+          tailRootWidth: 0.14,
+          tailRootHeight: 0.12,
           tailRootDepth: 0.46,
           nozzleX: 0,
           nozzleY: -0.01,
@@ -1189,6 +1221,8 @@ export function createEnemyMesh(config: EnemyConfig): THREE.Group {
           intakeYaw: 0.16,
           bellyY: -bodySize * 0.26,
           bellyZ: bodyLength * 0.12,
+          bellyWidth: 0.14,
+          bellyHeight: 0.12,
           bellyDepth: 0.52,
           pylonX: wingSpan * 0.29,
           pylonY: -0.09,
@@ -1199,6 +1233,8 @@ export function createEnemyMesh(config: EnemyConfig): THREE.Group {
           tailRootX: bodySize * 0.24,
           tailRootY: 0.12,
           tailRootZ: -bodyLength * 0.47,
+          tailRootWidth: 0.18,
+          tailRootHeight: 0.14,
           tailRootDepth: 0.56,
           nozzleX: bodySize * 0.18,
           nozzleY: -0.02,
@@ -1215,6 +1251,8 @@ export function createEnemyMesh(config: EnemyConfig): THREE.Group {
           intakeYaw: 0.14,
           bellyY: -bodySize * 0.32,
           bellyZ: 0,
+          bellyWidth: 0.2,
+          bellyHeight: 0.14,
           bellyDepth: 0.82,
           pylonX: wingSpan * 0.3,
           pylonY: -0.11,
@@ -1225,6 +1263,8 @@ export function createEnemyMesh(config: EnemyConfig): THREE.Group {
           tailRootX: bodySize * 0.28,
           tailRootY: 0.14,
           tailRootZ: -bodyLength * 0.54,
+          tailRootWidth: 0.24,
+          tailRootHeight: 0.18,
           tailRootDepth: 0.72,
           nozzleX: bodySize * 0.22,
           nozzleY: 0,
@@ -1241,6 +1281,8 @@ export function createEnemyMesh(config: EnemyConfig): THREE.Group {
           intakeYaw: 0.15,
           bellyY: -bodySize * 0.2,
           bellyZ: bodyLength * 0.24,
+          bellyWidth: 0.12,
+          bellyHeight: 0.1,
           bellyDepth: 0.56,
           pylonX: wingSpan * 0.2,
           pylonY: -0.08,
@@ -1251,6 +1293,8 @@ export function createEnemyMesh(config: EnemyConfig): THREE.Group {
           tailRootX: bodySize * 0.16,
           tailRootY: 0.12,
           tailRootZ: -bodyLength * 0.46,
+          tailRootWidth: 0.14,
+          tailRootHeight: 0.12,
           tailRootDepth: 0.52,
           nozzleX: 0,
           nozzleY: 0,
@@ -1268,6 +1312,8 @@ export function createEnemyMesh(config: EnemyConfig): THREE.Group {
           intakeYaw: 0.15,
           bellyY: -bodySize * 0.23,
           bellyZ: bodyLength * 0.1,
+          bellyWidth: 0.16,
+          bellyHeight: 0.12,
           bellyDepth: 0.58,
           pylonX: wingSpan * 0.24,
           pylonY: -0.1,
@@ -1278,6 +1324,8 @@ export function createEnemyMesh(config: EnemyConfig): THREE.Group {
           tailRootX: bodySize * 0.22,
           tailRootY: 0.12,
           tailRootZ: -bodyLength * 0.44,
+          tailRootWidth: 0.18,
+          tailRootHeight: 0.14,
           tailRootDepth: 0.58,
           nozzleX: 0,
           nozzleY: 0,
@@ -1460,7 +1508,7 @@ export function createEnemyMesh(config: EnemyConfig): THREE.Group {
       jetProfile.intakeDepthScale,
       jetProfile.intakeYaw
     );
-    addMeshPart(group, new THREE.BoxGeometry(0.14, 0.12, jetProfile.bellyDepth), materials.detail, [0, jetProfile.bellyY, jetProfile.bellyZ], {
+    addMeshPart(group, new THREE.BoxGeometry(jetProfile.bellyWidth, jetProfile.bellyHeight, jetProfile.bellyDepth), materials.detail, [0, jetProfile.bellyY, jetProfile.bellyZ], {
       rotation: [0.04, 0, 0],
     });
     addUndersideRailPair(
@@ -1482,8 +1530,8 @@ export function createEnemyMesh(config: EnemyConfig): THREE.Group {
       jetProfile.tailRootX,
       jetProfile.tailRootY,
       jetProfile.tailRootZ,
-      0.16,
-      0.14,
+      jetProfile.tailRootWidth,
+      jetProfile.tailRootHeight,
       jetProfile.tailRootDepth,
       0.1
     );

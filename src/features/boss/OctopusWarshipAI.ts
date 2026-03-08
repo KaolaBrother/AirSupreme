@@ -11,6 +11,15 @@ type BossGroup = THREE.Group & {
 
 export class OctopusWarshipAI {
   readonly name = 'OctopusWarshipAI';
+  private static readonly CRITICAL_HEALTH_THRESHOLD = 0.24;
+  private static readonly TERMINAL_HEALTH_THRESHOLD = 0.16;
+  private static readonly HIT_FLASH_DURATION = 0.2;
+  private static readonly LIGHT_HIT_FLASH_DURATION = 0.14;
+  private static readonly WEAKPOINT_PULSE_SPEED = 3.2;
+  private static readonly WEAPON_PULSE_SPEED = 9.6;
+  private static readonly ENERGY_PULSE_SPEED = 7.8;
+  private static readonly CRITICAL_PULSE_SPEED = 13.2;
+  private static readonly TERMINAL_PULSE_SPEED = 20.5;
 
   private mesh: THREE.Group;
   private config: BossConfig;
@@ -99,7 +108,7 @@ export class OctopusWarshipAI {
 
     this.eyeSystem.onEyeDamaged = (damage: number) => {
       this.health.takeDamage(damage);
-      this.hitFlashTimer = Math.max(this.hitFlashTimer, 0.14);
+      this.hitFlashTimer = Math.max(this.hitFlashTimer, OctopusWarshipAI.LIGHT_HIT_FLASH_DURATION);
     };
   }
 
@@ -147,18 +156,36 @@ export class OctopusWarshipAI {
   private updateVisualEffects(): void {
     const healthRatio = this.getHealth().current / this.getHealth().max;
     const lowHealthBoost = 1 + (1 - healthRatio) * 0.9;
-    const criticalState = THREE.MathUtils.clamp((0.25 - healthRatio) / 0.25, 0, 1);
-    const terminalState = THREE.MathUtils.clamp((0.16 - healthRatio) / 0.16, 0, 1);
+    const criticalState = THREE.MathUtils.clamp(
+      (OctopusWarshipAI.CRITICAL_HEALTH_THRESHOLD - healthRatio)
+        / OctopusWarshipAI.CRITICAL_HEALTH_THRESHOLD,
+      0,
+      1
+    );
+    const terminalState = THREE.MathUtils.clamp(
+      (OctopusWarshipAI.TERMINAL_HEALTH_THRESHOLD - healthRatio)
+        / OctopusWarshipAI.TERMINAL_HEALTH_THRESHOLD,
+      0,
+      1
+    );
     const hitFlash = this.getHitFlashStrength();
     const teleportCharge =
       this.teleportCooldown > 0
         ? 1 -
           THREE.MathUtils.clamp(this.teleportCooldown / Math.max(TELEPORT_CONFIG.COOLDOWN, 0.001), 0, 1)
         : 1;
-    const criticalPulse = (Math.sin(this.animationTime * 11.5) * 0.5 + 0.5) * criticalState;
-    const terminalPulse = (Math.sin(this.animationTime * 20.5) * 0.5 + 0.5) * terminalState;
+    const criticalPulse =
+      (Math.sin(this.animationTime * OctopusWarshipAI.CRITICAL_PULSE_SPEED) * 0.5 + 0.5)
+      * criticalState;
+    const terminalPulse =
+      (Math.sin(this.animationTime * OctopusWarshipAI.TERMINAL_PULSE_SPEED) * 0.5 + 0.5)
+      * terminalState;
     const corePulse =
-      (Math.sin(this.animationTime * (this.isTeleporting ? 10 : 3.5)) * 0.5 + 0.5) * lowHealthBoost;
+      (Math.sin(
+        this.animationTime
+        * (this.isTeleporting ? OctopusWarshipAI.TERMINAL_PULSE_SPEED : OctopusWarshipAI.WEAKPOINT_PULSE_SPEED)
+      ) * 0.5 + 0.5)
+      * lowHealthBoost;
     this.setGlowState(this.coreGlow, {
       intensity:
         0.95 +
@@ -182,7 +209,8 @@ export class OctopusWarshipAI {
     });
 
     for (let i = 0; i < this.plateEdges.length; i++) {
-      const pulse = Math.sin(this.animationTime * 4.2 + i * 0.9) * 0.5 + 0.5;
+      const pulse =
+        Math.sin(this.animationTime * OctopusWarshipAI.ENERGY_PULSE_SPEED + i * 0.9) * 0.5 + 0.5;
       this.setGlowState(this.plateEdges[i], {
         intensity:
           0.6 +
@@ -199,7 +227,8 @@ export class OctopusWarshipAI {
     }
 
     for (let i = 0; i < this.apertures.length; i++) {
-      const pulse = Math.sin(this.animationTime * 5.5 + i * Math.PI) * 0.5 + 0.5;
+      const pulse =
+        Math.sin(this.animationTime * OctopusWarshipAI.WEAPON_PULSE_SPEED + i * Math.PI) * 0.5 + 0.5;
       this.setGlowState(this.apertures[i], {
         intensity:
           0.7 +
@@ -224,7 +253,8 @@ export class OctopusWarshipAI {
     }
 
     for (let i = 0; i < this.antennaTips.length; i++) {
-      const pulse = Math.sin(this.animationTime * 6.4 + i * 1.1) * 0.5 + 0.5;
+      const pulse =
+        Math.sin(this.animationTime * OctopusWarshipAI.ENERGY_PULSE_SPEED + i * 1.1) * 0.5 + 0.5;
       this.setGlowState(this.antennaTips[i], {
         intensity:
           0.55 + pulse * 0.9 + criticalPulse * 0.7 + terminalPulse * 0.75 + hitFlash * 0.75,
@@ -243,7 +273,7 @@ export class OctopusWarshipAI {
       return 0;
     }
 
-    return THREE.MathUtils.clamp(this.hitFlashTimer / 0.22, 0, 1);
+    return THREE.MathUtils.clamp(this.hitFlashTimer / OctopusWarshipAI.HIT_FLASH_DURATION, 0, 1);
   }
 
   private setGlowState(
@@ -315,7 +345,7 @@ export class OctopusWarshipAI {
 
   public takeDamage(damage: number): void {
     this.health.takeDamage(damage);
-    this.hitFlashTimer = 0.22;
+    this.hitFlashTimer = OctopusWarshipAI.HIT_FLASH_DURATION;
 
     if (!this.isTeleporting && this.teleportCooldown <= 0 && !this.teleportDisabled) {
       if (Math.random() < TELEPORT_CONFIG.CHANCE_ON_HIT) {
@@ -326,12 +356,12 @@ export class OctopusWarshipAI {
 
   public takeEyeDamage(eyeIndex: number, damage: number): void {
     this.eyeSystem.damageEye(eyeIndex, damage);
-    this.hitFlashTimer = 0.14;
+    this.hitFlashTimer = OctopusWarshipAI.LIGHT_HIT_FLASH_DURATION;
   }
 
   public takeEyeDamageAtPosition(hitPosition: THREE.Vector3, damage: number): void {
     this.eyeSystem.damageNearestEye(hitPosition, damage);
-    this.hitFlashTimer = 0.14;
+    this.hitFlashTimer = OctopusWarshipAI.LIGHT_HIT_FLASH_DURATION;
   }
 
   private performTeleport(): void {
