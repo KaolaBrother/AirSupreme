@@ -14,7 +14,7 @@ import {
 } from '@/features/enemy/EnemyTypes';
 import { EnemyAI } from '@/features/enemy/EnemyAI';
 import type { TerrainGenerator } from '@/features/terrain/TerrainGenerator';
-import { SpawnPortal } from '@/features/effects/SpawnPortal';
+import type { SpawnPortal } from '@/features/effects/SpawnPortal';
 import { createEnemyMesh } from '@/features/aircraft/AircraftMeshFactory';
 import { getLogger } from '@/core/utils/Logger';
 import type { DifficultyProfile } from '@/core/Difficulty';
@@ -37,6 +37,8 @@ export class LevelManager {
   private scene: Scene;
   private terrainGenerator: TerrainGenerator | null = null;
   private terrainGeneratorPromise: Promise<TerrainGenerator> | null = null;
+  private spawnPortalModulePromise: Promise<typeof import('@/features/effects/SpawnPortal')> | null =
+    null;
   private terrainLoadSequence: number = 0;
 
   // 战斗区域边界
@@ -122,6 +124,14 @@ export class LevelManager {
       });
   }
 
+  private ensureSpawnPortalModule(): Promise<typeof import('@/features/effects/SpawnPortal')> {
+    if (!this.spawnPortalModulePromise) {
+      this.spawnPortalModulePromise = import('@/features/effects/SpawnPortal');
+    }
+
+    return this.spawnPortalModulePromise;
+  }
+
   /**
    * 加载关卡
    */
@@ -143,6 +153,7 @@ export class LevelManager {
     log.info('Loading level', { levelId, name: config.name, terrain: config.terrain });
 
     this.initializeTerrain(config);
+    void this.ensureSpawnPortalModule();
 
     log.info('Level loaded', { levelId, name: config.name });
   }
@@ -275,20 +286,26 @@ export class LevelManager {
     // 获取生成位置
     const spawnPosition = this.getSpawnPosition(playerPosition);
 
-    // 创建传送门（5秒生成动画）
-    const portal = new SpawnPortal(spawnPosition, () => {
-      // 传送门完成回调：立即显示敌人
-      const enemy = this.getOrCreateEnemy(enemyType);
-      enemy.reset(spawnPosition);
-      enemy.getMesh().visible = true; // 立即显示，无延迟
+    void this.ensureSpawnPortalModule()
+      .then(({ SpawnPortal }) => {
+        const portal = new SpawnPortal(spawnPosition, () => {
+          const enemy = this.getOrCreateEnemy(enemyType);
+          enemy.reset(spawnPosition);
+          enemy.getMesh().visible = true;
+          this.onEnemySpawned?.(enemy);
+        });
 
-      // 触发回调
-      this.onEnemySpawned?.(enemy);
-    });
+        this.scene.add(portal.getMesh());
+        this.activePortals.push(portal);
+      })
+      .catch((error: unknown) => {
+        log.error('Spawn portal module load failed', { error });
 
-    // 添加到场景和传送门列表
-    this.scene.add(portal.getMesh());
-    this.activePortals.push(portal);
+        const enemy = this.getOrCreateEnemy(enemyType);
+        enemy.reset(spawnPosition);
+        enemy.getMesh().visible = true;
+        this.onEnemySpawned?.(enemy);
+      });
   }
 
   /**
