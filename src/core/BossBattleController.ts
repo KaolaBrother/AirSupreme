@@ -662,9 +662,13 @@ export class BossBattleController {
     this.deps.onBossDestroyed(position, config, isBossMode);
   }
 
-  private createDamageFeedback(position: Vector3, intensity: number = 1): void {
-    this.deps.particleSystem.createHit(position, intensity);
-    this.deps.audioManager.playHit(intensity);
+  private createDamageFeedback(
+    position: Vector3,
+    intensity: number = 1,
+    profile: 'player' | 'enemy' | 'boss' = 'boss'
+  ): void {
+    this.deps.particleSystem.createHit(position, intensity, profile);
+    this.deps.audioManager.playHit(intensity, profile);
   }
 
   private disposeBossSpecificSystems(boss: ActiveBoss, bossType: BossType | null): void {

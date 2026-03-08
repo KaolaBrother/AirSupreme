@@ -13,6 +13,7 @@ export enum ParticleType {
 }
 
 export type SurfaceImpactType = 'ground' | 'desert' | 'snow' | 'city';
+export type HitEffectProfile = 'player' | 'enemy' | 'boss';
 
 /**
  * 单个粒子数据
@@ -325,45 +326,73 @@ export class ParticleSystem {
   /**
    * 创建击中效果
    */
-  public createHit(position: THREE.Vector3, intensity: number = 1): void {
+  public createHit(
+    position: THREE.Vector3,
+    intensity: number = 1,
+    profile: HitEffectProfile = 'player'
+  ): void {
     const hitIntensity = THREE.MathUtils.clamp(intensity, 0.6, 2.2);
     const sparkCount = Math.max(4, Math.floor(7 + hitIntensity * 3));
     const flashCount = Math.max(2, Math.floor(2 + hitIntensity * 2));
+    const isBoss = profile === 'boss';
+    const isEnemy = profile === 'enemy';
+    const sparkHueBase = isBoss ? 0.04 : isEnemy ? 0.065 : 0.1;
+    const sparkLightnessBase = isBoss ? 0.56 : isEnemy ? 0.66 : 0.62;
 
     // 高频火花层：命中边缘感
     for (let i = 0; i < sparkCount; i++) {
-      const sparkLightness = 0.62 + Math.random() * 0.2 * hitIntensity;
+      const sparkLightness = sparkLightnessBase + Math.random() * 0.18 * hitIntensity;
       this.spawnParticle(ParticleType.SPARK, position, {
-        speed: 24 + Math.random() * (16 + hitIntensity * 12),
-        life: 0.08 + Math.random() * 0.11,
-        size: 0.07 + Math.random() * (0.05 + hitIntensity * 0.05),
-        color: this.tempColorA.setHSL(0.1, 1, sparkLightness),
+        speed:
+          (isBoss ? 20 : isEnemy ? 28 : 24) + Math.random() * (16 + hitIntensity * 12),
+        life: (isBoss ? 0.11 : 0.08) + Math.random() * (isBoss ? 0.16 : 0.11),
+        size:
+          (isBoss ? 0.1 : 0.07) + Math.random() * ((isBoss ? 0.09 : 0.05) + hitIntensity * 0.05),
+        color: this.tempColorA.setHSL(sparkHueBase + Math.random() * 0.02, 1, sparkLightness),
       });
     }
 
     // 冲击闪光层：不同强度下更容易区分
     for (let i = 0; i < flashCount; i++) {
-      const isHeavy = hitIntensity > 1.25;
-      const hue = isHeavy ? 0.06 + Math.random() * 0.03 : 0.075 + Math.random() * 0.02;
-      const sat = isHeavy ? 1 : 0.92;
-      const light = isHeavy ? 0.74 + Math.random() * 0.08 : 0.66 + Math.random() * 0.08;
+      const isHeavy = hitIntensity > 1.25 || isBoss;
+      const hue = isBoss
+        ? 0.025 + Math.random() * 0.02
+        : isEnemy
+          ? 0.085 + Math.random() * 0.02
+          : isHeavy
+            ? 0.06 + Math.random() * 0.03
+            : 0.075 + Math.random() * 0.02;
+      const sat = isBoss ? 0.9 : isHeavy ? 1 : 0.92;
+      const light = isBoss
+        ? 0.58 + Math.random() * 0.08
+        : isHeavy
+          ? 0.74 + Math.random() * 0.08
+          : 0.66 + Math.random() * 0.08;
       this.spawnParticle(ParticleType.EXPLOSION, position, {
-        speed: 9 + Math.random() * (7 + hitIntensity * 5),
-        life: 0.06 + Math.random() * (0.06 + hitIntensity * 0.03),
-        size: 0.12 + Math.random() * (0.1 + hitIntensity * 0.07),
+        speed: (isBoss ? 7 : 9) + Math.random() * (7 + hitIntensity * 5),
+        life:
+          (isBoss ? 0.09 : 0.06) + Math.random() * ((isBoss ? 0.1 : 0.06) + hitIntensity * 0.03),
+        size:
+          (isBoss ? 0.22 : 0.12) + Math.random() * ((isBoss ? 0.16 : 0.1) + hitIntensity * 0.07),
         color: this.tempColorB.setHSL(hue, sat, light),
       });
     }
 
     // 强命中补一点碎片，弱命中不增加额外负担
-    if (hitIntensity > 1.35) {
-      const debrisCount = Math.floor(2 + (hitIntensity - 1.35) * 4);
+    if (hitIntensity > 1.35 || isBoss) {
+      const debrisCount = isBoss
+        ? Math.floor(3 + hitIntensity * 3)
+        : Math.floor(2 + (hitIntensity - 1.35) * 4);
       for (let i = 0; i < debrisCount; i++) {
         this.spawnParticle(ParticleType.DEBRIS, position, {
-          speed: 10 + Math.random() * 8,
-          life: 0.28 + Math.random() * 0.22,
-          size: 0.1 + Math.random() * 0.08,
-          color: this.tempColorC.setRGB(0.38, 0.38, 0.42),
+          speed: (isBoss ? 8 : 10) + Math.random() * 8,
+          life: (isBoss ? 0.4 : 0.28) + Math.random() * (isBoss ? 0.34 : 0.22),
+          size: (isBoss ? 0.14 : 0.1) + Math.random() * (isBoss ? 0.12 : 0.08),
+          color: this.tempColorC.setRGB(
+            isBoss ? 0.32 : 0.38,
+            isBoss ? 0.32 : 0.38,
+            isBoss ? 0.36 : 0.42
+          ),
           gravity: true,
         });
       }
@@ -372,12 +401,21 @@ export class ParticleSystem {
     // 轻烟痕层
     const smokePosition = position.clone();
     this.scheduleBurst(0.03, () => {
-      for (let i = 0; i < Math.max(1, Math.floor(1 + hitIntensity * 1.2)); i++) {
+      const smokeCount = isBoss
+        ? Math.max(2, Math.floor(2 + hitIntensity * 1.5))
+        : Math.max(1, Math.floor(1 + hitIntensity * 1.2));
+      for (let i = 0; i < smokeCount; i++) {
         this.spawnParticle(ParticleType.SMOKE, smokePosition, {
-          speed: 1.4 + Math.random() * 2.2,
-          life: 0.1 + Math.random() * (0.1 + hitIntensity * 0.04),
-          size: 0.12 + Math.random() * (0.12 + hitIntensity * 0.08),
-          color: this.tempColorA.setHSL(0.08, 0.1, 0.34 + Math.random() * 0.08),
+          speed: (isBoss ? 1.1 : 1.4) + Math.random() * (isBoss ? 2.8 : 2.2),
+          life:
+            (isBoss ? 0.18 : 0.1) + Math.random() * ((isBoss ? 0.16 : 0.1) + hitIntensity * 0.04),
+          size:
+            (isBoss ? 0.22 : 0.12) + Math.random() * ((isBoss ? 0.2 : 0.12) + hitIntensity * 0.08),
+          color: this.tempColorA.setHSL(
+            isBoss ? 0.04 : 0.08,
+            isBoss ? 0.12 : 0.1,
+            (isBoss ? 0.26 : 0.34) + Math.random() * 0.08
+          ),
         });
       }
     });

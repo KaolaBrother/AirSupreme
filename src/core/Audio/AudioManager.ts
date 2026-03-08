@@ -615,46 +615,54 @@ export class AudioManager {
   /**
    * 播放击中音效
    */
-  public playHit(intensity: number = 1): void {
+  public playHit(intensity: number = 1, profile: 'player' | 'enemy' | 'boss' = 'player'): void {
     const sound = this.beginSound(SoundType.HIT, 100);
     if (!sound) return;
     const { now, context, sfxGain } = sound;
     const hitIntensity = Math.max(0.7, Math.min(2.2, intensity));
+    const isBoss = profile === 'boss';
+    const isEnemy = profile === 'enemy';
 
     try {
       const bodyOsc = context.createOscillator();
       const bodyGain = context.createGain();
-      bodyOsc.type = 'triangle';
-      bodyOsc.frequency.setValueAtTime(420 - hitIntensity * 40, now);
-      bodyOsc.frequency.exponentialRampToValueAtTime(120 - hitIntensity * 10, now + 0.11);
+      bodyOsc.type = isBoss ? 'sawtooth' : 'triangle';
+      bodyOsc.frequency.setValueAtTime((isBoss ? 250 : isEnemy ? 380 : 420) - hitIntensity * 40, now);
+      bodyOsc.frequency.exponentialRampToValueAtTime((isBoss ? 72 : 120) - hitIntensity * 10, now + (isBoss ? 0.16 : 0.11));
       bodyGain.gain.setValueAtTime(0, now);
-      bodyGain.gain.linearRampToValueAtTime(0.13 * this.sfxVolume * hitIntensity, now + 0.004);
-      bodyGain.gain.exponentialRampToValueAtTime(0.01, now + 0.11);
+      bodyGain.gain.linearRampToValueAtTime(
+        (isBoss ? 0.16 : isEnemy ? 0.11 : 0.13) * this.sfxVolume * hitIntensity,
+        now + 0.004
+      );
+      bodyGain.gain.exponentialRampToValueAtTime(0.01, now + (isBoss ? 0.16 : 0.11));
       bodyOsc.connect(bodyGain);
       bodyGain.connect(sfxGain);
       bodyOsc.start(now);
-      bodyOsc.stop(now + 0.11);
+      bodyOsc.stop(now + (isBoss ? 0.16 : 0.11));
 
       const sparkOsc = context.createOscillator();
       const sparkGain = context.createGain();
-      sparkOsc.type = 'square';
-      sparkOsc.frequency.setValueAtTime(1600 + hitIntensity * 120, now);
-      sparkOsc.frequency.exponentialRampToValueAtTime(520 + hitIntensity * 40, now + 0.05);
+      sparkOsc.type = isBoss ? 'triangle' : 'square';
+      sparkOsc.frequency.setValueAtTime((isBoss ? 980 : 1600) + hitIntensity * 120, now);
+      sparkOsc.frequency.exponentialRampToValueAtTime((isBoss ? 280 : 520) + hitIntensity * 40, now + (isBoss ? 0.07 : 0.05));
       sparkGain.gain.setValueAtTime(0, now);
-      sparkGain.gain.linearRampToValueAtTime(0.08 * this.sfxVolume * hitIntensity, now + 0.002);
-      sparkGain.gain.exponentialRampToValueAtTime(0.01, now + 0.06);
+      sparkGain.gain.linearRampToValueAtTime(
+        (isBoss ? 0.06 : isEnemy ? 0.07 : 0.08) * this.sfxVolume * hitIntensity,
+        now + 0.002
+      );
+      sparkGain.gain.exponentialRampToValueAtTime(0.01, now + (isBoss ? 0.08 : 0.06));
       sparkOsc.connect(sparkGain);
       sparkGain.connect(sfxGain);
       sparkOsc.start(now);
-      sparkOsc.stop(now + 0.06);
+      sparkOsc.stop(now + (isBoss ? 0.08 : 0.06));
 
       this.playFilteredNoise(
-        0.07,
+        isBoss ? 0.1 : 0.07,
         0.003,
-        0.08 * this.sfxVolume * hitIntensity,
-        'highpass',
-        2200 + hitIntensity * 180,
-        1.1 + hitIntensity * 0.15
+        (isBoss ? 0.11 : isEnemy ? 0.07 : 0.08) * this.sfxVolume * hitIntensity,
+        isBoss ? 'bandpass' : 'highpass',
+        (isBoss ? 1400 : 2200) + hitIntensity * 180,
+        isBoss ? 0.95 + hitIntensity * 0.12 : 1.1 + hitIntensity * 0.15
       );
     } catch {
       // Ignore

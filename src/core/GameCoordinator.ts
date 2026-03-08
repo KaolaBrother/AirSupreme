@@ -623,7 +623,7 @@ export class GameCoordinator {
       enemyMeshes,
       friendlyMeshes,
       (target, damage) => {
-        this.createCombatHitFeedback(target, damage, 1);
+        this.createCombatHitFeedback(target, damage, 'player', 1);
         const enemy = this.enemySystem?.getEnemies().find((e) => e.getMesh() === target);
         enemy?.takeDamage(damage);
       },
@@ -633,7 +633,7 @@ export class GameCoordinator {
         }
       },
       (target, damage) => {
-        this.createCombatHitFeedback(target, damage, 0.92);
+        this.createCombatHitFeedback(target, damage, 'enemy', 0.92);
         const friendly = this.enemySystem?.getFriendlyAIs().find((f) => f.getMesh() === target);
         friendly?.takeDamage(damage);
       }
@@ -1454,13 +1454,14 @@ export class GameCoordinator {
   private createCombatHitFeedback(
     target: THREE.Object3D,
     damage: number,
+    profile: 'player' | 'enemy' | 'boss' = 'player',
     intensityMultiplier: number = 1
   ): void {
     const hitPosition = new THREE.Vector3();
     target.getWorldPosition(hitPosition);
     const hitIntensity = THREE.MathUtils.clamp((damage / 16) * intensityMultiplier, 0.82, 1.9);
-    this.audioManager.playHit(hitIntensity);
-    this.particleSystem?.createHit(hitPosition, hitIntensity);
+    this.audioManager.playHit(hitIntensity, profile);
+    this.particleSystem?.createHit(hitPosition, hitIntensity, profile);
   }
 
   private startLevelBossBattle(): void {
