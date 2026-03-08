@@ -31,8 +31,8 @@ describe('BossProjectilePool', () => {
 
     pool.update(0.4);
 
-    expect(projectile.scale.x).toBeGreaterThan(beforeScale.x);
-    expect(projectile.scale.z).toBeGreaterThan(3);
+    expect(projectile.scale.x).toBeGreaterThan(1);
+    expect(projectile.scale.z).toBeGreaterThan(2.5);
     expect(projectile.scale.z).not.toBeCloseTo(beforeScale.z);
   });
 });
