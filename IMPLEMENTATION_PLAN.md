@@ -378,6 +378,8 @@
   - 已为事件开始/完成提示加入签名去重与冷却，避免重复刷屏
   - 表现层目标卡已加入状态更新节流，减少重复重绘与闪烁
   - 已补齐 `PresentationController` 目标卡节流 / reset / 完成态切换单测
+  - `GameCoordinator` 已开始消费 onboarding beat 节拍配置，首波/事件提示不再完全写死在协调器常量里
+  - `LevelManager` 在 `loadLevel / clear` 时会重置当前 wave beat，避免旧波次节拍串到新局
 - [next] 继续收口阶段式 onboarding 第四批
   - 按首关实际反馈进一步压缩文案长度、节奏点位与提醒频率
 - [later] 首关开场演出与环境表现联动
@@ -404,6 +406,7 @@
 - [done] 事件波次提示节拍第二轮已接入
   - `LevelManager -> OnboardingManager -> GameCoordinator -> PresentationController` 已形成节拍配置链路
   - 事件开始与完成提示已加入节流和去重，目标卡完成态更稳定
+  - 已补齐 `ParticleSystem` 命中 flash 生命周期回归测试，防止事件反馈收口时把 hit flash 停留拉长
 - [next] 实装至少 3 类事件波次
   - 已完成: 精英歼灭
   - 已完成: 限时拦截
