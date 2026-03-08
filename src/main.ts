@@ -36,6 +36,25 @@ function checkWebGL(): boolean {
   }
 }
 
+function warmGameCoordinatorChunk(): void {
+  const preload = () => {
+    void import('./core/GameCoordinator');
+  };
+
+  if (typeof window === 'undefined') {
+    preload();
+    return;
+  }
+
+  if ('requestIdleCallback' in window) {
+    (window as Window & { requestIdleCallback: (cb: IdleRequestCallback) => number })
+      .requestIdleCallback(() => preload());
+    return;
+  }
+
+  globalThis.setTimeout(preload, 200);
+}
+
 async function main(): Promise<void> {
   if (!checkWebGL()) {
     showError('您的浏览器不支持 WebGL');
@@ -73,6 +92,7 @@ async function main(): Promise<void> {
     });
 
     hideLoadingScreen();
+    warmGameCoordinatorChunk();
 
     log.info('🎮 Air Supreme - 3D 空战游戏 (v2)');
     log.info('📖 控制说明:');
