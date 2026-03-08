@@ -80,6 +80,13 @@ interface WaveEventState {
 interface WaveObjectiveDisplay {
   title: string;
   objective: string;
+  status?: string;
+}
+
+interface TutorialObjectiveDisplay {
+  title: string;
+  objective: string;
+  status: string;
 }
 
 interface CombatRuntimeSystems {
@@ -93,7 +100,6 @@ export class GameCoordinator {
   private static readonly TUTORIAL_STAGE_GAP_MS = 350;
   private static readonly TUTORIAL_WAVE_READY_BUFFER_MS = 1000;
   private static readonly TUTORIAL_FRIENDLY_SPAWN_DELAY_MS = 5200;
-  private static readonly TUTORIAL_FRIENDLY_SPAWN_BUFFER_MS = 1200;
   private static readonly TUTORIAL_MOVE_DISTANCE = 90;
   private static readonly TUTORIAL_SPEED_THRESHOLD_RATIO = 0.72;
   private static readonly ESCORT_WAVE_SCORE_BONUS = 180;
@@ -182,6 +188,7 @@ export class GameCoordinator {
   private lowHealthWarningTimer: number = 0;
   private lastRenderTimestamp: number = 0;
   private upgradeMenuHintShown: boolean = false;
+  private waveCompletionObjective: WaveObjectiveDisplay | null = null;
 
   public static warmRuntimeChunks(): Promise<void> {
     if (!this.runtimeWarmupPromise) {
@@ -844,7 +851,157 @@ export class GameCoordinator {
       return;
     }
 
+    this.updatePlayerFacingObjective();
     this.updateEnemyHealthBars();
+  }
+
+  private updatePlayerFacingObjective(): void {
+    if (this.waveCompletionObjective) {
+      this.presentationController.showEventObjective(
+        this.waveCompletionObjective.title,
+        this.waveCompletionObjective.objective,
+        this.waveCompletionObjective.status
+      );
+      return;
+    }
+
+    if (this.tutorialCombatState.active && this.shouldRunTutorialIntro()) {
+      const objective = this.getTutorialObjectiveDisplay();
+      this.presentationController.showEventObjective(
+        objective.title,
+        objective.objective,
+        objective.status
+      );
+      return;
+    }
+
+    if (this.waveEventState.type !== null) {
+      const objective = this.getWaveObjectiveProgressDisplay();
+      this.presentationController.showEventObjective(
+        objective.title,
+        objective.objective,
+        objective.status
+      );
+      return;
+    }
+
+    this.presentationController.clearEventObjective();
+  }
+
+  private getTutorialObjectiveDisplay(): TutorialObjectiveDisplay {
+    const lockAndMissileComplete =
+      this.tutorialCombatState.lockCompleteHintShown && this.tutorialCombatState.missileHintShown;
+    const completedSteps = [
+      this.tutorialCombatState.movementHintShown,
+      this.tutorialCombatState.speedHintShown,
+      this.tutorialCombatState.fireHintShown,
+      lockAndMissileComplete,
+      this.tutorialCombatState.killHintShown,
+    ].filter(Boolean).length;
+
+    if (!this.tutorialCombatState.movementHintShown) {
+      return {
+        title: '试玩引导 · 机动确认',
+        objective: '先完成一次明显机动，建立基础空间感',
+        status: `步骤 1/5 · 当前进度 ${completedSteps}/5`,
+      };
+    }
+
+    if (!this.tutorialCombatState.speedHintShown) {
+      return {
+        title: '试玩引导 · 提升速度',
+        objective: '拉高速度并与敌机拉开安全间距',
+        status: `步骤 2/5 · 当前进度 ${completedSteps}/5`,
+      };
+    }
+
+    if (!this.tutorialCombatState.fireHintShown) {
+      return {
+        title: '试玩引导 · 火力压制',
+        objective: '按住开火，确认机炮持续输出节奏',
+        status: `步骤 3/5 · 当前进度 ${completedSteps}/5`,
+      };
+    }
+
+    if (!this.tutorialCombatState.lockCompleteHintShown && !this.tutorialCombatState.missileHintShown) {
+      return {
+        title: '试玩引导 · 导弹锁定',
+        objective: '让目标保持在准星内，完成锁定后再发射导弹',
+        status: `步骤 4/5 · 当前进度 ${completedSteps}/5 · 正在锁定`,
+      };
+    }
+
+    if (this.tutorialCombatState.lockCompleteHintShown && !this.tutorialCombatState.missileHintShown) {
+      return {
+        title: '试玩引导 · 导弹发射',
+        objective: '锁定已完成，立刻发射一枚导弹并观察打击反馈',
+        status: `步骤 4/5 · 当前进度 ${completedSteps}/5 · 等待导弹发射`,
+      };
+    }
+
+    return {
+      title: '试玩引导 · 击落首个目标',
+      objective: '优先清理前方高威胁敌机，完成首杀进入正式节奏',
+      status: `步骤 5/5 · 当前进度 ${completedSteps}/5`,
+    };
+  }
+
+  private getWaveObjectiveProgressDisplay(): WaveObjectiveDisplay {
+    const waveProgress = this.enemySystem?.getLevelManager().getWaveProgressSnapshot();
+    const waveNumber = this.waveEventState.wave + 1;
+    const enemies = this.enemySystem?.getEnemies() ?? [];
+    const aliveEnemies = enemies.filter((enemy) => enemy.isAlive());
+    const spawnedEnemies = waveProgress?.spawnedInWave ?? aliveEnemies.length;
+    const totalEnemies = waveProgress?.maxEnemies ?? Math.max(spawnedEnemies, aliveEnemies.length);
+    const remainingEnemies = waveProgress?.remainingInWave ?? Math.max(0, totalEnemies - (spawnedEnemies - aliveEnemies.length));
+    const aliveInWave = waveProgress?.aliveInWave ?? aliveEnemies.length;
+
+    switch (this.waveEventState.type) {
+      case LevelWaveEventType.ELITE_HUNT: {
+        const eliteAlive = aliveEnemies.filter((enemy) => {
+          const type = enemy.getConfig().type;
+          return type === EnemyType.HEAVY || type === EnemyType.ACE || type === EnemyType.SNIPER;
+        }).length;
+
+        return {
+          title: `第 ${waveNumber} 波 · 精英歼灭`,
+          objective:
+            eliteAlive > 0
+              ? '优先清理精英目标，压缩高威胁火力窗'
+              : '精英目标已清空，继续扫除尾敌并稳住空域',
+          status:
+            eliteAlive > 0
+              ? `精英 ${eliteAlive} 架 · 已出现 ${spawnedEnemies}/${totalEnemies} · 当前 ${aliveInWave} 架`
+              : `精英已清空 · 当前剩余 ${remainingEnemies} 架`,
+        };
+      }
+      case LevelWaveEventType.INTERCEPT:
+        return {
+          title: `第 ${waveNumber} 波 · 限时拦截`,
+          objective: '敌方前锋正在突防，保持正面拦截并优先击落高速机',
+          status: `前锋已出现 ${spawnedEnemies}/${totalEnemies} 架 · 空域剩余 ${remainingEnemies} 架`,
+        };
+      case LevelWaveEventType.ESCORT_DEFENSE: {
+        const escortAlive = (this.enemySystem?.getFriendlyAIs() ?? []).some(
+          (friendly) =>
+            friendly.isAlive() && friendly.getMesh().uuid === this.escortWaveState.friendlyId
+        );
+
+        return {
+          title: `第 ${waveNumber} 波 · 护送防守`,
+          objective: escortAlive
+            ? '掩护友军生存并持续压制来袭敌机'
+            : '友军已失联，继续清空波次避免局势失控',
+          status: `${escortAlive ? '护送目标存活' : '护送目标失联'} · 剩余 ${remainingEnemies} 架`,
+        };
+      }
+      default:
+        return {
+          title: `第 ${waveNumber} 波 · 空域压制`,
+          objective: '清空当前波次目标，保持机动与火力节奏',
+          status: `敌机剩余 ${remainingEnemies} 架`,
+        };
+    }
   }
 
   private updateEnemyHealthBars(): void {
@@ -1172,10 +1329,6 @@ export class GameCoordinator {
       this.activateTutorialCombatStage();
       this.hud.showPowerUpBig('⚔️', '第一波接敌，保持移动', 1.8);
     }, combatStartDelayMs);
-
-    this.scheduleTimeout(() => {
-      this.hud.showPowerUpBig('🤝', '友军正在接近，准备协同压制', 1.8);
-    }, combatStartDelayMs + GameCoordinator.TUTORIAL_FRIENDLY_SPAWN_BUFFER_MS);
   }
 
   private resetTutorialCombatState(): void {
@@ -1199,6 +1352,7 @@ export class GameCoordinator {
 
     this.tutorialCombatState.active = true;
     this.tutorialCombatState.startPosition = this.playerSystem.getPosition().clone();
+    this.updatePlayerFacingObjective();
   }
 
   private updateTutorialCombatState(): void {
@@ -1216,6 +1370,7 @@ export class GameCoordinator {
       if (movedDistance >= GameCoordinator.TUTORIAL_MOVE_DISTANCE) {
         this.tutorialCombatState.movementHintShown = true;
         this.hud.showPowerUpBig('🕹️', '机动确认，继续加速拉开距离', 1.8);
+        this.updatePlayerFacingObjective();
       }
     }
 
@@ -1227,6 +1382,7 @@ export class GameCoordinator {
     ) {
       this.tutorialCombatState.speedHintShown = true;
       this.hud.showPowerUpBig('⚡', '速度已拉起，按住开火持续压制', 1.8);
+      this.updatePlayerFacingObjective();
     }
   }
 
@@ -1237,6 +1393,7 @@ export class GameCoordinator {
 
     this.tutorialCombatState.fireHintShown = true;
     this.hud.showPowerUpBig('🔥', '火力确认，锁定后再发射导弹', 1.8);
+    this.updatePlayerFacingObjective();
   }
 
   private handleTutorialMissileLockStarted(): void {
@@ -1246,6 +1403,7 @@ export class GameCoordinator {
 
     this.tutorialCombatState.lockHintShown = true;
     this.hud.showPowerUpBig('🎯', '保持目标在准星内，等待锁定完成', 1.8);
+    this.updatePlayerFacingObjective();
   }
 
   private handleTutorialMissileFired(): void {
@@ -1255,6 +1413,7 @@ export class GameCoordinator {
 
     this.tutorialCombatState.missileHintShown = true;
     this.hud.showPowerUpBig('🚀', '导弹离轨，优先清理高威胁目标', 1.8);
+    this.updatePlayerFacingObjective();
   }
 
   private handleTutorialMissileLockCompleted(): void {
@@ -1264,6 +1423,7 @@ export class GameCoordinator {
 
     this.tutorialCombatState.lockCompleteHintShown = true;
     this.hud.showPowerUpBig('✅', '锁定完成，抓住窗口立刻发射', 1.6);
+    this.updatePlayerFacingObjective();
   }
 
   private handleTutorialEnemyDeath(): void {
@@ -1274,6 +1434,7 @@ export class GameCoordinator {
     this.tutorialCombatState.killHintShown = true;
     this.hud.showPowerUpBig('🎯', '确认击杀，清空首波进入正式节奏', 1.8);
     this.tutorialCombatState.active = false;
+    this.updatePlayerFacingObjective();
   }
 
   private handleTutorialPlayerHit(): void {
@@ -1283,6 +1444,7 @@ export class GameCoordinator {
 
     this.tutorialCombatState.hitHintShown = true;
     this.hud.showPowerUpBig('↪️', '被命中时横滚或加速脱离火线', 1.6);
+    this.updatePlayerFacingObjective();
   }
 
   private handleTutorialFriendlySupport(): void {
@@ -1292,6 +1454,7 @@ export class GameCoordinator {
 
     this.tutorialCombatState.friendlySupportHintShown = true;
     this.hud.showPowerUpBig('🤝', '友军已入场，优先配合清理高威胁目标', 1.8);
+    this.updatePlayerFacingObjective();
   }
 
   private handleWaveEventStart(eventType: LevelWaveEventType, wave: number): void {
@@ -1305,7 +1468,8 @@ export class GameCoordinator {
     const objectiveDisplay = this.getWaveObjectiveDisplay(eventType, waveNumber);
     this.presentationController.showEventObjective(
       objectiveDisplay.title,
-      objectiveDisplay.objective
+      objectiveDisplay.objective,
+      objectiveDisplay.status
     );
 
     switch (eventType) {
@@ -1374,7 +1538,7 @@ export class GameCoordinator {
 
     this.waveEventState.type = null;
     this.waveEventState.wave = -1;
-    this.presentationController.clearEventObjective();
+    this.updatePlayerFacingObjective();
   }
 
   private getWaveObjectiveDisplay(
@@ -1386,16 +1550,19 @@ export class GameCoordinator {
         return {
           title: `第 ${waveNumber} 波 · 精英歼灭`,
           objective: '优先清理重型与王牌目标，快速压制空域',
+          status: '高威胁目标优先',
         };
       case LevelWaveEventType.INTERCEPT:
         return {
           title: `第 ${waveNumber} 波 · 限时拦截`,
           objective: '高速目标正在突防，优先击落前锋编队',
+          status: '前锋编队高速接近',
         };
       case LevelWaveEventType.ESCORT_DEFENSE:
         return {
           title: `第 ${waveNumber} 波 · 护送防守`,
           objective: '掩护友军生存至波次结束，可获得额外奖励',
+          status: '友军存活即可获得加分',
         };
       default:
         return {

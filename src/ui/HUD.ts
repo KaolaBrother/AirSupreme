@@ -20,6 +20,7 @@ export class HUD {
   private eventObjectiveDisplay: HTMLDivElement;
   private eventObjectiveTitle: HTMLDivElement;
   private eventObjectiveText: HTMLDivElement;
+  private eventObjectiveStatus: HTMLDivElement;
   private livesDisplay: HTMLDivElement;
   private missilesDisplay: HTMLDivElement;
   private missileProgressDisplay: HTMLDivElement; // 导弹补给进度条背景
@@ -205,12 +206,28 @@ export class HUD {
       color: #f5fbff;
       text-shadow: 0 0 12px rgba(120, 220, 255, 0.16);
       line-height: 1.35;
-      white-space: nowrap;
+      white-space: normal;
+      word-break: break-word;
     `;
     this.setTextContent(this.eventObjectiveText, '');
 
+    this.eventObjectiveStatus = document.createElement('div');
+    this.eventObjectiveStatus.style.cssText = `
+      margin-top: 6px;
+      font-size: ${isMobile ? '10px' : '11px'};
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      color: rgba(183, 231, 255, 0.86);
+      text-transform: uppercase;
+      white-space: normal;
+      word-break: break-word;
+      display: none;
+    `;
+    this.setTextContent(this.eventObjectiveStatus, '');
+
     this.eventObjectiveDisplay.appendChild(this.eventObjectiveTitle);
     this.eventObjectiveDisplay.appendChild(this.eventObjectiveText);
+    this.eventObjectiveDisplay.appendChild(this.eventObjectiveStatus);
     this.container.appendChild(this.eventObjectiveDisplay);
     this.leftPrimaryRow.appendChild(this.scoreDisplay);
     this.leftPrimaryRow.appendChild(this.speedDisplay);
@@ -589,16 +606,34 @@ export class HUD {
     this.setTextContent(this.remainingEnemiesDisplay, `剩余: ${count}`);
   }
 
-  public showEventObjective(title: string, objective: string): void {
+  public showEventObjective(title: string, objective: string, status?: string): void {
     this.ensureInitialized();
     this.setTextContent(this.eventObjectiveTitle, title);
     this.setTextContent(this.eventObjectiveText, objective);
+    this.setTextContent(this.eventObjectiveStatus, status ?? '');
+    this.setStyleValue(
+      this.eventObjectiveStatus,
+      'display',
+      status && status.length > 0 ? 'block' : 'none'
+    );
     this.setStyleValue(this.eventObjectiveDisplay, 'display', 'block');
+  }
+
+  public updateEventObjectiveStatus(status: string): void {
+    this.ensureInitialized();
+    this.setTextContent(this.eventObjectiveStatus, status);
+    this.setStyleValue(
+      this.eventObjectiveStatus,
+      'display',
+      status.length > 0 ? 'block' : 'none'
+    );
   }
 
   public hideEventObjective(): void {
     this.ensureInitialized();
     this.setTextContent(this.eventObjectiveText, '');
+    this.setTextContent(this.eventObjectiveStatus, '');
+    this.setStyleValue(this.eventObjectiveStatus, 'display', 'none');
     this.setStyleValue(this.eventObjectiveDisplay, 'display', 'none');
   }
 

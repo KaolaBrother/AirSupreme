@@ -149,8 +149,12 @@ export class PresentationController {
     this.bossIndicator.clear();
   }
 
-  public showEventObjective(title: string, objective: string): void {
-    this.hud.showEventObjective(title, objective);
+  public showEventObjective(title: string, objective: string, status?: string): void {
+    this.hud.showEventObjective(title, objective, status);
+  }
+
+  public updateEventObjectiveStatus(status: string): void {
+    this.hud.updateEventObjectiveStatus(status);
   }
 
   public clearEventObjective(): void {

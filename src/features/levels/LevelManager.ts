@@ -30,6 +30,15 @@ export enum LevelState {
   GAME_OVER = 'GAME_OVER',
 }
 
+export interface WaveProgressSnapshot {
+  wave: number;
+  maxEnemies: number;
+  spawnedInWave: number;
+  aliveInWave: number;
+  remainingInWave: number;
+  eventType: LevelWaveEventType | null;
+}
+
 /**
  * 关卡管理器
  */
@@ -448,6 +457,29 @@ export class LevelManager {
     return this.currentLevel.enemiesPerWave.reduce((sum, count) => sum + count, 0);
   }
 
+  public getCurrentWaveEvent(): LevelWaveEventType | null {
+    return this.currentWaveEvent;
+  }
+
+  public getWaveProgressSnapshot(): WaveProgressSnapshot | null {
+    if (!this.currentLevel) {
+      return null;
+    }
+
+    const maxEnemies = this.currentLevel.enemiesPerWave[this.currentWave] ?? 0;
+    const aliveInWave = this.enemies.filter((enemy) => enemy.isAlive()).length;
+    const remainingSpawn = Math.max(0, maxEnemies - this.enemiesSpawnedThisWave);
+
+    return {
+      wave: this.currentWave,
+      maxEnemies,
+      spawnedInWave: this.enemiesSpawnedThisWave,
+      aliveInWave,
+      remainingInWave: aliveInWave + remainingSpawn,
+      eventType: this.currentWaveEvent,
+    };
+  }
+
   /**
    * 清除所有敌人
    */
@@ -705,11 +737,11 @@ export class LevelManager {
   private getWaveSpawnInterval(): number {
     switch (this.currentWaveEvent) {
       case LevelWaveEventType.ELITE_HUNT:
-        return 0.8;
+        return this.currentWave >= 3 ? 0.72 : 0.84;
       case LevelWaveEventType.INTERCEPT:
-        return 0.35;
+        return this.currentWave >= 3 ? 0.28 : 0.38;
       case LevelWaveEventType.ESCORT_DEFENSE:
-        return 0.6;
+        return this.currentWave >= 3 ? 0.52 : 0.64;
       default:
         return 0.5;
     }

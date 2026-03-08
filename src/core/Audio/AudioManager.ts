@@ -749,6 +749,121 @@ export class AudioManager {
     }
   }
 
+  public playHeavyWeaponImpact(
+    profile: 'boss-cannon' | 'laser' | 'flak-hit' | 'boss-armor' = 'boss-cannon',
+    intensity: number = 1
+  ): void {
+    const sound = this.beginSound(SoundType.HIT, 220);
+    if (!sound) return;
+    const { now, context, sfxGain } = sound;
+    const hitIntensity = Math.max(0.85, Math.min(2.8, intensity));
+    const isLaser = profile === 'laser';
+    const isFlak = profile === 'flak-hit';
+    const isArmor = profile === 'boss-armor';
+    const isCannon = profile === 'boss-cannon';
+
+    try {
+      const impactOsc = context.createOscillator();
+      const impactGain = context.createGain();
+      impactOsc.type = isLaser ? 'triangle' : isArmor ? 'square' : 'sawtooth';
+      impactOsc.frequency.setValueAtTime(
+        isLaser ? 420 : isFlak ? 210 : isArmor ? 190 : isCannon ? 150 : 160,
+        now
+      );
+      impactOsc.frequency.exponentialRampToValueAtTime(
+        isLaser ? 120 : isFlak ? 54 : isArmor ? 70 : isCannon ? 42 : 46,
+        now + (isLaser ? 0.18 : 0.24)
+      );
+      impactGain.gain.setValueAtTime(0, now);
+      impactGain.gain.linearRampToValueAtTime(
+        (isLaser ? 0.18 : isArmor ? 0.24 : 0.3) * this.sfxVolume * hitIntensity,
+        now + 0.006
+      );
+      impactGain.gain.exponentialRampToValueAtTime(0.01, now + (isLaser ? 0.18 : 0.24));
+      impactOsc.connect(impactGain);
+      impactGain.connect(sfxGain);
+      impactOsc.start(now);
+      impactOsc.stop(now + (isLaser ? 0.18 : 0.24));
+
+      const crackOsc = context.createOscillator();
+      const crackGain = context.createGain();
+      crackOsc.type = isLaser ? 'sine' : 'triangle';
+      crackOsc.frequency.setValueAtTime(
+        isLaser ? 1480 : isFlak ? 820 : isArmor ? 980 : isCannon ? 620 : 700,
+        now + 0.01
+      );
+      crackOsc.frequency.exponentialRampToValueAtTime(
+        isLaser ? 420 : isFlak ? 190 : isArmor ? 240 : isCannon ? 135 : 150,
+        now + (isLaser ? 0.14 : 0.22)
+      );
+      crackGain.gain.setValueAtTime(0, now + 0.008);
+      crackGain.gain.linearRampToValueAtTime(
+        (isLaser ? 0.08 : isArmor ? 0.12 : 0.15) * this.sfxVolume * hitIntensity,
+        now + 0.02
+      );
+      crackGain.gain.exponentialRampToValueAtTime(0.01, now + (isLaser ? 0.15 : 0.24));
+      crackOsc.connect(crackGain);
+      crackGain.connect(sfxGain);
+      crackOsc.start(now + 0.01);
+      crackOsc.stop(now + (isLaser ? 0.15 : 0.24));
+
+      if (!isLaser) {
+        const subOsc = context.createOscillator();
+        const subGain = context.createGain();
+        subOsc.type = 'sine';
+        subOsc.frequency.setValueAtTime(isFlak ? 82 : isCannon ? 58 : 64, now + 0.014);
+        subOsc.frequency.exponentialRampToValueAtTime(isFlak ? 28 : isCannon ? 20 : 22, now + 0.32);
+        subGain.gain.setValueAtTime(0, now + 0.014);
+        subGain.gain.linearRampToValueAtTime(
+          (isArmor ? 0.09 : isCannon ? 0.14 : 0.12) * this.sfxVolume * Math.min(2.1, hitIntensity),
+          now + 0.03
+        );
+        subGain.gain.exponentialRampToValueAtTime(0.01, now + 0.34);
+        subOsc.connect(subGain);
+        subGain.connect(sfxGain);
+        subOsc.start(now + 0.014);
+        subOsc.stop(now + 0.34);
+      }
+
+      if (isArmor || isCannon) {
+        const metallicOsc = context.createOscillator();
+        const metallicGain = context.createGain();
+        metallicOsc.type = 'triangle';
+        metallicOsc.frequency.setValueAtTime(isArmor ? 1280 : 960, now + 0.006);
+        metallicOsc.frequency.exponentialRampToValueAtTime(isArmor ? 420 : 320, now + 0.11);
+        metallicGain.gain.setValueAtTime(0, now + 0.004);
+        metallicGain.gain.linearRampToValueAtTime(
+          (isArmor ? 0.08 : 0.06) * this.sfxVolume * Math.min(2, hitIntensity),
+          now + 0.014
+        );
+        metallicGain.gain.exponentialRampToValueAtTime(0.01, now + 0.12);
+        metallicOsc.connect(metallicGain);
+        metallicGain.connect(sfxGain);
+        metallicOsc.start(now + 0.006);
+        metallicOsc.stop(now + 0.12);
+      }
+
+      this.playFilteredNoise(
+        isLaser ? 0.12 : 0.2,
+        0.004,
+        (isLaser ? 0.08 : isArmor ? 0.12 : 0.16) * this.sfxVolume * Math.min(2, hitIntensity),
+        isLaser ? 'bandpass' : 'highpass',
+        isLaser ? 2200 : isArmor ? 1700 : isCannon ? 1220 : 1350,
+        isLaser ? 1.15 : isArmor ? 1.05 : isCannon ? 0.9 : 0.95
+      );
+      this.playFilteredNoise(
+        isLaser ? 0.16 : 0.24,
+        0.014,
+        (isLaser ? 0.06 : isArmor ? 0.11 : 0.14) * this.sfxVolume * Math.min(2, hitIntensity),
+        'bandpass',
+        isLaser ? 980 : isArmor ? 920 : 760,
+        isLaser ? 1.5 : 1.1
+      );
+    } catch {
+      // Ignore
+    }
+  }
+
   public playWaterImpact(intensity: number = 1): void {
     const sound = this.beginSound(SoundType.HIT, 90);
     if (!sound) return;
@@ -1413,6 +1528,22 @@ export class AudioManager {
         2200,
         0.9
       );
+
+      const aftershockOsc = context.createOscillator();
+      const aftershockGain = context.createGain();
+      aftershockOsc.type = 'sine';
+      aftershockOsc.frequency.setValueAtTime(86, now + 0.2);
+      aftershockOsc.frequency.exponentialRampToValueAtTime(26, now + 1.12);
+      aftershockGain.gain.setValueAtTime(0, now + 0.18);
+      aftershockGain.gain.linearRampToValueAtTime(
+        (0.08 + Math.min(0.08, bossScale * 0.02)) * this.sfxVolume,
+        now + 0.32
+      );
+      aftershockGain.gain.exponentialRampToValueAtTime(0.01, now + 1.12);
+      aftershockOsc.connect(aftershockGain);
+      aftershockGain.connect(sfxGain);
+      aftershockOsc.start(now + 0.2);
+      aftershockOsc.stop(now + 1.12);
     } catch {
       // Ignore
     }
