@@ -69,53 +69,53 @@ function getEnemyMaterialTuning(type: EnemyType): {
   switch (type) {
     case EnemyType.SCOUT:
       return {
-        body: { metalness: 0.54, roughness: 0.46, emissiveIntensity: 0.015 },
-        wing: { metalness: 0.5, roughness: 0.48, emissiveIntensity: 0.01 },
-        cockpit: { metalness: 0.9, roughness: 0.14, emissiveIntensity: 0.08 },
-        accent: { metalness: 0.68, roughness: 0.34, emissiveIntensity: 0.02 },
-        detailColor: 0x8f99a4,
-        lightOpacity: 0.28,
-        engineOpacity: 0.38,
-      };
-    case EnemyType.FIGHTER:
-      return {
-        body: { metalness: 0.72, roughness: 0.3, emissiveIntensity: 0.018 },
-        wing: { metalness: 0.64, roughness: 0.36, emissiveIntensity: 0.012 },
-        cockpit: { metalness: 0.94, roughness: 0.1, emissiveIntensity: 0.09 },
-        accent: { metalness: 0.82, roughness: 0.24, emissiveIntensity: 0.025 },
-        detailColor: 0xb0b5bb,
-        lightOpacity: 0.3,
-        engineOpacity: 0.42,
-      };
-    case EnemyType.HEAVY:
-      return {
-        body: { metalness: 0.5, roughness: 0.54, emissiveIntensity: 0.01 },
-        wing: { metalness: 0.46, roughness: 0.6, emissiveIntensity: 0.008 },
-        cockpit: { metalness: 0.86, roughness: 0.18, emissiveIntensity: 0.06 },
-        accent: { metalness: 0.54, roughness: 0.4, emissiveIntensity: 0.015 },
-        detailColor: 0x7c848c,
+        body: { metalness: 0.78, roughness: 0.26, emissiveIntensity: 0.012 },
+        wing: { metalness: 0.72, roughness: 0.32, emissiveIntensity: 0.008 },
+        cockpit: { metalness: 0.96, roughness: 0.1, emissiveIntensity: 0.045 },
+        accent: { metalness: 0.82, roughness: 0.24, emissiveIntensity: 0.014 },
+        detailColor: 0xb4bcc6,
         lightOpacity: 0.22,
         engineOpacity: 0.34,
       };
+    case EnemyType.FIGHTER:
+      return {
+        body: { metalness: 0.82, roughness: 0.24, emissiveIntensity: 0.014 },
+        wing: { metalness: 0.76, roughness: 0.28, emissiveIntensity: 0.01 },
+        cockpit: { metalness: 0.96, roughness: 0.1, emissiveIntensity: 0.05 },
+        accent: { metalness: 0.86, roughness: 0.2, emissiveIntensity: 0.016 },
+        detailColor: 0xc0c7d0,
+        lightOpacity: 0.24,
+        engineOpacity: 0.36,
+      };
+    case EnemyType.HEAVY:
+      return {
+        body: { metalness: 0.72, roughness: 0.32, emissiveIntensity: 0.01 },
+        wing: { metalness: 0.68, roughness: 0.36, emissiveIntensity: 0.008 },
+        cockpit: { metalness: 0.92, roughness: 0.14, emissiveIntensity: 0.04 },
+        accent: { metalness: 0.78, roughness: 0.26, emissiveIntensity: 0.012 },
+        detailColor: 0xa0a8b2,
+        lightOpacity: 0.2,
+        engineOpacity: 0.32,
+      };
     case EnemyType.SNIPER:
       return {
-        body: { metalness: 0.66, roughness: 0.34, emissiveIntensity: 0.016 },
-        wing: { metalness: 0.58, roughness: 0.38, emissiveIntensity: 0.01 },
-        cockpit: { metalness: 0.96, roughness: 0.08, emissiveIntensity: 0.08 },
-        accent: { metalness: 0.82, roughness: 0.24, emissiveIntensity: 0.02 },
-        detailColor: 0x9ea8b3,
-        lightOpacity: 0.24,
-        engineOpacity: 0.34,
+        body: { metalness: 0.8, roughness: 0.24, emissiveIntensity: 0.012 },
+        wing: { metalness: 0.74, roughness: 0.3, emissiveIntensity: 0.008 },
+        cockpit: { metalness: 0.96, roughness: 0.08, emissiveIntensity: 0.045 },
+        accent: { metalness: 0.84, roughness: 0.2, emissiveIntensity: 0.014 },
+        detailColor: 0xb7c0c9,
+        lightOpacity: 0.2,
+        engineOpacity: 0.3,
       };
     case EnemyType.ACE:
       return {
-        body: { metalness: 0.76, roughness: 0.26, emissiveIntensity: 0.02 },
-        wing: { metalness: 0.68, roughness: 0.3, emissiveIntensity: 0.015 },
-        cockpit: { metalness: 0.98, roughness: 0.08, emissiveIntensity: 0.09 },
-        accent: { metalness: 0.88, roughness: 0.18, emissiveIntensity: 0.03 },
-        detailColor: 0x9b8e86,
-        lightOpacity: 0.28,
-        engineOpacity: 0.4,
+        body: { metalness: 0.84, roughness: 0.22, emissiveIntensity: 0.016 },
+        wing: { metalness: 0.8, roughness: 0.26, emissiveIntensity: 0.012 },
+        cockpit: { metalness: 0.98, roughness: 0.08, emissiveIntensity: 0.05 },
+        accent: { metalness: 0.9, roughness: 0.18, emissiveIntensity: 0.018 },
+        detailColor: 0xb3b0ac,
+        lightOpacity: 0.22,
+        engineOpacity: 0.34,
       };
     default:
       return {
@@ -153,12 +153,15 @@ function getOrCreateMaterials(
       tuning.wing.roughness,
       tuning.wing.emissiveIntensity
     ),
-    cockpit: createAircraftMaterial(
-      accentColor,
-      tuning.cockpit.metalness,
-      tuning.cockpit.roughness,
-      tuning.cockpit.emissiveIntensity
-    ),
+    cockpit: new THREE.MeshStandardMaterial({
+      color: 0x1f252c,
+      metalness: tuning.cockpit.metalness,
+      roughness: tuning.cockpit.roughness,
+      transparent: true,
+      opacity: 0.88,
+      emissive: 0x486170,
+      emissiveIntensity: tuning.cockpit.emissiveIntensity,
+    }),
     engine: new THREE.MeshBasicMaterial({
       color: 0xff6600,
       transparent: true,
@@ -172,7 +175,7 @@ function getOrCreateMaterials(
     ),
     detail: createAircraftMaterial(tuning.detailColor, 0.45, 0.6, 0),
     light: new THREE.MeshBasicMaterial({
-      color: accentColor,
+      color: 0x7fd7ff,
       transparent: true,
       opacity: tuning.lightOpacity,
     }),
@@ -839,49 +842,49 @@ export function createEnemyMesh(config: EnemyConfig): THREE.Group {
 
   switch (config.type) {
     case EnemyType.SCOUT:
-      bodyColor = 0x5b6670;
-      wingColor = 0x747f89;
-      accentColor = 0x3f4952;
-      bodySize = 1.28;
-      bodyLength = 5.6;
-      wingSpan = 4.6;
-      scaleMultiplier = 1.0;
+      bodyColor = 0xc5ccd3;
+      wingColor = 0x9ea8b3;
+      accentColor = 0x566472;
+      bodySize = 1.42;
+      bodyLength = 6.2;
+      wingSpan = 5.4;
+      scaleMultiplier = 2.0;
       break;
     case EnemyType.FIGHTER:
-      bodyColor = 0x70757d;
-      wingColor = 0x80868e;
-      accentColor = 0x4b525b;
-      bodySize = 1.72;
-      bodyLength = 7.4;
-      wingSpan = 6.1;
-      scaleMultiplier = 1.08;
+      bodyColor = 0xc9d0d6;
+      wingColor = 0xa8b2bc;
+      accentColor = 0x56616d;
+      bodySize = 1.86;
+      bodyLength = 8.4;
+      wingSpan = 7.4;
+      scaleMultiplier = 2.0;
       break;
     case EnemyType.HEAVY:
-      bodyColor = 0x4b4f54;
-      wingColor = 0x5e6369;
-      accentColor = 0x33373c;
-      bodySize = 2.28;
-      bodyLength = 9.4;
-      wingSpan = 8.6;
-      scaleMultiplier = 1.36;
+      bodyColor = 0xb0b7bf;
+      wingColor = 0x8f98a3;
+      accentColor = 0x4b5560;
+      bodySize = 2.52;
+      bodyLength = 10.6;
+      wingSpan = 10.8;
+      scaleMultiplier = 2.0;
       break;
     case EnemyType.SNIPER:
-      bodyColor = 0x5f6771;
-      wingColor = 0x727b85;
-      accentColor = 0x49515b;
-      bodySize = 1.46;
-      bodyLength = 8.8;
-      wingSpan = 5.2;
-      scaleMultiplier = 1.06;
+      bodyColor = 0xc2cad2;
+      wingColor = 0x9aa5af;
+      accentColor = 0x4f5d6a;
+      bodySize = 1.6;
+      bodyLength = 10.4;
+      wingSpan = 6.6;
+      scaleMultiplier = 2.0;
       break;
     case EnemyType.ACE:
-      bodyColor = 0x656a72;
-      wingColor = 0x7b8188;
-      accentColor = 0x8b4a40;
-      bodySize = 1.84;
-      bodyLength = 7.8;
-      wingSpan = 6.0;
-      scaleMultiplier = 1.14;
+      bodyColor = 0xd0d4d8;
+      wingColor = 0xa5adb6;
+      accentColor = 0x7a5046;
+      bodySize = 2.04;
+      bodyLength = 8.8;
+      wingSpan = 7.8;
+      scaleMultiplier = 2.0;
       break;
     default:
       bodyColor = config.color;
