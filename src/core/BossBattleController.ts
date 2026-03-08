@@ -458,6 +458,7 @@ export class BossBattleController {
         }
 
         octopusBoss.takeEyeDamage(part.index, GAME_CONSTANTS.MISSILE.DAMAGE);
+        this.deps.particleSystem.createHit(impactPosition, 1.2, 'boss');
         this.deps.particleSystem.createMissileImpact(impactPosition, 1.25);
         this.deps.audioManager.playMissileExplosion();
       });
@@ -474,7 +475,7 @@ export class BossBattleController {
         );
         const hitWorldPos = new Vector3();
         target.getWorldPosition(hitWorldPos);
-        this.createDamageFeedback(hitWorldPos, 1.05);
+        this.createDamageFeedback(hitWorldPos, 1.16);
       });
     }
 
@@ -565,7 +566,7 @@ export class BossBattleController {
         boss.takeEyeDamage(part.index, this.deps.combatSystem.getDamageMultiplier() * 12.5);
         const hitWorldPos = new Vector3();
         target.getWorldPosition(hitWorldPos);
-        this.createDamageFeedback(hitWorldPos, 1.05);
+        this.createDamageFeedback(hitWorldPos, 1.16);
       });
 
     const eyeBulletCollideRadius = 5;
@@ -577,6 +578,7 @@ export class BossBattleController {
           this.deps.playerSystem.getHealth().takeDamage(boss.getEyeDamage());
           this.createDamageFeedback(currentPlayerPosition, Math.max(1.05, boss.getEyeDamage() / 18));
         }
+        this.deps.particleSystem.createHit(bulletPosition, 0.92, 'boss');
         boss.getEyeSystem().removeBullet(bulletMesh);
         break;
       }
@@ -590,6 +592,7 @@ export class BossBattleController {
         if (bulletPosition.distanceTo(friendlyPosition) < eyeBulletCollideRadius) {
           friendly.takeDamage(boss.getEyeDamage());
           this.createDamageFeedback(friendlyPosition, Math.max(0.95, boss.getEyeDamage() / 22));
+          this.deps.particleSystem.createHit(bulletPosition, 0.84, 'boss');
           boss.getEyeSystem().removeBullet(bulletMesh);
           break;
         }

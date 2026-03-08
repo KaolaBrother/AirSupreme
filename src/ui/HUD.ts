@@ -17,6 +17,9 @@ export class HUD {
   private speedDisplay: HTMLDivElement;
   private enemiesDisplay: HTMLDivElement;
   private remainingEnemiesDisplay: HTMLDivElement; // 剩余敌人数量
+  private eventObjectiveDisplay: HTMLDivElement;
+  private eventObjectiveTitle: HTMLDivElement;
+  private eventObjectiveText: HTMLDivElement;
   private livesDisplay: HTMLDivElement;
   private missilesDisplay: HTMLDivElement;
   private missileProgressDisplay: HTMLDivElement; // 导弹补给进度条背景
@@ -164,6 +167,51 @@ export class HUD {
     `;
     this.setTextContent(this.remainingEnemiesDisplay, '剩余: 0');
     this.container.appendChild(this.remainingEnemiesDisplay);
+
+    this.eventObjectiveDisplay = document.createElement('div');
+    this.eventObjectiveDisplay.style.cssText = `
+      position: absolute;
+      top: ${isMobile ? '56px' : '74px'};
+      left: 50%;
+      transform: translateX(-50%);
+      min-width: ${isMobile ? '220px' : '280px'};
+      max-width: ${isMobile ? '72vw' : '34vw'};
+      padding: ${isMobile ? '8px 12px' : '10px 16px'};
+      border-radius: 14px;
+      background: linear-gradient(160deg, rgba(18, 26, 42, 0.88), rgba(8, 12, 20, 0.76));
+      border: 1px solid rgba(132, 210, 255, 0.24);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 12px 24px rgba(0, 0, 0, 0.18);
+      display: none;
+      pointer-events: none;
+      text-align: center;
+      backdrop-filter: blur(8px);
+    `;
+
+    this.eventObjectiveTitle = document.createElement('div');
+    this.eventObjectiveTitle.style.cssText = `
+      font-size: ${isMobile ? '11px' : '12px'};
+      font-weight: 700;
+      letter-spacing: 0.14em;
+      color: #8fe4ff;
+      text-transform: uppercase;
+      margin-bottom: 4px;
+    `;
+    this.setTextContent(this.eventObjectiveTitle, '作战目标');
+
+    this.eventObjectiveText = document.createElement('div');
+    this.eventObjectiveText.style.cssText = `
+      font-size: ${isMobile ? '13px' : '15px'};
+      font-weight: 700;
+      color: #f5fbff;
+      text-shadow: 0 0 12px rgba(120, 220, 255, 0.16);
+      line-height: 1.35;
+      white-space: nowrap;
+    `;
+    this.setTextContent(this.eventObjectiveText, '');
+
+    this.eventObjectiveDisplay.appendChild(this.eventObjectiveTitle);
+    this.eventObjectiveDisplay.appendChild(this.eventObjectiveText);
+    this.container.appendChild(this.eventObjectiveDisplay);
     this.leftPrimaryRow.appendChild(this.scoreDisplay);
     this.leftPrimaryRow.appendChild(this.speedDisplay);
     this.leftStatusPanel.appendChild(this.leftPrimaryRow);
@@ -541,6 +589,19 @@ export class HUD {
     this.setTextContent(this.remainingEnemiesDisplay, `剩余: ${count}`);
   }
 
+  public showEventObjective(title: string, objective: string): void {
+    this.ensureInitialized();
+    this.setTextContent(this.eventObjectiveTitle, title);
+    this.setTextContent(this.eventObjectiveText, objective);
+    this.setStyleValue(this.eventObjectiveDisplay, 'display', 'block');
+  }
+
+  public hideEventObjective(): void {
+    this.ensureInitialized();
+    this.setTextContent(this.eventObjectiveText, '');
+    this.setStyleValue(this.eventObjectiveDisplay, 'display', 'none');
+  }
+
   /**
    * 更新生命值显示
    */
@@ -772,6 +833,7 @@ export class HUD {
    */
   public showGameOver(finalScore: number): void {
     this.ensureInitialized();
+    this.hideEventObjective();
     this.setTextContent(this.finalScoreDisplay, `最终得分: ${finalScore}`);
     this.setStyleValue(this.gameOverDisplay, 'opacity', '1');
     this.setStyleValue(this.gameOverDisplay, 'pointerEvents', 'auto');
@@ -787,6 +849,7 @@ export class HUD {
   }
 
   public dispose(): void {
+    this.hideEventObjective();
     if (this.container.parentElement) {
       this.container.remove();
     }

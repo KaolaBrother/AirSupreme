@@ -149,6 +149,14 @@ export class PresentationController {
     this.bossIndicator.clear();
   }
 
+  public showEventObjective(title: string, objective: string): void {
+    this.hud.showEventObjective(title, objective);
+  }
+
+  public clearEventObjective(): void {
+    this.hud.hideEventObjective();
+  }
+
   public dispose(): void {
     this.hud.dispose();
     this.enemyHealthBars.dispose();

@@ -242,6 +242,11 @@ export function createPlayerMesh(): THREE.Group {
   const sensorMaterial = createAircraftMaterial(0x5f7488, 0.9, 0.18, 0.1);
   const weaponMaterial = createAircraftMaterial(0x5f6875, 0.92, 0.22, 0.03);
   const energyPanelMaterial = createAircraftMaterial(0x5e85a8, 0.86, 0.2, 0.12);
+  const playerIntakeCavityMaterial = new THREE.MeshStandardMaterial({
+    color: 0x161a20,
+    metalness: 0.38,
+    roughness: 0.74,
+  });
   const playerLightMaterial = new THREE.MeshBasicMaterial({
     color: 0x58d5ff,
     transparent: true,
@@ -511,6 +516,18 @@ export function createPlayerMesh(): THREE.Group {
   leftIntakeInner.rotation.y = -Math.PI / 2;
   group.add(leftIntakeInner);
 
+  const leftIntakeShoulder = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.1, 0.48), detailMaterial);
+  leftIntakeShoulder.position.set(-0.4, 0.03, -0.22);
+  leftIntakeShoulder.rotation.y = 0.18;
+  leftIntakeShoulder.castShadow = true;
+  group.add(leftIntakeShoulder);
+
+  const leftIntakeCavity = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.14, 0.42), playerIntakeCavityMaterial);
+  leftIntakeCavity.position.set(-0.62, -0.08, -0.28);
+  leftIntakeCavity.rotation.y = 0.08;
+  leftIntakeCavity.castShadow = true;
+  group.add(leftIntakeCavity);
+
   const rightIntake = new THREE.Mesh(intakeGeometry, engineMaterial);
   rightIntake.position.set(0.55, -0.15, -0.3);
   rightIntake.castShadow = true;
@@ -537,6 +554,18 @@ export function createPlayerMesh(): THREE.Group {
   rightIntakeInner.position.set(0.68, -0.15, -0.3);
   rightIntakeInner.rotation.y = Math.PI / 2;
   group.add(rightIntakeInner);
+
+  const rightIntakeShoulder = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.1, 0.48), detailMaterial);
+  rightIntakeShoulder.position.set(0.4, 0.03, -0.22);
+  rightIntakeShoulder.rotation.y = -0.18;
+  rightIntakeShoulder.castShadow = true;
+  group.add(rightIntakeShoulder);
+
+  const rightIntakeCavity = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.14, 0.42), playerIntakeCavityMaterial);
+  rightIntakeCavity.position.set(0.62, -0.08, -0.28);
+  rightIntakeCavity.rotation.y = -0.08;
+  rightIntakeCavity.castShadow = true;
+  group.add(rightIntakeCavity);
 
   // === 发动机喷口 ===
   // CylinderGeometry 默认轴向 +Y
@@ -711,6 +740,17 @@ export function createPlayerMesh(): THREE.Group {
   centerlineKeel.castShadow = true;
   group.add(centerlineKeel);
 
+  const centerlineStoreAdapter = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.08, 0.52), accentMaterial);
+  centerlineStoreAdapter.position.set(0, -0.2, 0.16);
+  centerlineStoreAdapter.castShadow = true;
+  group.add(centerlineStoreAdapter);
+
+  const centerlineStoreBrace = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.12, 0.38), detailMaterial);
+  centerlineStoreBrace.position.set(0, -0.14, 0.16);
+  centerlineStoreBrace.rotation.x = 0.06;
+  centerlineStoreBrace.castShadow = true;
+  group.add(centerlineStoreBrace);
+
   const leftOuterRail = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 0.52), accentMaterial);
   leftOuterRail.position.set(-1.78, -0.06, -0.12);
   leftOuterRail.rotation.y = -0.22;
@@ -793,11 +833,23 @@ export function createPlayerMesh(): THREE.Group {
   leftTailRootFairing.castShadow = true;
   group.add(leftTailRootFairing);
 
+  const leftTailplaneRoot = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.08, 0.42), wingMaterial);
+  leftTailplaneRoot.position.set(-0.34, 0.08, 1.1);
+  leftTailplaneRoot.rotation.y = 0.22;
+  leftTailplaneRoot.castShadow = true;
+  group.add(leftTailplaneRoot);
+
   const rightTailRootFairing = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.16, 0.6), heroPanelMaterial);
   rightTailRootFairing.position.set(0.42, 0.18, 1.28);
   rightTailRootFairing.rotation.y = -0.12;
   rightTailRootFairing.castShadow = true;
   group.add(rightTailRootFairing);
+
+  const rightTailplaneRoot = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.08, 0.42), wingMaterial);
+  rightTailplaneRoot.position.set(0.34, 0.08, 1.1);
+  rightTailplaneRoot.rotation.y = -0.22;
+  rightTailplaneRoot.castShadow = true;
+  group.add(rightTailplaneRoot);
 
   const leftShoulderSensor = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.08, 0.34), sensorMaterial);
   leftShoulderSensor.position.set(-0.32, 0.18, -0.94);
@@ -941,9 +993,9 @@ export function createEnemyMesh(config: EnemyConfig): THREE.Group {
 
   group.scale.set(scaleMultiplier, scaleMultiplier, scaleMultiplier);
   const materials = getOrCreateMaterials(config.type, bodyColor, wingColor, accentColor);
-  const weaponMaterial = createAircraftMaterial(accentColor, 0.9, 0.2, 0.08);
-  const energyMaterial = createAircraftMaterial(accentColor, 0.86, 0.16, 0.14);
-  const structureMaterial = createAircraftMaterial(wingColor, 0.68, 0.34, 0.03);
+  const weaponMaterial = createAircraftMaterial(accentColor, 0.88, 0.24, 0.05);
+  const energyMaterial = createAircraftMaterial(accentColor, 0.78, 0.24, 0.08);
+  const structureMaterial = createAircraftMaterial(wingColor, 0.62, 0.4, 0.02);
   const intakeCavityMaterial = new THREE.MeshStandardMaterial({
     color: 0x161a20,
     metalness: 0.42,

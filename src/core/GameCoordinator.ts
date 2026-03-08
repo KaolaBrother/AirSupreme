@@ -72,6 +72,16 @@ interface EscortWaveState {
   wave: number;
 }
 
+interface WaveEventState {
+  type: LevelWaveEventType | null;
+  wave: number;
+}
+
+interface WaveObjectiveDisplay {
+  title: string;
+  objective: string;
+}
+
 interface CombatRuntimeSystems {
   particleSystem: ParticleSystem;
   combatSystem: CombatSystem;
@@ -164,8 +174,13 @@ export class GameCoordinator {
     friendlyId: null,
     wave: -1,
   };
+  private readonly waveEventState: WaveEventState = {
+    type: null,
+    wave: -1,
+  };
   private lowHealthWarningTimer: number = 0;
   private lastRenderTimestamp: number = 0;
+  private upgradeMenuHintShown: boolean = false;
 
   public static warmRuntimeChunks(): Promise<void> {
     if (!this.runtimeWarmupPromise) {
@@ -402,7 +417,7 @@ export class GameCoordinator {
 
     this.resourceRegistry.addUnsubscriber(
       EventBus.on(GameEventType.WAVE_COMPLETE, ({ payload }) => {
-        this.handleEscortWaveComplete(payload.wave);
+        this.handleWaveEventComplete(payload.wave);
       })
     );
 
@@ -1013,6 +1028,7 @@ export class GameCoordinator {
     this.sessionState.setPlaying();
     this.presentationController.initializeCombatUi();
     this.presentationController.resetHudThrottle();
+    this.presentationController.clearEventObjective();
     this.resetTutorialCombatState();
     this.playerSystem.getHealth().reset();
     this.sessionState.setInBossBattle(this.sessionState.isBossMode());
@@ -1274,8 +1290,16 @@ export class GameCoordinator {
     this.escortWaveState.active = false;
     this.escortWaveState.friendlyId = null;
     this.escortWaveState.wave = wave;
+    this.waveEventState.type = eventType;
+    this.waveEventState.wave = wave;
 
     const waveNumber = wave + 1;
+    const objectiveDisplay = this.getWaveObjectiveDisplay(eventType, waveNumber);
+    this.presentationController.showEventObjective(
+      objectiveDisplay.title,
+      objectiveDisplay.objective
+    );
+
     switch (eventType) {
       case LevelWaveEventType.ELITE_HUNT:
         this.hud.showPowerUpBig('💠', `精英歼灭波次 · 第 ${waveNumber} 波`, 1.8, true);
@@ -1318,6 +1342,59 @@ export class GameCoordinator {
     this.escortWaveState.active = false;
     this.escortWaveState.friendlyId = null;
     this.escortWaveState.wave = -1;
+  }
+
+  private handleWaveEventComplete(wave: number): void {
+    if (this.waveEventState.wave !== wave || !this.waveEventState.type) {
+      this.presentationController.clearEventObjective();
+      return;
+    }
+
+    switch (this.waveEventState.type) {
+      case LevelWaveEventType.ELITE_HUNT:
+        this.hud.showPowerUpBig('✅', '精英歼灭完成，空域威胁已压制', 1.6, true);
+        break;
+      case LevelWaveEventType.INTERCEPT:
+        this.hud.showPowerUpBig('✅', '拦截成功，敌方前锋已被击退', 1.6, true);
+        break;
+      case LevelWaveEventType.ESCORT_DEFENSE:
+        this.handleEscortWaveComplete(wave);
+        break;
+      default:
+        break;
+    }
+
+    this.waveEventState.type = null;
+    this.waveEventState.wave = -1;
+    this.presentationController.clearEventObjective();
+  }
+
+  private getWaveObjectiveDisplay(
+    eventType: LevelWaveEventType,
+    waveNumber: number
+  ): WaveObjectiveDisplay {
+    switch (eventType) {
+      case LevelWaveEventType.ELITE_HUNT:
+        return {
+          title: `第 ${waveNumber} 波 · 精英歼灭`,
+          objective: '优先清理重型与王牌目标，快速压制空域',
+        };
+      case LevelWaveEventType.INTERCEPT:
+        return {
+          title: `第 ${waveNumber} 波 · 限时拦截`,
+          objective: '高速目标正在突防，优先击落前锋编队',
+        };
+      case LevelWaveEventType.ESCORT_DEFENSE:
+        return {
+          title: `第 ${waveNumber} 波 · 护送防守`,
+          objective: '掩护友军生存至波次结束，可获得额外奖励',
+        };
+      default:
+        return {
+          title: `第 ${waveNumber} 波 · 空域压制`,
+          objective: '清空当前波次目标，保持机动与火力节奏',
+        };
+    }
   }
 
   private async ensureUpgradeMenu(): Promise<UpgradeMenu> {
@@ -1424,6 +1501,10 @@ export class GameCoordinator {
     bossConfig: BossConfig,
     isBossMode: boolean
   ): void {
+    this.combatSystem?.getPlayerProjectilePool().clear();
+    this.combatSystem?.getEnemyProjectilePool().clear();
+    this.particleSystem?.clear();
+
     this.audioManager.playBossExplosion(bossConfig.scale);
     this.particleSystem?.createBossDeathExplosion(position, bossConfig.scale);
     this.gameState.addScore(bossConfig.scoreValue);
@@ -1435,10 +1516,6 @@ export class GameCoordinator {
 
     this.bossBattleController?.clear();
     this.enemySystem?.clearFriendlies();
-
-    this.combatSystem?.getPlayerProjectilePool().clear();
-    this.combatSystem?.getEnemyProjectilePool().clear();
-    this.particleSystem?.clear();
 
     this.hud.showPowerUpBig('🏆', 'Boss 已击败！');
 
@@ -1616,6 +1693,17 @@ export class GameCoordinator {
 
     const pointLabel = earnedPoints > 1 ? `${earnedPoints} 升级点` : '1 升级点';
     this.hud.showPowerUpBig('⭐', `获得 ${pointLabel}`, 1.1, true);
+
+    if (!this.upgradeMenuHintShown) {
+      this.upgradeMenuHintShown = true;
+      const isMobile = GameConfig.isMobile;
+      const hint = isMobile
+        ? '暂停后打开升级菜单，立即强化机体'
+        : '按 U 或暂停后打开升级菜单，立即强化机体';
+      this.scheduleTimeout(() => {
+        this.hud.showPowerUpBig('🧩', hint, 1.8, true);
+      }, 1200);
+    }
   }
 
   private scheduleTimeout(callback: () => void, delay: number): ReturnType<typeof setTimeout> {
