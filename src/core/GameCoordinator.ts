@@ -914,47 +914,47 @@ export class GameCoordinator {
     if (!this.tutorialCombatState.movementHintShown) {
       return {
         title: '试玩引导 · 机动确认',
-        objective: '先做一次明显转向或横移，确认基础机动手感。',
-        status: `步骤 1/5 · 已完成 ${completedSteps}/5`,
+        objective: '完成一次转向/横移，确认机动。',
+        status: `S1/5 · 已完成 ${completedSteps}/5`,
       };
     }
 
     if (!this.tutorialCombatState.speedHintShown) {
       return {
         title: '试玩引导 · 提升速度',
-        objective: '拉起速度，建立距离，准备进入第一次接敌。',
-        status: `步骤 2/5 · 已完成 ${completedSteps}/5`,
+        objective: '提速建立距离，准备接敌。',
+        status: `S2/5 · 已完成 ${completedSteps}/5`,
       };
     }
 
     if (!this.tutorialCombatState.fireHintShown) {
       return {
         title: '试玩引导 · 火力压制',
-        objective: '按住开火，确认机炮持续射击与修正节奏。',
-        status: `步骤 3/5 · 已完成 ${completedSteps}/5`,
+        objective: '持续开火，校准机炮节奏。',
+        status: `S3/5 · 已完成 ${completedSteps}/5`,
       };
     }
 
     if (!this.tutorialCombatState.lockCompleteHintShown && !this.tutorialCombatState.missileHintShown) {
       return {
         title: '试玩引导 · 导弹锁定',
-        objective: '把目标稳定留在准星内，等锁定圈闭合后再发射。',
-        status: `步骤 4/5 · 已完成 ${completedSteps}/5 · 当前状态：锁定中`,
+        objective: '目标稳定入准星，锁定圈闭合后发射。',
+        status: `S4/5 · 已完成 ${completedSteps}/5 · 锁定中`,
       };
     }
 
     if (this.tutorialCombatState.lockCompleteHintShown && !this.tutorialCombatState.missileHintShown) {
       return {
         title: '试玩引导 · 导弹发射',
-        objective: '锁定已完成，立刻发射一枚导弹，观察命中反馈。',
-        status: `步骤 4/5 · 已完成 ${completedSteps}/5 · 当前状态：等待发射`,
+        objective: '锁定达成后立刻发射，观察命中反馈。',
+        status: `S4/5 · 已完成 ${completedSteps}/5 · 等待发射`,
       };
     }
 
     return {
       title: '试玩引导 · 击落首个目标',
-      objective: '优先击落正前方高威胁目标，先打穿护航压力再进入常规节奏。',
-      status: `步骤 5/5 · 已完成 ${completedSteps}/5`,
+      objective: '先击落正前方高威胁，再解护航压力进入常规。',
+      status: `S5/5 · 已完成 ${completedSteps}/5`,
     };
   }
 
@@ -979,19 +979,19 @@ export class GameCoordinator {
           title: `第 ${waveNumber} 波 · 精英歼灭`,
           objective:
             eliteAlive > 0
-              ? '优先打穿重型/王牌目标，压缩高威胁窗口。'
-              : '高威胁主力已清空，继续打穿波次尾场。',
+              ? '优先打穿重型/王牌，压缩高威胁窗口。'
+              : '高威胁主力已清空，继续清理尾场。',
           status:
             eliteAlive > 0
-              ? `阶段状态：高威胁优先压制 · 精英 ${eliteAlive} 架 · 已出现 ${spawnedEnemies}/${totalEnemies} · 当前 ${aliveInWave} 架`
-              : `阶段状态：尾场清空 · 重点已打穿 · 当前剩余 ${remainingEnemies} 架`,
+              ? `精英压制：${eliteAlive} 架 · 已出 ${spawnedEnemies}/${totalEnemies} · 在场 ${aliveInWave} 架`
+              : `尾场清空：重点已打穿 · 剩余 ${remainingEnemies} 架`,
         };
       }
       case LevelWaveEventType.INTERCEPT:
         return {
           title: `第 ${waveNumber} 波 · 限时拦截`,
-          objective: '优先拦截突防编队，高速目标优先，维持前压制。',
-          status: `阶段状态：拦截中 · 已出现 ${spawnedEnemies}/${totalEnemies} 架 · 空域剩余 ${remainingEnemies} 架`,
+          objective: '拦截突防编队，优先高速目标。',
+          status: `拦截中：已出 ${spawnedEnemies}/${totalEnemies} · 剩余 ${remainingEnemies} 架`,
         };
       case LevelWaveEventType.ESCORT_DEFENSE: {
         const escortAlive = (this.enemySystem?.getFriendlyAIs() ?? []).some(
@@ -1002,16 +1002,16 @@ export class GameCoordinator {
         return {
           title: `第 ${waveNumber} 波 · 护送防守`,
           objective: escortAlive
-            ? '优先防御友军，优先打穿护航波次的高威胁点。'
-            : '优先防守已失效，打穿护航波次残余威胁后稳住空域。',
-          status: `阶段状态：${escortAlive ? '护送防御优先' : '护送失守后清场'} · 剩余 ${remainingEnemies} 架`,
+            ? '先护送友军，再点穿护航高威胁。'
+            : '护送失守，清理残余并稳住空域。',
+          status: `${escortAlive ? '护送优先' : '失守后清场'} · 剩余 ${remainingEnemies} 架`,
         };
       }
       default:
         return {
           title: `第 ${waveNumber} 波 · 空域压制`,
-          objective: '清空当前波次目标，保持机动与火力节奏。',
-          status: `阶段状态：空域压制中 · 敌机剩余 ${remainingEnemies} 架`,
+          objective: '清空本波目标，维持机动与火力。',
+          status: `空域压制中：剩余 ${remainingEnemies} 架`,
         };
     }
   }
@@ -1025,11 +1025,11 @@ export class GameCoordinator {
     const nextWaveDelay = Math.max(0, Math.ceil(waveProgress.nextWaveDelaySeconds));
     return {
       title: `第 ${waveProgress.wave + 1} 波 · 阶段完成`,
-      objective: '当前波次已清空，保持姿态并准备接续下一轮接敌。',
+      objective: '本波已清空，整姿态，准备下一波。',
       status:
         nextWaveDelay > 0
-          ? `阶段状态：战场重整中 · 下一波 ${nextWaveDelay}s 后开始`
-          : '阶段状态：正在切换下一波',
+          ? `重整中：${nextWaveDelay}s 后接续`
+          : '重整中：准备下一波',
     };
   }
 
@@ -1324,12 +1324,12 @@ export class GameCoordinator {
 
   private getTutorialStages(): Array<{ icon: string; text: string; hideSubtext?: boolean }> {
     return [
-      { icon: '🎮', text: '试玩关卡已开启', hideSubtext: true },
-      { icon: '🕹️', text: '先确认转向与横移的手感' },
-      { icon: '⚡', text: '把速度拉起来，再准备接敌' },
-      { icon: '🔥', text: '机炮负责压制，导弹负责点杀' },
-      { icon: '🚀', text: '锁定完成后再发射导弹' },
-      { icon: '🎯', text: '击落首个目标后进入正式节奏' },
+      { icon: '🎮', text: '试玩关开启', hideSubtext: true },
+      { icon: '🕹️', text: '确认转向与横移' },
+      { icon: '⚡', text: '提速再接敌' },
+      { icon: '🔥', text: '机炮压制，导弹点杀' },
+      { icon: '🚀', text: '锁定后再发射导弹' },
+      { icon: '🎯', text: '击杀首个目标后转常规' },
     ];
   }
 
@@ -1357,12 +1357,12 @@ export class GameCoordinator {
     const waveReadyDelayMs = Math.max(0, combatStartDelayMs - 1200);
 
     this.scheduleTimeout(() => {
-      this.hud.showPowerUpBig('📡', '前方空域即将接敌', 1.5);
+      this.hud.showPowerUpBig('📡', '前方有敌，准备接敌', 1.5);
     }, waveReadyDelayMs);
 
     this.scheduleTimeout(() => {
       this.activateTutorialCombatStage();
-      this.hud.showPowerUpBig('⚔️', '第一波接敌，保持机动并准备开火', 1.8);
+      this.hud.showPowerUpBig('⚔️', '第一波到来，先稳机动再开火', 1.8);
     }, combatStartDelayMs);
   }
 
@@ -1404,7 +1404,7 @@ export class GameCoordinator {
       const movedDistance = this.playerSystem.getPosition().distanceTo(startPosition);
       if (movedDistance >= GameCoordinator.TUTORIAL_MOVE_DISTANCE) {
         this.tutorialCombatState.movementHintShown = true;
-        this.hud.showPowerUpBig('🕹️', '机动确认，继续提速建立间距', 1.8);
+        this.hud.showPowerUpBig('🕹️', '机动确认，继续提速拉距', 1.8);
         this.updatePlayerFacingObjective();
       }
     }
@@ -1416,7 +1416,7 @@ export class GameCoordinator {
         >= this.playerStats.getMaxSpeed() * GameCoordinator.TUTORIAL_SPEED_THRESHOLD_RATIO
     ) {
       this.tutorialCombatState.speedHintShown = true;
-      this.hud.showPowerUpBig('⚡', '速度已建立，按住开火压制目标', 1.8);
+      this.hud.showPowerUpBig('⚡', '速度到位，按住开火压制', 1.8);
       this.updatePlayerFacingObjective();
     }
   }
@@ -1427,7 +1427,7 @@ export class GameCoordinator {
     }
 
     this.tutorialCombatState.fireHintShown = true;
-    this.hud.showPowerUpBig('🔥', '火力确认，开始准备导弹锁定', 1.8);
+    this.hud.showPowerUpBig('🔥', '火力确认，准备导弹锁定', 1.8);
     this.updatePlayerFacingObjective();
   }
 
@@ -1447,7 +1447,7 @@ export class GameCoordinator {
     }
 
     this.tutorialCombatState.missileHintShown = true;
-    this.hud.showPowerUpBig('🚀', '导弹已发射，优先点杀高威胁目标', 1.8);
+    this.hud.showPowerUpBig('🚀', '导弹已发射，优先点杀高威胁', 1.8);
     this.updatePlayerFacingObjective();
   }
 
@@ -1457,7 +1457,7 @@ export class GameCoordinator {
     }
 
     this.tutorialCombatState.lockCompleteHintShown = true;
-    this.hud.showPowerUpBig('✅', '锁定完成，抓住窗口立刻发射', 1.7);
+    this.hud.showPowerUpBig('✅', '锁定完成，立刻发射', 1.7);
     this.updatePlayerFacingObjective();
   }
 
@@ -1467,13 +1467,13 @@ export class GameCoordinator {
     }
 
     this.tutorialCombatState.killHintShown = true;
-    this.hud.showPowerUpBig('🎯', '首杀确认，继续清空本波进入正式节奏', 1.8);
+    this.hud.showPowerUpBig('🎯', '首杀确认，继续清空本波后正式', 1.8);
     this.tutorialCombatState.active = false;
     this.showTransientObjective(
       {
         title: '试玩引导 · 完成',
-        objective: '首轮教学目标已完成，接下来按常规波次节奏推进。',
-        status: '阶段状态：教学完成 · 常规战斗已解锁',
+        objective: '首轮引导完成，进入常规波次。',
+        status: '教学完成 · 常规战斗已解锁',
       },
       2600
     );
@@ -1485,7 +1485,7 @@ export class GameCoordinator {
     }
 
     this.tutorialCombatState.hitHintShown = true;
-    this.hud.showPowerUpBig('↪️', '被命中后立刻横移或加速脱离火线', 1.7);
+    this.hud.showPowerUpBig('↪️', '被命中后立刻横移或加速脱离', 1.7);
     this.updatePlayerFacingObjective();
   }
 
@@ -1495,7 +1495,7 @@ export class GameCoordinator {
     }
 
     this.tutorialCombatState.friendlySupportHintShown = true;
-    this.hud.showPowerUpBig('🤝', '友军已入场，优先防御友军并打穿高威胁压制点', 1.8);
+    this.hud.showPowerUpBig('🤝', '友军到位，先护航再压制', 1.8);
     this.updatePlayerFacingObjective();
   }
 
@@ -1517,10 +1517,10 @@ export class GameCoordinator {
 
     switch (eventType) {
       case LevelWaveEventType.ELITE_HUNT:
-        this.hud.showPowerUpBig('💠', `精英歼灭波次 · 第 ${waveNumber} 波`, 1.8, true);
+        this.hud.showPowerUpBig('💠', `精英歼灭波次 · 第${waveNumber}波`, 1.8, true);
         break;
       case LevelWaveEventType.INTERCEPT:
-        this.hud.showPowerUpBig('⚠️', `限时拦截波次 · 第 ${waveNumber} 波`, 1.8, true);
+        this.hud.showPowerUpBig('⚠️', `限时拦截波次 · 第${waveNumber}波`, 1.8, true);
         break;
       case LevelWaveEventType.ESCORT_DEFENSE:
         if ((this.enemySystem?.getFriendlyAIs().length ?? 0) < 4) {
@@ -1528,7 +1528,7 @@ export class GameCoordinator {
           this.escortWaveState.active = true;
           this.escortWaveState.friendlyId = escortFriendly.getMesh().uuid;
         }
-        this.hud.showPowerUpBig('🛡️', `护送防守波次 · 第 ${waveNumber} 波`, 1.8, true);
+        this.hud.showPowerUpBig('🛡️', `护送防守波次 · 第${waveNumber}波`, 1.8, true);
         break;
     }
   }
@@ -1549,9 +1549,9 @@ export class GameCoordinator {
       const earnedPoints = this.playerStats.addScore(GameCoordinator.ESCORT_WAVE_SCORE_BONUS);
       this.hud.updateUpgradePoints(this.playerStats.getUpgrades().getAvailablePoints());
       this.notifyEarnedUpgradePoints(earnedPoints);
-      this.hud.showPowerUpBig('✅', '护送完成，获得额外奖励', 1.6, true);
+      this.hud.showPowerUpBig('✅', '护送完成，奖励到位', 1.6, true);
     } else {
-      this.hud.showPowerUpBig('⚠️', '护送失利，继续保持空域压制', 1.6, true);
+      this.hud.showPowerUpBig('⚠️', '护送失利，继续压制', 1.6, true);
     }
 
     this.escortWaveState.active = false;
@@ -1569,19 +1569,19 @@ export class GameCoordinator {
     let completionObjective: WaveObjectiveDisplay | null = null;
     switch (this.waveEventState.type) {
       case LevelWaveEventType.ELITE_HUNT:
-        this.hud.showPowerUpBig('✅', '精英歼灭完成，空域威胁已压制', 1.6, true);
+        this.hud.showPowerUpBig('✅', '精英歼灭完成，威胁已压', 1.6, true);
         completionObjective = {
           title: `第 ${wave + 1} 波 · 精英歼灭完成`,
-          objective: '高威胁目标已清空，当前空域压力已经下降。',
-          status: '阶段结果：高威胁已打穿 · 目标卡短暂停留',
+          objective: '高威胁目标已清空，空域压力下降。',
+          status: '结果：高威胁已打穿',
         };
         break;
       case LevelWaveEventType.INTERCEPT:
-        this.hud.showPowerUpBig('✅', '拦截成功，敌方前锋已被击退', 1.6, true);
+        this.hud.showPowerUpBig('✅', '拦截成功，前锋被压制', 1.6, true);
         completionObjective = {
           title: `第 ${wave + 1} 波 · 拦截完成`,
-          objective: '前锋突防已被压制，准备接续下一轮接敌。',
-          status: '阶段结果：拦截节奏压断 · 目标卡短暂停留',
+          objective: '前锋突防已压制，准备接续下一波。',
+          status: '结果：拦截完成',
         };
         break;
       case LevelWaveEventType.ESCORT_DEFENSE: {
@@ -1589,13 +1589,13 @@ export class GameCoordinator {
         completionObjective = escortSuccess
           ? {
               title: `第 ${wave + 1} 波 · 护送完成`,
-              objective: '友军已防住关键节点，护航波次压力已被打穿。',
-              status: '阶段结果：护送防御达成 · 目标卡短暂停留',
+              objective: '友军守住关键点，护航压力打穿。',
+              status: '结果：护送达成',
             }
           : {
               title: `第 ${wave + 1} 波 · 护送结束`,
-              objective: '护送线受损，优先清理残余高威胁目标稳定空域。',
-              status: '阶段结果：护送失利 · 目标卡短暂停留',
+              objective: '护送线受损，清理残余威胁稳局。',
+              status: '结果：护送失利',
             };
         break;
       }
@@ -1638,25 +1638,25 @@ export class GameCoordinator {
       case LevelWaveEventType.ELITE_HUNT:
         return {
           title: `第 ${waveNumber} 波 · 精英歼灭`,
-          objective: '优先打穿重型与王牌主力，快速切断空域高威胁线。',
-          status: '优先目标：重型/王牌优先',
+          objective: '优先打穿重型与王牌，切断高威胁线。',
+          status: '优先：重型/王牌',
         };
       case LevelWaveEventType.INTERCEPT:
         return {
           title: `第 ${waveNumber} 波 · 限时拦截`,
-          objective: '优先拦截突防高速编队，优先防线前压。',
-          status: '前锋拦截优先',
+          objective: '拦截突防编队，优先高速目标。',
+          status: '优先：前锋拦截',
         };
       case LevelWaveEventType.ESCORT_DEFENSE:
         return {
           title: `第 ${waveNumber} 波 · 护送防守`,
-          objective: '优先防御友军，优先打穿护航波次关键袭扰。',
-          status: '友军防护优先级：最高',
+          objective: '先护送友军，再点穿护航关键威胁。',
+          status: '优先：友军防护',
         };
       default:
         return {
           title: `第 ${waveNumber} 波 · 空域压制`,
-          objective: '清空当前波次目标，保持机动与火力节奏',
+          objective: '清空本波目标，维持机动与火力',
         };
     }
   }

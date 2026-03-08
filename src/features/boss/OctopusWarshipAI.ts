@@ -180,6 +180,11 @@ export class OctopusWarshipAI {
     const terminalPulse =
       (Math.sin(this.animationTime * OctopusWarshipAI.TERMINAL_PULSE_SPEED) * 0.5 + 0.5)
       * terminalState;
+    const terminalWarning = Math.sqrt(terminalState);
+    const criticalBias = criticalState * criticalState;
+    const phasePressure = 1 + terminalWarning * 0.75 + criticalState * 0.2;
+    const terminalCrescendo = terminalWarning * (this.isTeleporting ? 0.2 : 1);
+    const terminalWarningPulse = terminalPulse * terminalWarning;
     const corePulse =
       (Math.sin(
         this.animationTime
@@ -192,19 +197,23 @@ export class OctopusWarshipAI {
         corePulse * 1.35 +
         (this.isTeleporting ? 0.9 : 0) +
         criticalPulse * 1.1 +
-        terminalPulse * 1.2 +
+        terminalPulse * 1.5 +
+        terminalWarning * 0.75 +
         hitFlash * 1.45,
       scale:
         1 +
         corePulse * 0.09 +
         (this.isTeleporting ? 0.08 : 0) +
-        criticalPulse * 0.06 +
-        terminalPulse * 0.06 +
+        criticalPulse * 0.07 +
+        terminalPulse * 0.08 +
         hitFlash * 0.06,
       color: this.weakpointBaseColor
         .clone()
-        .lerp(this.weakpointCriticalColor, (this.isTeleporting ? 0.5 : 0.1) + criticalPulse * 0.25)
-        .lerp(this.terminalColor, terminalState * 0.65 + terminalPulse * 0.35)
+        .lerp(
+          this.weakpointCriticalColor,
+          (this.isTeleporting ? 0.5 : 0.1) + criticalPulse * 0.25 + criticalBias * 0.3
+        )
+        .lerp(this.terminalColor, terminalState * 0.75 + terminalWarning * 0.45 + terminalPulse * 0.35)
         .lerp(this.hitFlashColor, hitFlash * 0.7),
     });
 
@@ -216,13 +225,20 @@ export class OctopusWarshipAI {
           0.6 +
           pulse * 0.85 * lowHealthBoost +
           criticalPulse * 0.6 +
-          terminalPulse * 0.8 +
-          hitFlash * 0.85,
-        scale: 1 + pulse * 0.04 + criticalPulse * 0.03 + terminalPulse * 0.03 + hitFlash * 0.03,
+          terminalPulse * 1.0 +
+          hitFlash * 0.82 +
+          terminalCrescendo * 0.45,
+        scale:
+          1 +
+          pulse * 0.04 * phasePressure +
+          criticalPulse * 0.04 +
+          terminalPulse * 0.05 +
+          hitFlash * 0.03 +
+          terminalWarning * 0.04,
         color: this.energyBaseColor
           .clone()
-          .lerp(this.energyCriticalColor, criticalState * 0.65 + criticalPulse * 0.25)
-          .lerp(this.terminalColor, terminalState * 0.35 + terminalPulse * 0.25),
+          .lerp(this.energyCriticalColor, criticalState * 0.65 + criticalPulse * 0.25 + criticalBias * 0.22)
+          .lerp(this.terminalColor, terminalState * 0.48 + terminalWarningPulse * 0.5 + terminalPulse * 0.25),
       });
     }
 
@@ -235,19 +251,22 @@ export class OctopusWarshipAI {
           teleportCharge * 0.9 +
           pulse * 0.45 +
           criticalPulse * 0.85 +
-          terminalPulse * 0.9 +
-          hitFlash * 0.95,
+          terminalPulse * 1.05 +
+          terminalWarning * 0.45 +
+          hitFlash * 0.9,
         scale:
           1 +
           teleportCharge * 0.08 +
           pulse * 0.03 +
           criticalPulse * 0.04 +
           terminalPulse * 0.04 +
-          hitFlash * 0.04,
+          hitFlash * 0.04 +
+          terminalWarning * 0.05 +
+          terminalWarningPulse * 0.02,
         color: this.weaponBaseColor
           .clone()
-          .lerp(this.weaponCriticalColor, criticalState + criticalPulse * 0.3)
-          .lerp(this.terminalColor, terminalState * 0.5 + terminalPulse * 0.3)
+          .lerp(this.weaponCriticalColor, criticalState + criticalPulse * 0.3 + criticalBias * 0.25)
+          .lerp(this.terminalColor, terminalState * 0.56 + terminalPulse * 0.35 + terminalWarning * 0.25)
           .lerp(this.hitFlashColor, hitFlash * 0.35),
       });
     }
@@ -258,11 +277,17 @@ export class OctopusWarshipAI {
       this.setGlowState(this.antennaTips[i], {
         intensity:
           0.55 + pulse * 0.9 + criticalPulse * 0.7 + terminalPulse * 0.75 + hitFlash * 0.75,
-        scale: 1 + pulse * 0.06 + criticalPulse * 0.04 + terminalPulse * 0.03 + hitFlash * 0.03,
+        scale:
+          1 +
+          pulse * 0.06 +
+          criticalPulse * 0.04 +
+          terminalPulse * 0.04 +
+          hitFlash * 0.03 +
+          terminalWarning * 0.04,
         color: this.energyBaseColor
           .clone()
-          .lerp(this.energyCriticalColor, criticalState * 0.5 + criticalPulse * 0.15)
-          .lerp(this.terminalColor, terminalState * 0.32 + terminalPulse * 0.2)
+          .lerp(this.energyCriticalColor, criticalState * 0.5 + criticalPulse * 0.15 + criticalBias * 0.22)
+          .lerp(this.terminalColor, terminalState * 0.32 + terminalPulse * 0.2 + terminalWarning * 0.25)
           .lerp(this.hitFlashColor, hitFlash * 0.35),
       });
     }

@@ -153,18 +153,34 @@ export class DesertFortressAI {
     const terminalPulse =
       (Math.sin(this.animationTime * DesertFortressAI.TERMINAL_PULSE_SPEED) * 0.5 + 0.5)
       * terminalState;
+    const terminalBias = terminalState * terminalState;
+    const terminalWarning = Math.sqrt(terminalState);
+    const criticalBias = criticalState * criticalState;
+    const phaseSeparation = 1 + terminalWarning * 0.8 + criticalState * 0.3;
+    const damagePhase = hitFlash * 0.75 + terminalWarning * 0.35;
     const corePulse =
       0.55
       + (Math.sin(this.animationTime * DesertFortressAI.WEAKPOINT_PULSE_SPEED) * 0.5 + 0.5)
         * 0.9
         * damagePulse;
     this.setGlowState(this.coreGlow, {
-      intensity: 0.7 + corePulse + criticalPulse * 1.05 + terminalPulse * 1.2 + hitFlash * 1.35,
-      scale: 1 + corePulse * 0.08 + criticalPulse * 0.08 + terminalPulse * 0.08 + hitFlash * 0.08,
+      intensity:
+        0.7 +
+        corePulse * 1.02 +
+        criticalPulse * 1.15 +
+        terminalPulse * 1.45 +
+        damagePhase * 1.2,
+      scale:
+        1 +
+        corePulse * 0.09 * phaseSeparation +
+        criticalPulse * 0.08 +
+        terminalPulse * 0.1 +
+        hitFlash * 0.08 +
+        terminalBias * 0.08,
       color: this.weakpointBaseColor
         .clone()
-        .lerp(this.weakpointCriticalColor, 1 - healthState + criticalPulse * 0.25)
-        .lerp(this.terminalColor, terminalState * 0.7 + terminalPulse * 0.3)
+        .lerp(this.weakpointCriticalColor, 1 - healthState + criticalPulse * 0.25 + criticalBias * 0.25)
+        .lerp(this.terminalColor, terminalState * 0.75 + terminalPulse * 0.35 + terminalBias * 0.2)
         .lerp(this.hitFlashColor, hitFlash * 0.75),
     });
 
@@ -183,21 +199,23 @@ export class DesertFortressAI {
         flakCharge * 1.35 +
         offsetPulse * 0.35 +
         criticalPulse * 0.7 +
-        terminalPulse * 0.9 +
-        hitFlash * 0.8;
+        terminalPulse * 1.1 +
+        hitFlash * 0.78 +
+        terminalWarning * 0.22;
       this.setGlowState(this.flakMuzzles[i], {
         intensity: intensity,
         scale:
           1 +
-          flakCharge * 0.22 +
+          flakCharge * 0.22 * phaseSeparation +
           offsetPulse * 0.05 +
-          criticalPulse * 0.05 +
-          terminalPulse * 0.05 +
-          hitFlash * 0.05,
+          criticalPulse * 0.06 +
+          terminalPulse * 0.08 +
+          hitFlash * 0.04 +
+          terminalBias * 0.05,
         color: this.weaponBaseColor
           .clone()
-          .lerp(this.weaponCriticalColor, criticalState + criticalPulse * 0.25)
-          .lerp(this.terminalColor, terminalState * 0.55 + terminalPulse * 0.3)
+          .lerp(this.weaponCriticalColor, criticalState + criticalPulse * 0.25 + criticalBias * 0.2)
+          .lerp(this.terminalColor, terminalState * 0.62 + terminalPulse * 0.32 + terminalBias * 0.22)
           .lerp(this.hitFlashColor, hitFlash * 0.45),
       });
     }
@@ -221,19 +239,21 @@ export class DesertFortressAI {
           pulse * 0.25 +
           activeBoost +
           criticalPulse * 0.65 +
-          terminalPulse * 0.85 +
-          hitFlash * 0.7,
+          terminalPulse * 1.05 +
+          hitFlash * 0.75 +
+          terminalWarning * 0.3,
         scale:
           1 +
           missileCharge * 0.16 +
           activeBoost * 0.05 +
           criticalPulse * 0.04 +
-          terminalPulse * 0.04 +
-          hitFlash * 0.04,
+          terminalPulse * 0.06 +
+          hitFlash * 0.04 +
+          terminalBias * 0.06,
         color: this.energyBaseColor
           .clone()
-          .lerp(this.energyCriticalColor, criticalState + activeBoost * 0.2)
-          .lerp(this.terminalColor, terminalState * 0.45 + terminalPulse * 0.3)
+          .lerp(this.energyCriticalColor, criticalState + activeBoost * 0.2 + criticalBias * 0.25)
+          .lerp(this.terminalColor, terminalState * 0.5 + terminalPulse * 0.35 + terminalBias * 0.2)
           .lerp(this.hitFlashColor, hitFlash * 0.35),
       });
     }

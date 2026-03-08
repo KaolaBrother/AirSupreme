@@ -169,6 +169,11 @@ export class MissileDestroyerAI {
       1
     );
     const hitFlash = this.getHitFlashStrength();
+    const terminalBias = terminalState * terminalState;
+    const terminalWarning = Math.sqrt(terminalState);
+    const criticalBias = criticalState * criticalState;
+    const phaseSeparation = 1 + terminalWarning * 0.9 + criticalState * 0.25;
+    const damagePhase = hitFlash * 0.68 + terminalWarning * 0.38;
     const criticalPulse =
       (Math.sin(this.animationTime * MissileDestroyerAI.CRITICAL_PULSE_SPEED) * 0.5 + 0.5)
       * criticalState;
@@ -181,13 +186,19 @@ export class MissileDestroyerAI {
         0.35 +
         bridgePulse * 0.55 * alertBoost +
         criticalPulse * 0.85 +
-        terminalPulse * 0.95 +
-        hitFlash * 0.9,
+        terminalPulse * 1.2 +
+        damagePhase * 1.1,
       scale: 1,
       color: this.weakpointBaseColor
         .clone()
-        .lerp(this.weakpointCriticalColor, bridgePulse * 0.35 + criticalPulse * 0.15)
-        .lerp(this.terminalColor, terminalState * 0.65 + terminalPulse * 0.35)
+        .lerp(
+          this.weakpointCriticalColor,
+          bridgePulse * 0.35 + criticalPulse * 0.15 + criticalBias * 0.25
+        )
+        .lerp(
+          this.terminalColor,
+          terminalState * 0.74 + terminalPulse * 0.36 + terminalBias * 0.2
+        )
         .lerp(this.hitFlashColor, hitFlash * 0.65),
     });
 
@@ -207,19 +218,21 @@ export class MissileDestroyerAI {
           flakCharge * 1.2 +
           pulse * 0.25 +
           criticalPulse * 0.65 +
-          terminalPulse * 0.8 +
-          hitFlash * 0.7,
+          terminalPulse * 1.05 +
+          hitFlash * 0.68 +
+          terminalWarning * 0.3,
         scale:
           1 +
-          flakCharge * 0.18 +
+          flakCharge * 0.18 * phaseSeparation +
           pulse * 0.04 +
           criticalPulse * 0.04 +
-          terminalPulse * 0.04 +
-          hitFlash * 0.04,
+          terminalPulse * 0.06 +
+          hitFlash * 0.04 +
+          terminalBias * 0.06,
         color: this.weaponBaseColor
           .clone()
-          .lerp(this.weaponCriticalColor, criticalState + criticalPulse * 0.25)
-          .lerp(this.terminalColor, terminalState * 0.52 + terminalPulse * 0.3)
+          .lerp(this.weaponCriticalColor, criticalState + criticalPulse * 0.25 + criticalBias * 0.2)
+          .lerp(this.terminalColor, terminalState * 0.52 + terminalPulse * 0.37 + terminalBias * 0.2)
           .lerp(this.hitFlashColor, hitFlash * 0.25),
       });
     }
@@ -242,19 +255,21 @@ export class MissileDestroyerAI {
           pulse * 0.2 +
           (isNextLauncher ? 0.25 : 0) +
           criticalPulse * 0.85 +
-          terminalPulse * 0.9 +
-          hitFlash * 0.8,
+          terminalPulse * 1.05 +
+          hitFlash * 0.8 +
+          terminalWarning * 0.33,
         scale:
           1 +
           missileCharge * 0.12 +
           (isNextLauncher ? 0.04 : 0) +
           criticalPulse * 0.04 +
-          terminalPulse * 0.04 +
-          hitFlash * 0.04,
+          terminalPulse * 0.06 +
+          hitFlash * 0.04 +
+          terminalBias * 0.05,
         color: this.weaponBaseColor
           .clone()
           .lerp(this.weaponCriticalColor, criticalState + (isNextLauncher ? 0.1 : 0))
-          .lerp(this.terminalColor, terminalState * 0.48 + terminalPulse * 0.28)
+          .lerp(this.terminalColor, terminalState * 0.48 + terminalPulse * 0.34 + terminalBias * 0.2)
           .lerp(this.hitFlashColor, hitFlash * 0.3),
       });
     }
@@ -263,14 +278,24 @@ export class MissileDestroyerAI {
     for (const exhaustGlow of this.exhaustGlows) {
       this.setGlowState(exhaustGlow, {
         intensity:
-          0.7 + enginePulse * 0.8 + criticalPulse * 0.6 + terminalPulse * 0.65 + hitFlash * 0.5,
+          0.7 +
+          enginePulse * 0.9 +
+          criticalPulse * 0.6 +
+          terminalPulse * 0.85 +
+          hitFlash * 0.45 +
+          terminalWarning * 0.35,
         scale:
-          1 + enginePulse * 0.08 + criticalPulse * 0.05 + terminalPulse * 0.04 + hitFlash * 0.03,
+          1 +
+          enginePulse * 0.08 * phaseSeparation +
+          criticalPulse * 0.05 +
+          terminalPulse * 0.06 +
+          hitFlash * 0.04 +
+          terminalBias * 0.05,
         color: this.energyBaseColor
           .clone()
-          .lerp(this.hitFlashColor, hitFlash * 0.25)
-          .lerp(this.energyCriticalColor, criticalState * 0.25)
-          .lerp(this.terminalColor, terminalState * 0.35 + terminalPulse * 0.22),
+          .lerp(this.hitFlashColor, hitFlash * 0.22)
+          .lerp(this.energyCriticalColor, criticalState * 0.25 + criticalBias * 0.22)
+          .lerp(this.terminalColor, terminalState * 0.38 + terminalPulse * 0.25 + terminalBias * 0.2),
       });
     }
   }

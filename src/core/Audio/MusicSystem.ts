@@ -95,10 +95,21 @@ interface MusicSession {
   level: LevelMusic;
   bpm: number;
   styleVolume: number;
+  startedAt: number;
   gain: GainNode;
+  trackLayerProfile: TrackLayerProfile;
   loopTimeout: number | null;
   notes: Set<OscillatorNode>;
   disposed: boolean;
+}
+
+type MusicTrackType = 'melody' | 'bass' | 'pad';
+
+interface TrackLayerProfile {
+  melodyFadeMs: number;
+  bassFadeMs: number;
+  padFadeMs: number;
+  padDelayMs: number;
 }
 
 interface LevelMusicStyle {
@@ -1706,6 +1717,23 @@ export class MusicSystem {
     return { notes, waveform: 'sine', volume: 0.12 };
   }
 
+  private isBossLevel(level: LevelMusic): boolean {
+    return (
+      level === LevelMusic.BOSS ||
+      level === LevelMusic.DESERT_BOSS ||
+      level === LevelMusic.OCTOPUS_BOSS ||
+      level === LevelMusic.OCEAN_BOSS ||
+      level === LevelMusic.SKY_CARRIER_BOSS
+    );
+  }
+
+  private getTrackLayerProfile(level: LevelMusic): TrackLayerProfile {
+    const isBoss = this.isBossLevel(level);
+    return isBoss
+      ? { melodyFadeMs: 180, bassFadeMs: 90, padFadeMs: 900, padDelayMs: 280 }
+      : { melodyFadeMs: 120, bassFadeMs: 80, padFadeMs: 560, padDelayMs: 180 };
+  }
+
   private createSession(level: LevelMusic, style: LevelMusicStyle): MusicSession {
     if (!this.context || !this.masterGain) {
       throw new Error('Music context not initialized');
@@ -1717,6 +1745,8 @@ export class MusicSystem {
       level,
       bpm: style.bpm,
       styleVolume: style.volume,
+      startedAt: this.context.currentTime,
+      trackLayerProfile: this.getTrackLayerProfile(level),
       gain: sessionGain,
       loopTimeout: null,
       notes: new Set(),
@@ -1789,7 +1819,10 @@ export class MusicSystem {
     try {
       gain.cancelScheduledValues(now);
       gain.setValueAtTime(gain.value, now);
-      gain.linearRampToValueAtTime(0, now + fadeMs / 1000);
+      const safeFadeMs = Math.max(50, fadeMs);
+      const target = Math.max(0.0001, gain.value * 0.02);
+      gain.linearRampToValueAtTime(target, now + safeFadeMs / 1000 * 0.2);
+      gain.exponentialRampToValueAtTime(0.0001, now + safeFadeMs / 1000);
     } catch {
       // Ignore
     }
@@ -1815,13 +1848,15 @@ export class MusicSystem {
     duration: number,
     waveform: OscillatorType,
     volume: number,
-    startTime: number
+    startTime: number,
+    trackType: MusicTrackType
   ): void {
     if (!this.context || this.masterGain === null || frequency === NOTE.REST || duration <= 0) {
       return;
     }
 
-    const finalVolume = clamp01(volume * this.getSessionGain(session));
+    const layerGain = this.getTrackLayerGain(session, trackType, startTime);
+    const finalVolume = clamp01(volume * this.getSessionGain(session) * layerGain);
     if (finalVolume <= 0) return;
 
     const osc = this.context.createOscillator();
@@ -1830,7 +1865,7 @@ export class MusicSystem {
     osc.type = waveform;
     osc.frequency.value = frequency;
 
-    const attackTime = 0.02;
+    const attackTime = trackType === 'pad' ? 0.06 : 0.02;
     const releaseTime = 0.05;
 
     gain.gain.setValueAtTime(0, startTime);
@@ -1854,14 +1889,45 @@ export class MusicSystem {
     session: MusicSession,
     track: MusicTrack,
     startTime: number,
-    beatDuration: number
+    beatDuration: number,
+    trackType: MusicTrackType
   ): void {
     let currentTime = startTime;
     for (const noteEvent of track.notes) {
       const durationInSeconds = noteEvent.duration * beatDuration;
-      this.playNote(session, noteEvent.note, durationInSeconds, track.waveform, track.volume, currentTime);
+      this.playNote(
+        session,
+        noteEvent.note,
+        durationInSeconds,
+        track.waveform,
+        track.volume,
+        currentTime,
+        trackType
+      );
       currentTime += durationInSeconds;
     }
+  }
+
+  private getTrackLayerGain(
+    session: MusicSession,
+    trackType: MusicTrackType,
+    noteStartTime: number
+  ): number {
+    const profile = session.trackLayerProfile;
+    const elapsedMs = Math.max(0, (noteStartTime - session.startedAt) * 1000);
+    const curveMs =
+      trackType === 'melody'
+        ? profile.melodyFadeMs
+        : trackType === 'bass'
+          ? profile.bassFadeMs
+          : Math.max(profile.padFadeMs, 260);
+    const delayMs = trackType === 'pad' ? profile.padDelayMs : 0;
+    const totalDelayMs = delayMs + curveMs;
+    if (elapsedMs >= totalDelayMs) return 1;
+    if (elapsedMs <= delayMs) return 0;
+
+    const progress = (elapsedMs - delayMs) / curveMs;
+    return 0.2 + 0.8 * Math.sin((progress * Math.PI) / 2);
   }
 
   private getTracksForLevel(level: LevelMusic): {
@@ -1965,22 +2031,22 @@ export class MusicSystem {
       this.trackDuration(tracks.melodyB, beatDuration) +
       (tracks.melodyC ? this.trackDuration(tracks.melodyC, beatDuration) : 0);
 
-    this.playTrack(session, tracks.melodyA, now, beatDuration);
+    this.playTrack(session, tracks.melodyA, now, beatDuration, 'melody');
 
     const aDuration =
       this.trackDuration(tracks.melodyA, beatDuration);
-    this.playTrack(session, tracks.melodyB, now + aDuration, beatDuration);
+    this.playTrack(session, tracks.melodyB, now + aDuration, beatDuration, 'melody');
 
     if (tracks.melodyC) {
       const bDuration =
         this.trackDuration(tracks.melodyB, beatDuration);
-      this.playTrack(session, tracks.melodyC, now + aDuration + bDuration, beatDuration);
+      this.playTrack(session, tracks.melodyC, now + aDuration + bDuration, beatDuration, 'melody');
     }
 
-    this.playTrack(session, tracks.bass, now, beatDuration);
+    this.playTrack(session, tracks.bass, now, beatDuration, 'bass');
 
     if (tracks.pad) {
-      this.playTrack(session, tracks.pad, now, beatDuration);
+      this.playTrack(session, tracks.pad, now, beatDuration, 'pad');
     }
 
     if (this.isPlaying) {
@@ -2022,7 +2088,7 @@ export class MusicSystem {
     const style = this.getLevelStyle(level);
     const nextSession = this.createSession(level, style);
     const oldSession = this.currentSession;
-    const fadeMs = Math.max(0, options.durationMs ?? DEFAULT_CROSSFADE_MS);
+    const fadeMs = Math.max(0, options.durationMs ?? this.getTransitionDuration(this.currentMusic, level));
 
     this.currentMusic = level;
     this.currentSession = nextSession;
@@ -2035,8 +2101,10 @@ export class MusicSystem {
 
     const now = context.currentTime;
     const targetGain = this.getSessionGain(nextSession);
+    const fadeSeconds = fadeMs / 1000;
     nextSession.gain.gain.setValueAtTime(0, now);
-    nextSession.gain.gain.linearRampToValueAtTime(targetGain, now + fadeMs / 1000);
+    nextSession.gain.gain.linearRampToValueAtTime(Math.max(0.0001, targetGain * 0.22), now + fadeSeconds * 0.3);
+    nextSession.gain.gain.linearRampToValueAtTime(targetGain, now + fadeSeconds);
     this.playMusicLoop(nextSession);
 
     if (oldSession && oldSession.id !== nextSession.id) {
@@ -2072,6 +2140,19 @@ export class MusicSystem {
         return { bpm: 110, volume: 0.38 };
     }
     return { bpm: 130, volume: 0.25 };
+  }
+
+  private getTransitionDuration(fromLevel: LevelMusic | null, toLevel: LevelMusic): number {
+    if (!fromLevel || fromLevel === toLevel) {
+      return DEFAULT_CROSSFADE_MS;
+    }
+
+    const fromBoss = this.isBossLevel(fromLevel);
+    const toBoss = this.isBossLevel(toLevel);
+    if (fromBoss !== toBoss) {
+      return 1200;
+    }
+    return fromBoss ? 860 : 900;
   }
 
   public playBossMusic(level?: number): void {
@@ -2130,16 +2211,18 @@ export class MusicSystem {
 
     const now = this.context.currentTime;
     const duckGain = 1 - amount;
-    const releaseTime = now + durationMs / 1000;
+    const safeDurationMs = Math.max(0, durationMs);
+    const duckCurveMs = Math.min(Math.max(55, safeDurationMs * 0.18), 280);
+    const releaseTime = now + safeDurationMs / 1000;
     const effectiveReleaseTime = Math.max(releaseTime, this.duckingReleaseTime);
 
     try {
       this.masterGain.gain.cancelScheduledValues(now);
       this.masterGain.gain.setValueAtTime(this.masterGain.gain.value, now);
-      this.masterGain.gain.linearRampToValueAtTime(duckGain, now + 0.02);
-      this.masterGain.gain.linearRampToValueAtTime(
+      this.masterGain.gain.linearRampToValueAtTime(duckGain, now + duckCurveMs / 1000);
+      this.masterGain.gain.exponentialRampToValueAtTime(
         MusicSystem.MASTER_OUTPUT_GAIN,
-        effectiveReleaseTime + 0.12
+        effectiveReleaseTime + 0.16
       );
       this.duckingReleaseTime = effectiveReleaseTime;
     } catch {

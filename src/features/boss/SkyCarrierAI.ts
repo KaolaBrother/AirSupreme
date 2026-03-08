@@ -187,6 +187,11 @@ export class SkyCarrierAI {
       this.damageFlashTimer > 0 ? this.damageFlashTimer / SkyCarrierAI.HIT_FLASH_DURATION : 0;
     const deckWave = Math.sin(this.visualPulseTime * SkyCarrierAI.WEAKPOINT_PULSE_SPEED) * 0.5 + 0.5;
     const engineWave = Math.sin(this.visualPulseTime * SkyCarrierAI.ENERGY_PULSE_SPEED) * 0.5 + 0.5;
+    const terminalBias = terminalState * terminalState;
+    const terminalWarning = Math.sqrt(terminalState);
+    const criticalBias = criticalState * criticalState;
+    const phaseSeparation = 1 + terminalWarning * 0.8 + criticalState * 0.25;
+    const damageBlend = damageFlash * 0.8 + terminalWarning * 0.45;
     const criticalPulse =
       (Math.sin(this.visualPulseTime * SkyCarrierAI.CRITICAL_PULSE_SPEED) * 0.5 + 0.5)
       * criticalState;
@@ -201,15 +206,22 @@ export class SkyCarrierAI {
           deckWave * 0.95 +
           missileCharge * 0.45 +
           criticalPulse * 0.8 +
-          terminalPulse * 1.15 +
-          damageFlash * 1.45,
+          terminalPulse * 1.3 +
+          damageBlend * 1.4,
         this.weakpointBaseColor
           .clone()
-          .lerp(this.weakpointCriticalColor, criticalState + criticalPulse * 0.35)
-          .lerp(this.terminalColor, terminalState * 0.65 + terminalPulse * 0.35)
+          .lerp(
+            this.weakpointCriticalColor,
+            criticalState + criticalPulse * 0.35 + criticalBias * 0.2
+          )
+          .lerp(
+            this.terminalColor,
+            terminalState * 0.72 + terminalPulse * 0.35 + terminalBias * 0.2
+          )
       );
       if (mesh.name === 'carrier_deck_core_glow') {
-        mesh.scale.z = 1 + deckWave * 0.12 + terminalPulse * 0.08 + damageFlash * 0.08;
+        mesh.scale.z =
+          1 + deckWave * 0.12 + terminalPulse * 0.08 + damageFlash * 0.08 + terminalWarning * 0.05;
       }
     }
 
@@ -221,12 +233,12 @@ export class SkyCarrierAI {
           activeBoost +
           (Math.sin(this.visualPulseTime * SkyCarrierAI.WEAPON_PULSE_SPEED + i) * 0.5 + 0.5) * 0.18 +
           criticalPulse * 0.75 +
-          terminalPulse * 0.95 +
-          damageFlash * 0.95,
+          terminalPulse * 1.2 +
+          damageBlend * 0.55,
         this.weaponBaseColor
           .clone()
-          .lerp(this.weaponCriticalColor, criticalState + criticalPulse * 0.25)
-          .lerp(this.terminalColor, terminalState * 0.55 + terminalPulse * 0.3)
+          .lerp(this.weaponCriticalColor, criticalState + criticalPulse * 0.25 + criticalBias * 0.22)
+          .lerp(this.terminalColor, terminalState * 0.6 + terminalPulse * 0.36 + terminalBias * 0.2)
       );
     }
 
@@ -237,14 +249,19 @@ export class SkyCarrierAI {
           missileCharge * 1.1 +
           deckWave * 0.35 +
           criticalPulse * 0.7 +
-          terminalPulse * 0.9 +
-          damageFlash * 0.95,
+          terminalPulse * 1.05 +
+          damageBlend * 0.62,
         this.weaponBaseColor
           .clone()
-          .lerp(this.weaponCriticalColor, criticalState + missileCharge * 0.2)
-          .lerp(this.terminalColor, terminalState * 0.5 + terminalPulse * 0.3)
+          .lerp(this.weaponCriticalColor, criticalState + missileCharge * 0.2 + criticalBias * 0.2)
+          .lerp(this.terminalColor, terminalState * 0.56 + terminalPulse * 0.35 + terminalBias * 0.2)
       );
-      const flashScale = 1 + terminalPulse * 0.05 + damageFlash * 0.07;
+      const flashScale =
+        1 +
+        terminalPulse * 0.06 +
+        damageFlash * 0.07 +
+        terminalWarning * 0.05 +
+        phaseSeparation * 0.02;
       mesh.scale.setScalar(flashScale);
     }
 
@@ -254,15 +271,25 @@ export class SkyCarrierAI {
         0.95 +
           engineWave * 1.1 * engineRatio +
           criticalPulse * 0.6 +
-          terminalPulse * 0.8 +
-          damageFlash * 0.8,
+          terminalPulse * 1.0 +
+          damageBlend * 0.7,
         this.energyBaseColor
           .clone()
-          .lerp(this.energyCriticalColor, criticalState + criticalPulse * 0.2)
-          .lerp(this.terminalColor, terminalState * 0.3 + terminalPulse * 0.2)
+          .lerp(this.energyCriticalColor, criticalState + criticalPulse * 0.2 + criticalBias * 0.22)
+          .lerp(this.terminalColor, terminalState * 0.35 + terminalPulse * 0.3 + terminalBias * 0.2)
       );
-      mesh.scale.x = 1 + engineWave * 0.08 + terminalPulse * 0.04 + damageFlash * 0.04;
-      mesh.scale.z = 1 + engineWave * 0.08 + terminalPulse * 0.04 + damageFlash * 0.04;
+      mesh.scale.x =
+        1 +
+        engineWave * 0.08 * phaseSeparation +
+        terminalPulse * 0.06 +
+        damageFlash * 0.04 +
+        terminalWarning * 0.04;
+      mesh.scale.z =
+        1 +
+        engineWave * 0.08 * phaseSeparation +
+        terminalPulse * 0.06 +
+        damageFlash * 0.04 +
+        terminalWarning * 0.04;
     }
   }
 

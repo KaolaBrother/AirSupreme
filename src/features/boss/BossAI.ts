@@ -173,6 +173,11 @@ export class BossAI {
       this.damageFlashTimer > 0 ? this.damageFlashTimer / BossAI.HIT_FLASH_DURATION : 0;
     const weakpointWave = Math.sin(this.visualPulseTime * BossAI.WEAKPOINT_PULSE_SPEED) * 0.5 + 0.5;
     const engineWave = Math.sin(this.visualPulseTime * BossAI.ENERGY_PULSE_SPEED) * 0.5 + 0.5;
+    const terminalPulseBias = terminalState * terminalState;
+    const terminalWarningBias = Math.sqrt(terminalPulseBias);
+    const criticalBias = criticalState * criticalState;
+    const phaseSeparationBias = 1 + terminalState * 0.85 + criticalState * 0.35;
+    const hitPhaseMix = damageFlash * 0.9 + terminalWarningBias * 0.45;
     const criticalPulse =
       (Math.sin(this.visualPulseTime * BossAI.CRITICAL_PULSE_SPEED) * 0.5 + 0.5) * criticalState;
     const terminalPulse =
@@ -185,15 +190,20 @@ export class BossAI {
           weakpointWave * 0.95 +
           missileCharge * 0.35 +
           criticalPulse * 1.1 +
-          terminalPulse * 1.25 +
-          damageFlash * 1.45,
+          terminalPulse * 1.4 +
+          hitPhaseMix * 1.3,
         this.weakpointBaseColor
           .clone()
-          .lerp(this.weakpointCriticalColor, criticalState + criticalPulse * 0.35)
-          .lerp(this.terminalColor, terminalState * 0.7 + terminalPulse * 0.3)
+          .lerp(this.weakpointCriticalColor, criticalState + criticalPulse * 0.35 + criticalBias * 0.2)
+          .lerp(this.terminalColor, terminalState * 0.8 + terminalPulse * 0.3 + terminalPulseBias * 0.2)
       );
       const pulseScale =
-        1 + weakpointWave * 0.08 + criticalPulse * 0.08 + terminalPulse * 0.08 + damageFlash * 0.1;
+        1 +
+        weakpointWave * 0.08 * phaseSeparationBias +
+        criticalPulse * 0.09 +
+        terminalPulse * 0.11 +
+        damageFlash * 0.09 +
+        terminalWarningBias * 0.07;
       mesh.scale.setScalar(pulseScale);
     }
 
@@ -206,12 +216,12 @@ export class BossAI {
           activeBoost +
           (Math.sin(this.visualPulseTime * BossAI.WEAPON_PULSE_SPEED + i) * 0.5 + 0.5) * 0.2 +
           criticalPulse * 0.75 +
-          terminalPulse * 0.9 +
-          damageFlash * 0.95,
+          terminalPulse * 1.05 +
+          hitPhaseMix * 0.35,
         this.weaponBaseColor
           .clone()
-          .lerp(this.weaponCriticalColor, criticalState + damageFlash * 0.2)
-          .lerp(this.terminalColor, terminalState * 0.6 + terminalPulse * 0.35)
+          .lerp(this.weaponCriticalColor, criticalState + criticalBias * 0.2 + criticalPulse * 0.25)
+          .lerp(this.terminalColor, terminalState * 0.7 + terminalPulse * 0.3 + terminalPulseBias * 0.2)
       );
     }
 
@@ -221,8 +231,9 @@ export class BossAI {
         0.5 +
           engineWave * 0.28 * speedRatio +
           cannonCharge * 0.08 +
-          terminalPulse * 0.12 +
-          damageFlash * 0.12
+          terminalPulse * 0.16 +
+          hitPhaseMix * 0.05 +
+          terminalWarningBias * 0.04
       );
     }
 
@@ -233,14 +244,19 @@ export class BossAI {
           engineWave * 0.9 * speedRatio +
           missileCharge * 0.3 +
           criticalPulse * 0.8 +
-          terminalPulse * 1.05 +
-          damageFlash * 0.78,
+          terminalPulse * 1.2 +
+          hitPhaseMix * 0.55,
         this.energyBaseColor
           .clone()
-          .lerp(this.energyCriticalColor, criticalState + criticalPulse * 0.4)
-          .lerp(this.terminalColor, terminalState * 0.45 + terminalPulse * 0.35)
+          .lerp(this.energyCriticalColor, criticalState + criticalPulse * 0.45 + criticalBias * 0.25)
+          .lerp(this.terminalColor, terminalState * 0.52 + terminalPulse * 0.38 + terminalPulseBias * 0.18)
       );
-      const ringScale = 1 + criticalPulse * 0.07 + terminalPulse * 0.06 + damageFlash * 0.08;
+      const ringScale =
+        1 +
+        criticalPulse * 0.08 +
+        terminalPulse * 0.09 +
+        damageFlash * 0.07 +
+        terminalWarningBias * 0.06;
       ring.scale.setScalar(ringScale);
     }
   }
