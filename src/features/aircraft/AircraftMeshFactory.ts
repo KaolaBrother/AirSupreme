@@ -993,6 +993,33 @@ export function createEnemyMesh(config: EnemyConfig): THREE.Group {
       rotation: [0.04, 0, 0],
     });
   };
+  const addCanopyTransition = (
+    cockpitY: number,
+    cockpitZ: number,
+    frameWidth: number,
+    frameDepth: number
+  ): void => {
+    addMeshPart(group, new THREE.BoxGeometry(frameWidth, 0.06, frameDepth), materials.accent, [0, cockpitY, cockpitZ], {
+      rotation: [0.02, 0, 0],
+    });
+    addMeshPart(group, new THREE.BoxGeometry(frameWidth * 0.8, 0.05, frameDepth * 0.42), materials.detail, [0, cockpitY - 0.04, cockpitZ + frameDepth * 0.46], {
+      rotation: [0.04, 0, 0],
+    });
+  };
+  const addCenterlineStoreAdapter = (yOffset: number, zOffset: number, depth: number): void => {
+    addMeshPart(group, new THREE.BoxGeometry(0.12, 0.08, depth), materials.accent, [0, yOffset, zOffset]);
+    addMeshPart(group, new THREE.BoxGeometry(0.08, 0.12, depth * 0.72), materials.detail, [0, yOffset + 0.05, zOffset], {
+      rotation: [0.06, 0, 0],
+    });
+  };
+  const addTailplaneRootPair = (xOffset: number, yOffset: number, zOffset: number, width: number): void => {
+    addMeshPart(group, new THREE.BoxGeometry(width, 0.08, 0.42), materials.wing, [-xOffset, yOffset, zOffset], {
+      rotation: [0, 0.24, 0.04],
+    });
+    addMeshPart(group, new THREE.BoxGeometry(width, 0.08, 0.42), materials.wing, [xOffset, yOffset, zOffset], {
+      rotation: [0, -0.24, -0.04],
+    });
+  };
   if (config.type === EnemyType.SCOUT) {
     addMeshPart(group, new THREE.CylinderGeometry(bodySize * 0.14, bodySize * 0.26, bodyLength * 0.34, 8), materials.body, [0, 0, bodyLength * 0.26], {
       rotation: [Math.PI / 2, 0, 0],
@@ -1106,6 +1133,7 @@ export function createEnemyMesh(config: EnemyConfig): THREE.Group {
     addMeshPart(group, new THREE.SphereGeometry(bodySize * 0.28, 8, 8), materials.cockpit, [0, bodySize * 0.22, bodyLength * 0.22], {
       scale: [0.9, 0.55, 1.25],
     });
+    addCanopyTransition(bodySize * 0.24, bodyLength * 0.18, 0.18, 0.64);
     addMeshPart(group, new THREE.BoxGeometry(0.2, 0.36, 0.54), materials.detail, [-bodySize * 0.34, bodySize * 0.28, -bodyLength * 0.34], {
       rotation: [0, 0, 0.24],
     });
@@ -1131,6 +1159,7 @@ export function createEnemyMesh(config: EnemyConfig): THREE.Group {
       rotation: [0, -0.24, -0.04],
     });
     addMeshPart(group, new THREE.BoxGeometry(0.18, 0.12, 0.72), materials.accent, [0, -bodySize * 0.16, 0.32]);
+    addCenterlineStoreAdapter(-bodySize * 0.22, 0.18, 0.54);
     addMeshPart(group, new THREE.BoxGeometry(0.14, 0.16, 0.58), materials.accent, [-bodySize * 0.42, -0.02, bodyLength * 0.22], {
       rotation: [0, 0.24, 0],
     });
@@ -1185,6 +1214,7 @@ export function createEnemyMesh(config: EnemyConfig): THREE.Group {
     });
     addCenterKeel(0.12, 0.22, 0.62, -bodySize * 0.28, 0.1);
     addTailRootFairingPair(bodySize * 0.24, 0.12, -bodyLength * 0.46, 0.18, 0.14, 0.56, 0.12);
+    addTailplaneRootPair(bodySize * 0.26, 0.08, -bodyLength * 0.3, 0.24);
     addMeshPart(group, new THREE.BoxGeometry(0.16, 0.14, 0.46), materials.detail, [-bodySize * 0.22, 0.12, -bodyLength * 0.48], {
       rotation: [0.02, 0.12, 0.04],
     });
@@ -1325,6 +1355,7 @@ export function createEnemyMesh(config: EnemyConfig): THREE.Group {
       scale: [0.9, 0.7, 1.3],
       castShadow: false,
     });
+    addCanopyTransition(bodySize * 0.18, bodyLength * 0.46, 0.14, 0.54);
     addMeshPart(group, new THREE.BoxGeometry(0.16, 0.46, 0.36), materials.detail, [0, bodySize * 0.34, -bodyLength * 0.24]);
     addMeshPart(group, new THREE.BoxGeometry(0.12, 0.18, 0.72), materials.detail, [-bodySize * 0.22, -bodySize * 0.14, bodyLength * 0.14], {
       rotation: [0, -0.2, 0],
@@ -1361,6 +1392,7 @@ export function createEnemyMesh(config: EnemyConfig): THREE.Group {
     });
     addIntakeLipPair(bodySize * 0.28, 0.01, bodyLength * 0.19, 0.96, 0.72, 0.14);
     addMeshPart(group, new THREE.BoxGeometry(0.18, 0.14, 0.62), weaponMaterial, [0, -bodySize * 0.14, bodyLength * 0.28]);
+    addCenterlineStoreAdapter(-bodySize * 0.2, bodyLength * 0.22, 0.48);
     addMeshPart(group, new THREE.BoxGeometry(0.08, 0.22, 0.64), materials.detail, [0, -bodySize * 0.24, -bodyLength * 0.02], {
       rotation: [0.04, 0, 0],
     });
@@ -1422,6 +1454,7 @@ export function createEnemyMesh(config: EnemyConfig): THREE.Group {
     addMeshPart(group, new THREE.SphereGeometry(bodySize * 0.24, 8, 8), materials.cockpit, [0, bodySize * 0.2, bodyLength * 0.2], {
       scale: [0.9, 0.55, 1.1],
     });
+    addCanopyTransition(bodySize * 0.22, bodyLength * 0.18, 0.2, 0.62);
     addMeshPart(group, new THREE.BoxGeometry(0.24, 0.14, bodyLength * 0.34), energyMaterial, [0, bodySize * 0.18, bodyLength * 0.06], {
       castShadow: false,
     });
@@ -1471,6 +1504,7 @@ export function createEnemyMesh(config: EnemyConfig): THREE.Group {
       rotation: [0.08, -0.06, 0.06],
     });
     addMeshPart(group, new THREE.BoxGeometry(0.16, 0.12, 0.54), materials.detail, [0, -bodySize * 0.18, 0.18]);
+    addCenterlineStoreAdapter(-bodySize * 0.22, 0.12, 0.56);
     addMeshPart(group, new THREE.BoxGeometry(0.14, 0.16, 0.56), materials.accent, [-bodySize * 0.42, -0.02, bodyLength * 0.18], {
       rotation: [0, 0.22, 0],
     });
@@ -1501,6 +1535,7 @@ export function createEnemyMesh(config: EnemyConfig): THREE.Group {
     });
     addCenterKeel(0.12, 0.24, 0.72, -bodySize * 0.28, 0.12);
     addTailRootFairingPair(bodySize * 0.22, 0.12, -bodyLength * 0.42, 0.18, 0.16, 0.58, 0.1);
+    addTailplaneRootPair(bodySize * 0.24, 0.1, -bodyLength * 0.28, 0.28);
     addMeshPart(group, new THREE.ConeGeometry(bodySize * 0.12, 0.68, 8), materials.engine, [0, 0, -bodyLength * 0.58], {
       rotation: [-Math.PI / 2, 0, 0],
       name: 'engineGlow',

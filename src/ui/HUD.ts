@@ -7,6 +7,7 @@ type BigMessageVariant = 'announcement' | 'powerup';
  */
 export class HUD {
   private static readonly UPGRADE_HINT_STYLE_ID = 'hud-upgrade-hint-style';
+  private initialized: boolean = false;
   private container: HTMLDivElement;
   private leftStatusPanel: HTMLDivElement;
   private leftPrimaryRow: HTMLDivElement;
@@ -354,10 +355,22 @@ export class HUD {
     this.container.appendChild(this.missilesDisplay);
     this.container.appendChild(this.missileProgressDisplay);
     this.container.appendChild(this.powerUpDisplay);
+  }
+
+  public init(): void {
+    if (this.initialized) {
+      return;
+    }
+
     document.body.appendChild(this.container);
     document.body.appendChild(this.powerUpBigDisplay);
     document.body.appendChild(this.damageFlashOverlay);
     document.body.appendChild(this.gameOverDisplay);
+    this.initialized = true;
+  }
+
+  private ensureInitialized(): void {
+    this.init();
   }
 
   /**
@@ -463,6 +476,7 @@ export class HUD {
   }
 
   public updateHealth(percent: number): void {
+    this.ensureInitialized();
     const clampedPercent = Math.max(0, Math.min(1, percent));
     this.setStyleValue(this.healthBarFill, 'width', `${clampedPercent * 100}%`);
 
@@ -498,6 +512,7 @@ export class HUD {
    * 更新分数显示
    */
   public updateScore(score: number): void {
+    this.ensureInitialized();
     this.setTextContent(this.scoreDisplay, `得分 ${score.toString().padStart(6, '0')}`);
   }
 
@@ -505,6 +520,7 @@ export class HUD {
    * 更新速度显示
    */
   public updateSpeed(speed: number): void {
+    this.ensureInitialized();
     const displaySpeed = Math.round(speed * 10); // 放大显示
     this.setTextContent(this.speedDisplay, `速度 ${displaySpeed.toString().padStart(3, '0')} km/h`);
   }
@@ -513,6 +529,7 @@ export class HUD {
    * 更新敌人数量显示
    */
   public updateEnemies(count: number): void {
+    this.ensureInitialized();
     this.setTextContent(this.enemiesDisplay, `敌人: ${count}`);
   }
 
@@ -520,6 +537,7 @@ export class HUD {
    * 更新剩余敌人数量显示
    */
   public updateRemainingEnemies(count: number): void {
+    this.ensureInitialized();
     this.setTextContent(this.remainingEnemiesDisplay, `剩余: ${count}`);
   }
 
@@ -527,11 +545,13 @@ export class HUD {
    * 更新生命值显示
    */
   public updateLives(lives: number): void {
+    this.ensureInitialized();
     const hearts = '❤️'.repeat(Math.max(0, lives)) + '🖤'.repeat(Math.max(0, 3 - lives));
     this.setTextContent(this.livesDisplay, `生命: ${hearts}`);
   }
 
   public updateUpgradePoints(points: number): void {
+    this.ensureInitialized();
     if (points > 0) {
       const isMobile = GameConfig.isMobile;
       const hintText = isMobile
@@ -549,6 +569,7 @@ export class HUD {
   }
 
   public updateMissiles(count: number): void {
+    this.ensureInitialized();
     const maxMissiles = 10; // 假设最多10发
     const icons = '🚀'.repeat(Math.max(0, count)) + '⬜'.repeat(Math.max(0, maxMissiles - count));
     this.setTextContent(this.missilesDisplay, `导弹: ${icons}`);
@@ -559,6 +580,7 @@ export class HUD {
    * @param progress 进度（0-1）
    */
   public updateMissileProgress(progress: number): void {
+    this.ensureInitialized();
     // 限制在0-1范围
     const clampedProgress = Math.max(0, Math.min(1, progress));
     this.setStyleValue(this.missileProgressFill, 'width', `${clampedProgress * 100}%`);
@@ -571,6 +593,7 @@ export class HUD {
    * @param duration 持续时间（秒），0表示即时效果（如生命恢复、炸弹）
    */
   public showPowerUp(name: string, icon: string, duration: number = 0): void {
+    this.ensureInitialized();
     // 即时效果道具（duration <= 0）不显示在右上角
     if (duration <= 0) {
       this.hidePowerUp();
@@ -591,6 +614,7 @@ export class HUD {
    * 更新道具倒计时
    */
   public update(deltaTime: number): void {
+    this.ensureInitialized();
     const safeDeltaTime = Number.isFinite(deltaTime) && deltaTime > 0 ? deltaTime : 0;
 
     // 更新道具倒计时
@@ -632,6 +656,7 @@ export class HUD {
    * 隐藏道具提示
    */
   public hidePowerUp(): void {
+    this.ensureInitialized();
     this.activePowerUpName = '';
     this.activePowerUpIcon = '';
     this.lastPowerUpRemainingSeconds = -1;
@@ -654,6 +679,7 @@ export class HUD {
     hideSubtext: boolean = false,
     variant: BigMessageVariant = 'announcement'
   ): void {
+    this.ensureInitialized();
     this.applyBigMessageVariant(variant);
     this.setTextContent(this.powerUpBigIcon, icon);
     this.setTextContent(this.powerUpBigText, name);
@@ -668,6 +694,7 @@ export class HUD {
   }
 
   public triggerDamageFlash(intensity: number = 1): void {
+    this.ensureInitialized();
     const normalizedIntensity = Math.max(0.18, Math.min(0.55, 0.18 + intensity * 0.08));
     this.damageFlashDuration = 0.18 + Math.min(intensity, 2.2) * 0.06;
     this.damageFlashPeakOpacity = normalizedIntensity;
@@ -728,6 +755,7 @@ export class HUD {
    * 隐藏 HUD
    */
   public hide(): void {
+    this.ensureInitialized();
     this.setStyleValue(this.container, 'display', 'none');
   }
 
@@ -735,6 +763,7 @@ export class HUD {
    * 显示 HUD
    */
   public show(): void {
+    this.ensureInitialized();
     this.setStyleValue(this.container, 'display', 'block');
   }
 
@@ -742,6 +771,7 @@ export class HUD {
    * 显示游戏结束
    */
   public showGameOver(finalScore: number): void {
+    this.ensureInitialized();
     this.setTextContent(this.finalScoreDisplay, `最终得分: ${finalScore}`);
     this.setStyleValue(this.gameOverDisplay, 'opacity', '1');
     this.setStyleValue(this.gameOverDisplay, 'pointerEvents', 'auto');
@@ -751,14 +781,24 @@ export class HUD {
    * 隐藏游戏结束
    */
   public hideGameOver(): void {
+    this.ensureInitialized();
     this.setStyleValue(this.gameOverDisplay, 'opacity', '0');
     this.setStyleValue(this.gameOverDisplay, 'pointerEvents', 'none');
   }
 
   public dispose(): void {
-    this.container.remove();
-    this.powerUpBigDisplay.remove();
-    this.damageFlashOverlay.remove();
-    this.gameOverDisplay.remove();
+    if (this.container.parentElement) {
+      this.container.remove();
+    }
+    if (this.powerUpBigDisplay.parentElement) {
+      this.powerUpBigDisplay.remove();
+    }
+    if (this.damageFlashOverlay.parentElement) {
+      this.damageFlashOverlay.remove();
+    }
+    if (this.gameOverDisplay.parentElement) {
+      this.gameOverDisplay.remove();
+    }
+    this.initialized = false;
   }
 }

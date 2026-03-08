@@ -95,6 +95,8 @@
   - [done] `EnemyHealthBars`、`LockOnIndicator`、`BossMissileIndicator` 已改成战斗期惰性挂载
   - [done] StartMenu 阶段不再提前创建这些战斗 DOM
   - [done] 菜单空闲预热已继续下沉到深层战斗模块、升级菜单与地形模块
+  - [done] HUD 已改成战斗期惰性挂载，由 `PresentationController.initializeCombatUi()` 统一初始化
+  - [done] `ModelPreview` 模块已加菜单空闲预取与按钮 hover/focus 预取，减少首次打开等待
 
 ### 本轮交付门槛
 - `npx tsc --noEmit`
@@ -130,6 +132,7 @@
 - [active] 阶段式 onboarding 第三批
 - [active] 事件型波次第二批
 - [done] 战斗 UI 指示器惰性挂载已完成
+- [done] HUD 惰性挂载已完成
 - [done] 子弹 / Boss 炮弹飞行轮廓分流已完成当前轮
 
 ### 已知未收尾

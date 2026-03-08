@@ -68,6 +68,7 @@ export class PresentationController {
   }
 
   public initializeCombatUi(): void {
+    this.hud.init();
     this.enemyHealthBars.init();
     this.lockOnIndicator.init();
     this.bossIndicator.init();

@@ -139,6 +139,7 @@ export class ParticleSystem {
     const explosionScale = THREE.MathUtils.clamp(scale, 0.7, 2.4);
     const isPlayer = profile === 'player';
     const isFriendly = profile === 'friendly';
+    const isHeavy = explosionScale >= 1.45;
     const fireHueBase = isPlayer ? 0.02 : isFriendly ? 0.08 : 0.05;
     const fireLightBase = isPlayer ? 0.48 : isFriendly ? 0.58 : 0.5;
     const smokeLightBase = isPlayer ? 0.18 : isFriendly ? 0.32 : 0.3;
@@ -147,8 +148,10 @@ export class ParticleSystem {
     for (let i = 0; i < particleCount * 0.4; i++) {
       this.spawnParticle(ParticleType.FIRE, position, {
         speed: 20 * scale,
-        life: (isPlayer ? 0.36 : 0.3) + Math.random() * (isPlayer ? 0.34 : 0.3),
-        size: (isPlayer ? 0.65 : isFriendly ? 0.42 : 0.5) + Math.random() * (isPlayer ? 1.8 : 1.5),
+        life: (isPlayer ? 0.36 : isHeavy ? 0.38 : 0.3)
+          + Math.random() * (isPlayer ? 0.34 : isHeavy ? 0.4 : 0.3),
+        size: (isPlayer ? 0.65 : isFriendly ? 0.42 : isHeavy ? 0.72 : 0.5)
+          + Math.random() * (isPlayer ? 1.8 : isHeavy ? 2.1 : 1.5),
         color: new THREE.Color().setHSL(
           fireHueBase + Math.random() * (isPlayer ? 0.05 : isFriendly ? 0.06 : 0.1),
           isFriendly ? 0.9 : 1,
@@ -161,8 +164,10 @@ export class ParticleSystem {
     for (let i = 0; i < particleCount * 0.3; i++) {
       this.spawnParticle(ParticleType.EXPLOSION, position, {
         speed: 24 * scale,
-        life: (isPlayer ? 0.22 : 0.18) + Math.random() * (isPlayer ? 0.38 : 0.34),
-        size: (isPlayer ? 0.34 : isFriendly ? 0.2 : 0.24) + Math.random() * (isPlayer ? 1 : 0.84),
+        life: (isPlayer ? 0.22 : isHeavy ? 0.24 : 0.18)
+          + Math.random() * (isPlayer ? 0.38 : isHeavy ? 0.42 : 0.34),
+        size: (isPlayer ? 0.34 : isFriendly ? 0.2 : isHeavy ? 0.42 : 0.24)
+          + Math.random() * (isPlayer ? 1 : isHeavy ? 1.18 : 0.84),
         color: new THREE.Color().setHSL(
           isPlayer ? 0.045 : isFriendly ? 0.085 : 0.075,
           isFriendly ? 0.84 : 0.92,
@@ -177,7 +182,7 @@ export class ParticleSystem {
         speed: 50 * scale,
         life: 0.5 + Math.random() * 0.5,
         size: 0.1 + Math.random() * 0.2,
-        color: new THREE.Color(isFriendly ? 0xa8fff3 : isPlayer ? 0xffd27a : 0xffff00),
+        color: new THREE.Color(isFriendly ? 0xa8fff3 : isPlayer ? 0xffd27a : isHeavy ? 0xffb24d : 0xffff00),
       });
     }
 
@@ -207,18 +212,34 @@ export class ParticleSystem {
       });
     }
 
+    if (isHeavy) {
+      const heavyRingPosition = position.clone();
+      this.scheduleBurst(0.035, () => {
+        this.emitMissileSparkRing(
+          heavyRingPosition,
+          0.9 + explosionScale * 0.55,
+          Math.max(8, Math.floor(8 + explosionScale * 4)),
+          18 + explosionScale * 6,
+          0.18,
+          0.12,
+          isPlayer ? 0xff7c42 : 0xff9a38
+        );
+      });
+    }
+
     // 烟雾延迟到 update 内处理，避免高频 setTimeout 对主线程造成压力
     const smokePosition = position.clone();
     this.scheduleBurst(0.1, () => {
       for (let i = 0; i < particleCount * 0.3; i++) {
         this.spawnParticle(ParticleType.SMOKE, smokePosition, {
           speed: 5 * scale,
-          life: (isPlayer ? 2.4 : 2) + Math.random() * (isPlayer ? 2.1 : 2),
-          size: (isPlayer ? 2.4 : isFriendly ? 1.7 : 2) + Math.random() * (isPlayer ? 3.4 : 3),
+          life: (isPlayer ? 2.4 : isHeavy ? 2.7 : 2) + Math.random() * (isPlayer ? 2.1 : isHeavy ? 2.3 : 2),
+          size: (isPlayer ? 2.4 : isFriendly ? 1.7 : isHeavy ? 2.8 : 2)
+            + Math.random() * (isPlayer ? 3.4 : isHeavy ? 4.1 : 3),
           color: new THREE.Color().setHSL(
             isFriendly ? 0.06 : 0,
             isFriendly ? 0.08 : 0,
-            smokeLightBase + Math.random() * (isPlayer ? 0.18 : 0.3)
+            smokeLightBase + Math.random() * (isPlayer ? 0.18 : isHeavy ? 0.22 : 0.3)
           ),
         });
       }

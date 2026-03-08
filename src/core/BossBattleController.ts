@@ -239,7 +239,7 @@ export class BossBattleController {
       this.deps.audioManager.playShoot('boss');
     };
     boss.onMissileFired = () => {
-      this.deps.audioManager.playMissileLaunch();
+      this.deps.audioManager.playMissileLaunch('boss');
     };
     boss.onDestroy = (position, bossConfig) => {
       this.handleBossDestroy(position, bossConfig, isBossMode);
@@ -285,7 +285,7 @@ export class BossBattleController {
       });
     };
     boss.onMissileFired = () => {
-      this.deps.audioManager.playMissileLaunch();
+      this.deps.audioManager.playMissileLaunch('boss');
     };
     boss.onDestroy = (position, bossConfig) => {
       this.handleBossDestroy(position, bossConfig, isBossMode);
@@ -370,7 +370,7 @@ export class BossBattleController {
       });
     };
     boss.onMissileFired = () => {
-      this.deps.audioManager.playMissileLaunch();
+      this.deps.audioManager.playMissileLaunch('boss');
     };
     boss.onFighterSpawn = (position) => {
       this.deps.onSpawnEnemyFromBoss(position, EnemyType.FIGHTER);
@@ -399,7 +399,7 @@ export class BossBattleController {
       this.deps.audioManager.playShoot('boss');
     };
     boss.onMissileFired = () => {
-      this.deps.audioManager.playMissileLaunch();
+      this.deps.audioManager.playMissileLaunch('boss');
     };
     boss.onEnemySpawn = (position, enemyType) => {
       this.deps.onSpawnEnemyFromBoss(position, enemyType);
@@ -423,7 +423,7 @@ export class BossBattleController {
       [this.deps.playerAircraft, ...friendlyMeshes],
       (target: Object3D) => {
         this.deps.particleSystem.createBossMissileExplosion(target.position.clone(), 1.15);
-        this.deps.audioManager.playMissileExplosion();
+        this.deps.audioManager.playMissileExplosion('boss');
         if (target === this.deps.playerAircraft) {
           if (!this.deps.playerSystem.isShieldActive()) {
             this.deps.playerSystem.getHealth().takeDamage(BOSS_MISSILE_CONFIG.DAMAGE);
@@ -494,7 +494,7 @@ export class BossBattleController {
       if (missile) {
         missile.takeDamage(GAME_CONSTANTS.MISSILE.DAMAGE);
         this.deps.particleSystem.createBossMissileExplosion(hitWorldPos, 0.92);
-        this.deps.audioManager.playMissileExplosion();
+        this.deps.audioManager.playMissileExplosion('boss');
       }
     });
 
@@ -529,7 +529,7 @@ export class BossBattleController {
         if (missile) {
           missile.takeDamage(damage);
           this.deps.particleSystem.createBossMissileExplosion(target.position.clone(), 0.72);
-          this.deps.audioManager.playMissileExplosion();
+          this.deps.audioManager.playMissileExplosion('boss');
         }
       });
   }

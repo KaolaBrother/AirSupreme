@@ -305,7 +305,7 @@ export class GameCoordinator {
     this.resourceRegistry.addUnsubscriber(
       EventBus.on(GameEventType.PLAYER_DEATH, ({ payload }) => {
         this.audioManager.stopEngine();
-        this.audioManager.playExplosion('player');
+        this.audioManager.playExplosion('player', 2);
         this.particleSystem?.createExplosion(payload.position, 2, 'player');
         this.lockOnIndicator.cancelLockOn();
         this.playerAircraft.visible = false;
@@ -364,7 +364,7 @@ export class GameCoordinator {
         const earnedPoints = this.playerStats.addScore(payload.config.scoreValue);
         this.hud.updateUpgradePoints(this.playerStats.getUpgrades().getAvailablePoints());
         this.notifyEarnedUpgradePoints(earnedPoints);
-        this.audioManager.playExplosion('enemy');
+        this.audioManager.playExplosion('enemy', payload.config.scale);
         this.particleSystem?.createExplosion(payload.position, payload.config.scale, 'enemy');
         this.handleTutorialEnemyDeath();
 
@@ -376,7 +376,7 @@ export class GameCoordinator {
 
     this.resourceRegistry.addUnsubscriber(
       EventBus.on(GameEventType.FRIENDLY_DEATH, ({ payload }) => {
-        this.audioManager.playExplosion('friendly');
+        this.audioManager.playExplosion('friendly', 1.15);
         this.particleSystem?.createExplosion(payload.position, 1.15, 'friendly');
         this.hud.showPowerUpBig('⚠️', '友军坠毁', 1, true);
       })

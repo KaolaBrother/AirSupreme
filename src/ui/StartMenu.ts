@@ -7,6 +7,7 @@ import {
   type StartFlowSettings,
 } from '@/core/SessionSettings';
 import type { ModelPreview } from './ModelPreview';
+type ModelPreviewModule = typeof import('./ModelPreview');
 
 export class StartMenu {
   private static readonly STORAGE_KEY = 'air-supreme:start-menu-settings';
@@ -15,6 +16,7 @@ export class StartMenu {
   private onStart?: (settings: GameSettings) => void;
   private modelPreview: ModelPreview | null = null;
   private modelPreviewPromise: Promise<ModelPreview> | null = null;
+  private modelPreviewModulePromise: Promise<ModelPreviewModule> | null = null;
   private isDisposed: boolean = false;
 
   private settings: GameSettings = { ...DEFAULT_START_FLOW_SETTINGS };
@@ -25,6 +27,38 @@ export class StartMenu {
     this.settingsContainer = this.createSettingsPanel();
     this.container.appendChild(this.settingsContainer);
     document.body.appendChild(this.container);
+    this.scheduleModelPreviewPreload();
+  }
+
+  private scheduleModelPreviewPreload(): void {
+    const preload = (): void => {
+      if (this.isDisposed) {
+        return;
+      }
+      this.preloadModelPreviewModule();
+    };
+
+    if ('requestIdleCallback' in window) {
+      (
+        window as Window & {
+          requestIdleCallback: (callback: IdleRequestCallback) => number;
+        }
+      ).requestIdleCallback(() => preload());
+      return;
+    }
+
+    setTimeout(preload, 1200);
+  }
+
+  private preloadModelPreviewModule(): void {
+    if (this.modelPreview || this.modelPreviewPromise || this.modelPreviewModulePromise) {
+      return;
+    }
+
+    this.modelPreviewModulePromise = import('./ModelPreview').catch((error) => {
+      this.modelPreviewModulePromise = null;
+      throw error;
+    });
   }
 
   private async ensureModelPreview(): Promise<ModelPreview> {
@@ -33,7 +67,9 @@ export class StartMenu {
     }
 
     if (!this.modelPreviewPromise) {
-      this.modelPreviewPromise = import('./ModelPreview').then(({ ModelPreview }) => {
+      const modulePromise = this.modelPreviewModulePromise ?? import('./ModelPreview');
+      this.modelPreviewModulePromise = modulePromise;
+      this.modelPreviewPromise = modulePromise.then(({ ModelPreview }) => {
         const preview = new ModelPreview();
         preview.setOnBack(() => {
           if (!this.isDisposed) {
@@ -55,6 +91,7 @@ export class StartMenu {
       return await this.modelPreviewPromise;
     } catch (error) {
       this.modelPreviewPromise = null;
+      this.modelPreviewModulePromise = null;
       throw error;
     }
   }
@@ -448,6 +485,8 @@ export class StartMenu {
     previewBtn.className = 'preview-btn';
     previewBtn.id = 'preview-btn';
     previewBtn.innerHTML = '✈️ 模型预览';
+    previewBtn.onmouseenter = () => this.preloadModelPreviewModule();
+    previewBtn.onfocus = () => this.preloadModelPreviewModule();
     previewBtn.onclick = async () => {
       if (previewBtn.disabled) {
         return;
