@@ -20,6 +20,7 @@ export class LockOnIndicator {
   private currentTarget: Object3D | null = null;
   private lockProgressValue: number = 0; // 0-1，1 表示锁定完成
   private lockTime: number = 3.0; // 锁定时间（默认 3 秒，可通过 setLockTime 动态调整）
+  private lockCircleScale: number = 1;
   private lockedTarget: Object3D | null = null; // 锁定的目标（一旦锁定就保持不变）
 
   // 屏幕中心
@@ -131,7 +132,8 @@ export class LockOnIndicator {
    * 更新黄色圈大小
    */
   private updateLockCircleSize(): void {
-    this.lockCircleSize = Math.min(window.innerWidth, window.innerHeight) * 0.3; // 屏幕最小边的 30%
+    this.lockCircleSize =
+      Math.min(window.innerWidth, window.innerHeight) * 0.3 * this.lockCircleScale; // 屏幕最小边的 30%
     this.setStyleValue(this.lockCircle, 'width', `${this.lockCircleSize}px`);
     this.setStyleValue(this.lockCircle, 'height', `${this.lockCircleSize}px`);
   }
@@ -425,6 +427,17 @@ export class LockOnIndicator {
    */
   public setLockTime(time: number): void {
     this.lockTime = Math.max(0.5, time);
+  }
+
+  /**
+   * 设置锁定圈尺寸倍率
+   * @param scale 锁定圈尺寸倍率，最小 1.0，最大 2.0
+   */
+  public setLockCircleScale(scale: number): void {
+    this.lockCircleScale = Math.max(1, Math.min(2, scale));
+    if (this.initialized) {
+      this.updateLockCircleSize();
+    }
   }
 
   private selectBestTarget(

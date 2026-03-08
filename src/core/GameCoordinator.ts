@@ -102,6 +102,7 @@ export class GameCoordinator {
     [UpgradeType.SPEED]: { icon: '⚡', label: '飞行速度升级' },
     [UpgradeType.FIRE_RATE]: { icon: '🔫', label: '射速升级' },
     [UpgradeType.DAMAGE]: { icon: '💥', label: '武器伤害升级' },
+    [UpgradeType.MISSILE_LOCK_RADIUS]: { icon: '📡', label: '锁定范围升级' },
     [UpgradeType.MISSILE_RELOAD_TIME]: { icon: '🚀', label: '导弹装填升级' },
     [UpgradeType.MISSILE_LOCK_TIME]: { icon: '🎯', label: '导弹锁定升级' },
   };
@@ -227,6 +228,9 @@ export class GameCoordinator {
     this.hud = new HUD();
     this.lockOnIndicator = new LockOnIndicator();
     this.lockOnIndicator.setLockTime(this.playerStats.getMissileLockTime());
+    this.lockOnIndicator.setLockCircleScale(
+      this.playerStats.getMissileLockRadiusMultiplier()
+    );
     this.enemyHealthBars = new EnemyHealthBars();
     this.startMenu = showStartMenu ? new StartMenu() : null;
     this.bossIndicator = new BossMissileIndicator();
@@ -545,6 +549,10 @@ export class GameCoordinator {
     this.gameState.reset();
     this.sessionState.setInBossBattle(false);
     this.sessionState.resume();
+    this.lockOnIndicator.setLockTime(this.playerStats.getMissileLockTime());
+    this.lockOnIndicator.setLockCircleScale(
+      this.playerStats.getMissileLockRadiusMultiplier()
+    );
 
     if (settings.testScore > 0) {
       this.playerStats.addScore(settings.testScore);
@@ -1678,6 +1686,11 @@ export class GameCoordinator {
       }
       if (type === UpgradeType.MISSILE_LOCK_TIME) {
         this.lockOnIndicator.setLockTime(this.playerStats.getMissileLockTime());
+      }
+      if (type === UpgradeType.MISSILE_LOCK_RADIUS) {
+        this.lockOnIndicator.setLockCircleScale(
+          this.playerStats.getMissileLockRadiusMultiplier()
+        );
       }
       this.hud.updateUpgradePoints(this.playerStats.getUpgrades().getAvailablePoints());
       this.audioManager.playPowerUp();

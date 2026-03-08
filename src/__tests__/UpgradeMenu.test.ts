@@ -73,6 +73,20 @@ describe('UpgradeMenu', () => {
     expect(statValues?.[2]?.textContent).toBe('+8');
   });
 
+  it('shows missile lock radius upgrade card with multiplier values', () => {
+    menu.show();
+
+    const radiusCard = document.getElementById(
+      `upgrade-card-${UpgradeType.MISSILE_LOCK_RADIUS}`
+    );
+    expect(radiusCard).not.toBeNull();
+
+    const statValues = radiusCard?.querySelectorAll('.stat-value');
+    expect(statValues?.[0]?.textContent).toBe('1x');
+    expect(statValues?.[1]?.textContent).toBe('1.2x');
+    expect(statValues?.[2]?.textContent).toBe('+0.2x');
+  });
+
   it('triggers resume callback and toggles visibility with show/hide', () => {
     menu.show();
     const resumeButton = document.querySelector('.resume-btn') as HTMLButtonElement;

@@ -27,6 +27,7 @@ export class UpgradeMenu {
     [UpgradeType.SPEED]: { icon: '⚡', label: 'Speed' },
     [UpgradeType.FIRE_RATE]: { icon: '🔫', label: 'Fire Rate' },
     [UpgradeType.DAMAGE]: { icon: '💥', label: 'Damage' },
+    [UpgradeType.MISSILE_LOCK_RADIUS]: { icon: '📡', label: 'Lock Radius' },
     [UpgradeType.MISSILE_RELOAD_TIME]: { icon: '🚀', label: 'Missile Reload' },
     [UpgradeType.MISSILE_LOCK_TIME]: { icon: '🎯', label: 'Missile Lock' },
   };
@@ -36,6 +37,7 @@ export class UpgradeMenu {
     UpgradeType.SPEED,
     UpgradeType.FIRE_RATE,
     UpgradeType.DAMAGE,
+    UpgradeType.MISSILE_LOCK_RADIUS,
     UpgradeType.MISSILE_RELOAD_TIME,
     UpgradeType.MISSILE_LOCK_TIME,
   ];

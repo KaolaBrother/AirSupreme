@@ -4,6 +4,7 @@ export enum UpgradeType {
   FIRE_RATE = 'FIRE_RATE',
   SPEED = 'SPEED',
   MISSILE_LOCK_TIME = 'MISSILE_LOCK_TIME',
+  MISSILE_LOCK_RADIUS = 'MISSILE_LOCK_RADIUS',
   MISSILE_RELOAD_TIME = 'MISSILE_RELOAD_TIME',
 }
 
@@ -68,6 +69,16 @@ export const UPGRADE_CONFIGS: Record<UpgradeType, UpgradeConfig> = {
     valuePerLevel: -0.2,
     baseValue: 1.5,
     unit: 's',
+  },
+  [UpgradeType.MISSILE_LOCK_RADIUS]: {
+    type: UpgradeType.MISSILE_LOCK_RADIUS,
+    name: '导弹锁定范围',
+    description: '扩大锁定圈范围，满级达到当前两倍',
+    maxLevel: 5,
+    costs: [1, 2, 3, 4, 5],
+    valuePerLevel: 0.2,
+    baseValue: 1,
+    unit: 'x',
   },
   [UpgradeType.MISSILE_RELOAD_TIME]: {
     type: UpgradeType.MISSILE_RELOAD_TIME,
@@ -241,6 +252,10 @@ export class PlayerStats {
 
   public getMissileReloadTime(): number {
     return this.upgrades.getValue(UpgradeType.MISSILE_RELOAD_TIME);
+  }
+
+  public getMissileLockRadiusMultiplier(): number {
+    return this.upgrades.getValue(UpgradeType.MISSILE_LOCK_RADIUS);
   }
 
   public getAccuracy(): number {

@@ -73,6 +73,7 @@ describe('PlayerUpgrades', () => {
     it('Missile upgrades should cost 1,2,3,4,5', () => {
       upgrades.addScore(10000);
       expect(upgrades.getUpgradeCost(UpgradeType.MISSILE_LOCK_TIME)).toBe(1);
+      expect(upgrades.getUpgradeCost(UpgradeType.MISSILE_LOCK_RADIUS)).toBe(1);
       expect(upgrades.getUpgradeCost(UpgradeType.MISSILE_RELOAD_TIME)).toBe(1);
     });
   });
@@ -126,6 +127,17 @@ describe('PlayerUpgrades', () => {
       expect(upgrades.getValue(UpgradeType.MISSILE_LOCK_TIME)).toBe(1.5);
       upgrades.upgrade(UpgradeType.MISSILE_LOCK_TIME);
       expect(upgrades.getValue(UpgradeType.MISSILE_LOCK_TIME)).toBeCloseTo(1.3, 1);
+    });
+
+    it('Missile Lock Radius should increase by 0.2 per level (1.0x -> 2.0x)', () => {
+      upgrades.addScore(10000);
+      expect(upgrades.getValue(UpgradeType.MISSILE_LOCK_RADIUS)).toBe(1);
+      upgrades.upgrade(UpgradeType.MISSILE_LOCK_RADIUS);
+      expect(upgrades.getValue(UpgradeType.MISSILE_LOCK_RADIUS)).toBeCloseTo(1.2, 2);
+      for (let i = 0; i < 4; i++) {
+        upgrades.upgrade(UpgradeType.MISSILE_LOCK_RADIUS);
+      }
+      expect(upgrades.getValue(UpgradeType.MISSILE_LOCK_RADIUS)).toBeCloseTo(2, 2);
     });
   });
 
@@ -199,6 +211,10 @@ describe('PlayerStats', () => {
       expect(stats.getMissileLockTime()).toBe(1.5);
     });
 
+    it('should return base missile lock radius multiplier', () => {
+      expect(stats.getMissileLockRadiusMultiplier()).toBe(1);
+    });
+
     it('should return base missile reload time', () => {
       expect(stats.getMissileReloadTime()).toBe(7.5);
     });
@@ -215,6 +231,12 @@ describe('PlayerStats', () => {
       stats.getUpgrades().addScore(10000);
       stats.getUpgrades().upgrade(UpgradeType.MISSILE_LOCK_TIME);
       expect(stats.getMissileLockTime()).toBeCloseTo(1.3, 1);
+    });
+
+    it('should return upgraded missile lock radius multiplier', () => {
+      stats.getUpgrades().addScore(10000);
+      stats.getUpgrades().upgrade(UpgradeType.MISSILE_LOCK_RADIUS);
+      expect(stats.getMissileLockRadiusMultiplier()).toBeCloseTo(1.2, 2);
     });
 
     it('should return upgraded missile reload time', () => {
@@ -255,8 +277,8 @@ describe('PlayerStats', () => {
 });
 
 describe('UPGRADE_CONFIGS', () => {
-  it('should have 6 upgrade types', () => {
-    expect(Object.keys(UPGRADE_CONFIGS).length).toBe(6);
+  it('should have 7 upgrade types', () => {
+    expect(Object.keys(UPGRADE_CONFIGS).length).toBe(7);
   });
 
   it('should have maxLevel 5 for all upgrades', () => {
