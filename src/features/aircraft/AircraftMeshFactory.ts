@@ -326,7 +326,7 @@ export function createPlayerMesh(): THREE.Group {
   const detailMaterial = createAircraftMaterial(0x45505c, 0.72, 0.4, 0.01);
   const sensorMaterial = createAircraftMaterial(0x5f7488, 0.9, 0.18, 0.03);
   const weaponMaterial = createAircraftMaterial(0x5f6875, 0.92, 0.22, 0.01);
-  const energyPanelMaterial = createAircraftMaterial(0x5e85a8, 0.86, 0.22, 0.03);
+  const energyPanelMaterial = createAircraftMaterial(0x74889a, 0.82, 0.28, 0.02);
   const playerIntakeCavityMaterial = new THREE.MeshStandardMaterial({
     color: 0x161a20,
     metalness: 0.38,
@@ -1055,11 +1055,23 @@ export function createPlayerMesh(): THREE.Group {
   leftIntakeConduit.castShadow = true;
   group.add(leftIntakeConduit);
 
+  const leftIntakeSpineBlend = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.08, 0.52), heroPanelMaterial);
+  leftIntakeSpineBlend.position.set(-0.44, 0.14, -0.5);
+  leftIntakeSpineBlend.rotation.y = 0.18;
+  leftIntakeSpineBlend.castShadow = true;
+  group.add(leftIntakeSpineBlend);
+
   const rightIntakeConduit = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 0.72), energyPanelMaterial);
   rightIntakeConduit.position.set(0.52, 0.08, -0.26);
   rightIntakeConduit.rotation.y = -0.1;
   rightIntakeConduit.castShadow = true;
   group.add(rightIntakeConduit);
+
+  const rightIntakeSpineBlend = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.08, 0.52), heroPanelMaterial);
+  rightIntakeSpineBlend.position.set(0.44, 0.14, -0.5);
+  rightIntakeSpineBlend.rotation.y = -0.18;
+  rightIntakeSpineBlend.castShadow = true;
+  group.add(rightIntakeSpineBlend);
 
   const tailBeacon = new THREE.Mesh(new THREE.SphereGeometry(0.05, 8, 8), playerLightMaterial);
   tailBeacon.position.set(0, 0.18, 2.08);
@@ -1095,11 +1107,23 @@ export function createPlayerMesh(): THREE.Group {
   leftOuterPylonCap.castShadow = true;
   group.add(leftOuterPylonCap);
 
+  const leftInnerPylonCap = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.08, 0.3), weaponMaterial);
+  leftInnerPylonCap.position.set(-0.84, -0.12, 0.1);
+  leftInnerPylonCap.rotation.y = 0.1;
+  leftInnerPylonCap.castShadow = true;
+  group.add(leftInnerPylonCap);
+
   const rightOuterPylonCap = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.08, 0.36), weaponMaterial);
   rightOuterPylonCap.position.set(1.3, -0.14, 0.36);
   rightOuterPylonCap.rotation.y = -0.16;
   rightOuterPylonCap.castShadow = true;
   group.add(rightOuterPylonCap);
+
+  const rightInnerPylonCap = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.08, 0.3), weaponMaterial);
+  rightInnerPylonCap.position.set(0.84, -0.12, 0.1);
+  rightInnerPylonCap.rotation.y = -0.1;
+  rightInnerPylonCap.castShadow = true;
+  group.add(rightInnerPylonCap);
 
   const leftTailBaseCollar = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.14, 0.34), detailMaterial);
   leftTailBaseCollar.position.set(-0.54, 0.18, 1.52);
@@ -1149,6 +1173,24 @@ export function createPlayerMesh(): THREE.Group {
   centerlineSensorBand.position.set(0, -0.1, -1.02);
   centerlineSensorBand.castShadow = true;
   group.add(centerlineSensorBand);
+
+  const centerlineBellyDoor = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.06, 0.96), detailMaterial);
+  centerlineBellyDoor.position.set(0, -0.22, -0.06);
+  centerlineBellyDoor.rotation.x = 0.04;
+  centerlineBellyDoor.castShadow = true;
+  group.add(centerlineBellyDoor);
+
+  const leftTailStatusFillet = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 0.42), heroPanelMaterial);
+  leftTailStatusFillet.position.set(-0.42, 0.18, 1.62);
+  leftTailStatusFillet.rotation.y = 0.12;
+  leftTailStatusFillet.castShadow = true;
+  group.add(leftTailStatusFillet);
+
+  const rightTailStatusFillet = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 0.42), heroPanelMaterial);
+  rightTailStatusFillet.position.set(0.42, 0.18, 1.62);
+  rightTailStatusFillet.rotation.y = -0.12;
+  rightTailStatusFillet.castShadow = true;
+  group.add(rightTailStatusFillet);
 
   // 设置阴影
   group.traverse((child) => {
@@ -1941,6 +1983,65 @@ export function createEnemyMesh(config: EnemyConfig): THREE.Group {
       rotation: [0.05, 0, 0],
     });
   };
+  const addIntakeShoulderFairingPair = (): void => {
+    const shoulderWidth = Math.max(0.12, contourProfile.wingRoot.insetWidth * 0.92);
+    const shoulderHeight = Math.max(0.08, contourProfile.wingRoot.insetHeight);
+    const shoulderDepth = Math.max(0.42, bodySize * 0.28);
+    addMeshPart(group, new THREE.BoxGeometry(shoulderWidth, shoulderHeight, shoulderDepth), materials.accent, [-jetProfile.intakeX * 0.82, jetProfile.intakeY + shoulderHeight * 0.9, jetProfile.intakeZ - shoulderDepth * 0.08], {
+      rotation: [0.04, jetProfile.intakeYaw * 0.92, -0.04],
+    });
+    addMeshPart(group, new THREE.BoxGeometry(shoulderWidth, shoulderHeight, shoulderDepth), materials.accent, [jetProfile.intakeX * 0.82, jetProfile.intakeY + shoulderHeight * 0.9, jetProfile.intakeZ - shoulderDepth * 0.08], {
+      rotation: [0.04, -jetProfile.intakeYaw * 0.92, 0.04],
+    });
+    addMeshPart(group, new THREE.BoxGeometry(shoulderWidth * 0.68, shoulderHeight * 0.88, shoulderDepth * 0.72), structureMaterial, [-jetProfile.intakeX * 0.98, jetProfile.intakeY + shoulderHeight * 0.18, jetProfile.intakeZ - shoulderDepth * 0.22], {
+      rotation: [0.02, jetProfile.intakeYaw * 1.08, 0],
+    });
+    addMeshPart(group, new THREE.BoxGeometry(shoulderWidth * 0.68, shoulderHeight * 0.88, shoulderDepth * 0.72), structureMaterial, [jetProfile.intakeX * 0.98, jetProfile.intakeY + shoulderHeight * 0.18, jetProfile.intakeZ - shoulderDepth * 0.22], {
+      rotation: [0.02, -jetProfile.intakeYaw * 1.08, 0],
+    });
+  };
+  const addBellyPayloadFairing = (): void => {
+    const bayWidth = Math.max(0.12, jetProfile.bellyWidth * 1.18);
+    const bayHeight = Math.max(0.08, jetProfile.bellyHeight * 0.9);
+    const bayDepth = Math.max(0.48, jetProfile.bellyDepth * 1.04);
+    addMeshPart(group, new THREE.BoxGeometry(bayWidth, bayHeight, bayDepth), materials.accent, [0, jetProfile.bellyY + bayHeight * 0.18, jetProfile.bellyZ], {
+      rotation: [0.04, 0, 0],
+    });
+    addMeshPart(group, new THREE.BoxGeometry(Math.max(0.08, bayWidth * 0.52), bayHeight * 1.36, bayDepth * 0.68), materials.detail, [-bayWidth * 0.68, jetProfile.bellyY + bayHeight * 0.36, jetProfile.bellyZ + bayDepth * 0.04], {
+      rotation: [0.06, 0.08, -0.04],
+    });
+    addMeshPart(group, new THREE.BoxGeometry(Math.max(0.08, bayWidth * 0.52), bayHeight * 1.36, bayDepth * 0.68), materials.detail, [bayWidth * 0.68, jetProfile.bellyY + bayHeight * 0.36, jetProfile.bellyZ + bayDepth * 0.04], {
+      rotation: [0.06, -0.08, 0.04],
+    });
+    addMeshPart(group, new THREE.BoxGeometry(Math.max(0.1, bayWidth * 0.8), bayHeight * 0.76, bayDepth * 0.54), weaponMaterial, [0, jetProfile.bellyY - bayHeight * 0.06, jetProfile.bellyZ + bayDepth * 0.14], {
+      rotation: [0.02, 0, 0],
+    });
+  };
+  const addPylonShoulderPair = (): void => {
+    const collarWidth = Math.max(0.14, contourProfile.pylon.anchorWidth * 1.08);
+    const collarHeight = Math.max(0.08, contourProfile.pylon.anchorHeight * 0.92);
+    const collarDepth = Math.max(0.3, contourProfile.pylon.anchorDepth * 0.82);
+    addMeshPart(group, new THREE.BoxGeometry(collarWidth, collarHeight, collarDepth), structureMaterial, [-wingSpan * 0.24, jetProfile.pylonY + 0.04, jetProfile.pylonZ - 0.02], {
+      rotation: [0.06, -contourProfile.pylon.anchorYaw * 0.7, -0.04],
+    });
+    addMeshPart(group, new THREE.BoxGeometry(collarWidth, collarHeight, collarDepth), structureMaterial, [wingSpan * 0.24, jetProfile.pylonY + 0.04, jetProfile.pylonZ - 0.02], {
+      rotation: [0.06, contourProfile.pylon.anchorYaw * 0.7, 0.04],
+    });
+  };
+  const addTailTransitionBracePair = (): void => {
+    const braceWidth = Math.max(0.12, contourProfile.tail.fairingWidth * 0.92);
+    const braceHeight = Math.max(0.12, contourProfile.tail.fairingHeight * 0.88);
+    const braceDepth = Math.max(0.42, contourProfile.tail.fairingDepth * 0.86);
+    addMeshPart(group, new THREE.BoxGeometry(braceWidth, braceHeight, braceDepth), structureMaterial, [-jetProfile.tailRootX * 0.8, contourProfile.tail.fairingY + braceHeight * 0.72, contourProfile.tail.fairingZOffset + braceDepth * 0.08], {
+      rotation: [0.05, 0.12, 0.04],
+    });
+    addMeshPart(group, new THREE.BoxGeometry(braceWidth, braceHeight, braceDepth), structureMaterial, [jetProfile.tailRootX * 0.8, contourProfile.tail.fairingY + braceHeight * 0.72, contourProfile.tail.fairingZOffset + braceDepth * 0.08], {
+      rotation: [0.05, -0.12, -0.04],
+    });
+    addMeshPart(group, new THREE.BoxGeometry(Math.max(0.12, braceWidth * 0.86), Math.max(0.08, braceHeight * 0.72), Math.max(0.28, braceDepth * 0.58)), materials.accent, [0, contourProfile.tail.fairingY + braceHeight * 0.34, contourProfile.tail.fairingZOffset + 0.04], {
+      rotation: [0.04, 0, 0],
+    });
+  };
   const applyUnifiedJetProportionLayer = (): void => {
     addIntakeLipPair(
       jetProfile.intakeX,
@@ -1991,10 +2092,14 @@ export function createEnemyMesh(config: EnemyConfig): THREE.Group {
   };
   const applyEnemyContourRefinement = (): void => {
     addNoseContour(contourProfile.nose);
+    addIntakeShoulderFairingPair();
     addBellyFin(contourProfile.bellyFin);
+    addBellyPayloadFairing();
     addWingRootTransitions(contourProfile.wingRoot);
     addPylonRig(contourProfile.pylon);
+    addPylonShoulderPair();
     addTailTransition(contourProfile.tail);
+    addTailTransitionBracePair();
   };
   if (config.type === EnemyType.SCOUT) {
     addMeshPart(group, new THREE.CylinderGeometry(bodySize * 0.14, bodySize * 0.26, bodyLength * 0.34, 8), materials.body, [0, 0, bodyLength * 0.26], {
