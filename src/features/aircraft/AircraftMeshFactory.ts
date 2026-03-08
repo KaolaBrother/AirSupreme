@@ -101,9 +101,9 @@ function getEnemyMaterialTuning(type: EnemyType): {
     case EnemyType.SCOUT:
       return {
         body: { metalness: 0.78, roughness: 0.26, emissiveIntensity: 0.008 },
-        wing: { metalness: 0.72, roughness: 0.32, emissiveIntensity: 0.005 },
-        cockpit: { metalness: 0.96, roughness: 0.1, emissiveIntensity: 0.028 },
-        accent: { metalness: 0.82, roughness: 0.24, emissiveIntensity: 0.01 },
+        wing: { metalness: 0.72, roughness: 0.32, emissiveIntensity: 0.003 },
+        cockpit: { metalness: 0.96, roughness: 0.1, emissiveIntensity: 0.012 },
+        accent: { metalness: 0.82, roughness: 0.24, emissiveIntensity: 0.005 },
         detailColor: 0xb4bcc6,
         lightOpacity: 0.16,
         engineOpacity: 0.26,
@@ -111,9 +111,9 @@ function getEnemyMaterialTuning(type: EnemyType): {
     case EnemyType.FIGHTER:
       return {
         body: { metalness: 0.82, roughness: 0.24, emissiveIntensity: 0.009 },
-        wing: { metalness: 0.76, roughness: 0.28, emissiveIntensity: 0.006 },
-        cockpit: { metalness: 0.96, roughness: 0.1, emissiveIntensity: 0.03 },
-        accent: { metalness: 0.86, roughness: 0.2, emissiveIntensity: 0.011 },
+        wing: { metalness: 0.76, roughness: 0.28, emissiveIntensity: 0.003 },
+        cockpit: { metalness: 0.96, roughness: 0.1, emissiveIntensity: 0.012 },
+        accent: { metalness: 0.86, roughness: 0.2, emissiveIntensity: 0.006 },
         detailColor: 0xc0c7d0,
         lightOpacity: 0.17,
         engineOpacity: 0.28,
@@ -122,8 +122,8 @@ function getEnemyMaterialTuning(type: EnemyType): {
       return {
         body: { metalness: 0.72, roughness: 0.32, emissiveIntensity: 0.006 },
         wing: { metalness: 0.68, roughness: 0.36, emissiveIntensity: 0.004 },
-        cockpit: { metalness: 0.92, roughness: 0.14, emissiveIntensity: 0.024 },
-        accent: { metalness: 0.78, roughness: 0.26, emissiveIntensity: 0.008 },
+        cockpit: { metalness: 0.92, roughness: 0.14, emissiveIntensity: 0.01 },
+        accent: { metalness: 0.78, roughness: 0.26, emissiveIntensity: 0.004 },
         detailColor: 0xa0a8b2,
         lightOpacity: 0.14,
         engineOpacity: 0.24,
@@ -132,8 +132,8 @@ function getEnemyMaterialTuning(type: EnemyType): {
       return {
         body: { metalness: 0.8, roughness: 0.24, emissiveIntensity: 0.008 },
         wing: { metalness: 0.74, roughness: 0.3, emissiveIntensity: 0.005 },
-        cockpit: { metalness: 0.96, roughness: 0.08, emissiveIntensity: 0.028 },
-        accent: { metalness: 0.84, roughness: 0.2, emissiveIntensity: 0.01 },
+        cockpit: { metalness: 0.96, roughness: 0.08, emissiveIntensity: 0.012 },
+        accent: { metalness: 0.84, roughness: 0.2, emissiveIntensity: 0.005 },
         detailColor: 0xb7c0c9,
         lightOpacity: 0.15,
         engineOpacity: 0.23,
@@ -141,19 +141,19 @@ function getEnemyMaterialTuning(type: EnemyType): {
     case EnemyType.ACE:
       return {
         body: { metalness: 0.84, roughness: 0.22, emissiveIntensity: 0.01 },
-        wing: { metalness: 0.8, roughness: 0.26, emissiveIntensity: 0.007 },
-        cockpit: { metalness: 0.98, roughness: 0.08, emissiveIntensity: 0.032 },
-        accent: { metalness: 0.9, roughness: 0.18, emissiveIntensity: 0.012 },
+        wing: { metalness: 0.8, roughness: 0.26, emissiveIntensity: 0.004 },
+        cockpit: { metalness: 0.98, roughness: 0.08, emissiveIntensity: 0.012 },
+        accent: { metalness: 0.9, roughness: 0.18, emissiveIntensity: 0.006 },
         detailColor: 0xb3b0ac,
         lightOpacity: 0.16,
         engineOpacity: 0.26,
       };
     default:
       return {
-        body: { metalness: 0.7, roughness: 0.3, emissiveIntensity: 0.05 },
-        wing: { metalness: 0.62, roughness: 0.38, emissiveIntensity: 0.04 },
-        cockpit: { metalness: 0.92, roughness: 0.12, emissiveIntensity: 0.32 },
-        accent: { metalness: 0.82, roughness: 0.24, emissiveIntensity: 0.1 },
+        body: { metalness: 0.7, roughness: 0.3, emissiveIntensity: 0.006 },
+        wing: { metalness: 0.62, roughness: 0.38, emissiveIntensity: 0.003 },
+        cockpit: { metalness: 0.92, roughness: 0.12, emissiveIntensity: 0.01 },
+        accent: { metalness: 0.82, roughness: 0.24, emissiveIntensity: 0.005 },
         detailColor: 0xcfd6df,
         lightOpacity: 0.95,
         engineOpacity: 0.8,
@@ -256,9 +256,9 @@ function addMeshPart(
 export function createPlayerMesh(): THREE.Group {
   const group = new THREE.Group();
 
-  const bodyMaterial = createAircraftMaterial(0xe8e8e8, 0.82, 0.22, 0.04);
+  const bodyMaterial = createAircraftMaterial(0xe8e8e8, 0.82, 0.24, 0.02);
   const wingMaterial = createAircraftMaterial(0xa0a0a0, 0.72, 0.32, 0.03);
-  const heroPanelMaterial = createAircraftMaterial(0xcfd8e3, 0.88, 0.18, 0.05);
+  const heroPanelMaterial = createAircraftMaterial(0xcfd8e3, 0.88, 0.22, 0.02);
   const cockpitMaterial = new THREE.MeshStandardMaterial({
     color: 0x1a1a1a,
     metalness: 0.95,
@@ -266,13 +266,13 @@ export function createPlayerMesh(): THREE.Group {
     transparent: true,
     opacity: 0.85,
     emissive: 0x4fc3ff,
-    emissiveIntensity: 0.08,
+    emissiveIntensity: 0.03,
   });
-  const accentMaterial = createAircraftMaterial(0x707070, 0.9, 0.2, 0.04);
-  const detailMaterial = createAircraftMaterial(0x45505c, 0.72, 0.4, 0.02);
-  const sensorMaterial = createAircraftMaterial(0x5f7488, 0.9, 0.18, 0.1);
-  const weaponMaterial = createAircraftMaterial(0x5f6875, 0.92, 0.22, 0.02);
-  const energyPanelMaterial = createAircraftMaterial(0x5e85a8, 0.86, 0.2, 0.08);
+  const accentMaterial = createAircraftMaterial(0x707070, 0.9, 0.22, 0.02);
+  const detailMaterial = createAircraftMaterial(0x45505c, 0.72, 0.4, 0.01);
+  const sensorMaterial = createAircraftMaterial(0x5f7488, 0.9, 0.18, 0.03);
+  const weaponMaterial = createAircraftMaterial(0x5f6875, 0.92, 0.22, 0.01);
+  const energyPanelMaterial = createAircraftMaterial(0x5e85a8, 0.86, 0.22, 0.03);
   const playerIntakeCavityMaterial = new THREE.MeshStandardMaterial({
     color: 0x161a20,
     metalness: 0.38,
@@ -281,17 +281,17 @@ export function createPlayerMesh(): THREE.Group {
   const playerLightMaterial = new THREE.MeshBasicMaterial({
     color: 0x58d5ff,
     transparent: true,
-    opacity: 0.95,
+    opacity: 0.75,
   });
   const navRedMaterial = new THREE.MeshBasicMaterial({
     color: 0xff5544,
     transparent: true,
-    opacity: 0.9,
+    opacity: 0.45,
   });
   const navGreenMaterial = new THREE.MeshBasicMaterial({
     color: 0x6dff8c,
     transparent: true,
-    opacity: 0.9,
+    opacity: 0.45,
   });
   const engineMaterial = createAircraftMaterial(0x404040, 0.82, 0.28, 0.04);
 
@@ -635,7 +635,7 @@ export function createPlayerMesh(): THREE.Group {
   const glowMaterial = new THREE.MeshBasicMaterial({
     color: 0xff4400,
     transparent: true,
-    opacity: 0.9,
+    opacity: 0.6,
   });
 
   // 左喷口
@@ -1337,9 +1337,9 @@ export function createEnemyMesh(config: EnemyConfig): THREE.Group {
 
   group.scale.set(scaleMultiplier, scaleMultiplier, scaleMultiplier);
   const materials = getOrCreateMaterials(config.type, bodyColor, wingColor, accentColor);
-  const weaponMaterial = createAircraftMaterial(accentColor, 0.88, 0.24, 0.05);
-  const energyMaterial = createAircraftMaterial(accentColor, 0.78, 0.24, 0.08);
-  const structureMaterial = createAircraftMaterial(wingColor, 0.62, 0.4, 0.02);
+  const weaponMaterial = createAircraftMaterial(accentColor, 0.88, 0.24, 0.02);
+  const energyMaterial = createAircraftMaterial(accentColor, 0.78, 0.24, 0.03);
+  const structureMaterial = createAircraftMaterial(wingColor, 0.62, 0.4, 0.005);
   const intakeCavityMaterial = new THREE.MeshStandardMaterial({
     color: 0x161a20,
     metalness: 0.42,
@@ -1497,6 +1497,55 @@ export function createEnemyMesh(config: EnemyConfig): THREE.Group {
     });
     addMeshPart(group, new THREE.BoxGeometry(width * 0.66, 0.12, depth * 0.72), materials.detail, [xOffset, yOffset + 0.04, zOffset], {
       rotation: [0.08, -yaw * 0.72, 0.06],
+    });
+  };
+  const addFuselageSectionBreaks = (): void => {
+    addMeshPart(group, new THREE.BoxGeometry(bodySize * 0.7, 0.06, 0.16), materials.detail, [0, bodySize * 0.03, bodyLength * 0.38], {
+      rotation: [0.02, 0, 0],
+    });
+    addMeshPart(group, new THREE.BoxGeometry(bodySize * 0.66, 0.06, 0.16), materials.detail, [0, 0, 0], {
+      rotation: [0.02, 0, 0],
+    });
+    addMeshPart(group, new THREE.BoxGeometry(bodySize * 0.7, 0.06, 0.16), materials.detail, [0, -bodySize * 0.03, -bodyLength * 0.32], {
+      rotation: [0.02, 0, 0],
+    });
+  };
+  const addWingRootTransitionPair = (
+    xOffset: number,
+    yOffset: number,
+    zOffset: number
+  ): void => {
+    addMeshPart(group, new THREE.BoxGeometry(0.12, 0.12, 0.4), structureMaterial, [-xOffset, yOffset, zOffset], {
+      rotation: [0.02, 0.08, 0.06],
+    });
+    addMeshPart(group, new THREE.BoxGeometry(0.12, 0.12, 0.4), structureMaterial, [xOffset, yOffset, zOffset], {
+      rotation: [0.02, -0.08, -0.06],
+    });
+    addMeshPart(group, new THREE.BoxGeometry(0.1, 0.09, 0.42), materials.accent, [-xOffset, yOffset + 0.05, zOffset], {
+      rotation: [0.06, 0.1, -0.03],
+    });
+    addMeshPart(group, new THREE.BoxGeometry(0.1, 0.09, 0.42), materials.accent, [xOffset, yOffset + 0.05, zOffset], {
+      rotation: [0.06, -0.1, 0.03],
+    });
+  };
+  const addPylonAnchorPair = (
+    xOffset: number,
+    yOffset: number,
+    zOffset: number
+  ): void => {
+    addMeshPart(group, new THREE.BoxGeometry(0.16, 0.1, 0.3), materials.accent, [-xOffset, yOffset, zOffset], {
+      rotation: [0.04, 0.08, 0],
+    });
+    addMeshPart(group, new THREE.BoxGeometry(0.16, 0.1, 0.3), materials.accent, [xOffset, yOffset, zOffset], {
+      rotation: [0.04, -0.08, 0],
+    });
+  };
+  const addTailRootSaddle = (): void => {
+    addMeshPart(group, new THREE.BoxGeometry(0.16, 0.12, 0.34), materials.detail, [0, jetProfile.tailRootY + 0.02, jetProfile.tailRootZ], {
+      rotation: [0.04, 0, 0.05],
+    });
+    addMeshPart(group, new THREE.BoxGeometry(0.22, 0.09, 0.26), materials.accent, [0, jetProfile.tailRootY + 0.03, jetProfile.tailRootZ], {
+      rotation: [0.04, 0, -0.06],
     });
   };
   const applyUnifiedJetProportionLayer = (): void => {
@@ -2169,6 +2218,10 @@ export function createEnemyMesh(config: EnemyConfig): THREE.Group {
       rotation: [0, -0.1, 0],
     });
   }
+  addFuselageSectionBreaks();
+  addWingRootTransitionPair(jetProfile.pylonX, jetProfile.pylonY - 0.03, jetProfile.pylonZ + 0.04);
+  addPylonAnchorPair(jetProfile.pylonX, jetProfile.pylonY - 0.06, jetProfile.pylonZ + 0.08);
+  addTailRootSaddle();
 
   group.name = config.type;
   return group;

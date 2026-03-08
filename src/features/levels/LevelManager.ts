@@ -472,6 +472,7 @@ export class LevelManager {
     const aliveInWave = this.enemies.filter((enemy) => enemy.isAlive()).length;
     const remainingSpawn = Math.max(0, maxEnemies - this.enemiesSpawnedThisWave);
 
+    const nextWaveDelaySeconds = Number(this.waveDelayTimer.toFixed(1));
     return {
       wave: this.currentWave,
       maxEnemies,
@@ -480,7 +481,7 @@ export class LevelManager {
       remainingInWave: aliveInWave + remainingSpawn,
       eventType: this.currentWaveEvent,
       state: this.state,
-      nextWaveDelaySeconds: Math.max(0, this.waveDelayTimer),
+      nextWaveDelaySeconds: Math.max(0, nextWaveDelaySeconds),
     };
   }
 

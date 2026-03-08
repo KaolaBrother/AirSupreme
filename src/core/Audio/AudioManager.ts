@@ -15,6 +15,11 @@ export enum SoundType {
   SHOOT = 'SHOOT',
   EXPLOSION = 'EXPLOSION',
   HIT = 'HIT',
+  BULLET_HIT = 'BULLET_HIT',
+  MISSILE_HIT = 'MISSILE_HIT',
+  HEAVY_WEAPON_HIT = 'HEAVY_WEAPON_HIT',
+  FLAK_HIT = 'FLAK_HIT',
+  ENVIRONMENT_HIT = 'ENVIRONMENT_HIT',
   POWERUP = 'POWERUP',
   LEVEL_UP = 'LEVEL_UP',
   WAVE_START = 'WAVE_START',
@@ -33,6 +38,9 @@ export enum SoundType {
   LOW_HEALTH = 'LOW_HEALTH',
   BOSS_EXPLOSION = 'BOSS_EXPLOSION',
 }
+
+type HitProfile = 'player' | 'enemy' | 'boss' | 'environment';
+type HitTone = 'bullet' | 'missile' | 'heavy' | 'flak' | 'environment';
 
 interface SoundPolicy {
   minIntervalMs: number;
@@ -67,12 +75,38 @@ export class AudioManager {
   private activeSoundCounts: Map<SoundType, number> = new Map();
   private lastSoundPlayTimes: Map<SoundType, number> = new Map();
   private soundReleaseTimeouts: Set<number> = new Set();
+  private readonly sfxBusBalanceBoost = 0.78;
 
   // 音量设置
   private masterVolumeValue: number = 0.5;
   private sfxVolume: number = 0.7;
   private musicVolumeValue: number = 0.7;
   private readonly soundPolicies: Partial<Record<SoundType, SoundPolicy>> = {
+    [SoundType.BULLET_HIT]: { minIntervalMs: 20, maxConcurrent: 8, duckAmount: 0.06, duckDurationMs: 90 },
+    [SoundType.MISSILE_HIT]: {
+      minIntervalMs: 65,
+      maxConcurrent: 4,
+      duckAmount: 0.12,
+      duckDurationMs: 180,
+    },
+    [SoundType.HEAVY_WEAPON_HIT]: {
+      minIntervalMs: 80,
+      maxConcurrent: 3,
+      duckAmount: 0.16,
+      duckDurationMs: 240,
+    },
+    [SoundType.FLAK_HIT]: {
+      minIntervalMs: 90,
+      maxConcurrent: 2,
+      duckAmount: 0.18,
+      duckDurationMs: 240,
+    },
+    [SoundType.ENVIRONMENT_HIT]: {
+      minIntervalMs: 40,
+      maxConcurrent: 6,
+      duckAmount: 0.08,
+      duckDurationMs: 140,
+    },
     [SoundType.SHOOT]: { minIntervalMs: 35, maxConcurrent: 5 },
     [SoundType.HIT]: { minIntervalMs: 25, maxConcurrent: 6, duckAmount: 0.08, duckDurationMs: 120 },
     [SoundType.EXPLOSION]: {
@@ -207,6 +241,44 @@ export class AudioManager {
     return this.musicGain;
   }
 
+  private getSfxBusScale(soundType: SoundType): number {
+    const policy = this.soundPolicies[soundType];
+    const profileScale = (() => {
+      switch (soundType) {
+        case SoundType.BULLET_HIT:
+          return 0.82;
+        case SoundType.MISSILE_HIT:
+          return 0.7;
+        case SoundType.HEAVY_WEAPON_HIT:
+          return 0.76;
+        case SoundType.FLAK_HIT:
+          return 0.74;
+        case SoundType.ENVIRONMENT_HIT:
+          return 0.62;
+        case SoundType.BOSS_EXPLOSION:
+          return 0.68;
+        case SoundType.MISSILE_EXPLOSION:
+          return 0.72;
+        case SoundType.FLAK_EXPLOSION:
+          return 0.7;
+        case SoundType.EXPLOSION:
+          return 0.74;
+        case SoundType.HIT:
+          return 0.8;
+        case SoundType.FLAK_FIRE:
+        case SoundType.MISSILE_FIRE:
+          return 0.66;
+        default:
+          return 0.82;
+      }
+    })();
+
+    const musicPressure = clamp01(this.musicVolumeValue);
+    const duckCompensation = clamp01(1 - (policy?.duckAmount ?? 0) * 0.4);
+    const musicCompensation = 1 - musicPressure * 0.18;
+    return clamp01(profileScale * duckCompensation * musicCompensation * this.sfxBusBalanceBoost);
+  }
+
   private beginSound(
     soundType: SoundType,
     durationMs: number
@@ -243,10 +315,14 @@ export class AudioManager {
       musicDuckingBridge.request(policy.duckAmount, policy.duckDurationMs);
     }
 
+    const soundBus = this.context.createGain();
+    soundBus.gain.value = this.getSfxBusScale(soundType);
+    soundBus.connect(this.sfxGain);
+
     return {
       now: this.context.currentTime,
       context: this.context,
-      sfxGain: this.sfxGain,
+      sfxGain: soundBus,
     };
   }
 
@@ -695,8 +771,28 @@ export class AudioManager {
   /**
    * 播放击中音效
    */
-  public playHit(intensity: number = 1, profile: 'player' | 'enemy' | 'boss' = 'player'): void {
-    const sound = this.beginSound(SoundType.HIT, 100);
+  private getHitSoundType(profile: HitProfile, hitTone: HitTone): SoundType {
+    if (profile === 'environment') {
+      return SoundType.ENVIRONMENT_HIT;
+    }
+    if (hitTone === 'missile') {
+      return SoundType.MISSILE_HIT;
+    }
+    if (hitTone === 'flak') {
+      return SoundType.FLAK_HIT;
+    }
+    if (hitTone === 'heavy') {
+      return SoundType.HEAVY_WEAPON_HIT;
+    }
+    return SoundType.BULLET_HIT;
+  }
+
+  public playHit(
+    intensity: number = 1,
+    profile: HitProfile = 'player',
+    hitTone: HitTone = 'bullet'
+  ): void {
+    const sound = this.beginSound(this.getHitSoundType(profile, hitTone), 100);
     if (!sound) return;
     const { now, context, sfxGain } = sound;
     const hitIntensity = Math.max(0.7, Math.min(2.2, intensity));
@@ -755,12 +851,19 @@ export class AudioManager {
   ): void {
     const durationMs =
       profile === 'laser' ? 180 : profile === 'flak-hit' ? 240 : profile === 'boss-armor' ? 210 : 220;
-    const sound = this.beginSound(SoundType.HIT, durationMs);
+    const isFlak = profile === 'flak-hit';
+    const sound = this.beginSound(
+      isFlak
+        ? SoundType.FLAK_HIT
+        : profile === 'boss-armor'
+          ? SoundType.HEAVY_WEAPON_HIT
+          : SoundType.BULLET_HIT,
+      durationMs
+    );
     if (!sound) return;
     const { now, context, sfxGain } = sound;
     const hitIntensity = Math.max(0.8, Math.min(2.4, intensity));
     const isLaser = profile === 'laser';
-    const isFlak = profile === 'flak-hit';
     const isArmor = profile === 'boss-armor';
     const isCannon = profile === 'boss-cannon';
     const profileGain = isLaser ? 0.92 : isFlak ? 0.98 : isArmor ? 0.9 : 0.96;
@@ -855,7 +958,8 @@ export class AudioManager {
         (isLaser ? 0.08 : isArmor ? 0.12 : 0.16)
           * this.sfxVolume
           * Math.min(2, hitIntensity)
-          * profileGain,
+          * profileGain
+          * (isFlak ? 1.06 : 1),
         isLaser ? 'bandpass' : 'highpass',
         isLaser ? 2200 : isArmor ? 1700 : isCannon ? 1220 : 1350,
         isLaser ? 1.15 : isArmor ? 1.05 : isCannon ? 0.9 : 0.95
@@ -877,7 +981,7 @@ export class AudioManager {
   }
 
   public playWaterImpact(intensity: number = 1): void {
-    const sound = this.beginSound(SoundType.HIT, 90);
+    const sound = this.beginSound(SoundType.ENVIRONMENT_HIT, 90);
     if (!sound) return;
     const { now, context, sfxGain } = sound;
     const splashIntensity = Math.max(0.7, Math.min(1.8, intensity));
@@ -923,7 +1027,7 @@ export class AudioManager {
           900,
           0.9
         );
-        this.playHit(Math.max(0.72, intensity * 0.9));
+        this.playHit(Math.max(0.72, intensity * 0.9), 'environment', 'environment');
         return;
       case 'snow':
         this.playFilteredNoise(
@@ -935,19 +1039,19 @@ export class AudioManager {
           1.4
         );
         return;
-      case 'city':
-        this.playHit(Math.max(0.85, intensity * 1.05));
-        this.playFilteredNoise(
-          0.06,
-          0.003,
-          0.06 * this.sfxVolume * Math.min(1.8, intensity),
-          'highpass',
-          2600,
-          1.2
-        );
-        return;
-      default:
-        this.playHit(Math.max(0.8, intensity));
+    case 'city':
+      this.playHit(Math.max(0.85, intensity * 1.05), 'environment', 'environment');
+      this.playFilteredNoise(
+        0.06,
+        0.003,
+        0.06 * this.sfxVolume * Math.min(1.8, intensity),
+        'highpass',
+        2600,
+        1.2
+      );
+      return;
+    default:
+      this.playHit(Math.max(0.8, intensity), 'environment', 'environment');
     }
   }
 
@@ -1397,21 +1501,29 @@ export class AudioManager {
   /**
    * 播放导弹爆炸音效
    */
-  public playMissileExplosion(profile: 'player' | 'boss' = 'player'): void {
+  public playMissileExplosion(profile: 'player' | 'boss' | 'enemy' | 'environment' = 'player'): void {
     const sound = this.beginSound(SoundType.MISSILE_EXPLOSION, 600);
     if (!sound) return;
     const { now, context, sfxGain } = sound;
     const isBoss = profile === 'boss';
+    const isEnemy = profile === 'enemy';
+    const isEnvironment = profile === 'environment';
 
     try {
       // 导弹爆炸：更厚的低频冲击 + 更明确的金属破裂层
       const boomOsc = context.createOscillator();
       const boomGain = context.createGain();
       boomOsc.type = 'sawtooth';
-      boomOsc.frequency.setValueAtTime(isBoss ? 76 : 88, now);
-      boomOsc.frequency.exponentialRampToValueAtTime(isBoss ? 18 : 24, now + (isBoss ? 0.68 : 0.58));
+      boomOsc.frequency.setValueAtTime(isBoss ? 76 : isEnemy || isEnvironment ? 90 : 88, now);
+      boomOsc.frequency.exponentialRampToValueAtTime(
+        isBoss ? 18 : isEnemy ? 24 : 28,
+        now + (isBoss ? 0.68 : 0.58)
+      );
       boomGain.gain.setValueAtTime(0, now);
-      boomGain.gain.linearRampToValueAtTime((isBoss ? 0.56 : 0.52) * this.sfxVolume, now + 0.016);
+      boomGain.gain.linearRampToValueAtTime(
+        (isBoss ? 0.56 : isEnvironment ? 0.44 : isEnemy ? 0.5 : 0.52) * this.sfxVolume,
+        now + 0.016
+      );
       boomGain.gain.exponentialRampToValueAtTime(0.01, now + (isBoss ? 0.68 : 0.58));
       boomOsc.connect(boomGain);
       boomGain.connect(sfxGain);
@@ -1421,10 +1533,13 @@ export class AudioManager {
       const subOsc = context.createOscillator();
       const subGain = context.createGain();
       subOsc.type = 'sine';
-      subOsc.frequency.setValueAtTime(isBoss ? 52 : 62, now);
+      subOsc.frequency.setValueAtTime(isBoss ? 52 : isEnvironment ? 58 : 62, now);
       subOsc.frequency.exponentialRampToValueAtTime(isBoss ? 18 : 24, now + (isBoss ? 0.6 : 0.5));
       subGain.gain.setValueAtTime(0, now);
-      subGain.gain.linearRampToValueAtTime((isBoss ? 0.23 : 0.19) * this.sfxVolume, now + 0.022);
+      subGain.gain.linearRampToValueAtTime(
+        (isBoss ? 0.23 : isEnvironment ? 0.15 : isEnemy ? 0.2 : 0.19) * this.sfxVolume,
+        now + 0.022
+      );
       subGain.gain.exponentialRampToValueAtTime(0.01, now + (isBoss ? 0.6 : 0.5));
       subOsc.connect(subGain);
       subGain.connect(sfxGain);

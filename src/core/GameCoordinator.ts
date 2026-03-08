@@ -103,7 +103,7 @@ export class GameCoordinator {
   private static readonly TUTORIAL_FRIENDLY_SPAWN_DELAY_MS = 5200;
   private static readonly TUTORIAL_MOVE_DISTANCE = 90;
   private static readonly TUTORIAL_SPEED_THRESHOLD_RATIO = 0.72;
-  private static readonly OBJECTIVE_COMPLETE_HOLD_MS = 2200;
+  private static readonly OBJECTIVE_COMPLETE_HOLD_MS = 1700;
   private static readonly ESCORT_WAVE_SCORE_BONUS = 180;
   private static readonly UPGRADE_FEEDBACK: Record<UpgradeType, { icon: string; label: string }> = {
     [UpgradeType.MAX_HEALTH]: { icon: '❤️', label: '最大生命值升级' },
@@ -953,7 +953,7 @@ export class GameCoordinator {
 
     return {
       title: '试玩引导 · 击落首个目标',
-      objective: '优先击落正前方高威胁目标，完成首杀进入常规节奏。',
+      objective: '优先击落正前方高威胁目标，先打穿护航压力再进入常规节奏。',
       status: `步骤 5/5 · 已完成 ${completedSteps}/5`,
     };
   }
@@ -979,19 +979,19 @@ export class GameCoordinator {
           title: `第 ${waveNumber} 波 · 精英歼灭`,
           objective:
             eliteAlive > 0
-              ? '优先清理精英目标，压缩高威胁火力窗。'
-              : '精英目标已清空，继续扫除尾敌并稳住空域。',
+              ? '优先打穿重型/王牌目标，压缩高威胁窗口。'
+              : '高威胁主力已清空，继续打穿波次尾场。',
           status:
             eliteAlive > 0
-              ? `阶段状态：精英压制中 · 精英 ${eliteAlive} 架 · 已出现 ${spawnedEnemies}/${totalEnemies} · 当前 ${aliveInWave} 架`
-              : `阶段状态：收尾清场 · 精英已清空 · 当前剩余 ${remainingEnemies} 架`,
+              ? `阶段状态：高威胁优先压制 · 精英 ${eliteAlive} 架 · 已出现 ${spawnedEnemies}/${totalEnemies} · 当前 ${aliveInWave} 架`
+              : `阶段状态：尾场清空 · 重点已打穿 · 当前剩余 ${remainingEnemies} 架`,
         };
       }
       case LevelWaveEventType.INTERCEPT:
         return {
           title: `第 ${waveNumber} 波 · 限时拦截`,
-          objective: '敌方前锋正在突防，保持正面拦截并优先击落高速机。',
-          status: `阶段状态：前锋拦截中 · 已出现 ${spawnedEnemies}/${totalEnemies} 架 · 空域剩余 ${remainingEnemies} 架`,
+          objective: '优先拦截突防编队，高速目标优先，维持前压制。',
+          status: `阶段状态：拦截中 · 已出现 ${spawnedEnemies}/${totalEnemies} 架 · 空域剩余 ${remainingEnemies} 架`,
         };
       case LevelWaveEventType.ESCORT_DEFENSE: {
         const escortAlive = (this.enemySystem?.getFriendlyAIs() ?? []).some(
@@ -1002,9 +1002,9 @@ export class GameCoordinator {
         return {
           title: `第 ${waveNumber} 波 · 护送防守`,
           objective: escortAlive
-            ? '掩护友军生存并持续压制来袭敌机。'
-            : '友军已失联，继续清空波次避免局势失控。',
-          status: `阶段状态：${escortAlive ? '护送进行中' : '护送失利后清场'} · 剩余 ${remainingEnemies} 架`,
+            ? '优先防御友军，优先打穿护航波次的高威胁点。'
+            : '优先防守已失效，打穿护航波次残余威胁后稳住空域。',
+          status: `阶段状态：${escortAlive ? '护送防御优先' : '护送失守后清场'} · 剩余 ${remainingEnemies} 架`,
         };
       }
       default:
@@ -1495,7 +1495,7 @@ export class GameCoordinator {
     }
 
     this.tutorialCombatState.friendlySupportHintShown = true;
-    this.hud.showPowerUpBig('🤝', '友军已入场，优先协同清理高威胁目标', 1.8);
+    this.hud.showPowerUpBig('🤝', '友军已入场，优先防御友军并打穿高威胁压制点', 1.8);
     this.updatePlayerFacingObjective();
   }
 
@@ -1573,7 +1573,7 @@ export class GameCoordinator {
         completionObjective = {
           title: `第 ${wave + 1} 波 · 精英歼灭完成`,
           objective: '高威胁目标已清空，当前空域压力已经下降。',
-          status: '阶段结果：精英机群歼灭 · 目标卡短暂停留',
+          status: '阶段结果：高威胁已打穿 · 目标卡短暂停留',
         };
         break;
       case LevelWaveEventType.INTERCEPT:
@@ -1581,7 +1581,7 @@ export class GameCoordinator {
         completionObjective = {
           title: `第 ${wave + 1} 波 · 拦截完成`,
           objective: '前锋突防已被压制，准备接续下一轮接敌。',
-          status: '阶段结果：前锋编队击退 · 目标卡短暂停留',
+          status: '阶段结果：拦截节奏压断 · 目标卡短暂停留',
         };
         break;
       case LevelWaveEventType.ESCORT_DEFENSE: {
@@ -1589,12 +1589,12 @@ export class GameCoordinator {
         completionObjective = escortSuccess
           ? {
               title: `第 ${wave + 1} 波 · 护送完成`,
-              objective: '友军成功生还，额外护送奖励已经发放。',
-              status: '阶段结果：护送成功 · 目标卡短暂停留',
+              objective: '友军已防住关键节点，护航波次压力已被打穿。',
+              status: '阶段结果：护送防御达成 · 目标卡短暂停留',
             }
           : {
               title: `第 ${wave + 1} 波 · 护送结束`,
-              objective: '友军未能生还，继续稳住空域压制节奏。',
+              objective: '护送线受损，优先清理残余高威胁目标稳定空域。',
               status: '阶段结果：护送失利 · 目标卡短暂停留',
             };
         break;
@@ -1638,20 +1638,20 @@ export class GameCoordinator {
       case LevelWaveEventType.ELITE_HUNT:
         return {
           title: `第 ${waveNumber} 波 · 精英歼灭`,
-          objective: '优先清理重型与王牌目标，快速压制空域',
-          status: '高威胁目标优先',
+          objective: '优先打穿重型与王牌主力，快速切断空域高威胁线。',
+          status: '优先目标：重型/王牌优先',
         };
       case LevelWaveEventType.INTERCEPT:
         return {
           title: `第 ${waveNumber} 波 · 限时拦截`,
-          objective: '高速目标正在突防，优先击落前锋编队',
-          status: '前锋编队高速接近',
+          objective: '优先拦截突防高速编队，优先防线前压。',
+          status: '前锋拦截优先',
         };
       case LevelWaveEventType.ESCORT_DEFENSE:
         return {
           title: `第 ${waveNumber} 波 · 护送防守`,
-          objective: '掩护友军生存至波次结束，可获得额外奖励',
-          status: '友军存活即可获得加分',
+          objective: '优先防御友军，优先打穿护航波次关键袭扰。',
+          status: '友军防护优先级：最高',
         };
       default:
         return {
