@@ -15,6 +15,12 @@ interface TargetInfo {
 }
 
 type EnvironmentProjectileSource = 'player' | 'enemy' | 'boss';
+export type ProjectileHitSource =
+  | 'player-bullet'
+  | 'friendly-bullet'
+  | 'enemy-bullet'
+  | 'boss-projectile'
+  | 'missile';
 
 export class CombatSystem implements IGameSystem {
   readonly name = 'CombatSystem';
@@ -122,9 +128,9 @@ export class CombatSystem implements IGameSystem {
   checkProjectileCollisions(
     enemyMeshes: Object3D[],
     friendlyMeshes: Object3D[],
-    onEnemyHit: (target: Object3D, damage: number) => void,
-    onPlayerHit: (damage: number) => void,
-    onFriendlyHit: (target: Object3D, damage: number) => void
+    onEnemyHit: (target: Object3D, damage: number, source: ProjectileHitSource) => void,
+    onPlayerHit: (damage: number, source: ProjectileHitSource) => void,
+    onFriendlyHit: (target: Object3D, damage: number, source: ProjectileHitSource) => void
   ): void {
     const targets: TargetInfo[] = [
       { mesh: this.playerMesh, faction: Faction.NEUTRAL },
@@ -133,11 +139,11 @@ export class CombatSystem implements IGameSystem {
     ];
 
     this.playerProjectilePool.checkCollisions(enemyMeshes, (target, _projectileMesh, damage) => {
-      onEnemyHit(target, damage);
+      onEnemyHit(target, damage, 'player-bullet');
     });
 
     this.missileSystem.checkCollisions(enemyMeshes, (target, impactPosition) => {
-      onEnemyHit(target, 50 * this.damageMultiplier);
+      onEnemyHit(target, 50 * this.damageMultiplier, 'missile');
       EventBus.emit(GameEventType.MISSILE_HIT, {
         position: impactPosition,
         target,
@@ -155,12 +161,14 @@ export class CombatSystem implements IGameSystem {
         if (!target) return;
 
         if (areHostile(projectileFaction, target.faction)) {
+          const source: ProjectileHitSource =
+            projectileFaction === Faction.FRIENDLY ? 'friendly-bullet' : 'enemy-bullet';
           if (target.faction === Faction.NEUTRAL) {
-            onPlayerHit(damage);
+            onPlayerHit(damage, source);
           } else if (target.faction === Faction.ENEMY) {
-            onEnemyHit(target.mesh, damage);
+            onEnemyHit(target.mesh, damage, source);
           } else if (target.faction === Faction.FRIENDLY) {
-            onFriendlyHit(target.mesh, damage);
+            onFriendlyHit(target.mesh, damage, source);
           }
         }
       }
@@ -177,12 +185,13 @@ export class CombatSystem implements IGameSystem {
         if (!target) return;
 
         if (areHostile(projectileFaction, target.faction)) {
+          const source: ProjectileHitSource = 'boss-projectile';
           if (target.faction === Faction.NEUTRAL) {
-            onPlayerHit(damage);
+            onPlayerHit(damage, source);
           } else if (target.faction === Faction.ENEMY) {
-            onEnemyHit(target.mesh, damage);
+            onEnemyHit(target.mesh, damage, source);
           } else if (target.faction === Faction.FRIENDLY) {
-            onFriendlyHit(target.mesh, damage);
+            onFriendlyHit(target.mesh, damage, source);
           }
         }
       }

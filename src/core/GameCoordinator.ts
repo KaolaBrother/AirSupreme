@@ -4,7 +4,7 @@ import { GameScene } from '@/scenes/GameScene';
 import { GameState } from '@/core/GameState';
 import { EventBus, GameEventType } from '@/core/EventBus';
 import { PlayerSystem } from '@/core/systems/PlayerSystem';
-import type { CombatSystem } from '@/core/systems/CombatSystem';
+import type { CombatSystem, ProjectileHitSource } from '@/core/systems/CombatSystem';
 import type { EnemySystem } from '@/core/systems/EnemySystem';
 import type { PowerUpSystem } from '@/core/systems/PowerUpSystem';
 import { InputHandler } from '@/core/Input/InputHandler';
@@ -694,18 +694,19 @@ export class GameCoordinator {
     this.combatSystem?.checkProjectileCollisions(
       enemyMeshes,
       friendlyMeshes,
-      (target, damage) => {
-        this.createCombatHitFeedback(target, damage, 'player', 1);
+      (target, damage, source) => {
+        this.createCombatHitFeedback(target, damage, source);
         const enemy = this.enemySystem?.getEnemies().find((e) => e.getMesh() === target);
         enemy?.takeDamage(damage);
       },
-      (damage) => {
+      (damage, source) => {
         if (!this.playerSystem.isShieldActive()) {
-          this.playerSystem.takeCombatDamage(damage);
+          this.createCombatHitFeedback(this.playerAircraft, damage, source);
+          this.playerSystem.takeCombatDamage(damage, { suppressDefaultFeedback: true });
         }
       },
-      (target, damage) => {
-        this.createCombatHitFeedback(target, damage, 'enemy', 0.92);
+      (target, damage, source) => {
+        this.createCombatHitFeedback(target, damage, source);
         const friendly = this.enemySystem?.getFriendlyAIs().find((f) => f.getMesh() === target);
         friendly?.takeDamage(damage);
       }
@@ -1965,14 +1966,53 @@ export class GameCoordinator {
   private createCombatHitFeedback(
     target: THREE.Object3D,
     damage: number,
-    profile: 'player' | 'enemy' | 'boss' = 'player',
-    intensityMultiplier: number = 1
+    source: ProjectileHitSource = 'player-bullet'
   ): void {
     const hitPosition = new THREE.Vector3();
     target.getWorldPosition(hitPosition);
-    const hitIntensity = THREE.MathUtils.clamp((damage / 16) * intensityMultiplier, 0.82, 1.9);
-    this.audioManager.playHit(hitIntensity, profile);
+    const { profile, hitTone, intensityMultiplier } = this.resolveProjectileHitFeedback(source);
+    const hitIntensity = THREE.MathUtils.clamp((damage / 16) * intensityMultiplier, 0.82, 1.95);
+    this.audioManager.playHit(hitIntensity, profile, hitTone);
     this.particleSystem?.createHit(hitPosition, hitIntensity, profile);
+  }
+
+  private resolveProjectileHitFeedback(source: ProjectileHitSource): {
+    profile: 'player' | 'enemy' | 'boss';
+    hitTone: 'bullet' | 'missile' | 'heavy';
+    intensityMultiplier: number;
+  } {
+    switch (source) {
+      case 'friendly-bullet':
+        return {
+          profile: 'player',
+          hitTone: 'bullet',
+          intensityMultiplier: 0.94,
+        };
+      case 'enemy-bullet':
+        return {
+          profile: 'enemy',
+          hitTone: 'bullet',
+          intensityMultiplier: 0.92,
+        };
+      case 'boss-projectile':
+        return {
+          profile: 'boss',
+          hitTone: 'heavy',
+          intensityMultiplier: 1.08,
+        };
+      case 'missile':
+        return {
+          profile: 'player',
+          hitTone: 'missile',
+          intensityMultiplier: 1.18,
+        };
+      default:
+        return {
+          profile: 'player',
+          hitTone: 'bullet',
+          intensityMultiplier: 1,
+        };
+    }
   }
 
   private startLevelBossBattle(): void {

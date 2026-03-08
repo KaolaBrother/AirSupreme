@@ -95,9 +95,11 @@
   - [done] 玩家机炮 / 敌机炮弹 / Boss 重武器命中 profile 已继续拉开一轮
   - [done] 玩家 / 敌机 / 友军 / Boss 弹丸飞行 profile 第三轮已完成
   - [done] Boss 命中玩家的通用 `PLAYER_HIT` 双重反馈已去重
+  - [done] 普通弹道碰撞链路 `source/tone` 透传已完成
   - 交接：
     - 飞行轮廓收口：`ProjectilePool.ts` / `BossProjectilePool.ts`
     - 玩家受击反馈去重：`PlayerSystem.ts` / `GameCoordinator.ts` / `BossBattleController.ts` / `EventBus.ts`
+    - 普通命中路由透传：`CombatSystem.ts` / `GameCoordinator.ts`
 - `Batch C - 运行时边界与包体积`
   - [done] `EnemyHealthBars`、`LockOnIndicator`、`BossMissileIndicator` 已改成战斗期惰性挂载
   - [done] StartMenu 阶段不再提前创建这些战斗 DOM
@@ -271,6 +273,9 @@
 - [done] Boss 命中玩家反馈链路去重已完成
   - Boss 专用重武器命中已不再叠加通用 `PLAYER_HIT` 的默认音画层
   - HUD 受击闪与教程受击统计仍保留在统一事件链上
+- [done] 普通弹道命中 `source/tone` 透传已完成
+  - `CombatSystem -> GameCoordinator` 已按 `player / friendly / enemy / boss / missile` 来源显式映射命中 profile / tone
+  - 普通敌弹命中玩家已不再退回未分流的默认 hit 路由
 - [done] 环境命中反馈第一批已接入
   - 普通子弹与 Boss 炮弹撞地时会触发地面火花/尘土反馈
   - 湖区与海洋关已接入水花反馈
@@ -348,6 +353,8 @@
 - [done] 玩家受击默认命中音画已支持按来源抑制
   - 普通敌弹仍走通用 `PLAYER_HIT`
   - Boss 专用命中已可只保留专用重武器反馈，不再叠通用层
+- [done] 普通弹道命中音色路由已补齐 `source/tone` 透传
+  - 玩家机炮、友军弹、敌弹、Boss 炮弹与导弹命中已可按来源映射到更贴近的命中音色
 - [done] Boss 主炮音色已从玩家机炮音色中分家
 - [done] 八爪鱼 Boss 的瞬移 / 激光预警 / 激光扫射已补齐专属音效触发
 - [done] 玩家 / 敌机 / 友军爆炸音色已从通用爆炸中分家
