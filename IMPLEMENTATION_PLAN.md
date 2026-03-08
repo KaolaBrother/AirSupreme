@@ -93,6 +93,7 @@
 - `Batch C - 运行时边界与包体积`
   - [done] `EnemyHealthBars`、`LockOnIndicator`、`BossMissileIndicator` 已改成战斗期惰性挂载
   - [done] StartMenu 阶段不再提前创建这些战斗 DOM
+  - [done] 菜单空闲预热已继续下沉到深层战斗模块、升级菜单与地形模块
 
 ### 本轮交付门槛
 - `npx tsc --noEmit`
@@ -172,6 +173,7 @@
   - 已补强翼根过渡、机腹结构、挂载节点与尾喷机械感
   - 已继续补强内外侧挂点层级、机腹梁/吊舱语义与尾喷外圈机械感
   - 已补强腹鳍、挂点支架、腹部龙骨与尾翼根部过渡
+  - 已补强各型敌机进气口唇边、进气腔体周边与尾翼根部整流过渡
   - 下一轮继续收口挂载和机腹语义，避免只靠配色区分
 - [next] 飞机模型视觉终版第二批继续收口
   - 玩家机状态表现件继续收口
@@ -289,6 +291,8 @@
   - 机炮已加入微随机，减少连发重复感
   - 导弹发射已加入更明确的点火前导
   - 通用爆炸和导弹爆炸尾部差异继续拉开
+- [done] Boss 主炮音色已从玩家机炮音色中分家
+- [done] 八爪鱼 Boss 的瞬移 / 激光预警 / 激光扫射已补齐专属音效触发
 - [done] 玩家 / 敌机 / 友军开火音色已拆分
 - [done] 玩家受击闭环已补强
   - 已加入 HUD 受击闪、受击强度驱动的命中特效与音效强度
@@ -382,6 +386,9 @@
 - [done] `BossBattleController` 已延后到首次进入 Boss 流程时才动态导入
 - [done] 菜单空闲时已接入 `GameCoordinator` chunk 预取
 - [done] 菜单空闲预取已通过构建和全量测试验证
+- [done] 菜单空闲预热已继续覆盖深层战斗运行时
+  - `ParticleSystem` / `CombatSystem` / `PowerUpSystem` / `EnemySystem` / `BossBattleController`
+  - `UpgradeMenu` / `TerrainGenerator`
 - [done] 战斗 UI 指示器已改成惰性挂载
   - `EnemyHealthBars`、`LockOnIndicator`、`BossMissileIndicator` 仅在进入战斗后初始化 DOM 和相关监听
 - [later] 继续隔离非首屏 Three 依赖和高画质附加路径

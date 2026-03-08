@@ -95,6 +95,7 @@ export class GameCoordinator {
     [UpgradeType.MISSILE_RELOAD_TIME]: { icon: '🚀', label: '导弹装填升级' },
     [UpgradeType.MISSILE_LOCK_TIME]: { icon: '🎯', label: '导弹锁定升级' },
   };
+  private static runtimeWarmupPromise: Promise<void> | null = null;
 
   private gameLoop: GameLoop;
   private gameScene: GameScene;
@@ -165,6 +166,22 @@ export class GameCoordinator {
   };
   private lowHealthWarningTimer: number = 0;
   private lastRenderTimestamp: number = 0;
+
+  public static warmRuntimeChunks(): Promise<void> {
+    if (!this.runtimeWarmupPromise) {
+      this.runtimeWarmupPromise = Promise.all([
+        import('@/features/effects/ParticleSystem'),
+        import('@/core/systems/CombatSystem'),
+        import('@/core/systems/PowerUpSystem'),
+        import('@/core/systems/EnemySystem'),
+        import('@/core/BossBattleController'),
+        import('@/ui/UpgradeMenu'),
+        import('@/features/terrain/TerrainGenerator'),
+      ]).then(() => undefined);
+    }
+
+    return this.runtimeWarmupPromise;
+  }
 
   constructor(options: GameCoordinatorOptions = {}) {
     const showStartMenu = options.showStartMenu ?? true;
@@ -288,8 +305,8 @@ export class GameCoordinator {
     this.resourceRegistry.addUnsubscriber(
       EventBus.on(GameEventType.PLAYER_DEATH, ({ payload }) => {
         this.audioManager.stopEngine();
-        this.audioManager.playExplosion();
-        this.particleSystem?.createExplosion(payload.position, 2);
+        this.audioManager.playExplosion('player');
+        this.particleSystem?.createExplosion(payload.position, 2, 'player');
         this.lockOnIndicator.cancelLockOn();
         this.playerAircraft.visible = false;
 
@@ -347,8 +364,8 @@ export class GameCoordinator {
         const earnedPoints = this.playerStats.addScore(payload.config.scoreValue);
         this.hud.updateUpgradePoints(this.playerStats.getUpgrades().getAvailablePoints());
         this.notifyEarnedUpgradePoints(earnedPoints);
-        this.audioManager.playExplosion();
-        this.particleSystem?.createExplosion(payload.position, payload.config.scale);
+        this.audioManager.playExplosion('enemy');
+        this.particleSystem?.createExplosion(payload.position, payload.config.scale, 'enemy');
         this.handleTutorialEnemyDeath();
 
         if (this.shouldSpawnPowerUp()) {
@@ -359,8 +376,8 @@ export class GameCoordinator {
 
     this.resourceRegistry.addUnsubscriber(
       EventBus.on(GameEventType.FRIENDLY_DEATH, ({ payload }) => {
-        this.audioManager.playExplosion();
-        this.particleSystem?.createExplosion(payload.position, 1.15);
+        this.audioManager.playExplosion('friendly');
+        this.particleSystem?.createExplosion(payload.position, 1.15, 'friendly');
         this.hud.showPowerUpBig('⚠️', '友军坠毁', 1, true);
       })
     );

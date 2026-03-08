@@ -236,7 +236,7 @@ export class BossBattleController {
       this.deps.combatSystem
         .getBossProjectilePool()
         .fire(position, direction, damage, boss.getMesh(), Faction.ENEMY);
-      this.deps.audioManager.playShoot();
+      this.deps.audioManager.playShoot('boss');
     };
     boss.onMissileFired = () => {
       this.deps.audioManager.playMissileLaunch();
@@ -310,12 +310,15 @@ export class BossBattleController {
     boss.onTeleport = (from, to) => {
       this.deps.particleSystem.createTeleportOut(from);
       this.deps.particleSystem.createTeleportIn(to);
+      this.deps.audioManager.playTeleport();
     };
     boss.onLaserWarning = () => {
       this.deps.hud.showPowerUpBig('⚠️', '激光预警！', 1, true);
+      this.deps.audioManager.playLaserWarning();
     };
     boss.onLaserSweep = () => {
       this.deps.hud.showPowerUpBig('💣', '激光扫射！', 1, true);
+      this.deps.audioManager.playLaserSweep();
     };
     boss.onLaserHit = () => {
       if (!this.deps.playerSystem.isShieldActive()) {
@@ -393,7 +396,7 @@ export class BossBattleController {
       this.deps.combatSystem
         .getBossProjectilePool()
         .fire(position, direction, damage, boss.getMesh(), Faction.ENEMY);
-      this.deps.audioManager.playShoot();
+      this.deps.audioManager.playShoot('boss');
     };
     boss.onMissileFired = () => {
       this.deps.audioManager.playMissileLaunch();
