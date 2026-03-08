@@ -25,6 +25,14 @@
 - Subagents must not edit the same file in parallel.
 - If multiple changes need the same file, serialize them and hand off explicitly.
 - Small single-file changes can stay local; medium/large work should be parallelized.
+- For each medium/large round, define a concrete parallel batch before coding:
+  - `Batch A`: visuals / models / rendering
+  - `Batch B`: combat / gameplay / feedback
+  - `Batch C`: runtime / performance / code-splitting / tests
+- Each batch should declare:
+  - owned files
+  - acceptance checks
+  - final integration by the main agent
 
 ## Commands
 ```bash

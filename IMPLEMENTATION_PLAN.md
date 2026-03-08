@@ -17,6 +17,80 @@
 - `[later]` 中期或后期处理
 - `[watch]` 已有结果，但需要持续验收或调参
 
+## 并行批次模板
+
+### 默认批次编排
+- `Batch A - 视觉/模型`
+  - 负责飞机/Boss 模型、材质、环境、美术层级
+  - 优先文件：`src/features/aircraft/*`、`src/features/boss/*`、`src/features/terrain/*`
+- `Batch B - 战斗/反馈`
+  - 负责武器、命中、导弹、爆炸、音效、玩法反馈
+  - 优先文件：`src/features/effects/*`、`src/core/Audio/*`、`src/core/BossBattleController.ts`、`src/core/GameCoordinator.ts`
+- `Batch C - 运行时/性能/结构`
+  - 负责延迟初始化、动态导入、UI 生命周期、测试补强、包体积治理
+  - 优先文件：`src/main.ts`、`src/core/*`、`src/ui/*`、`src/features/levels/*`
+
+### 执行规则
+- 每个批次必须先声明写入边界，避免子代理并行修改同一文件。
+- 主代理负责：
+  - 拆分批次
+  - 合并共享接口
+  - 更新本计划
+  - 运行最终全量验证
+- 每轮尽量一次推进 2-3 个批次，不做只修一个点的小回合，除非是紧急回归。
+
+### 下一轮复杂批次
+- `Batch A - 飞机终版收口`
+  - 目标：
+    - 敌机挂载、腹鳍、进气/翼根、尾翼根部过渡继续收口
+    - 玩家机与敌机材质语言进一步统一
+  - owned files：
+    - `src/features/aircraft/AircraftMeshFactory.ts`
+    - 需要时 `src/ui/ModelPreview.ts`
+  - 验收：
+    - 五类敌机在中近距离更像真实军机
+    - 与玩家机并列时，材质语言统一但仍保留阵营差异
+
+- `Batch B - 战斗反馈终版收口`
+  - 目标：
+    - 玩家机炮 / 敌机炮弹 / Boss 炮击继续拉开飞行与命中反馈
+    - 导弹、爆炸、环境命中继续统一到最终标准
+  - owned files：
+    - `src/features/effects/ParticleSystem.ts`
+    - `src/core/Audio/AudioManager.ts`
+    - `src/features/combat/ProjectilePool.ts`
+    - `src/features/combat/BossProjectilePool.ts`
+    - `src/core/BossBattleController.ts`
+    - `src/core/GameCoordinator.ts`
+  - 验收：
+    - 仅靠视觉/听觉就能明显分辨三类攻击
+    - 不引入新的过度发光、噪音堆叠或性能回退
+
+- `Batch C - 运行时边界与包体积`
+  - 目标：
+    - 继续后移非首屏路径
+    - 优先处理 UI 指示器与表现层运行时的延迟初始化/预取策略
+    - 继续朝 `vendor-three` 治理推进
+  - owned files：
+    - `src/main.ts`
+    - `src/core/GameCoordinator.ts`
+    - `src/core/PresentationController.ts`
+    - `src/ui/EnemyHealthBars.ts`
+    - `src/ui/LockOnIndicator.ts`
+    - `src/ui/BossMissileIndicator.ts`
+  - 验收：
+    - 菜单到战斗启动不回退
+    - 现有 UI 行为不丢失
+    - 构建结构继续改善或至少不回退
+
+### 本轮交付门槛
+- `npx tsc --noEmit`
+- `npm run lint`
+- `npm run test:run`
+- `npm run build`
+- 更新本计划状态
+- 推送当前远端分支
+
 ## 当前概览
 
 ### 已完成基线
