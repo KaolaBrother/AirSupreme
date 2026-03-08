@@ -3,6 +3,7 @@ import type { Camera } from 'three';
 
 export class BossMissileIndicator {
   private container: HTMLDivElement;
+  private initialized: boolean = false;
   private indicators: Map<
     string,
     {
@@ -28,7 +29,15 @@ export class BossMissileIndicator {
       pointer-events: none;
       z-index: 46;
     `;
+  }
+
+  public init(): void {
+    if (this.initialized) {
+      return;
+    }
+
     document.body.appendChild(this.container);
+    this.initialized = true;
   }
 
   public update(
@@ -40,6 +49,8 @@ export class BossMissileIndicator {
     }>,
     camera: Camera
   ): void {
+    this.init();
+
     const activeIds = new Set(missiles.map((m) => m.id));
 
     for (const [id, indicator] of this.indicators) {
@@ -250,6 +261,9 @@ export class BossMissileIndicator {
 
   public dispose(): void {
     this.clear();
-    this.container.remove();
+    if (this.container.parentElement) {
+      this.container.remove();
+    }
+    this.initialized = false;
   }
 }

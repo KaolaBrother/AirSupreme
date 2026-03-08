@@ -27,6 +27,7 @@ export class LockOnIndicator {
   private centerY: number = window.innerHeight / 2;
   private lockCircleSize: number = 0; // 黄色圈大小
   private resizeHandler!: () => void;
+  private initialized: boolean = false;
   private viewportWidth: number = window.innerWidth;
   private viewportHeight: number = window.innerHeight;
   private candidateRefreshTimer: number = 0;
@@ -104,10 +105,6 @@ export class LockOnIndicator {
     this.container.appendChild(this.noMissileLabel);
     this.container.appendChild(this.lockProgress);
     this.container.appendChild(this.lockCircle);
-    document.body.appendChild(this.container);
-
-    // 设置黄色圈大小
-    this.updateLockCircleSize();
 
     // 监听窗口大小变化
     this.resizeHandler = () => {
@@ -117,7 +114,17 @@ export class LockOnIndicator {
       this.centerY = this.viewportHeight / 2;
       this.updateLockCircleSize();
     };
+  }
+
+  public init(): void {
+    if (this.initialized) {
+      return;
+    }
+
+    document.body.appendChild(this.container);
+    this.updateLockCircleSize();
     window.addEventListener('resize', this.resizeHandler);
+    this.initialized = true;
   }
 
   /**
@@ -158,6 +165,7 @@ export class LockOnIndicator {
    * 开始锁定
    */
   public startLockOn(): void {
+    this.init();
     this.isLockingOn = true;
     this.lockProgressValue = 0;
     this.currentTarget = null;
@@ -191,6 +199,7 @@ export class LockOnIndicator {
    * 导弹数量为0时显示提示
    */
   public setNoMissiles(show: boolean): void {
+    this.init();
     if (show) {
       this.setStyleValue(this.container, 'display', 'block');
       this.setStyleValue(this.lockCircle, 'display', 'none');
@@ -223,6 +232,8 @@ export class LockOnIndicator {
     deltaTime: number,
     _enemyScreenPos: { x: number; y: number } | null
   ): boolean {
+    this.init();
+
     if (!this.isLockingOn) {
       return false;
     }
@@ -490,9 +501,12 @@ export class LockOnIndicator {
    * 清除
    */
   public dispose(): void {
-    window.removeEventListener('resize', this.resizeHandler);
+    if (this.initialized) {
+      window.removeEventListener('resize', this.resizeHandler);
+    }
     if (this.container.parentElement) {
       this.container.remove();
     }
+    this.initialized = false;
   }
 }

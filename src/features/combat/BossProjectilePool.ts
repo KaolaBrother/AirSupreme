@@ -1,9 +1,9 @@
 import {
+  BoxGeometry,
   Mesh,
   MeshBasicMaterial,
   Object3D,
   Scene,
-  SphereGeometry,
   Vector3,
   type Material,
 } from 'three';
@@ -20,6 +20,9 @@ interface Projectile {
   startPosition: Vector3;
   damage: number; // 伤害值
   owner?: Object3D; // 发射者，用于防止子弹立即碰撞到发射者
+  baseScale: Vector3;
+  baseOpacity: number;
+  pulseOffset: number;
 }
 
 const FORWARD = new Vector3(0, 0, 1);
@@ -32,7 +35,7 @@ export class BossProjectilePool {
   private pool: Projectile[] = [];
   private maxDistance: number;
   private scene: Scene;
-  private geometry: SphereGeometry;
+  private shellGeometry: BoxGeometry;
 
   constructor(scene: Scene) {
     this.scene = scene;
@@ -40,15 +43,16 @@ export class BossProjectilePool {
 
     const poolSize = GameConfig.getProjectilePoolSize();
 
-    this.geometry = new SphereGeometry(0.8, 12, 12);
+    this.shellGeometry = new BoxGeometry(0.34, 0.34, 1.85);
     const material = new MeshBasicMaterial({
-      color: 0xff3300,
+      color: 0xd83a20,
       transparent: true,
-      opacity: 0.9,
+      opacity: 0.94,
+      depthWrite: false,
     });
 
     for (let i = 0; i < poolSize; i++) {
-      const mesh = new Mesh(this.geometry, material.clone());
+      const mesh = new Mesh(this.shellGeometry, material.clone());
       mesh.visible = false;
       this.scene.add(mesh);
 
@@ -59,6 +63,9 @@ export class BossProjectilePool {
         active: false,
         startPosition: new Vector3(),
         damage: 10,
+        baseScale: new Vector3(1, 1, 1),
+        baseOpacity: 0.94,
+        pulseOffset: Math.random() * Math.PI * 2,
       });
     }
   }
@@ -106,6 +113,7 @@ export class BossProjectilePool {
 
       // 移动炮弹
       projectile.mesh.position.addScaledVector(projectile.direction, projectile.speed * deltaTime);
+      this.updateProjectileVisual(projectile);
 
       if (
         typeof impactHeight === 'number'
@@ -163,10 +171,27 @@ export class BossProjectilePool {
 
   private applyProjectileVisual(projectile: Projectile): void {
     const material = projectile.mesh.material as MeshBasicMaterial;
-    material.color.set(0xff542b);
-    material.opacity = 0.96;
-    projectile.mesh.scale.set(1.05, 1.05, 2.35);
+    projectile.mesh.geometry = this.shellGeometry;
+    material.color.set(0xd84528);
+    projectile.baseOpacity = 0.94;
+    projectile.baseScale.set(1.15, 1.15, 2.8);
+    material.opacity = projectile.baseOpacity;
     projectile.mesh.quaternion.setFromUnitVectors(FORWARD, projectile.direction);
+    projectile.mesh.scale.copy(projectile.baseScale);
+  }
+
+  private updateProjectileVisual(projectile: Projectile): void {
+    const material = projectile.mesh.material as MeshBasicMaterial;
+    const travel = projectile.mesh.position.distanceTo(projectile.startPosition);
+    const pulse = Math.sin(travel * 0.09 + projectile.pulseOffset) * 0.1;
+    const stretchPulse = Math.sin(travel * 0.06 + projectile.pulseOffset * 0.6) * 0.08;
+
+    material.opacity = Math.min(1, projectile.baseOpacity + pulse * 0.08);
+    projectile.mesh.scale.set(
+      projectile.baseScale.x * (1 - stretchPulse * 0.35),
+      projectile.baseScale.y * (1 - stretchPulse * 0.35),
+      projectile.baseScale.z * (1 + stretchPulse)
+    );
   }
 
   public getActiveProjectiles(): Mesh[] {
@@ -185,7 +210,7 @@ export class BossProjectilePool {
       this.scene.remove(projectile.mesh);
       (projectile.mesh.material as Material).dispose();
     }
-    this.geometry.dispose();
+    this.shellGeometry.dispose();
     this.pool = [];
   }
 }

@@ -614,11 +614,26 @@ export function createPlayerMesh(): THREE.Group {
   leftPylon.rotation.y = 0.15;
   group.add(leftPylon);
 
+  const leftPylonBrace = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.12, 0.34), detailMaterial);
+  leftPylonBrace.position.set(-1.03, -0.03, 0.42);
+  leftPylonBrace.rotation.set(0.08, 0.12, -0.12);
+  leftPylonBrace.castShadow = true;
+  group.add(leftPylonBrace);
+
   const leftInnerPylon = new THREE.Mesh(detailGeometries.hardpoint, accentMaterial);
   leftInnerPylon.position.set(-0.82, -0.06, 0.15);
   leftInnerPylon.rotation.y = 0.08;
   leftInnerPylon.castShadow = true;
   group.add(leftInnerPylon);
+
+  const leftInnerPylonBrace = new THREE.Mesh(
+    new THREE.BoxGeometry(0.06, 0.12, 0.3),
+    detailMaterial
+  );
+  leftInnerPylonBrace.position.set(-0.73, -0.01, 0.08);
+  leftInnerPylonBrace.rotation.set(0.06, 0.08, -0.1);
+  leftInnerPylonBrace.castShadow = true;
+  group.add(leftInnerPylonBrace);
 
   const leftWeaponPod = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.13, 0.62), weaponMaterial);
   leftWeaponPod.position.set(-1.05, -0.16, 0.58);
@@ -632,11 +647,26 @@ export function createPlayerMesh(): THREE.Group {
   rightPylon.rotation.y = -0.15;
   group.add(rightPylon);
 
+  const rightPylonBrace = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.12, 0.34), detailMaterial);
+  rightPylonBrace.position.set(1.03, -0.03, 0.42);
+  rightPylonBrace.rotation.set(0.08, -0.12, 0.12);
+  rightPylonBrace.castShadow = true;
+  group.add(rightPylonBrace);
+
   const rightInnerPylon = new THREE.Mesh(detailGeometries.hardpoint, accentMaterial);
   rightInnerPylon.position.set(0.82, -0.06, 0.15);
   rightInnerPylon.rotation.y = -0.08;
   rightInnerPylon.castShadow = true;
   group.add(rightInnerPylon);
+
+  const rightInnerPylonBrace = new THREE.Mesh(
+    new THREE.BoxGeometry(0.06, 0.12, 0.3),
+    detailMaterial
+  );
+  rightInnerPylonBrace.position.set(0.73, -0.01, 0.08);
+  rightInnerPylonBrace.rotation.set(0.06, -0.08, 0.1);
+  rightInnerPylonBrace.castShadow = true;
+  group.add(rightInnerPylonBrace);
 
   const rightWeaponPod = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.13, 0.62), weaponMaterial);
   rightWeaponPod.position.set(1.05, -0.16, 0.58);
@@ -675,6 +705,11 @@ export function createPlayerMesh(): THREE.Group {
   centerlineModule.position.set(0, -0.16, 0.42);
   centerlineModule.castShadow = true;
   group.add(centerlineModule);
+
+  const centerlineKeel = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.22, 0.94), accentMaterial);
+  centerlineKeel.position.set(0, -0.28, 0.3);
+  centerlineKeel.castShadow = true;
+  group.add(centerlineKeel);
 
   const leftOuterRail = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 0.52), accentMaterial);
   leftOuterRail.position.set(-1.78, -0.06, -0.12);
@@ -751,6 +786,18 @@ export function createPlayerMesh(): THREE.Group {
   dorsalCoolingFairing.position.set(0, 0.3, 0.72);
   dorsalCoolingFairing.castShadow = true;
   group.add(dorsalCoolingFairing);
+
+  const leftTailRootFairing = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.16, 0.6), heroPanelMaterial);
+  leftTailRootFairing.position.set(-0.42, 0.18, 1.28);
+  leftTailRootFairing.rotation.y = 0.12;
+  leftTailRootFairing.castShadow = true;
+  group.add(leftTailRootFairing);
+
+  const rightTailRootFairing = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.16, 0.6), heroPanelMaterial);
+  rightTailRootFairing.position.set(0.42, 0.18, 1.28);
+  rightTailRootFairing.rotation.y = -0.12;
+  rightTailRootFairing.castShadow = true;
+  group.add(rightTailRootFairing);
 
   const leftShoulderSensor = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.08, 0.34), sensorMaterial);
   leftShoulderSensor.position.set(-0.32, 0.18, -0.94);
@@ -938,9 +985,28 @@ export function createEnemyMesh(config: EnemyConfig): THREE.Group {
     addMeshPart(group, new THREE.BoxGeometry(0.12, 0.08, 0.34), materials.accent, [wingSpan * 0.22, -0.07, -bodyLength * 0.04], {
       rotation: [0, -0.06, 0],
     });
+    addMeshPart(group, new THREE.BoxGeometry(0.08, 0.12, 0.42), materials.detail, [-wingSpan * 0.22, -0.02, -bodyLength * 0.04], {
+      rotation: [0.06, 0.04, -0.08],
+    });
+    addMeshPart(group, new THREE.BoxGeometry(0.08, 0.12, 0.42), materials.detail, [wingSpan * 0.22, -0.02, -bodyLength * 0.04], {
+      rotation: [0.06, -0.04, 0.08],
+    });
+    addMeshPart(group, new THREE.BoxGeometry(bodySize * 0.18, 0.12, 0.54), materials.accent, [-bodySize * 0.42, -bodySize * 0.04, bodyLength * 0.14], {
+      rotation: [0, 0.18, 0],
+    });
+    addMeshPart(group, new THREE.BoxGeometry(bodySize * 0.18, 0.12, 0.54), materials.accent, [bodySize * 0.42, -bodySize * 0.04, bodyLength * 0.14], {
+      rotation: [0, -0.18, 0],
+    });
     addMeshPart(group, new THREE.CylinderGeometry(bodySize * 0.15, bodySize * 0.18, 0.22, 10), materials.detail, [0, 0, -bodyLength * 0.6], {
       rotation: [-Math.PI / 2, 0, 0],
     });
+    addMeshPart(group, new THREE.BoxGeometry(0.18, 0.08, 0.4), materials.accent, [-bodySize * 0.22, -bodySize * 0.1, bodyLength * 0.26], {
+      rotation: [0.02, 0.18, 0],
+    });
+    addMeshPart(group, new THREE.BoxGeometry(0.18, 0.08, 0.4), materials.accent, [bodySize * 0.22, -bodySize * 0.1, bodyLength * 0.26], {
+      rotation: [0.02, -0.18, 0],
+    });
+    addMeshPart(group, new THREE.BoxGeometry(0.12, 0.18, 0.34), materials.detail, [0, -bodySize * 0.22, -bodyLength * 0.12]);
     addMeshPart(group, new THREE.ConeGeometry(bodySize * 0.14, 0.7, 8), materials.engine, [0, 0, -bodyLength * 0.56], {
       rotation: [-Math.PI / 2, 0, 0],
       name: 'engineGlow',
@@ -1001,6 +1067,27 @@ export function createEnemyMesh(config: EnemyConfig): THREE.Group {
     addMeshPart(group, new THREE.BoxGeometry(0.18, 0.1, 0.62), materials.accent, [wingSpan * 0.28, -0.1, 0.08], {
       rotation: [0, -0.08, 0],
     });
+    addMeshPart(group, new THREE.BoxGeometry(0.08, 0.14, 0.58), materials.detail, [-wingSpan * 0.28, -0.02, 0.08], {
+      rotation: [0.08, 0.08, -0.08],
+    });
+    addMeshPart(group, new THREE.BoxGeometry(0.08, 0.14, 0.58), materials.detail, [wingSpan * 0.28, -0.02, 0.08], {
+      rotation: [0.08, -0.08, 0.08],
+    });
+    addMeshPart(group, new THREE.BoxGeometry(bodySize * 0.22, 0.14, 0.8), materials.accent, [-bodySize * 0.5, -0.02, bodyLength * 0.12], {
+      rotation: [0, 0.2, 0],
+    });
+    addMeshPart(group, new THREE.BoxGeometry(bodySize * 0.22, 0.14, 0.8), materials.accent, [bodySize * 0.5, -0.02, bodyLength * 0.12], {
+      rotation: [0, -0.2, 0],
+    });
+    addMeshPart(group, new THREE.BoxGeometry(0.22, 0.16, 0.52), materials.detail, [-bodySize * 0.24, 0.1, -bodyLength * 0.52], {
+      rotation: [0.02, 0.1, 0.04],
+    });
+    addMeshPart(group, new THREE.BoxGeometry(0.22, 0.16, 0.52), materials.detail, [bodySize * 0.24, 0.1, -bodyLength * 0.52], {
+      rotation: [0.02, -0.1, -0.04],
+    });
+    addMeshPart(group, new THREE.BoxGeometry(0.18, 0.22, 0.66), materials.detail, [0, -bodySize * 0.22, bodyLength * 0.08], {
+      rotation: [0.04, 0, 0],
+    });
     addMeshPart(group, new THREE.CylinderGeometry(bodySize * 0.14, bodySize * 0.18, 0.18, 10), materials.detail, [-bodySize * 0.18, -0.02, -bodyLength * 0.66], {
       rotation: [-Math.PI / 2, 0, 0],
     });
@@ -1051,7 +1138,28 @@ export function createEnemyMesh(config: EnemyConfig): THREE.Group {
     addMeshPart(group, new THREE.BoxGeometry(0.16, 0.12, 0.72), weaponMaterial, [wingSpan * 0.26, -0.12, -bodyLength * 0.06], {
       rotation: [0, -0.04, 0],
     });
+    addMeshPart(group, new THREE.BoxGeometry(0.1, 0.16, 0.76), materials.detail, [-wingSpan * 0.26, -0.04, -bodyLength * 0.06], {
+      rotation: [0.08, 0.04, -0.06],
+    });
+    addMeshPart(group, new THREE.BoxGeometry(0.1, 0.16, 0.76), materials.detail, [wingSpan * 0.26, -0.04, -bodyLength * 0.06], {
+      rotation: [0.08, -0.04, 0.06],
+    });
+    addMeshPart(group, new THREE.BoxGeometry(bodySize * 0.28, 0.16, 1), materials.accent, [-bodySize * 0.66, 0.04, bodyLength * 0.02], {
+      rotation: [0, 0.16, 0],
+    });
+    addMeshPart(group, new THREE.BoxGeometry(bodySize * 0.28, 0.16, 1), materials.accent, [bodySize * 0.66, 0.04, bodyLength * 0.02], {
+      rotation: [0, -0.16, 0],
+    });
     addMeshPart(group, new THREE.BoxGeometry(bodySize * 0.24, 0.14, bodyLength * 0.36), materials.detail, [0, -bodySize * 0.28, -bodyLength * 0.12]);
+    addMeshPart(group, new THREE.BoxGeometry(0.24, 0.26, bodyLength * 0.48), materials.detail, [0, -bodySize * 0.3, 0.02], {
+      rotation: [0.04, 0, 0],
+    });
+    addMeshPart(group, new THREE.BoxGeometry(0.3, 0.18, 0.64), materials.detail, [-bodySize * 0.24, 0.12, -bodyLength * 0.5], {
+      rotation: [0.02, 0.08, 0.04],
+    });
+    addMeshPart(group, new THREE.BoxGeometry(0.3, 0.18, 0.64), materials.detail, [bodySize * 0.24, 0.12, -bodyLength * 0.5], {
+      rotation: [0.02, -0.08, -0.04],
+    });
     addMeshPart(group, new THREE.CylinderGeometry(bodySize * 0.17, bodySize * 0.2, 0.28, 10), materials.detail, [-bodySize * 0.26, 0, -bodyLength * 0.66], {
       rotation: [-Math.PI / 2, 0, 0],
     });
@@ -1113,8 +1221,29 @@ export function createEnemyMesh(config: EnemyConfig): THREE.Group {
     addMeshPart(group, new THREE.BoxGeometry(0.1, 0.08, 0.48), materials.accent, [wingSpan * 0.2, -0.08, 0.26], {
       rotation: [0, -0.04, 0],
     });
+    addMeshPart(group, new THREE.BoxGeometry(0.08, 0.14, 0.54), materials.detail, [-wingSpan * 0.2, -0.02, 0.26], {
+      rotation: [0.08, 0.04, -0.06],
+    });
+    addMeshPart(group, new THREE.BoxGeometry(0.08, 0.14, 0.54), materials.detail, [wingSpan * 0.2, -0.02, 0.26], {
+      rotation: [0.08, -0.04, 0.06],
+    });
+    addMeshPart(group, new THREE.BoxGeometry(bodySize * 0.14, 0.12, 0.72), materials.accent, [-bodySize * 0.36, -0.04, bodyLength * 0.22], {
+      rotation: [0, 0.2, 0],
+    });
+    addMeshPart(group, new THREE.BoxGeometry(bodySize * 0.14, 0.12, 0.72), materials.accent, [bodySize * 0.36, -0.04, bodyLength * 0.22], {
+      rotation: [0, -0.2, 0],
+    });
     addMeshPart(group, new THREE.CylinderGeometry(bodySize * 0.11, bodySize * 0.14, 0.22, 10), materials.detail, [0, 0, -bodyLength * 0.64], {
       rotation: [-Math.PI / 2, 0, 0],
+    });
+    addMeshPart(group, new THREE.BoxGeometry(0.14, 0.18, 0.46), materials.detail, [0, -bodySize * 0.24, -bodyLength * 0.14], {
+      rotation: [0.04, 0, 0],
+    });
+    addMeshPart(group, new THREE.BoxGeometry(0.16, 0.14, 0.5), materials.detail, [-bodySize * 0.18, 0.08, -bodyLength * 0.5], {
+      rotation: [0.02, 0.08, 0.03],
+    });
+    addMeshPart(group, new THREE.BoxGeometry(0.16, 0.14, 0.5), materials.detail, [bodySize * 0.18, 0.08, -bodyLength * 0.5], {
+      rotation: [0.02, -0.08, -0.03],
     });
     addMeshPart(group, new THREE.ConeGeometry(bodySize * 0.1, 0.7, 8), materials.engine, [0, 0, -bodyLength * 0.56], {
       rotation: [-Math.PI / 2, 0, 0],
@@ -1178,7 +1307,28 @@ export function createEnemyMesh(config: EnemyConfig): THREE.Group {
     addMeshPart(group, new THREE.BoxGeometry(0.1, 0.08, 0.38), materials.accent, [wingSpan * 0.26, -0.08, 0.04], {
       rotation: [0, -0.06, 0],
     });
+    addMeshPart(group, new THREE.BoxGeometry(0.08, 0.14, 0.46), materials.detail, [-wingSpan * 0.26, -0.02, 0.04], {
+      rotation: [0.08, 0.06, -0.06],
+    });
+    addMeshPart(group, new THREE.BoxGeometry(0.08, 0.14, 0.46), materials.detail, [wingSpan * 0.26, -0.02, 0.04], {
+      rotation: [0.08, -0.06, 0.06],
+    });
     addMeshPart(group, new THREE.BoxGeometry(0.16, 0.12, 0.54), materials.detail, [0, -bodySize * 0.18, 0.18]);
+    addMeshPart(group, new THREE.BoxGeometry(bodySize * 0.2, 0.14, 0.76), materials.accent, [-bodySize * 0.5, -0.02, bodyLength * 0.1], {
+      rotation: [0, 0.18, 0],
+    });
+    addMeshPart(group, new THREE.BoxGeometry(bodySize * 0.2, 0.14, 0.76), materials.accent, [bodySize * 0.5, -0.02, bodyLength * 0.1], {
+      rotation: [0, -0.18, 0],
+    });
+    addMeshPart(group, new THREE.BoxGeometry(0.2, 0.18, 0.6), materials.detail, [-bodySize * 0.2, 0.1, -bodyLength * 0.46], {
+      rotation: [0.02, 0.08, 0.03],
+    });
+    addMeshPart(group, new THREE.BoxGeometry(0.2, 0.18, 0.6), materials.detail, [bodySize * 0.2, 0.1, -bodyLength * 0.46], {
+      rotation: [0.02, -0.08, -0.03],
+    });
+    addMeshPart(group, new THREE.BoxGeometry(0.16, 0.22, 0.7), materials.detail, [0, -bodySize * 0.22, -bodyLength * 0.02], {
+      rotation: [0.04, 0, 0],
+    });
     addMeshPart(group, new THREE.ConeGeometry(bodySize * 0.12, 0.68, 8), materials.engine, [0, 0, -bodyLength * 0.58], {
       rotation: [-Math.PI / 2, 0, 0],
       name: 'engineGlow',

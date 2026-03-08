@@ -1,9 +1,10 @@
 import {
+  BoxGeometry,
   Mesh,
   MeshBasicMaterial,
   Object3D,
+  OctahedronGeometry,
   Scene,
-  SphereGeometry,
   Vector3,
   type Material,
 } from 'three';
@@ -20,6 +21,9 @@ interface Projectile {
   startPosition: Vector3;
   damage: number; // 伤害值
   owner?: Object3D; // 发射者，用于防止子弹立即碰撞到发射者
+  baseScale: Vector3;
+  baseOpacity: number;
+  pulseOffset: number;
 }
 
 const FORWARD = new Vector3(0, 0, 1);
@@ -32,7 +36,9 @@ export class ProjectilePool {
   private pool: Projectile[] = [];
   private maxDistance: number;
   private scene: Scene;
-  private geometry: SphereGeometry;
+  private playerGeometry: BoxGeometry;
+  private enemyGeometry: OctahedronGeometry;
+  private friendlyGeometry: BoxGeometry;
 
   constructor(scene: Scene) {
     this.scene = scene;
@@ -40,15 +46,18 @@ export class ProjectilePool {
 
     const poolSize = GameConfig.getProjectilePoolSize();
 
-    this.geometry = new SphereGeometry(0.3, 8, 8);
+    this.playerGeometry = new BoxGeometry(0.12, 0.12, 1.4);
+    this.enemyGeometry = new OctahedronGeometry(0.22, 0);
+    this.friendlyGeometry = new BoxGeometry(0.14, 0.14, 1.05);
     const material = new MeshBasicMaterial({
       color: 0xffff00,
       transparent: true,
       opacity: 0.9,
+      depthWrite: false,
     });
 
     for (let i = 0; i < poolSize; i++) {
-      const mesh = new Mesh(this.geometry, material.clone());
+      const mesh = new Mesh(this.playerGeometry, material.clone());
       mesh.visible = false;
       this.scene.add(mesh);
 
@@ -59,6 +68,9 @@ export class ProjectilePool {
         active: false,
         startPosition: new Vector3(),
         damage: 10,
+        baseScale: new Vector3(1, 1, 1),
+        baseOpacity: 0.9,
+        pulseOffset: Math.random() * Math.PI * 2,
       });
     }
   }
@@ -106,6 +118,7 @@ export class ProjectilePool {
 
       // 移动子弹
       projectile.mesh.position.addScaledVector(projectile.direction, projectile.speed * deltaTime);
+      this.updateProjectileVisual(projectile);
 
       if (
         typeof impactHeight === 'number'
@@ -166,20 +179,39 @@ export class ProjectilePool {
   private applyProjectileVisual(projectile: Projectile, faction?: string): void {
     const material = projectile.mesh.material as MeshBasicMaterial;
     if (faction === 'ENEMY') {
-      material.color.set(0xff9b4a);
-      material.opacity = 0.92;
-      projectile.mesh.scale.set(0.9, 0.9, 1.8);
+      projectile.mesh.geometry = this.enemyGeometry;
+      material.color.set(0xff7a3a);
+      projectile.baseOpacity = 0.84;
+      projectile.baseScale.set(0.9, 0.9, 1.3);
     } else if (faction === 'FRIENDLY') {
-      material.color.set(0x78ffd8);
-      material.opacity = 0.86;
-      projectile.mesh.scale.set(0.82, 0.82, 1.6);
+      projectile.mesh.geometry = this.friendlyGeometry;
+      material.color.set(0x7af8ff);
+      projectile.baseOpacity = 0.82;
+      projectile.baseScale.set(0.78, 0.78, 1.55);
     } else {
-      material.color.set(0xfff27a);
-      material.opacity = 0.98;
-      projectile.mesh.scale.set(0.75, 0.75, 2.1);
+      projectile.mesh.geometry = this.playerGeometry;
+      material.color.set(0xfff2a0);
+      projectile.baseOpacity = 0.96;
+      projectile.baseScale.set(0.62, 0.62, 1.95);
     }
 
+    material.opacity = projectile.baseOpacity;
     projectile.mesh.quaternion.setFromUnitVectors(FORWARD, projectile.direction);
+    projectile.mesh.scale.copy(projectile.baseScale);
+  }
+
+  private updateProjectileVisual(projectile: Projectile): void {
+    const material = projectile.mesh.material as MeshBasicMaterial;
+    const travel = projectile.mesh.position.distanceTo(projectile.startPosition);
+    const pulse = Math.sin(travel * 0.18 + projectile.pulseOffset) * 0.08 + 1;
+    const stretchPulse = Math.sin(travel * 0.12 + projectile.pulseOffset * 0.7) * 0.06;
+
+    material.opacity = Math.min(1, projectile.baseOpacity * (0.94 + (pulse - 1) * 1.2));
+    projectile.mesh.scale.set(
+      projectile.baseScale.x * (1 - stretchPulse * 0.45),
+      projectile.baseScale.y * (1 - stretchPulse * 0.45),
+      projectile.baseScale.z * (1 + stretchPulse)
+    );
   }
 
   public getActiveProjectiles(): Mesh[] {
@@ -198,7 +230,9 @@ export class ProjectilePool {
       this.scene.remove(projectile.mesh);
       (projectile.mesh.material as Material).dispose();
     }
-    this.geometry.dispose();
+    this.playerGeometry.dispose();
+    this.enemyGeometry.dispose();
+    this.friendlyGeometry.dispose();
     this.pool = [];
   }
 }

@@ -67,6 +67,12 @@ export class PresentationController {
     this.uiUpdateInterval = options.uiUpdateInterval ?? 1 / 30;
   }
 
+  public initializeCombatUi(): void {
+    this.enemyHealthBars.init();
+    this.lockOnIndicator.init();
+    this.bossIndicator.init();
+  }
+
   public wireStartMenu(onStart: (settings: GameSettings) => void): void {
     this.startMenu?.setOnStart(onStart);
   }

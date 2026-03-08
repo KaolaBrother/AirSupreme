@@ -994,6 +994,7 @@ export class GameCoordinator {
 
   public start(): void {
     this.sessionState.setPlaying();
+    this.presentationController.initializeCombatUi();
     this.presentationController.resetHudThrottle();
     this.resetTutorialCombatState();
     this.playerSystem.getHealth().reset();

@@ -13,6 +13,7 @@ const HEALTH_PERCENT_THRESHOLD = 0.001;
  */
 export class EnemyHealthBars {
   private container: HTMLDivElement;
+  private initialized: boolean = false;
   private healthBars: Map<
     string,
     {
@@ -52,7 +53,15 @@ export class EnemyHealthBars {
       pointer-events: none;
       z-index: 35;
     `;
+  }
+
+  public init(): void {
+    if (this.initialized) {
+      return;
+    }
+
     document.body.appendChild(this.container);
+    this.initialized = true;
   }
 
   /**
@@ -76,6 +85,8 @@ export class EnemyHealthBars {
     camera: Camera,
     playerPosition: Vector3
   ): void {
+    this.init();
+
     const cameraMoved =
       !this.cameraStateInitialized ||
       this.lastCameraPosition.distanceToSquared(camera.position) > CAMERA_POSITION_THRESHOLD_SQ ||
@@ -658,7 +669,10 @@ export class EnemyHealthBars {
 
   public dispose(): void {
     this.clear();
-    this.container.remove();
+    if (this.container.parentElement) {
+      this.container.remove();
+    }
+    this.initialized = false;
   }
 
   /**
