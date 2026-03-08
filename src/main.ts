@@ -38,7 +38,9 @@ function checkWebGL(): boolean {
 
 function warmGameCoordinatorChunk(): void {
   const preload = () => {
-    void import('./core/GameCoordinator');
+    void import('./core/GameCoordinator').then(({ GameCoordinator }) => {
+      void GameCoordinator.warmRuntimeChunks();
+    });
   };
 
   if (typeof window === 'undefined') {
@@ -80,6 +82,7 @@ async function main(): Promise<void> {
 
       try {
         const [{ GameCoordinator }] = await Promise.all([import('./core/GameCoordinator')]);
+        void GameCoordinator.warmRuntimeChunks();
         startMenu.dispose();
         const coordinator = new GameCoordinator({ showStartMenu: false });
         coordinator.boot(settings);

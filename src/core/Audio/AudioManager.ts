@@ -487,16 +487,17 @@ export class AudioManager {
   /**
    * 播放射击音效
    */
-  public playShoot(profile: 'player' | 'enemy' | 'friendly' = 'player'): void {
+  public playShoot(profile: 'player' | 'enemy' | 'friendly' | 'boss' = 'player'): void {
     const sound = this.beginSound(SoundType.SHOOT, 100);
     if (!sound) return;
     const { now, context, sfxGain } = sound;
+    const isBoss = profile === 'boss';
     const clickPitchBase =
-      profile === 'enemy' ? 1.08 : profile === 'friendly' ? 1.02 : 0.96;
+      isBoss ? 0.84 : profile === 'enemy' ? 1.08 : profile === 'friendly' ? 1.02 : 0.96;
     const bodyPitchBase =
-      profile === 'enemy' ? 0.88 : profile === 'friendly' ? 0.98 : 0.94;
+      isBoss ? 0.68 : profile === 'enemy' ? 0.88 : profile === 'friendly' ? 0.98 : 0.94;
     const shotGainBase =
-      profile === 'enemy' ? 0.82 : profile === 'friendly' ? 0.72 : 0.95;
+      isBoss ? 1.02 : profile === 'enemy' ? 0.82 : profile === 'friendly' ? 0.72 : 0.95;
     const clickPitch = clickPitchBase + Math.random() * 0.08;
     const bodyPitch = bodyPitchBase + Math.random() * 0.1;
     const shotGain = shotGainBase + Math.random() * 0.08;
@@ -507,49 +508,55 @@ export class AudioManager {
       const clickGain = context.createGain();
       clickOsc.type = 'square';
       clickOsc.frequency.setValueAtTime(1480 * clickPitch, now);
-      clickOsc.frequency.exponentialRampToValueAtTime(520 * clickPitch, now + 0.05);
+      clickOsc.frequency.exponentialRampToValueAtTime(
+        (isBoss ? 360 : 520) * clickPitch,
+        now + (isBoss ? 0.07 : 0.05)
+      );
       clickGain.gain.setValueAtTime(0, now);
       clickGain.gain.linearRampToValueAtTime(
-        (profile === 'enemy' ? 0.12 : 0.14) * this.sfxVolume * shotGain,
+        (isBoss ? 0.16 : profile === 'enemy' ? 0.12 : 0.14) * this.sfxVolume * shotGain,
         now + 0.002
       );
-      clickGain.gain.exponentialRampToValueAtTime(0.01, now + 0.055);
+      clickGain.gain.exponentialRampToValueAtTime(0.01, now + (isBoss ? 0.075 : 0.055));
       clickOsc.connect(clickGain);
       clickGain.connect(sfxGain);
       clickOsc.start(now);
-      clickOsc.stop(now + 0.055);
+      clickOsc.stop(now + (isBoss ? 0.075 : 0.055));
 
       const bodyOsc = context.createOscillator();
       const bodyGain = context.createGain();
-      bodyOsc.type = 'triangle';
-      bodyOsc.frequency.setValueAtTime(340 * bodyPitch, now);
-      bodyOsc.frequency.exponentialRampToValueAtTime(150 * bodyPitch, now + 0.075);
+      bodyOsc.type = isBoss ? 'sawtooth' : 'triangle';
+      bodyOsc.frequency.setValueAtTime((isBoss ? 240 : 340) * bodyPitch, now);
+      bodyOsc.frequency.exponentialRampToValueAtTime(
+        (isBoss ? 92 : 150) * bodyPitch,
+        now + (isBoss ? 0.11 : 0.075)
+      );
       bodyGain.gain.setValueAtTime(0, now);
       bodyGain.gain.linearRampToValueAtTime(
-        (profile === 'friendly' ? 0.08 : 0.1) * this.sfxVolume * shotGain,
+        (isBoss ? 0.15 : profile === 'friendly' ? 0.08 : 0.1) * this.sfxVolume * shotGain,
         now + 0.004
       );
-      bodyGain.gain.exponentialRampToValueAtTime(0.01, now + 0.085);
+      bodyGain.gain.exponentialRampToValueAtTime(0.01, now + (isBoss ? 0.12 : 0.085));
       bodyOsc.connect(bodyGain);
       bodyGain.connect(sfxGain);
       bodyOsc.start(now);
-      bodyOsc.stop(now + 0.085);
+      bodyOsc.stop(now + (isBoss ? 0.12 : 0.085));
 
       this.playFilteredNoise(
-        0.055,
+        isBoss ? 0.075 : 0.055,
         0.003,
-        0.08 * this.sfxVolume * shotGain,
-        'highpass',
-        profile === 'enemy' ? 2800 : 2400,
-        profile === 'enemy' ? 1.9 : 1.5
+        (isBoss ? 0.1 : 0.08) * this.sfxVolume * shotGain,
+        isBoss ? 'bandpass' : 'highpass',
+        isBoss ? 1700 : profile === 'enemy' ? 2800 : 2400,
+        isBoss ? 1.1 : profile === 'enemy' ? 1.9 : 1.5
       );
       this.playFilteredNoise(
-        0.028,
+        isBoss ? 0.04 : 0.028,
         0.002,
-        (profile === 'friendly' ? 0.03 : 0.04) * this.sfxVolume,
-        'bandpass',
-        profile === 'enemy' ? 3600 : 4200,
-        profile === 'enemy' ? 1.6 : 2.2
+        (isBoss ? 0.05 : profile === 'friendly' ? 0.03 : 0.04) * this.sfxVolume,
+        isBoss ? 'lowpass' : 'bandpass',
+        isBoss ? 980 : profile === 'enemy' ? 3600 : 4200,
+        isBoss ? 0.9 : profile === 'enemy' ? 1.6 : 2.2
       );
     } catch {
       // Ignore
@@ -559,54 +566,88 @@ export class AudioManager {
   /**
    * 播放爆炸音效
    */
-  public playExplosion(): void {
+  public playExplosion(profile: 'enemy' | 'player' | 'friendly' = 'enemy'): void {
     const sound = this.beginSound(SoundType.EXPLOSION, 500);
     if (!sound) return;
     const { now, context, sfxGain } = sound;
+    const isPlayer = profile === 'player';
+    const isFriendly = profile === 'friendly';
 
     try {
       // 通用爆炸：中低频主体 + 高频破裂，不强调导弹特征
       const bodyOsc = context.createOscillator();
       const bodyGain = context.createGain();
-      bodyOsc.type = 'sine';
-      bodyOsc.frequency.setValueAtTime(135, now);
-      bodyOsc.frequency.exponentialRampToValueAtTime(30, now + 0.5);
+      bodyOsc.type = isPlayer ? 'sawtooth' : 'sine';
+      bodyOsc.frequency.setValueAtTime(isPlayer ? 150 : isFriendly ? 145 : 135, now);
+      bodyOsc.frequency.exponentialRampToValueAtTime(
+        isPlayer ? 34 : isFriendly ? 38 : 30,
+        now + (isPlayer ? 0.56 : 0.5)
+      );
       bodyGain.gain.setValueAtTime(0, now);
-      bodyGain.gain.linearRampToValueAtTime(0.4 * this.sfxVolume, now + 0.018);
-      bodyGain.gain.exponentialRampToValueAtTime(0.01, now + 0.5);
+      bodyGain.gain.linearRampToValueAtTime(
+        (isPlayer ? 0.46 : isFriendly ? 0.32 : 0.4) * this.sfxVolume,
+        now + 0.018
+      );
+      bodyGain.gain.exponentialRampToValueAtTime(0.01, now + (isPlayer ? 0.56 : 0.5));
       bodyOsc.connect(bodyGain);
       bodyGain.connect(sfxGain);
       bodyOsc.start(now);
-      bodyOsc.stop(now + 0.5);
+      bodyOsc.stop(now + (isPlayer ? 0.56 : 0.5));
 
       const crackOsc = context.createOscillator();
       const crackGain = context.createGain();
-      crackOsc.type = 'triangle';
-      crackOsc.frequency.setValueAtTime(880, now + 0.004);
-      crackOsc.frequency.exponentialRampToValueAtTime(220, now + 0.16);
+      crackOsc.type = isFriendly ? 'triangle' : 'square';
+      crackOsc.frequency.setValueAtTime(isPlayer ? 760 : isFriendly ? 940 : 880, now + 0.004);
+      crackOsc.frequency.exponentialRampToValueAtTime(
+        isPlayer ? 180 : isFriendly ? 260 : 220,
+        now + (isPlayer ? 0.2 : 0.16)
+      );
       crackGain.gain.setValueAtTime(0, now);
-      crackGain.gain.linearRampToValueAtTime(0.18 * this.sfxVolume, now + 0.008);
-      crackGain.gain.exponentialRampToValueAtTime(0.01, now + 0.18);
+      crackGain.gain.linearRampToValueAtTime(
+        (isPlayer ? 0.2 : isFriendly ? 0.13 : 0.18) * this.sfxVolume,
+        now + 0.008
+      );
+      crackGain.gain.exponentialRampToValueAtTime(0.01, now + (isPlayer ? 0.22 : 0.18));
       crackOsc.connect(crackGain);
       crackGain.connect(sfxGain);
       crackOsc.start(now + 0.004);
-      crackOsc.stop(now + 0.18);
+      crackOsc.stop(now + (isPlayer ? 0.22 : 0.18));
 
       const tailOsc = context.createOscillator();
       const tailGain = context.createGain();
       tailOsc.type = 'triangle';
-      tailOsc.frequency.setValueAtTime(180, now + 0.02);
-      tailOsc.frequency.exponentialRampToValueAtTime(52, now + 0.42);
+      tailOsc.frequency.setValueAtTime(isPlayer ? 165 : isFriendly ? 210 : 180, now + 0.02);
+      tailOsc.frequency.exponentialRampToValueAtTime(
+        isPlayer ? 44 : isFriendly ? 62 : 52,
+        now + (isPlayer ? 0.48 : 0.42)
+      );
       tailGain.gain.setValueAtTime(0, now + 0.02);
-      tailGain.gain.linearRampToValueAtTime(0.12 * this.sfxVolume, now + 0.05);
-      tailGain.gain.exponentialRampToValueAtTime(0.01, now + 0.42);
+      tailGain.gain.linearRampToValueAtTime(
+        (isPlayer ? 0.14 : isFriendly ? 0.09 : 0.12) * this.sfxVolume,
+        now + 0.05
+      );
+      tailGain.gain.exponentialRampToValueAtTime(0.01, now + (isPlayer ? 0.48 : 0.42));
       tailOsc.connect(tailGain);
       tailGain.connect(sfxGain);
       tailOsc.start(now + 0.02);
-      tailOsc.stop(now + 0.42);
+      tailOsc.stop(now + (isPlayer ? 0.48 : 0.42));
 
-      this.playFilteredNoise(0.22, 0.016, 0.16 * this.sfxVolume, 'bandpass', 690, 1.05);
-      this.playFilteredNoise(0.34, 0.02, 0.22 * this.sfxVolume, 'highpass', 1700, 0.82);
+      this.playFilteredNoise(
+        isPlayer ? 0.26 : 0.22,
+        0.016,
+        (isPlayer ? 0.18 : isFriendly ? 0.12 : 0.16) * this.sfxVolume,
+        'bandpass',
+        isPlayer ? 620 : isFriendly ? 760 : 690,
+        isPlayer ? 0.98 : 1.05
+      );
+      this.playFilteredNoise(
+        isPlayer ? 0.38 : 0.34,
+        0.02,
+        (isPlayer ? 0.25 : isFriendly ? 0.16 : 0.22) * this.sfxVolume,
+        'highpass',
+        isPlayer ? 1450 : isFriendly ? 2100 : 1700,
+        isFriendly ? 0.94 : 0.82
+      );
     } catch {
       // Ignore
     }

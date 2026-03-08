@@ -90,6 +90,7 @@
 - `Batch B - 战斗反馈终版收口`
   - [done] 玩家/敌机/Boss 炮弹飞行轮廓已继续拉开
   - [done] 普通子弹与 Boss 炮弹已接入轻量飞行脉冲与更清楚的阵营轮廓
+  - [done] 爆炸族谱第一轮已按玩家 / 敌机 / 友军分家
 - `Batch C - 运行时边界与包体积`
   - [done] `EnemyHealthBars`、`LockOnIndicator`、`BossMissileIndicator` 已改成战斗期惰性挂载
   - [done] StartMenu 阶段不再提前创建这些战斗 DOM
@@ -293,6 +294,7 @@
   - 通用爆炸和导弹爆炸尾部差异继续拉开
 - [done] Boss 主炮音色已从玩家机炮音色中分家
 - [done] 八爪鱼 Boss 的瞬移 / 激光预警 / 激光扫射已补齐专属音效触发
+- [done] 玩家 / 敌机 / 友军爆炸音色已从通用爆炸中分家
 - [done] 玩家 / 敌机 / 友军开火音色已拆分
 - [done] 玩家受击闭环已补强
   - 已加入 HUD 受击闪、受击强度驱动的命中特效与音效强度
@@ -389,6 +391,7 @@
 - [done] 菜单空闲预热已继续覆盖深层战斗运行时
   - `ParticleSystem` / `CombatSystem` / `PowerUpSystem` / `EnemySystem` / `BossBattleController`
   - `UpgradeMenu` / `TerrainGenerator`
+- [done] 点击开始后会再次并行触发深层运行时预热，降低快点开始时的等待波动
 - [done] 战斗 UI 指示器已改成惰性挂载
   - `EnemyHealthBars`、`LockOnIndicator`、`BossMissileIndicator` 仅在进入战斗后初始化 DOM 和相关监听
 - [later] 继续隔离非首屏 Three 依赖和高画质附加路径
