@@ -1,20 +1,29 @@
 import {
+  AdditiveBlending,
   BoxGeometry,
+  DoubleSide,
+  Group,
   Mesh,
   MeshBasicMaterial,
   Object3D,
   OctahedronGeometry,
+  PlaneGeometry,
   Scene,
+  Sprite,
+  SpriteMaterial,
   Vector3,
   type Material,
 } from 'three';
 import { GameConfig, GAME_CONSTANTS } from '@/config';
+import { getVfxTextures } from '@/features/effects/ParticleSystem';
 
 /**
  * 子弹数据
  */
 interface Projectile {
   mesh: Mesh;
+  glow: Sprite; // 曳光弹光晕
+  tail: Group; // 弹道拖尾（交叉双面片）
   direction: Vector3;
   speed: number;
   active: boolean;
@@ -46,16 +55,57 @@ export class ProjectilePool {
   private playerGeometry: BoxGeometry;
   private enemyGeometry: OctahedronGeometry;
   private friendlyGeometry: BoxGeometry;
+  private tailGeometry: PlaneGeometry;
+  // 各阵营共享的光晕/拖尾材质（避免 600+ 材质实例）
+  private playerGlowMaterial: SpriteMaterial;
+  private enemyGlowMaterial: SpriteMaterial;
+  private friendlyGlowMaterial: SpriteMaterial;
+  private playerTailMaterial: MeshBasicMaterial;
+  private enemyTailMaterial: MeshBasicMaterial;
+  private friendlyTailMaterial: MeshBasicMaterial;
 
   constructor(scene: Scene) {
     this.scene = scene;
     this.maxDistance = GAME_CONSTANTS.PROJECTILE.MAX_DISTANCE;
 
     const poolSize = GameConfig.getProjectilePoolSize();
+    const textures = getVfxTextures();
 
     this.playerGeometry = new BoxGeometry(0.12, 0.12, 1.4);
     this.enemyGeometry = new OctahedronGeometry(0.22, 0);
     this.friendlyGeometry = new BoxGeometry(0.14, 0.14, 1.05);
+
+    // 拖尾面片：预旋转为沿 Z 轴展开，v=0（亮端）朝 +Z（弹头方向）
+    this.tailGeometry = new PlaneGeometry(1, 1);
+    this.tailGeometry.rotateX(-Math.PI / 2);
+
+    const makeGlowMaterial = (color: number): SpriteMaterial =>
+      new SpriteMaterial({
+        map: textures.glow,
+        color,
+        transparent: true,
+        opacity: 0.85,
+        blending: AdditiveBlending,
+        depthWrite: false,
+      });
+    const makeTailMaterial = (color: number): MeshBasicMaterial =>
+      new MeshBasicMaterial({
+        map: textures.tail,
+        color,
+        transparent: true,
+        opacity: 0.8,
+        blending: AdditiveBlending,
+        depthWrite: false,
+        side: DoubleSide,
+      });
+
+    this.playerGlowMaterial = makeGlowMaterial(0xffe08a);
+    this.enemyGlowMaterial = makeGlowMaterial(0xff7a30);
+    this.friendlyGlowMaterial = makeGlowMaterial(0x8af4ff);
+    this.playerTailMaterial = makeTailMaterial(0xffc96a);
+    this.enemyTailMaterial = makeTailMaterial(0xff5a1e);
+    this.friendlyTailMaterial = makeTailMaterial(0x6ce8ff);
+
     const material = new MeshBasicMaterial({
       color: 0xffff00,
       transparent: true,
@@ -66,10 +116,24 @@ export class ProjectilePool {
     for (let i = 0; i < poolSize; i++) {
       const mesh = new Mesh(this.playerGeometry, material.clone());
       mesh.visible = false;
+
+      const glow = new Sprite(this.playerGlowMaterial);
+      glow.position.z = 0.1;
+      mesh.add(glow);
+
+      const tail = new Group();
+      const tailPlaneA = new Mesh(this.tailGeometry, this.playerTailMaterial);
+      const tailPlaneB = new Mesh(this.tailGeometry, this.playerTailMaterial);
+      tailPlaneB.rotation.z = Math.PI / 2;
+      tail.add(tailPlaneA, tailPlaneB);
+      mesh.add(tail);
+
       this.scene.add(mesh);
 
       this.pool.push({
         mesh,
+        glow,
+        tail,
         direction: new Vector3(),
         speed: GAME_CONSTANTS.PROJECTILE.SPEED,
         active: false,
@@ -87,6 +151,27 @@ export class ProjectilePool {
         travelWidthBoost: 0,
       });
     }
+  }
+
+  /**
+   * 给曳光弹换装：阵营专属的光晕与拖尾
+   */
+  private applyTracerDress(
+    projectile: Projectile,
+    glowMaterial: SpriteMaterial,
+    tailMaterial: MeshBasicMaterial,
+    glowScale: number,
+    tailWidth: number,
+    tailLength: number,
+    tailCenterZ: number
+  ): void {
+    projectile.glow.material = glowMaterial;
+    projectile.glow.scale.set(glowScale, glowScale, 1);
+    for (const tailPlane of projectile.tail.children) {
+      (tailPlane as Mesh).material = tailMaterial;
+    }
+    projectile.tail.scale.set(tailWidth, tailWidth, tailLength);
+    projectile.tail.position.z = tailCenterZ;
   }
 
   /**
@@ -204,6 +289,16 @@ export class ProjectilePool {
       projectile.stretchFrequency = 0.1;
       projectile.travelLengthBoost = 0.06;
       projectile.travelWidthBoost = 0.08;
+      // 灼热等离子团：大光晕 + 短宽尾
+      this.applyTracerDress(
+        projectile,
+        this.enemyGlowMaterial,
+        this.enemyTailMaterial,
+        1.05,
+        0.7,
+        1.1,
+        -0.78
+      );
     } else if (faction === 'FRIENDLY') {
       projectile.mesh.geometry = this.friendlyGeometry;
       material.color.set(0x74f4ff);
@@ -216,6 +311,16 @@ export class ProjectilePool {
       projectile.stretchFrequency = 0.11;
       projectile.travelLengthBoost = 0.16;
       projectile.travelWidthBoost = -0.04;
+      // 青色能量束：冷光晕 + 修长尾
+      this.applyTracerDress(
+        projectile,
+        this.friendlyGlowMaterial,
+        this.friendlyTailMaterial,
+        1.1,
+        0.5,
+        1.3,
+        -1.18
+      );
     } else {
       projectile.mesh.geometry = this.playerGeometry;
       material.color.set(0xfff4aa);
@@ -228,6 +333,16 @@ export class ProjectilePool {
       projectile.stretchFrequency = 0.16;
       projectile.travelLengthBoost = 0.22;
       projectile.travelWidthBoost = -0.06;
+      // 暖金曳光：明亮光晕 + 长拖尾
+      this.applyTracerDress(
+        projectile,
+        this.playerGlowMaterial,
+        this.playerTailMaterial,
+        1.5,
+        0.5,
+        1.6,
+        -1.5
+      );
     }
 
     material.opacity = projectile.baseOpacity;
@@ -276,6 +391,13 @@ export class ProjectilePool {
     this.playerGeometry.dispose();
     this.enemyGeometry.dispose();
     this.friendlyGeometry.dispose();
+    this.tailGeometry.dispose();
+    this.playerGlowMaterial.dispose();
+    this.enemyGlowMaterial.dispose();
+    this.friendlyGlowMaterial.dispose();
+    this.playerTailMaterial.dispose();
+    this.enemyTailMaterial.dispose();
+    this.friendlyTailMaterial.dispose();
     this.pool = [];
   }
 }

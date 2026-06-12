@@ -17,7 +17,281 @@ export type HitEffectProfile = 'player' | 'enemy' | 'boss';
 export type HeavyWeaponImpactProfile = 'boss-cannon' | 'laser' | 'flak-hit' | 'boss-armor';
 
 /**
+ * 共享程序化贴图集合（Canvas 一次性烘焙，全局复用）。
+ * 在无 Canvas 2D 环境（如 jsdom 测试）下各项为 null，
+ * 所有消费方都必须容忍 map 为 null。
+ */
+export interface VfxTextures {
+  /** 径向柔光 */
+  glow: THREE.Texture | null;
+  /** 火焰渐变（白热核心 + 碎边） */
+  fire: THREE.Texture | null;
+  /** 噪点烟团 */
+  smoke: THREE.Texture | null;
+  /** 火花拉丝 */
+  spark: THREE.Texture | null;
+  /** 细环（冲击波/传送门） */
+  ring: THREE.Texture | null;
+  /** 漩涡（传送门） */
+  swirl: THREE.Texture | null;
+  /** 曳光弹尾迹线性渐隐 */
+  tail: THREE.Texture | null;
+}
+
+let vfxTextures: VfxTextures | null = null;
+
+function createVfxCanvas(
+  size: number
+): { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D } | null {
+  if (typeof document === 'undefined') return null;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return null;
+  return { canvas, ctx };
+}
+
+function toVfxTexture(canvas: HTMLCanvasElement): THREE.Texture {
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.needsUpdate = true;
+  return texture;
+}
+
+function createGlowTexture(): THREE.Texture | null {
+  const target = createVfxCanvas(64);
+  if (!target) return null;
+  const { canvas, ctx } = target;
+  const gradient = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+  gradient.addColorStop(0, 'rgba(255,255,255,1)');
+  gradient.addColorStop(0.22, 'rgba(255,255,255,0.88)');
+  gradient.addColorStop(0.52, 'rgba(255,255,255,0.34)');
+  gradient.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, 64, 64);
+  return toVfxTexture(canvas);
+}
+
+function createFireTexture(): THREE.Texture | null {
+  const target = createVfxCanvas(128);
+  if (!target) return null;
+  const { canvas, ctx } = target;
+  const gradient = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
+  gradient.addColorStop(0, 'rgba(255,255,255,1)');
+  gradient.addColorStop(0.28, 'rgba(255,243,214,0.92)');
+  gradient.addColorStop(0.55, 'rgba(255,255,255,0.42)');
+  gradient.addColorStop(0.85, 'rgba(255,255,255,0.1)');
+  gradient.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, 128, 128);
+  // 碎边火舌：在边缘叠加若干柔光团，让轮廓不规则
+  ctx.globalCompositeOperation = 'lighter';
+  for (let i = 0; i < 10; i++) {
+    const angle = (i / 10) * Math.PI * 2 + Math.random() * 0.6;
+    const dist = 26 + Math.random() * 22;
+    const x = 64 + Math.cos(angle) * dist;
+    const y = 64 + Math.sin(angle) * dist;
+    const radius = 8 + Math.random() * 14;
+    const blob = ctx.createRadialGradient(x, y, 0, x, y, radius);
+    blob.addColorStop(0, 'rgba(255,238,200,0.5)');
+    blob.addColorStop(1, 'rgba(255,238,200,0)');
+    ctx.fillStyle = blob;
+    ctx.fillRect(x - radius, y - radius, radius * 2, radius * 2);
+  }
+  return toVfxTexture(canvas);
+}
+
+function createSmokeTexture(): THREE.Texture | null {
+  const target = createVfxCanvas(128);
+  if (!target) return null;
+  const { canvas, ctx } = target;
+  const base = ctx.createRadialGradient(64, 64, 0, 64, 64, 62);
+  base.addColorStop(0, 'rgba(190,190,195,0.85)');
+  base.addColorStop(0.55, 'rgba(170,170,176,0.55)');
+  base.addColorStop(1, 'rgba(150,150,156,0)');
+  ctx.fillStyle = base;
+  ctx.fillRect(0, 0, 128, 128);
+  // 噪点棉团：明暗斑块制造体积感
+  for (let i = 0; i < 16; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const dist = Math.random() * 38;
+    const x = 64 + Math.cos(angle) * dist;
+    const y = 64 + Math.sin(angle) * dist;
+    const radius = 9 + Math.random() * 17;
+    const light = Math.random() > 0.5;
+    const blob = ctx.createRadialGradient(x, y, 0, x, y, radius);
+    blob.addColorStop(0, light ? 'rgba(225,225,230,0.28)' : 'rgba(60,60,66,0.24)');
+    blob.addColorStop(1, light ? 'rgba(225,225,230,0)' : 'rgba(60,60,66,0)');
+    ctx.fillStyle = blob;
+    ctx.fillRect(x - radius, y - radius, radius * 2, radius * 2);
+  }
+  // 用径向 alpha 蒙版收圆轮廓
+  ctx.globalCompositeOperation = 'destination-in';
+  const mask = ctx.createRadialGradient(64, 64, 0, 64, 64, 62);
+  mask.addColorStop(0, 'rgba(0,0,0,1)');
+  mask.addColorStop(0.62, 'rgba(0,0,0,0.85)');
+  mask.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = mask;
+  ctx.fillRect(0, 0, 128, 128);
+  return toVfxTexture(canvas);
+}
+
+function createSparkTexture(): THREE.Texture | null {
+  const target = createVfxCanvas(64);
+  if (!target) return null;
+  const { canvas, ctx } = target;
+  // 水平拉丝主体
+  const streak = ctx.createLinearGradient(0, 32, 64, 32);
+  streak.addColorStop(0, 'rgba(255,255,255,0)');
+  streak.addColorStop(0.5, 'rgba(255,255,255,1)');
+  streak.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = streak;
+  ctx.save();
+  ctx.translate(32, 32);
+  ctx.scale(1, 0.14);
+  ctx.translate(-32, -32);
+  ctx.beginPath();
+  ctx.arc(32, 32, 31, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+  // 中心热点
+  const core = ctx.createRadialGradient(32, 32, 0, 32, 32, 9);
+  core.addColorStop(0, 'rgba(255,255,255,1)');
+  core.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = core;
+  ctx.fillRect(20, 20, 24, 24);
+  return toVfxTexture(canvas);
+}
+
+function createRingTexture(): THREE.Texture | null {
+  const target = createVfxCanvas(128);
+  if (!target) return null;
+  const { canvas, ctx } = target;
+  const gradient = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
+  gradient.addColorStop(0.56, 'rgba(255,255,255,0)');
+  gradient.addColorStop(0.72, 'rgba(255,255,255,0.9)');
+  gradient.addColorStop(0.84, 'rgba(255,255,255,0.32)');
+  gradient.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, 128, 128);
+  return toVfxTexture(canvas);
+}
+
+function createSwirlTexture(): THREE.Texture | null {
+  const target = createVfxCanvas(256);
+  if (!target) return null;
+  const { canvas, ctx } = target;
+  ctx.globalCompositeOperation = 'lighter';
+  const armCount = 4;
+  for (let arm = 0; arm < armCount; arm++) {
+    const armOffset = (arm / armCount) * Math.PI * 2;
+    for (let t = 0; t < 1; t += 0.02) {
+      const angle = armOffset + t * 4.6;
+      const radius = 18 + t * 102;
+      const x = 128 + Math.cos(angle) * radius;
+      const y = 128 + Math.sin(angle) * radius;
+      const blobRadius = 6 + t * 13;
+      const alpha = 0.32 * (1 - t * 0.55);
+      const blob = ctx.createRadialGradient(x, y, 0, x, y, blobRadius);
+      blob.addColorStop(0, `rgba(255,255,255,${alpha.toFixed(3)})`);
+      blob.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.fillStyle = blob;
+      ctx.fillRect(x - blobRadius, y - blobRadius, blobRadius * 2, blobRadius * 2);
+    }
+  }
+  // 中心亮核
+  const core = ctx.createRadialGradient(128, 128, 0, 128, 128, 42);
+  core.addColorStop(0, 'rgba(255,255,255,0.95)');
+  core.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = core;
+  ctx.fillRect(86, 86, 84, 84);
+  return toVfxTexture(canvas);
+}
+
+function createTailTexture(): THREE.Texture | null {
+  const target = createVfxCanvas(64);
+  if (!target) return null;
+  const { canvas, ctx } = target;
+  // 纵向渐隐（v=1 端贴近弹头，最亮）
+  const fade = ctx.createLinearGradient(0, 64, 0, 0);
+  fade.addColorStop(0, 'rgba(255,255,255,0.95)');
+  fade.addColorStop(0.45, 'rgba(255,255,255,0.42)');
+  fade.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = fade;
+  ctx.fillRect(0, 0, 64, 64);
+  // 横向柔边
+  ctx.globalCompositeOperation = 'destination-in';
+  const edge = ctx.createLinearGradient(0, 0, 64, 0);
+  edge.addColorStop(0, 'rgba(0,0,0,0)');
+  edge.addColorStop(0.3, 'rgba(0,0,0,1)');
+  edge.addColorStop(0.7, 'rgba(0,0,0,1)');
+  edge.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = edge;
+  ctx.fillRect(0, 0, 64, 64);
+  return toVfxTexture(canvas);
+}
+
+/**
+ * 获取共享 VFX 贴图（懒构建一次）
+ */
+export function getVfxTextures(): VfxTextures {
+  if (!vfxTextures) {
+    vfxTextures = {
+      glow: createGlowTexture(),
+      fire: createFireTexture(),
+      smoke: createSmokeTexture(),
+      spark: createSparkTexture(),
+      ring: createRingTexture(),
+      swirl: createSwirlTexture(),
+      tail: createTailTexture(),
+    };
+  }
+  return vfxTextures;
+}
+
+let sharedDebrisGeometry: THREE.BoxGeometry | null = null;
+function getSharedDebrisGeometry(): THREE.BoxGeometry {
+  if (!sharedDebrisGeometry) {
+    sharedDebrisGeometry = new THREE.BoxGeometry(0.3, 0.3, 0.3);
+  }
+  return sharedDebrisGeometry;
+}
+
+let sharedShockwaveGeometry: THREE.RingGeometry | null = null;
+function getSharedShockwaveGeometry(): THREE.RingGeometry {
+  if (!sharedShockwaveGeometry) {
+    sharedShockwaveGeometry = new THREE.RingGeometry(0.78, 1, 48);
+    sharedShockwaveGeometry.rotateX(-Math.PI / 2); // 水平放置
+  }
+  return sharedShockwaveGeometry;
+}
+
+/** 各粒子类型的 sprite 世界尺寸系数（对齐旧版网格体观感） */
+const SPRITE_SCALE: Record<ParticleType, number> = {
+  [ParticleType.EXPLOSION]: 1.7,
+  [ParticleType.FIRE]: 1.35,
+  [ParticleType.SPARK]: 1.5,
+  [ParticleType.SMOKE]: 2.2,
+  [ParticleType.DEBRIS]: 1,
+};
+
+/** 各粒子类型的默认重力系数（烟为负值=浮升） */
+const TYPE_GRAVITY: Record<ParticleType, number> = {
+  [ParticleType.EXPLOSION]: 0.04,
+  [ParticleType.FIRE]: 0.08,
+  [ParticleType.SPARK]: 0.45,
+  [ParticleType.SMOKE]: -0.12,
+  [ParticleType.DEBRIS]: 1.15,
+};
+
+const WHITE_HOT = new THREE.Color(1, 1, 1);
+const SOFT_GRAY = new THREE.Color(0.6, 0.6, 0.62);
+
+/**
  * 单个粒子数据
+ * 非碎片粒子使用面向相机的加色/普通混合 Sprite，
+ * 碎片保留 3D 翻滚方块。
  */
 interface Particle {
   position: THREE.Vector3;
@@ -26,7 +300,30 @@ interface Particle {
   maxLife: number;
   size: number;
   type: ParticleType;
+  sprite: THREE.Sprite;
+  spriteMaterial: THREE.SpriteMaterial;
+  debrisMesh: THREE.Mesh;
+  debrisMaterial: THREE.MeshBasicMaterial;
+  baseColor: THREE.Color;
+  baseOpacity: number;
+  spinSpeed: number;
+  gravityScale: number;
+  smokeTrail: boolean;
+  smokeTrailTimer: number;
+  active: boolean;
+}
+
+/**
+ * 扩散冲击波环（爆炸用，水平加色环）
+ */
+interface ShockwaveRing {
   mesh: THREE.Mesh;
+  material: THREE.MeshBasicMaterial;
+  life: number;
+  maxLife: number;
+  fromScale: number;
+  toScale: number;
+  baseOpacity: number;
   active: boolean;
 }
 
@@ -87,10 +384,10 @@ export class ParticleSystem {
   private maxParticles: number;
   private delayedBursts: DelayedBurst[] = [];
   private totalParticles: number = 0;
+  private shockwaves: ShockwaveRing[] = [];
+  private static readonly MAX_SHOCKWAVES = 12;
+  private static readonly MAX_TRAIL_EMITS = 16;
 
-  // 几何体和材质缓存
-  private geometries: Map<ParticleType, THREE.BufferGeometry> = new Map();
-  private materials: Map<ParticleType, THREE.MeshBasicMaterial> = new Map();
   private readonly gravity = new THREE.Vector3(0, -9.8, 0);
   private readonly spawnDirection = new THREE.Vector3();
   private readonly trailColor = new THREE.Color();
@@ -98,6 +395,12 @@ export class ParticleSystem {
   private readonly tempColorA = new THREE.Color();
   private readonly tempColorB = new THREE.Color();
   private readonly tempColorC = new THREE.Color();
+  // update 循环专用的色彩缓存，避免与发射方法共享的 tempColor 冲突
+  private readonly rampColor = new THREE.Color();
+  private readonly rampTarget = new THREE.Color();
+  // 碎片烟迹的延迟发射队列（避免在遍历 activeParticles 时变更数组）
+  private readonly trailEmitQueue: THREE.Vector3[] = [];
+  private trailEmitCount = 0;
 
   constructor(scene: THREE.Scene) {
     this.scene = scene;
@@ -107,66 +410,85 @@ export class ParticleSystem {
 
     this.maxParticles = GameConfig.getParticleCount();
 
-    // 初始化几何体和材质
-    this.initAssets();
+    for (let i = 0; i < ParticleSystem.MAX_TRAIL_EMITS; i++) {
+      this.trailEmitQueue.push(new THREE.Vector3());
+    }
+
+    this.initShockwavePool();
   }
 
   /**
-   * 初始化粒子资源
+   * 初始化冲击波环对象池
    */
-  private initAssets(): void {
-    // 爆炸粒子 - 球体
-    this.geometries.set(ParticleType.EXPLOSION, new THREE.SphereGeometry(0.5, 8, 8));
-    this.materials.set(
-      ParticleType.EXPLOSION,
-      new THREE.MeshBasicMaterial({
-        color: 0xff6600,
+  private initShockwavePool(): void {
+    for (let i = 0; i < ParticleSystem.MAX_SHOCKWAVES; i++) {
+      const material = new THREE.MeshBasicMaterial({
+        color: 0xff8c4a,
         transparent: true,
-        opacity: 1,
-      })
-    );
+        opacity: 0,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      });
+      const mesh = new THREE.Mesh(getSharedShockwaveGeometry(), material);
+      mesh.visible = false;
+      this.particleMeshes.add(mesh);
+      this.shockwaves.push({
+        mesh,
+        material,
+        life: 0,
+        maxLife: 0,
+        fromScale: 0,
+        toScale: 1,
+        baseOpacity: 0.9,
+        active: false,
+      });
+    }
+  }
 
-    // 烟雾粒子 - 大球体
-    this.geometries.set(ParticleType.SMOKE, new THREE.SphereGeometry(1, 8, 8));
-    this.materials.set(
-      ParticleType.SMOKE,
-      new THREE.MeshBasicMaterial({
-        color: 0x888888,
-        transparent: true,
-        opacity: 0.6,
-      })
-    );
+  /**
+   * 生成一圈扩散冲击波（加色水平环，随扩散淡出）
+   */
+  public createShockwave(
+    position: THREE.Vector3,
+    radius: number,
+    life: number,
+    color: number,
+    opacity: number = 0.85
+  ): void {
+    const ring = this.shockwaves.find((entry) => !entry.active);
+    if (!ring) return;
 
-    // 火花粒子 - 小球体
-    this.geometries.set(ParticleType.SPARK, new THREE.SphereGeometry(0.1, 4, 4));
-    this.materials.set(
-      ParticleType.SPARK,
-      new THREE.MeshBasicMaterial({
-        color: 0xffff00,
-        transparent: true,
-        opacity: 1,
-      })
-    );
+    ring.active = true;
+    ring.life = life;
+    ring.maxLife = life;
+    ring.fromScale = Math.max(0.001, radius * 0.12);
+    ring.toScale = radius;
+    ring.baseOpacity = opacity;
+    ring.material.color.set(color);
+    ring.material.opacity = opacity;
+    ring.mesh.position.copy(position);
+    ring.mesh.scale.setScalar(ring.fromScale);
+    ring.mesh.visible = true;
+  }
 
-    // 火焰粒子
-    this.geometries.set(ParticleType.FIRE, new THREE.SphereGeometry(0.3, 8, 8));
-    this.materials.set(
-      ParticleType.FIRE,
-      new THREE.MeshBasicMaterial({
-        color: 0xff4400,
-        transparent: true,
-        opacity: 0.9,
-      })
-    );
+  private updateShockwaves(deltaTime: number): void {
+    for (const ring of this.shockwaves) {
+      if (!ring.active) continue;
 
-    // 碎片粒子 - 方块
-    this.geometries.set(ParticleType.DEBRIS, new THREE.BoxGeometry(0.3, 0.3, 0.3));
-    this.materials.set(
-      ParticleType.DEBRIS,
-      new THREE.MeshBasicMaterial({
-        color: 0x666666,
-      })
-    );
+      ring.life -= deltaTime;
+      if (ring.life <= 0) {
+        ring.active = false;
+        ring.mesh.visible = false;
+        continue;
+      }
+
+      const progress = 1 - ring.life / ring.maxLife;
+      const eased = 1 - Math.pow(1 - progress, 3); // easeOutCubic
+      const scale = ring.fromScale + (ring.toScale - ring.fromScale) * eased;
+      ring.mesh.scale.setScalar(scale);
+      ring.material.opacity = ring.baseOpacity * Math.pow(1 - progress, 1.6);
+    }
   }
 
   /**
@@ -185,6 +507,54 @@ export class ParticleSystem {
     const fireHueBase = isPlayer ? 0.02 : isFriendly ? 0.08 : 0.05;
     const fireLightBase = isPlayer ? 0.48 : isFriendly ? 0.58 : 0.5;
     const smokeLightBase = isPlayer ? 0.18 : isFriendly ? 0.32 : 0.3;
+
+    // 瞬时核心闪光：极短寿命的大尺寸光球，快速膨胀后熄灭
+    this.spawnParticle(ParticleType.EXPLOSION, position, {
+      speed: 0,
+      life: 0.09 + explosionScale * 0.03,
+      size: 1.7 * explosionScale + Math.random() * 0.5,
+      color: this.tempColorA.set(isPlayer ? 0xffe9c4 : isFriendly ? 0xd8fbff : 0xffd9a8),
+    });
+
+    // 扩散冲击波环
+    this.createShockwave(
+      position,
+      6.5 + explosionScale * 5.5,
+      0.42 + explosionScale * 0.14,
+      isPlayer ? 0xffb866 : isFriendly ? 0x7ee9ff : 0xff8c4a,
+      0.85
+    );
+
+    // 余烬火花：受重力坠落的短拉丝
+    const emberCount = Math.max(4, Math.floor(5 * explosionScale));
+    for (let i = 0; i < emberCount; i++) {
+      this.spawnParticle(ParticleType.SPARK, position, {
+        speed: 16 + Math.random() * 18 * explosionScale,
+        life: 0.55 + Math.random() * 0.6,
+        size: 0.1 + Math.random() * 0.14,
+        color: this.tempColorB.setHSL(0.06 + Math.random() * 0.04, 1, 0.6),
+        gravity: true,
+      });
+    }
+
+    // 滞留烟柱：稍晚自爆点上方堆叠浮升
+    const columnPosition = position.clone();
+    this.scheduleBurst(0.3, () => {
+      const columnCount = Math.max(3, Math.floor(3 + explosionScale * 2));
+      for (let i = 0; i < columnCount; i++) {
+        const columnPos = new THREE.Vector3(
+          columnPosition.x + (Math.random() - 0.5) * 1.2,
+          columnPosition.y + i * (0.7 + explosionScale * 0.4),
+          columnPosition.z + (Math.random() - 0.5) * 1.2
+        );
+        this.spawnParticle(ParticleType.SMOKE, columnPos, {
+          speed: 1.2 + Math.random(),
+          life: 2.2 + Math.random() * 1.2,
+          size: 1.6 + Math.random() * (1.1 + explosionScale * 0.5),
+          color: this.tempColorC.setHSL(0, 0, 0.3 + Math.random() * 0.1),
+        });
+      }
+    });
 
     // 火焰核心
     for (let i = 0; i < particleCount * 0.4; i++) {
@@ -297,6 +667,48 @@ export class ParticleSystem {
     const smokeCount = Math.max(16, Math.floor(16 + blastScale * 8));
     const burstRadius = 2.2 + blastScale * 1.05;
 
+    // 瞬时白热巨闪 + 双层冲击波
+    this.spawnParticle(ParticleType.EXPLOSION, position, {
+      speed: 0,
+      life: 0.12 + blastScale * 0.02,
+      size: 3.6 + blastScale * 1.2,
+      color: this.tempColorA.set(0xfff1d8),
+    });
+    this.createShockwave(position, 16 + blastScale * 6, 0.62, 0xffa14e, 0.95);
+    const secondWavePosition = position.clone();
+    this.scheduleBurst(0.22, () => {
+      this.createShockwave(secondWavePosition, 24 + blastScale * 8, 0.85, 0xff7038, 0.8);
+    });
+
+    // 多波次次级闪光：让 Boss 死亡有 2~3 秒的戏剧节奏
+    const stageFlashPosition = position.clone();
+    const stageDelays = [0.45, 0.85, 1.25, 1.7];
+    for (const delay of stageDelays) {
+      this.scheduleBurst(delay, () => {
+        const offsetAngle = Math.random() * Math.PI * 2;
+        const offsetDist = Math.random() * burstRadius * 1.2;
+        const flashPos = new THREE.Vector3(
+          stageFlashPosition.x + Math.cos(offsetAngle) * offsetDist,
+          stageFlashPosition.y + (Math.random() - 0.5) * (1.6 + blastScale * 0.4),
+          stageFlashPosition.z + Math.sin(offsetAngle) * offsetDist
+        );
+        this.spawnParticle(ParticleType.EXPLOSION, flashPos, {
+          speed: 0,
+          life: 0.1 + Math.random() * 0.06,
+          size: 1.5 + Math.random() * (0.8 + blastScale * 0.3),
+          color: this.tempColorA.setHSL(0.05 + Math.random() * 0.03, 1, 0.78),
+        });
+        for (let i = 0; i < 5; i++) {
+          this.spawnParticle(ParticleType.FIRE, flashPos, {
+            speed: 10 + Math.random() * 12,
+            life: 0.2 + Math.random() * 0.18,
+            size: 0.35 + Math.random() * 0.3,
+            color: this.tempColorB.setHSL(0.02 + Math.random() * 0.04, 1, 0.52),
+          });
+        }
+      });
+    }
+
     for (let i = 0; i < coreFlashCount; i++) {
       this.spawnParticle(ParticleType.EXPLOSION, position, {
         speed: 24 + Math.random() * (18 + blastScale * 8),
@@ -331,6 +743,7 @@ export class ParticleSystem {
         size: 0.16 + Math.random() * (0.16 + blastScale * 0.08),
         color: this.tempColorA.setRGB(0.28, 0.29, 0.33),
         gravity: true,
+        smokeTrail: i % 2 === 0, // 大块残骸拖出烟迹
       });
     }
 
@@ -453,6 +866,24 @@ export class ParticleSystem {
           life: 1.8 + Math.random() * 1.3,
           size: 1.2 + Math.random() * (0.9 + blastScale * 0.25),
           color: this.tempColorB.setHSL(0, 0, 0.12 + Math.random() * 0.08),
+        });
+      }
+    });
+
+    // 收尾：浓重烟幕缓缓升起，把戏剧时间拉到 2~3 秒
+    this.scheduleBurst(2.2, () => {
+      const pallPosition = position.clone();
+      for (let i = 0; i < Math.max(6, Math.floor(6 + blastScale * 2)); i++) {
+        const pallPos = new THREE.Vector3(
+          pallPosition.x + (Math.random() - 0.5) * burstRadius * 1.4,
+          pallPosition.y + Math.random() * (2 + blastScale * 0.5),
+          pallPosition.z + (Math.random() - 0.5) * burstRadius * 1.4
+        );
+        this.spawnParticle(ParticleType.SMOKE, pallPos, {
+          speed: 1 + Math.random() * 1.4,
+          life: 2.4 + Math.random() * 1.4,
+          size: 1.6 + Math.random() * (1.1 + blastScale * 0.3),
+          color: this.tempColorC.setHSL(0, 0, 0.1 + Math.random() * 0.06),
         });
       }
     });
@@ -980,6 +1411,13 @@ export class ParticleSystem {
       });
     }
 
+    this.createShockwave(
+      position,
+      4 + impactScale * 3,
+      0.38,
+      profileConfig.ringColor,
+      isLaser ? 0.55 : 0.72
+    );
     this.emitFlakRing(
       position,
       0.46 + impactScale * (isFlak ? 0.68 : isLaser ? 0.52 : isArmor ? 0.44 : 0.58),
@@ -1138,11 +1576,12 @@ export class ParticleSystem {
     this.trailColor.copy(color);
     this.directedVelocity.copy(direction).normalize();
 
+    // 长寿命烟团：持续 1.2~2 秒，让导弹在天空划出可见的烟线
     const smoke = this.spawnParticle(ParticleType.SMOKE, position, {
       speed: 2.8 + trailIntensity * 2.4,
       life: isHeavyMissileTrail
-        ? 0.34 + Math.random() * (0.1 + trailIntensity * 0.08)
-        : 0.24 + Math.random() * (0.08 + trailIntensity * 0.08),
+        ? 1.5 + Math.random() * (0.35 + trailIntensity * 0.1)
+        : 1.2 + Math.random() * (0.4 + trailIntensity * 0.2),
       size: isHeavyMissileTrail
         ? 0.3 + Math.random() * (0.14 + trailIntensity * 0.12)
         : 0.26 + Math.random() * (0.14 + trailIntensity * 0.12),
@@ -1158,8 +1597,8 @@ export class ParticleSystem {
       const darkSmoke = this.spawnParticle(ParticleType.SMOKE, position, {
         speed: isHeavyMissileTrail ? 2.8 + trailIntensity * 1.4 : 2 + trailIntensity * 1.5,
         life: isHeavyMissileTrail
-          ? 0.3 + Math.random() * (0.12 + trailIntensity * 0.06)
-          : 0.2 + Math.random() * 0.1,
+          ? 1.1 + Math.random() * (0.3 + trailIntensity * 0.1)
+          : 0.9 + Math.random() * 0.3,
         size: isHeavyMissileTrail
           ? 0.26 + Math.random() * (0.16 + trailIntensity * 0.08)
           : 0.2 + Math.random() * 0.12,
@@ -1221,6 +1660,15 @@ export class ParticleSystem {
     const sparkCount = Math.max(10, Math.floor(11 + impactScale * 6));
     const flashCount = Math.max(4, Math.floor(5 + impactScale * 3));
     const fireCount = Math.max(6, Math.floor(6 + impactScale * 4));
+
+    // 瞬时核心闪光 + 冲击波环
+    this.spawnParticle(ParticleType.EXPLOSION, position, {
+      speed: 0,
+      life: 0.09 + impactScale * 0.02,
+      size: 1.3 * impactScale + Math.random() * 0.4,
+      color: this.tempColorA.set(0xffeecb),
+    });
+    this.createShockwave(position, 5 + impactScale * 4, 0.4, 0xffa050, 0.8);
 
     // 核心闪光：命中时刻更清晰
     for (let i = 0; i < flashCount; i++) {
@@ -1335,7 +1783,7 @@ export class ParticleSystem {
 
     const smoke = this.spawnParticle(ParticleType.SMOKE, position, {
       speed: 4.2,
-      life: 0.46 + Math.random() * 0.2,
+      life: 1.3 + Math.random() * 0.6,
       size: 0.56 + Math.random() * 0.28,
       color: new THREE.Color().setHSL(0.01, 0.12, 0.28 + Math.random() * 0.05),
     });
@@ -1372,6 +1820,15 @@ export class ParticleSystem {
     const fireCount = Math.max(12, Math.floor(12 + blastScale * 5.2));
     const sparkCount = Math.max(12, Math.floor(12 + blastScale * 6.2));
     const debrisCount = Math.max(6, Math.floor(5 + blastScale * 3.5));
+
+    // 0. 瞬时白闪 + 冲击波：Boss 弹的命中规模一眼可读
+    this.spawnParticle(ParticleType.EXPLOSION, position, {
+      speed: 0,
+      life: 0.1 + blastScale * 0.02,
+      size: 1.8 + blastScale * 0.7,
+      color: this.tempColorA.set(0xffe6cc),
+    });
+    this.createShockwave(position, 9 + blastScale * 4, 0.55, 0xff6a3a, 0.85);
 
     // 1. 爆心高亮：更白、更硬，先读到“危险级别”
     for (let i = 0; i < coreFlashCount; i++) {
@@ -1589,6 +2046,7 @@ export class ParticleSystem {
     }
 
     // 3. 冲击波环：分阶段扩散，帮助玩家读到“爆炸半径与时间”
+    this.createShockwave(position, visualRadius * 0.95, 1.05, 0xff7048, 0.55);
     this.emitFlakRing(position, visualRadius * 0.24, ringCount, 0.34, 0.9, 22, 0.38, 0xff7048);
     const secondRingPos = position.clone();
     this.scheduleBurst(0.1, () => {
@@ -1874,6 +2332,8 @@ export class ParticleSystem {
       size: number;
       color: THREE.Color;
       gravity?: boolean;
+      spin?: number;
+      smokeTrail?: boolean;
     }
   ): Particle | null {
     const particle = this.acquireParticle();
@@ -1881,33 +2341,78 @@ export class ParticleSystem {
       return null;
     }
 
-    const geometry = this.geometries.get(type);
-    const baseMaterial = this.materials.get(type);
-
-    if (!geometry || !baseMaterial) return null;
-
     this.spawnDirection
       .set((Math.random() - 0.5) * 2, (Math.random() - 0.5) * 2, (Math.random() - 0.5) * 2)
       .normalize()
       .multiplyScalar(options.speed);
 
-    const material = particle.mesh.material as THREE.MeshBasicMaterial;
-    material.color.copy(options.color);
-    material.transparent = baseMaterial.transparent;
-    material.opacity = baseMaterial.opacity;
+    particle.type = type;
+    particle.baseColor.copy(options.color);
+    particle.smokeTrail = options.smokeTrail === true;
+    particle.smokeTrailTimer = 0.05;
+    particle.gravityScale = options.gravity === true
+      ? Math.max(1, TYPE_GRAVITY[type])
+      : TYPE_GRAVITY[type];
 
-    particle.mesh.geometry = geometry;
-    particle.mesh.position.copy(position);
-    particle.mesh.scale.setScalar(options.size);
-    particle.mesh.rotation.set(0, 0, 0);
-    particle.mesh.visible = true;
+    if (type === ParticleType.DEBRIS) {
+      particle.sprite.visible = false;
+      particle.debrisMesh.visible = true;
+      particle.debrisMaterial.color.copy(options.color);
+      particle.debrisMaterial.opacity = 1;
+      particle.debrisMesh.position.copy(position);
+      particle.debrisMesh.scale.setScalar(options.size);
+      particle.debrisMesh.rotation.set(
+        Math.random() * Math.PI,
+        Math.random() * Math.PI,
+        Math.random() * Math.PI
+      );
+      particle.baseOpacity = 1;
+    } else {
+      const textures = getVfxTextures();
+      particle.debrisMesh.visible = false;
+      particle.sprite.visible = true;
+
+      const material = particle.spriteMaterial;
+      switch (type) {
+        case ParticleType.SMOKE:
+          material.map = textures.smoke;
+          material.blending = THREE.NormalBlending;
+          particle.baseOpacity = 0.62;
+          particle.spinSpeed = options.spin ?? (Math.random() - 0.5) * 1.7;
+          break;
+        case ParticleType.SPARK:
+          material.map = textures.spark;
+          material.blending = THREE.AdditiveBlending;
+          particle.baseOpacity = 1;
+          particle.spinSpeed = options.spin ?? 0;
+          break;
+        case ParticleType.FIRE:
+          material.map = textures.fire;
+          material.blending = THREE.AdditiveBlending;
+          particle.baseOpacity = 0.95;
+          particle.spinSpeed = options.spin ?? (Math.random() - 0.5) * 0.9;
+          break;
+        default:
+          material.map = textures.glow;
+          material.blending = THREE.AdditiveBlending;
+          particle.baseOpacity = 1;
+          particle.spinSpeed = options.spin ?? (Math.random() - 0.5) * 0.6;
+          break;
+      }
+
+      material.rotation = Math.random() * Math.PI * 2;
+      material.color.copy(options.color);
+      material.opacity = particle.baseOpacity;
+      particle.sprite.position.copy(position);
+      const initialScale = options.size * SPRITE_SCALE[type];
+      particle.sprite.scale.set(initialScale, initialScale, 1);
+    }
 
     particle.position.copy(position);
     particle.velocity.copy(this.spawnDirection);
     particle.life = options.life;
     particle.maxLife = options.life;
     particle.size = options.size;
-    particle.type = type;
     particle.active = true;
 
     this.activeParticles.push(particle);
@@ -1935,22 +2440,44 @@ export class ParticleSystem {
   }
 
   private createParticleSlot(): Particle {
-    const initialGeometry = this.geometries.get(ParticleType.EXPLOSION) as THREE.BufferGeometry;
-    const initialMaterial = (
-      this.materials.get(ParticleType.EXPLOSION) as THREE.MeshBasicMaterial
-    ).clone();
-    const mesh = new THREE.Mesh(initialGeometry, initialMaterial);
-    mesh.visible = false;
-    this.particleMeshes.add(mesh);
+    const textures = getVfxTextures();
+    const spriteMaterial = new THREE.SpriteMaterial({
+      map: textures.glow,
+      transparent: true,
+      opacity: 1,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    });
+    const sprite = new THREE.Sprite(spriteMaterial);
+    sprite.visible = false;
+    this.particleMeshes.add(sprite);
+
+    const debrisMaterial = new THREE.MeshBasicMaterial({
+      color: 0x666666,
+      transparent: true,
+      opacity: 1,
+    });
+    const debrisMesh = new THREE.Mesh(getSharedDebrisGeometry(), debrisMaterial);
+    debrisMesh.visible = false;
+    this.particleMeshes.add(debrisMesh);
 
     return {
       position: new THREE.Vector3(),
       velocity: new THREE.Vector3(),
       life: 0,
-      mesh,
       maxLife: 0,
       size: 1,
       type: ParticleType.EXPLOSION,
+      sprite,
+      spriteMaterial,
+      debrisMesh,
+      debrisMaterial,
+      baseColor: new THREE.Color(),
+      baseOpacity: 1,
+      spinSpeed: 0,
+      gravityScale: 0.3,
+      smokeTrail: false,
+      smokeTrailTimer: 0,
       active: false,
     };
   }
@@ -1979,9 +2506,12 @@ export class ParticleSystem {
     const particle = this.activeParticles[index];
     particle.active = false;
     particle.life = 0;
-    particle.mesh.visible = false;
-    particle.mesh.scale.setScalar(0.0001);
-    particle.mesh.position.set(0, -9999, 0);
+    particle.smokeTrail = false;
+    particle.sprite.visible = false;
+    particle.sprite.position.set(0, -9999, 0);
+    particle.debrisMesh.visible = false;
+    particle.debrisMesh.scale.setScalar(0.0001);
+    particle.debrisMesh.position.set(0, -9999, 0);
 
     const lastIndex = this.activeParticles.length - 1;
     if (index !== lastIndex) {
@@ -1996,6 +2526,7 @@ export class ParticleSystem {
    */
   public update(deltaTime: number): void {
     this.flushDelayedBursts(deltaTime);
+    this.updateShockwaves(deltaTime);
 
     for (let i = this.activeParticles.length - 1; i >= 0; i--) {
       const particle = this.activeParticles[i];
@@ -2009,28 +2540,88 @@ export class ParticleSystem {
         continue;
       }
 
-      // 更新位置
-      particle.velocity.addScaledVector(this.gravity, deltaTime * 0.3);
+      // 更新位置（按类型重力：碎片坠落、烟浮升、光焰近似悬浮）
+      particle.velocity.addScaledVector(this.gravity, deltaTime * particle.gravityScale);
       particle.position.addScaledVector(particle.velocity, deltaTime);
 
-      particle.mesh.position.copy(particle.position);
-
-      // 更新透明度
       const lifeRatio = particle.life / particle.maxLife;
-      const material = particle.mesh.material as THREE.MeshBasicMaterial;
-      material.opacity = lifeRatio;
+      const age = 1 - lifeRatio;
 
-      // 更新大小（烟雾逐渐变大）
-      if (particle.type === ParticleType.SMOKE) {
-        const scale = particle.size * (1 + (1 - lifeRatio) * 2);
-        particle.mesh.scale.setScalar(scale);
-      }
-
-      // 旋转碎片
       if (particle.type === ParticleType.DEBRIS) {
-        particle.mesh.rotation.x += deltaTime * 5;
-        particle.mesh.rotation.y += deltaTime * 3;
+        particle.debrisMesh.position.copy(particle.position);
+        particle.debrisMesh.rotation.x += deltaTime * 5;
+        particle.debrisMesh.rotation.y += deltaTime * 3;
+        particle.debrisMaterial.opacity = Math.min(1, lifeRatio * 1.6);
+
+        // 大块碎片拖出烟迹（boss 爆炸残骸）
+        if (particle.smokeTrail) {
+          particle.smokeTrailTimer -= deltaTime;
+          if (
+            particle.smokeTrailTimer <= 0 &&
+            this.trailEmitCount < ParticleSystem.MAX_TRAIL_EMITS
+          ) {
+            particle.smokeTrailTimer = 0.05 + Math.random() * 0.04;
+            this.trailEmitQueue[this.trailEmitCount++].copy(particle.position);
+          }
+        }
+        continue;
       }
+
+      const material = particle.spriteMaterial;
+      particle.sprite.position.copy(particle.position);
+      material.rotation += particle.spinSpeed * deltaTime;
+
+      if (particle.type === ParticleType.SMOKE) {
+        // 烟：小而暗出生 → 膨胀提亮为柔灰 → 淡出
+        const fadeIn = Math.min(1, age * 8);
+        material.opacity = particle.baseOpacity * fadeIn * Math.pow(lifeRatio, 1.3);
+        const scale = particle.size * SPRITE_SCALE[particle.type] * (0.55 + age * 1.9);
+        particle.sprite.scale.set(scale, scale, 1);
+        this.rampTarget.copy(particle.baseColor).lerp(SOFT_GRAY, 0.5);
+        this.rampColor.copy(particle.baseColor).multiplyScalar(0.6);
+        material.color.copy(this.rampColor).lerp(this.rampTarget, Math.min(1, age * 1.4));
+      } else if (particle.type === ParticleType.SPARK) {
+        // 火花：白热出生，迅速回落到基色并收窄
+        material.opacity = particle.baseOpacity * lifeRatio;
+        const scale =
+          particle.size * SPRITE_SCALE[particle.type] * (1.1 - age * 0.45);
+        particle.sprite.scale.set(scale, scale, 1);
+        this.rampColor.copy(WHITE_HOT).lerp(particle.baseColor, Math.min(1, age / 0.25));
+        material.color.copy(this.rampColor);
+      } else {
+        // 闪光/火焰：快速膨胀 → 收缩，白热 → 基色 → 暗化（保持原色相）
+        const isFlash = particle.type === ParticleType.EXPLOSION;
+        const growPhase = isFlash ? 0.2 : 0.3;
+        const peak = isFlash ? 1.2 : 1.1;
+        const startScale = isFlash ? 0.5 : 0.7;
+        const endScale = isFlash ? 0.5 : 0.6;
+        const grow =
+          age < growPhase
+            ? startScale + (peak - startScale) * (age / growPhase)
+            : peak - (peak - endScale) * ((age - growPhase) / (1 - growPhase));
+        const scale = particle.size * SPRITE_SCALE[particle.type] * grow;
+        particle.sprite.scale.set(scale, scale, 1);
+        material.opacity = particle.baseOpacity * Math.pow(lifeRatio, isFlash ? 0.65 : 0.8);
+        this.rampColor.copy(WHITE_HOT).lerp(particle.baseColor, Math.min(1, age / 0.3));
+        if (age > 0.55) {
+          this.rampTarget.copy(particle.baseColor).multiplyScalar(0.32);
+          this.rampColor.lerp(this.rampTarget, ((age - 0.55) / 0.45) * 0.85);
+        }
+        material.color.copy(this.rampColor);
+      }
+    }
+
+    // 遍历结束后再生成碎片烟迹，避免遍历期间修改 activeParticles
+    if (this.trailEmitCount > 0) {
+      for (let i = 0; i < this.trailEmitCount; i++) {
+        this.spawnParticle(ParticleType.SMOKE, this.trailEmitQueue[i], {
+          speed: 0.6 + Math.random() * 0.8,
+          life: 0.5 + Math.random() * 0.4,
+          size: 0.4 + Math.random() * 0.3,
+          color: this.tempColorA.setHSL(0.02, 0.05, 0.24 + Math.random() * 0.08),
+        });
+      }
+      this.trailEmitCount = 0;
     }
   }
 
@@ -2039,6 +2630,12 @@ export class ParticleSystem {
    */
   public clear(): void {
     this.delayedBursts = [];
+    this.trailEmitCount = 0;
+
+    for (const ring of this.shockwaves) {
+      ring.active = false;
+      ring.mesh.visible = false;
+    }
 
     for (let i = this.activeParticles.length - 1; i >= 0; i--) {
       this.releaseParticleAtIndex(i);
@@ -2057,9 +2654,17 @@ export class ParticleSystem {
 
     const allParticles = [...this.particlePool, ...this.activeParticles];
     for (const particle of allParticles) {
-      this.particleMeshes.remove(particle.mesh);
-      (particle.mesh.material as THREE.Material).dispose();
+      this.particleMeshes.remove(particle.sprite);
+      this.particleMeshes.remove(particle.debrisMesh);
+      particle.spriteMaterial.dispose();
+      particle.debrisMaterial.dispose();
     }
+
+    for (const ring of this.shockwaves) {
+      this.particleMeshes.remove(ring.mesh);
+      ring.material.dispose();
+    }
+    this.shockwaves = [];
 
     this.particlePool = [];
     this.activeParticles = [];

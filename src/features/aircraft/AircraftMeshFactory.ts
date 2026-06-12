@@ -25,6 +25,7 @@ interface CachedMaterials {
   accent: THREE.MeshStandardMaterial;
   detail: THREE.MeshStandardMaterial;
   light: THREE.MeshBasicMaterial;
+  weapon: THREE.MeshStandardMaterial;
 }
 
 const materialsCache: Map<EnemyType, CachedMaterials> = new Map();
@@ -170,6 +171,7 @@ function getOrCreateMaterials(
       transparent: true,
       opacity: tuning.lightOpacity,
     }),
+    weapon: createAircraftMaterial(accentColor, 0.88, 0.24, 0.02),
   };
 
   materialsCache.set(type, materials);
@@ -234,6 +236,76 @@ export function updateAircraftSignals(deltaTime: number): void {
   }
 }
 
+// ---------------------------------------------------------------------------
+// 共享细节资源：单位几何体（建模时按需 scale）+ 跨机型通用材质。
+// 模块级常量跨所有飞机实例复用，配合 userData.sharedResource 防止随单机销毁释放。
+// ---------------------------------------------------------------------------
+const sharedGeometries = {
+  /** 单位盒：杆、条、框、挂架、识别带等细节 */
+  unitBox: new THREE.BoxGeometry(1, 1, 1),
+  /** 单位圆柱：天线杆、空速管、炮管、翼尖/垂尾吊舱 */
+  unitCylinder: new THREE.CylinderGeometry(1, 1, 1, 6),
+  /** 单位球：座舱盖气泡与菲涅尔镶边壳 */
+  unitSphere: new THREE.SphereGeometry(1, 12, 10),
+  /** 单位锥：弹头、加力外焰 */
+  unitCone: new THREE.ConeGeometry(1, 1, 8),
+  /** 喷口收敛外环（开口圆柱，窄端朝 -Y） */
+  nozzleRing: new THREE.CylinderGeometry(1, 0.84, 1, 10, 1, true),
+  /** 喷口深色内喉（开口收敛筒） */
+  nozzleThroat: new THREE.CylinderGeometry(0.8, 0.6, 1, 10, 1, true),
+  /** 加力核心亮盘 */
+  afterburnerDisc: new THREE.CircleGeometry(1, 10),
+  /** 挂载弹体（顶径 1 → 底径 0.92，比例与旧 addStore 一致） */
+  storeBody: new THREE.CylinderGeometry(1, 0.92, 1, 8),
+};
+
+const nozzleMetalMaterial = new THREE.MeshStandardMaterial({
+  color: 0x474c52,
+  metalness: 0.92,
+  roughness: 0.34,
+});
+const nozzleThroatMaterial = new THREE.MeshStandardMaterial({
+  color: 0x111418,
+  metalness: 0.56,
+  roughness: 0.82,
+});
+const canopyFrameMaterial = new THREE.MeshStandardMaterial({
+  color: 0x2a3138,
+  metalness: 0.86,
+  roughness: 0.3,
+});
+// 菲涅尔式座舱镶边：背面渲染的淡亮壳，廉价模拟玻璃边缘反光（无自定义 shader）
+const canopyRimMaterial = new THREE.MeshBasicMaterial({
+  color: 0x9fd2ee,
+  transparent: true,
+  opacity: 0.13,
+  side: THREE.BackSide,
+  depthWrite: false,
+});
+// 分层加力尾焰（叠加混合）：注册进引擎闪烁驱动，与现有尾焰同步抖动
+const afterburnerCoreMaterial = new THREE.MeshBasicMaterial({
+  color: 0xffe2ae,
+  transparent: true,
+  opacity: 0.78,
+  blending: THREE.AdditiveBlending,
+  depthWrite: false,
+});
+registerEngineGlowMaterial(afterburnerCoreMaterial);
+const afterburnerHaloMaterial = new THREE.MeshBasicMaterial({
+  color: 0xff7a2c,
+  transparent: true,
+  opacity: 0.22,
+  blending: THREE.AdditiveBlending,
+  depthWrite: false,
+});
+registerEngineGlowMaterial(afterburnerHaloMaterial);
+// 敌机进气道内腔：所有机型同色，模块级共享
+const enemyCavityMaterial = new THREE.MeshStandardMaterial({
+  color: 0x161a20,
+  metalness: 0.42,
+  roughness: 0.72,
+});
+
 /**
  * 依据机体包围盒追加航空灯组。tailDirection 指向机尾（+1 表示尾部在 +Z）。
  */
@@ -242,6 +314,10 @@ function addNavigationLights(group: THREE.Group, tailDirection: 1 | -1): void {
   if (bounds.isEmpty()) {
     return;
   }
+  // setFromObject 含 group 自身缩放，而灯具以 group 本地坐标定位 → 换算回本地空间，
+  // 避免缩放后的机体（敌机 scale=2）把灯具放到机体外两倍距离处
+  bounds.min.divide(group.scale);
+  bounds.max.divide(group.scale);
   const center = bounds.getCenter(new THREE.Vector3());
 
   const portLight = new THREE.Mesh(signalLightGeometry, signalLightMaterials.port);
@@ -282,6 +358,8 @@ function addMeshPart(
     scale?: [number, number, number];
     castShadow?: boolean;
     name?: string;
+    /** 几何体与材质均为跨机体共享资源，销毁单机时不随之 dispose */
+    shared?: boolean;
   }
 ): THREE.Mesh {
   const mesh = new THREE.Mesh(geometry, material);
@@ -299,6 +377,10 @@ function addMeshPart(
 
   if (options?.name) {
     mesh.name = options.name;
+  }
+
+  if (options?.shared) {
+    mesh.userData.sharedResource = true;
   }
 
   group.add(mesh);
@@ -440,6 +522,8 @@ function addFuselage(
 
 /**
  * 挂载物（导弹/炸弹）：弹体圆柱 + 弹头锥 + 十字尾翼，轴向沿 Z。
+ * 几何体全部取自模块级共享单位几何体（按需 scale）。
+ * shared = true 表示弹体/尾翼材质也是跨机体共享（缓存）材质。
  */
 function addStore(
   group: THREE.Group,
@@ -448,35 +532,176 @@ function addStore(
   position: [number, number, number],
   length: number,
   radius: number,
-  forward: 1 | -1
+  forward: 1 | -1,
+  shared: boolean = false
 ): void {
+  addMeshPart(group, sharedGeometries.storeBody, bodyMaterial, position, {
+    rotation: [Math.PI / 2, 0, 0],
+    scale: [radius, length, radius],
+    shared,
+  });
   addMeshPart(
     group,
-    new THREE.CylinderGeometry(radius, radius * 0.92, length, 8),
-    bodyMaterial,
-    position,
-    { rotation: [Math.PI / 2, 0, 0] }
-  );
-  addMeshPart(
-    group,
-    new THREE.ConeGeometry(radius * 0.95, length * 0.28, 8),
+    sharedGeometries.unitCone,
     bodyMaterial,
     [position[0], position[1], position[2] + forward * (length / 2 + length * 0.13)],
-    { rotation: [forward * (Math.PI / 2), 0, 0] }
+    {
+      rotation: [forward * (Math.PI / 2), 0, 0],
+      scale: [radius * 0.95, length * 0.28, radius * 0.95],
+      shared,
+    }
   );
   const finZ = position[2] - forward * length * 0.42;
+  addMeshPart(group, sharedGeometries.unitBox, finMaterial, [position[0], position[1], finZ], {
+    scale: [radius * 4.2, radius * 0.45, radius * 1.6],
+    shared,
+  });
+  addMeshPart(group, sharedGeometries.unitBox, finMaterial, [position[0], position[1], finZ], {
+    scale: [radius * 0.45, radius * 4.2, radius * 1.6],
+    shared,
+  });
+}
+
+/**
+ * 引擎喷口与分层加力尾焰。
+ * exit 为喷口出口平面中心，tailDirection 指向机尾（+1 = 机尾在 +Z）。
+ * 组成：收敛喷口外环（可选）+ 深色金属内喉 + 加力核心亮盘（叠加混合）
+ * + 外层淡焰锥（叠加混合）。两层焰使用已注册的共享材质，
+ * 由 updateAircraftSignals 的引擎闪烁驱动同步抖动。
+ */
+function addExhaustDetail(
+  group: THREE.Group,
+  exit: [number, number, number],
+  radius: number,
+  tailDirection: 1 | -1,
+  options?: { nozzle?: boolean; flameLength?: number }
+): void {
+  const withNozzle = options?.nozzle ?? true;
+  const flameLength = options?.flameLength ?? radius * 3.2;
+  const nozzleLength = radius * 1.05;
+  let coreZ = exit[2] + tailDirection * 0.04;
+
+  if (withNozzle) {
+    // 收敛喷口外环（窄端朝尾）
+    addMeshPart(
+      group,
+      sharedGeometries.nozzleRing,
+      nozzleMetalMaterial,
+      [exit[0], exit[1], exit[2] + tailDirection * nozzleLength * 0.4],
+      {
+        rotation: [-tailDirection * (Math.PI / 2), 0, 0],
+        scale: [radius, nozzleLength, radius],
+        shared: true,
+      }
+    );
+    coreZ = exit[2] + tailDirection * nozzleLength * 0.55;
+  }
+  // 深色内喉
   addMeshPart(
     group,
-    new THREE.BoxGeometry(radius * 4.2, radius * 0.45, radius * 1.6),
-    finMaterial,
-    [position[0], position[1], finZ]
+    sharedGeometries.nozzleThroat,
+    nozzleThroatMaterial,
+    [exit[0], exit[1], exit[2] + tailDirection * nozzleLength * 0.18],
+    {
+      rotation: [-tailDirection * (Math.PI / 2), 0, 0],
+      scale: [radius * 0.98, nozzleLength * 0.8, radius * 0.98],
+      castShadow: false,
+      shared: true,
+    }
   );
+  // 加力核心亮盘（叠加）
   addMeshPart(
     group,
-    new THREE.BoxGeometry(radius * 0.45, radius * 4.2, radius * 1.6),
-    finMaterial,
-    [position[0], position[1], finZ]
+    sharedGeometries.afterburnerDisc,
+    afterburnerCoreMaterial,
+    [exit[0], exit[1], coreZ],
+    {
+      rotation: [0, tailDirection > 0 ? 0 : Math.PI, 0],
+      scale: [radius * 0.58, radius * 0.58, 1],
+      castShadow: false,
+      shared: true,
+    }
   );
+  // 外层淡焰锥（叠加，锥尖朝尾）
+  addMeshPart(
+    group,
+    sharedGeometries.unitCone,
+    afterburnerHaloMaterial,
+    [exit[0], exit[1], coreZ + tailDirection * flameLength * 0.5],
+    {
+      rotation: [tailDirection * (Math.PI / 2), 0, 0],
+      scale: [radius * 0.8, flameLength, radius * 0.8],
+      castShadow: false,
+      shared: true,
+    }
+  );
+}
+
+/** 垂尾顶端整流舱：沿机身纵轴的小圆柱天线/灯具吊舱 + 共享频闪灯。 */
+function addFinTipPod(
+  group: THREE.Group,
+  position: [number, number, number],
+  length: number
+): void {
+  addMeshPart(group, sharedGeometries.unitCylinder, canopyFrameMaterial, position, {
+    rotation: [Math.PI / 2, 0, 0],
+    scale: [0.05, length, 0.05],
+    shared: true,
+  });
+  const light = new THREE.Mesh(signalLightGeometry, signalLightMaterials.strobe);
+  light.position.set(position[0], position[1] + 0.04, position[2]);
+  light.scale.setScalar(0.45);
+  light.castShadow = false;
+  light.userData.sharedResource = true;
+  group.add(light);
+}
+
+const STRIP_AXIS = new THREE.Vector3(1, 0, 0);
+
+/**
+ * 翼前缘加强/涂装条：从翼根前缘到翼尖前缘的细长薄盒。
+ * 使用四元数（setFromUnitVectors）对准任意方向，避免欧拉角万向节问题。
+ */
+function addLeadingEdgeStrip(
+  group: THREE.Group,
+  material: THREE.Material,
+  from: [number, number, number],
+  to: [number, number, number],
+  width: number = 0.12,
+  shared: boolean = true
+): void {
+  const direction = new THREE.Vector3(to[0] - from[0], to[1] - from[1], to[2] - from[2]);
+  const length = direction.length();
+  direction.normalize();
+  const mesh = addMeshPart(
+    group,
+    sharedGeometries.unitBox,
+    material,
+    [(from[0] + to[0]) / 2, (from[1] + to[1]) / 2, (from[2] + to[2]) / 2],
+    { scale: [length, 0.035, width], castShadow: false, shared }
+  );
+  mesh.quaternion.setFromUnitVectors(STRIP_AXIS, direction);
+}
+
+/** 左右对称的一对前缘条（from/to 给出 +X 侧坐标）。 */
+function addLeadingEdgeStripPair(
+  group: THREE.Group,
+  material: THREE.Material,
+  from: [number, number, number],
+  to: [number, number, number],
+  width: number = 0.12,
+  shared: boolean = true
+): void {
+  for (const side of [1, -1] as const) {
+    addLeadingEdgeStrip(
+      group,
+      material,
+      [side * from[0], from[1], from[2]],
+      [side * to[0], to[1], to[2]],
+      width,
+      shared
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -553,12 +778,21 @@ export function createPlayerMesh(): THREE.Group {
     rotation: [0, 0.12, 0],
   });
 
-  // === 气泡座舱盖 ===
+  // === 气泡座舱盖：玻璃气泡 + 风挡弓框 + 纵梁 + 后拱框 + 菲涅尔镶边壳 ===
   addMeshPart(group, new THREE.SphereGeometry(0.4, 14, 12), cockpitMaterial, [0, 0.32, -0.85], {
     scale: [1.0, 0.62, 1.7],
   });
+  addMeshPart(group, sharedGeometries.unitSphere, canopyRimMaterial, [0, 0.32, -0.85], {
+    scale: [0.424, 0.263, 0.721],
+    castShadow: false,
+    shared: true,
+  });
   addMeshPart(group, new THREE.BoxGeometry(0.5, 0.05, 0.07), accentMaterial, [0, 0.42, -1.4]);
   addMeshPart(group, new THREE.BoxGeometry(0.07, 0.04, 1.1), accentMaterial, [0, 0.55, -0.8]);
+  addMeshPart(group, sharedGeometries.unitBox, canopyFrameMaterial, [0, 0.4, -0.28], {
+    scale: [0.46, 0.05, 0.07],
+    shared: true,
+  });
 
   // === 前缘根部延伸（LERX）===
   addWingPair(
@@ -694,6 +928,18 @@ export function createPlayerMesh(): THREE.Group {
   rightGlow.userData.sharedResource = true;
   group.add(rightGlow);
 
+  // 矩形喷口深色内喉 + 分层加力辉光（与矢量喷口配合，随引擎闪烁驱动抖动）
+  for (const side of [1, -1] as const) {
+    addMeshPart(group, sharedGeometries.unitBox, intakeCavityMaterial, [side * 0.32, -0.03, 2.2], {
+      scale: [0.34, 0.22, 0.12],
+      castShadow: false,
+    });
+    addExhaustDetail(group, [side * 0.32, -0.03, 2.26], 0.16, 1, {
+      nozzle: false,
+      flameLength: 0.6,
+    });
+  }
+
   // === 腹鳍 ===
   addMeshPart(group, new THREE.BoxGeometry(0.04, 0.3, 0.6), detailMaterial, [-0.4, -0.32, 1.2], {
     rotation: [0, 0, 0.35],
@@ -702,11 +948,15 @@ export function createPlayerMesh(): THREE.Group {
     rotation: [0, 0, -0.35],
   });
 
-  // === 翼下挂架 ===
+  // === 翼下挂架 + 格斗弹（内外两对）===
   addMeshPart(group, new THREE.BoxGeometry(0.07, 0.18, 0.55), weaponMaterial, [-1.05, -0.2, 0.45]);
   addMeshPart(group, new THREE.BoxGeometry(0.07, 0.18, 0.55), weaponMaterial, [1.05, -0.2, 0.45]);
   addMeshPart(group, new THREE.BoxGeometry(0.07, 0.16, 0.5), weaponMaterial, [-1.65, -0.17, 0.6]);
   addMeshPart(group, new THREE.BoxGeometry(0.07, 0.16, 0.5), weaponMaterial, [1.65, -0.17, 0.6]);
+  for (const side of [1, -1] as const) {
+    addStore(group, detailMaterial, weaponMaterial, [side * 1.05, -0.36, 0.45], 0.85, 0.05, -1);
+    addStore(group, detailMaterial, weaponMaterial, [side * 1.65, -0.31, 0.6], 0.75, 0.045, -1);
+  }
 
   // === 翼尖导弹（发射轨 + 弹体）===
   for (const side of [1, -1] as const) {
@@ -764,6 +1014,35 @@ export function createPlayerMesh(): THREE.Group {
   noseSensor.position.set(0, -0.05, -2.3);
   group.add(noseSensor);
 
+  // —— 细节强化 ——
+  // 主翼前缘涂装条
+  addLeadingEdgeStripPair(
+    group,
+    accentMaterial,
+    [0.6, -0.02, -0.6],
+    [2.45, -0.13, 0.95],
+    0.12,
+    false
+  );
+  // 双垂尾顶端天线吊舱（含频闪灯）
+  for (const side of [1, -1] as const) {
+    addFinTipPod(group, [side * 0.9, 1.22, 1.2], 0.45);
+  }
+  // 机鼻攻角探头（左右各一，向前外侧斜出）
+  for (const side of [1, -1] as const) {
+    addMeshPart(group, sharedGeometries.unitCylinder, accentMaterial, [side * 0.2, 0.04, -2.3], {
+      scale: [0.012, 0.16, 0.012],
+      rotation: [Math.PI / 2, 0, side * 0.25],
+    });
+  }
+  // 尾撑顶面中队识别带
+  for (const side of [1, -1] as const) {
+    addMeshPart(group, sharedGeometries.unitBox, accentMaterial, [side * 0.76, 0.11, 1.2], {
+      scale: [0.32, 0.03, 0.2],
+      castShadow: false,
+    });
+  }
+
   // 翼尖航行灯（左红右绿）
   const leftNavLight = new THREE.Mesh(new THREE.SphereGeometry(0.05, 8, 8), navRedMaterial);
   leftNavLight.position.set(-2.52, -0.02, -0.3);
@@ -804,31 +1083,56 @@ interface EnemyBuildContext {
   wingSpan: number;
 }
 
-/** 敌机座舱盖：染色玻璃气泡 + 风挡弓形框。 */
+/** 敌机座舱盖：染色玻璃气泡 + 前弓风挡框 + 后拱框 + 中央纵梁 + 菲涅尔式镶边壳。 */
 function addEnemyCanopy(
   ctx: EnemyBuildContext,
   position: [number, number, number],
   radius: number,
   scale: [number, number, number]
 ): void {
+  const sx = radius * scale[0];
+  const sy = radius * scale[1];
+  const sz = radius * scale[2];
+  addMeshPart(ctx.group, sharedGeometries.unitSphere, ctx.materials.cockpit, position, {
+    scale: [sx, sy, sz],
+    shared: true,
+  });
+  // 菲涅尔式镶边壳：略大的背面渲染淡亮壳，模拟玻璃边缘反光
+  addMeshPart(ctx.group, sharedGeometries.unitSphere, canopyRimMaterial, position, {
+    scale: [sx * 1.06, sy * 1.06, sz * 1.06],
+    castShadow: false,
+    shared: true,
+  });
+  // 前弓风挡框
   addMeshPart(
     ctx.group,
-    new THREE.SphereGeometry(radius, 12, 10),
-    ctx.materials.cockpit,
-    position,
-    {
-      scale,
-    }
-  );
-  addMeshPart(
-    ctx.group,
-    new THREE.BoxGeometry(radius * scale[0] * 1.6, 0.05, 0.07),
+    sharedGeometries.unitBox,
     ctx.materials.accent,
-    [position[0], position[1] + radius * scale[1] * 0.5, position[2] + radius * scale[2] * 0.72]
+    [position[0], position[1] + sy * 0.5, position[2] + sz * 0.72],
+    { scale: [sx * 1.6, 0.05, 0.07], shared: true }
+  );
+  // 后拱框
+  addMeshPart(
+    ctx.group,
+    sharedGeometries.unitBox,
+    canopyFrameMaterial,
+    [position[0], position[1] + sy * 0.45, position[2] - sz * 0.62],
+    { scale: [sx * 1.5, 0.05, 0.07], shared: true }
+  );
+  // 中央纵梁
+  addMeshPart(
+    ctx.group,
+    sharedGeometries.unitBox,
+    canopyFrameMaterial,
+    [position[0], position[1] + sy * 0.86, position[2]],
+    { scale: [0.05, 0.045, sz * 1.35], shared: true }
   );
 }
 
-/** 敌机引擎：喷管圆柱 + 尾焰锥（机尾 -Z 方向）。name 用于 'engineGlow' 查询。 */
+/**
+ * 敌机引擎：喷管壳体 + 收敛喷口外环 + 深色内喉 + 主尾焰锥 + 分层加力
+ * （机尾 -Z 方向）。name 用于 'engineGlow' 查询（尾迹采样等），保持唯一。
+ */
 function addEnemyEngine(
   ctx: EnemyBuildContext,
   position: [number, number, number],
@@ -852,6 +1156,14 @@ function addEnemyEngine(
       castShadow: false,
       name: options?.name,
     }
+  );
+  // 真实喷口几何（出口在壳体后端面）+ 分层加力辉光
+  addExhaustDetail(
+    ctx.group,
+    [position[0], position[1], position[2] - radius * 1.2],
+    radius * 0.95,
+    -1,
+    { flameLength: (options?.glowLength ?? radius * 4) * 0.85 }
   );
 }
 
@@ -988,6 +1300,40 @@ function buildScout(ctx: EnemyBuildContext): void {
   addMeshPart(group, new THREE.SphereGeometry(0.06, 8, 8), materials.light, [0, 0.3, -0.5], {
     castShadow: false,
   });
+
+  // —— 细节强化 ——
+  // 主翼前缘涂装条
+  addLeadingEdgeStripPair(group, materials.accent, [0.36, 0.19, 0.14], [2.6, 0.39, -0.1], 0.1);
+  // V 型尾翼顶端天线吊舱（含频闪灯）
+  for (const side of [1, -1] as const) {
+    addFinTipPod(group, [side * 0.55, 0.74, -3.2], 0.36);
+  }
+  // 尾部中队识别带（环绕机身的涂装带）
+  addMeshPart(group, sharedGeometries.unitBox, materials.accent, [0, 0, -2.9], {
+    scale: [0.38, 0.36, 0.3],
+    shared: true,
+  });
+  // 机身侧查线（中队色细条）
+  for (const side of [1, -1] as const) {
+    addMeshPart(group, sharedGeometries.unitBox, materials.accent, [side * 0.3, 0.1, 0.3], {
+      scale: [0.02, 0.06, 2.0],
+      castShadow: false,
+      shared: true,
+    });
+  }
+  // 腹部刀形天线
+  addMeshPart(group, sharedGeometries.unitBox, materials.detail, [0, -0.34, 1.4], {
+    scale: [0.025, 0.12, 0.2],
+    shared: true,
+  });
+  // 翼尖侦察吊舱前端传感器灯
+  for (const side of [1, -1] as const) {
+    addMeshPart(group, signalLightGeometry, materials.light, [side * 2.66, 0.4, -0.02], {
+      scale: [0.6, 0.6, 0.6],
+      castShadow: false,
+      shared: true,
+    });
+  }
 }
 
 /**
@@ -1093,12 +1439,47 @@ function buildFighter(ctx: EnemyBuildContext): void {
       -0.04,
       -2.0,
     ]);
-    addStore(group, materials.detail, weaponMaterial, [side * 3.32, -0.12, -2.0], 1.1, 0.07, 1);
+    addStore(
+      group,
+      materials.detail,
+      weaponMaterial,
+      [side * 3.32, -0.12, -2.0],
+      1.1,
+      0.07,
+      1,
+      true
+    );
   }
 
-  // 翼下挂架
+  // 翼下挂架（内侧）+ 中距弹，外侧再加一对挂架 + 格斗弹
   addMeshPart(group, new THREE.BoxGeometry(0.08, 0.22, 0.7), weaponMaterial, [-1.6, -0.22, -1.6]);
   addMeshPart(group, new THREE.BoxGeometry(0.08, 0.22, 0.7), weaponMaterial, [1.6, -0.22, -1.6]);
+  for (const side of [1, -1] as const) {
+    addStore(
+      group,
+      materials.detail,
+      weaponMaterial,
+      [side * 1.6, -0.42, -1.55],
+      1.05,
+      0.06,
+      1,
+      true
+    );
+    addMeshPart(group, sharedGeometries.unitBox, weaponMaterial, [side * 2.35, -0.16, -2.4], {
+      scale: [0.07, 0.18, 0.6],
+      shared: true,
+    });
+    addStore(
+      group,
+      materials.detail,
+      weaponMaterial,
+      [side * 2.35, -0.31, -2.4],
+      0.9,
+      0.055,
+      1,
+      true
+    );
+  }
 
   // 背脊整流罩 / 检修缝 / 信标 / 空速管
   addMeshPart(group, new THREE.BoxGeometry(0.24, 0.12, 2.6), materials.body, [0, 0.42, 0.2]);
@@ -1116,6 +1497,33 @@ function buildFighter(ctx: EnemyBuildContext): void {
       rotation: [Math.PI / 2, 0, 0],
     }
   );
+
+  // —— 细节强化 ——
+  // 三角翼前缘涂装条
+  addLeadingEdgeStripPair(group, materials.accent, [0.55, -0.02, 0.38], [3.3, -0.02, -2.92], 0.13);
+  // 垂尾顶端天线吊舱（含频闪灯）+ 垂尾前缘涂装条
+  addFinTipPod(group, [0, 1.06, -4.2], 0.55);
+  addLeadingEdgeStrip(group, materials.accent, [0, 0.5, -3.3], [0, 1.08, -3.87], 0.09);
+  // 背脊涂装条（中队色）
+  addMeshPart(group, sharedGeometries.unitBox, materials.accent, [0, 0.49, 0.2], {
+    scale: [0.22, 0.02, 2.4],
+    castShadow: false,
+    shared: true,
+  });
+  // 尾部中队识别带
+  addMeshPart(group, sharedGeometries.unitBox, materials.accent, [0, 0, -3.9], {
+    scale: [0.62, 0.52, 0.3],
+    shared: true,
+  });
+  // 背部/腹部刀形天线
+  addMeshPart(group, sharedGeometries.unitBox, materials.detail, [0, 0.55, 1.4], {
+    scale: [0.03, 0.16, 0.24],
+    shared: true,
+  });
+  addMeshPart(group, sharedGeometries.unitBox, materials.detail, [0, -0.46, 0.6], {
+    scale: [0.03, 0.12, 0.2],
+    shared: true,
+  });
 }
 
 /**
@@ -1252,13 +1660,31 @@ function buildHeavy(ctx: EnemyBuildContext): void {
       0.1,
       -1.2,
     ]);
-    addStore(group, weaponMaterial, materials.detail, [side * 2.3, -0.18, -1.1], 1.5, 0.17, 1);
+    addStore(
+      group,
+      weaponMaterial,
+      materials.detail,
+      [side * 2.3, -0.18, -1.1],
+      1.5,
+      0.17,
+      1,
+      true
+    );
     addMeshPart(group, new THREE.BoxGeometry(0.1, 0.26, 0.8), weaponMaterial, [
       side * 3.5,
       0,
       -1.5,
     ]);
-    addStore(group, weaponMaterial, materials.detail, [side * 3.5, -0.26, -1.4], 1.3, 0.15, 1);
+    addStore(
+      group,
+      weaponMaterial,
+      materials.detail,
+      [side * 3.5, -0.26, -1.4],
+      1.3,
+      0.15,
+      1,
+      true
+    );
   }
 
   // 腹部龙骨 / 检修缝 / 信标
@@ -1267,6 +1693,56 @@ function buildHeavy(ctx: EnemyBuildContext): void {
   addMeshPart(group, new THREE.BoxGeometry(0.02, 0.04, 3.4), materials.detail, [1.0, 0.2, 0.8]);
   addMeshPart(group, new THREE.SphereGeometry(0.08, 8, 8), materials.light, [0, 0.62, 0.6], {
     castShadow: false,
+  });
+
+  // —— 细节强化 ——
+  // 发动机短舱真实喷口（外环 + 内喉 + 分层加力）
+  for (const side of [1, -1] as const) {
+    addExhaustDetail(group, [side * 1.35, -0.05, -6.0], 0.36, -1, { flameLength: 1.0 });
+  }
+  // 机腹纵列弹架 + 三枚炸弹
+  addMeshPart(group, sharedGeometries.unitBox, weaponMaterial, [0, -0.78, 0.2], {
+    scale: [0.5, 0.1, 2.8],
+    shared: true,
+  });
+  for (const z of [1.2, 0.2, -0.8]) {
+    addStore(group, weaponMaterial, materials.detail, [0, -0.97, z], 1.35, 0.16, 1, true);
+  }
+  // 主翼前缘涂装条
+  addLeadingEdgeStripPair(group, materials.accent, [1.1, 0.39, 0.62], [5.3, 0.1, -1.82], 0.16);
+  // 翼尖整流条
+  for (const side of [1, -1] as const) {
+    addMeshPart(group, sharedGeometries.unitBox, materials.detail, [side * 5.32, 0.02, -1.55], {
+      scale: [0.07, 0.09, 1.1],
+      shared: true,
+    });
+  }
+  // 双垂尾顶端天线吊舱（含频闪灯）
+  for (const side of [1, -1] as const) {
+    addFinTipPod(group, [side * 1.05, 1.5, -6.0], 0.5);
+  }
+  // 机背刀形天线排
+  addMeshPart(group, sharedGeometries.unitBox, materials.detail, [0, 0.66, 2.6], {
+    scale: [0.04, 0.18, 0.3],
+    shared: true,
+  });
+  addMeshPart(group, sharedGeometries.unitBox, materials.detail, [0, 0.62, -0.6], {
+    scale: [0.04, 0.16, 0.26],
+    shared: true,
+  });
+  // 机身侧中队识别条
+  for (const side of [1, -1] as const) {
+    addMeshPart(group, sharedGeometries.unitBox, materials.accent, [side * 1.05, 0.2, 3.2], {
+      scale: [0.025, 0.09, 2.2],
+      castShadow: false,
+      shared: true,
+    });
+  }
+  // 机鼻空速管
+  addMeshPart(group, sharedGeometries.unitCylinder, materials.detail, [0, 0, nose + 0.16], {
+    scale: [0.016, 0.4, 0.016],
+    rotation: [Math.PI / 2, 0, 0],
+    shared: true,
   });
 }
 
@@ -1388,6 +1864,49 @@ function buildSniper(ctx: EnemyBuildContext): void {
   addMeshPart(group, new THREE.BoxGeometry(0.02, 0.03, 2.6), materials.detail, [0.43, 0.06, 0.2]);
   addMeshPart(group, new THREE.SphereGeometry(0.07, 8, 8), materials.light, [0, 0.5, -2.6], {
     castShadow: false,
+  });
+
+  // —— 细节强化 ——
+  // 鼻下长身管狙击炮：长炮管 + 炮口套环 + 传感器整流罩 + 光电窗
+  addMeshPart(group, sharedGeometries.unitCylinder, nozzleMetalMaterial, [0, -0.16, 5.4], {
+    scale: [0.045, 2.4, 0.045],
+    rotation: [Math.PI / 2, 0, 0],
+    shared: true,
+  });
+  addMeshPart(group, sharedGeometries.unitCylinder, nozzleMetalMaterial, [0, -0.16, 6.5], {
+    scale: [0.065, 0.14, 0.065],
+    rotation: [Math.PI / 2, 0, 0],
+    shared: true,
+  });
+  addMeshPart(group, sharedGeometries.unitBox, materials.detail, [0, -0.26, 4.3], {
+    scale: [0.16, 0.14, 0.9],
+    shared: true,
+  });
+  addMeshPart(group, sharedGeometries.unitSphere, materials.cockpit, [0, -0.3, 4.75], {
+    scale: [0.07, 0.06, 0.1],
+    shared: true,
+  });
+  // 主翼前缘涂装条
+  addLeadingEdgeStripPair(group, materials.accent, [0.75, 0.05, -0.28], [2.2, 0.0, -1.52], 0.1);
+  // 双垂尾顶端天线吊舱（含频闪灯）
+  for (const side of [1, -1] as const) {
+    addFinTipPod(group, [side * 0.63, 0.95, -5.45], 0.45);
+  }
+  // 背脊中队涂装条
+  addMeshPart(group, sharedGeometries.unitBox, materials.accent, [0, 0.49, -0.6], {
+    scale: [0.2, 0.025, 4.2],
+    castShadow: false,
+    shared: true,
+  });
+  // 尾部中队识别带
+  addMeshPart(group, sharedGeometries.unitBox, materials.accent, [0, 0, -4.6], {
+    scale: [0.62, 0.5, 0.26],
+    shared: true,
+  });
+  // 背部刀形天线
+  addMeshPart(group, sharedGeometries.unitBox, materials.detail, [0, 0.52, 1.8], {
+    scale: [0.03, 0.16, 0.24],
+    shared: true,
   });
 }
 
@@ -1523,7 +2042,16 @@ function buildAce(ctx: EnemyBuildContext): void {
       0.16,
       0.85,
     ]);
-    addStore(group, materials.detail, weaponMaterial, [side * 3.62, 0.07, 0.85], 1.2, 0.07, 1);
+    addStore(
+      group,
+      materials.detail,
+      weaponMaterial,
+      [side * 3.62, 0.07, 0.85],
+      1.2,
+      0.07,
+      1,
+      true
+    );
   }
 
   // 检修缝 / 空速管
@@ -1538,6 +2066,55 @@ function buildAce(ctx: EnemyBuildContext): void {
       rotation: [Math.PI / 2, 0, 0],
     }
   );
+
+  // —— 细节强化 ——
+  // 翼下双排挂架 + 格斗弹
+  for (const side of [1, -1] as const) {
+    addMeshPart(group, sharedGeometries.unitBox, weaponMaterial, [side * 1.8, -0.04, -1.2], {
+      scale: [0.07, 0.22, 0.7],
+      shared: true,
+    });
+    addStore(
+      group,
+      materials.detail,
+      weaponMaterial,
+      [side * 1.8, -0.21, -1.2],
+      1.05,
+      0.06,
+      1,
+      true
+    );
+    addMeshPart(group, sharedGeometries.unitBox, weaponMaterial, [side * 2.5, 0.0, -0.85], {
+      scale: [0.06, 0.2, 0.6],
+      shared: true,
+    });
+    addStore(
+      group,
+      materials.detail,
+      weaponMaterial,
+      [side * 2.5, -0.16, -0.85],
+      0.9,
+      0.055,
+      1,
+      true
+    );
+  }
+  // 前掠主翼前缘涂装条（精英中队色）
+  addLeadingEdgeStripPair(group, materials.accent, [0.7, 0.09, -0.95], [3.6, 0.14, 0.35], 0.13);
+  // 双垂尾顶端天线吊舱（含频闪灯）
+  for (const side of [1, -1] as const) {
+    addFinTipPod(group, [side * 0.82, 1.1, -4.4], 0.5);
+  }
+  // 机鼻中队识别带
+  addMeshPart(group, sharedGeometries.unitBox, materials.accent, [0, 0, 3.6], {
+    scale: [0.9, 0.64, 0.28],
+    shared: true,
+  });
+  // 腹部刀形天线
+  addMeshPart(group, sharedGeometries.unitBox, materials.detail, [0, -0.52, 1.2], {
+    scale: [0.03, 0.14, 0.22],
+    shared: true,
+  });
 }
 
 /**
@@ -1608,12 +2185,9 @@ export function createEnemyMesh(config: EnemyConfig): THREE.Group {
 
   group.scale.set(scaleMultiplier, scaleMultiplier, scaleMultiplier);
   const materials = getOrCreateMaterials(config.type, bodyColor, wingColor, accentColor);
-  const weaponMaterial = createAircraftMaterial(accentColor, 0.88, 0.24, 0.02);
-  const cavityMaterial = new THREE.MeshStandardMaterial({
-    color: 0x161a20,
-    metalness: 0.42,
-    roughness: 0.72,
-  });
+  // 武器/内腔材质同样跨实例共享：武器取自按机型缓存，内腔为模块级常量
+  const weaponMaterial = materials.weapon;
+  const cavityMaterial = enemyCavityMaterial;
 
   const ctx: EnemyBuildContext = {
     group,

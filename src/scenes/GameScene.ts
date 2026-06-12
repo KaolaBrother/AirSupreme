@@ -116,7 +116,8 @@ export class GameScene {
     });
     const ground = new THREE.Mesh(groundGeometry, groundMaterial);
     ground.rotation.x = -Math.PI / 2;
-    ground.position.y = -70;
+    // worldscape 高度场的湖盆最深可达约 -92：底板下沉以免穿出湖床
+    ground.position.y = -96;
     ground.renderOrder = -1;
     this.scene.add(ground);
     this.ground = ground;

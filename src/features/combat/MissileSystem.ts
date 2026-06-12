@@ -1,26 +1,61 @@
 import * as THREE from 'three';
-import { ParticleSystem } from '@/features/effects/ParticleSystem';
+import { ParticleSystem, getVfxTextures } from '@/features/effects/ParticleSystem';
 import { GAME_CONSTANTS } from '@/config';
 import { getLogger } from '@/core/utils/Logger';
 
 const log = getLogger('MissileSystem');
-const MISSILE_TRAIL_INTERVAL = 0.04;
+// 稍微加密尾迹步进，让烟线更连续
+const MISSILE_TRAIL_INTERVAL = 0.035;
 
-let sharedConeGeometry: THREE.ConeGeometry | null = null;
-let sharedTrailGeometry: THREE.ConeGeometry | null = null;
-
-function getSharedConeGeometry(): THREE.ConeGeometry {
-  if (!sharedConeGeometry) {
-    sharedConeGeometry = new THREE.ConeGeometry(0.4, 2.5, 16);
-  }
-  return sharedConeGeometry;
+/**
+ * 导弹模型共享几何体（全部预旋转为 +Z 朝前）
+ */
+interface MissileGeometries {
+  body: THREE.CylinderGeometry;
+  nose: THREE.ConeGeometry;
+  fin: THREE.BoxGeometry;
+  canard: THREE.BoxGeometry;
+  nozzle: THREE.TorusGeometry;
+  accentBand: THREE.CylinderGeometry;
+  flameOuter: THREE.ConeGeometry;
+  flameInner: THREE.ConeGeometry;
 }
 
-function getSharedTrailGeometry(): THREE.ConeGeometry {
-  if (!sharedTrailGeometry) {
-    sharedTrailGeometry = new THREE.ConeGeometry(0.25, 2, 16);
+let sharedMissileGeometries: MissileGeometries | null = null;
+
+function getMissileGeometries(): MissileGeometries {
+  if (!sharedMissileGeometries) {
+    // 弹体：细长圆柱，前端略收（含弹头总长径比 ~8:1，更接近真实空空弹）
+    const body = new THREE.CylinderGeometry(0.15, 0.165, 1.9, 12);
+    body.rotateX(Math.PI / 2);
+    // 卵形弹头
+    const nose = new THREE.ConeGeometry(0.15, 0.8, 12);
+    nose.rotateX(Math.PI / 2);
+    // 十字尾翼 / 弹体中段小鸭翼
+    const fin = new THREE.BoxGeometry(0.045, 0.4, 0.52);
+    const canard = new THREE.BoxGeometry(0.035, 0.22, 0.3);
+    // 喷口环
+    const nozzle = new THREE.TorusGeometry(0.12, 0.04, 8, 16);
+    // 弹体警示色带
+    const accentBand = new THREE.CylinderGeometry(0.17, 0.17, 0.12, 12);
+    accentBand.rotateX(Math.PI / 2);
+    // 双层尾焰（开口锥，尖端朝后）
+    const flameOuter = new THREE.ConeGeometry(0.17, 1.5, 10, 1, true);
+    flameOuter.rotateX(-Math.PI / 2);
+    const flameInner = new THREE.ConeGeometry(0.09, 1.0, 8, 1, true);
+    flameInner.rotateX(-Math.PI / 2);
+    sharedMissileGeometries = {
+      body,
+      nose,
+      fin,
+      canard,
+      nozzle,
+      accentBand,
+      flameOuter,
+      flameInner,
+    };
   }
-  return sharedTrailGeometry;
+  return sharedMissileGeometries;
 }
 
 /**
@@ -36,14 +71,19 @@ export class Missile {
 
   private turnSpeed: number = GAME_CONSTANTS.MISSILE.TURN_SPEED; // 转向速度（弧度/秒）
   private speed: number = 80; // 导弹速度
-  private trail: THREE.Mesh | null = null;
   private particleSystem: ParticleSystem;
   private startPosition: THREE.Vector3; // 记录发射位置
   private maxFlightDistance: number = GAME_CONSTANTS.MISSILE.MAX_FLIGHT_DISTANCE; // 最大飞行距离
   private enemies: THREE.Object3D[] = []; // 敌人列表，用于重新锁定目标
-  private coneMaterial: THREE.MeshStandardMaterial;
-  private trailMaterial: THREE.MeshBasicMaterial;
-  private engineGlowMaterial: THREE.MeshBasicMaterial;
+  private readonly ownedMaterials: THREE.Material[] = [];
+  private accentMaterial!: THREE.MeshStandardMaterial;
+  private nozzleMaterial!: THREE.MeshStandardMaterial;
+  private flameOuterMaterial!: THREE.MeshBasicMaterial;
+  private flameInnerMaterial!: THREE.MeshBasicMaterial;
+  private engineGlowMaterial!: THREE.SpriteMaterial;
+  private flameOuter!: THREE.Mesh;
+  private flameInner!: THREE.Mesh;
+  private engineGlow!: THREE.Sprite;
   private trailTimer: number = MISSILE_TRAIL_INTERVAL;
   private visualPulseTime: number = 0;
   private readonly targetWorldPos = new THREE.Vector3();
@@ -70,41 +110,9 @@ export class Missile {
     // 记录发射位置
     this.startPosition = position.clone();
 
-    // 导弹模型 - 使用父容器来正确控制朝向
+    // 导弹模型 - 使用父容器来正确控制朝向（+Z 朝前）
     this.mesh = new THREE.Group();
-
-    // 创建锥体（导弹弹头）- 使用共享几何体
-    this.coneMaterial = new THREE.MeshStandardMaterial({
-      color: 0xff4444,
-      emissive: 0xff0000,
-      emissiveIntensity: 0.5,
-      metalness: 0.8,
-      roughness: 0.2,
-    });
-    const cone = new THREE.Mesh(getSharedConeGeometry(), this.coneMaterial);
-    cone.rotation.x = -Math.PI / 2; // 旋转锥体让尖头朝 Z+ 方向（向前）
-    this.mesh.add(cone);
-
-    // 增强尾焰效果 - 使用共享几何体
-    this.trailMaterial = new THREE.MeshBasicMaterial({
-      color: 0xffdd00,
-      transparent: true,
-      opacity: 1,
-    });
-    this.trail = new THREE.Mesh(getSharedTrailGeometry(), this.trailMaterial);
-    this.trail.rotation.x = -Math.PI / 2;
-    this.trail.position.z = 1.5;
-    this.mesh.add(this.trail);
-
-    this.engineGlowMaterial = new THREE.MeshBasicMaterial({
-      color: 0xffaa33,
-      transparent: true,
-      opacity: 0.72,
-    });
-    const engineGlow = new THREE.Mesh(new THREE.SphereGeometry(0.38, 10, 10), this.engineGlowMaterial);
-    engineGlow.scale.set(0.7, 0.7, 1.2);
-    engineGlow.position.z = 1.3;
-    this.mesh.add(engineGlow);
+    this.buildMissileModel();
 
     // 设置导弹位置为发射位置
     this.mesh.position.copy(position);
@@ -127,6 +135,130 @@ export class Missile {
       this.lookTarget.copy(this.mesh.position).add(this.velocity);
       this.mesh.lookAt(this.lookTarget);
     }
+  }
+
+  /**
+   * 构建导弹模型：
+   * 细长金属弹体 + 卵形弹头 + 十字尾翼 + 鸭翼 + 喷口环 + 双层闪烁尾焰 + 引擎光晕
+   */
+  private buildMissileModel(): void {
+    const geometries = getMissileGeometries();
+    const textures = getVfxTextures();
+
+    const bodyMaterial = new THREE.MeshStandardMaterial({
+      color: 0xccd3da,
+      metalness: 0.85,
+      roughness: 0.32,
+      emissive: 0x1a2630,
+      emissiveIntensity: 0.35,
+    });
+    const noseMaterial = new THREE.MeshStandardMaterial({
+      color: 0x39404a,
+      metalness: 0.9,
+      roughness: 0.25,
+    });
+    const finMaterial = new THREE.MeshStandardMaterial({
+      color: 0x9aa4ae,
+      metalness: 0.75,
+      roughness: 0.4,
+    });
+    this.accentMaterial = new THREE.MeshStandardMaterial({
+      color: 0xff3a26,
+      emissive: 0xff2200,
+      emissiveIntensity: 0.85,
+      metalness: 0.4,
+      roughness: 0.4,
+    });
+    this.nozzleMaterial = new THREE.MeshStandardMaterial({
+      color: 0x2c2f34,
+      metalness: 0.95,
+      roughness: 0.3,
+      emissive: 0xff5a22,
+      emissiveIntensity: 0.4,
+    });
+    this.flameOuterMaterial = new THREE.MeshBasicMaterial({
+      color: 0xff7c1e,
+      transparent: true,
+      opacity: 0.85,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    });
+    this.flameInnerMaterial = new THREE.MeshBasicMaterial({
+      color: 0xfff4cf,
+      transparent: true,
+      opacity: 0.95,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    });
+    this.engineGlowMaterial = new THREE.SpriteMaterial({
+      map: textures.glow,
+      color: 0xffb763,
+      transparent: true,
+      opacity: 0.85,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    this.ownedMaterials.push(
+      bodyMaterial,
+      noseMaterial,
+      finMaterial,
+      this.accentMaterial,
+      this.nozzleMaterial,
+      this.flameOuterMaterial,
+      this.flameInnerMaterial,
+      this.engineGlowMaterial
+    );
+
+    const body = new THREE.Mesh(geometries.body, bodyMaterial);
+    this.mesh.add(body);
+
+    const nose = new THREE.Mesh(geometries.nose, noseMaterial);
+    nose.position.z = 1.35;
+    this.mesh.add(nose);
+
+    const accentBand = new THREE.Mesh(geometries.accentBand, this.accentMaterial);
+    accentBand.position.z = 0.5;
+    this.mesh.add(accentBand);
+
+    // 十字尾翼 + 中段鸭翼
+    const bodyRadius = 0.165;
+    for (let i = 0; i < 4; i++) {
+      const angle = (i / 4) * Math.PI * 2 + Math.PI / 4;
+
+      const fin = new THREE.Mesh(geometries.fin, finMaterial);
+      fin.position.x = Math.cos(angle) * (bodyRadius + 0.18);
+      fin.position.y = Math.sin(angle) * (bodyRadius + 0.18);
+      fin.position.z = -0.7;
+      fin.rotation.z = angle + Math.PI / 2;
+      this.mesh.add(fin);
+
+      const canard = new THREE.Mesh(geometries.canard, finMaterial);
+      canard.position.x = Math.cos(angle) * (bodyRadius + 0.1);
+      canard.position.y = Math.sin(angle) * (bodyRadius + 0.1);
+      canard.position.z = 0.8;
+      canard.rotation.z = angle + Math.PI / 2;
+      this.mesh.add(canard);
+    }
+
+    const nozzle = new THREE.Mesh(geometries.nozzle, this.nozzleMaterial);
+    nozzle.position.z = -0.96;
+    this.mesh.add(nozzle);
+
+    // 双层尾焰：内层白热 + 外层橙焰，高频闪烁
+    this.flameOuter = new THREE.Mesh(geometries.flameOuter, this.flameOuterMaterial);
+    this.flameOuter.position.z = -1.71;
+    this.mesh.add(this.flameOuter);
+
+    this.flameInner = new THREE.Mesh(geometries.flameInner, this.flameInnerMaterial);
+    this.flameInner.position.z = -1.46;
+    this.mesh.add(this.flameInner);
+
+    this.engineGlow = new THREE.Sprite(this.engineGlowMaterial);
+    this.engineGlow.scale.set(1.1, 1.1, 1);
+    this.engineGlow.position.z = -1.1;
+    this.mesh.add(this.engineGlow);
   }
 
   /**
@@ -242,16 +374,26 @@ export class Missile {
   }
 
   private updateVisuals(): void {
-    const pulse = 0.72 + Math.sin(this.visualPulseTime * 28) * 0.18;
+    const t = this.visualPulseTime;
+    // 双频叠加的高频火焰闪烁（0..1 左右波动）
+    const flicker = 0.5 + 0.28 * Math.sin(t * 52) + 0.22 * Math.sin(t * 87 + 1.7);
+    const flickerB = 0.5 + 0.5 * Math.sin(t * 64 + 0.9);
     const speedPulse = THREE.MathUtils.clamp(this.velocity.length() / this.speed, 0.8, 1.15);
 
-    this.coneMaterial.emissiveIntensity = 0.42 + pulse * 0.28;
-    this.trailMaterial.opacity = 0.78 + pulse * 0.22;
-    this.engineGlowMaterial.opacity = 0.58 + pulse * 0.26;
-    if (this.trail) {
-      const flameScale = 0.88 + pulse * 0.18 * speedPulse;
-      this.trail.scale.set(flameScale, flameScale, 1 + pulse * 0.2);
-    }
+    this.accentMaterial.emissiveIntensity = 0.55 + flicker * 0.5;
+    this.nozzleMaterial.emissiveIntensity = 0.3 + flicker * 0.45;
+
+    this.flameOuterMaterial.opacity = 0.55 + flicker * 0.35;
+    const outerScale = (0.82 + flicker * 0.3) * speedPulse;
+    this.flameOuter.scale.set(outerScale, outerScale, 0.85 + flicker * 0.45);
+
+    this.flameInnerMaterial.opacity = 0.7 + flickerB * 0.3;
+    const innerScale = (0.85 + flickerB * 0.32) * speedPulse;
+    this.flameInner.scale.set(innerScale, innerScale, 0.8 + flickerB * 0.5);
+
+    this.engineGlowMaterial.opacity = 0.5 + flicker * 0.4;
+    const glowScale = 0.9 + flicker * 0.5;
+    this.engineGlow.scale.set(glowScale, glowScale, 1);
   }
 
   /**
@@ -294,9 +436,10 @@ export class Missile {
    */
   public dispose(scene: THREE.Scene): void {
     scene.remove(this.mesh);
-    this.coneMaterial.dispose();
-    this.trailMaterial.dispose();
-    this.engineGlowMaterial.dispose();
+    for (const material of this.ownedMaterials) {
+      material.dispose();
+    }
+    this.ownedMaterials.length = 0;
     this.active = false;
   }
 }

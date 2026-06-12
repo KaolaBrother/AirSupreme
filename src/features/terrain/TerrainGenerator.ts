@@ -8,8 +8,40 @@ import {
 } from './LevelConfig';
 import { GameConfig, GAME_CONSTANTS } from '@/config';
 import { getLogger } from '@/core/utils/Logger';
+import {
+  Heightfield,
+  LAKESIDE_VALLEY_PRESET,
+  DESERT_DUNE_PRESET,
+  ALPINE_RIDGE_PRESET,
+} from './worldscape/heightfield';
+import {
+  BiomePainter,
+  buildWorldTerrainMesh,
+  WORLDSHOWCASE_BIOME_PALETTE,
+  DESERT_BIOME_PALETTE,
+  ALPINE_BIOME_PALETTE,
+} from './worldscape/biomes';
+import {
+  buildWorldscapeWater,
+  sampleWaveHeight,
+  type WorldscapeWater,
+} from './worldscape/water';
+import {
+  buildVegetation,
+  grassTuftGeometry,
+  leafTreeGeometries,
+  setScatterInstance,
+  type WorldscapeVegetation,
+} from './worldscape/vegetation';
+import { injectWindSway } from './worldscape/shadermods';
+import { CloudField } from './worldscape/clouds';
 
 const log = getLogger('TerrainGenerator');
+
+/** worldscape 高度场局部 0（水位）对应的世界 Y */
+const WORLDSCAPE_WATER_Y = -48;
+/** 旧版地面基准（-50）与 worldscape 水位基准的差值 */
+const WORLDSCAPE_BASE_OFFSET = WORLDSCAPE_WATER_Y - -50;
 
 type WeatherType = 'clear' | 'rain' | 'snow' | 'dust' | 'mist' | 'storm' | 'smog';
 type SurfacePattern = 'grass' | 'sand' | 'snow' | 'rock' | 'asphalt' | 'water' | 'beach';
@@ -41,6 +73,12 @@ interface WeatherProfile {
   cloudSpeed: number;
   cloudHeightMin: number;
   cloudHeightMax: number;
+  /** 云覆盖率 0..1：决定多少朵积云在天上（worldscape 云场用） */
+  cloudCoverage: number;
+  /** 云色调 0..1：1 = 晴日亮白，越低越阴沉（worldscape 云场用） */
+  cloudTone: number;
+  /** 风力 0..1：驱动云漂移速度与植被摇曳 */
+  windStrength: number;
   /** 风向（弧度，0 = +X），云层沿该方向漂移 */
   windAngle: number;
   particleCount: number;
@@ -100,19 +138,19 @@ const FALLBACK_DESIGN_TOKENS: Record<TerrainType, SceneDesignTokens> = {
     distantSilhouette: 0x8da6bf,
   },
   [TerrainType.OCEAN]: {
-    terrainPrimary: 0x12283e,
-    terrainSecondary: 0x0a1c30,
-    terrainAccent: 0x2a4a66,
-    vegetation: 0x2c5e4f,
-    vegetationAccent: 0x498672,
-    water: 0x1a4d76,
-    waterDeep: 0x07243f,
-    waterSparkle: 0x9fd4e8,
-    structure: 0x44525f,
-    structureAccent: 0x9fb2bf,
-    glow: 0xc6dcec,
-    horizonHaze: 0x274a66,
-    distantSilhouette: 0x16334c,
+    terrainPrimary: 0x2a527a,
+    terrainSecondary: 0x1c3f63,
+    terrainAccent: 0x4a7aa2,
+    vegetation: 0x3f8a68,
+    vegetationAccent: 0x63b08c,
+    water: 0x2e86ba,
+    waterDeep: 0x1f6da0,
+    waterSparkle: 0xc8ecf8,
+    structure: 0x68798a,
+    structureAccent: 0xc2d2de,
+    glow: 0xe2f1fa,
+    horizonHaze: 0x6f9cbd,
+    distantSilhouette: 0x3a6285,
   },
   [TerrainType.CITY]: {
     terrainPrimary: 0x616f84,
@@ -136,10 +174,20 @@ export class TerrainGenerator {
   private terrainGroup: THREE.Group;
   private waterMesh?: THREE.Mesh;
   private trees: THREE.Group[] = [];
-  private clouds: THREE.Group[] = [];
-  private grass: THREE.InstancedMesh | null = null;
   private rocks: THREE.Mesh[] = [];
   private time: number = 0;
+  /** worldscape 实例化积云场（漂移/浮沉/天气色调，所有关卡共用） */
+  private cloudField: CloudField | null = null;
+  /** worldscape 波浪着色器水面（湖/雪山/海洋） */
+  private worldWater: WorldscapeWater | null = null;
+  /** worldscape 实例化植被（松树/阔叶/岩石/草簇） */
+  private worldVegetation: WorldscapeVegetation | null = null;
+  /** 当前关卡的解析高度场（湖/沙漠/雪山），所有放置查询共用 */
+  private stageField: Heightfield | null = null;
+  /** 注入植被摇曳/雪覆盖着色器的共享 uniform */
+  private readonly worldscapeTime = { value: 0 };
+  private readonly worldscapeWind = { value: 0.3 };
+  private readonly worldscapeSnow = { value: 0 };
   private weatherParticles?: THREE.Points;
   private weatherParticleBaseHeight: number = 260;
   private weatherParticleSpread: number = 1600;
@@ -173,6 +221,9 @@ export class TerrainGenerator {
     this.clearTerrain();
     this.weatherProfile = this.resolveWeatherProfile(config);
     this.designTokens = config.environment.designTokens ?? FALLBACK_DESIGN_TOKENS[config.terrain];
+    // worldscape 着色器 uniform：风力驱动草木摇曳，雪覆盖只在雪山关激活
+    this.worldscapeWind.value = 0.25 + this.weatherProfile.windStrength * 1.1;
+    this.worldscapeSnow.value = config.terrain === TerrainType.MOUNTAINS ? 1 : 0;
     this.weatherParticleBaseHeight = Math.max(140, this.weatherProfile.cloudHeightMax + 30);
     this.weatherParticleSpread = 1200 + this.weatherProfile.intensity * 700;
     this.weatherParticleFloor = this.weatherProfile.type === 'storm' ? -80 : -40;
@@ -221,108 +272,63 @@ export class TerrainGenerator {
   }
 
   /**
-   * 生成湖面地形 - 美化版
+   * 生成湖面地形 —— worldshowcase 山谷的直接移植（XZ ×2.2 放大到 4000m 地面）：
+   * 解析高度场（域扭曲 fbm 谷底 + 边缘山脊带/峰墙 + 中央冰川湖盆）、
+   * 生物群系顶点色、波浪着色器湖面、实例化松林/阔叶/岩石/风吹草簇。
    */
   private generateLakeTerrain(config: LevelConfig): void {
-    const surfaceProfile = this.getSurfaceProfile(config);
-    // 创建渐变草地
-    const groundGeometry = new THREE.PlaneGeometry(4000, 4000, 200, 200);
-    const lakeRadius = 220;
-    const beachRadius = 260;
-
-    // 添加起伏地形
-    const positions = groundGeometry.attributes.position;
-    for (let i = 0; i < positions.count; i++) {
-      const x = positions.getX(i);
-      const y = positions.getY(i);
-
-      // 多层噪声
-      const noise1 = Math.sin(x * 0.01) * Math.cos(y * 0.01) * 8;
-      const noise2 = Math.sin(x * 0.03 + 1) * Math.cos(y * 0.03) * 3;
-      const noise3 = Math.sin(x * 0.005) * Math.cos(y * 0.005) * 15;
-      const distanceFromCenter = Math.sqrt(x * x + y * y);
-
-      // 为中央湖区挖出浅盆地，避免起伏地形遮挡水面
-      let lakeDepression = 0;
-      if (distanceFromCenter < beachRadius) {
-        const basinT = THREE.MathUtils.clamp(
-          (beachRadius - distanceFromCenter) / (beachRadius - lakeRadius),
-          0,
-          1
-        );
-        lakeDepression -= basinT * 5.5;
-      }
-      if (distanceFromCenter < lakeRadius) {
-        const centerT = 1 - distanceFromCenter / lakeRadius;
-        lakeDepression -= 6.5 + centerT * 3.5;
-      }
-
-      positions.setZ(i, noise1 + noise2 + noise3 + lakeDepression);
-    }
-    groundGeometry.computeVertexNormals();
-
-    // 创建草地材质
-    const groundMaterial = new THREE.MeshStandardMaterial({
-      color: surfaceProfile.groundBaseColor ?? this.tintColor(config.groundColor, 0.1, 0.28, 0.12),
-      roughness: 0.68,
-      metalness: 0,
-      emissive:
-        surfaceProfile.groundEmissiveColor ?? this.tintColor(config.groundColor, 0.06, 0.4, 0.02),
-      emissiveIntensity: 0.42,
-      flatShading: false,
-      map: this.createDetailTexture(
-        surfaceProfile.groundBaseColor ?? 0x79b64d,
-        surfaceProfile.groundAccentColor ?? 0x9ddf70,
-        surfaceProfile.groundDetailColor ?? 0x5c9a38,
-        'grass'
-      ),
+    const field = new Heightfield(LAKESIDE_VALLEY_PRESET);
+    this.stageField = field;
+    const painter = new BiomePainter(field, {
+      palette: WORLDSHOWCASE_BIOME_PALETTE,
+      waterLevel: 0,
+      snowLine: 118,
     });
 
-    const ground = new THREE.Mesh(groundGeometry, groundMaterial);
-    ground.rotation.x = -Math.PI / 2;
-    ground.position.y = -50;
-    ground.receiveShadow = true;
-    this.terrainGroup.add(ground);
+    const terrain = buildWorldTerrainMesh(field, painter, {
+      size: 4000,
+      segments: GameConfig.isMobile ? 180 : 256,
+      snowUniform: this.worldscapeSnow,
+    });
+    terrain.position.y = WORLDSCAPE_WATER_Y;
+    this.terrainGroup.add(terrain);
 
-    // 创建中央湖泊
-    this.createBeautifulLake(config, surfaceProfile);
+    // 中央冰川湖 + 谷地零星小水潭：全幅水面，地形深度按顶点烘焙进着色器
+    this.worldWater = buildWorldscapeWater({
+      size: 4000,
+      grid: GameConfig.isMobile ? 128 : 176,
+      depthAt: (x, z) => -field.heightAt(x, z),
+      deepColor: 0x16555e,
+      shallowColor: 0x39a08c,
+      skyTint: 0xbcd6da,
+      sunDir: this.getSunDirection(config),
+      sunColor: config.lighting.sunColor,
+      sunIntensity: Math.min(1.6, config.lighting.sunIntensity * 0.45),
+    });
+    this.worldWater.mesh.position.y = WORLDSCAPE_WATER_Y;
+    this.terrainGroup.add(this.worldWater.mesh);
 
-    // 增加湖岸/水面读边层次
-    this.createLakeLayering(surfaceProfile);
+    // 实例化植被：噪声场驱动的密集松林、阔叶团簇、碎石与风吹草地
+    this.worldVegetation = buildVegetation(
+      field,
+      {
+        seed: 909090,
+        half: 1970,
+        snowLine: 118,
+        pines: { count: this.scaleCount(3200), minHeight: 4, maxHeight: 142, maxSlope: 0.42 },
+        broadleaf: { count: this.scaleCount(1500), minHeight: 2.5, maxHeight: 62, maxSlope: 0.3 },
+        rocks: { count: this.scaleCount(900), minHeight: 1 },
+        grass: { count: this.scaleCount(24000), minHeight: 2.2, maxHeight: 95, maxSlope: 0.34 },
+      },
+      this.getWorldscapeUniforms()
+    );
+    this.worldVegetation.group.position.y = WORLDSCAPE_WATER_Y;
+    this.terrainGroup.add(this.worldVegetation.group);
 
-    // 添加森林
-    this.createForest(128, -49, 2000, 200);
-    this.createForestCluster(45, -840, -520, 300, -49);
-    this.createForestCluster(51, 1040, -320, 360, -49);
-    this.createForestCluster(42, 720, 840, 280, -49);
-
-    // 添加草地细节
-    this.createLakeEcologicalGrass(1040, 160000);
-
-    // 添加湖岸小景
-    this.createLakeShoreProps(surfaceProfile);
-
-    // 添加野花
-    this.createFlowers(600, 32000);
-
-    // 添加岩石
-    this.createRocks(48);
-
-    // 添加农田和远处山体，提升第一关自然层次
-    this.createLakeFarmland(surfaceProfile);
-    this.createLakeDirtPaths(surfaceProfile);
-    this.createLakeRidges(surfaceProfile);
-
-    // 湖外远景：环形群山、喀斯特石峰、草甸丘陵、蜿蜒河流与湖畔村落
-    this.createLakeMountainRanges();
-    this.createLakeKarstSpires();
-    this.createLakeMeadowHills();
-    this.createLakeRiver(surfaceProfile);
-    this.createLakeHamlet();
-
-    // 湖畔生态动态元素：莲叶、木码头与小船、晨光花粉、环湖飞鸟
-    this.createLakeLilyPads();
+    // 保留的湖畔地标与生态动态元素：木码头与小船、村落、莲叶、花粉、飞鸟
     this.createLakeDock();
+    this.createLakeHamlet();
+    this.createLakeLilyPads();
     this.createLakePollenDrift();
     this.createBirdFlock({
       centerX: -240,
@@ -346,343 +352,26 @@ export class TerrainGenerator {
     });
   }
 
-  /**
-   * 创建美丽的湖泊
-   */
-  private createBeautifulLake(config: LevelConfig, surfaceProfile: LevelSurfaceProfile): void {
-    // 湖泊形状 - 多频扰动不规则环形
-    const lakeShape = this.createIrregularShape({
-      baseRadius: 180,
-      radiusJitter: 20,
-      pointCount: 64,
-      wobbleFreqA: 3,
-      wobbleFreqB: 5,
-      phaseA: 0.16,
-      phaseB: 0.48,
-    });
-
-    const lakeGeometry = new THREE.ShapeGeometry(lakeShape, 48);
-    const waterBaseColor =
-      surfaceProfile.waterBaseColor ?? this.tintColor(config.waterColor || 0x1e90ff, 0.01, 0.08, 0.02);
-    const waterAccentColor = surfaceProfile.waterAccentColor ?? 0x7fd8ff;
-    const waterDetailColor = surfaceProfile.waterDetailColor ?? 0x0f5f87;
-    const shorelineBaseColor = surfaceProfile.shorelineBaseColor ?? 0xf4e4bc;
-    const shorelineAccentColor = surfaceProfile.shorelineAccentColor ?? 0xe2ce9b;
-    const shorelineDetailColor = surfaceProfile.shorelineDetailColor ?? 0xc7b18a;
-
-    const lakeMaterial = new THREE.MeshStandardMaterial({
-      color: waterBaseColor,
-      transparent: true,
-      opacity: 0.92,
-      depthWrite: false,
-      side: THREE.DoubleSide,
-      polygonOffset: true,
-      polygonOffsetFactor: -1,
-      polygonOffsetUnits: -1,
-      roughness: 0.1,
-      metalness: 0.3,
-      emissive: this.tintColor(waterBaseColor, 0.02, 0.2, -0.05),
-      emissiveIntensity: 0.28,
-      map: this.createDetailTexture(waterBaseColor, waterAccentColor, waterDetailColor, 'water'),
-    });
-    const lake = new THREE.Mesh(lakeGeometry, lakeMaterial);
-    lake.rotation.x = -Math.PI / 2;
-    lake.position.y = -47.9;
-    lake.renderOrder = 2;
-    this.terrainGroup.add(lake);
-    this.waterMesh = lake;
-
-    const tokens = this.designTokens;
-
-    // 深水中心盘：沉在水面下方，透过半透明湖面读出湖心的"深"
-    const deepDisc = new THREE.Mesh(
-      new THREE.CircleGeometry(118, 40),
-      new THREE.MeshStandardMaterial({
-        color: tokens.waterDeep,
-        roughness: 0.6,
-        metalness: 0.1,
-        emissive: this.tintColor(tokens.waterDeep, 0, 0.05, -0.06),
-        emissiveIntensity: 0.16,
-        transparent: true,
-        opacity: 0.85,
-        depthWrite: false,
-      })
-    );
-    deepDisc.rotation.x = -Math.PI / 2;
-    deepDisc.position.y = -49.3;
-    deepDisc.renderOrder = 1;
-    this.terrainGroup.add(deepDisc);
-
-    // 闪光层：低透明度加色叠加，细节纹理与基础水面反向滚动，制造交错的波光
-    const sparkleShape = this.createIrregularShape({
-      baseRadius: 172,
-      radiusJitter: 18,
-      pointCount: 64,
-      wobbleFreqA: 3,
-      wobbleFreqB: 5,
-      phaseA: 0.16,
-      phaseB: 0.48,
-    });
-    const sparkleMaterial = new THREE.MeshBasicMaterial({
-      color: tokens.waterSparkle,
-      transparent: true,
-      opacity: 0.12,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-      map: this.createDetailTexture(
-        tokens.water,
-        tokens.waterSparkle,
-        this.tintColor(tokens.waterSparkle, 0, -0.1, -0.12),
-        'water'
-      ),
-    });
-    const sparkleLayer = new THREE.Mesh(new THREE.ShapeGeometry(sparkleShape, 24), sparkleMaterial);
-    sparkleLayer.rotation.x = -Math.PI / 2;
-    sparkleLayer.position.y = -46.85;
-    sparkleLayer.renderOrder = 5;
-    this.terrainGroup.add(sparkleLayer);
-    this.animatedProps.push((_deltaTime, time) => {
-      // 与 update() 中基础水面贴图 (+0.0045, +0.0028) 反向滚动
-      sparkleMaterial.map?.offset.set(time * -0.006, time * -0.0035);
-      sparkleMaterial.opacity = 0.105 + Math.sin(time * 0.45) * 0.03;
-    });
-
-    // 岸边白色浪沫环：不规则细环，随时间缓慢呼吸
-    const foamRing = this.createIrregularShape({
-      baseRadius: 188,
-      radiusJitter: 17,
-      pointCount: 80,
-      wobbleFreqA: 3.1,
-      wobbleFreqB: 5.3,
-      phaseA: 0.7,
-      phaseB: 1.3,
-    });
-    const foamHole = this.createIrregularShape({
-      baseRadius: 179,
-      radiusJitter: 16,
-      pointCount: 80,
-      wobbleFreqA: 3.1,
-      wobbleFreqB: 5.3,
-      phaseA: 0.7,
-      phaseB: 1.3,
-    });
-    foamRing.holes.push(foamHole);
-    const foamMaterial = new THREE.MeshBasicMaterial({
-      color: this.tintColor(tokens.waterSparkle, 0, -0.25, 0.2),
-      transparent: true,
-      opacity: 0.22,
-      depthWrite: false,
-      side: THREE.DoubleSide,
-    });
-    const foamLayer = new THREE.Mesh(new THREE.ShapeGeometry(foamRing, 24), foamMaterial);
-    foamLayer.rotation.x = -Math.PI / 2;
-    foamLayer.position.y = -47.68;
-    foamLayer.renderOrder = 4;
-    this.terrainGroup.add(foamLayer);
-    this.animatedProps.push((_deltaTime, time) => {
-      foamMaterial.opacity = 0.18 + (Math.sin(time * 0.6) * 0.5 + 0.5) * 0.1;
-    });
-
-    // 添加湖泊边缘的沙滩
-    const beachShape = this.createIrregularShape({
-      baseRadius: 202,
-      radiusJitter: 20,
-      pointCount: 64,
-      wobbleFreqA: 2.8,
-      wobbleFreqB: 4.4,
-      phaseA: 0.6,
-      phaseB: 1.12,
-    });
-    // 减去湖泊区域
-    beachShape.holes.push(lakeShape);
-
-    const beachGeometry = new THREE.ShapeGeometry(beachShape);
-    const beachMaterial = new THREE.MeshStandardMaterial({
-      color: shorelineBaseColor,
-      roughness: 0.95,
-      metalness: 0,
-      emissive: this.tintColor(shorelineAccentColor, 0, 0.08, 0.01),
-      emissiveIntensity: 0.06,
-      map: this.createDetailTexture(
-        shorelineBaseColor,
-        shorelineAccentColor,
-        shorelineDetailColor,
-        'beach'
-      ),
-    });
-    const beach = new THREE.Mesh(beachGeometry, beachMaterial);
-    beach.rotation.x = -Math.PI / 2;
-    beach.position.y = -49.1;
-    beach.receiveShadow = true;
-    this.terrainGroup.add(beach);
-
-    // 湖边湿沙层，增加水岸层次
-    const wetShoreShape = this.createIrregularShape({
-      baseRadius: 190,
-      radiusJitter: 18,
-      pointCount: 64,
-      wobbleFreqA: 3.2,
-      wobbleFreqB: 5.4,
-      phaseA: 1.1,
-      phaseB: 0.22,
-    });
-    wetShoreShape.holes.push(lakeShape);
-
-    const wetShore = new THREE.Mesh(
-      new THREE.ShapeGeometry(wetShoreShape, 24),
-      new THREE.MeshStandardMaterial({
-        color: this.tintColor(shorelineBaseColor, -0.03, 0.16, -0.08),
-        roughness: 0.72,
-        metalness: 0.04,
-        emissive: this.tintColor(shorelineAccentColor, -0.02, 0.08, 0.01),
-        emissiveIntensity: 0.04,
-        map: this.createDetailTexture(
-          this.tintColor(shorelineBaseColor, -0.03, 0.16, -0.08),
-          shorelineAccentColor,
-          shorelineDetailColor,
-          'beach'
-        ),
-      })
-    );
-    wetShore.rotation.x = -Math.PI / 2;
-    wetShore.position.y = -48.75;
-    wetShore.receiveShadow = true;
-    this.terrainGroup.add(wetShore);
-
-    // 外缘草甸过渡层
-    const meadowRingShape = this.createIrregularShape({
-      baseRadius: 252,
-      radiusJitter: 24,
-      pointCount: 64,
-      wobbleFreqA: 2.9,
-      wobbleFreqB: 4.7,
-      phaseA: 1.9,
-      phaseB: 0.77,
-    });
-    meadowRingShape.holes.push(beachShape);
-
-    const meadowColor = this.tintColor(surfaceProfile.groundBaseColor ?? 0x79b64d, 0.01, 0.12, 0.03);
-    const meadow = new THREE.Mesh(
-      new THREE.ShapeGeometry(meadowRingShape, 24),
-      new THREE.MeshStandardMaterial({
-        color: meadowColor,
-        roughness: 0.88,
-        metalness: 0,
-        emissive: this.tintColor(meadowColor, 0.01, 0.08, 0.01),
-        emissiveIntensity: 0.04,
-        map: this.createDetailTexture(
-          meadowColor,
-          surfaceProfile.groundAccentColor ?? 0x9ddf70,
-          surfaceProfile.groundDetailColor ?? 0x5c9a38,
-          'grass'
-        ),
-      })
-    );
-    meadow.rotation.x = -Math.PI / 2;
-    meadow.position.y = -48.95;
-    meadow.receiveShadow = true;
-    this.terrainGroup.add(meadow);
+  /** 关卡配置中的太阳位置 → 归一化方向（水面高光用） */
+  private getSunDirection(config: LevelConfig): THREE.Vector3 {
+    const p = config.lighting.sunPosition;
+    const v = new THREE.Vector3(p.x, p.y, p.z);
+    return v.lengthSq() > 0 ? v.normalize() : new THREE.Vector3(0.5, 0.7, 0.3);
   }
 
-  private createLakeLayering(surfaceProfile: LevelSurfaceProfile): void {
-    const waterBaseColor = this.tintColor(surfaceProfile.waterBaseColor ?? 0x1e90ff, 0, 0.02, 0.02);
-    const waterAccentColor = surfaceProfile.waterAccentColor ?? 0x7fd8ff;
-    const waterDetailColor = surfaceProfile.waterDetailColor ?? 0x0f5f87;
-    const ringTexture = this.createDetailTexture(waterBaseColor, waterAccentColor, waterDetailColor, 'water');
+  private getWorldscapeUniforms() {
+    return { time: this.worldscapeTime, wind: this.worldscapeWind, snow: this.worldscapeSnow };
+  }
 
-    const shorelineTint = this.tintColor(waterBaseColor, 0.04, -0.12, -0.24);
-    const deepTint = this.tintColor(waterBaseColor, 0, -0.25, -0.45);
-
-    const shoreRing = this.createIrregularShape({
-      baseRadius: 185,
-      radiusJitter: 15,
-      pointCount: 80,
-      wobbleFreqA: 2.7,
-      wobbleFreqB: 4.6,
-      phaseA: 0.9,
-      phaseB: 0.34,
-    });
-    const shoreHole = this.createIrregularShape({
-      baseRadius: 175,
-      radiusJitter: 14,
-      pointCount: 80,
-      wobbleFreqA: 2.7,
-      wobbleFreqB: 4.6,
-      phaseA: 0.9,
-      phaseB: 0.34,
-    });
-    shoreRing.holes.push(shoreHole);
-    const shoreMaterial = new THREE.MeshStandardMaterial({
-      color: shorelineTint,
-      transparent: true,
-      opacity: 0.22,
-      roughness: 0.28,
-      metalness: 0.45,
-      map: ringTexture,
-      side: THREE.DoubleSide,
-      emissive: this.tintColor(shorelineTint, 0.03, 0.2, -0.05),
-      emissiveIntensity: 0.22,
-    });
-    const shoreLayer = new THREE.Mesh(new THREE.ShapeGeometry(shoreRing, 28), shoreMaterial);
-    shoreLayer.rotation.x = -Math.PI / 2;
-    shoreLayer.position.y = -47.82;
-    shoreLayer.renderOrder = 3;
-    this.terrainGroup.add(shoreLayer);
-
-    const glossRing = this.createIrregularShape({
-      baseRadius: 190,
-      radiusJitter: 13,
-      pointCount: 80,
-      wobbleFreqA: 2.4,
-      wobbleFreqB: 5.1,
-      phaseA: 1.4,
-      phaseB: 0.65,
-    });
-    const glossHole = this.createIrregularShape({
-      baseRadius: 171,
-      radiusJitter: 11,
-      pointCount: 80,
-      wobbleFreqA: 2.4,
-      wobbleFreqB: 5.1,
-      phaseA: 1.4,
-      phaseB: 0.65,
-    });
-    glossRing.holes.push(glossHole);
-    const glossMaterial = new THREE.MeshStandardMaterial({
-      color: waterBaseColor,
-      transparent: true,
-      opacity: 0.14,
-      roughness: 0.05,
-      metalness: 0.75,
-      map: ringTexture,
-      side: THREE.DoubleSide,
-      emissive: this.tintColor(waterBaseColor, 0.05, 0.18, 0.06),
-      emissiveIntensity: 0.32,
-    });
-    const glossLayer = new THREE.Mesh(new THREE.ShapeGeometry(glossRing, 28), glossMaterial);
-    glossLayer.rotation.x = -Math.PI / 2;
-    glossLayer.position.y = -47.72;
-    glossLayer.renderOrder = 4;
-    this.terrainGroup.add(glossLayer);
-
-    const lakeMist = new THREE.Mesh(
-      new THREE.PlaneGeometry(520, 180),
-      new THREE.MeshStandardMaterial({
-        color: deepTint,
-        transparent: true,
-        opacity: 0.34,
-        roughness: 1,
-        metalness: 0,
-        emissive: this.tintColor(deepTint, 0.1, 0.15, -0.08),
-        emissiveIntensity: 0.24,
-        side: THREE.DoubleSide,
-        depthWrite: false,
-      })
-    );
-    lakeMist.rotation.x = -Math.PI / 2;
-    lakeMist.position.set(0, -48.7, -140);
-    lakeMist.renderOrder = 5;
-    this.terrainGroup.add(lakeMist);
+  /** 沿给定方向从湖心向外步进，找到水岸线半径（高度首次越过水位） */
+  private findShorelineRadius(dirX: number, dirZ: number, fallback = 620): number {
+    if (!this.stageField) return fallback;
+    for (let r = 220; r <= 1700; r += 12) {
+      if (this.stageField.heightAt(dirX * r, dirZ * r) > 0.4) {
+        return r;
+      }
+    }
+    return fallback;
   }
 
   private createIrregularShape(options: {
@@ -780,145 +469,12 @@ export class TerrainGenerator {
       haze.rotation.z = (Math.random() - 0.5) * 0.16;
       haze.position.set(
         (Math.random() - 0.5) * 360,
-        -49.6 + i * 0.05,
+        // worldscape 沙海起伏 ±24m：热浪层抬到沙丘脊线之上
+        -22 + i * 1.4,
         -840 + i * 300
       );
       haze.renderOrder = 5;
       this.terrainGroup.add(haze);
-    }
-  }
-
-  private createMountainAtmosphere(surfaceProfile: LevelSurfaceProfile): void {
-    const snowColor = this.tintColor(surfaceProfile.groundDetailColor ?? 0xe8f4ff, 0.05, 0.08, 0.2);
-    const frostColor = this.tintColor(surfaceProfile.groundBaseColor ?? 0xf4f8ff, -0.01, -0.08, -0.02);
-
-    const fogLayers = [
-      { width: 5200, depth: 640, y: -48.4, z: -1040, opacity: 0.18 },
-      { width: 5200, depth: 440, y: -47.9, z: -640, opacity: 0.14 },
-      { width: 4600, depth: 360, y: -47.3, z: -240, opacity: 0.12 },
-    ];
-
-    for (const layer of fogLayers) {
-      const haze = new THREE.Mesh(
-        new THREE.PlaneGeometry(layer.width, layer.depth),
-        new THREE.MeshStandardMaterial({
-          color: snowColor,
-          transparent: true,
-          opacity: layer.opacity,
-          roughness: 1,
-          metalness: 0.1,
-          emissive: this.tintColor(snowColor, 0.08, 0.12, 0.18),
-          emissiveIntensity: 0.2,
-          side: THREE.DoubleSide,
-          depthWrite: false,
-        })
-      );
-      haze.rotation.x = -Math.PI / 2 + 0.05;
-      haze.position.set(0, layer.y, layer.z);
-      haze.renderOrder = 5;
-      this.terrainGroup.add(haze);
-    }
-
-    const glow = new THREE.Mesh(
-      new THREE.PlaneGeometry(3200, 1800),
-      new THREE.MeshStandardMaterial({
-        color: frostColor,
-        transparent: true,
-        opacity: 0.17,
-        roughness: 0.2,
-        metalness: 0.45,
-        emissive: this.tintColor(frostColor, 0.08, 0.06, 0.22),
-        emissiveIntensity: 0.24,
-      })
-    );
-    glow.rotation.x = -Math.PI / 2;
-    glow.position.set(0, -49.0, -440);
-    glow.renderOrder = 4;
-    this.terrainGroup.add(glow);
-  }
-
-  private createSnowflakeSurfaceLayer(surfaceProfile: LevelSurfaceProfile): void {
-    const flakeCount = 670;
-    const flakeGeometry = new THREE.PlaneGeometry(0.45, 0.45);
-    const flakeMaterial = new THREE.MeshStandardMaterial({
-      color: surfaceProfile.groundDetailColor ?? 0xe6f3ff,
-      transparent: true,
-      opacity: 0.2,
-      roughness: 0.5,
-      metalness: 0.1,
-      emissive: this.tintColor(surfaceProfile.groundDetailColor ?? 0xe6f3ff, 0.05, 0.2, 0.15),
-      emissiveIntensity: 0.26,
-      side: THREE.DoubleSide,
-    });
-    const snowFlakes = new THREE.InstancedMesh(flakeGeometry, flakeMaterial, flakeCount);
-
-    const dummy = new THREE.Object3D();
-    for (let i = 0; i < flakeCount; i++) {
-      dummy.position.set(
-        (Math.random() - 0.5) * 3800,
-        -48.6 + Math.random() * 4,
-        (Math.random() - 0.5) * 3800
-      );
-      dummy.rotation.set(
-        (Math.random() - 0.5) * Math.PI * 0.4,
-        (Math.random() - 0.5) * Math.PI * 2,
-        (Math.random() - 0.5) * Math.PI * 0.4
-      );
-      dummy.scale.setScalar(0.4 + Math.random() * 1.4);
-      dummy.updateMatrix();
-      snowFlakes.setMatrixAt(i, dummy.matrix);
-    }
-    snowFlakes.instanceMatrix.needsUpdate = true;
-    this.terrainGroup.add(snowFlakes);
-  }
-
-  private createOceanNightFog(surfaceProfile: LevelSurfaceProfile): void {
-    const deepWater = this.tintColor(surfaceProfile.waterDetailColor ?? 0x09385f, -0.02, -0.16, -0.18);
-    const oceanFog = this.tintColor(surfaceProfile.waterBaseColor ?? 0x1a4d76, 0.01, -0.1, -0.12);
-
-    const abyss = new THREE.Mesh(
-      new THREE.PlaneGeometry(4700, 4700),
-      new THREE.MeshStandardMaterial({
-        color: deepWater,
-        transparent: true,
-        opacity: 0.44,
-        roughness: 0.98,
-        metalness: 0.05,
-        emissive: this.tintColor(deepWater, 0.02, 0.04, -0.06),
-        emissiveIntensity: 0.12,
-        depthWrite: false,
-        side: THREE.DoubleSide,
-      })
-    );
-    abyss.rotation.x = -Math.PI / 2;
-    abyss.position.y = -50.08;
-    this.terrainGroup.add(abyss);
-
-    const hazeLayers = [
-      { width: 4400, height: 440, z: -1040, opacity: 0.18, tint: oceanFog },
-      { width: 4400, height: 520, z: -520, opacity: 0.14, tint: this.tintColor(oceanFog, 0.02, 0.06, -0.04) },
-      { width: 3800, height: 360, z: -80, opacity: 0.1, tint: this.tintColor(oceanFog, -0.02, 0.04, -0.07) },
-    ];
-
-    for (const layer of hazeLayers) {
-      const fogLayer = new THREE.Mesh(
-        new THREE.PlaneGeometry(layer.width, layer.height),
-        new THREE.MeshStandardMaterial({
-          color: layer.tint,
-          transparent: true,
-          opacity: layer.opacity,
-          roughness: 1,
-          metalness: 0.05,
-          emissive: this.tintColor(layer.tint, 0.04, 0.08, -0.05),
-          emissiveIntensity: 0.14,
-          depthWrite: false,
-          side: THREE.DoubleSide,
-        })
-      );
-      fogLayer.rotation.x = -Math.PI / 2 + 0.02;
-      fogLayer.position.set(0, -49.82, layer.z);
-      fogLayer.renderOrder = 6;
-      this.terrainGroup.add(fogLayer);
     }
   }
 
@@ -1103,495 +659,10 @@ export class TerrainGenerator {
   /**
    * 创建森林
    */
-  private createForest(count: number, groundY: number, radius: number, avoidRadius: number): void {
-    // 多种树类型
-    const treeTypes = [
-      { color: 0x228b22, height: 12, width: 6 }, // 橡树
-      { color: 0x2e8b57, height: 18, width: 5 }, // 松树
-      { color: 0x32cd32, height: 8, width: 4 }, // 小树
-      { color: 0x006400, height: 15, width: 7 }, // 大树
-    ];
-
-    for (let i = 0; i < count; i++) {
-      const angle = Math.random() * Math.PI * 2;
-      const r = avoidRadius + Math.random() * (radius - avoidRadius);
-
-      const x = Math.cos(angle) * r;
-      const z = Math.sin(angle) * r;
-
-      // 随机选择树类型
-      const treeType = treeTypes[Math.floor(Math.random() * treeTypes.length)];
-      const tree = this.createBeautifulTree(treeType.color, treeType.height, treeType.width);
-      tree.position.set(x, groundY, z);
-      tree.scale.setScalar(0.8 + Math.random() * 0.6);
-      tree.rotation.y = Math.random() * Math.PI * 2;
-      this.terrainGroup.add(tree);
-      this.trees.push(tree);
-    }
-  }
-
-  /**
-   * 创建美丽的树
-   */
-  private createBeautifulTree(color: number, height: number, width: number): THREE.Group {
-    const tree = new THREE.Group();
-
-    // 树干
-    const trunkGeometry = new THREE.CylinderGeometry(width * 0.08, width * 0.15, height * 0.4, 8);
-    const trunkMaterial = new THREE.MeshStandardMaterial({
-      color: 0x4a3728,
-      roughness: 0.9,
-    });
-    const trunk = new THREE.Mesh(trunkGeometry, trunkMaterial);
-    trunk.position.y = height * 0.2;
-    trunk.castShadow = true;
-    tree.add(trunk);
-
-    // 多层树冠
-    const foliageMaterial = new THREE.MeshStandardMaterial({
-      color,
-      roughness: 0.8,
-    });
-
-    // 底层 - 最宽
-    const foliage1 = new THREE.Mesh(
-      new THREE.ConeGeometry(width * 0.8, height * 0.4, 8),
-      foliageMaterial
-    );
-    foliage1.position.y = height * 0.5;
-    foliage1.castShadow = true;
-    tree.add(foliage1);
-
-    // 中层
-    const foliage2 = new THREE.Mesh(
-      new THREE.ConeGeometry(width * 0.6, height * 0.35, 8),
-      foliageMaterial
-    );
-    foliage2.position.y = height * 0.7;
-    foliage2.castShadow = true;
-    tree.add(foliage2);
-
-    // 顶层 - 最窄
-    const foliage3 = new THREE.Mesh(
-      new THREE.ConeGeometry(width * 0.4, height * 0.3, 8),
-      foliageMaterial
-    );
-    foliage3.position.y = height * 0.9;
-    foliage3.castShadow = true;
-    tree.add(foliage3);
-
-    return tree;
-  }
-
-  private createLakeEcologicalGrass(radius: number, count: number): void {
-    const grassGeometry = new THREE.ConeGeometry(0.1, 0.5, 4);
-    const grassMaterial = new THREE.MeshStandardMaterial({
-      color: 0xa7ff54,
-      emissive: 0x4f8b24,
-      emissiveIntensity: 0.52,
-      roughness: 0.84,
-      metalness: 0,
-      side: THREE.DoubleSide,
-    });
-
-    this.grass = new THREE.InstancedMesh(grassGeometry, grassMaterial, count);
-    this.grass.castShadow = false;
-    this.grass.receiveShadow = false;
-
-    const dummy = new THREE.Object3D();
-    for (let i = 0; i < count; i++) {
-      const angle = Math.random() * Math.PI * 2;
-      const normalized = Math.random();
-      const r = Math.pow(normalized, 0.82) * radius;
-      const shorelineBias = r < 240 ? 0.65 : r < 320 ? 0.9 : 1.15;
-      const x = Math.cos(angle) * r;
-      const z = Math.sin(angle) * r;
-      const nearForestBoost =
-        (x < -260 && z < -40 ? 0.2 : 0)
-        + (x > 260 && z < 30 ? 0.18 : 0)
-        + (x > 180 && z > 220 ? 0.16 : 0);
-
-      dummy.position.set(x, -49.5, z);
-      dummy.rotation.set(
-        (Math.random() - 0.5) * 0.2,
-        Math.random() * Math.PI * 2,
-        (Math.random() - 0.5) * 0.2
-      );
-      dummy.scale.setScalar((0.45 + Math.random() * 0.9) * shorelineBias + nearForestBoost);
-      dummy.updateMatrix();
-      this.grass.setMatrixAt(i, dummy.matrix);
-    }
-
-    this.grass.instanceMatrix.needsUpdate = true;
-    this.terrainGroup.add(this.grass);
-  }
-
-  /**
-   * 创建野花
-   */
-  private createFlowers(radius: number, count: number): void {
-    const flowerColors = [0xff69b4, 0xffd700, 0xff6347, 0x9370db, 0x00ced1];
-    const flowerGeometry = new THREE.SphereGeometry(0.15, 8, 8);
-
-    // 创建不同颜色的花
-    flowerColors.forEach((color) => {
-      const flowerMaterial = new THREE.MeshStandardMaterial({
-        color,
-        emissive: color,
-        emissiveIntensity: 0.1,
-      });
-
-      const flowers = new THREE.InstancedMesh(
-        flowerGeometry,
-        flowerMaterial,
-        Math.floor(count / flowerColors.length)
-      );
-
-      const dummy = new THREE.Object3D();
-      for (let i = 0; i < Math.floor(count / flowerColors.length); i++) {
-        const angle = Math.random() * Math.PI * 2;
-        const r = Math.random() * radius;
-
-        dummy.position.set(Math.cos(angle) * r, -49.3, Math.sin(angle) * r);
-        dummy.scale.setScalar(0.8 + Math.random() * 0.4);
-        dummy.updateMatrix();
-        flowers.setMatrixAt(i, dummy.matrix);
-      }
-
-      flowers.instanceMatrix.needsUpdate = true;
-      this.terrainGroup.add(flowers);
-    });
-  }
-
-  /**
-   * 创建岩石
-   */
-  private createRocks(count: number): void {
-    for (let i = 0; i < count; i++) {
-      const rockGeometry = new THREE.DodecahedronGeometry(1 + Math.random() * 2, 0);
-
-      // 随机变形
-      const positions = rockGeometry.attributes.position;
-      for (let j = 0; j < positions.count; j++) {
-        positions.setX(j, positions.getX(j) * (0.8 + Math.random() * 0.4));
-        positions.setY(j, positions.getY(j) * (0.6 + Math.random() * 0.8));
-        positions.setZ(j, positions.getZ(j) * (0.8 + Math.random() * 0.4));
-      }
-      rockGeometry.computeVertexNormals();
-
-      const rockMaterial = new THREE.MeshStandardMaterial({
-        color: new THREE.Color().setHSL(0, 0, 0.3 + Math.random() * 0.2),
-        roughness: 0.9,
-        metalness: 0.1,
-      });
-
-      const rock = new THREE.Mesh(rockGeometry, rockMaterial);
-      rock.position.set((Math.random() - 0.5) * 1500, -49, (Math.random() - 0.5) * 1500);
-      rock.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
-      rock.castShadow = true;
-      rock.receiveShadow = true;
-      this.terrainGroup.add(rock);
-      this.rocks.push(rock);
-    }
-  }
-
-  private createForestCluster(
-    count: number,
-    centerX: number,
-    centerZ: number,
-    radius: number,
-    groundY: number
-  ): void {
-    const treeTypes = [
-      { color: 0x2f7d32, height: 11, width: 5 },
-      { color: 0x3a8b4a, height: 16, width: 5.5 },
-      { color: 0x5aa04b, height: 9, width: 4.2 },
-      { color: 0x1f6130, height: 14, width: 6.5 },
-    ];
-
-    for (let i = 0; i < count; i++) {
-      const angle = Math.random() * Math.PI * 2;
-      const distance = Math.random() * radius;
-      const x = centerX + Math.cos(angle) * distance;
-      const z = centerZ + Math.sin(angle) * distance;
-      const treeType = treeTypes[Math.floor(Math.random() * treeTypes.length)];
-      const tree = this.createBeautifulTree(treeType.color, treeType.height, treeType.width);
-      tree.position.set(x, groundY, z);
-      tree.scale.setScalar(0.7 + Math.random() * 0.65);
-      tree.rotation.y = Math.random() * Math.PI * 2;
-      this.terrainGroup.add(tree);
-      this.trees.push(tree);
-    }
-  }
-
-  private createLakeFarmland(surfaceProfile: LevelSurfaceProfile): void {
-    const fieldGroup = new THREE.Group();
-    fieldGroup.name = 'lakeFarmland';
-    const fieldColors = [
-      surfaceProfile.groundAccentColor ?? 0x98c96b,
-      0xc8b86d,
-      0x8db15b,
-      0xb89f58,
-    ];
-
-    const baseX = -1240;
-    const baseZ = 720;
-    const rows = 3;
-    const cols = 4;
-
-    for (let row = 0; row < rows; row++) {
-      for (let col = 0; col < cols; col++) {
-        const fieldWidth = 90 + Math.random() * 45;
-        const fieldDepth = 70 + Math.random() * 50;
-        const color = fieldColors[(row * cols + col) % fieldColors.length];
-        const field = new THREE.Mesh(
-          new THREE.PlaneGeometry(fieldWidth, fieldDepth),
-          new THREE.MeshStandardMaterial({
-            color,
-            roughness: 0.92,
-            metalness: 0,
-            emissive: this.tintColor(color, -0.02, 0.12, -0.04),
-            emissiveIntensity: 0.05,
-            map: this.createDetailTexture(
-              color,
-              this.tintColor(color, 0.01, 0.08, 0.03),
-              this.tintColor(color, -0.01, 0.12, -0.06),
-              'grass'
-            ),
-          })
-        );
-        field.rotation.x = -Math.PI / 2;
-        field.position.set(
-          baseX + col * 110 + (Math.random() - 0.5) * 18,
-          -48.6 + row * 0.03,
-          baseZ + row * 95 + (Math.random() - 0.5) * 12
-        );
-        field.rotation.z = (Math.random() - 0.5) * 0.12;
-        field.receiveShadow = true;
-        fieldGroup.add(field);
-
-        const border = new THREE.Mesh(
-          new THREE.BoxGeometry(fieldWidth + 6, 0.4, 3.2),
-          new THREE.MeshStandardMaterial({
-            color: 0x705733,
-            roughness: 0.95,
-            metalness: 0,
-          })
-        );
-        border.position.set(field.position.x, -48.45, field.position.z - fieldDepth * 0.5);
-        border.rotation.y = field.rotation.z;
-        border.castShadow = true;
-        border.receiveShadow = true;
-        fieldGroup.add(border);
-      }
-    }
-
-    const barn = new THREE.Group();
-    const barnBody = new THREE.Mesh(
-      new THREE.BoxGeometry(36, 16, 26),
-      new THREE.MeshStandardMaterial({
-        color: 0x9c5038,
-        roughness: 0.82,
-        metalness: 0.05,
-      })
-    );
-    barnBody.position.y = 8;
-    barnBody.castShadow = true;
-    barnBody.receiveShadow = true;
-    barn.add(barnBody);
-
-    const barnRoof = new THREE.Mesh(
-      new THREE.ConeGeometry(22, 10, 4),
-      new THREE.MeshStandardMaterial({
-        color: 0x5c3c32,
-        roughness: 0.76,
-        metalness: 0.08,
-      })
-    );
-    barnRoof.rotation.y = Math.PI / 4;
-    barnRoof.position.y = 19;
-    barnRoof.scale.set(1.1, 1, 0.7);
-    barnRoof.castShadow = true;
-    barn.add(barnRoof);
-
-    barn.position.set(baseX + 80, -49, baseZ + 70);
-    this.terrainGroup.add(fieldGroup);
-    this.terrainGroup.add(barn);
-  }
-
-  private createLakeDirtPaths(surfaceProfile: LevelSurfaceProfile): void {
-    const pathColor = this.tintColor(surfaceProfile.shorelineDetailColor ?? 0xc8b387, -0.02, 0.14, -0.06);
-    const pathMaterial = new THREE.MeshStandardMaterial({
-      color: pathColor,
-      roughness: 0.96,
-      metalness: 0,
-      map: this.createDetailTexture(
-        pathColor,
-        this.tintColor(pathColor, 0.01, 0.06, 0.04),
-        this.tintColor(pathColor, -0.01, 0.1, -0.08),
-        'sand'
-      ),
-    });
-
-    const pathSegments = [
-      { width: 480, depth: 18, x: -860, z: 620, rot: 0.34 },
-      { width: 320, depth: 16, x: -440, z: 360, rot: 0.6 },
-      { width: 360, depth: 14, x: 680, z: -240, rot: -0.42 },
-    ];
-
-    for (const segment of pathSegments) {
-      const path = new THREE.Mesh(
-        new THREE.PlaneGeometry(segment.width, segment.depth),
-        pathMaterial
-      );
-      path.rotation.x = -Math.PI / 2;
-      path.rotation.z = segment.rot;
-      path.position.set(segment.x, -48.72, segment.z);
-      path.receiveShadow = true;
-      this.terrainGroup.add(path);
-    }
-  }
-
-  private createLakeShoreProps(surfaceProfile: LevelSurfaceProfile): void {
-    const reedMaterial = new THREE.MeshStandardMaterial({
-      color: this.tintColor(surfaceProfile.groundAccentColor ?? 0x9ddf70, -0.02, 0.16, -0.06),
-      roughness: 0.88,
-      metalness: 0,
-      emissive: this.tintColor(surfaceProfile.groundAccentColor ?? 0x9ddf70, 0.01, 0.12, 0.02),
-      emissiveIntensity: 0.05,
-      side: THREE.DoubleSide,
-    });
-    const reedGeometry = new THREE.BoxGeometry(0.08, 0.9, 0.08);
-    const reeds = new THREE.InstancedMesh(reedGeometry, reedMaterial, 240);
-    reeds.castShadow = false;
-    reeds.receiveShadow = false;
-
-    const reedDummy = new THREE.Object3D();
-    for (let i = 0; i < 240; i++) {
-      const angle = Math.random() * Math.PI * 2;
-      const radius = 198 + Math.random() * 48;
-      const x = Math.cos(angle) * radius;
-      const z = Math.sin(angle) * radius;
-      reedDummy.position.set(x, -48.88, z);
-      reedDummy.rotation.set(
-        (Math.random() - 0.5) * 0.06,
-        Math.random() * Math.PI * 2,
-        (Math.random() - 0.5) * 0.18
-      );
-      reedDummy.scale.set(0.7 + Math.random() * 0.35, 0.7 + Math.random() * 0.6, 0.7 + Math.random() * 0.35);
-      reedDummy.updateMatrix();
-      reeds.setMatrixAt(i, reedDummy.matrix);
-    }
-    reeds.instanceMatrix.needsUpdate = true;
-    this.terrainGroup.add(reeds);
-
-    const stoneMaterial = new THREE.MeshStandardMaterial({
-      color: this.tintColor(surfaceProfile.shorelineDetailColor ?? 0xc7b18a, -0.03, 0.08, -0.05),
-      roughness: 0.96,
-      metalness: 0,
-    });
-    const stoneGeometry = new THREE.DodecahedronGeometry(0.38, 0);
-    const stones = new THREE.InstancedMesh(stoneGeometry, stoneMaterial, 160);
-    stones.castShadow = true;
-    stones.receiveShadow = true;
-
-    const stoneDummy = new THREE.Object3D();
-    for (let i = 0; i < 160; i++) {
-      const angle = Math.random() * Math.PI * 2;
-      const radius = 208 + Math.random() * 54;
-      const x = Math.cos(angle) * radius;
-      const z = Math.sin(angle) * radius;
-      stoneDummy.position.set(x, -48.82, z);
-      stoneDummy.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
-      stoneDummy.scale.setScalar(0.45 + Math.random() * 0.65);
-      stoneDummy.updateMatrix();
-      stones.setMatrixAt(i, stoneDummy.matrix);
-    }
-    stones.instanceMatrix.needsUpdate = true;
-    this.terrainGroup.add(stones);
-  }
-
-  private createLakeRidges(surfaceProfile: LevelSurfaceProfile): void {
-    const ridgeColor = this.tintColor(
-      surfaceProfile.groundDetailColor ?? 0x5c9a38,
-      -0.02,
-      0.22,
-      -0.08
-    );
-    const ridgeCapColor = this.tintColor(
-      surfaceProfile.groundAccentColor ?? 0x9ddf70,
-      0.02,
-      0.1,
-      0.08
-    );
-
-    for (let i = 0; i < 7; i++) {
-      const ridge = new THREE.Group();
-      const width = 180 + Math.random() * 120;
-      const height = 120 + Math.random() * 90;
-      const depth = 120 + Math.random() * 80;
-
-      const base = new THREE.Mesh(
-        new THREE.ConeGeometry(width * 0.42, height, 6),
-        new THREE.MeshStandardMaterial({
-          color: ridgeColor,
-          roughness: 0.92,
-          metalness: 0.03,
-        })
-      );
-      base.position.y = height * 0.5;
-      base.scale.z = depth / width;
-      base.castShadow = true;
-      base.receiveShadow = true;
-      ridge.add(base);
-
-      const cap = new THREE.Mesh(
-        new THREE.ConeGeometry(width * 0.2, height * 0.26, 6),
-        new THREE.MeshStandardMaterial({
-          color: ridgeCapColor,
-          roughness: 0.88,
-          metalness: 0,
-        })
-      );
-      cap.position.y = height * 0.92;
-      cap.scale.z = depth / width;
-      cap.castShadow = true;
-      ridge.add(cap);
-
-      const angle = (i / 7) * Math.PI * 2 + (Math.random() - 0.5) * 0.18;
-      const radius = 1640 + Math.random() * 560;
-      ridge.position.set(Math.cos(angle) * radius, -50, Math.sin(angle) * radius);
-      ridge.rotation.y = Math.random() * Math.PI * 2;
-      // 远景山脊不加入 this.rocks：LOD 会隐藏 600m 外的 rocks，而远景应当常驻可见
-      this.terrainGroup.add(ridge);
-    }
-  }
-
-  /** 湖区地形高度采样（与 generateLakeTerrain 中的形变公式一致，几何局部 y = -世界 z） */
+  /** 湖区地形高度采样：基于 worldscape 高度场（返回值相对旧版 -50 地面基准） */
   private sampleLakeGroundHeight(worldX: number, worldZ: number): number {
-    const localY = -worldZ;
-    const lakeRadius = 220;
-    const beachRadius = 260;
-    const noise1 = Math.sin(worldX * 0.01) * Math.cos(localY * 0.01) * 8;
-    const noise2 = Math.sin(worldX * 0.03 + 1) * Math.cos(localY * 0.03) * 3;
-    const noise3 = Math.sin(worldX * 0.005) * Math.cos(localY * 0.005) * 15;
-    const distanceFromCenter = Math.sqrt(worldX * worldX + localY * localY);
-
-    let lakeDepression = 0;
-    if (distanceFromCenter < beachRadius) {
-      const basinT = THREE.MathUtils.clamp(
-        (beachRadius - distanceFromCenter) / (beachRadius - lakeRadius),
-        0,
-        1
-      );
-      lakeDepression -= basinT * 5.5;
-    }
-    if (distanceFromCenter < lakeRadius) {
-      const centerT = 1 - distanceFromCenter / lakeRadius;
-      lakeDepression -= 6.5 + centerT * 3.5;
-    }
-
-    return noise1 + noise2 + noise3 + lakeDepression;
+    if (!this.stageField) return 0;
+    return this.stageField.heightAt(worldX, worldZ) + WORLDSCAPE_BASE_OFFSET;
   }
 
   /**
@@ -1611,246 +682,31 @@ export class TerrainGenerator {
     return geometry;
   }
 
-  /** 环湖远景群山：2-3 层深度带，越远越亮越蓝（向地平线雾霭色过渡），最高峰带雪顶 */
-  private createLakeMountainRanges(): void {
-    const tokens = this.designTokens;
-    const silhouette = new THREE.Color(tokens.distantSilhouette);
-    const haze = new THREE.Color(tokens.horizonHaze);
-    const bands = [
-      { radiusMin: 1900, radiusMax: 2080, count: 14, hazeMix: 0.22, heightMin: 200, heightMax: 320 },
-      { radiusMin: 2150, radiusMax: 2330, count: 12, hazeMix: 0.48, heightMin: 250, heightMax: 380 },
-      { radiusMin: 2420, radiusMax: 2600, count: 10, hazeMix: 0.72, heightMin: 300, heightMax: 440 },
-    ];
-
-    const coneGeometry = new THREE.ConeGeometry(1, 1, 7);
-    const capColor = this.tintColor(tokens.horizonHaze, 0, -0.2, 0.18);
-    const capMaterial = new THREE.MeshBasicMaterial({ color: capColor });
-    const dummy = new THREE.Object3D();
-    const snowCaps: Array<{ x: number; z: number; topY: number; width: number; height: number }> =
-      [];
-
-    for (const band of bands) {
-      const bandColor = silhouette.clone().lerp(haze, band.hazeMix);
-      const bandMaterial = new THREE.MeshBasicMaterial({ color: bandColor });
-      const peaks = new THREE.InstancedMesh(coneGeometry, bandMaterial, band.count);
-
-      for (let i = 0; i < band.count; i++) {
-        const angle = (i / band.count) * Math.PI * 2 + Math.random() * 0.42;
-        const radius = band.radiusMin + Math.random() * (band.radiusMax - band.radiusMin);
-        const height = band.heightMin + Math.random() * (band.heightMax - band.heightMin);
-        const width = height * (0.85 + Math.random() * 0.55);
-        const x = Math.cos(angle) * radius;
-        const z = Math.sin(angle) * radius;
-
-        dummy.position.set(x, -50 + height / 2, z);
-        dummy.rotation.set(0, Math.random() * Math.PI * 2, 0);
-        dummy.scale.set(width, height, width);
-        dummy.updateMatrix();
-        peaks.setMatrixAt(i, dummy.matrix);
-
-        // 各深度带最高的山峰挂雪顶
-        if (height > band.heightMin + (band.heightMax - band.heightMin) * 0.55) {
-          snowCaps.push({ x, z, topY: -50 + height, width, height });
-        }
-      }
-      peaks.instanceMatrix.needsUpdate = true;
-      this.terrainGroup.add(peaks);
-    }
-
-    if (snowCaps.length > 0) {
-      const caps = new THREE.InstancedMesh(coneGeometry, capMaterial, snowCaps.length);
-      for (let i = 0; i < snowCaps.length; i++) {
-        const cap = snowCaps[i];
-        const capHeight = cap.height * 0.26;
-        dummy.position.set(cap.x, cap.topY - capHeight / 2, cap.z);
-        dummy.rotation.set(0, 0, 0);
-        dummy.scale.set(cap.width * 0.4, capHeight, cap.width * 0.4);
-        dummy.updateMatrix();
-        caps.setMatrixAt(i, dummy.matrix);
-      }
-      caps.instanceMatrix.needsUpdate = true;
-      this.terrainGroup.add(caps);
-    }
-  }
-
-  /** 喀斯特石峰群：中远距离的高瘦岩柱，部分顶部覆绿 */
-  private createLakeKarstSpires(): void {
-    const tokens = this.designTokens;
-    const spireGroup = new THREE.Group();
-    spireGroup.name = 'karstSpires';
-    const baseColor = new THREE.Color(tokens.terrainSecondary).lerp(
-      new THREE.Color(tokens.distantSilhouette),
-      0.4
-    );
-    const count = 10;
-
-    for (let i = 0; i < count; i++) {
-      const angle = (i / count) * Math.PI * 2 + Math.random() * 0.5;
-      const radius = 1200 + Math.random() * 600;
-      const height = 95 + Math.random() * 85;
-      const baseRadius = 14 + Math.random() * 14;
-      const distanceT = (radius - 1200) / 600;
-
-      const spireColor = baseColor.clone().lerp(new THREE.Color(tokens.horizonHaze), distanceT * 0.4);
-      const spire = new THREE.Mesh(
-        new THREE.CylinderGeometry(baseRadius * (0.26 + Math.random() * 0.18), baseRadius, height, 6),
-        new THREE.MeshStandardMaterial({
-          color: spireColor,
-          roughness: 0.95,
-          metalness: 0,
-          flatShading: true,
-        })
-      );
-      spire.position.set(Math.cos(angle) * radius, -50 + height / 2, Math.sin(angle) * radius);
-      spire.rotation.y = Math.random() * Math.PI * 2;
-      spireGroup.add(spire);
-
-      // 约一半的石峰顶部覆绿（喀斯特植被）
-      if (i % 2 === 0) {
-        const crown = new THREE.Mesh(
-          new THREE.ConeGeometry(baseRadius * 0.55, height * 0.14, 6),
-          new THREE.MeshStandardMaterial({
-            color: this.tintColor(tokens.vegetation, 0, 0, 0.04),
-            roughness: 0.9,
-            metalness: 0,
-          })
-        );
-        crown.position.set(
-          spire.position.x,
-          -50 + height + height * 0.05,
-          spire.position.z
-        );
-        spireGroup.add(crown);
-      }
-    }
-    this.terrainGroup.add(spireGroup);
-  }
-
-  /** 中距离草甸丘陵：大型压扁球体，铺草地纹理 */
-  private createLakeMeadowHills(): void {
-    const tokens = this.designTokens;
-    const hillTexture = this.createDetailTexture(
-      tokens.terrainPrimary,
-      tokens.terrainAccent,
-      tokens.terrainSecondary,
-      'grass'
-    );
-    const hillMaterial = new THREE.MeshStandardMaterial({
-      color: this.tintColor(tokens.terrainPrimary, 0, -0.04, -0.02),
-      roughness: 0.94,
-      metalness: 0,
-      emissive: this.tintColor(tokens.terrainSecondary, 0, 0.05, -0.1),
-      emissiveIntensity: 0.06,
-      map: hillTexture,
-    });
-    const hillGeometry = new THREE.SphereGeometry(1, 18, 12);
-    const count = 9;
-    const hills = new THREE.InstancedMesh(hillGeometry, hillMaterial, count);
-
-    const dummy = new THREE.Object3D();
-    for (let i = 0; i < count; i++) {
-      const angle = (i / count) * Math.PI * 2 + Math.random() * 0.6;
-      const radius = 640 + Math.random() * 760;
-      const hillRadius = 110 + Math.random() * 130;
-      dummy.position.set(Math.cos(angle) * radius, -52, Math.sin(angle) * radius);
-      dummy.rotation.set(0, Math.random() * Math.PI * 2, 0);
-      dummy.scale.set(
-        hillRadius,
-        hillRadius * (0.16 + Math.random() * 0.1),
-        hillRadius * (0.74 + Math.random() * 0.4)
-      );
-      dummy.updateMatrix();
-      hills.setMatrixAt(i, dummy.matrix);
-    }
-    hills.instanceMatrix.needsUpdate = true;
-    this.terrainGroup.add(hills);
-  }
-
-  /** 蜿蜒河流：从湖泊流向地图边缘的曲线水带，附带一处小池塘 */
-  private createLakeRiver(surfaceProfile: LevelSurfaceProfile): void {
-    const tokens = this.designTokens;
-    const riverMaterial = new THREE.MeshStandardMaterial({
-      color: surfaceProfile.waterBaseColor ?? tokens.water,
-      transparent: true,
-      opacity: 0.88,
-      roughness: 0.14,
-      metalness: 0.3,
-      depthWrite: false,
-      side: THREE.DoubleSide,
-      emissive: this.tintColor(tokens.water, 0.02, 0.16, -0.04),
-      emissiveIntensity: 0.22,
-      map: this.createDetailTexture(tokens.water, tokens.waterSparkle, tokens.waterDeep, 'water'),
-    });
-    this.animatedProps.push((_deltaTime, time) => {
-      riverMaterial.map?.offset.set(time * 0.005, time * -0.0032);
-    });
-
-    // 从湖东南岸出发蜿蜒流向地图边缘
-    const headingAngle = -1.32; // 大致朝 (+x, -z)
-    const headingX = Math.cos(headingAngle);
-    const headingZ = Math.sin(headingAngle);
-    const sideX = -headingZ;
-    const sideZ = headingX;
-    const startDistance = 232;
-    const endDistance = 1490;
-    const segments = 34;
-
-    for (let i = 0; i < segments; i++) {
-      const t0 = i / segments;
-      const t1 = (i + 1) / segments;
-      const meander0 = Math.sin(t0 * Math.PI * 3.1) * 130 * Math.min(1, t0 * 4);
-      const meander1 = Math.sin(t1 * Math.PI * 3.1) * 130 * Math.min(1, t1 * 4);
-      const d0 = startDistance + (endDistance - startDistance) * t0;
-      const d1 = startDistance + (endDistance - startDistance) * t1;
-      const x0 = headingX * d0 + sideX * meander0;
-      const z0 = headingZ * d0 + sideZ * meander0;
-      const x1 = headingX * d1 + sideX * meander1;
-      const z1 = headingZ * d1 + sideZ * meander1;
-
-      const midX = (x0 + x1) / 2;
-      const midZ = (z0 + z1) / 2;
-      const length = Math.hypot(x1 - x0, z1 - z0) + 4;
-      const width = 17 - t0 * 6;
-      const groundHeight = Math.max(
-        this.sampleLakeGroundHeight(x0, z0),
-        this.sampleLakeGroundHeight(x1, z1)
-      );
-
-      const strip = new THREE.Mesh(new THREE.PlaneGeometry(width, length), riverMaterial);
-      strip.rotation.x = -Math.PI / 2;
-      // 长轴沿几何局部 Y（rotation.x 后指向世界 -Z），按段方向对齐
-      strip.rotation.z = Math.atan2(-(x1 - x0), -(z1 - z0));
-      strip.position.set(midX, -50 + groundHeight + 0.32, midZ);
-      strip.renderOrder = 3;
-      this.terrainGroup.add(strip);
-    }
-
-    // 小池塘
-    const pondShape = this.createIrregularShape({
-      baseRadius: 42,
-      radiusJitter: 8,
-      pointCount: 40,
-      wobbleFreqA: 2.6,
-      wobbleFreqB: 4.2,
-      phaseA: 0.8,
-      phaseB: 1.6,
-    });
-    const pondX = -560;
-    const pondZ = -430;
-    const pond = new THREE.Mesh(new THREE.ShapeGeometry(pondShape, 16), riverMaterial);
-    pond.rotation.x = -Math.PI / 2;
-    pond.position.set(pondX, -50 + this.sampleLakeGroundHeight(pondX, pondZ) + 0.3, pondZ);
-    pond.renderOrder = 3;
-    this.terrainGroup.add(pond);
-  }
-
-  /** 湖畔小村落：石木小屋（暖窗）、坡顶屋脊与袅袅炊烟 */
+  /** 湖畔小村落：石木小屋（暖窗）、坡顶屋脊与袅袅炊烟（自动寻找湖畔平缓草甸落位） */
   private createLakeHamlet(): void {
     const tokens = this.designTokens;
     const hamlet = new THREE.Group();
     hamlet.name = 'lakesideHamlet';
-    const hamletX = -430;
-    const hamletZ = 330;
+    let hamletX = -430;
+    let hamletZ = 330;
+    if (this.stageField) {
+      let found = false;
+      for (const radius of [760, 880, 1010, 1140]) {
+        if (found) break;
+        for (let i = 0; i < 14; i++) {
+          const angle = (i / 14) * Math.PI * 2 + 0.21;
+          const x = Math.cos(angle) * radius;
+          const z = Math.sin(angle) * radius;
+          const h = this.stageField.heightAt(x, z);
+          if (h > 4 && h < 36 && this.stageField.slopeAt(x, z) < 0.12) {
+            hamletX = x;
+            hamletZ = z;
+            found = true;
+            break;
+          }
+        }
+      }
+    }
 
     const wallMaterial = new THREE.MeshStandardMaterial({
       color: this.tintColor(tokens.structureAccent, 0, -0.1, 0),
@@ -1985,52 +841,54 @@ export class TerrainGenerator {
    */
   private generateDesertTerrain(config: LevelConfig): void {
     const surfaceProfile = this.getSurfaceProfile(config);
-    const dunesBase = surfaceProfile.groundBaseColor ?? config.groundColor;
-    // 沙漠地面 - 沙丘效果
-    const groundGeometry = new THREE.PlaneGeometry(4000, 4000, 200, 200); // 提高细节到200x200
-    const positions = groundGeometry.attributes.position;
-
-    for (let i = 0; i < positions.count; i++) {
-      const x = positions.getX(i);
-      const y = positions.getY(i);
-
-      // 沙丘波浪：低频大振幅，形成大尺度起伏沙山
-      const dune1 = Math.sin(x * 0.0048 + y * 0.0018) * 17.6;
-      const dune2 = Math.sin(x * 0.009) * Math.cos(y * 0.0072) * 11;
-      const dune3 = Math.sin(x * 0.0024 + y * 0.0036) * 26.4;
-
-      positions.setZ(i, Math.max(0, dune1 + dune2 + dune3));
-    }
-    groundGeometry.computeVertexNormals();
-
-    const groundMaterial = new THREE.MeshStandardMaterial({
-      color: this.tintColor(dunesBase, 0.01, 0.08, 0.01),
-      roughness: 1,
-      metalness: 0,
-      emissive: this.tintColor(dunesBase, -0.01, 0.2, -0.15),
-      emissiveIntensity: 0.08,
-      map: this.createDetailTexture(
-        dunesBase,
-        surfaceProfile.groundAccentColor ?? 0xe0ba74,
-        surfaceProfile.groundDetailColor ?? 0xa6752d,
-        'sand'
-      ),
-      polygonOffset: true, // 修复Z-fighting闪烁
-      polygonOffsetFactor: 1, // 偏移因子
-      polygonOffsetUnits: 1,
+    // worldscape 沙海：低频 fbm 起伏 + 沙色生物群系顶点色（无山脊带）
+    const field = new Heightfield(DESERT_DUNE_PRESET);
+    this.stageField = field;
+    const painter = new BiomePainter(field, {
+      palette: DESERT_BIOME_PALETTE,
+      waterLevel: -999, // 无水面
+      snowLine: 9999,
+      beachHeight: 10, // 低洼读作纯沙
+      beachBlendTop: 16,
+      forestDarkening: 0.18,
     });
+    const terrain = buildWorldTerrainMesh(field, painter, {
+      size: 4000,
+      segments: GameConfig.isMobile ? 160 : 220,
+    });
+    terrain.position.y = -50;
+    this.terrainGroup.add(terrain);
 
-    const ground = new THREE.Mesh(groundGeometry, groundMaterial);
-    ground.rotation.x = -Math.PI / 2;
-    ground.position.y = -50;
-    ground.receiveShadow = true;
-    this.terrainGroup.add(ground);
+    // 实例化散布：暖调风蚀碎石 + 稀疏干草簇（橄榄/沙褐）
+    this.worldVegetation = buildVegetation(
+      field,
+      {
+        seed: 20260214,
+        half: 1970,
+        snowLine: 9999,
+        rocks: { count: this.scaleCount(300), minHeight: -30 },
+        grass: {
+          count: this.scaleCount(5200),
+          minHeight: -24,
+          maxHeight: 80,
+          maxSlope: 0.4,
+          rootColor: 0x6b6234,
+          tipColor: 0xcbb56a,
+          hueBase: 0.13,
+          hueDryShift: 0.03,
+          saturation: 0.34,
+          lightnessBase: 0.5,
+          lightnessRand: 0.18,
+        },
+        rockTint: { r: 1.12, g: 1, b: 0.78 },
+      },
+      this.getWorldscapeUniforms()
+    );
+    this.worldVegetation.group.position.y = -50;
+    this.terrainGroup.add(this.worldVegetation.group);
 
     // 添加仙人掌
     this.createCacti(80);
-
-    // 添加沙漠岩石
-    this.createRocks(32);
 
     // 添加枯木
     this.createDeadTrees(24);
@@ -2050,13 +908,9 @@ export class TerrainGenerator {
     this.createDesertOasis();
   }
 
-  /** 沙漠地形高度采样（与 generateDesertTerrain 中的形变公式一致，几何局部 y = -世界 z） */
+  /** 沙漠地形高度采样：基于 worldscape 高度场（相对 -50 地面基准） */
   private sampleDesertGroundHeight(worldX: number, worldZ: number): number {
-    const localY = -worldZ;
-    const dune1 = Math.sin(worldX * 0.0048 + localY * 0.0018) * 17.6;
-    const dune2 = Math.sin(worldX * 0.009) * Math.cos(localY * 0.0072) * 11;
-    const dune3 = Math.sin(worldX * 0.0024 + localY * 0.0036) * 26.4;
-    return Math.max(0, dune1 + dune2 + dune3);
+    return this.stageField ? this.stageField.heightAt(worldX, worldZ) : 0;
   }
 
   /** 新月形沙丘群：弯月状雕塑沙体，向阳面亮、滑落面暗的双色调 */
@@ -2155,7 +1009,7 @@ export class TerrainGenerator {
       const strip = new THREE.Mesh(new THREE.PlaneGeometry(length, width), wadiMaterial);
       strip.rotation.x = -Math.PI / 2;
       strip.rotation.z = Math.atan2(-(z1 - z0), x1 - x0);
-      strip.position.set(midX, -50 + groundHeight + 0.28, midZ);
+      strip.position.set(midX, -50 + groundHeight + 1.1, midZ);
       strip.renderOrder = 2;
       this.terrainGroup.add(strip);
     }
@@ -2366,58 +1220,60 @@ export class TerrainGenerator {
    * 生成山地地形
    */
   private generateMountainTerrain(config: LevelConfig): void {
-    const surfaceProfile = this.getSurfaceProfile(config);
-    // 雪地基础
-    const groundGeometry = new THREE.PlaneGeometry(4000, 4000, 150, 150);
-    const positions = groundGeometry.attributes.position;
-
-    for (let i = 0; i < positions.count; i++) {
-      const x = positions.getX(i);
-      const y = positions.getY(i);
-
-      // 山峰效果
-      const mountain1 = Math.sin(x * 0.02) * Math.cos(y * 0.02) * 40;
-      const mountain2 = Math.sin(x * 0.035) * Math.cos(y * 0.03) * 20;
-      const noise = Math.sin(x * 0.1) * Math.cos(y * 0.1) * 5;
-
-      positions.setZ(i, Math.max(0, mountain1 + mountain2 + noise));
-    }
-    groundGeometry.computeVertexNormals();
-
-    const groundMaterial = new THREE.MeshStandardMaterial({
-      color: this.tintColor(surfaceProfile.groundBaseColor ?? config.groundColor, 0, -0.1, 0.03),
-      roughness: 0.8,
-      metalness: 0,
-      map: this.createDetailTexture(
-        this.tintColor(surfaceProfile.groundBaseColor ?? config.groundColor, 0, -0.04, 0.02),
-        surfaceProfile.groundAccentColor ?? 0xeaf4ff,
-        surfaceProfile.groundDetailColor ?? 0xb8c8d8,
-        'snow'
-      ),
-      polygonOffset: true, // 修复Z-fighting闪烁
-      polygonOffsetFactor: 1, // 偏移因子
-      polygonOffsetUnits: 1,
+    // worldscape 山脊多重分形高度场：谷地保留中央飞行空间，
+    // 峰群向战场边缘聚拢，雪线以上由雪覆盖着色器染白（uSnowCover = 1）
+    const field = new Heightfield(ALPINE_RIDGE_PRESET);
+    this.stageField = field;
+    const painter = new BiomePainter(field, {
+      palette: ALPINE_BIOME_PALETTE,
+      waterLevel: 0,
+      snowLine: 34,
+      lushHeightDivisor: 120,
     });
+    const terrain = buildWorldTerrainMesh(field, painter, {
+      size: 4000,
+      segments: GameConfig.isMobile ? 180 : 256,
+      snowUniform: this.worldscapeSnow,
+      snowWorldY: { start: WORLDSCAPE_WATER_Y + 2, end: WORLDSCAPE_WATER_Y + 12 },
+    });
+    terrain.position.y = WORLDSCAPE_WATER_Y;
+    this.terrainGroup.add(terrain);
 
-    const ground = new THREE.Mesh(groundGeometry, groundMaterial);
-    ground.rotation.x = -Math.PI / 2;
-    ground.position.y = -50;
-    ground.receiveShadow = true;
-    this.terrainGroup.add(ground);
+    // 冰川蓝水面：高山冰湖与谷地溪潭
+    this.worldWater = buildWorldscapeWater({
+      size: 4000,
+      grid: GameConfig.isMobile ? 112 : 160,
+      depthAt: (x, z) => -field.heightAt(x, z),
+      deepColor: 0x2f7c95,
+      shallowColor: 0x8ed2e3,
+      skyTint: 0xdde8f2,
+      sunDir: this.getSunDirection(config),
+      sunColor: config.lighting.sunColor,
+      sunIntensity: Math.min(1.2, config.lighting.sunIntensity * 0.5),
+    });
+    this.worldWater.mesh.position.y = WORLDSCAPE_WATER_Y;
+    this.terrainGroup.add(this.worldWater.mesh);
 
-    // 添加山峰
-    const peaks = this.createBeautifulMountains(20);
+    // 雪线之下的松林、坡地碎石与覆雪草甸
+    this.worldVegetation = buildVegetation(
+      field,
+      {
+        seed: 20260613,
+        half: 1970,
+        snowLine: 34,
+        pines: { count: this.scaleCount(2400), minHeight: 2, maxHeight: 58, maxSlope: 0.42 },
+        rocks: { count: this.scaleCount(1100), minHeight: 1 },
+        grass: { count: this.scaleCount(7000), minHeight: 1.5, maxHeight: 30, maxSlope: 0.3 },
+        snowWorldY: { start: WORLDSCAPE_WATER_Y + 2, end: WORLDSCAPE_WATER_Y + 12 },
+        rockTint: { r: 0.98, g: 1, b: 1.08 },
+      },
+      this.getWorldscapeUniforms()
+    );
+    this.worldVegetation.group.position.y = WORLDSCAPE_WATER_Y;
+    this.terrainGroup.add(this.worldVegetation.group);
 
-    // 添加雪松
-    this.createPineForest(96, -50, 1600, 200);
-
-    // 冷雾与雪光层次
-    this.createMountainAtmosphere(surfaceProfile);
-    this.createSnowflakeSurfaceLayer(surfaceProfile);
-
-    // 高山动态元素：峰顶风吹雪旗、冰封湖面、盘旋雄鹰
-    this.createSnowBanners(peaks);
-    this.createFrozenAlpineLake();
+    // 高山动态元素：峰顶风吹雪旗（峰顶从高度场采样）、盘旋雄鹰
+    this.createSnowBanners(this.findRidgePeaks(field, 8));
     this.createBirdFlock({
       centerX: 0,
       centerZ: -80,
@@ -2430,183 +1286,75 @@ export class TerrainGenerator {
     });
   }
 
-  /**
-   * 创建美丽的山峰，并返回各峰顶坐标供风吹雪旗等动态元素锚定
-   */
-  private createBeautifulMountains(count: number): Array<{ x: number; z: number; topY: number }> {
+  /** 在高度场上网格采样，挑出彼此相距足够远的前 N 座峰顶（雪旗锚点） */
+  private findRidgePeaks(
+    field: Heightfield,
+    count: number
+  ): Array<{ x: number; z: number; topY: number }> {
+    const candidates: Array<{ x: number; z: number; h: number }> = [];
+    const step = 110;
+    for (let x = -1850; x <= 1850; x += step) {
+      for (let z = -1850; z <= 1850; z += step) {
+        const h = field.heightAt(x, z);
+        if (h > 60) candidates.push({ x, z, h });
+      }
+    }
+    candidates.sort((a, b) => b.h - a.h);
     const peaks: Array<{ x: number; z: number; topY: number }> = [];
-    for (let i = 0; i < count; i++) {
-      const angle = (i / count) * Math.PI * 2 + Math.random() * 0.5;
-      const distance = 800 + Math.random() * 800;
-
-      const x = Math.cos(angle) * distance;
-      const z = Math.sin(angle) * distance;
-
-      const mountain = new THREE.Group();
-
-      // 主峰
-      const peakHeight = 60 + Math.random() * 60;
-      const peakWidth = 30 + Math.random() * 20;
-
-      const peakMaterial = new THREE.MeshStandardMaterial({
-        color: this.tintColor(0x696969, 0, -0.05, -0.05),
-        roughness: 0.9,
-        flatShading: true,
-        map: this.createDetailTexture(0x696969, 0x848484, 0x424242, 'rock'),
-      });
-
-      const peak = new THREE.Mesh(
-        new THREE.ConeGeometry(peakWidth, peakHeight, 6 + Math.floor(Math.random() * 3)),
-        peakMaterial
-      );
-      peak.position.y = peakHeight / 2;
-      peak.castShadow = true;
-      mountain.add(peak);
-
-      // 雪顶
-      const snowMaterial = new THREE.MeshStandardMaterial({
-        color: 0xffffff,
-        roughness: 0.45,
-        emissive: 0xbfd7ff,
-        emissiveIntensity: 0.06,
-        map: this.createDetailTexture(0xffffff, 0xe6f3ff, 0xd7dde5, 'snow'),
-      });
-      const snow = new THREE.Mesh(
-        new THREE.ConeGeometry(peakWidth * 0.5, peakHeight * 0.35, 6),
-        snowMaterial
-      );
-      snow.position.y = peakHeight * 0.7;
-      mountain.add(snow);
-
-      mountain.position.set(x, -50, z);
-      mountain.rotation.y = Math.random() * Math.PI * 2;
-      this.terrainGroup.add(mountain);
-      peaks.push({ x, z, topY: -50 + peakHeight });
+    for (const candidate of candidates) {
+      if (peaks.length >= count) break;
+      if (peaks.some((p) => Math.hypot(p.x - candidate.x, p.z - candidate.z) < 320)) continue;
+      peaks.push({ x: candidate.x, z: candidate.z, topY: WORLDSCAPE_WATER_Y + candidate.h });
     }
     return peaks;
-  }
-
-  /**
-   * 创建松树林
-   */
-  private createPineForest(
-    count: number,
-    groundY: number,
-    radius: number,
-    avoidRadius: number
-  ): void {
-    for (let i = 0; i < count; i++) {
-      const angle = Math.random() * Math.PI * 2;
-      const r = avoidRadius + Math.random() * (radius - avoidRadius);
-
-      const x = Math.cos(angle) * r;
-      const z = Math.sin(angle) * r;
-
-      const tree = this.createPineTree();
-      tree.position.set(x, groundY, z);
-      tree.scale.setScalar(0.6 + Math.random() * 0.8);
-      this.terrainGroup.add(tree);
-      this.trees.push(tree);
-    }
-  }
-
-  /**
-   * 创建松树
-   */
-  private createPineTree(): THREE.Group {
-    const tree = new THREE.Group();
-
-    // 树干
-    const trunk = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.2, 0.4, 3, 8),
-      new THREE.MeshStandardMaterial({ color: 0x4a3728 })
-    );
-    trunk.position.y = 1.5;
-    trunk.castShadow = true;
-    tree.add(trunk);
-
-    // 多层松针
-    const foliageMaterial = new THREE.MeshStandardMaterial({
-      color: 0x1a472a,
-      roughness: 0.8,
-    });
-
-    for (let i = 0; i < 5; i++) {
-      const layer = new THREE.Mesh(
-        new THREE.ConeGeometry(2 - i * 0.3, 2.5 - i * 0.3, 8),
-        foliageMaterial
-      );
-      layer.position.y = 3 + i * 1.5;
-      layer.castShadow = true;
-      tree.add(layer);
-    }
-
-    // 雪覆盖
-    if (Math.random() > 0.5) {
-      const snow = new THREE.Mesh(
-        new THREE.ConeGeometry(0.3, 1, 8),
-        new THREE.MeshStandardMaterial({ color: 0xffffff })
-      );
-      snow.position.y = 10;
-      tree.add(snow);
-    }
-
-    return tree;
   }
 
   /**
    * 生成海洋地形
    */
   private generateOceanTerrain(config: LevelConfig): void {
-    const surfaceProfile = this.getSurfaceProfile(config);
-    // 海面 - 波浪效果
-    const oceanGeometry = new THREE.PlaneGeometry(4000, 4000, 200, 200);
-    const positions = oceanGeometry.attributes.position;
+    this.stageField = null;
+    const tokens = this.designTokens;
 
-    for (let i = 0; i < positions.count; i++) {
-      const x = positions.getX(i);
-      const y = positions.getY(i);
-      const wave = Math.sin(x * 0.05) * Math.cos(y * 0.05) * 2;
-      positions.setZ(i, wave);
-    }
-    oceanGeometry.computeVertexNormals();
+    // 阳光海床：透过波浪着色器的半透明水体读出深海蓝（替代旧版深渊夜雾层）
+    const seabed = new THREE.Mesh(
+      new THREE.PlaneGeometry(4400, 4400),
+      new THREE.MeshStandardMaterial({
+        color: this.tintColor(tokens.waterDeep, 0, -0.05, -0.06),
+        roughness: 1,
+        metalness: 0,
+      })
+    );
+    seabed.rotation.x = -Math.PI / 2;
+    seabed.position.y = -66;
+    this.terrainGroup.add(seabed);
 
-    const oceanMaterial = new THREE.MeshStandardMaterial({
-      color:
-        surfaceProfile.waterBaseColor ?? this.tintColor(config.waterColor || 0x006994, 0, 0.08, 0.02),
-      transparent: true,
-      opacity: 0.9,
-      roughness: 0.1,
-      metalness: 0.45,
-      emissive: this.tintColor(
-        surfaceProfile.waterDetailColor ?? (config.waterColor || 0x006994),
-        0.01,
-        0.18,
-        -0.02
-      ),
-      emissiveIntensity: 0.24,
-      map: this.createDetailTexture(
-        surfaceProfile.waterBaseColor ?? (config.waterColor || 0x006994),
-        surfaceProfile.waterAccentColor ?? 0x7bd6ff,
-        surfaceProfile.waterDetailColor ?? 0x03415d,
-        'water'
-      ),
+    // 添加岛屿群（先放置，以便把岛屿浅滩烘焙进水深 → 岛缘绿松石浅水 + 浪沫环）
+    const islandMounds = this.createOceanIslands();
+
+    // worldshowcase 波浪着色器海面：明亮远洋晴昼调色板（深钴蓝 → 绿松石浅滩）
+    this.worldWater = buildWorldscapeWater({
+      size: 4400,
+      grid: GameConfig.isMobile ? 144 : 200,
+      depthAt: (x, z) => {
+        let depth = 26;
+        for (const mound of islandMounds) {
+          const dx = x - mound.x;
+          const dz = z - mound.z;
+          const spread = mound.radius * 0.62;
+          depth -= mound.height * Math.exp(-(dx * dx + dz * dz) / (2 * spread * spread));
+        }
+        return depth;
+      },
+      deepColor: tokens.waterDeep,
+      shallowColor: 0x3f9ec6,
+      skyTint: 0xd2e9f5,
+      sunDir: this.getSunDirection(config),
+      sunColor: config.lighting.sunColor,
+      sunIntensity: Math.min(1.8, config.lighting.sunIntensity * 0.6),
     });
-
-    const ocean = new THREE.Mesh(oceanGeometry, oceanMaterial);
-    ocean.rotation.x = -Math.PI / 2;
-    ocean.position.y = -50;
-    this.terrainGroup.add(ocean);
-    this.waterMesh = ocean;
-
-    // 添加岛屿群（岩礁石柱、棕榈沙洲与残破石塔）
-    this.createOceanIslands();
-
-    // 深海夜雾与海面层次
-    this.createOceanNightFog(surfaceProfile);
-
-    // 海面闪光叠加层：低透明度加色滚动，呼应月光下的碎浪反光
-    this.createOceanSparkleOverlay();
+    this.worldWater.mesh.position.y = WORLDSCAPE_WATER_Y;
+    this.terrainGroup.add(this.worldWater.mesh);
 
     // 远海动态元素：灯塔旋转光束、浪尖白沫、远航货轮、闪烁浮标
     this.createLighthouse();
@@ -2618,8 +1366,12 @@ export class TerrainGenerator {
   /**
    * 海上岛屿群：8-10 座小岛分布在 400-1900 半径（中心 300 内不放置），
    * 混合裸岩石柱、带棕榈的沙洲，以及一座残破石塔的遗迹岛。
+   * 返回各岛的浅滩隆起参数，供波浪着色器烘焙岛缘浅水与浪沫环。
    */
-  private createOceanIslands(): void {
+  private createOceanIslands(): Array<{ x: number; z: number; radius: number; height: number }> {
+    const islandMounds: Array<{ x: number; z: number; radius: number; height: number }> = [];
+    // 灯塔礁（createLighthouse 固定放在 860,-780）也需要浅滩
+    islandMounds.push({ x: 860, z: -780, radius: 46, height: 30 });
     const tokens = this.designTokens;
     const rockMaterial = new THREE.MeshStandardMaterial({
       color: this.tintColor(tokens.structure, 0, -0.1, -0.06),
@@ -2677,6 +1429,7 @@ export class TerrainGenerator {
         const skirt = new THREE.Mesh(new THREE.ConeGeometry(26, 9, 7), rockMaterial);
         skirt.position.y = -48;
         island.add(skirt);
+        islandMounds.push({ x, z, radius: 36, height: 30 });
       } else {
         // 沙洲岛：隆起的沙丘（高出风暴浪峰）+ 1-3 棵棕榈
         const caySize = 22 + Math.random() * 20;
@@ -2696,6 +1449,7 @@ export class TerrainGenerator {
         green.scale.set(1, 0.3, 0.85);
         green.position.y = -47 + caySize * 0.12;
         island.add(green);
+        islandMounds.push({ x, z, radius: caySize * 1.35, height: 30 });
 
         const palmBaseY = -48 + caySize * 0.3 * 0.72;
         const palmCount = 1 + Math.floor(Math.random() * 3);
@@ -2752,34 +1506,9 @@ export class TerrainGenerator {
 
     ruinIsland.position.set(ruinX, 0, ruinZ);
     this.terrainGroup.add(ruinIsland);
-  }
+    islandMounds.push({ x: ruinX, z: ruinZ, radius: 44, height: 30 });
 
-  /** 海面闪光叠加层：与基础海面反向滚动的加色细波纹 */
-  private createOceanSparkleOverlay(): void {
-    const tokens = this.designTokens;
-    const sparkleMaterial = new THREE.MeshBasicMaterial({
-      color: tokens.waterSparkle,
-      transparent: true,
-      opacity: 0.06,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-      map: this.createDetailTexture(
-        tokens.water,
-        tokens.waterSparkle,
-        this.tintColor(tokens.waterSparkle, 0, -0.12, -0.1),
-        'water'
-      ),
-    });
-    const sparkle = new THREE.Mesh(new THREE.PlaneGeometry(4000, 4000), sparkleMaterial);
-    sparkle.rotation.x = -Math.PI / 2;
-    sparkle.position.y = -36.8; // 略高于风暴浪峰，加色混合下读作海面碎光
-    sparkle.renderOrder = 4;
-    this.terrainGroup.add(sparkle);
-
-    this.animatedProps.push((_deltaTime, time) => {
-      sparkleMaterial.map?.offset.set(time * -0.0052, time * -0.003);
-      sparkleMaterial.opacity = 0.05 + (Math.sin(time * 0.5) * 0.5 + 0.5) * 0.025;
-    });
+    return islandMounds;
   }
 
   /**
@@ -2877,6 +1606,7 @@ export class TerrainGenerator {
 
     // 中央公园、环城高架与废墟景观
     this.createCentralPark();
+    this.createCityParkPlantings();
     this.createRingHighway();
     this.createCityRuins();
     this.createCityLandmarks();
@@ -2885,6 +1615,107 @@ export class TerrainGenerator {
     this.createCitySearchlights();
     this.createCityTraffic();
     this.createCityNeonSigns();
+  }
+
+  /**
+   * 城市公园植被：worldscape 草簇 + 阔叶树实例化散布在中央公园与街角绿地，
+   * 草随风摇曳（windSway 注入），为钢城补一点生机。
+   */
+  private createCityParkPlantings(): void {
+    const uniforms = this.getWorldscapeUniforms();
+    const patches = [
+      { x: 0, z: 0, radius: 235 }, // 中央公园（避开 62,-46 处的池塘）
+      { x: -780, z: 540, radius: 90 },
+      { x: 660, z: -700, radius: 80 },
+      { x: 920, z: 480, radius: 70 },
+    ];
+    const pondX = 62;
+    const pondZ = -46;
+    const color = new THREE.Color();
+
+    // 风吹草簇
+    const grassMaterial = new THREE.MeshStandardMaterial({
+      vertexColors: true,
+      roughness: 1,
+      side: THREE.DoubleSide,
+    });
+    injectWindSway(grassMaterial, uniforms.time, uniforms.wind, 0.5, 1.0, 'city-grass');
+    const grassCount = this.scaleCount(4200);
+    const grassMesh = new THREE.InstancedMesh(
+      grassTuftGeometry(0x3c5c34, 0x7da45a),
+      grassMaterial,
+      grassCount
+    );
+    grassMesh.frustumCulled = false;
+    let placedGrass = 0;
+    let guard = 0;
+    while (placedGrass < grassCount && guard++ < grassCount * 6) {
+      const patch = patches[placedGrass % patches.length];
+      const angle = Math.random() * Math.PI * 2;
+      const r = Math.sqrt(Math.random()) * patch.radius;
+      const x = patch.x + Math.cos(angle) * r;
+      const z = patch.z + Math.sin(angle) * r;
+      if (Math.hypot(x - pondX, z - pondZ) < 78) continue;
+      setScatterInstance(
+        grassMesh,
+        placedGrass,
+        x,
+        -49.0,
+        z,
+        Math.random() * Math.PI * 2,
+        (0.7 + Math.random() * 0.9) * 1.9
+      );
+      color.setHSL(0.27 + Math.random() * 0.05, 0.4, 0.42 + Math.random() * 0.16);
+      grassMesh.setColorAt(placedGrass, color);
+      placedGrass++;
+    }
+    grassMesh.count = placedGrass;
+    if (grassMesh.instanceColor) grassMesh.instanceColor.needsUpdate = true;
+    grassMesh.instanceMatrix.needsUpdate = true;
+    this.terrainGroup.add(grassMesh);
+
+    // 阔叶树团簇
+    const leaf = leafTreeGeometries(() => Math.random());
+    const trunkMaterial = new THREE.MeshStandardMaterial({
+      color: 0x6e5240,
+      flatShading: true,
+      roughness: 1,
+    });
+    const crownMaterial = new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      flatShading: true,
+      roughness: 1,
+    });
+    injectWindSway(crownMaterial, uniforms.time, uniforms.wind, 0.22, 4.4, 'city-leaf');
+    const treeCount = this.scaleCount(140);
+    const trunks = new THREE.InstancedMesh(leaf.trunk, trunkMaterial, treeCount);
+    const crowns = new THREE.InstancedMesh(leaf.foliage, crownMaterial, treeCount);
+    trunks.frustumCulled = false;
+    crowns.frustumCulled = false;
+    let placedTrees = 0;
+    guard = 0;
+    while (placedTrees < treeCount && guard++ < treeCount * 8) {
+      const patch = patches[placedTrees % patches.length];
+      const angle = Math.random() * Math.PI * 2;
+      const r = Math.sqrt(Math.random()) * Math.max(10, patch.radius - 8);
+      const x = patch.x + Math.cos(angle) * r;
+      const z = patch.z + Math.sin(angle) * r;
+      if (Math.hypot(x - pondX, z - pondZ) < 84) continue;
+      const rot = Math.random() * Math.PI * 2;
+      const s = (0.9 + Math.random() * 0.8) * 1.7;
+      setScatterInstance(trunks, placedTrees, x, -49.05, z, rot, s);
+      setScatterInstance(crowns, placedTrees, x, -49.05, z, rot, s);
+      color.setHSL(0.3 + Math.random() * 0.06, 0.4, 0.3 + Math.random() * 0.1);
+      crowns.setColorAt(placedTrees, color);
+      placedTrees++;
+    }
+    trunks.count = placedTrees;
+    crowns.count = placedTrees;
+    if (crowns.instanceColor) crowns.instanceColor.needsUpdate = true;
+    trunks.instanceMatrix.needsUpdate = true;
+    crowns.instanceMatrix.needsUpdate = true;
+    this.terrainGroup.add(trunks);
+    this.terrainGroup.add(crowns);
   }
 
   /**
@@ -4280,125 +3111,34 @@ export class TerrainGenerator {
    * 创建云朵
    */
   private createClouds(profile: WeatherProfile): void {
-    for (let i = 0; i < profile.cloudCount; i++) {
-      const cloud = this.createFluffyCloud(profile);
-      const initialY =
-        profile.cloudHeightMin + Math.random() * (profile.cloudHeightMax - profile.cloudHeightMin);
-      cloud.position.set(
-        (Math.random() - 0.5) * 4000,
-        initialY,
-        (Math.random() - 0.5) * 4000
-      );
-      cloud.scale.setScalar(8 + Math.random() * (10 + profile.intensity * 10));
-      cloud.userData.baseY = initialY;
-      cloud.userData.floatAmplitude = 1 + Math.random() * (1.5 + profile.intensity * 2);
-      cloud.userData.floatSpeed = 0.12 + Math.random() * 0.18 + profile.intensity * 0.08;
-      cloud.userData.floatPhase = Math.random() * Math.PI * 2;
-      cloud.userData.spinSpeed = (Math.random() - 0.5) * (0.02 + profile.intensity * 0.04);
-      cloud.renderOrder = 6;
-      this.terrainGroup.add(cloud);
-      this.clouds.push(cloud);
-    }
+    // worldscape 实例化积云场：合并球体云团 × 变体实例化，
+    // 随风持续漂移 + 环绕回卷 + 垂直浮沉 + 天气色调调制 —— 云永远在动
+    this.cloudField = new CloudField({
+      seed: 4242,
+      variants: 5,
+      perVariant: Math.max(6, this.scaleCount(28)),
+      fieldSize: 4800,
+      altitudeMin: profile.cloudHeightMin,
+      altitudeMax: profile.cloudHeightMax,
+      tint: profile.cloudTint,
+      scaleMultiplier: 2.3,
+      opacity: THREE.MathUtils.clamp(profile.cloudOpacity + 0.2, 0.55, 0.95),
+    });
+    this.terrainGroup.add(this.cloudField.group);
+    // 初始铺排：先推进一帧，让云在第一帧就出现在天上而非从零浮现
+    this.cloudField.update(
+      4,
+      0,
+      this.weatherProfile.cloudCoverage,
+      this.weatherProfile.cloudTone,
+      this.weatherProfile.windAngle,
+      0
+    );
   }
 
-  /**
-   * 创建蓬松云朵
-   */
-  private createFluffyCloud(profile: WeatherProfile): THREE.Group {
-    const cloud = new THREE.Group();
-    const backMaterial = new THREE.MeshBasicMaterial({
-      color: profile.cloudTint,
-      transparent: true,
-      opacity: profile.cloudOpacity * 0.34,
-      depthWrite: false,
-      depthTest: true,
-      fog: true,
-      toneMapped: false,
-      side: THREE.BackSide,
-    });
-    const frontMaterial = new THREE.MeshBasicMaterial({
-      color: profile.cloudTint,
-      transparent: true,
-      opacity: profile.cloudOpacity * 0.22,
-      depthWrite: false,
-      depthTest: true,
-      fog: true,
-      toneMapped: false,
-      side: THREE.FrontSide,
-    });
-
-    // 风暴云：底部云团使用更暗的双色调材质，强化压迫感
-    const isStorm = profile.type === 'storm';
-    const darkTint = isStorm ? this.tintColor(profile.cloudTint, 0, -0.06, -0.22) : null;
-    const darkBackMaterial = darkTint
-      ? new THREE.MeshBasicMaterial({
-          color: darkTint,
-          transparent: true,
-          opacity: profile.cloudOpacity * 0.4,
-          depthWrite: false,
-          depthTest: true,
-          fog: true,
-          toneMapped: false,
-          side: THREE.BackSide,
-        })
-      : null;
-    const darkFrontMaterial = darkTint
-      ? new THREE.MeshBasicMaterial({
-          color: darkTint,
-          transparent: true,
-          opacity: profile.cloudOpacity * 0.26,
-          depthWrite: false,
-          depthTest: true,
-          fog: true,
-          toneMapped: false,
-          side: THREE.FrontSide,
-        })
-      : null;
-
-    const puffs = 5 + Math.floor(Math.random() * 4);
-    for (let i = 0; i < puffs; i++) {
-      const size = 0.5 + Math.random() * 0.5;
-      const geometry = new THREE.SphereGeometry(size, 10, 10);
-      const position = new THREE.Vector3(
-        (Math.random() - 0.5) * 2.6,
-        (Math.random() - 0.5) * 0.65,
-        (Math.random() - 0.5) * 1.9
-      );
-      const scale = new THREE.Vector3(
-        1 + Math.random() * 0.35,
-        0.7 + Math.random() * 0.25,
-        1 + Math.random() * 0.45
-      );
-      const isBottomPuff = position.y < 0;
-      const useBackMaterial =
-        isStorm && isBottomPuff && darkBackMaterial ? darkBackMaterial : backMaterial;
-      const useFrontMaterial =
-        isStorm && isBottomPuff && darkFrontMaterial ? darkFrontMaterial : frontMaterial;
-      const breathPhase = Math.random() * Math.PI * 2;
-
-      const backPuff = new THREE.Mesh(geometry, useBackMaterial);
-      backPuff.position.copy(position);
-      backPuff.scale.copy(scale);
-      backPuff.castShadow = false;
-      backPuff.receiveShadow = false;
-      backPuff.renderOrder = 6;
-      // 云团呼吸动画的基准缩放与相位（update() 中读取，避免每帧分配）
-      backPuff.userData.baseScale = scale.clone();
-      backPuff.userData.breathPhase = breathPhase;
-      cloud.add(backPuff);
-
-      const frontPuff = new THREE.Mesh(geometry, useFrontMaterial);
-      frontPuff.position.copy(position);
-      frontPuff.scale.copy(scale);
-      frontPuff.castShadow = false;
-      frontPuff.receiveShadow = false;
-      frontPuff.renderOrder = 7;
-      frontPuff.userData.baseScale = scale.clone();
-      frontPuff.userData.breathPhase = breathPhase;
-      cloud.add(frontPuff);
-    }
-
-    return cloud;
+  /** 云漂移速度（米/秒）：关卡 cloudSpeed 基线 + 风力加成 */
+  private getCloudWindSpeed(): number {
+    return 5 + this.weatherProfile.cloudSpeed * 2.2 + this.weatherProfile.windStrength * 12;
   }
 
   /** 高空卷云层：大尺寸半透明水平面片，极缓慢漂移 */
@@ -4537,41 +3277,20 @@ export class TerrainGenerator {
       }
     }
 
-    // 云朵移动：沿关卡风向漂移，双轴 ±2400 环绕
-    const cloudWindX = Math.cos(this.weatherProfile.windAngle) * this.weatherProfile.cloudSpeed;
-    const cloudWindZ = Math.sin(this.weatherProfile.windAngle) * this.weatherProfile.cloudSpeed;
-    for (const cloud of this.clouds) {
-      const baseY =
-        typeof cloud.userData.baseY === 'number' ? cloud.userData.baseY : cloud.position.y;
-      const floatAmplitude =
-        typeof cloud.userData.floatAmplitude === 'number' ? cloud.userData.floatAmplitude : 1;
-      const floatSpeed =
-        typeof cloud.userData.floatSpeed === 'number' ? cloud.userData.floatSpeed : 0.15;
-      const floatPhase =
-        typeof cloud.userData.floatPhase === 'number' ? cloud.userData.floatPhase : 0;
-      const spinSpeed =
-        typeof cloud.userData.spinSpeed === 'number' ? cloud.userData.spinSpeed : 0;
-
-      cloud.position.x += deltaTime * cloudWindX;
-      cloud.position.z += deltaTime * cloudWindZ;
-      cloud.position.y =
-        baseY + Math.sin(this.time * floatSpeed + floatPhase) * floatAmplitude;
-      cloud.rotation.y += deltaTime * spinSpeed;
-      if (cloud.position.x > 2400) cloud.position.x = -2400;
-      if (cloud.position.x < -2400) cloud.position.x = 2400;
-      if (cloud.position.z > 2400) cloud.position.z = -2400;
-      if (cloud.position.z < -2400) cloud.position.z = 2400;
-
-      // 云团呼吸：每个云团以独立相位做 ±6% 的缩放振荡
-      for (const puff of cloud.children) {
-        const baseScale = puff.userData.baseScale as THREE.Vector3 | undefined;
-        if (baseScale) {
-          const breathPhase =
-            typeof puff.userData.breathPhase === 'number' ? puff.userData.breathPhase : 0;
-          const breath = 1 + Math.sin(this.time * 0.6 + breathPhase) * 0.06;
-          puff.scale.copy(baseScale).multiplyScalar(breath);
-        }
-      }
+    // worldscape 世界系统：着色器时间（草木摇曳）、波浪水面、漂移积云场
+    this.worldscapeTime.value = this.time;
+    this.worldWater?.update(this.time);
+    if (this.cloudField) {
+      const stormSag = this.weatherProfile.type === 'storm' ? 0.55 : 0;
+      this.cloudField.update(
+        deltaTime,
+        this.time,
+        this.weatherProfile.cloudCoverage,
+        this.weatherProfile.cloudTone,
+        this.weatherProfile.windAngle,
+        this.getCloudWindSpeed(),
+        stormSag
+      );
     }
 
     if (this.weatherParticles) {
@@ -4645,6 +3364,24 @@ export class TerrainGenerator {
     // 立即清空 waterMesh 引用（避免 update() 访问旧对象）
     this.waterMesh = undefined;
 
+    // worldscape 世界系统：显式释放实例化云场/波浪水面/植被的几何与材质
+    if (this.cloudField) {
+      this.terrainGroup.remove(this.cloudField.group);
+      this.cloudField.dispose();
+      this.cloudField = null;
+    }
+    if (this.worldWater) {
+      this.terrainGroup.remove(this.worldWater.mesh);
+      this.worldWater.dispose();
+      this.worldWater = null;
+    }
+    if (this.worldVegetation) {
+      this.terrainGroup.remove(this.worldVegetation.group);
+      this.worldVegetation.dispose();
+      this.worldVegetation = null;
+    }
+    this.stageField = null;
+
     // 清理天空纹理
     if (this.scene.background instanceof THREE.Texture) {
       this.scene.background.dispose();
@@ -4709,9 +3446,7 @@ export class TerrainGenerator {
     }
 
     this.trees = [];
-    this.clouds = [];
     this.waterMesh = undefined;
-    this.grass = null;
     this.rocks = [];
     this.weatherParticles = undefined;
     this.animatedProps = [];
@@ -5151,9 +3886,10 @@ export class TerrainGenerator {
   }
 
   /** 湖面莲叶（带缺口的圆叶，实例化渲染） */
+  /** 莲叶：拒绝采样落在湖缘齐踝浅水带 */
   private createLakeLilyPads(): void {
-    const count = this.scaleCount(34);
-    const padGeometry = new THREE.CircleGeometry(2.3, 9, 0.35, Math.PI * 1.82);
+    const count = this.scaleCount(44);
+    const padGeometry = new THREE.CircleGeometry(2.6, 9, 0.35, Math.PI * 1.82);
     const padMaterial = new THREE.MeshStandardMaterial({
       color: 0x3f7d2f,
       roughness: 0.78,
@@ -5165,23 +3901,32 @@ export class TerrainGenerator {
     const pads = new THREE.InstancedMesh(padGeometry, padMaterial, count);
 
     const dummy = new THREE.Object3D();
-    for (let i = 0; i < count; i++) {
+    let placed = 0;
+    let guard = 0;
+    while (placed < count && guard++ < count * 80) {
       const angle = Math.random() * Math.PI * 2;
-      const radius = 35 + Math.random() * 135;
-      dummy.position.set(Math.cos(angle) * radius, -47.5, Math.sin(angle) * radius);
+      const radius = 240 + Math.random() * 980;
+      const x = Math.cos(angle) * radius;
+      const z = Math.sin(angle) * radius;
+      const h = this.stageField ? this.stageField.heightAt(x, z) : -1;
+      if (h > -0.6 || h < -3.4) continue; // 只生在浅水
+      dummy.position.set(x, WORLDSCAPE_WATER_Y + 0.5, z);
       dummy.rotation.set(-Math.PI / 2, 0, Math.random() * Math.PI * 2);
       dummy.scale.setScalar(0.6 + Math.random() * 0.9);
       dummy.updateMatrix();
-      pads.setMatrixAt(i, dummy.matrix);
+      pads.setMatrixAt(placed, dummy.matrix);
+      placed++;
     }
+    pads.count = placed;
     pads.instanceMatrix.needsUpdate = true;
     this.terrainGroup.add(pads);
   }
 
-  /** 湖畔木码头与一艘随波摇晃的小船 */
+  /** 湖畔木码头与一艘随波摇晃的小船（沿高度场水岸线自动落位） */
   private createLakeDock(): void {
     const dockAngle = 0.42;
     const dockDirection = new THREE.Vector2(Math.cos(dockAngle), Math.sin(dockAngle));
+    const shoreRadius = this.findShorelineRadius(dockDirection.x, dockDirection.y);
 
     const dock = new THREE.Group();
     dock.name = 'lakeDock';
@@ -5211,7 +3956,7 @@ export class TerrainGenerator {
       }
     }
 
-    dock.position.set(dockDirection.x * 182, 0, dockDirection.y * 182);
+    dock.position.set(dockDirection.x * (shoreRadius - 16), 0, dockDirection.y * (shoreRadius - 16));
     dock.rotation.y = Math.atan2(dockDirection.x, dockDirection.y);
     this.terrainGroup.add(dock);
 
@@ -5236,14 +3981,14 @@ export class TerrainGenerator {
     bench.position.y = 0.45;
     boat.add(bench);
 
-    const boatX = dockDirection.x * 138 + 9;
-    const boatZ = dockDirection.y * 138 + 7;
+    const boatX = dockDirection.x * (shoreRadius - 58) + 9;
+    const boatZ = dockDirection.y * (shoreRadius - 58) + 7;
     boat.position.set(boatX, -47.6, boatZ);
     boat.rotation.y = dockAngle + 0.7;
     this.terrainGroup.add(boat);
 
     this.animatedProps.push((_deltaTime, time) => {
-      boat.position.y = -47.55 + this.sampleWaterWave(boatX, boatZ) * 0.7;
+      boat.position.y = -47.65 + this.sampleWaterWave(boatX, boatZ) * 0.7;
       boat.rotation.z = Math.sin(time * 0.9) * 0.045;
       boat.rotation.x = Math.sin(time * 0.7 + 1.2) * 0.03;
     });
@@ -5458,63 +4203,9 @@ export class TerrainGenerator {
     }
   }
 
-  /** 山地地形高度采样（与 generateMountainTerrain 中的形变公式一致） */
-  private sampleMountainHeight(worldX: number, worldZ: number): number {
-    const localY = -worldZ;
-    const mountain1 = Math.sin(worldX * 0.02) * Math.cos(localY * 0.02) * 40;
-    const mountain2 = Math.sin(worldX * 0.035) * Math.cos(localY * 0.03) * 20;
-    const noise = Math.sin(worldX * 0.1) * Math.cos(localY * 0.1) * 5;
-    return Math.max(0, mountain1 + mountain2 + noise);
-  }
-
-  /** 冰封高山湖：自动寻找谷地放置高反光冰面 */
-  private createFrozenAlpineLake(): void {
-    let bestX = 300;
-    let bestZ = 260;
-    let bestHeight = Number.POSITIVE_INFINITY;
-    for (let i = 0; i < 10; i++) {
-      const angle = (i / 10) * Math.PI * 2;
-      const radius = 260 + (i % 3) * 70;
-      const x = Math.cos(angle) * radius;
-      const z = Math.sin(angle) * radius;
-      const height = this.sampleMountainHeight(x, z);
-      if (height < bestHeight) {
-        bestHeight = height;
-        bestX = x;
-        bestZ = z;
-      }
-    }
-
-    const ice = new THREE.Mesh(
-      new THREE.CircleGeometry(88, 26),
-      new THREE.MeshStandardMaterial({
-        color: 0xbfe2f5,
-        roughness: 0.12,
-        metalness: 0.5,
-        emissive: 0x7fb4d8,
-        emissiveIntensity: 0.18,
-        transparent: true,
-        opacity: 0.96,
-      })
-    );
-    ice.rotation.x = -Math.PI / 2;
-    ice.position.set(bestX, -50 + bestHeight + 0.35, bestZ);
-    ice.receiveShadow = true;
-    this.terrainGroup.add(ice);
-  }
-
-  /** 水面波高采样（与 update() 中水面顶点动画公式一致，几何局部 y = -世界 z） */
+  /** 水面波高采样：与 worldscape 波浪着色器的 GPU 波形完全一致（深水处 waveScale = 1） */
   private sampleWaterWave(worldX: number, worldZ: number): number {
-    const localY = -worldZ;
-    const speedFactor = 1 + this.weatherProfile.intensity * 0.25;
-    return (
-      (Math.sin(worldX * 0.05 + this.time * speedFactor) *
-        Math.cos(localY * 0.05 + this.time * 0.7) +
-        Math.sin(worldX * 0.03 - this.time * 0.6) * 0.4 +
-        Math.sin(localY * 0.02 + this.time * 0.5) * 0.8 +
-        Math.sin((worldX + localY) * 0.085 - this.time * 1.7) * 0.25) *
-      this.weatherProfile.waterWaveScale
-    );
+    return sampleWaveHeight(worldX, worldZ, this.time);
   }
 
   /** 海上灯塔：岩礁、红白条纹塔身与旋转的扫海光束 */
@@ -5633,14 +4324,10 @@ export class TerrainGenerator {
     this.animatedProps.push((_deltaTime, time) => {
       for (let i = 0; i < count; i++) {
         const wave = this.sampleWaterWave(capX[i], capZ[i]);
-        dummy.position.set(capX[i], -50 + wave + 0.45, capZ[i]);
+        dummy.position.set(capX[i], WORLDSCAPE_WATER_Y + wave + 0.35, capZ[i]);
         dummy.rotation.set(-Math.PI / 2, 0, capYaw[i]);
-        // 浪峰处放大、浪谷处缩小，模拟白沫聚散
-        const crest = THREE.MathUtils.clamp(
-          0.35 + wave / Math.max(this.weatherProfile.waterWaveScale, 0.001),
-          0.12,
-          1.5
-        );
+        // 浪峰处放大、浪谷处缩小，模拟白沫聚散（GPU 波形振幅约 ±1）
+        const crest = THREE.MathUtils.clamp(0.55 + wave * 0.45, 0.12, 1.5);
         dummy.scale.setScalar(capScale[i] * crest);
         dummy.updateMatrix();
         caps.setMatrixAt(i, dummy.matrix);
@@ -5709,7 +4396,7 @@ export class TerrainGenerator {
         if (shipX > 2100) shipX = -2100;
         if (shipX < -2100) shipX = 2100;
         ship.position.x = shipX;
-        ship.position.y = -46.5 + this.sampleWaterWave(shipX, route.z) * 0.16;
+        ship.position.y = -46.5 + this.sampleWaterWave(shipX, route.z) * 0.7;
         ship.rotation.z = Math.sin(time * 0.5 + phase) * 0.022;
         ship.rotation.x = Math.sin(time * 0.38 + phase * 1.7) * 0.015;
       });
@@ -5766,7 +4453,7 @@ export class TerrainGenerator {
     this.animatedProps.push((_deltaTime, time) => {
       for (const buoy of buoys) {
         const wave = this.sampleWaterWave(buoy.x, buoy.z);
-        buoy.group.position.y = -50 + wave + 0.6;
+        buoy.group.position.y = WORLDSCAPE_WATER_Y + wave + 0.4;
         buoy.group.rotation.x = Math.sin(time * 0.9 + buoy.phase) * 0.1;
         buoy.group.rotation.z = Math.cos(time * 0.8 + buoy.phase) * 0.1;
         buoy.lightMaterial.opacity = Math.sin(time * 2.6 + buoy.phase) > 0.45 ? 0.95 : 0.08;
@@ -5947,6 +4634,7 @@ export class TerrainGenerator {
     const baseProfile = this.getDefaultWeatherProfile(config.terrain);
     const weatherPresetMap: Record<LevelWeatherConfig['preset'], WeatherType> = {
       clear: 'clear',
+      cloudy: 'clear',
       mist: 'mist',
       windy: 'mist',
       sandstorm: 'dust',
@@ -5954,13 +4642,37 @@ export class TerrainGenerator {
       storm: 'storm',
       smog: 'smog',
     };
+    /** 云色调（1 = 晴日亮白 → 0 = 风暴铅灰），按天气类型推导 */
+    const cloudToneByType: Record<WeatherType, number> = {
+      clear: 1.0,
+      mist: 0.92,
+      snow: 0.86,
+      dust: 0.95,
+      storm: 0.34,
+      smog: 0.72,
+      rain: 0.55,
+    };
     const weatherConfig = config.weather;
     const environmentConfig = config.environment;
     const cloudCover = environmentConfig.cloudCover ?? weatherConfig.cloudCoverage;
+    const resolvedType = weatherPresetMap[weatherConfig.preset] ?? baseProfile.type;
 
     const resolvedProfile: WeatherProfile = {
       ...baseProfile,
-      type: weatherPresetMap[weatherConfig.preset] ?? baseProfile.type,
+      type: resolvedType,
+      cloudCoverage: THREE.MathUtils.clamp(
+        typeof cloudCover === 'number' && cloudCover <= 1
+          ? cloudCover
+          : weatherConfig.cloudCoverage,
+        0.05,
+        1
+      ),
+      cloudTone: cloudToneByType[resolvedType],
+      windStrength: THREE.MathUtils.clamp(
+        weatherConfig.windStrength ?? baseProfile.windStrength,
+        0,
+        1
+      ),
       intensity: THREE.MathUtils.clamp(
         environmentConfig.weatherIntensity ?? weatherConfig.intensity ?? baseProfile.intensity,
         0,
@@ -6051,6 +4763,9 @@ export class TerrainGenerator {
         return {
           type: 'dust',
           intensity: 0.55,
+          cloudCoverage: 0.14,
+          cloudTone: 0.95,
+          windStrength: 0.9,
           fogDensity: 0.0012,
           cloudCount: 12,
           cloudOpacity: 0.48,
@@ -6071,6 +4786,9 @@ export class TerrainGenerator {
         return {
           type: 'snow',
           intensity: 0.45,
+          cloudCoverage: 0.74,
+          cloudTone: 0.86,
+          windStrength: 0.44,
           fogDensity: 0.00105,
           cloudCount: 24,
           cloudOpacity: 0.78,
@@ -6091,6 +4809,9 @@ export class TerrainGenerator {
         return {
           type: 'storm',
           intensity: 0.5,
+          cloudCoverage: 0.62,
+          cloudTone: 0.95,
+          windStrength: 0.7,
           fogDensity: 0.0011,
           cloudCount: 28,
           cloudOpacity: 0.72,
@@ -6111,6 +4832,9 @@ export class TerrainGenerator {
         return {
           type: 'smog',
           intensity: 0.4,
+          cloudCoverage: 0.55,
+          cloudTone: 0.72,
+          windStrength: 0.2,
           fogDensity: 0.00115,
           cloudCount: 22,
           cloudOpacity: 0.68,
@@ -6132,6 +4856,9 @@ export class TerrainGenerator {
         return {
           type: 'clear',
           intensity: 0.2,
+          cloudCoverage: 0.3,
+          cloudTone: 1.0,
+          windStrength: 0.3,
           fogDensity: 0.00072,
           cloudCount: 18,
           cloudOpacity: 0.74,

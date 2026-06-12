@@ -1,19 +1,27 @@
 import {
+  AdditiveBlending,
   BoxGeometry,
   Mesh,
   MeshBasicMaterial,
   Object3D,
   Scene,
+  Sprite,
+  SpriteMaterial,
   Vector3,
   type Material,
 } from 'three';
 import { GameConfig, GAME_CONSTANTS } from '@/config';
+import { getVfxTextures } from '@/features/effects/ParticleSystem';
 
 /**
  * Boss炮弹数据
  */
 interface Projectile {
   mesh: Mesh;
+  glow: Sprite; // 加色能量核心
+  crackleA: Sprite; // 能量电弧火花（抖动）
+  crackleB: Sprite;
+  embers: Sprite[]; // 尾部余烬串
   direction: Vector3;
   speed: number;
   active: boolean;
@@ -32,6 +40,10 @@ interface Projectile {
   travelWidthBoost: number;
 }
 
+/** 余烬基础尺寸（本地坐标，由后向前递减） */
+const EMBER_SIZES = [0.6, 0.45, 0.32];
+const EMBER_Z = [-0.9, -1.25, -1.6];
+
 const FORWARD = new Vector3(0, 0, 1);
 
 /**
@@ -43,12 +55,17 @@ export class BossProjectilePool {
   private maxDistance: number;
   private scene: Scene;
   private shellGeometry: BoxGeometry;
+  // 所有炮弹共享的特效材质（动画走 sprite 缩放/位置，避免逐弹材质实例）
+  private glowMaterial: SpriteMaterial;
+  private crackleMaterial: SpriteMaterial;
+  private emberMaterial: SpriteMaterial;
 
   constructor(scene: Scene) {
     this.scene = scene;
     this.maxDistance = GAME_CONSTANTS.PROJECTILE.MAX_DISTANCE;
 
     const poolSize = GameConfig.getProjectilePoolSize();
+    const textures = getVfxTextures();
 
     this.shellGeometry = new BoxGeometry(0.34, 0.34, 1.85);
     const material = new MeshBasicMaterial({
@@ -58,13 +75,64 @@ export class BossProjectilePool {
       depthWrite: false,
     });
 
+    this.glowMaterial = new SpriteMaterial({
+      map: textures.glow,
+      color: 0xff4a22,
+      transparent: true,
+      opacity: 0.9,
+      blending: AdditiveBlending,
+      depthWrite: false,
+    });
+    this.crackleMaterial = new SpriteMaterial({
+      map: textures.spark,
+      color: 0xffd9a0,
+      transparent: true,
+      opacity: 0.95,
+      blending: AdditiveBlending,
+      depthWrite: false,
+    });
+    this.emberMaterial = new SpriteMaterial({
+      map: textures.glow,
+      color: 0xff8a3a,
+      transparent: true,
+      opacity: 0.75,
+      blending: AdditiveBlending,
+      depthWrite: false,
+    });
+
     for (let i = 0; i < poolSize; i++) {
       const mesh = new Mesh(this.shellGeometry, material.clone());
       mesh.visible = false;
+
+      const glow = new Sprite(this.glowMaterial);
+      glow.scale.set(1.6, 1.6, 1);
+      mesh.add(glow);
+
+      const crackleA = new Sprite(this.crackleMaterial);
+      crackleA.scale.set(0.5, 0.5, 1);
+      mesh.add(crackleA);
+
+      const crackleB = new Sprite(this.crackleMaterial);
+      crackleB.scale.set(0.4, 0.4, 1);
+      mesh.add(crackleB);
+
+      const embers: Sprite[] = [];
+      for (let e = 0; e < EMBER_SIZES.length; e++) {
+        const ember = new Sprite(this.emberMaterial);
+        ember.scale.set(EMBER_SIZES[e], EMBER_SIZES[e], 1);
+        ember.position.z = EMBER_Z[e];
+        mesh.add(ember);
+        embers.push(ember);
+      }
+
       this.scene.add(mesh);
 
       this.pool.push({
         mesh,
+        glow,
+        crackleA,
+        crackleB,
+        embers,
         direction: new Vector3(),
         speed: GAME_CONSTANTS.PROJECTILE.SPEED,
         active: false,
@@ -219,6 +287,37 @@ export class BossProjectilePool {
       projectile.baseScale.y * widthResponse * (1 - stretchPulse * projectile.widthPulseScale),
       projectile.baseScale.z * lengthResponse * (1 + stretchPulse * projectile.lengthPulseScale)
     );
+
+    // 能量特效动画：全部由 travel 推导，零分配、确定性抖动
+    const phase = travel * 2.1 + projectile.pulseOffset * 5;
+
+    // 脉冲发光核心
+    const glowScale = 1.45 + 0.35 * Math.sin(travel * 0.6 + projectile.pulseOffset);
+    projectile.glow.scale.set(glowScale, glowScale, 1);
+
+    // 电弧火花：围绕弹体小幅乱跳
+    projectile.crackleA.position.set(
+      Math.sin(phase * 1.7) * 0.26,
+      Math.cos(phase * 1.3) * 0.26,
+      0.35 + Math.sin(phase) * 0.4
+    );
+    const crackleScaleA = 0.38 + 0.26 * (0.5 + 0.5 * Math.sin(phase * 3.1));
+    projectile.crackleA.scale.set(crackleScaleA, crackleScaleA, 1);
+
+    projectile.crackleB.position.set(
+      Math.cos(phase * 2.3 + 1.1) * 0.24,
+      Math.sin(phase * 1.9 + 0.6) * 0.24,
+      -0.25 + Math.cos(phase * 1.4) * 0.35
+    );
+    const crackleScaleB = 0.3 + 0.22 * (0.5 + 0.5 * Math.cos(phase * 2.7 + 0.8));
+    projectile.crackleB.scale.set(crackleScaleB, crackleScaleB, 1);
+
+    // 尾部余烬串：依次闪烁，拉出能量尾迹
+    for (let i = 0; i < projectile.embers.length; i++) {
+      const flicker = 0.72 + 0.34 * Math.sin(phase * 2.3 + i * 1.9);
+      const emberScale = EMBER_SIZES[i] * flicker;
+      projectile.embers[i].scale.set(emberScale, emberScale, 1);
+    }
   }
 
   public getActiveProjectiles(): Mesh[] {
@@ -238,6 +337,9 @@ export class BossProjectilePool {
       (projectile.mesh.material as Material).dispose();
     }
     this.shellGeometry.dispose();
+    this.glowMaterial.dispose();
+    this.crackleMaterial.dispose();
+    this.emberMaterial.dispose();
     this.pool = [];
   }
 }
