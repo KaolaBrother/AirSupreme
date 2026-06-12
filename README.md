@@ -2,8 +2,6 @@
 
 一款使用 Three.js + TypeScript 开发的 3D 飞机空战游戏，支持桌面和移动端。当前版本已包含 5 个关卡、5 个 Boss、试玩关卡、升级菜单、事件波次和模型预览，并完成了主要战斗反馈与运行时边界收口。
 
-![Game Preview](https://via.placeholder.com/800x400?text=Air+Supreme+3D+Combat+Game)
-
 ## 🎮 游戏特色
 
 ### 当前内容概览
@@ -41,14 +39,27 @@
 - **弹药提示** - 导弹耗尽时按下 M 键会显示 "NO MISSILE" 提示
 - **UI 进度条** - 右上角显示白色进度条，距离下一发导弹的进度
 - **伤害** - 导弹伤害 50 点（比机炮高 4 倍）
+- **玩家导弹外观** - AIM-120 风格一体车削弹体，黑雷达罩 / 滚转色带 / 铭文 / X 翼布局
 
-### 多关卡地形系统
+### 🌍 多关卡地形系统（Worldscape）
 
-1. **湖畔晨曦** - 湖区、森林、草甸、农田与远山自然景观
-2. **沙漠风暴** - 炎热沙漠，仙人掌点缀
-3. **雪山之巅** - 高耸雪峰，云雾缭绕
-4. **深海决战** - 广阔海洋，小岛散布
-5. **城市废墟** - 工业城市、高楼街区、夜景灯光
+五个关卡均采用程序化 Worldscape 引擎生成，每关使用种子化噪声高度场 + 群落顶点着色 + 实例化植被：
+
+1. **湖畔晨曦** - 湖谷场景：码头、村落、睡莲、2.4 万株风摆草、松林与阔叶树、合并球簇实例化云
+2. **沙漠风暴** - 沙丘高度场，暖色岩石，旱草点缀，仙人掌群落
+3. **雪山之巅** - 雪线山脊，冰川蓝湖潭，谷地抬升，云雾缭绕
+4. **深海决战** - 远洋晴昼（环境光全面提亮），菲涅尔/岸沫着色器水面，小岛散布
+5. **城市废墟（纽约化）** - 中央公园草甸 + 帝国大厦式尖塔 / 克莱斯勒式塔冠 / 双子玻璃塔，布鲁克林式悬索桥，双层高架快速路，高架环线列车（动画车流与亮窗列车），街灯 + 广告牌 + 近翻倍窗灯密度
+
+**动态云系统**：全关卡 140 朵实例化云，随风持续漂移、环绕回卷、垂直浮动、随天气色调调制。
+
+**Worldscape 技术栈**（`src/features/terrain/worldscape/`）：
+- 种子化 simplex / fbm / ridged 噪声高度场
+- 群落顶点着色
+- 波浪 / 菲涅尔 / 岸沫着色器水面
+- 实例化松林 / 阔叶树 / 岩石 / 2.4 万风摆草
+- 合并球簇实例化云
+- 风摆与积雪着色器注入
 
 ### 道具系统
 
@@ -78,33 +89,50 @@
 
 ### Boss 战系统
 
-每个关卡都有独特的 Boss。普通模式流程为：
+每个关卡都有独特的 Boss（模型全面重制）。普通模式流程为：
 
 `波次 -> 事件波次 -> Boss 战 -> 下一关`
 
 同时开始菜单支持 **Boss 模式**，可直接挑战关底 Boss。
 
-| 关卡     | Boss         | HP   | 特点                           |
-| -------- | ------------ | ---- | ------------------------------ |
-| 湖畔晨曦 | 重型轰炸机   | 2000 | 四门重炮 + 导弹发射器          |
-| 沙漠风暴 | 沙漠堡垒     | 2500 | 防空炮（AOE）+ 导弹发射井      |
-| 雪山之巅 | 八爪鱼战舰   | 3000 | 瞬移 + 全屏激光扫射 + 眼睛激光 |
-| 深海决战 | 导弹驱逐舰   | 3500 | 防空炮 + 导弹 + 起飞战斗机     |
-| 城市废墟 | 空中航空母舰 | 4000 | 重炮 + 导弹 + 起飞敌机群       |
+| 关卡       | Boss         | HP   | 特点                                                   |
+| ---------- | ------------ | ---- | ------------------------------------------------------ |
+| 湖畔晨曦   | 重型轰炸机   | 2000 | 长机身 / 6 发吊舱进气风扇 / 炮塔群 / 开舱弹舱弱点    |
+| 沙漠风暴   | 沙漠堡垒     | 2500 | 履带基座 / 斜面装甲 / 双联主炮 / 旋转雷达 / 战旗      |
+| 雪山之巅   | 八爪鱼战舰   | 3000 | 球形外壳 / 外露发光脑核 / 铆接装甲 / 8 条分段摆动触手 |
+| 深海决战   | 导弹驱逐舰   | 3500 | 伯克级船体 / 相控阵 / 垂发单元 / 近防炮 / 直升机甲板  |
+| 城市废墟   | 空中航空母舰 | 4000 | 斜角甲板 / 拦阻索 / 舷岛旋转雷达 / 升降机 / 停机剪影  |
+
+**Boss 导弹**：两级混合弹（助推器 / 分离环 / 电缆导管 / 装甲护板 / 危险条纹 / 弦号），飞行中缓慢滚转。
+
+### ✨ 战斗特效
+
+- **爆炸**：精灵贴图多段效果（核心闪光 / 冲击波环 / 重力余烬 / 上升烟柱）；Boss 死亡触发多段闪爆
+- **子弹**：曳光晕 + 拖尾；Boss 炮弹脉冲核心与电弧火花
+- **命中反馈**：按来源分发 — 玩家命中 / 敌人命中 / Boss 命中各有独立闪光 / 火花 / 碎屑 / 烟团
+- **传送门**：重制为反向旋转旋涡门
+
+### 🛩️ 机型细节
+
+全 6 机型（玩家机 + 5 种敌机）均包含：
+- 喷管 + 加力燃烧光
+- 座舱框架
+- 挂架导弹（玩家机 / 战斗机 / 王牌）
+- 重型机腹挂弹架
+- 狙击机长管
+- 天线 / 皮托管 / 涂装条纹
+- 修正航行灯偏移（按 2 倍机体外扩后不再漂移）
 
 ### 试玩关卡与事件波次
 
 - **试玩关卡**：开始菜单可开关，首关会按动作推进基础教学
-- **事件波次**：
-  - 精英歼灭
-  - 限时拦截
-  - 护送防守
+- **事件波次**：精英歼灭 / 限时拦截 / 护送防守
 - **升级点反馈**：获得升级点时会有 HUD 提示，并引导打开升级菜单
 
 ### 模型预览
 
-- 开始菜单可打开 **模型预览**
-- 可查看玩家机、敌机、Boss 和导弹模型
+- 开始菜单可打开 **模型预览**，共 13 个模型（含玩家机 / 敌机 / Boss / 玩家导弹 / Boss 导弹）
+- 包围盒自适应取景，修复新 Boss 被怼脸及八爪鱼缩放异常
 - 首次打开前会在菜单空闲时预取资源，减少等待感
 
 ## 🎯 游戏控制
@@ -155,8 +183,8 @@ npm run build
 
 - 主要功能与表现层已经进入阶段性收口，当前没有已知阻塞性开发项
 - `GameCoordinator`、战斗运行时、Boss 控制器、presentation/UI runtime 都已后移到按需初始化路径
-- 当前测试规模为 **28 个测试文件 / 304 个测试**
-- 已知观察项仅剩构建中的 `vendor-three` chunk 约 `503.67 kB` warning
+- 当前测试规模为 **29 个测试文件 / 309 个测试**
+- 已知观察项仅剩构建中的 `vendor-three` chunk 约 503 kB warning
 
 ## 📁 项目结构
 
@@ -182,6 +210,8 @@ src/
 │       └── Logger.ts        # 日志系统
 │
 ├── features/                # 游戏功能
+│   ├── aircraft/            # 机型网格工厂
+│   │   └── AircraftMeshFactory.ts
 │   ├── player/              # 玩家控制
 │   ├── enemy/               # AI 敌人
 │   │   ├── EnemyAI.ts       # 敌人逻辑
@@ -189,6 +219,7 @@ src/
 │   │   └── EnemyTypes.ts    # 敌人类型
 │   ├── boss/                # Boss 系统
 │   │   ├── BossAI.ts        # Boss 基类
+│   │   ├── BossMissileSystem.ts
 │   │   ├── DesertFortressAI.ts
 │   │   ├── OctopusWarshipAI.ts
 │   │   ├── MissileDestroyerAI.ts
@@ -196,23 +227,36 @@ src/
 │   │   └── BossTypes.ts     # Boss 类型配置
 │   ├── combat/              # 战斗系统
 │   │   ├── ProjectilePool.ts
+│   │   ├── BossProjectilePool.ts
 │   │   ├── MissileSystem.ts
 │   │   └── HealthSystem.ts
 │   ├── camera/              # 相机系统
 │   ├── terrain/             # 地形生成
+│   │   ├── TerrainGenerator.ts
+│   │   ├── LevelConfig.ts
+│   │   └── worldscape/      # Worldscape 程序化场景引擎
+│   │       ├── noise.ts     # 种子化噪声 (simplex/fbm/ridged)
+│   │       ├── heightfield.ts
+│   │       ├── biomes.ts    # 群落顶点着色
+│   │       ├── water.ts     # 波浪/菲涅尔/岸沫着色器
+│   │       ├── vegetation.ts # 实例化植被
+│   │       ├── clouds.ts    # 实例化动态云
+│   │       └── shadermods.ts # 风摆与积雪着色器
 │   ├── levels/              # 关卡管理
 │   ├── powerups/            # 道具系统
 │   ├── upgrade/             # 升级系统
 │   └── effects/             # 粒子效果
 │
 ├── scenes/                  # 场景管理
+│   └── GameScene.ts
 ├── ui/                      # UI 组件
 │   ├── HUD.ts              # 游戏界面
 │   ├── StartMenu.ts         # 开始菜单
 │   ├── LockOnIndicator.ts  # 导弹锁定
+│   ├── ModelPreview.ts      # 模型预览廊
 │   └── UpgradeMenu.ts       # 升级菜单
 │
-├── __tests__/              # 测试文件 (304 个测试)
+├── __tests__/              # 测试文件 (309 个测试)
 │
 ├── Game.ts                  # 向后兼容导出
 ├── Game.legacy.ts           # 旧实现 (@deprecated)
@@ -246,20 +290,10 @@ src/
 - 波次间隔期间可以收集道具
 - 完成所有波次后进入当前关的 Boss 战，再推进下一关
 
-### 敌人 AI 行为
-
-- **巡逻** - 未发现玩家时绕圈飞行
-- **追击** - 发现玩家后追击
-- **攻击** - 进入攻击范围后射击
-- **闪避** - 血量低时尝试闪避
-- **环绕** - 狙击手保持距离攻击
-- **俯冲** - 王牌使用的高级战术
-- **撤退** - 保持安全距离
-
 ### 碰撞系统
 
 - 玩家子弹 vs 敌人
-- 敌人子弹 vs 玩家
+- 敌人子弹 vs 玩家（友军子弹不伤玩家）
 - 玩家 vs 道具
 
 ## 📝 开发说明
@@ -278,6 +312,7 @@ src/
 - 对象池减少 GC 压力
 - 移动端自动降低画质
 - 粒子数量限制
+- 实例化渲染（植被、云朵）
 
 ## 🔧 配置
 
@@ -325,64 +360,23 @@ PLAYER: {
 ```typescript
 import { configLoader } from '@/core/utils/ConfigLoader';
 
-// 异步加载配置
 async function initGame() {
-  await configLoader.loadConfig();
-
-  // 获取配置值
-  const playerConfig = configLoader.get('player');
-  console.log(playerConfig.maxHealth); // 200
-
-  // 获取嵌套值
-  const difficulty = configLoader.get('game.difficulty'); // "normal"
+  await configLoader.load();
+  const playerConfig = configLoader.getPlayer();
+  const enemyConfig = configLoader.getEnemy('FIGHTER');
 }
 ```
 
 ## 📊 日志系统
 
-游戏使用统一的日志系统，支持不同日志级别和模块过滤：
-
-### 基本用法
-
 ```typescript
-import { logger } from '@/core/utils/Logger';
+import { getLogger } from '@/core/utils/Logger';
 
-// 不同日志级别
-logger.debug('调试信息', { detail: 'value' });
-logger.info('普通信息');
-logger.warn('警告信息');
-logger.error('错误信息', new Error('Something went wrong'));
-```
-
-### 模块日志
-
-```typescript
-// 创建模块专用 logger
-const moduleLogger = logger.createModuleLogger('EnemyAI');
-
-moduleLogger.info('敌人生成'); // [EnemyAI] 敌人生成
-moduleLogger.debug('AI 状态更新', { state: 'chase' });
-```
-
-### 日志级别控制
-
-```typescript
-// 设置全局日志级别
-logger.setLevel('debug'); // 'debug' | 'info' | 'warn' | 'error'
-
-// 开发环境显示所有日志，生产环境只显示警告和错误
-if (import.meta.env.PROD) {
-  logger.setLevel('warn');
-}
-```
-
-### 性能追踪
-
-```typescript
-// 计时功能
-const timer = logger.startTimer('帧更新');
-// ... 执行代码
-timer.end(); // 输出: [Timer] 帧更新: 16.5ms
+const log = getLogger('MyModule');
+log.debug('调试信息', { data: 123 });
+log.info('普通信息');
+log.warn('警告');
+log.error('错误');
 ```
 
 ## 📄 许可证
