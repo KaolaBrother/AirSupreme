@@ -105,7 +105,7 @@ export class GameScene {
    * 设置地面（作为参考）
    */
   private setupGround(): void {
-    const groundGeometry = new THREE.PlaneGeometry(2000, 2000);
+    const groundGeometry = new THREE.PlaneGeometry(4400, 4400);
     const groundMaterial = new THREE.MeshStandardMaterial({
       color: 0x3d5c5c,
       roughness: 1,

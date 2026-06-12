@@ -11,6 +11,7 @@ type BossGroup = THREE.Group & {
   engineRingMeshes?: THREE.Mesh[];
   weakpointMeshes?: THREE.Mesh[];
   muzzleMeshes?: THREE.Mesh[];
+  signalBeaconMeshes?: THREE.Mesh[];
 };
 
 /**
@@ -28,6 +29,7 @@ export class BossAI {
   private static readonly ENERGY_PULSE_SPEED = 7.8;
   private static readonly CRITICAL_PULSE_SPEED = 13.2;
   private static readonly TERMINAL_PULSE_SPEED = 20.5;
+  private static readonly BEACON_PULSE_SPEED = 2.4;
   private mesh: THREE.Group;
   private config: BossConfig;
   private health: HealthSystem;
@@ -37,6 +39,7 @@ export class BossAI {
   private readonly muzzleMeshes: THREE.Mesh[];
   private readonly engineMeshes: THREE.Mesh[];
   private readonly engineRingMeshes: THREE.Mesh[];
+  private readonly signalBeaconMeshes: THREE.Mesh[];
   private readonly weakpointBaseColor = new THREE.Color(0xff6a3a);
   private readonly weakpointCriticalColor = new THREE.Color(0xffb67a);
   private readonly weaponBaseColor = new THREE.Color(0xff924f);
@@ -90,6 +93,7 @@ export class BossAI {
     this.muzzleMeshes = bossGroup.muzzleMeshes ?? [];
     this.engineMeshes = bossGroup.engineMeshes ?? [];
     this.engineRingMeshes = bossGroup.engineRingMeshes ?? [];
+    this.signalBeaconMeshes = bossGroup.signalBeaconMeshes ?? [];
 
     this.velocity = new THREE.Vector3(0, 0, -config.speed);
 
@@ -258,6 +262,12 @@ export class BossAI {
         damageFlash * 0.07 +
         terminalWarningBias * 0.06;
       ring.scale.setScalar(ringScale);
+    }
+
+    // 信号灯（警示信标）缓慢脉冲
+    const beaconWave = Math.sin(this.visualPulseTime * BossAI.BEACON_PULSE_SPEED) * 0.5 + 0.5;
+    for (const beacon of this.signalBeaconMeshes) {
+      this.setMaterialOpacity(beacon, 0.3 + beaconWave * 0.7);
     }
   }
 
@@ -537,6 +547,7 @@ export function createBossMesh(config: BossConfig): THREE.Group {
   const parts: THREE.Mesh[] = [];
   const weakpointMeshes: THREE.Mesh[] = [];
   const muzzleMeshes: THREE.Mesh[] = [];
+  const signalBeaconMeshes: THREE.Mesh[] = [];
 
   const bodyMaterial = new THREE.MeshStandardMaterial({
     color: 0xaebcca,
@@ -1098,12 +1109,262 @@ export function createBossMesh(config: BossConfig): THREE.Group {
     group.add(tailFin);
   }
 
+  // ===== 细节增强：船体镶板 / 上层结构 / 武备细节 / 信号灯 =====
+  const hullDetailMaterial = new THREE.MeshStandardMaterial({
+    color: new THREE.Color(0xaebcca).offsetHSL(0, 0.05, -0.08),
+    metalness: 0.66,
+    roughness: 0.2,
+    emissive: 0x232c37,
+    emissiveIntensity: 0.18,
+  });
+  const ribDetailMaterial = new THREE.MeshStandardMaterial({
+    color: new THREE.Color(0xc4cfd8).offsetHSL(0, 0.04, -0.12),
+    metalness: 0.6,
+    roughness: 0.24,
+  });
+  const railingMaterial = new THREE.MeshStandardMaterial({
+    color: new THREE.Color(0xd9e2e9).offsetHSL(0, 0.03, -0.18),
+    metalness: 0.7,
+    roughness: 0.2,
+  });
+  const armamentDetailMaterial = new THREE.MeshStandardMaterial({
+    color: new THREE.Color(0x758392).offsetHSL(0, 0.05, -0.1),
+    metalness: 0.86,
+    roughness: 0.16,
+  });
+  const windowStripMaterial = new THREE.MeshStandardMaterial({
+    color: 0x9fd4ef,
+    emissive: 0x2e7fb8,
+    emissiveIntensity: 0.85,
+    metalness: 0.6,
+    roughness: 0.1,
+  });
+  const runningLightRedMaterial = new THREE.MeshBasicMaterial({ color: 0xff2a2a });
+  const runningLightGreenMaterial = new THREE.MeshBasicMaterial({ color: 0x2aff5a });
+  const beaconMaterial = new THREE.MeshBasicMaterial({
+    color: 0xffb030,
+    transparent: true,
+    opacity: 0.85,
+  });
+  const thrusterGlowMaterial = new THREE.MeshBasicMaterial({
+    color: 0xffa64d,
+    transparent: true,
+    opacity: 0.8,
+  });
+
+  // 复用几何体
+  const hullPlateGeometry = new THREE.BoxGeometry(0.55 * scale, 0.1 * scale, 0.85 * scale);
+  const spineRibGeometry = new THREE.BoxGeometry(2.0 * scale, 0.1 * scale, 0.18 * scale);
+  const wingStripGeometry = new THREE.BoxGeometry(2.4 * scale, 0.08 * scale, 0.3 * scale);
+  const railPostGeometry = new THREE.BoxGeometry(0.05 * scale, 0.3 * scale, 0.05 * scale);
+  const railBarGeometry = new THREE.BoxGeometry(0.04 * scale, 0.04 * scale, 3.6 * scale);
+  const antennaRodGeometry = new THREE.CylinderGeometry(0.04 * scale, 0.06 * scale, 0.9 * scale, 6);
+  const barrelSleeveGeometry = new THREE.CylinderGeometry(
+    0.12 * scale,
+    0.14 * scale,
+    0.6 * scale,
+    8
+  );
+  const ammoFeedGeometry = new THREE.BoxGeometry(0.5 * scale, 0.3 * scale, 0.7 * scale);
+  const blastShieldGeometry = new THREE.BoxGeometry(0.9 * scale, 0.5 * scale, 0.08 * scale);
+  const runningLightGeometry = new THREE.SphereGeometry(0.14 * scale, 8, 8);
+  const beaconGeometry = new THREE.SphereGeometry(0.16 * scale, 8, 8);
+  const thrusterDotGeometry = new THREE.SphereGeometry(0.12 * scale, 6, 6);
+
+  // 机身侧面镶板
+  for (let side = 0; side < 2; side++) {
+    for (let i = 0; i < 4; i++) {
+      const hullPlate = new THREE.Mesh(hullPlateGeometry, hullDetailMaterial);
+      hullPlate.position.set(
+        (side === 0 ? -1.15 : 1.15) * scale,
+        0.25 * scale,
+        (-2.8 + i * 1.8) * scale
+      );
+      hullPlate.rotation.z = side === 0 ? Math.PI / 2 : -Math.PI / 2;
+      hullPlate.name = `boss_hull_plate_${side === 0 ? 'left' : 'right'}_${i}`;
+      hullPlate.castShadow = true;
+      group.add(hullPlate);
+    }
+  }
+
+  // 背脊横向肋条
+  for (let i = 0; i < 5; i++) {
+    const spineRib = new THREE.Mesh(spineRibGeometry, ribDetailMaterial);
+    spineRib.position.set(0, 1.33 * scale, (-2.2 + i * 1.1) * scale);
+    spineRib.name = `boss_spine_rib_${i}`;
+    spineRib.castShadow = true;
+    group.add(spineRib);
+  }
+
+  // 机翼后缘饰条
+  for (let side = 0; side < 2; side++) {
+    for (let i = 0; i < 3; i++) {
+      const wingStrip = new THREE.Mesh(wingStripGeometry, ribDetailMaterial);
+      wingStrip.position.set(
+        (side === 0 ? -1 : 1) * (4.5 + i * 2.5) * scale,
+        0.2 * scale,
+        1.3 * scale
+      );
+      wingStrip.name = `boss_wing_strip_${side === 0 ? 'left' : 'right'}_${i}`;
+      wingStrip.castShadow = true;
+      group.add(wingStrip);
+    }
+  }
+
+  // 舰桥舷窗（发光条）
+  for (let i = 0; i < 2; i++) {
+    const windowStrip = new THREE.Mesh(
+      new THREE.BoxGeometry(0.08 * scale, 0.2 * scale, 1.0 * scale),
+      windowStripMaterial
+    );
+    windowStrip.position.set((i === 0 ? -0.72 : 0.72) * scale, 0.72 * scale, -2.1 * scale);
+    windowStrip.name = `boss_bridge_window_strip_${i}`;
+    group.add(windowStrip);
+  }
+
+  // 天线阵列
+  const antennaSpots = [
+    { x: 0, y: 1.74, z: -1.0 },
+    { x: 0, y: 1.74, z: 1.2 },
+  ];
+  antennaSpots.forEach((spot, i) => {
+    const antenna = new THREE.Mesh(antennaRodGeometry, railingMaterial);
+    antenna.position.set(spot.x * scale, spot.y * scale, spot.z * scale);
+    antenna.name = `boss_antenna_rod_${i}`;
+    antenna.castShadow = true;
+    group.add(antenna);
+  });
+
+  // 雷达盘（圆柱 + 环形格栅）
+  const radarPost = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.06 * scale, 0.08 * scale, 0.5 * scale, 6),
+    railingMaterial
+  );
+  radarPost.position.set(0, 0.87 * scale, 3.0 * scale);
+  radarPost.name = 'boss_radar_post';
+  radarPost.castShadow = true;
+  group.add(radarPost);
+
+  const radarDish = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.4 * scale, 0.5 * scale, 0.1 * scale, 12),
+    ribDetailMaterial
+  );
+  radarDish.position.set(0, 1.2 * scale, 3.0 * scale);
+  radarDish.rotation.z = 0.4;
+  radarDish.name = 'boss_radar_dish';
+  radarDish.castShadow = true;
+  group.add(radarDish);
+
+  const radarLattice = new THREE.Mesh(
+    new THREE.TorusGeometry(0.45 * scale, 0.04 * scale, 6, 14),
+    railingMaterial
+  );
+  radarLattice.position.set(0, 1.2 * scale, 3.0 * scale);
+  radarLattice.rotation.set(Math.PI / 2, 0, 0.4);
+  radarLattice.name = 'boss_radar_lattice';
+  radarLattice.castShadow = true;
+  group.add(radarLattice);
+
+  // 背部栏杆
+  for (let side = 0; side < 2; side++) {
+    for (let i = 0; i < 4; i++) {
+      const railPost = new THREE.Mesh(railPostGeometry, railingMaterial);
+      railPost.position.set(
+        (side === 0 ? -0.62 : 0.62) * scale,
+        1.44 * scale,
+        (-1.5 + i * 1.0) * scale
+      );
+      railPost.name = `boss_rail_post_${side === 0 ? 'left' : 'right'}_${i}`;
+      railPost.castShadow = true;
+      group.add(railPost);
+    }
+
+    const railBar = new THREE.Mesh(railBarGeometry, railingMaterial);
+    railBar.position.set((side === 0 ? -0.62 : 0.62) * scale, 1.56 * scale, 0);
+    railBar.name = `boss_rail_bar_${side === 0 ? 'left' : 'right'}`;
+    railBar.castShadow = true;
+    group.add(railBar);
+  }
+
+  // 炮塔武备细节（炮管套筒 / 弹药供给箱 / 防爆挡板）—— 不移动炮塔锚点
+  const turretDressingSpots = [
+    { name: 'left', x: -4, y: 0.6, sleeveZ: -0.2, ammoX: -4.95, ammoY: 0.45 },
+    { name: 'right', x: 4, y: 0.6, sleeveZ: -0.2, ammoX: 4.95, ammoY: 0.45 },
+    { name: 'top', x: 0, y: 2.05, sleeveZ: 0.05, ammoX: 0.95, ammoY: 1.5 },
+    { name: 'bottom', x: 0, y: -2.05, sleeveZ: 0.05, ammoX: 0.95, ammoY: -1.5 },
+  ];
+  for (const spot of turretDressingSpots) {
+    const barrelSleeve = new THREE.Mesh(barrelSleeveGeometry, armamentDetailMaterial);
+    barrelSleeve.rotation.x = Math.PI / 2;
+    barrelSleeve.position.set(spot.x * scale, spot.y * scale, spot.sleeveZ * scale);
+    barrelSleeve.name = `boss_turret_barrel_sleeve_${spot.name}`;
+    barrelSleeve.castShadow = true;
+    group.add(barrelSleeve);
+
+    const ammoFeed = new THREE.Mesh(ammoFeedGeometry, armamentDetailMaterial);
+    ammoFeed.position.set(spot.ammoX * scale, spot.ammoY * scale, 0.4 * scale);
+    ammoFeed.name = `boss_turret_ammo_feed_${spot.name}`;
+    ammoFeed.castShadow = true;
+    group.add(ammoFeed);
+
+    const blastShield = new THREE.Mesh(blastShieldGeometry, hullDetailMaterial);
+    blastShield.position.set(
+      spot.x * scale,
+      (spot.y + (spot.y >= 0 ? 0.15 : -0.15)) * scale,
+      0.7 * scale
+    );
+    blastShield.name = `boss_turret_blast_shield_${spot.name}`;
+    blastShield.castShadow = true;
+    group.add(blastShield);
+  }
+
+  // 翼尖航行灯（左红右绿）
+  const leftRunningLight = new THREE.Mesh(runningLightGeometry, runningLightRedMaterial);
+  leftRunningLight.position.set(-13.2 * scale, 0.34 * scale, 0.15 * scale);
+  leftRunningLight.name = 'boss_running_light_left';
+  group.add(leftRunningLight);
+
+  const rightRunningLight = new THREE.Mesh(runningLightGeometry, runningLightGreenMaterial);
+  rightRunningLight.position.set(13.2 * scale, 0.34 * scale, 0.15 * scale);
+  rightRunningLight.name = 'boss_running_light_right';
+  group.add(rightRunningLight);
+
+  // 警示信标（慢速脉冲）
+  const beaconSpots = [
+    { x: 0, y: 2.15, z: 4.0 },
+    { x: 0, y: -1.72, z: 0.8 },
+    { x: 0, y: 1.32, z: -3.9 },
+  ];
+  beaconSpots.forEach((spot, i) => {
+    const beacon = new THREE.Mesh(beaconGeometry, beaconMaterial);
+    beacon.position.set(spot.x * scale, spot.y * scale, spot.z * scale);
+    beacon.name = `boss_warning_beacon_${i}`;
+    group.add(beacon);
+    signalBeaconMeshes.push(beacon);
+  });
+
+  // 引擎喷口辉光点阵
+  enginePositions.forEach((pos, i) => {
+    for (let j = 0; j < 2; j++) {
+      const thrusterDot = new THREE.Mesh(thrusterDotGeometry, thrusterGlowMaterial);
+      thrusterDot.position.set(
+        pos.x + (j === 0 ? -0.18 : 0.18) * scale,
+        pos.y,
+        pos.z + 1.0 * scale
+      );
+      thrusterDot.name = `boss_thruster_glow_${i}_${j}`;
+      group.add(thrusterDot);
+      signalBeaconMeshes.push(thrusterDot);
+    }
+  });
+
   const bossGroup = group as BossGroup;
   bossGroup.bossParts = parts;
   bossGroup.engineMeshes = engineMeshes;
   bossGroup.engineRingMeshes = engineRingMeshes;
   bossGroup.weakpointMeshes = weakpointMeshes;
   bossGroup.muzzleMeshes = muzzleMeshes;
+  bossGroup.signalBeaconMeshes = signalBeaconMeshes;
   group.name = `BOSS_${config.type}`;
   return group;
 }

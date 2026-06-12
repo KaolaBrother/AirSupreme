@@ -18,6 +18,40 @@ export interface LevelEnvironmentConfig {
   waterWaveScale?: number;
   skyGlow?: number;
   surfaceProfile?: LevelSurfaceProfile;
+  designTokens?: SceneDesignTokens;
+}
+
+/**
+ * 场景设计令牌：每关一套结构化调色板，TerrainGenerator 中的新增场景元素统一从这里取色，
+ * 保证同一关卡内地形、植被、水体、建筑与辉光色彩协调。所有值为 THREE 颜色十六进制数。
+ */
+export interface SceneDesignTokens {
+  /** 地表主色 */
+  terrainPrimary: number;
+  /** 地表暗部/细节色 */
+  terrainSecondary: number;
+  /** 地表高光/点缀色 */
+  terrainAccent: number;
+  /** 植被主色 */
+  vegetation: number;
+  /** 植被亮部点缀色 */
+  vegetationAccent: number;
+  /** 水面基色 */
+  water: number;
+  /** 深水色 */
+  waterDeep: number;
+  /** 水面闪光/泛光色 */
+  waterSparkle: number;
+  /** 建筑/构筑物主色 */
+  structure: number;
+  /** 建筑点缀色（屋顶、饰带等） */
+  structureAccent: number;
+  /** 暖光/灯光辉光色 */
+  glow: number;
+  /** 地平线雾霭色（远景大气透视目标色） */
+  horizonHaze: number;
+  /** 远景剪影色（最远山体/建筑轮廓） */
+  distantSilhouette: number;
 }
 
 export interface LevelSurfaceProfile {
@@ -66,6 +100,8 @@ export interface LevelWeatherConfig {
   cloudCoverage: number;
   precipitation: number;
   turbulence: number;
+  /** 风向（弧度，0 = +X，π/2 = +Z），云层沿该方向漂移；未配置时按天气预设推导 */
+  windAngle?: number;
   cloudOpacity?: number;
   cloudTint?: number;
   cloudSpeed?: number;
@@ -207,16 +243,16 @@ export const LEVELS: LevelConfig[] = [
       ...DEFAULT_LEVEL_SCENE_CONFIG.environment,
       backgroundGradient: ['#2a4f88', '#5f88bf', '#d3efff', '#f7f4dc'],
       fogColor: 0xd8efff,
-      fogNear: 200,
-      fogFar: 2400,
-      fogDensity: 0.00032,
+      fogNear: 360,
+      fogFar: 4320,
+      fogDensity: 0.00019,
       cloudCover: 0.3,
       cloudTint: 0xfafcff,
       cloudSpeed: 2.1,
       cloudHeightMin: 105,
       cloudHeightMax: 285,
       weatherIntensity: 0.18,
-      particleCount: 56,
+      particleCount: 73,
       particleSize: 4.8,
       particleSpeed: 3.8,
       particleDrift: 0.95,
@@ -234,6 +270,22 @@ export const LEVELS: LevelConfig[] = [
         shorelineBaseColor: 0xeedcb3,
         shorelineAccentColor: 0xf8edcd,
         shorelineDetailColor: 0xb5a17b,
+      },
+      // 清晨湖畔：鲜绿、青蓝与奶油色
+      designTokens: {
+        terrainPrimary: 0x8ecf60,
+        terrainSecondary: 0x67a34f,
+        terrainAccent: 0xa8dc7c,
+        vegetation: 0x3e8a3c,
+        vegetationAccent: 0x77c95e,
+        water: 0x5eb7de,
+        waterDeep: 0x2a6e96,
+        waterSparkle: 0xbdf0ff,
+        structure: 0x9c6b4a,
+        structureAccent: 0xf3e6c8,
+        glow: 0xffe9b0,
+        horizonHaze: 0xdceff8,
+        distantSilhouette: 0x7da3c0,
       },
     },
     lighting: {
@@ -254,14 +306,15 @@ export const LEVELS: LevelConfig[] = [
       cloudCoverage: 0.4,
       precipitation: 0.02,
       turbulence: 0.11,
+      windAngle: 0.35,
       cloudOpacity: 0.46,
       cloudTint: 0xf8fbff,
       cloudSpeed: 2.1,
       cloudHeightMin: 105,
       cloudHeightMax: 285,
       intensity: 0.18,
-      fogDensity: 0.00032,
-      particleCount: 56,
+      fogDensity: 0.00019,
+      particleCount: 73,
       particleSize: 4.8,
       particleSpeed: 3.9,
       particleDrift: 1,
@@ -301,16 +354,16 @@ export const LEVELS: LevelConfig[] = [
       ...DEFAULT_LEVEL_SCENE_CONFIG.environment,
       backgroundGradient: ['#6c2508', '#bf5a2a', '#f0a95a', '#f6ebc7'],
       fogColor: 0xd09c67,
-      fogNear: 100,
-      fogFar: 1230,
-      fogDensity: 0.00165,
+      fogNear: 180,
+      fogFar: 2214,
+      fogDensity: 0.00095,
       cloudCover: 0.12,
       cloudTint: 0xd9b37a,
       cloudSpeed: 6.4,
       cloudHeightMin: 90,
       cloudHeightMax: 170,
       weatherIntensity: 0.84,
-      particleCount: 330,
+      particleCount: 430,
       particleSize: 8,
       particleSpeed: 20,
       particleDrift: 15,
@@ -322,6 +375,22 @@ export const LEVELS: LevelConfig[] = [
         groundAccentColor: 0xffe4b2,
         groundDetailColor: 0x9d7e4e,
         groundEmissiveColor: 0x63492e,
+      },
+      // 炽热沙漠：赭石、陶土与暖沙色
+      designTokens: {
+        terrainPrimary: 0xd9b178,
+        terrainSecondary: 0xa6752d,
+        terrainAccent: 0xf2cf94,
+        vegetation: 0x6f8f3f,
+        vegetationAccent: 0x9ab85a,
+        water: 0x3f9e9b,
+        waterDeep: 0x216b6b,
+        waterSparkle: 0xaef0e4,
+        structure: 0xa05f38,
+        structureAccent: 0xe0b27c,
+        glow: 0xffc06a,
+        horizonHaze: 0xe8c193,
+        distantSilhouette: 0x8a5a36,
       },
     },
     lighting: {
@@ -343,6 +412,7 @@ export const LEVELS: LevelConfig[] = [
       cloudCoverage: 0.12,
       precipitation: 0,
       turbulence: 0.76,
+      windAngle: 0.72,
       cloudOpacity: 0.38,
       cloudTint: 0xd8b07b,
       cloudSpeed: 6.5,
@@ -350,8 +420,8 @@ export const LEVELS: LevelConfig[] = [
       cloudHeightMax: 170,
       particleColor: 0xd0a76f,
       intensity: 0.84,
-      fogDensity: 0.00165,
-      particleCount: 330,
+      fogDensity: 0.00095,
+      particleCount: 430,
       particleSize: 8,
       particleSpeed: 20,
       particleDrift: 15,
@@ -395,16 +465,16 @@ export const LEVELS: LevelConfig[] = [
       ...DEFAULT_LEVEL_SCENE_CONFIG.environment,
       backgroundGradient: ['#12253f', '#355679', '#91b4cf', '#ecf8ff'],
       fogColor: 0xd3e8f5,
-      fogNear: 135,
-      fogFar: 1620,
-      fogDensity: 0.0012,
+      fogNear: 243,
+      fogFar: 2916,
+      fogDensity: 0.00068,
       cloudCover: 0.74,
       cloudTint: 0xf2f8ff,
       cloudSpeed: 1.95,
       cloudHeightMin: 95,
       cloudHeightMax: 210,
       weatherIntensity: 0.62,
-      particleCount: 290,
+      particleCount: 377,
       particleSize: 2.9,
       particleSpeed: 10,
       particleDrift: 2.8,
@@ -420,6 +490,22 @@ export const LEVELS: LevelConfig[] = [
         roadAccentColor: 0xc3d0e4,
         roadDetailColor: 0x708099,
         roadLineColor: 0xdff2ff,
+      },
+      // 寒峰雪境：冷白与钢蓝
+      designTokens: {
+        terrainPrimary: 0xf4f8ff,
+        terrainSecondary: 0xc9d5e2,
+        terrainAccent: 0xe2ecf8,
+        vegetation: 0x2e5448,
+        vegetationAccent: 0x49705f,
+        water: 0x9cc8e8,
+        waterDeep: 0x4a7aa6,
+        waterSparkle: 0xe4f4ff,
+        structure: 0x6e7e92,
+        structureAccent: 0xb8c6d8,
+        glow: 0xdcedff,
+        horizonHaze: 0xc7daea,
+        distantSilhouette: 0x8da6bf,
       },
     },
     lighting: {
@@ -440,14 +526,15 @@ export const LEVELS: LevelConfig[] = [
       cloudCoverage: 0.74,
       precipitation: 0.48,
       turbulence: 0.34,
+      windAngle: 2.4,
       cloudOpacity: 0.8,
       cloudTint: 0xf2f8ff,
       cloudSpeed: 1.95,
       cloudHeightMin: 95,
       cloudHeightMax: 210,
       intensity: 0.62,
-      fogDensity: 0.0012,
-      particleCount: 290,
+      fogDensity: 0.00068,
+      particleCount: 377,
       particleSize: 2.9,
       particleSpeed: 10,
       particleDrift: 2.8,
@@ -493,26 +580,42 @@ export const LEVELS: LevelConfig[] = [
       ...DEFAULT_LEVEL_SCENE_CONFIG.environment,
       backgroundGradient: ['#060d19', '#103153', '#1f5275', '#7ca3bd'],
       fogColor: 0x7eaec7,
-      fogNear: 120,
-      fogFar: 1760,
-      fogDensity: 0.00108,
+      fogNear: 216,
+      fogFar: 3168,
+      fogDensity: 0.00062,
       cloudCover: 0.8,
       cloudTint: 0xd1dceb,
       cloudSpeed: 6.2,
       cloudHeightMin: 85,
       cloudHeightMax: 180,
       weatherIntensity: 0.82,
-      particleCount: 280,
+      particleCount: 364,
       particleSize: 7.1,
       particleSpeed: 11.5,
       particleDrift: 7,
       particleColor: 0xd5e2eb,
-      waterWaveScale: 4.4,
+      waterWaveScale: 5.2,
       skyGlow: 0x4f7db4,
       surfaceProfile: {
         waterBaseColor: 0x1a4d76,
         waterAccentColor: 0x63a8e6,
         waterDetailColor: 0x09385f,
+      },
+      // 深海风暴夜：海军蓝、暗青与月银
+      designTokens: {
+        terrainPrimary: 0x12283e,
+        terrainSecondary: 0x0a1c30,
+        terrainAccent: 0x2a4a66,
+        vegetation: 0x2c5e4f,
+        vegetationAccent: 0x498672,
+        water: 0x1a4d76,
+        waterDeep: 0x07243f,
+        waterSparkle: 0x9fd4e8,
+        structure: 0x44525f,
+        structureAccent: 0x9fb2bf,
+        glow: 0xc6dcec,
+        horizonHaze: 0x274a66,
+        distantSilhouette: 0x16334c,
       },
     },
     lighting: {
@@ -534,19 +637,20 @@ export const LEVELS: LevelConfig[] = [
       cloudCoverage: 0.88,
       precipitation: 0.62,
       turbulence: 0.68,
+      windAngle: -0.65,
       cloudOpacity: 0.86,
       cloudTint: 0xc7d5e2,
       cloudSpeed: 6.2,
       cloudHeightMin: 85,
       cloudHeightMax: 180,
       intensity: 0.86,
-      fogDensity: 0.00118,
-      particleCount: 280,
+      fogDensity: 0.00068,
+      particleCount: 364,
       particleSize: 7.1,
       particleSpeed: 12.1,
       particleDrift: 7.2,
       particleColor: 0xc5d4de,
-      waterWaveScale: 4.5,
+      waterWaveScale: 5.2,
       skyGlow: 0x4f7db4,
     },
     postFx: {
@@ -587,16 +691,16 @@ export const LEVELS: LevelConfig[] = [
       ...DEFAULT_LEVEL_SCENE_CONFIG.environment,
       backgroundGradient: ['#11192d', '#28406a', '#537ba9', '#c6d9ef'],
       fogColor: 0x94aeca,
-      fogNear: 155,
-      fogFar: 1820,
-      fogDensity: 0.00052,
+      fogNear: 279,
+      fogFar: 3276,
+      fogDensity: 0.0003,
       cloudCover: 0.56,
       cloudTint: 0xdde6ef,
       cloudSpeed: 2.0,
       cloudHeightMin: 72,
       cloudHeightMax: 170,
       weatherIntensity: 0.24,
-      particleCount: 92,
+      particleCount: 120,
       particleSize: 3.8,
       particleSpeed: 4.2,
       particleDrift: 1.0,
@@ -619,6 +723,22 @@ export const LEVELS: LevelConfig[] = [
         buildingTrimColor: 0xf2f8ff,
         windowColor: 0x7ed6ff,
       },
+      // 暮色钢城：石板灰、钢蓝与琥珀霓虹
+      designTokens: {
+        terrainPrimary: 0x616f84,
+        terrainSecondary: 0x3f4d5d,
+        terrainAccent: 0x9ca9bc,
+        vegetation: 0x44704c,
+        vegetationAccent: 0x6a9a64,
+        water: 0x4a7d96,
+        waterDeep: 0x27485c,
+        waterSparkle: 0xa8dcef,
+        structure: 0x5a718e,
+        structureAccent: 0x8fa3ba,
+        glow: 0xffc46a,
+        horizonHaze: 0xa9bdd4,
+        distantSilhouette: 0x55657a,
+      },
     },
     lighting: {
       ...DEFAULT_LEVEL_SCENE_CONFIG.lighting,
@@ -640,14 +760,15 @@ export const LEVELS: LevelConfig[] = [
       cloudCoverage: 0.54,
       precipitation: 0.02,
       turbulence: 0.24,
+      windAngle: 0.18,
       cloudOpacity: 0.42,
       cloudTint: 0xdde6ef,
       cloudSpeed: 2.0,
       cloudHeightMin: 78,
       cloudHeightMax: 170,
       intensity: 0.24,
-      fogDensity: 0.00052,
-      particleCount: 90,
+      fogDensity: 0.0003,
+      particleCount: 118,
       particleSize: 3.8,
       particleSpeed: 4.2,
       particleDrift: 1.05,

@@ -15,10 +15,10 @@ import {
 import { EnemyAI } from '@/features/enemy/EnemyAI';
 import type { TerrainGenerator } from '@/features/terrain/TerrainGenerator';
 import type { SpawnPortal } from '@/features/effects/SpawnPortal';
-import { createEnemyMesh } from '@/features/aircraft/AircraftMeshFactory';
+import { createEnemyMesh, updateAircraftSignals } from '@/features/aircraft/AircraftMeshFactory';
 import { getLogger } from '@/core/utils/Logger';
 import type { DifficultyProfile } from '@/core/Difficulty';
-import { GameConfig } from '@/config';
+import { GameConfig, GAME_CONSTANTS } from '@/config';
 import {
   DEFAULT_ONBOARDING_BEAT_PROFILE,
   getWaveOnboardingBeat,
@@ -66,12 +66,12 @@ export class LevelManager {
   } = {
     maxHeight: 150, // 最大高度（敌人不能超过）
     minHeight: -20, // 最小高度（敌人不能低于）
-    horizontalDistance: 750, // 水平边界（离战场中心的距离，±750米）
+    horizontalDistance: GAME_CONSTANTS.WORLD.BATTLEFIELD_HALF_EXTENT, // 水平边界（离战场中心的距离）
   };
 
-  // 战场边界常量
-  private readonly BATTLEFIELD_MIN = -750;
-  private readonly BATTLEFIELD_MAX = 750;
+  // 战场边界常量（随全局战场尺寸缩放）
+  private readonly BATTLEFIELD_MAX = GAME_CONSTANTS.WORLD.BATTLEFIELD_HALF_EXTENT;
+  private readonly BATTLEFIELD_MIN = -GAME_CONSTANTS.WORLD.BATTLEFIELD_HALF_EXTENT;
 
   private currentLevel: LevelConfig | null = null;
   private currentWave: number = 0;
@@ -413,6 +413,9 @@ export class LevelManager {
    * 更新纯视觉环境动画，跟随渲染帧而不是固定玩法步长。
    */
   public updateVisuals(deltaTime: number, playerPosition: Vector3): void {
+    // 飞机信号灯（航行灯/频闪灯/引擎尾焰）使用共享材质，每帧推进一次即可作用于所有机体
+    updateAircraftSignals(deltaTime);
+
     const terrainGenerator = this.terrainGenerator;
     if (!terrainGenerator) {
       return;

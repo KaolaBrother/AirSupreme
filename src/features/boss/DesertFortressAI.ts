@@ -18,6 +18,7 @@ export class DesertFortressAI {
   private static readonly ENERGY_PULSE_SPEED = 7.8;
   private static readonly CRITICAL_PULSE_SPEED = 13.2;
   private static readonly TERMINAL_PULSE_SPEED = 20.5;
+  private static readonly BEACON_PULSE_SPEED = 2.2;
   private mesh: THREE.Group;
   private config: BossConfig;
   private health: HealthSystem;
@@ -28,6 +29,7 @@ export class DesertFortressAI {
   private coreGlow: THREE.Mesh | null = null;
   private flakMuzzles: THREE.Mesh[] = [];
   private missileGlowCaps: THREE.Mesh[] = [];
+  private signalBeacons: THREE.Mesh[] = [];
   private readonly hitFlashColor = new THREE.Color(0xfff1c1);
   private readonly weakpointBaseColor = new THREE.Color(0xff6e3a);
   private readonly weakpointCriticalColor = new THREE.Color(0xffb47a);
@@ -128,6 +130,9 @@ export class DesertFortressAI {
     ) as THREE.Mesh[];
     this.missileGlowCaps = this.mesh.children.filter((child) =>
       child.name.endsWith('_glow') && child.name.startsWith('fortress_missile_')
+    ) as THREE.Mesh[];
+    this.signalBeacons = this.mesh.children.filter((child) =>
+      child.name.startsWith('fortress_signal_beacon_')
     ) as THREE.Mesh[];
   }
 
@@ -256,6 +261,19 @@ export class DesertFortressAI {
           .lerp(this.terminalColor, terminalState * 0.5 + terminalPulse * 0.35 + terminalBias * 0.2)
           .lerp(this.hitFlashColor, hitFlash * 0.35),
       });
+    }
+
+    // 信号灯（警示信标）缓慢脉冲
+    const beaconWave =
+      Math.sin(this.animationTime * DesertFortressAI.BEACON_PULSE_SPEED) * 0.5 + 0.5;
+    for (const beacon of this.signalBeacons) {
+      this.setBeaconOpacity(beacon, 0.3 + beaconWave * 0.7);
+    }
+  }
+
+  private setBeaconOpacity(mesh: THREE.Mesh, opacity: number): void {
+    if (mesh.material instanceof THREE.MeshBasicMaterial) {
+      mesh.material.opacity = opacity;
     }
   }
 
@@ -945,6 +963,245 @@ export function createDesertFortressMesh(config: BossConfig): THREE.Group {
   rightLauncherGlow.position.set(3 * scale, 5.6 * scale, 0);
   rightLauncherGlow.name = 'fortress_missile_right_glow';
   group.add(rightLauncherGlow);
+
+  // ===== 细节增强：装甲镶板 / 上层结构 / 武备细节 / 信号灯 =====
+  const hullDetailMaterial = new THREE.MeshStandardMaterial({
+    color: new THREE.Color(0xd4a574).offsetHSL(0, 0.05, -0.08),
+    metalness: 0.62,
+    roughness: 0.38,
+  });
+  const armorDetailMaterial = new THREE.MeshStandardMaterial({
+    color: new THREE.Color(0xe3bd86).offsetHSL(0, 0.04, -0.12),
+    metalness: 0.72,
+    roughness: 0.3,
+  });
+  const weaponDetailMaterial = new THREE.MeshStandardMaterial({
+    color: new THREE.Color(0x6d3c22).offsetHSL(0, 0.05, -0.05),
+    metalness: 0.88,
+    roughness: 0.2,
+  });
+  const towerWindowMaterial = new THREE.MeshStandardMaterial({
+    color: 0xffd9a0,
+    emissive: 0xb87a2e,
+    emissiveIntensity: 0.85,
+    metalness: 0.55,
+    roughness: 0.12,
+  });
+  const runningLightRedMaterial = new THREE.MeshBasicMaterial({ color: 0xff2a2a });
+  const runningLightGreenMaterial = new THREE.MeshBasicMaterial({ color: 0x2aff5a });
+  const beaconMaterial = new THREE.MeshBasicMaterial({
+    color: 0xff4030,
+    transparent: true,
+    opacity: 0.85,
+  });
+  const exhaustGlowMaterial = new THREE.MeshBasicMaterial({
+    color: 0xff8a3c,
+    transparent: true,
+    opacity: 0.8,
+  });
+
+  // 复用几何体
+  const sidePanelGeometry = new THREE.BoxGeometry(2.1 * scale, 0.7 * scale, 0.14 * scale);
+  const deckRibGeometry = new THREE.BoxGeometry(0.3 * scale, 0.14 * scale, 7.4 * scale);
+  const trackPlateGeometry = new THREE.BoxGeometry(0.6 * scale, 0.18 * scale, 2.1 * scale);
+  const towerWindowGeometry = new THREE.BoxGeometry(0.85 * scale, 0.28 * scale, 0.1 * scale);
+  const antennaRodGeometry = new THREE.CylinderGeometry(0.05 * scale, 0.07 * scale, 1.6 * scale, 6);
+  const railPostGeometry = new THREE.BoxGeometry(0.06 * scale, 0.4 * scale, 0.06 * scale);
+  const barrelCollarGeometry = new THREE.CylinderGeometry(0.2 * scale, 0.22 * scale, 0.5 * scale, 8);
+  const ammoDrumGeometry = new THREE.CylinderGeometry(0.28 * scale, 0.28 * scale, 0.5 * scale, 8);
+  const ammoFeedGeometry = new THREE.BoxGeometry(0.55 * scale, 0.4 * scale, 0.5 * scale);
+  const runningLightGeometry = new THREE.SphereGeometry(0.16 * scale, 8, 8);
+  const beaconGeometry = new THREE.SphereGeometry(0.18 * scale, 8, 8);
+  const exhaustStripGeometry = new THREE.BoxGeometry(0.55 * scale, 0.18 * scale, 0.12 * scale);
+
+  // 车体前后装甲镶板
+  for (let side = 0; side < 2; side++) {
+    for (let i = 0; i < 4; i++) {
+      const hullPanel = new THREE.Mesh(sidePanelGeometry, hullDetailMaterial);
+      hullPanel.position.set(
+        (-6 + i * 4) * scale,
+        1.1 * scale,
+        (side === 0 ? -4.08 : 4.08) * scale
+      );
+      hullPanel.name = `fortress_hull_panel_${side === 0 ? 'front' : 'back'}_${i}`;
+      hullPanel.castShadow = true;
+      group.add(hullPanel);
+    }
+  }
+
+  // 顶甲板肋条
+  const deckRibXs = [-6.5, -2.2, 2.2, 6.5];
+  deckRibXs.forEach((x, i) => {
+    const deckRib = new THREE.Mesh(deckRibGeometry, armorDetailMaterial);
+    deckRib.position.set(x * scale, 2.06 * scale, 0);
+    deckRib.name = `fortress_deck_rib_${i}`;
+    deckRib.castShadow = true;
+    group.add(deckRib);
+  });
+
+  // 履带踏板细节
+  for (let side = 0; side < 2; side++) {
+    const trackX = side === 0 ? -7 : 7;
+    for (let i = 0; i < 4; i++) {
+      const trackPlate = new THREE.Mesh(trackPlateGeometry, weaponDetailMaterial);
+      trackPlate.position.set((trackX + (-4.5 + i * 3)) * scale, 1.06 * scale, 0);
+      trackPlate.name = `fortress_track_plate_${side === 0 ? 'left' : 'right'}_${i}`;
+      trackPlate.castShadow = true;
+      group.add(trackPlate);
+    }
+  }
+
+  // 指挥塔舷窗（发光条）
+  for (let i = 0; i < 3; i++) {
+    const angle = -0.5 + i * 0.5;
+    const towerWindow = new THREE.Mesh(towerWindowGeometry, towerWindowMaterial);
+    towerWindow.position.set(
+      Math.sin(angle) * 2.25 * scale,
+      3.9 * scale,
+      -Math.cos(angle) * 2.25 * scale
+    );
+    towerWindow.rotation.y = -angle;
+    towerWindow.name = `fortress_tower_window_${i}`;
+    group.add(towerWindow);
+  }
+
+  // 天线阵列
+  const antennaSpots = [
+    { x: -1.0, y: 6.3, z: 0.6 },
+    { x: 1.1, y: 6.4, z: -0.4 },
+    { x: 0.3, y: 6.2, z: 1.0 },
+  ];
+  antennaSpots.forEach((spot, i) => {
+    const antenna = new THREE.Mesh(antennaRodGeometry, armorDetailMaterial);
+    antenna.position.set(spot.x * scale, spot.y * scale, spot.z * scale);
+    antenna.name = `fortress_antenna_rod_${i}`;
+    antenna.castShadow = true;
+    group.add(antenna);
+  });
+
+  // 雷达盘（圆柱 + 环形格栅）
+  const radarPost = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.1 * scale, 0.12 * scale, 0.5 * scale, 6),
+    armorDetailMaterial
+  );
+  radarPost.position.set(-0.9 * scale, 5.8 * scale, 0);
+  radarPost.name = 'fortress_radar_post';
+  radarPost.castShadow = true;
+  group.add(radarPost);
+
+  const radarDish = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.55 * scale, 0.7 * scale, 0.15 * scale, 12),
+    hullDetailMaterial
+  );
+  radarDish.position.set(-0.9 * scale, 6.2 * scale, 0);
+  radarDish.rotation.z = 0.45;
+  radarDish.name = 'fortress_radar_dish';
+  radarDish.castShadow = true;
+  group.add(radarDish);
+
+  const radarLattice = new THREE.Mesh(
+    new THREE.TorusGeometry(0.6 * scale, 0.05 * scale, 6, 14),
+    armorDetailMaterial
+  );
+  radarLattice.position.set(-0.9 * scale, 6.2 * scale, 0);
+  radarLattice.rotation.set(Math.PI / 2, 0, 0.45);
+  radarLattice.name = 'fortress_radar_lattice';
+  radarLattice.castShadow = true;
+  group.add(radarLattice);
+
+  // 指挥塔环形栏杆
+  for (let i = 0; i < 8; i++) {
+    const angle = (i / 8) * Math.PI * 2;
+    const railPost = new THREE.Mesh(railPostGeometry, armorDetailMaterial);
+    railPost.position.set(Math.cos(angle) * 2.5 * scale, 4.45 * scale, Math.sin(angle) * 2.5 * scale);
+    railPost.name = `fortress_rail_post_${i}`;
+    railPost.castShadow = true;
+    group.add(railPost);
+  }
+
+  const railRing = new THREE.Mesh(
+    new THREE.TorusGeometry(2.5 * scale, 0.05 * scale, 6, 20),
+    armorDetailMaterial
+  );
+  railRing.rotation.x = Math.PI / 2;
+  railRing.position.set(0, 4.65 * scale, 0);
+  railRing.name = 'fortress_rail_ring';
+  railRing.castShadow = true;
+  group.add(railRing);
+
+  // 防空炮武备细节（炮管护套 / 弹药鼓 / 供弹箱）—— 不移动炮位锚点
+  for (const flakPos of flakPositions) {
+    const isFront = flakPos.name.includes('front');
+    const sideSign = flakPos.pos.x < 0 ? -1 : 1;
+
+    const barrelCollar = new THREE.Mesh(barrelCollarGeometry, weaponDetailMaterial);
+    barrelCollar.position.copy(flakPos.pos);
+    barrelCollar.position.y += 0.55 * scale;
+    barrelCollar.rotation.x = -Math.PI / 4;
+    barrelCollar.name = `fortress_flak_collar_${flakPos.name}`;
+    barrelCollar.castShadow = true;
+    group.add(barrelCollar);
+
+    const ammoDrum = new THREE.Mesh(ammoDrumGeometry, weaponDetailMaterial);
+    ammoDrum.rotation.z = Math.PI / 2;
+    ammoDrum.position.set(
+      flakPos.pos.x + sideSign * 0.85 * scale,
+      flakPos.pos.y + 0.1 * scale,
+      flakPos.pos.z
+    );
+    ammoDrum.name = `fortress_flak_ammo_drum_${flakPos.name}`;
+    ammoDrum.castShadow = true;
+    group.add(ammoDrum);
+
+    const ammoFeed = new THREE.Mesh(ammoFeedGeometry, hullDetailMaterial);
+    ammoFeed.position.set(
+      flakPos.pos.x,
+      flakPos.pos.y + 0.3 * scale,
+      flakPos.pos.z + (isFront ? 0.85 : -0.85) * scale
+    );
+    ammoFeed.name = `fortress_flak_ammo_feed_${flakPos.name}`;
+    ammoFeed.castShadow = true;
+    group.add(ammoFeed);
+  }
+
+  // 航行灯（左红右绿）
+  const runningLightSpots = [
+    { name: 'left_front', x: -7.85, z: -3.85, red: true },
+    { name: 'left_back', x: -7.85, z: 3.85, red: true },
+    { name: 'right_front', x: 7.85, z: -3.85, red: false },
+    { name: 'right_back', x: 7.85, z: 3.85, red: false },
+  ];
+  for (const spot of runningLightSpots) {
+    const runningLight = new THREE.Mesh(
+      runningLightGeometry,
+      spot.red ? runningLightRedMaterial : runningLightGreenMaterial
+    );
+    runningLight.position.set(spot.x * scale, 2.1 * scale, spot.z * scale);
+    runningLight.name = `fortress_running_light_${spot.name}`;
+    group.add(runningLight);
+  }
+
+  // 警示信标（慢速脉冲）
+  const beaconSpots = [
+    { x: -1.3, y: 5.75, z: 0 },
+    { x: 1.3, y: 5.75, z: 0 },
+    { x: -5.9, y: 3.15, z: 0 },
+    { x: 5.9, y: 3.15, z: 0 },
+  ];
+  beaconSpots.forEach((spot, i) => {
+    const beacon = new THREE.Mesh(beaconGeometry, beaconMaterial);
+    beacon.position.set(spot.x * scale, spot.y * scale, spot.z * scale);
+    beacon.name = `fortress_signal_beacon_${i}`;
+    group.add(beacon);
+  });
+
+  // 尾部排气辉光
+  for (let i = 0; i < 3; i++) {
+    const exhaustStrip = new THREE.Mesh(exhaustStripGeometry, exhaustGlowMaterial);
+    exhaustStrip.position.set((-2 + i * 2) * scale, 2.65 * scale, 2.72 * scale);
+    exhaustStrip.name = `fortress_exhaust_light_${i}`;
+    group.add(exhaustStrip);
+  }
 
   group.name = `BOSS_${config.type}`;
   (group as BossGroup).bossParts = parts;

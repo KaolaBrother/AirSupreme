@@ -20,6 +20,7 @@ export class OctopusWarshipAI {
   private static readonly ENERGY_PULSE_SPEED = 7.8;
   private static readonly CRITICAL_PULSE_SPEED = 13.2;
   private static readonly TERMINAL_PULSE_SPEED = 20.5;
+  private static readonly BEACON_PULSE_SPEED = 2.3;
 
   private mesh: THREE.Group;
   private config: BossConfig;
@@ -43,6 +44,7 @@ export class OctopusWarshipAI {
   private plateEdges: THREE.Mesh[] = [];
   private apertures: THREE.Mesh[] = [];
   private antennaTips: THREE.Mesh[] = [];
+  private signalBeacons: THREE.Mesh[] = [];
   private readonly hitFlashColor = new THREE.Color(0xd8fbff);
   private readonly weakpointBaseColor = new THREE.Color(0xff6c3b);
   private readonly weakpointCriticalColor = new THREE.Color(0xffb67a);
@@ -150,6 +152,9 @@ export class OctopusWarshipAI {
     ) as THREE.Mesh[];
     this.antennaTips = this.mesh.children.filter((child) =>
       child.name.startsWith('octopus_antenna_tip_')
+    ) as THREE.Mesh[];
+    this.signalBeacons = this.mesh.children.filter((child) =>
+      child.name.startsWith('octopus_signal_beacon_')
     ) as THREE.Mesh[];
   }
 
@@ -290,6 +295,19 @@ export class OctopusWarshipAI {
           .lerp(this.terminalColor, terminalState * 0.32 + terminalPulse * 0.2 + terminalWarning * 0.25)
           .lerp(this.hitFlashColor, hitFlash * 0.35),
       });
+    }
+
+    // 信号灯（警示信标）缓慢脉冲
+    const beaconWave =
+      Math.sin(this.animationTime * OctopusWarshipAI.BEACON_PULSE_SPEED) * 0.5 + 0.5;
+    for (const beacon of this.signalBeacons) {
+      this.setBeaconOpacity(beacon, 0.3 + beaconWave * 0.7);
+    }
+  }
+
+  private setBeaconOpacity(mesh: THREE.Mesh, opacity: number): void {
+    if (mesh.material instanceof THREE.MeshBasicMaterial) {
+      mesh.material.opacity = opacity;
     }
   }
 
@@ -873,6 +891,200 @@ export function createOctopusWarshipMesh(config: BossConfig): THREE.Group {
     antennaCollar.name = `octopus_antenna_collar_${i}`;
     antennaCollar.castShadow = true;
     group.add(antennaCollar);
+  }
+
+  // ===== 细节增强：装甲镶板 / 上层结构 / 武备细节 / 信号灯 =====
+  const plateDetailMaterial = new THREE.MeshStandardMaterial({
+    color: new THREE.Color(0x336688).offsetHSL(0, 0.06, -0.06),
+    metalness: 0.82,
+    roughness: 0.18,
+  });
+  const frameDetailMaterial = new THREE.MeshStandardMaterial({
+    color: new THREE.Color(0x24485d).offsetHSL(0, 0.05, -0.04),
+    metalness: 0.86,
+    roughness: 0.16,
+  });
+  const crownWindowMaterial = new THREE.MeshStandardMaterial({
+    color: 0x9fe8ff,
+    emissive: 0x2fa8d8,
+    emissiveIntensity: 0.85,
+    metalness: 0.55,
+    roughness: 0.1,
+  });
+  const runningLightRedMaterial = new THREE.MeshBasicMaterial({ color: 0xff2a2a });
+  const runningLightGreenMaterial = new THREE.MeshBasicMaterial({ color: 0x2aff5a });
+  const beaconMaterial = new THREE.MeshBasicMaterial({
+    color: 0xff5040,
+    transparent: true,
+    opacity: 0.85,
+  });
+  const thrusterGlowMaterial = new THREE.MeshBasicMaterial({
+    color: 0x55e0ff,
+    transparent: true,
+    opacity: 0.85,
+  });
+
+  // 复用几何体
+  const platePanelGeometry = new THREE.BoxGeometry(3.4, 1.5, 0.5);
+  const ribTrimGeometry = new THREE.BoxGeometry(0.5, 3.6, 0.3);
+  const crownWindowGeometry = new THREE.BoxGeometry(1.6, 0.45, 0.18);
+  const sensorRodGeometry = new THREE.CylinderGeometry(0.08, 0.1, 1.8, 6);
+  const railPostGeometry = new THREE.BoxGeometry(0.12, 0.8, 0.12);
+  const apertureFinGeometry = new THREE.BoxGeometry(0.5, 0.9, 1.6);
+  const eyeSocketGeometry = new THREE.TorusGeometry(3.3, 0.25, 8, 18);
+  const runningLightGeometry = new THREE.SphereGeometry(0.45, 8, 8);
+  const beaconGeometry = new THREE.SphereGeometry(0.5, 8, 8);
+  const thrusterDotGeometry = new THREE.SphereGeometry(0.4, 8, 8);
+
+  // 装甲板镶板细节（避开赤道眼睛带）
+  for (let i = 0; i < 6; i++) {
+    const angle = (i / 6) * Math.PI * 2;
+    for (let j = 0; j < 2; j++) {
+      const platePanel = new THREE.Mesh(platePanelGeometry, plateDetailMaterial);
+      platePanel.position.set(
+        Math.cos(angle) * 15.6,
+        j === 0 ? 3.4 : -3.4,
+        Math.sin(angle) * 15.6
+      );
+      platePanel.rotation.y = -angle;
+      platePanel.name = `octopus_plate_panel_${i}_${j}`;
+      platePanel.castShadow = true;
+      group.add(platePanel);
+    }
+  }
+
+  // 肋骨饰条
+  for (let i = 0; i < 8; i++) {
+    const angle = (i / 8) * Math.PI * 2;
+    const ribTrim = new THREE.Mesh(ribTrimGeometry, frameDetailMaterial);
+    ribTrim.position.set(Math.cos(angle) * 9.95, 2.6, Math.sin(angle) * 9.95);
+    ribTrim.rotation.y = -angle;
+    ribTrim.name = `octopus_rib_trim_${i}`;
+    ribTrim.castShadow = true;
+    group.add(ribTrim);
+  }
+
+  // 冠部舷窗（发光条）
+  for (let i = 0; i < 4; i++) {
+    const angle = (i / 4) * Math.PI * 2 + Math.PI / 8;
+    const crownWindow = new THREE.Mesh(crownWindowGeometry, crownWindowMaterial);
+    crownWindow.position.set(Math.cos(angle) * 4.9, 12.2, Math.sin(angle) * 4.9);
+    crownWindow.rotation.y = Math.PI / 2 - angle;
+    crownWindow.name = `octopus_crown_window_${i}`;
+    group.add(crownWindow);
+  }
+
+  // 雷达盘（圆柱 + 环形格栅）
+  const radarPost = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.22, 1.2, 6), frameDetailMaterial);
+  radarPost.position.set(1.8, 13.4, 0);
+  radarPost.name = 'octopus_radar_post';
+  radarPost.castShadow = true;
+  group.add(radarPost);
+
+  const radarDish = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 1.1, 0.25, 12), plateDetailMaterial);
+  radarDish.position.set(1.8, 14.2, 0);
+  radarDish.rotation.z = 0.5;
+  radarDish.name = 'octopus_radar_dish';
+  radarDish.castShadow = true;
+  group.add(radarDish);
+
+  const radarLattice = new THREE.Mesh(new THREE.TorusGeometry(0.85, 0.07, 6, 14), frameDetailMaterial);
+  radarLattice.position.set(1.8, 14.2, 0);
+  radarLattice.rotation.set(Math.PI / 2, 0, 0.5);
+  radarLattice.name = 'octopus_radar_lattice';
+  radarLattice.castShadow = true;
+  group.add(radarLattice);
+
+  // 传感杆阵列
+  const sensorAngles = [0.8, 2.6, 4.5];
+  sensorAngles.forEach((angle, i) => {
+    const sensorRod = new THREE.Mesh(sensorRodGeometry, frameDetailMaterial);
+    sensorRod.position.set(Math.cos(angle) * 3.6, 13.3, Math.sin(angle) * 3.6);
+    sensorRod.name = `octopus_sensor_rod_${i}`;
+    sensorRod.castShadow = true;
+    group.add(sensorRod);
+  });
+
+  // 顶部甲板栏杆
+  for (let i = 0; i < 8; i++) {
+    const angle = (i / 8) * Math.PI * 2;
+    const railPost = new THREE.Mesh(railPostGeometry, frameDetailMaterial);
+    railPost.position.set(Math.cos(angle) * 6.1, 9.75, Math.sin(angle) * 6.1);
+    railPost.name = `octopus_rail_post_${i}`;
+    railPost.castShadow = true;
+    group.add(railPost);
+  }
+
+  const railRing = new THREE.Mesh(new THREE.TorusGeometry(6.1, 0.07, 6, 24), frameDetailMaterial);
+  railRing.rotation.x = Math.PI / 2;
+  railRing.position.set(0, 10.1, 0);
+  railRing.name = 'octopus_rail_ring';
+  railRing.castShadow = true;
+  group.add(railRing);
+
+  // 能量孔武备护鳍（不移动孔位锚点）
+  for (let i = 0; i < 4; i++) {
+    const angle = (i / 4) * Math.PI * 2;
+
+    const topFin = new THREE.Mesh(apertureFinGeometry, plateDetailMaterial);
+    topFin.position.set(Math.cos(angle) * 3.3, 10.6, Math.sin(angle) * 3.3);
+    topFin.rotation.y = -angle;
+    topFin.name = `octopus_aperture_fin_top_${i}`;
+    topFin.castShadow = true;
+    group.add(topFin);
+
+    const bottomFin = new THREE.Mesh(apertureFinGeometry, plateDetailMaterial);
+    bottomFin.position.set(Math.cos(angle) * 3.3, -10.6, Math.sin(angle) * 3.3);
+    bottomFin.rotation.y = -angle;
+    bottomFin.name = `octopus_aperture_fin_bottom_${i}`;
+    bottomFin.castShadow = true;
+    group.add(bottomFin);
+  }
+
+  // 眼部装甲座圈（围绕运行时眼睛位置，不移动眼睛锚点）
+  for (let i = 0; i < 8; i++) {
+    const angle = (i / 8) * Math.PI * 2;
+    const eyeSocket = new THREE.Mesh(eyeSocketGeometry, frameDetailMaterial);
+    eyeSocket.position.set(Math.cos(angle) * 14.9, 0, Math.sin(angle) * 14.9);
+    eyeSocket.rotation.y = Math.PI / 2 - angle;
+    eyeSocket.name = `octopus_eye_socket_${i}`;
+    eyeSocket.castShadow = true;
+    group.add(eyeSocket);
+  }
+
+  // 航行灯（左红右绿）
+  const leftRunningLight = new THREE.Mesh(runningLightGeometry, runningLightRedMaterial);
+  leftRunningLight.position.set(-11.6, 5.5, 0);
+  leftRunningLight.name = 'octopus_running_light_left';
+  group.add(leftRunningLight);
+
+  const rightRunningLight = new THREE.Mesh(runningLightGeometry, runningLightGreenMaterial);
+  rightRunningLight.position.set(11.6, 5.5, 0);
+  rightRunningLight.name = 'octopus_running_light_right';
+  group.add(rightRunningLight);
+
+  // 警示信标（慢速脉冲）
+  const beaconSpots = [
+    { x: -2.5, y: 12.95, z: 0 },
+    { x: 2.5, y: 12.95, z: 0 },
+    { x: 0, y: 12.95, z: -2.5 },
+    { x: 0, y: 12.95, z: 2.5 },
+    { x: 0, y: -13.6, z: 0 },
+  ];
+  beaconSpots.forEach((spot, i) => {
+    const beacon = new THREE.Mesh(beaconGeometry, beaconMaterial);
+    beacon.position.set(spot.x, spot.y, spot.z);
+    beacon.name = `octopus_signal_beacon_${i}`;
+    group.add(beacon);
+  });
+
+  // 腹部推进辉光点阵
+  for (let i = 0; i < 6; i++) {
+    const angle = (i / 6) * Math.PI * 2;
+    const thrusterDot = new THREE.Mesh(thrusterDotGeometry, thrusterGlowMaterial);
+    thrusterDot.position.set(Math.cos(angle) * 3.4, -13.45, Math.sin(angle) * 3.4);
+    thrusterDot.name = `octopus_thruster_glow_${i}`;
+    group.add(thrusterDot);
   }
 
   group.name = `BOSS_${config.type}`;

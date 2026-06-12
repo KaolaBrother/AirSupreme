@@ -544,6 +544,10 @@ export class ModelPreview {
 
     this.scene.remove(this.currentMesh);
     this.currentMesh.traverse((object) => {
+      // 跨机体共享的资源（航空信号灯、引擎尾焰材质等）不随预览销毁释放
+      if (object.userData.sharedResource === true) {
+        return;
+      }
       if (object instanceof Mesh) {
         object.geometry.dispose();
         if (Array.isArray(object.material)) {

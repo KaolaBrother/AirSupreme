@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { GAME_CONSTANTS } from '@/config';
 import { EnemyConfig, EnemyType, EnemyAIState } from './EnemyTypes';
 import { HealthSystem } from '@/features/combat/HealthSystem';
 import { ParticleTrailRenderer } from '@/features/effects/ParticleTrailRenderer';
@@ -330,10 +331,10 @@ export class EnemyAI {
    * 在战场范围内（距离玩家100-300米）随机生成
    */
   private generateFixedDirectionTarget(): THREE.Vector3 {
-    // 战场边界
-    const BATTLEFIELD_MIN = -750;
-    const BATTLEFIELD_MAX = 750;
-    const BATTLEFIELD_SIZE = 1500;
+    // 战场边界（随全局战场尺寸缩放）
+    const BATTLEFIELD_MAX = GAME_CONSTANTS.WORLD.BATTLEFIELD_HALF_EXTENT;
+    const BATTLEFIELD_MIN = -BATTLEFIELD_MAX;
+    const BATTLEFIELD_SIZE = BATTLEFIELD_MAX * 2;
 
     // 需要玩家位置来生成追踪点
     if (!this.targetPosition) {
@@ -513,6 +514,10 @@ export class EnemyAI {
     while (this.mesh.children.length > 0) {
       const child = this.mesh.children[0];
       this.mesh.remove(child);
+      // 跨机体共享的资源（航空信号灯等）不随单机销毁释放
+      if (child.userData.sharedResource === true) {
+        continue;
+      }
       if (child instanceof THREE.Mesh) {
         child.geometry.dispose();
         if (Array.isArray(child.material)) {

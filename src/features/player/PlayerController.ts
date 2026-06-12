@@ -98,6 +98,31 @@ export class PlayerController {
   }
 
   /**
+   * 软边界：超出软边界半径后，回推力随超出量平方增强；
+   * 到达战场硬边界时回推力大于飞行速度，玩家无法飞出。
+   * 顶界同理柔和下压，避免生硬的位置钳制。
+   */
+  private applySoftBoundary(deltaTime: number): void {
+    const hardRadius = GAME_CONSTANTS.WORLD.BATTLEFIELD_HALF_EXTENT;
+    const softRadius = GAME_CONSTANTS.WORLD.SOFT_BOUNDARY_RADIUS;
+    const position = this.aircraft.position;
+
+    const radial = Math.hypot(position.x, position.z);
+    if (radial > softRadius) {
+      const overshoot = Math.min((radial - softRadius) / (hardRadius - softRadius), 1.6);
+      const pushback = overshoot * overshoot * this.currentSpeed * 1.4 * deltaTime;
+      const inverseRadial = 1 / Math.max(radial, 1e-3);
+      position.x -= position.x * inverseRadial * pushback;
+      position.z -= position.z * inverseRadial * pushback;
+    }
+
+    const ceiling = GAME_CONSTANTS.WORLD.SOFT_CEILING;
+    if (position.y > ceiling) {
+      position.y -= (position.y - ceiling) * 3 * deltaTime;
+    }
+  }
+
+  /**
    * 更新飞机状态
    */
   public update(deltaTime: number, input: InputState): void {
@@ -172,6 +197,9 @@ export class PlayerController {
     this.forward.set(0, 0, -1);
     this.forward.applyQuaternion(this.aircraft.quaternion);
     this.aircraft.position.addScaledVector(this.forward, this.currentSpeed * deltaTime);
+
+    // 软边界：靠近战场边缘/顶界时施加渐强回推力，防止飞出战场
+    this.applySoftBoundary(deltaTime);
 
     // 根据油门状态调整火焰效果
     const targetSize = input.throttle ? this.boostFlameSize : this.normalFlameSize;

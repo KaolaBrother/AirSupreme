@@ -23,6 +23,7 @@ export class MissileDestroyerAI {
   private static readonly ENERGY_PULSE_SPEED = 7.8;
   private static readonly CRITICAL_PULSE_SPEED = 13.2;
   private static readonly TERMINAL_PULSE_SPEED = 20.5;
+  private static readonly BEACON_PULSE_SPEED = 2.2;
   private mesh: THREE.Group;
   private config: BossConfig;
   private health: HealthSystem;
@@ -34,6 +35,7 @@ export class MissileDestroyerAI {
   private flakMuzzles: THREE.Mesh[] = [];
   private launcherCaps: THREE.Mesh[] = [];
   private exhaustGlows: THREE.Mesh[] = [];
+  private signalBeacons: THREE.Mesh[] = [];
   private readonly hitFlashColor = new THREE.Color(0xd8f7ff);
   private readonly weakpointBaseColor = new THREE.Color(0xff703e);
   private readonly weakpointCriticalColor = new THREE.Color(0xffb87d);
@@ -150,6 +152,9 @@ export class MissileDestroyerAI {
     ) as THREE.Mesh[];
     this.exhaustGlows = this.mesh.children.filter((child) =>
       child.name.startsWith('destroyer_exhaust_glow_')
+    ) as THREE.Mesh[];
+    this.signalBeacons = this.mesh.children.filter((child) =>
+      child.name.startsWith('destroyer_signal_beacon_')
     ) as THREE.Mesh[];
   }
 
@@ -297,6 +302,19 @@ export class MissileDestroyerAI {
           .lerp(this.energyCriticalColor, criticalState * 0.25 + criticalBias * 0.22)
           .lerp(this.terminalColor, terminalState * 0.38 + terminalPulse * 0.25 + terminalBias * 0.2),
       });
+    }
+
+    // 信号灯（警示信标）缓慢脉冲
+    const beaconWave =
+      Math.sin(this.animationTime * MissileDestroyerAI.BEACON_PULSE_SPEED) * 0.5 + 0.5;
+    for (const beacon of this.signalBeacons) {
+      this.setBeaconOpacity(beacon, 0.3 + beaconWave * 0.7);
+    }
+  }
+
+  private setBeaconOpacity(mesh: THREE.Mesh, opacity: number): void {
+    if (mesh.material instanceof THREE.MeshBasicMaterial) {
+      mesh.material.opacity = opacity;
     }
   }
 
@@ -1111,6 +1129,261 @@ export function createMissileDestroyerMesh(config: BossConfig): THREE.Group {
   sideStabilizerRight.name = 'destroyer_side_stabilizer_right';
   sideStabilizerRight.castShadow = true;
   group.add(sideStabilizerRight);
+
+  // ===== 细节增强：船体镶板 / 上层结构 / 武备细节 / 信号灯 =====
+  const hullPlateDetailMaterial = new THREE.MeshStandardMaterial({
+    color: new THREE.Color(0x5f7892).offsetHSL(0, 0.05, -0.07),
+    metalness: 0.68,
+    roughness: 0.2,
+  });
+  const deckDetailMaterial = new THREE.MeshStandardMaterial({
+    color: new THREE.Color(0x8ea2b7).offsetHSL(0, 0.04, -0.1),
+    metalness: 0.5,
+    roughness: 0.26,
+  });
+  const armamentDetailMaterial = new THREE.MeshStandardMaterial({
+    color: new THREE.Color(0x6f8399).offsetHSL(0, 0.05, -0.08),
+    metalness: 0.88,
+    roughness: 0.16,
+  });
+  const sideWindowMaterial = new THREE.MeshStandardMaterial({
+    color: 0x7fc4ef,
+    emissive: 0x1f7fb8,
+    emissiveIntensity: 0.85,
+    metalness: 0.6,
+    roughness: 0.1,
+  });
+  const runningLightRedMaterial = new THREE.MeshBasicMaterial({ color: 0xff2a2a });
+  const runningLightGreenMaterial = new THREE.MeshBasicMaterial({ color: 0x2aff5a });
+  const beaconMaterial = new THREE.MeshBasicMaterial({
+    color: 0xff4034,
+    transparent: true,
+    opacity: 0.85,
+  });
+  const thrusterGlowMaterial = new THREE.MeshBasicMaterial({
+    color: 0x66d8ff,
+    transparent: true,
+    opacity: 0.85,
+  });
+
+  // 复用几何体
+  const hullPlateGeometry = new THREE.BoxGeometry(1.8 * scale, 0.5 * scale, 0.12 * scale);
+  const deckRibGeometry = new THREE.BoxGeometry(0.18 * scale, 0.14 * scale, 5.0 * scale);
+  const sideWindowGeometry = new THREE.BoxGeometry(1.8 * scale, 0.32 * scale, 0.1 * scale);
+  const antennaRodGeometry = new THREE.CylinderGeometry(
+    0.045 * scale,
+    0.06 * scale,
+    2.2 * scale,
+    6
+  );
+  const railPostGeometry = new THREE.BoxGeometry(0.05 * scale, 0.35 * scale, 0.05 * scale);
+  const railBarGeometry = new THREE.BoxGeometry(13.5 * scale, 0.04 * scale, 0.04 * scale);
+  const flakSleeveGeometry = new THREE.CylinderGeometry(0.2 * scale, 0.24 * scale, 0.6 * scale, 8);
+  const flakAmmoGeometry = new THREE.BoxGeometry(0.6 * scale, 0.4 * scale, 0.5 * scale);
+  const flakShieldGeometry = new THREE.BoxGeometry(0.12 * scale, 0.6 * scale, 1.2 * scale);
+  const deflectorGeometry = new THREE.BoxGeometry(1.7 * scale, 0.12 * scale, 1.0 * scale);
+  const runningLightGeometry = new THREE.SphereGeometry(0.16 * scale, 8, 8);
+  const beaconGeometry = new THREE.SphereGeometry(0.18 * scale, 8, 8);
+  const thrusterDiscGeometry = new THREE.CylinderGeometry(0.4 * scale, 0.4 * scale, 0.15 * scale, 10);
+
+  // 船舷镶板
+  for (let side = 0; side < 2; side++) {
+    for (let i = 0; i < 6; i++) {
+      const hullPlate = new THREE.Mesh(hullPlateGeometry, hullPlateDetailMaterial);
+      hullPlate.position.set(
+        (-9 + i * 3.6) * scale,
+        1.1 * scale,
+        (side === 0 ? -1 : 1) * (hullWidth * 0.5 + 0.22) * scale
+      );
+      hullPlate.name = `destroyer_hull_plate_${side === 0 ? 'port' : 'starboard'}_${i}`;
+      hullPlate.castShadow = true;
+      group.add(hullPlate);
+    }
+  }
+
+  // 甲板横向肋条
+  const deckRibXs = [-10.5, -2.5, 10.5];
+  deckRibXs.forEach((x, i) => {
+    const deckRib = new THREE.Mesh(deckRibGeometry, deckDetailMaterial);
+    deckRib.position.set(x * scale, (hullHeight + 0.55) * scale, 0);
+    deckRib.name = `destroyer_deck_rib_${i}`;
+    deckRib.castShadow = true;
+    group.add(deckRib);
+  });
+
+  // 烟囱箍带
+  const funnelCollar = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.46 * scale, 0.46 * scale, 0.18 * scale, 10),
+    armamentDetailMaterial
+  );
+  funnelCollar.position.set(3.5 * scale, (hullHeight + 3.7) * scale, 0);
+  funnelCollar.name = 'destroyer_funnel_collar';
+  funnelCollar.castShadow = true;
+  group.add(funnelCollar);
+
+  // 舰桥侧舷窗（发光条）
+  for (let i = 0; i < 2; i++) {
+    const sideWindow = new THREE.Mesh(sideWindowGeometry, sideWindowMaterial);
+    sideWindow.position.set(
+      2 * scale,
+      (hullHeight + 3.4) * scale,
+      (i === 0 ? -1.55 : 1.55) * scale
+    );
+    sideWindow.name = `destroyer_bridge_side_window_${i}`;
+    group.add(sideWindow);
+  }
+
+  // 天线阵列与横桁
+  const antennaSpots = [
+    { x: 1.45, y: 5.3, z: -0.55 },
+    { x: 2.65, y: 5.5, z: 0.4 },
+    { x: 1.3, y: 5.6, z: 0.75 },
+  ];
+  antennaSpots.forEach((spot, i) => {
+    const antenna = new THREE.Mesh(antennaRodGeometry, deckDetailMaterial);
+    antenna.position.set(spot.x * scale, (hullHeight + spot.y) * scale, spot.z * scale);
+    antenna.name = `destroyer_antenna_rod_${i}`;
+    antenna.castShadow = true;
+    group.add(antenna);
+  });
+
+  const yardarm = new THREE.Mesh(
+    new THREE.BoxGeometry(0.08 * scale, 0.08 * scale, 2.4 * scale),
+    deckDetailMaterial
+  );
+  yardarm.position.set(2 * scale, (hullHeight + 5.7) * scale, 0);
+  yardarm.name = 'destroyer_yardarm';
+  yardarm.castShadow = true;
+  group.add(yardarm);
+
+  // 第二雷达盘（圆柱 + 环形格栅）
+  const radarPost2 = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.08 * scale, 0.1 * scale, 0.5 * scale, 6),
+    deckDetailMaterial
+  );
+  radarPost2.position.set(3.1 * scale, (hullHeight + 5.0) * scale, 0);
+  radarPost2.name = 'destroyer_radar_dish_post';
+  radarPost2.castShadow = true;
+  group.add(radarPost2);
+
+  const radarDish2 = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.5 * scale, 0.62 * scale, 0.14 * scale, 12),
+    hullPlateDetailMaterial
+  );
+  radarDish2.position.set(3.1 * scale, (hullHeight + 5.35) * scale, 0);
+  radarDish2.rotation.z = 0.5;
+  radarDish2.name = 'destroyer_radar_dish';
+  radarDish2.castShadow = true;
+  group.add(radarDish2);
+
+  const radarLattice2 = new THREE.Mesh(
+    new THREE.TorusGeometry(0.48 * scale, 0.05 * scale, 6, 14),
+    deckDetailMaterial
+  );
+  radarLattice2.position.set(3.1 * scale, (hullHeight + 5.35) * scale, 0);
+  radarLattice2.rotation.set(Math.PI / 2, 0, 0.5);
+  radarLattice2.name = 'destroyer_radar_dish_lattice';
+  radarLattice2.castShadow = true;
+  group.add(radarLattice2);
+
+  // 甲板边缘栏杆
+  for (let side = 0; side < 2; side++) {
+    for (let i = 0; i < 5; i++) {
+      const railPost = new THREE.Mesh(railPostGeometry, deckDetailMaterial);
+      railPost.position.set(
+        (-9 + i * 3) * scale,
+        (hullHeight + 0.85) * scale,
+        (side === 0 ? -2.65 : 2.65) * scale
+      );
+      railPost.name = `destroyer_rail_post_${side === 0 ? 'port' : 'starboard'}_${i}`;
+      railPost.castShadow = true;
+      group.add(railPost);
+    }
+
+    const railBar = new THREE.Mesh(railBarGeometry, deckDetailMaterial);
+    railBar.position.set(-3 * scale, (hullHeight + 1.02) * scale, (side === 0 ? -2.65 : 2.65) * scale);
+    railBar.name = `destroyer_rail_bar_${side === 0 ? 'port' : 'starboard'}`;
+    railBar.castShadow = true;
+    group.add(railBar);
+  }
+
+  // 防空炮武备细节（炮管护套 / 供弹箱 / 防爆挡板）—— 不移动炮位锚点
+  for (const flakPos of flakPositions) {
+    const flakSleeve = new THREE.Mesh(flakSleeveGeometry, armamentDetailMaterial);
+    flakSleeve.position.copy(flakPos.pos);
+    flakSleeve.position.y += 0.75 * scale;
+    flakSleeve.rotation.x = -Math.PI / 3;
+    flakSleeve.name = `destroyer_flak_sleeve_${flakPos.name}`;
+    flakSleeve.castShadow = true;
+    group.add(flakSleeve);
+
+    const flakAmmo = new THREE.Mesh(flakAmmoGeometry, armamentDetailMaterial);
+    flakAmmo.position.copy(flakPos.pos);
+    flakAmmo.position.x += 0.8 * scale;
+    flakAmmo.position.y += 0.15 * scale;
+    flakAmmo.name = `destroyer_flak_ammo_${flakPos.name}`;
+    flakAmmo.castShadow = true;
+    group.add(flakAmmo);
+
+    const flakShield = new THREE.Mesh(flakShieldGeometry, hullPlateDetailMaterial);
+    flakShield.position.copy(flakPos.pos);
+    flakShield.position.x -= 0.75 * scale;
+    flakShield.position.y += 0.55 * scale;
+    flakShield.name = `destroyer_flak_blast_shield_${flakPos.name}`;
+    flakShield.castShadow = true;
+    group.add(flakShield);
+  }
+
+  // 导弹发射器尾焰导流板
+  for (const launcherPos of missileLauncherPositions) {
+    const deflector = new THREE.Mesh(deflectorGeometry, armamentDetailMaterial);
+    deflector.position.copy(launcherPos.pos);
+    deflector.position.x += 1.05 * scale;
+    deflector.position.y += 0.45 * scale;
+    deflector.rotation.z = -0.35;
+    deflector.name = `destroyer_launcher_deflector_${launcherPos.name}`;
+    deflector.castShadow = true;
+    group.add(deflector);
+  }
+
+  // 航行灯（港左红 / 右舷绿）
+  const runningLightSpots = [
+    { name: 'bow_port', x: -10.8, z: 3.05, red: true },
+    { name: 'bow_starboard', x: -10.8, z: -3.05, red: false },
+    { name: 'stern_port', x: 10.8, z: 3.05, red: true },
+    { name: 'stern_starboard', x: 10.8, z: -3.05, red: false },
+  ];
+  for (const spot of runningLightSpots) {
+    const runningLight = new THREE.Mesh(
+      runningLightGeometry,
+      spot.red ? runningLightRedMaterial : runningLightGreenMaterial
+    );
+    runningLight.position.set(spot.x * scale, (hullHeight + 0.9) * scale, spot.z * scale);
+    runningLight.name = `destroyer_running_light_${spot.name}`;
+    group.add(runningLight);
+  }
+
+  // 警示信标（慢速脉冲）
+  const beaconSpots = [
+    { x: 2, y: 12.2, z: 0 },
+    { x: -11.3, y: 4.1, z: 0 },
+    { x: 3.5, y: 7.35, z: 0 },
+  ];
+  beaconSpots.forEach((spot, i) => {
+    const beacon = new THREE.Mesh(beaconGeometry, beaconMaterial);
+    beacon.position.set(spot.x * scale, spot.y * scale, spot.z * scale);
+    beacon.name = `destroyer_signal_beacon_${i}`;
+    group.add(beacon);
+  });
+
+  // 艉部推进辉光阵列
+  for (let i = 0; i < 3; i++) {
+    const thrusterDisc = new THREE.Mesh(thrusterDiscGeometry, thrusterGlowMaterial);
+    thrusterDisc.rotation.z = Math.PI / 2;
+    thrusterDisc.position.set(12.15 * scale, 1.5 * scale, (-1.2 + i * 1.2) * scale);
+    thrusterDisc.name = `destroyer_thruster_glow_${i}`;
+    group.add(thrusterDisc);
+  }
 
   group.name = `BOSS_${config.type}`;
   (group as BossGroup).bossParts = parts;

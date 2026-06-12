@@ -224,7 +224,7 @@ export const GAME_CONSTANTS = {
   CAMERA: {
     FOV: 75,
     NEAR: 0.1,
-    FAR: 2000,
+    FAR: 5000,
     OFFSET: { x: 0, y: 5, z: 15 },
     SMOOTH_FACTOR: 0.1,
   },
@@ -234,6 +234,12 @@ export const GAME_CONSTANTS = {
     FOG_NEAR: 100,
     FOG_FAR: 1000,
     SKYBOX_SIZE: 1000,
+    /** 战场水平半径（米），战场跨度为 2 倍该值（面积为旧版 4 倍） */
+    BATTLEFIELD_HALF_EXTENT: 1500,
+    /** 软边界起始半径：超过后产生渐强回推力，防止飞出战场 */
+    SOFT_BOUNDARY_RADIUS: 1350,
+    /** 软顶界高度：超过后柔和下压 */
+    SOFT_CEILING: 540,
   },
 
   // 道具参数

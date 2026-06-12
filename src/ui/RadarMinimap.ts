@@ -26,7 +26,7 @@ export class RadarMinimap {
   private radarCanvas: HTMLCanvasElement;
   private ctx: CanvasRenderingContext2D | null = null;
   private size: number = 150; // 雷达大小
-  private range: number = 600; // 雷达显示范围（米）
+  private range: number = 800; // 雷达显示范围（米）
 
   constructor() {
     this.container = document.createElement('div');
