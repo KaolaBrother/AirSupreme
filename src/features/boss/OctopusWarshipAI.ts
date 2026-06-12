@@ -45,6 +45,7 @@ export class OctopusWarshipAI {
   private apertures: THREE.Mesh[] = [];
   private antennaTips: THREE.Mesh[] = [];
   private signalBeacons: THREE.Mesh[] = [];
+  private tentaclePivots: THREE.Object3D[] = [];
   private readonly hitFlashColor = new THREE.Color(0xd8fbff);
   private readonly weakpointBaseColor = new THREE.Color(0xff6c3b);
   private readonly weakpointCriticalColor = new THREE.Color(0xffb67a);
@@ -156,20 +157,31 @@ export class OctopusWarshipAI {
     this.signalBeacons = this.mesh.children.filter((child) =>
       child.name.startsWith('octopus_signal_beacon_')
     ) as THREE.Mesh[];
+
+    // 触手关节缓存（用于波动动画）
+    this.tentaclePivots = [];
+    for (const child of this.mesh.children) {
+      if (!child.name.startsWith('octopus_tentacle_')) continue;
+      child.traverse((node) => {
+        if (node.name.includes('_pivot_')) {
+          this.tentaclePivots.push(node);
+        }
+      });
+    }
   }
 
   private updateVisualEffects(): void {
     const healthRatio = this.getHealth().current / this.getHealth().max;
     const lowHealthBoost = 1 + (1 - healthRatio) * 0.9;
     const criticalState = THREE.MathUtils.clamp(
-      (OctopusWarshipAI.CRITICAL_HEALTH_THRESHOLD - healthRatio)
-        / OctopusWarshipAI.CRITICAL_HEALTH_THRESHOLD,
+      (OctopusWarshipAI.CRITICAL_HEALTH_THRESHOLD - healthRatio) /
+        OctopusWarshipAI.CRITICAL_HEALTH_THRESHOLD,
       0,
       1
     );
     const terminalState = THREE.MathUtils.clamp(
-      (OctopusWarshipAI.TERMINAL_HEALTH_THRESHOLD - healthRatio)
-        / OctopusWarshipAI.TERMINAL_HEALTH_THRESHOLD,
+      (OctopusWarshipAI.TERMINAL_HEALTH_THRESHOLD - healthRatio) /
+        OctopusWarshipAI.TERMINAL_HEALTH_THRESHOLD,
       0,
       1
     );
@@ -177,14 +189,18 @@ export class OctopusWarshipAI {
     const teleportCharge =
       this.teleportCooldown > 0
         ? 1 -
-          THREE.MathUtils.clamp(this.teleportCooldown / Math.max(TELEPORT_CONFIG.COOLDOWN, 0.001), 0, 1)
+          THREE.MathUtils.clamp(
+            this.teleportCooldown / Math.max(TELEPORT_CONFIG.COOLDOWN, 0.001),
+            0,
+            1
+          )
         : 1;
     const criticalPulse =
-      (Math.sin(this.animationTime * OctopusWarshipAI.CRITICAL_PULSE_SPEED) * 0.5 + 0.5)
-      * criticalState;
+      (Math.sin(this.animationTime * OctopusWarshipAI.CRITICAL_PULSE_SPEED) * 0.5 + 0.5) *
+      criticalState;
     const terminalPulse =
-      (Math.sin(this.animationTime * OctopusWarshipAI.TERMINAL_PULSE_SPEED) * 0.5 + 0.5)
-      * terminalState;
+      (Math.sin(this.animationTime * OctopusWarshipAI.TERMINAL_PULSE_SPEED) * 0.5 + 0.5) *
+      terminalState;
     const terminalWarning = Math.sqrt(terminalState);
     const criticalBias = criticalState * criticalState;
     const phasePressure = 1 + terminalWarning * 0.75 + criticalState * 0.2;
@@ -192,10 +208,14 @@ export class OctopusWarshipAI {
     const terminalWarningPulse = terminalPulse * terminalWarning;
     const corePulse =
       (Math.sin(
-        this.animationTime
-        * (this.isTeleporting ? OctopusWarshipAI.TERMINAL_PULSE_SPEED : OctopusWarshipAI.WEAKPOINT_PULSE_SPEED)
-      ) * 0.5 + 0.5)
-      * lowHealthBoost;
+        this.animationTime *
+          (this.isTeleporting
+            ? OctopusWarshipAI.TERMINAL_PULSE_SPEED
+            : OctopusWarshipAI.WEAKPOINT_PULSE_SPEED)
+      ) *
+        0.5 +
+        0.5) *
+      lowHealthBoost;
     this.setGlowState(this.coreGlow, {
       intensity:
         0.95 +
@@ -218,7 +238,10 @@ export class OctopusWarshipAI {
           this.weakpointCriticalColor,
           (this.isTeleporting ? 0.5 : 0.1) + criticalPulse * 0.25 + criticalBias * 0.3
         )
-        .lerp(this.terminalColor, terminalState * 0.75 + terminalWarning * 0.45 + terminalPulse * 0.35)
+        .lerp(
+          this.terminalColor,
+          terminalState * 0.75 + terminalWarning * 0.45 + terminalPulse * 0.35
+        )
         .lerp(this.hitFlashColor, hitFlash * 0.7),
     });
 
@@ -242,14 +265,21 @@ export class OctopusWarshipAI {
           terminalWarning * 0.04,
         color: this.energyBaseColor
           .clone()
-          .lerp(this.energyCriticalColor, criticalState * 0.65 + criticalPulse * 0.25 + criticalBias * 0.22)
-          .lerp(this.terminalColor, terminalState * 0.48 + terminalWarningPulse * 0.5 + terminalPulse * 0.25),
+          .lerp(
+            this.energyCriticalColor,
+            criticalState * 0.65 + criticalPulse * 0.25 + criticalBias * 0.22
+          )
+          .lerp(
+            this.terminalColor,
+            terminalState * 0.48 + terminalWarningPulse * 0.5 + terminalPulse * 0.25
+          ),
       });
     }
 
     for (let i = 0; i < this.apertures.length; i++) {
       const pulse =
-        Math.sin(this.animationTime * OctopusWarshipAI.WEAPON_PULSE_SPEED + i * Math.PI) * 0.5 + 0.5;
+        Math.sin(this.animationTime * OctopusWarshipAI.WEAPON_PULSE_SPEED + i * Math.PI) * 0.5 +
+        0.5;
       this.setGlowState(this.apertures[i], {
         intensity:
           0.7 +
@@ -271,7 +301,10 @@ export class OctopusWarshipAI {
         color: this.weaponBaseColor
           .clone()
           .lerp(this.weaponCriticalColor, criticalState + criticalPulse * 0.3 + criticalBias * 0.25)
-          .lerp(this.terminalColor, terminalState * 0.56 + terminalPulse * 0.35 + terminalWarning * 0.25)
+          .lerp(
+            this.terminalColor,
+            terminalState * 0.56 + terminalPulse * 0.35 + terminalWarning * 0.25
+          )
           .lerp(this.hitFlashColor, hitFlash * 0.35),
       });
     }
@@ -291,8 +324,14 @@ export class OctopusWarshipAI {
           terminalWarning * 0.04,
         color: this.energyBaseColor
           .clone()
-          .lerp(this.energyCriticalColor, criticalState * 0.5 + criticalPulse * 0.15 + criticalBias * 0.22)
-          .lerp(this.terminalColor, terminalState * 0.32 + terminalPulse * 0.2 + terminalWarning * 0.25)
+          .lerp(
+            this.energyCriticalColor,
+            criticalState * 0.5 + criticalPulse * 0.15 + criticalBias * 0.22
+          )
+          .lerp(
+            this.terminalColor,
+            terminalState * 0.32 + terminalPulse * 0.2 + terminalWarning * 0.25
+          )
           .lerp(this.hitFlashColor, hitFlash * 0.35),
       });
     }
@@ -302,6 +341,17 @@ export class OctopusWarshipAI {
       Math.sin(this.animationTime * OctopusWarshipAI.BEACON_PULSE_SPEED) * 0.5 + 0.5;
     for (const beacon of this.signalBeacons) {
       this.setBeaconOpacity(beacon, 0.3 + beaconWave * 0.7);
+    }
+
+    // 触手分节波动（受击/濒死时摆动加剧）
+    const swaySpeed = 1.6 + terminalState * 1.4 + hitFlash * 0.8;
+    for (const pivot of this.tentaclePivots) {
+      const base =
+        typeof pivot.userData.swayBase === 'number' ? pivot.userData.swayBase : pivot.rotation.x;
+      const phase = typeof pivot.userData.swayPhase === 'number' ? pivot.userData.swayPhase : 0;
+      const amp = typeof pivot.userData.swayAmp === 'number' ? pivot.userData.swayAmp : 0.05;
+      pivot.rotation.x =
+        base + Math.sin(this.animationTime * swaySpeed + phase) * amp * (1 + terminalState * 0.6);
     }
   }
 
@@ -521,14 +571,16 @@ export class OctopusWarshipAI {
     while (this.mesh.children.length > 0) {
       const child = this.mesh.children[0];
       this.mesh.remove(child);
-      if (child instanceof THREE.Mesh) {
-        child.geometry.dispose();
-        if (Array.isArray(child.material)) {
-          child.material.forEach((m) => m.dispose());
-        } else if (child.material instanceof THREE.Material) {
-          child.material.dispose();
+      child.traverse((node) => {
+        if (node instanceof THREE.Mesh) {
+          node.geometry.dispose();
+          if (Array.isArray(node.material)) {
+            node.material.forEach((m) => m.dispose());
+          } else if (node.material instanceof THREE.Material) {
+            node.material.dispose();
+          }
         }
-      }
+      });
     }
   }
 }
@@ -538,18 +590,66 @@ export function createOctopusWarshipMesh(config: BossConfig): THREE.Group {
   const scale = config.scale;
   const parts: THREE.Mesh[] = [];
 
+  // ===== 几何构造辅助（本地单位，最终通过 group.scale 统一缩放）=====
+  const box = (w: number, h: number, d: number) => new THREE.BoxGeometry(w, h, d);
+  const cyl = (rTop: number, rBottom: number, h: number, seg = 10) =>
+    new THREE.CylinderGeometry(rTop, rBottom, h, seg);
+  const ball = (r: number, seg = 12) => new THREE.SphereGeometry(r, seg, seg);
+  const ring = (r: number, tube: number, radSeg = 8, tubSeg = 20) =>
+    new THREE.TorusGeometry(r, tube, radSeg, tubSeg);
+
+  const add = (
+    geometry: THREE.BufferGeometry,
+    material: THREE.Material,
+    name: string,
+    x: number,
+    y: number,
+    z: number,
+    options: { rx?: number; ry?: number; rz?: number; collide?: boolean; shadow?: boolean } = {}
+  ): THREE.Mesh => {
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.position.set(x, y, z);
+    if (options.rx !== undefined) mesh.rotation.x = options.rx;
+    if (options.ry !== undefined) mesh.rotation.y = options.ry;
+    if (options.rz !== undefined) mesh.rotation.z = options.rz;
+    mesh.name = name;
+    mesh.castShadow = options.shadow !== false;
+    group.add(mesh);
+    if (options.collide) parts.push(mesh);
+    return mesh;
+  };
+
+  // ===== 材质（冰蓝生物机械装甲基调）=====
   const bodyMaterial = new THREE.MeshStandardMaterial({
     color: 0x4488aa,
     metalness: 0.7,
-    roughness: 0.3,
+    roughness: 0.32,
   });
-
   const armorMaterial = new THREE.MeshStandardMaterial({
     color: 0x336688,
     metalness: 0.8,
+    roughness: 0.24,
+  });
+  const armorDarkMaterial = new THREE.MeshStandardMaterial({
+    color: new THREE.Color(0x336688).offsetHSL(0, 0.04, -0.08),
+    metalness: 0.82,
+    roughness: 0.22,
+  });
+  const frameMaterial = new THREE.MeshStandardMaterial({
+    color: 0x24485d,
+    metalness: 0.85,
     roughness: 0.2,
   });
-
+  const tentacleMaterial = new THREE.MeshStandardMaterial({
+    color: new THREE.Color(0x4488aa).offsetHSL(0, 0.05, -0.06),
+    metalness: 0.72,
+    roughness: 0.3,
+  });
+  const rivetMaterial = new THREE.MeshStandardMaterial({
+    color: 0x1d3a4c,
+    metalness: 0.88,
+    roughness: 0.26,
+  });
   const glowMaterial = new THREE.MeshStandardMaterial({
     color: 0x55ddff,
     emissive: 0x22ccff,
@@ -557,7 +657,6 @@ export function createOctopusWarshipMesh(config: BossConfig): THREE.Group {
     metalness: 0.45,
     roughness: 0.15,
   });
-
   const energyMaterial = new THREE.MeshStandardMaterial({
     color: 0x71ebff,
     emissive: 0x2fe0ff,
@@ -565,344 +664,12 @@ export function createOctopusWarshipMesh(config: BossConfig): THREE.Group {
     metalness: 0.52,
     roughness: 0.12,
   });
-
   const sensorMaterial = new THREE.MeshStandardMaterial({
     color: 0x7ea7cf,
     metalness: 0.78,
     roughness: 0.16,
     emissive: 0x335f88,
     emissiveIntensity: 0.3,
-  });
-
-  const innerFrameMaterial = new THREE.MeshStandardMaterial({
-    color: 0x24485d,
-    metalness: 0.85,
-    roughness: 0.18,
-  });
-
-  const bodyGeometry = new THREE.SphereGeometry(15, 32, 32);
-  const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
-  body.name = 'octopus_body';
-  body.castShadow = true;
-  group.add(body);
-  parts.push(body);
-
-  const equatorRing = new THREE.Mesh(
-    new THREE.TorusGeometry(12.5, 1.1, 12, 32),
-    innerFrameMaterial
-  );
-  equatorRing.rotation.x = Math.PI / 2;
-  equatorRing.name = 'octopus_equator_ring';
-  equatorRing.castShadow = true;
-  group.add(equatorRing);
-
-  const upperRing = new THREE.Mesh(
-    new THREE.TorusGeometry(11.6, 0.42, 10, 28),
-    armorMaterial.clone()
-  );
-  upperRing.rotation.x = Math.PI / 2;
-  upperRing.position.y = 4.8;
-  upperRing.name = 'octopus_upper_ring';
-  upperRing.castShadow = true;
-  group.add(upperRing);
-
-  const lowerRing = new THREE.Mesh(
-    new THREE.TorusGeometry(11.6, 0.42, 10, 28),
-    armorMaterial.clone()
-  );
-  lowerRing.rotation.x = Math.PI / 2;
-  lowerRing.position.y = -4.8;
-  lowerRing.name = 'octopus_lower_ring';
-  lowerRing.castShadow = true;
-  group.add(lowerRing);
-
-  const coreGlow = new THREE.Mesh(
-    new THREE.SphereGeometry(6, 20, 20),
-    glowMaterial
-  );
-  coreGlow.name = 'octopus_core_glow';
-  group.add(coreGlow);
-
-  const coreRing = new THREE.Mesh(
-    new THREE.TorusGeometry(7.1, 0.45, 10, 30),
-    energyMaterial.clone()
-  );
-  coreRing.rotation.x = Math.PI / 2;
-  coreRing.name = 'octopus_core_ring';
-  coreRing.castShadow = true;
-  group.add(coreRing);
-
-  const innerLatticeRing = new THREE.Mesh(
-    new THREE.TorusGeometry(9.2, 0.22, 8, 28),
-    innerFrameMaterial.clone()
-  );
-  innerLatticeRing.rotation.x = Math.PI / 2;
-  innerLatticeRing.name = 'octopus_inner_lattice_ring';
-  innerLatticeRing.castShadow = true;
-  group.add(innerLatticeRing);
-
-  for (let i = 0; i < 8; i++) {
-    const angle = (i / 8) * Math.PI * 2;
-    const spoke = new THREE.Mesh(
-      new THREE.BoxGeometry(0.55, 0.55, 7.2),
-      innerFrameMaterial.clone()
-    );
-    spoke.position.set(Math.cos(angle) * 5.8, 0, Math.sin(angle) * 5.8);
-    spoke.rotation.y = -angle;
-    spoke.name = `octopus_inner_spoke_${i}`;
-    spoke.castShadow = true;
-    group.add(spoke);
-  }
-
-  for (let i = 0; i < 6; i++) {
-    const angle = (i / 6) * Math.PI * 2;
-    const plate = new THREE.Mesh(new THREE.BoxGeometry(12, 8, 3), armorMaterial.clone());
-    plate.position.set(Math.cos(angle) * 14, 0, Math.sin(angle) * 14);
-    plate.rotation.y = -angle;
-    plate.name = `octopus_plate_${i}`;
-    plate.castShadow = true;
-    group.add(plate);
-    parts.push(plate);
-
-    const plateEdge = new THREE.Mesh(
-      new THREE.BoxGeometry(10.5, 0.7, 0.8),
-      glowMaterial
-    );
-    plateEdge.position.copy(plate.position);
-    plateEdge.position.y += 2.6;
-    plateEdge.rotation.y = plate.rotation.y;
-    plateEdge.name = `octopus_plate_edge_${i}`;
-    group.add(plateEdge);
-
-    const sideModule = new THREE.Mesh(
-      new THREE.CylinderGeometry(1.35, 1.6, 3.8, 10),
-      innerFrameMaterial.clone()
-    );
-    sideModule.rotation.z = Math.PI / 2;
-    sideModule.position.set(Math.cos(angle) * 11.2, 0, Math.sin(angle) * 11.2);
-    sideModule.rotation.y = -angle;
-    sideModule.name = `octopus_side_module_${i}`;
-    sideModule.castShadow = true;
-    group.add(sideModule);
-
-    const sideCap = new THREE.Mesh(
-      new THREE.SphereGeometry(0.95, 10, 10),
-      energyMaterial
-    );
-    sideCap.position.set(Math.cos(angle) * 12.8, 0, Math.sin(angle) * 12.8);
-    sideCap.name = `octopus_side_cap_${i}`;
-    group.add(sideCap);
-
-    const suspendedPod = new THREE.Mesh(
-      new THREE.BoxGeometry(2.2, 1.8, 1.1),
-      armorMaterial.clone()
-    );
-    suspendedPod.position.set(Math.cos(angle) * 16.1, -1.1, Math.sin(angle) * 16.1);
-    suspendedPod.rotation.y = -angle;
-    suspendedPod.name = `octopus_suspended_pod_${i}`;
-    suspendedPod.castShadow = true;
-    group.add(suspendedPod);
-    parts.push(suspendedPod);
-
-    const podGlow = new THREE.Mesh(
-      new THREE.SphereGeometry(0.42, 8, 8),
-      energyMaterial
-    );
-    podGlow.position.set(Math.cos(angle) * 17.1, -1.1, Math.sin(angle) * 17.1);
-    podGlow.name = `octopus_suspended_pod_glow_${i}`;
-    group.add(podGlow);
-
-    const supportStrut = new THREE.Mesh(
-      new THREE.BoxGeometry(1.8, 0.5, 0.6),
-      armorMaterial.clone()
-    );
-    supportStrut.position.set(Math.cos(angle) * 9.6, 0, Math.sin(angle) * 9.6);
-    supportStrut.rotation.y = -angle;
-    supportStrut.name = `octopus_support_strut_${i}`;
-    supportStrut.castShadow = true;
-    group.add(supportStrut);
-
-    const supportBrace = new THREE.Mesh(
-      new THREE.BoxGeometry(1.2, 0.3, 2.2),
-      innerFrameMaterial.clone()
-    );
-    supportBrace.position.set(Math.cos(angle) * 8.2, 0, Math.sin(angle) * 8.2);
-    supportBrace.rotation.y = -angle;
-    supportBrace.name = `octopus_support_brace_${i}`;
-    supportBrace.castShadow = true;
-    group.add(supportBrace);
-  }
-
-  for (let i = 0; i < 8; i++) {
-    const angle = (i / 8) * Math.PI * 2;
-    const rib = new THREE.Mesh(new THREE.BoxGeometry(1.3, 9.2, 0.55), armorMaterial.clone());
-    rib.position.set(Math.cos(angle) * 9.4, 0, Math.sin(angle) * 9.4);
-    rib.rotation.y = -angle;
-    rib.name = `octopus_rib_${i}`;
-    rib.castShadow = true;
-    group.add(rib);
-
-    const ribCap = new THREE.Mesh(
-      new THREE.BoxGeometry(0.9, 1.3, 0.7),
-      innerFrameMaterial.clone()
-    );
-    ribCap.position.set(Math.cos(angle) * 10.6, 0, Math.sin(angle) * 10.6);
-    ribCap.rotation.y = -angle;
-    ribCap.name = `octopus_rib_cap_${i}`;
-    ribCap.castShadow = true;
-    group.add(ribCap);
-  }
-
-  const topDomeGeometry = new THREE.SphereGeometry(8, 16, 16, 0, Math.PI * 2, 0, Math.PI / 2);
-  const topDome = new THREE.Mesh(topDomeGeometry, armorMaterial);
-  topDome.position.set(0, 10, 0);
-  topDome.name = 'octopus_top_dome';
-  topDome.castShadow = true;
-  group.add(topDome);
-  parts.push(topDome);
-
-  const topDeckRing = new THREE.Mesh(
-    new THREE.TorusGeometry(6.1, 0.32, 8, 24),
-    innerFrameMaterial.clone()
-  );
-  topDeckRing.rotation.x = Math.PI / 2;
-  topDeckRing.position.set(0, 9.2, 0);
-  topDeckRing.name = 'octopus_top_deck_ring';
-  topDeckRing.castShadow = true;
-  group.add(topDeckRing);
-
-  for (let i = 0; i < 4; i++) {
-    const angle = (i / 4) * Math.PI * 2 + Math.PI / 4;
-    const topBrace = new THREE.Mesh(
-      new THREE.BoxGeometry(1.2, 0.35, 3.8),
-      armorMaterial.clone()
-    );
-    topBrace.position.set(Math.cos(angle) * 4.2, 9.6, Math.sin(angle) * 4.2);
-    topBrace.rotation.y = -angle;
-    topBrace.name = `octopus_top_brace_${i}`;
-    topBrace.castShadow = true;
-    group.add(topBrace);
-  }
-
-  const crownCollar = new THREE.Mesh(
-    new THREE.CylinderGeometry(4.3, 5.2, 1.5, 12),
-    armorMaterial.clone()
-  );
-  crownCollar.position.set(0, 12.1, 0);
-  crownCollar.name = 'octopus_crown_collar';
-  crownCollar.castShadow = true;
-  group.add(crownCollar);
-
-  const topAperture = new THREE.Mesh(
-    new THREE.CylinderGeometry(2.4, 2.8, 1.6, 16),
-    energyMaterial
-  );
-  topAperture.position.set(0, 10.4, 0);
-  topAperture.name = 'octopus_top_aperture';
-  group.add(topAperture);
-
-  const bottomDomeGeometry = new THREE.SphereGeometry(
-    8,
-    16,
-    16,
-    0,
-    Math.PI * 2,
-    Math.PI / 2,
-    Math.PI / 2
-  );
-  const bottomDome = new THREE.Mesh(bottomDomeGeometry, armorMaterial);
-  bottomDome.position.set(0, -10, 0);
-  bottomDome.name = 'octopus_bottom_dome';
-  bottomDome.castShadow = true;
-  group.add(bottomDome);
-  parts.push(bottomDome);
-
-  const bottomDeckRing = new THREE.Mesh(
-    new THREE.TorusGeometry(6.1, 0.32, 8, 24),
-    innerFrameMaterial.clone()
-  );
-  bottomDeckRing.rotation.x = Math.PI / 2;
-  bottomDeckRing.position.set(0, -9.2, 0);
-  bottomDeckRing.name = 'octopus_bottom_deck_ring';
-  bottomDeckRing.castShadow = true;
-  group.add(bottomDeckRing);
-
-  for (let i = 0; i < 4; i++) {
-    const angle = (i / 4) * Math.PI * 2;
-    const lowerFin = new THREE.Mesh(
-      new THREE.BoxGeometry(1.4, 2.1, 0.55),
-      armorMaterial.clone()
-    );
-    lowerFin.position.set(Math.cos(angle) * 6.7, -8.8, Math.sin(angle) * 6.7);
-    lowerFin.rotation.y = -angle;
-    lowerFin.name = `octopus_lower_fin_${i}`;
-    lowerFin.castShadow = true;
-    group.add(lowerFin);
-  }
-
-  const bottomAperture = new THREE.Mesh(
-    new THREE.CylinderGeometry(2.4, 2.8, 1.6, 16),
-    energyMaterial
-  );
-  bottomAperture.position.set(0, -10.4, 0);
-  bottomAperture.name = 'octopus_bottom_aperture';
-  group.add(bottomAperture);
-
-  const bellyHousing = new THREE.Mesh(
-    new THREE.CylinderGeometry(4.2, 5.1, 2.1, 12),
-    innerFrameMaterial.clone()
-  );
-  bellyHousing.position.set(0, -12.2, 0);
-  bellyHousing.name = 'octopus_belly_housing';
-  bellyHousing.castShadow = true;
-  group.add(bellyHousing);
-
-  const antennaGeometry = new THREE.CylinderGeometry(0.5, 0.3, 10, 8);
-  const antennaMaterial = new THREE.MeshStandardMaterial({
-    color: 0x6f98bd,
-    metalness: 0.8,
-    roughness: 0.2,
-  });
-
-  for (let i = 0; i < 4; i++) {
-    const angle = (i / 4) * Math.PI * 2 + Math.PI / 4;
-    const antenna = new THREE.Mesh(antennaGeometry, antennaMaterial);
-    antenna.position.set(Math.cos(angle) * 5, 15, Math.sin(angle) * 5);
-    antenna.rotation.x = -0.3;
-    antenna.rotation.z = Math.cos(angle) * 0.3;
-    antenna.name = `octopus_antenna_${i}`;
-    group.add(antenna);
-    parts.push(antenna);
-
-    const antennaTip = new THREE.Mesh(
-      new THREE.SphereGeometry(0.9, 10, 10),
-      sensorMaterial
-    );
-    antennaTip.position.set(Math.cos(angle) * 5.9, 19.2, Math.sin(angle) * 5.9);
-    antennaTip.name = `octopus_antenna_tip_${i}`;
-    group.add(antennaTip);
-
-    const antennaCollar = new THREE.Mesh(
-      new THREE.TorusGeometry(0.42, 0.08, 8, 16),
-      innerFrameMaterial.clone()
-    );
-    antennaCollar.rotation.x = Math.PI / 2;
-    antennaCollar.position.set(Math.cos(angle) * 5.15, 16.7, Math.sin(angle) * 5.15);
-    antennaCollar.name = `octopus_antenna_collar_${i}`;
-    antennaCollar.castShadow = true;
-    group.add(antennaCollar);
-  }
-
-  // ===== 细节增强：装甲镶板 / 上层结构 / 武备细节 / 信号灯 =====
-  const plateDetailMaterial = new THREE.MeshStandardMaterial({
-    color: new THREE.Color(0x336688).offsetHSL(0, 0.06, -0.06),
-    metalness: 0.82,
-    roughness: 0.18,
-  });
-  const frameDetailMaterial = new THREE.MeshStandardMaterial({
-    color: new THREE.Color(0x24485d).offsetHSL(0, 0.05, -0.04),
-    metalness: 0.86,
-    roughness: 0.16,
   });
   const crownWindowMaterial = new THREE.MeshStandardMaterial({
     color: 0x9fe8ff,
@@ -924,168 +691,330 @@ export function createOctopusWarshipMesh(config: BossConfig): THREE.Group {
     opacity: 0.85,
   });
 
-  // 复用几何体
-  const platePanelGeometry = new THREE.BoxGeometry(3.4, 1.5, 0.5);
-  const ribTrimGeometry = new THREE.BoxGeometry(0.5, 3.6, 0.3);
-  const crownWindowGeometry = new THREE.BoxGeometry(1.6, 0.45, 0.18);
-  const sensorRodGeometry = new THREE.CylinderGeometry(0.08, 0.1, 1.8, 6);
-  const railPostGeometry = new THREE.BoxGeometry(0.12, 0.8, 0.12);
-  const apertureFinGeometry = new THREE.BoxGeometry(0.5, 0.9, 1.6);
-  const eyeSocketGeometry = new THREE.TorusGeometry(3.3, 0.25, 8, 18);
-  const runningLightGeometry = new THREE.SphereGeometry(0.45, 8, 8);
-  const beaconGeometry = new THREE.SphereGeometry(0.5, 8, 8);
-  const thrusterDotGeometry = new THREE.SphereGeometry(0.4, 8, 8);
+  // ===== 球形外壳（运行时眼睛位于赤道半径 15 处，保持眼带净空）=====
+  const body = add(ball(15, 32), bodyMaterial, 'octopus_body', 0, 0, 0, { collide: true });
+  body.scale.set(1, 1.12, 1);
 
-  // 装甲板镶板细节（避开赤道眼睛带）
-  for (let i = 0; i < 6; i++) {
-    const angle = (i / 6) * Math.PI * 2;
-    for (let j = 0; j < 2; j++) {
-      const platePanel = new THREE.Mesh(platePanelGeometry, plateDetailMaterial);
-      platePanel.position.set(
-        Math.cos(angle) * 15.6,
-        j === 0 ? 3.4 : -3.4,
-        Math.sin(angle) * 15.6
-      );
-      platePanel.rotation.y = -angle;
-      platePanel.name = `octopus_plate_panel_${i}_${j}`;
-      platePanel.castShadow = true;
-      group.add(platePanel);
+  // 赤道结构环与上下眉脊（框出眼带）
+  add(ring(13.0, 1.0, 12, 32), frameMaterial, 'octopus_equator_ring', 0, 0, 0, {
+    rx: Math.PI / 2,
+  });
+  add(ring(14.3, 0.62, 10, 30), armorDarkMaterial, 'octopus_upper_brow_ring', 0, 3.6, 0, {
+    rx: Math.PI / 2,
+  });
+  add(ring(14.3, 0.62, 10, 30), armorDarkMaterial, 'octopus_lower_brow_ring', 0, -3.6, 0, {
+    rx: Math.PI / 2,
+  });
+
+  // 眼部装甲座圈（围绕运行时眼睛位置，不移动眼睛锚点）
+  const eyeSocketGeometry = ring(3.35, 0.28, 8, 18);
+  for (let i = 0; i < 8; i++) {
+    const angle = (i / 8) * Math.PI * 2;
+    add(
+      eyeSocketGeometry,
+      frameMaterial,
+      `octopus_eye_socket_${i}`,
+      Math.cos(angle) * 14.6,
+      0,
+      Math.sin(angle) * 14.6,
+      { ry: Math.PI / 2 - angle }
+    );
+  }
+
+  // ===== 铆接装甲板带（上半球，板间为发光能量缝）=====
+  const platePanelGeometry = box(6.2, 4.6, 1.0);
+  const rivetGeometry = ball(0.2, 6);
+  for (let i = 0; i < 8; i++) {
+    const angle = (i / 8) * Math.PI * 2;
+    const radial = { x: Math.cos(angle), z: Math.sin(angle) };
+    const tangent = { x: Math.sin(angle), z: -Math.cos(angle) };
+    const plate = add(
+      platePanelGeometry,
+      armorMaterial.clone(),
+      `octopus_plate_${i}`,
+      radial.x * 12.3,
+      5.7,
+      radial.z * 12.3,
+      { ry: Math.PI / 2 - angle, collide: true }
+    );
+    plate.rotation.order = 'YXZ';
+    plate.rotation.x = -0.42;
+
+    for (const dx of [-2.4, 2.4]) {
+      for (const dy of [-1.6, 1.6]) {
+        add(
+          rivetGeometry,
+          rivetMaterial,
+          `octopus_plate_rivet_${i}_${dx < 0 ? 'a' : 'b'}${dy < 0 ? 0 : 1}`,
+          radial.x * 12.85 + tangent.x * dx,
+          5.7 + dy,
+          radial.z * 12.85 + tangent.z * dx,
+          { shadow: false }
+        );
+      }
     }
   }
 
-  // 肋骨饰条
+  // 发光能量缝（板间，独立材质便于逐缝脉冲）
+  const plateEdgeGeometry = box(0.55, 4.4, 0.55);
   for (let i = 0; i < 8; i++) {
-    const angle = (i / 8) * Math.PI * 2;
-    const ribTrim = new THREE.Mesh(ribTrimGeometry, frameDetailMaterial);
-    ribTrim.position.set(Math.cos(angle) * 9.95, 2.6, Math.sin(angle) * 9.95);
-    ribTrim.rotation.y = -angle;
-    ribTrim.name = `octopus_rib_trim_${i}`;
-    ribTrim.castShadow = true;
-    group.add(ribTrim);
+    const angle = (i / 8) * Math.PI * 2 + Math.PI / 8;
+    add(
+      plateEdgeGeometry,
+      glowMaterial.clone(),
+      `octopus_plate_edge_${i}`,
+      Math.cos(angle) * 12.9,
+      5.7,
+      Math.sin(angle) * 12.9,
+      { ry: Math.PI / 2 - angle, shadow: false }
+    );
   }
+
+  // 下半球散热鳃缝
+  const ventGeometry = box(1.7, 0.5, 0.3);
+  for (let i = 0; i < 8; i++) {
+    const angle = (i / 8) * Math.PI * 2 + Math.PI / 8;
+    add(
+      ventGeometry,
+      rivetMaterial,
+      `octopus_gill_vent_${i}`,
+      Math.cos(angle) * 13.3,
+      -5.2,
+      Math.sin(angle) * 13.3,
+      { ry: Math.PI / 2 - angle, shadow: false }
+    );
+  }
+
+  // ===== 头冠穹顶与中央传感核心 =====
+  const topDome = add(
+    new THREE.SphereGeometry(8.6, 20, 14, 0, Math.PI * 2, 0, Math.PI / 2),
+    armorMaterial,
+    'octopus_top_dome',
+    0,
+    10.2,
+    0,
+    { collide: true }
+  );
+  topDome.castShadow = true;
+  add(ring(7.4, 0.4, 8, 26), frameMaterial, 'octopus_top_deck_ring', 0, 11.6, 0, {
+    rx: Math.PI / 2,
+  });
+  add(cyl(4.4, 5.4, 1.6, 14), armorDarkMaterial, 'octopus_crown_collar', 0, 14.2, 0);
+
+  // 顶部能量孔（瞬移充能口）
+  add(cyl(2.4, 2.9, 1.5, 16), energyMaterial.clone(), 'octopus_top_aperture', 0, 15.3, 0, {
+    shadow: false,
+  });
+
+  // 中央传感核心（外露的发光眼球 + 虹膜护圈）
+  add(ball(3.0, 18), glowMaterial.clone(), 'octopus_core_glow', 0, 16.9, 0, { shadow: false });
+  add(ring(3.5, 0.36, 10, 24), frameMaterial, 'octopus_core_iris_ring', 0, 16.9, 0, {
+    rx: Math.PI / 2,
+  });
 
   // 冠部舷窗（发光条）
+  const crownWindowGeometry = box(1.6, 0.45, 0.18);
   for (let i = 0; i < 4; i++) {
     const angle = (i / 4) * Math.PI * 2 + Math.PI / 8;
-    const crownWindow = new THREE.Mesh(crownWindowGeometry, crownWindowMaterial);
-    crownWindow.position.set(Math.cos(angle) * 4.9, 12.2, Math.sin(angle) * 4.9);
-    crownWindow.rotation.y = Math.PI / 2 - angle;
-    crownWindow.name = `octopus_crown_window_${i}`;
-    group.add(crownWindow);
+    add(
+      crownWindowGeometry,
+      crownWindowMaterial,
+      `octopus_crown_window_${i}`,
+      Math.cos(angle) * 4.9,
+      13.9,
+      Math.sin(angle) * 4.9,
+      { ry: Math.PI / 2 - angle, shadow: false }
+    );
   }
 
-  // 雷达盘（圆柱 + 环形格栅）
-  const radarPost = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.22, 1.2, 6), frameDetailMaterial);
-  radarPost.position.set(1.8, 13.4, 0);
-  radarPost.name = 'octopus_radar_post';
-  radarPost.castShadow = true;
-  group.add(radarPost);
-
-  const radarDish = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 1.1, 0.25, 12), plateDetailMaterial);
-  radarDish.position.set(1.8, 14.2, 0);
-  radarDish.rotation.z = 0.5;
-  radarDish.name = 'octopus_radar_dish';
-  radarDish.castShadow = true;
-  group.add(radarDish);
-
-  const radarLattice = new THREE.Mesh(new THREE.TorusGeometry(0.85, 0.07, 6, 14), frameDetailMaterial);
-  radarLattice.position.set(1.8, 14.2, 0);
-  radarLattice.rotation.set(Math.PI / 2, 0, 0.5);
-  radarLattice.name = 'octopus_radar_lattice';
-  radarLattice.castShadow = true;
-  group.add(radarLattice);
-
-  // 传感杆阵列
-  const sensorAngles = [0.8, 2.6, 4.5];
-  sensorAngles.forEach((angle, i) => {
-    const sensorRod = new THREE.Mesh(sensorRodGeometry, frameDetailMaterial);
-    sensorRod.position.set(Math.cos(angle) * 3.6, 13.3, Math.sin(angle) * 3.6);
-    sensorRod.name = `octopus_sensor_rod_${i}`;
-    sensorRod.castShadow = true;
-    group.add(sensorRod);
-  });
-
-  // 顶部甲板栏杆
-  for (let i = 0; i < 8; i++) {
-    const angle = (i / 8) * Math.PI * 2;
-    const railPost = new THREE.Mesh(railPostGeometry, frameDetailMaterial);
-    railPost.position.set(Math.cos(angle) * 6.1, 9.75, Math.sin(angle) * 6.1);
-    railPost.name = `octopus_rail_post_${i}`;
-    railPost.castShadow = true;
-    group.add(railPost);
-  }
-
-  const railRing = new THREE.Mesh(new THREE.TorusGeometry(6.1, 0.07, 6, 24), frameDetailMaterial);
-  railRing.rotation.x = Math.PI / 2;
-  railRing.position.set(0, 10.1, 0);
-  railRing.name = 'octopus_rail_ring';
-  railRing.castShadow = true;
-  group.add(railRing);
-
-  // 能量孔武备护鳍（不移动孔位锚点）
+  // 传感天线阵列（杆 + 发光端球）
+  const antennaGeometry = cyl(0.32, 0.5, 7.5, 8);
   for (let i = 0; i < 4; i++) {
-    const angle = (i / 4) * Math.PI * 2;
-
-    const topFin = new THREE.Mesh(apertureFinGeometry, plateDetailMaterial);
-    topFin.position.set(Math.cos(angle) * 3.3, 10.6, Math.sin(angle) * 3.3);
-    topFin.rotation.y = -angle;
-    topFin.name = `octopus_aperture_fin_top_${i}`;
-    topFin.castShadow = true;
-    group.add(topFin);
-
-    const bottomFin = new THREE.Mesh(apertureFinGeometry, plateDetailMaterial);
-    bottomFin.position.set(Math.cos(angle) * 3.3, -10.6, Math.sin(angle) * 3.3);
-    bottomFin.rotation.y = -angle;
-    bottomFin.name = `octopus_aperture_fin_bottom_${i}`;
-    bottomFin.castShadow = true;
-    group.add(bottomFin);
+    const angle = (i / 4) * Math.PI * 2 + Math.PI / 4;
+    const lean = 0.22;
+    add(
+      antennaGeometry,
+      sensorMaterial,
+      `octopus_antenna_${i}`,
+      Math.cos(angle) * 5.2,
+      17.6,
+      Math.sin(angle) * 5.2,
+      { rx: Math.sin(angle) * lean, rz: -Math.cos(angle) * lean, collide: true }
+    );
+    add(
+      ball(0.85, 10),
+      sensorMaterial.clone(),
+      `octopus_antenna_tip_${i}`,
+      Math.cos(angle) * 6.1,
+      21.3,
+      Math.sin(angle) * 6.1,
+      { shadow: false }
+    );
+    add(
+      ring(0.45, 0.09, 8, 14),
+      frameMaterial,
+      `octopus_antenna_collar_${i}`,
+      Math.cos(angle) * 5.4,
+      19.2,
+      Math.sin(angle) * 5.4,
+      { rx: Math.PI / 2 }
+    );
   }
 
-  // 眼部装甲座圈（围绕运行时眼睛位置，不移动眼睛锚点）
-  for (let i = 0; i < 8; i++) {
-    const angle = (i / 8) * Math.PI * 2;
-    const eyeSocket = new THREE.Mesh(eyeSocketGeometry, frameDetailMaterial);
-    eyeSocket.position.set(Math.cos(angle) * 14.9, 0, Math.sin(angle) * 14.9);
-    eyeSocket.rotation.y = Math.PI / 2 - angle;
-    eyeSocket.name = `octopus_eye_socket_${i}`;
-    eyeSocket.castShadow = true;
-    group.add(eyeSocket);
-  }
-
-  // 航行灯（左红右绿）
-  const leftRunningLight = new THREE.Mesh(runningLightGeometry, runningLightRedMaterial);
-  leftRunningLight.position.set(-11.6, 5.5, 0);
-  leftRunningLight.name = 'octopus_running_light_left';
-  group.add(leftRunningLight);
-
-  const rightRunningLight = new THREE.Mesh(runningLightGeometry, runningLightGreenMaterial);
-  rightRunningLight.position.set(11.6, 5.5, 0);
-  rightRunningLight.name = 'octopus_running_light_right';
-  group.add(rightRunningLight);
-
-  // 警示信标（慢速脉冲）
-  const beaconSpots = [
-    { x: -2.5, y: 12.95, z: 0 },
-    { x: 2.5, y: 12.95, z: 0 },
-    { x: 0, y: 12.95, z: -2.5 },
-    { x: 0, y: 12.95, z: 2.5 },
-    { x: 0, y: -13.6, z: 0 },
-  ];
-  beaconSpots.forEach((spot, i) => {
-    const beacon = new THREE.Mesh(beaconGeometry, beaconMaterial);
-    beacon.position.set(spot.x, spot.y, spot.z);
-    beacon.name = `octopus_signal_beacon_${i}`;
-    group.add(beacon);
+  // 旋转雷达盘（头冠侧）
+  add(cyl(0.18, 0.22, 1.2, 6), frameMaterial, 'octopus_radar_post', 1.9, 14.9, 0);
+  add(cyl(0.9, 1.1, 0.25, 12), armorDarkMaterial, 'octopus_radar_dish', 1.9, 15.6, 0, {
+    rz: 0.5,
+  });
+  add(ring(0.85, 0.07, 6, 14), frameMaterial, 'octopus_radar_lattice', 1.9, 15.6, 0, {
+    rx: Math.PI / 2,
+    rz: 0.5,
   });
 
-  // 腹部推进辉光点阵
+  // ===== 下腹与武器舱 =====
+  const bottomDome = add(
+    new THREE.SphereGeometry(8.2, 20, 14, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2),
+    armorMaterial,
+    'octopus_bottom_dome',
+    0,
+    -9.8,
+    0,
+    { collide: true }
+  );
+  bottomDome.castShadow = true;
+  add(ring(6.4, 0.38, 8, 26), frameMaterial, 'octopus_bottom_deck_ring', 0, -11.0, 0, {
+    rx: Math.PI / 2,
+  });
+  add(cyl(4.0, 5.0, 2.0, 14), frameMaterial, 'octopus_belly_housing', 0, -12.4, 0);
+
+  // 底部能量孔
+  add(cyl(2.4, 2.8, 1.5, 16), energyMaterial.clone(), 'octopus_bottom_aperture', 0, -11.6, 0, {
+    shadow: false,
+  });
+
+  // 腹部武器发射口（向下的炮口环阵）
+  const weaponPortGeometry = cyl(0.7, 0.85, 1.2, 8);
+  const portGlowGeometry = cyl(0.45, 0.45, 0.2, 8);
   for (let i = 0; i < 6; i++) {
     const angle = (i / 6) * Math.PI * 2;
-    const thrusterDot = new THREE.Mesh(thrusterDotGeometry, thrusterGlowMaterial);
-    thrusterDot.position.set(Math.cos(angle) * 3.4, -13.45, Math.sin(angle) * 3.4);
-    thrusterDot.name = `octopus_thruster_glow_${i}`;
-    group.add(thrusterDot);
+    add(
+      weaponPortGeometry,
+      armorDarkMaterial,
+      `octopus_weapon_port_${i}`,
+      Math.cos(angle) * 4.6,
+      -13.0,
+      Math.sin(angle) * 4.6
+    );
+    add(
+      portGlowGeometry,
+      energyMaterial,
+      `octopus_weapon_port_glow_${i}`,
+      Math.cos(angle) * 4.6,
+      -13.65,
+      Math.sin(angle) * 4.6,
+      { shadow: false }
+    );
   }
+
+  // 腹部推进辉光点阵
+  const thrusterDotGeometry = ball(0.4, 8);
+  for (let i = 0; i < 6; i++) {
+    const angle = (i / 6) * Math.PI * 2 + Math.PI / 6;
+    add(
+      thrusterDotGeometry,
+      thrusterGlowMaterial,
+      `octopus_thruster_glow_${i}`,
+      Math.cos(angle) * 2.6,
+      -13.5,
+      Math.sin(angle) * 2.6,
+      { shadow: false }
+    );
+  }
+
+  // ===== 8 条分节铰接触手（关节带波动动画钩子）=====
+  const tentacleSegmentLengths = [3.2, 2.8, 2.4, 2.0, 1.7, 1.4];
+  const tentacleSegmentRadii = [1.5, 1.22, 0.98, 0.76, 0.56, 0.38];
+  const tentacleSegmentGeometries = tentacleSegmentLengths.map(
+    (len, j) =>
+      new THREE.CylinderGeometry(
+        tentacleSegmentRadii[j],
+        j < tentacleSegmentLengths.length - 1 ? tentacleSegmentRadii[j + 1] : 0.16,
+        len,
+        8
+      )
+  );
+  const tentacleBandGeometries = [1, 2, 3].map(
+    (j) => new THREE.TorusGeometry(tentacleSegmentRadii[j] * 1.1, 0.14, 6, 10)
+  );
+  const tentacleTipGeometry = ball(0.42, 8);
+
+  for (let i = 0; i < 8; i++) {
+    const angle = (i / 8) * Math.PI * 2 + Math.PI / 8;
+    const root = new THREE.Group();
+    root.name = `octopus_tentacle_${i}`;
+    root.position.set(Math.cos(angle) * 8.0, -9.2, Math.sin(angle) * 8.0);
+    root.rotation.y = Math.PI / 2 - angle;
+    group.add(root);
+
+    let parent: THREE.Object3D = root;
+    let lastPivot: THREE.Object3D = root;
+    for (let j = 0; j < tentacleSegmentLengths.length; j++) {
+      const pivot = new THREE.Group();
+      pivot.name = `octopus_tentacle_${i}_pivot_${j}`;
+      pivot.position.y = j === 0 ? 0 : -tentacleSegmentLengths[j - 1];
+      const baseRot = j === 0 ? -1.25 : 0.28;
+      pivot.rotation.x = baseRot;
+      pivot.userData.swayBase = baseRot;
+      pivot.userData.swayPhase = i * 0.85 + j * 0.6;
+      pivot.userData.swayAmp = 0.05 + j * 0.022;
+      parent.add(pivot);
+
+      const segment = new THREE.Mesh(tentacleSegmentGeometries[j], tentacleMaterial);
+      segment.name = `octopus_tentacle_${i}_seg_${j}`;
+      segment.position.y = -tentacleSegmentLengths[j] / 2;
+      segment.castShadow = true;
+      pivot.add(segment);
+      if (j === 0) {
+        parts.push(segment);
+      }
+
+      if (j >= 1 && j <= 3) {
+        const band = new THREE.Mesh(tentacleBandGeometries[j - 1], frameMaterial);
+        band.name = `octopus_tentacle_${i}_band_${j}`;
+        band.rotation.x = Math.PI / 2;
+        pivot.add(band);
+      }
+
+      parent = pivot;
+      lastPivot = pivot;
+    }
+
+    const tip = new THREE.Mesh(tentacleTipGeometry, energyMaterial);
+    tip.name = `octopus_tentacle_tip_${i}`;
+    tip.position.y = -tentacleSegmentLengths[tentacleSegmentLengths.length - 1] - 0.15;
+    lastPivot.add(tip);
+  }
+
+  // ===== 航行灯与警示信标 =====
+  add(ball(0.45, 8), runningLightRedMaterial, 'octopus_running_light_left', -12.4, 5.8, 0, {
+    shadow: false,
+  });
+  add(ball(0.45, 8), runningLightGreenMaterial, 'octopus_running_light_right', 12.4, 5.8, 0, {
+    shadow: false,
+  });
+
+  const beaconGeometry = ball(0.5, 8);
+  [
+    { x: -2.6, y: 14.6, z: 0 },
+    { x: 2.6, y: 14.6, z: 0 },
+    { x: 0, y: 14.6, z: -2.6 },
+    { x: 0, y: 14.6, z: 2.6 },
+    { x: 0, y: -13.9, z: 0 },
+  ].forEach((spot, i) => {
+    add(beaconGeometry, beaconMaterial, `octopus_signal_beacon_${i}`, spot.x, spot.y, spot.z, {
+      shadow: false,
+    });
+  });
 
   group.name = `BOSS_${config.type}`;
   (group as BossGroup).bossParts = parts;

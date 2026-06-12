@@ -118,10 +118,14 @@ export interface WaterEnvironment {
 }
 
 export interface WorldscapeWaterOptions {
-  /** 水面边长（米） */
+  /** 水面边长（米，X 方向） */
   size: number;
-  /** 网格细分数 */
+  /** 网格细分数（X 方向） */
   grid: number;
+  /** Z 方向边长（米），缺省与 size 相同（方形水面，向后兼容） */
+  sizeZ?: number;
+  /** Z 方向网格细分数，缺省与 grid 相同 */
+  gridZ?: number;
   /** 局部水深采样（正 = 水下深度，负 = 旱地高出水面），按顶点烘焙 */
   depthAt: (x: number, z: number) => number;
   deepColor?: THREE.ColorRepresentation;
@@ -151,7 +155,12 @@ interface WaterUniforms {
 }
 
 export function buildWorldscapeWater(options: WorldscapeWaterOptions): WorldscapeWater {
-  const geo = new THREE.PlaneGeometry(options.size, options.size, options.grid, options.grid);
+  const geo = new THREE.PlaneGeometry(
+    options.size,
+    options.sizeZ ?? options.size,
+    options.grid,
+    options.gridZ ?? options.grid
+  );
   geo.rotateX(-Math.PI / 2);
 
   const pos = geo.attributes.position;

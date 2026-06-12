@@ -726,15 +726,15 @@ export const LEVELS: LevelConfig[] = [
         buildingTrimColor: 0xf2f8ff,
         windowColor: 0x7ed6ff,
       },
-      // 暮色钢城：石板灰、钢蓝与琥珀霓虹
+      // 暮色钢城：石板灰、钢蓝与琥珀霓虹（水体取第 1 关湖水的亮蓝绿，公园池塘/界河共用）
       designTokens: {
         terrainPrimary: 0x616f84,
         terrainSecondary: 0x3f4d5d,
         terrainAccent: 0x9ca9bc,
         vegetation: 0x44704c,
         vegetationAccent: 0x6a9a64,
-        water: 0x4a7d96,
-        waterDeep: 0x27485c,
+        water: 0x39a08c,
+        waterDeep: 0x16555e,
         waterSparkle: 0xa8dcef,
         structure: 0x5a718e,
         structureAccent: 0x8fa3ba,
@@ -745,11 +745,12 @@ export const LEVELS: LevelConfig[] = [
     },
     lighting: {
       ...DEFAULT_LEVEL_SCENE_CONFIG.lighting,
+      // 夜城提亮：环境光与半球光小幅上调，地面不再死黑，但保持夜景氛围
       ambientColor: 0xebf2ff,
-      ambientIntensity: 0.48,
+      ambientIntensity: 0.56,
       hemisphereSkyColor: 0xa2bbdf,
-      hemisphereGroundColor: 0x495866,
-      hemisphereIntensity: 0.62,
+      hemisphereGroundColor: 0x55626e,
+      hemisphereIntensity: 0.74,
       sunColor: 0xe7f1ff,
       sunIntensity: 1.04,
       sunPosition: { x: 110, y: 150, z: 58 },
@@ -784,7 +785,7 @@ export const LEVELS: LevelConfig[] = [
       exposure: 1.16,
       contrast: 1.18,
       saturation: 1.08,
-      bloomStrength: 0.06,
+      bloomStrength: 0.1,
       vignetteStrength: 0.09,
     },
     totalWaves: 7,

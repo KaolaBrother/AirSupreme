@@ -6,25 +6,266 @@ import { BOSS_MISSILE_CONFIG } from './BossTypes';
 const BOSS_MISSILE_TRAIL_INTERVAL = 0.04;
 
 // 弹体基准尺寸（乘以 BOSS_MISSILE_CONFIG.SCALE）。
-// 含弹头总长 ≈ 3.82 × SCALE，直径 0.52 × SCALE → 长径比 ≈ 7.3，重型巡航弹观感
+// 两级反舰/弹道混合构型：总长 ≈ 4.66 × SCALE ≈ 18.6 单位，
+// 主级直径 0.52 × SCALE、助推器直径 0.64 × SCALE → 玩家导弹的“恐怖大哥”体量
 const BOSS_BODY_RADIUS = 0.26;
-const BOSS_BODY_LENGTH = 2.9;
+const BOSS_BOOSTER_RADIUS = 0.32;
+const BOSS_TAIL_Z = -2.35;
+const BOSS_NOSE_Z = 2.31;
+// 弹体慢速滚转（弧度/秒），飞行朝向由外层 Group 四元数控制，不受影响
+const BOSS_ROLL_SPEED = 0.45;
+
+/**
+ * 弹体纵剖面（半径, 轴向位置，未乘 SCALE），从尾到头，车削成两级一体弹体：
+ * 收口喷管 → 尾裙 → 助推器段 → 凸起分离环 → 级间收束 → 主级弹体 → 大型雷达罩
+ */
+const BOSS_HULL_PROFILE: ReadonlyArray<readonly [number, number]> = [
+  [0.2, BOSS_TAIL_Z], // 喷口缘
+  [0.245, -2.31], // 喷口外唇
+  [0.275, -2.18], // 尾裙
+  [0.305, -2.0],
+  [BOSS_BOOSTER_RADIUS, -1.86], // 助推器最大半径
+  [BOSS_BOOSTER_RADIUS, -1.02], // 助推器段
+  [0.336, -0.97], // 凸起分离环
+  [0.336, -0.86],
+  [0.3, -0.81], // 级间收束
+  [0.27, -0.74],
+  [BOSS_BODY_RADIUS, -0.66],
+  [BOSS_BODY_RADIUS, 1.28], // 主级弹体
+  [0.2515, 1.32], // 头部舱段接缝凹槽
+  [BOSS_BODY_RADIUS, 1.36],
+  [0.247, 1.58], // 大型卵形雷达罩
+  [0.214, 1.81],
+  [0.165, 2.01],
+  [0.105, 2.17],
+  [0.05, 2.27],
+  [0.0, BOSS_NOSE_Z], // 弹尖
+];
+
+/**
+ * 车削弹体：按轴向位置重映射 v 坐标，使画布贴图能精确对位分段涂装
+ */
+function createHullGeometry(
+  profile: ReadonlyArray<readonly [number, number]>,
+  radialSegments: number,
+  scale: number
+): THREE.LatheGeometry {
+  const points = profile.map(([radius, z]) => new THREE.Vector2(radius * scale, z * scale));
+  const geometry = new THREE.LatheGeometry(points, radialSegments);
+  const position = geometry.getAttribute('position');
+  const uv = geometry.getAttribute('uv');
+  let minY = Infinity;
+  let maxY = -Infinity;
+  for (const point of points) {
+    if (point.y < minY) minY = point.y;
+    if (point.y > maxY) maxY = point.y;
+  }
+  const span = maxY - minY || 1;
+  for (let i = 0; i < position.count; i++) {
+    uv.setY(i, (position.getY(i) - minY) / span);
+  }
+  uv.needsUpdate = true;
+  geometry.rotateX(Math.PI / 2); // 车削轴 +Y → +Z 朝前
+  return geometry;
+}
+
+/**
+ * 薄翼面：在（弦向, 展向）平面定义平面形状后挤出厚度并倒角。
+ * 输出几何体弦向沿 +Z、展向沿 +Y、厚度沿 X，原点位于翼根弦线中点。
+ */
+function createFinGeometry(
+  outline: ReadonlyArray<readonly [number, number]>,
+  thickness: number,
+  bevel: number
+): THREE.ExtrudeGeometry {
+  const shape = new THREE.Shape();
+  shape.moveTo(outline[0][0], outline[0][1]);
+  for (let i = 1; i < outline.length; i++) {
+    shape.lineTo(outline[i][0], outline[i][1]);
+  }
+  shape.closePath();
+  const geometry = new THREE.ExtrudeGeometry(shape, {
+    depth: thickness,
+    steps: 1,
+    bevelEnabled: true,
+    bevelThickness: bevel,
+    bevelSize: bevel * 1.4,
+    bevelSegments: 1,
+  });
+  geometry.translate(0, 0, -thickness / 2);
+  geometry.rotateY(-Math.PI / 2);
+  return geometry;
+}
+
+/**
+ * 尾焰锥：尖端朝 -Z（向后），原点锚定在焰口平面，长度向后伸展
+ */
+function createFlameGeometry(radius: number, length: number, segments: number): THREE.ConeGeometry {
+  const geometry = new THREE.ConeGeometry(radius, length, segments, 1, true);
+  geometry.rotateX(-Math.PI / 2);
+  geometry.translate(0, 0, -length / 2);
+  return geometry;
+}
+
+let bossBodySkin: THREE.Texture | null | undefined;
+
+/** Boss 弹体程序化涂装贴图（构建一次全弹共享）：装甲拼板 / 传感器视窗 / 危险条纹 / 大型弦号 */
+function getBossBodySkin(): THREE.Texture | null {
+  if (bossBodySkin === undefined) {
+    bossBodySkin = createBossBodySkin();
+  }
+  return bossBodySkin;
+}
+
+function createBossBodySkin(): THREE.Texture | null {
+  if (typeof document === 'undefined') return null;
+  const width = 256;
+  const height = 512;
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return null;
+
+  // u = 周向，v = 轴向（弹尖在画布顶端）
+  const zSpan = BOSS_NOSE_Z - BOSS_TAIL_Z;
+  const zToPx = (z: number): number => ((BOSS_NOSE_Z - z) / zSpan) * height;
+  const paintBand = (zFront: number, zBack: number, color: string): void => {
+    const top = zToPx(zFront);
+    ctx.fillStyle = color;
+    ctx.fillRect(0, top, width, zToPx(zBack) - top);
+  };
+  const paintSeam = (z: number, color: string, thickness = 2): void => {
+    ctx.fillStyle = color;
+    ctx.fillRect(0, Math.round(zToPx(z)), width, thickness);
+  };
+  const stencil = (text: string, u: number, z: number, font: string, color: string): void => {
+    ctx.save();
+    ctx.font = font;
+    ctx.fillStyle = color;
+    ctx.translate(u, zToPx(z));
+    ctx.rotate(Math.PI / 2);
+    ctx.fillText(text, 0, 0);
+    ctx.restore();
+  };
+
+  // 基础：暗深红装甲底漆 + 拼板色差（深红/枪铁交错）
+  paintBand(BOSS_NOSE_Z, BOSS_TAIL_Z, '#4f181d');
+  const plateTints = [
+    'rgba(36,38,44,0.22)',
+    'rgba(110,32,36,0.30)',
+    'rgba(18,8,10,0.22)',
+    'rgba(122,54,42,0.14)',
+  ];
+  for (let i = 0; i < 40; i++) {
+    ctx.fillStyle = plateTints[i % plateTints.length];
+    ctx.fillRect(
+      Math.random() * width,
+      Math.random() * height,
+      20 + Math.random() * 42,
+      14 + Math.random() * 30
+    );
+  }
+
+  // 细装甲缝线（横向板缝 + 主级纵缝）
+  ctx.strokeStyle = 'rgba(18,6,8,0.6)';
+  ctx.lineWidth = 1;
+  for (let i = 0; i < 12; i++) {
+    ctx.strokeRect(-2, Math.random() * height, width + 4, 18 + Math.random() * 40);
+  }
+  for (let i = 0; i < 6; i++) {
+    const u = (i / 6) * width + 8;
+    ctx.beginPath();
+    ctx.moveTo(u, zToPx(1.28));
+    ctx.lineTo(u, zToPx(-0.66));
+    ctx.stroke();
+  }
+
+  // 枪铁黑雷达罩 + 断续传感器视窗带（青色冷光）
+  paintBand(BOSS_NOSE_Z, 1.56, '#1b1418');
+  paintBand(1.94, 1.8, '#08090d');
+  ctx.fillStyle = '#36d8ea';
+  for (let i = 0; i < 4; i++) {
+    ctx.fillRect(i * 64 + 10, Math.round(zToPx(1.885)), 30, 2);
+  }
+  paintSeam(1.56, '#0f0b0d', 3);
+
+  // 主级舱段缝 / 级间过渡 / 分离环琥珀标线
+  paintSeam(1.32, '#2a0d10');
+  paintSeam(-0.66, '#2a0d10');
+  paintBand(-0.78, -0.84, '#c8861f');
+  paintSeam(-1.02, '#2a0d10');
+
+  // 喷口前的黑黄危险条纹带（助推器尾段）
+  const hazardTop = zToPx(-1.98);
+  const hazardBottom = zToPx(-2.2);
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(0, hazardTop, width, hazardBottom - hazardTop);
+  ctx.clip();
+  ctx.fillStyle = '#d99a26';
+  ctx.fillRect(0, hazardTop, width, hazardBottom - hazardTop);
+  ctx.fillStyle = '#15130f';
+  for (let x = -32; x < width + 32; x += 32) {
+    ctx.beginPath();
+    ctx.moveTo(x, hazardBottom);
+    ctx.lineTo(x + 16, hazardTop);
+    ctx.lineTo(x + 32, hazardTop);
+    ctx.lineTo(x + 16, hazardBottom);
+    ctx.closePath();
+    ctx.fill();
+  }
+  ctx.restore();
+
+  // 大型弦侧编号 + 级段蚀刻 + 警示文字
+  stencil('HX-09', 36, 1.2, 'bold 26px monospace', 'rgba(206,184,162,0.88)');
+  stencil('HX-09', 164, 1.2, 'bold 26px monospace', 'rgba(206,184,162,0.88)');
+  stencil('DANGER', 104, 0.55, 'bold 11px monospace', 'rgba(216,154,38,0.8)');
+  stencil('STAGE-2', 36, -1.12, 'bold 12px monospace', 'rgba(206,184,162,0.65)');
+  stencil('STAGE-2', 164, -1.12, 'bold 12px monospace', 'rgba(206,184,162,0.65)');
+
+  // 分离环上方的警示三角
+  ctx.fillStyle = 'rgba(217,154,38,0.85)';
+  for (let i = 0; i < 4; i++) {
+    const u = i * 64 + 24;
+    const y = zToPx(-0.55);
+    ctx.beginPath();
+    ctx.moveTo(u, y);
+    ctx.lineTo(u + 12, y);
+    ctx.lineTo(u + 6, y - 10);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  // 战损/污渍噪点
+  for (let i = 0; i < 500; i++) {
+    ctx.fillStyle = `rgba(0,0,0,${(0.04 + Math.random() * 0.06).toFixed(3)})`;
+    ctx.fillRect(Math.random() * width, Math.random() * height, 1, 1);
+  }
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.anisotropy = 4;
+  texture.needsUpdate = true;
+  return texture;
+}
 
 /**
  * Boss 重型导弹共享几何体（全部预旋转为 +Z 朝前，烘焙 SCALE）
  */
 interface BossMissileGeometries {
-  body: THREE.CylinderGeometry;
-  noseFrustum: THREE.CylinderGeometry;
-  radome: THREE.ConeGeometry;
-  stripe: THREE.CylinderGeometry;
-  band: THREE.CylinderGeometry;
-  strake: THREE.BoxGeometry;
-  fin: THREE.BoxGeometry;
+  hull: THREE.LatheGeometry;
+  tailFin: THREE.ExtrudeGeometry;
+  strake: THREE.ExtrudeGeometry;
+  conduit: THREE.BoxGeometry;
+  armorPlate: THREE.BoxGeometry;
+  finTipLight: THREE.BoxGeometry;
+  separationRing: THREE.TorusGeometry;
   nozzleRing: THREE.TorusGeometry;
   nozzleCup: THREE.CylinderGeometry;
+  flameCore: THREE.ConeGeometry;
+  flameMid: THREE.ConeGeometry;
   flameOuter: THREE.ConeGeometry;
-  flameInner: THREE.ConeGeometry;
 }
 
 let sharedBossMissileGeometries: BossMissileGeometries | null = null;
@@ -32,48 +273,58 @@ let sharedBossMissileGeometries: BossMissileGeometries | null = null;
 function getBossMissileGeometries(): BossMissileGeometries {
   if (!sharedBossMissileGeometries) {
     const s = BOSS_MISSILE_CONFIG.SCALE;
-    const r = BOSS_BODY_RADIUS * s;
-    const len = BOSS_BODY_LENGTH * s;
 
-    // 细长主弹体
-    const body = new THREE.CylinderGeometry(r, r, len, 14);
-    body.rotateX(Math.PI / 2);
-    // 头部过渡锥台（弹体 → 雷达罩）
-    const noseFrustum = new THREE.CylinderGeometry(r * 0.5, r, 0.42 * s, 14);
-    noseFrustum.rotateX(Math.PI / 2);
-    // 钝头雷达罩
-    const radome = new THREE.ConeGeometry(r * 0.5, 0.5 * s, 14);
-    radome.rotateX(Math.PI / 2);
-    // 警示色带 / 检修面板带（略大于弹体半径，避免 z-fighting）
-    const stripe = new THREE.CylinderGeometry(r * 1.045, r * 1.045, 0.14 * s, 14);
-    stripe.rotateX(Math.PI / 2);
-    const band = new THREE.CylinderGeometry(r * 1.025, r * 1.025, 0.5 * s, 14);
-    band.rotateX(Math.PI / 2);
-    // 中段边条翼 / 大型十字尾翼
-    const strake = new THREE.BoxGeometry(0.05 * s, 0.22 * s, 1.3 * s);
-    const fin = new THREE.BoxGeometry(0.07 * s, 0.72 * s, 0.85 * s);
-    // 喷口环 + 喷管内衬（开口锥台）
-    const nozzleRing = new THREE.TorusGeometry(0.22 * s, 0.045 * s, 8, 18);
-    const nozzleCup = new THREE.CylinderGeometry(0.17 * s, 0.21 * s, 0.3 * s, 14, 1, true);
+    // 两级一体车削弹体（含分离环凸起与收口喷管，约 900 三角形）
+    const hull = createHullGeometry(BOSS_HULL_PROFILE, 24, s);
+    // 大型切角三角尾翼（X 布局，助推器段）
+    const tailFin = createFinGeometry(
+      [
+        [0.5 * s, 0],
+        [-0.1 * s, 0.55 * s],
+        [-0.38 * s, 0.55 * s],
+        [-0.5 * s, 0],
+      ],
+      0.06 * s,
+      0.012 * s
+    );
+    // 助推器低展弦比边条（+ 布局）
+    const strake = createFinGeometry(
+      [
+        [0.5 * s, 0],
+        [0.34 * s, 0.1 * s],
+        [-0.38 * s, 0.1 * s],
+        [-0.5 * s, 0],
+      ],
+      0.04 * s,
+      0.008 * s
+    );
+    // 主级电缆导管 / 装甲检修护板 / 翼尖警示灯
+    const conduit = new THREE.BoxGeometry(0.07 * s, 0.05 * s, 1.9 * s);
+    const armorPlate = new THREE.BoxGeometry(0.22 * s, 0.028 * s, 0.5 * s);
+    const finTipLight = new THREE.BoxGeometry(0.05 * s, 0.04 * s, 0.16 * s);
+    // 级间分离环 + 喷口环 + 喷管内衬
+    const separationRing = new THREE.TorusGeometry(0.345 * s, 0.022 * s, 6, 20);
+    const nozzleRing = new THREE.TorusGeometry(0.225 * s, 0.04 * s, 6, 16);
+    const nozzleCup = new THREE.CylinderGeometry(0.16 * s, 0.2 * s, 0.32 * s, 16, 1, true);
     nozzleCup.rotateX(Math.PI / 2);
-    // 双层尾焰（开口锥，尖端朝后）
-    const flameOuter = new THREE.ConeGeometry(0.24 * s, 1.6 * s, 12, 1, true);
-    flameOuter.rotateX(-Math.PI / 2);
-    const flameInner = new THREE.ConeGeometry(0.13 * s, 1.0 * s, 10, 1, true);
-    flameInner.rotateX(-Math.PI / 2);
+    // 三层尾焰：白热焰芯 / 橙红主焰 / 热霾外晕
+    const flameCore = createFlameGeometry(0.1 * s, 1.1 * s, 8);
+    const flameMid = createFlameGeometry(0.165 * s, 1.7 * s, 10);
+    const flameOuter = createFlameGeometry(0.25 * s, 2.4 * s, 12);
 
     sharedBossMissileGeometries = {
-      body,
-      noseFrustum,
-      radome,
-      stripe,
-      band,
+      hull,
+      tailFin,
       strake,
-      fin,
+      conduit,
+      armorPlate,
+      finTipLight,
+      separationRing,
       nozzleRing,
       nozzleCup,
+      flameCore,
+      flameMid,
       flameOuter,
-      flameInner,
     };
   }
   return sharedBossMissileGeometries;
@@ -81,10 +332,8 @@ function getBossMissileGeometries(): BossMissileGeometries {
 
 /** 静态外观材质（不参与脉动动画，全弹共享，不随单发销毁） */
 interface BossMissileStaticMaterials {
-  radome: THREE.MeshStandardMaterial;
   fin: THREE.MeshStandardMaterial;
-  stripe: THREE.MeshStandardMaterial;
-  band: THREE.MeshStandardMaterial;
+  greeble: THREE.MeshStandardMaterial;
   nozzleCup: THREE.MeshStandardMaterial;
 }
 
@@ -93,42 +342,233 @@ let sharedBossMissileMaterials: BossMissileStaticMaterials | null = null;
 function getBossMissileStaticMaterials(): BossMissileStaticMaterials {
   if (!sharedBossMissileMaterials) {
     sharedBossMissileMaterials = {
-      // 深色亮面雷达罩
-      radome: new THREE.MeshStandardMaterial({
-        color: 0x141418,
-        metalness: 0.6,
-        roughness: 0.18,
-      }),
       // 枪铁色翼面
       fin: new THREE.MeshStandardMaterial({
         color: 0x23262b,
         metalness: 0.85,
         roughness: 0.35,
       }),
-      // 琥珀色警示带
-      stripe: new THREE.MeshStandardMaterial({
-        color: 0xffb52e,
-        emissive: 0x8a5a00,
-        emissiveIntensity: 0.35,
-        metalness: 0.3,
-        roughness: 0.5,
-      }),
-      // 检修面板带
-      band: new THREE.MeshStandardMaterial({
-        color: 0x2a2d33,
+      // 导管/护板等机械附件：近黑哑光金属
+      greeble: new THREE.MeshStandardMaterial({
+        color: 0x1b1d21,
         metalness: 0.8,
-        roughness: 0.45,
+        roughness: 0.5,
       }),
       // 喷管内衬
       nozzleCup: new THREE.MeshStandardMaterial({
         color: 0x17171b,
         metalness: 0.95,
         roughness: 0.3,
+        emissive: 0x331106,
+        emissiveIntensity: 0.6,
         side: THREE.DoubleSide,
       }),
     };
   }
   return sharedBossMissileMaterials;
+}
+
+/** 逐发动画材质（威胁脉动/尾焰闪烁会修改它们，每次装配新建，战斗实例随单发销毁） */
+interface BossMissileAnimatedMaterials {
+  body: THREE.MeshStandardMaterial;
+  ring: THREE.MeshStandardMaterial;
+  thrust: THREE.MeshBasicMaterial;
+  midThrust: THREE.MeshBasicMaterial;
+  innerThrust: THREE.MeshBasicMaterial;
+  engineGlow: THREE.SpriteMaterial;
+}
+
+function createBossMissileAnimatedMaterials(): BossMissileAnimatedMaterials {
+  const skin = getBossBodySkin();
+  return {
+    // 弹体材质随威胁脉动（贴图为模块级共享，不随单发销毁）
+    body: new THREE.MeshStandardMaterial({
+      color: skin ? 0xffffff : 0x5e1b1f,
+      map: skin,
+      emissive: 0x3c0303,
+      emissiveIntensity: 0.18,
+      metalness: 0.55,
+      roughness: 0.42,
+    }),
+    ring: new THREE.MeshStandardMaterial({
+      color: 0xffaa00,
+      emissive: 0xff6600,
+      emissiveIntensity: 0.72,
+    }),
+    thrust: new THREE.MeshBasicMaterial({
+      color: 0xff3a10,
+      transparent: true,
+      opacity: 0.3,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    }),
+    midThrust: new THREE.MeshBasicMaterial({
+      color: 0xff7a22,
+      transparent: true,
+      opacity: 0.85,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    }),
+    innerThrust: new THREE.MeshBasicMaterial({
+      color: 0xfff0b0,
+      transparent: true,
+      opacity: 1,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    }),
+    engineGlow: new THREE.SpriteMaterial({
+      map: getVfxTextures().glow,
+      color: 0xff6a33,
+      transparent: true,
+      opacity: 0.85,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    }),
+  };
+}
+
+/** 装配产物中需要逐帧动画的节点 */
+interface BossMissileModelParts {
+  rollGroup: THREE.Group;
+  flameOuter: THREE.Mesh;
+  flameMid: THREE.Mesh;
+  flameCore: THREE.Mesh;
+  engineGlow: THREE.Sprite;
+}
+
+/**
+ * 装配两级重型反舰/弹道混合弹模型（仅视觉，+Z 朝前），战斗实例与预览工厂共用：
+ * 一体车削弹体（助推器 + 分离环 + 主级 + 大型雷达罩，装甲拼板/传感器视窗/
+ * 危险条纹/弦号涂装在共享画布贴图上）+ 主级电缆导管与装甲护板 greeble
+ * + 大型 X 布局尾翼与 + 布局助推器边条（翼尖警示灯）+ 凹陷喷管
+ * + 威胁脉动发光环 + 三层尾焰与引擎光晕，弹体部分置于滚转组内。
+ * 体量明显大于玩家导弹（总长 ≈ 4.66 × SCALE ≈ 18.6 单位）。
+ * 所有节点都引用模块级共享几何体/静态材质/贴图，统一标记
+ * userData.sharedResource，预览画廊销毁时会跳过这些共享资源。
+ */
+function assembleBossMissileModel(
+  group: THREE.Group,
+  materials: BossMissileAnimatedMaterials
+): BossMissileModelParts {
+  const s = BOSS_MISSILE_CONFIG.SCALE;
+  const geometries = getBossMissileGeometries();
+  const staticMaterials = getBossMissileStaticMaterials();
+
+  // 滚转组：弹体/附件/翼面随飞行缓慢滚转（飞行朝向由外层 Group 控制）
+  const rollGroup = new THREE.Group();
+  group.add(rollGroup);
+
+  const addRolling = (object: THREE.Object3D): void => {
+    object.userData.sharedResource = true;
+    rollGroup.add(object);
+  };
+  const add = (object: THREE.Object3D): void => {
+    object.userData.sharedResource = true;
+    group.add(object);
+  };
+
+  // 两级一体车削弹体
+  addRolling(new THREE.Mesh(geometries.hull, materials.body));
+
+  // 凹陷喷管内衬 + 喷口警示环（随威胁脉动）
+  const nozzleCup = new THREE.Mesh(geometries.nozzleCup, staticMaterials.nozzleCup);
+  nozzleCup.position.z = -2.18 * s;
+  addRolling(nozzleCup);
+
+  const nozzleRing = new THREE.Mesh(geometries.nozzleRing, materials.ring);
+  nozzleRing.position.z = -2.33 * s;
+  addRolling(nozzleRing);
+
+  // 级间分离环（琥珀发光，与贴图上的警示三角呼应）
+  const separationRing = new THREE.Mesh(geometries.separationRing, materials.ring);
+  separationRing.position.z = -0.915 * s;
+  addRolling(separationRing);
+
+  // 主级电缆导管（3 条，沿弹轴的凸起线缆槽）
+  const conduitOffset = (BOSS_BODY_RADIUS + 0.018) * s;
+  for (let i = 0; i < 3; i++) {
+    const angle = Math.PI / 2 + (i / 3) * Math.PI * 2;
+    const conduit = new THREE.Mesh(geometries.conduit, staticMaterials.greeble);
+    conduit.position.set(Math.cos(angle) * conduitOffset, Math.sin(angle) * conduitOffset, 0.3 * s);
+    conduit.rotation.z = angle - Math.PI / 2;
+    addRolling(conduit);
+  }
+
+  // 装甲检修护板（错落分布在主级表面）
+  const plateOffset = (BOSS_BODY_RADIUS + 0.008) * s;
+  const plateSlots: ReadonlyArray<readonly [number, number]> = [
+    [Math.PI / 4, 0.9],
+    [(3 * Math.PI) / 4, 0.35],
+    [(5 * Math.PI) / 4, 0.8],
+    [(7 * Math.PI) / 4, -0.1],
+  ];
+  for (const [angle, z] of plateSlots) {
+    const plate = new THREE.Mesh(geometries.armorPlate, staticMaterials.greeble);
+    plate.position.set(Math.cos(angle) * plateOffset, Math.sin(angle) * plateOffset, z * s);
+    plate.rotation.z = angle - Math.PI / 2;
+    addRolling(plate);
+  }
+
+  // 助推器边条（+ 布局）+ 大型尾翼（X 布局）+ 翼尖警示灯
+  const strakeOffset = (BOSS_BOOSTER_RADIUS - 0.01) * s;
+  const finOffset = 0.28 * s;
+  for (let i = 0; i < 4; i++) {
+    const strakeAngle = (i / 4) * Math.PI * 2;
+    const strake = new THREE.Mesh(geometries.strake, staticMaterials.fin);
+    strake.position.set(
+      Math.cos(strakeAngle) * strakeOffset,
+      Math.sin(strakeAngle) * strakeOffset,
+      -1.5 * s
+    );
+    strake.rotation.z = strakeAngle - Math.PI / 2;
+    addRolling(strake);
+
+    const finAngle = strakeAngle + Math.PI / 4;
+    const fin = new THREE.Mesh(geometries.tailFin, staticMaterials.fin);
+    fin.position.set(Math.cos(finAngle) * finOffset, Math.sin(finAngle) * finOffset, -1.78 * s);
+    fin.rotation.z = finAngle - Math.PI / 2;
+    addRolling(fin);
+
+    const tipLight = new THREE.Mesh(geometries.finTipLight, materials.ring);
+    tipLight.position.set(Math.cos(finAngle) * 0.8 * s, Math.sin(finAngle) * 0.8 * s, -2.0 * s);
+    tipLight.rotation.z = finAngle - Math.PI / 2;
+    addRolling(tipLight);
+  }
+
+  // 三层尾焰：焰口锚定喷管，向后伸展（高频闪烁见 updateVisuals）
+  const flameCore = new THREE.Mesh(geometries.flameCore, materials.innerThrust);
+  flameCore.position.z = -2.2 * s;
+  add(flameCore);
+
+  const flameMid = new THREE.Mesh(geometries.flameMid, materials.midThrust);
+  flameMid.position.z = -2.28 * s;
+  add(flameMid);
+
+  const flameOuter = new THREE.Mesh(geometries.flameOuter, materials.thrust);
+  flameOuter.position.z = -2.32 * s;
+  add(flameOuter);
+
+  // 引擎光晕 sprite：让 Boss 导弹在远距离也读得到威胁
+  const engineGlow = new THREE.Sprite(materials.engineGlow);
+  const glowSize = BOSS_BODY_RADIUS * s * 4.2;
+  engineGlow.scale.set(glowSize, glowSize, 1);
+  engineGlow.position.z = -2.4 * s;
+  add(engineGlow);
+
+  return { rollGroup, flameOuter, flameMid, flameCore, engineGlow };
+}
+
+/**
+ * 预览工厂：仅装配 Boss 导弹视觉模型（不需要场景/粒子系统/目标）。
+ * 动画材质为全新实例，模型画廊不会改动战斗弹使用的材质。
+ */
+export function createBossMissileVisualMesh(): THREE.Group {
+  const group = new THREE.Group();
+  assembleBossMissileModel(group, createBossMissileAnimatedMaterials());
+  return group;
 }
 
 export class BossMissile {
@@ -160,9 +600,14 @@ export class BossMissile {
   private bodyMaterial!: THREE.MeshStandardMaterial;
   private ringMaterial!: THREE.MeshStandardMaterial;
   private thrustMaterial!: THREE.MeshBasicMaterial;
+  private midThrustMaterial!: THREE.MeshBasicMaterial;
   private innerThrustMaterial!: THREE.MeshBasicMaterial;
   private engineGlowMaterial!: THREE.SpriteMaterial;
   private engineGlow!: THREE.Sprite;
+  private rollGroup!: THREE.Group;
+  private flameOuter!: THREE.Mesh;
+  private flameMid!: THREE.Mesh;
+  private flameCore!: THREE.Mesh;
 
   constructor(
     scene: THREE.Scene,
@@ -202,132 +647,33 @@ export class BossMissile {
   }
 
   /**
-   * 构建重型反舰/巡航弹模型（仅视觉，+Z 朝前）：
-   * 细长深红枪铁色弹体 + 钝头雷达罩 + 大型十字尾翼（X 布局）+ 中段边条翼
-   * + 琥珀警示带 / 检修面板带 + 喷口环喷管 + 既有的双层加色尾焰与引擎光晕。
-   * 体量明显大于玩家导弹（总长 ≈ 3.8 × SCALE ≈ 15 单位）。
+   * 构建导弹模型：装配逻辑与预览工厂共用（见 assembleBossMissileModel），
+   * 战斗实例持有动画材质与滚转组引用以驱动威胁脉动/尾焰闪烁/慢速滚转，
+   * 动画材质随单发销毁。
    */
   private buildMissileModel(): void {
-    const s = BOSS_MISSILE_CONFIG.SCALE;
-    const geometries = getBossMissileGeometries();
-    const staticMaterials = getBossMissileStaticMaterials();
-
-    // 弹体材质随威胁脉动，逐发持有
-    this.bodyMaterial = new THREE.MeshStandardMaterial({
-      color: 0x5e1b1f,
-      emissive: 0x3c0303,
-      emissiveIntensity: 0.18,
-      metalness: 0.75,
-      roughness: 0.35,
-    });
-    this.ringMaterial = new THREE.MeshStandardMaterial({
-      color: 0xffaa00,
-      emissive: 0xff6600,
-      emissiveIntensity: 0.72,
-    });
-    this.thrustMaterial = new THREE.MeshBasicMaterial({
-      color: 0xff4400,
-      transparent: true,
-      opacity: 0.9,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-      side: THREE.DoubleSide,
-    });
-    this.innerThrustMaterial = new THREE.MeshBasicMaterial({
-      color: 0xfff0b0,
-      transparent: true,
-      opacity: 1,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-      side: THREE.DoubleSide,
-    });
-    this.engineGlowMaterial = new THREE.SpriteMaterial({
-      map: getVfxTextures().glow,
-      color: 0xff6a33,
-      transparent: true,
-      opacity: 0.85,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-    });
+    const materials = createBossMissileAnimatedMaterials();
+    this.bodyMaterial = materials.body;
+    this.ringMaterial = materials.ring;
+    this.thrustMaterial = materials.thrust;
+    this.midThrustMaterial = materials.midThrust;
+    this.innerThrustMaterial = materials.innerThrust;
+    this.engineGlowMaterial = materials.engineGlow;
     this.ownedMaterials.push(
-      this.bodyMaterial,
-      this.ringMaterial,
-      this.thrustMaterial,
-      this.innerThrustMaterial,
-      this.engineGlowMaterial
+      materials.body,
+      materials.ring,
+      materials.thrust,
+      materials.midThrust,
+      materials.innerThrust,
+      materials.engineGlow
     );
 
-    // 主弹体（中心 z=0，前后各 1.45s）
-    const body = new THREE.Mesh(geometries.body, this.bodyMaterial);
-    this.mesh.add(body);
-
-    // 头部过渡锥台 + 钝头雷达罩
-    const noseFrustum = new THREE.Mesh(geometries.noseFrustum, this.bodyMaterial);
-    noseFrustum.position.z = 1.66 * s;
-    this.mesh.add(noseFrustum);
-
-    const radome = new THREE.Mesh(geometries.radome, staticMaterials.radome);
-    radome.position.z = 2.12 * s;
-    this.mesh.add(radome);
-
-    // 警示带（头/尾各一道）+ 中段检修面板带
-    const stripeFront = new THREE.Mesh(geometries.stripe, staticMaterials.stripe);
-    stripeFront.position.z = 1.2 * s;
-    this.mesh.add(stripeFront);
-
-    const stripeRear = new THREE.Mesh(geometries.stripe, staticMaterials.stripe);
-    stripeRear.position.z = -1.0 * s;
-    this.mesh.add(stripeRear);
-
-    const panelBand = new THREE.Mesh(geometries.band, staticMaterials.band);
-    panelBand.position.z = 0.35 * s;
-    this.mesh.add(panelBand);
-
-    // 中段边条翼（十字直列）+ 大型尾翼（X 布局，更具压迫感）
-    const strakeOffset = (BOSS_BODY_RADIUS + 0.11) * s;
-    const finOffset = (BOSS_BODY_RADIUS + 0.36) * s;
-    for (let i = 0; i < 4; i++) {
-      const strakeAngle = (i / 4) * Math.PI * 2;
-      const strake = new THREE.Mesh(geometries.strake, staticMaterials.fin);
-      strake.position.x = Math.cos(strakeAngle) * strakeOffset;
-      strake.position.y = Math.sin(strakeAngle) * strakeOffset;
-      strake.position.z = 0.1 * s;
-      strake.rotation.z = strakeAngle + Math.PI / 2;
-      this.mesh.add(strake);
-
-      const finAngle = strakeAngle + Math.PI / 4;
-      const fin = new THREE.Mesh(geometries.fin, staticMaterials.fin);
-      fin.position.x = Math.cos(finAngle) * finOffset;
-      fin.position.y = Math.sin(finAngle) * finOffset;
-      fin.position.z = -1.15 * s;
-      fin.rotation.z = finAngle + Math.PI / 2;
-      this.mesh.add(fin);
-    }
-
-    // 喷口环 + 喷管内衬，衔接双层尾焰
-    const nozzleRing = new THREE.Mesh(geometries.nozzleRing, this.ringMaterial);
-    nozzleRing.position.z = -1.47 * s;
-    this.mesh.add(nozzleRing);
-
-    const nozzleCup = new THREE.Mesh(geometries.nozzleCup, staticMaterials.nozzleCup);
-    nozzleCup.position.z = -1.5 * s;
-    this.mesh.add(nozzleCup);
-
-    // 外层橙红尾焰 + 内层白热焰芯（加色混合，高频闪烁见 updateVisuals）
-    const thrust = new THREE.Mesh(geometries.flameOuter, this.thrustMaterial);
-    thrust.position.z = -2.27 * s;
-    this.mesh.add(thrust);
-
-    const innerThrust = new THREE.Mesh(geometries.flameInner, this.innerThrustMaterial);
-    innerThrust.position.z = -1.97 * s;
-    this.mesh.add(innerThrust);
-
-    // 引擎光晕 sprite：让 Boss 导弹在远距离也读得到威胁
-    this.engineGlow = new THREE.Sprite(this.engineGlowMaterial);
-    const glowSize = BOSS_BODY_RADIUS * s * 4.2;
-    this.engineGlow.scale.set(glowSize, glowSize, 1);
-    this.engineGlow.position.z = -1.75 * s;
-    this.mesh.add(this.engineGlow);
+    const parts = assembleBossMissileModel(this.mesh, materials);
+    this.rollGroup = parts.rollGroup;
+    this.flameOuter = parts.flameOuter;
+    this.flameMid = parts.flameMid;
+    this.flameCore = parts.flameCore;
+    this.engineGlow = parts.engineGlow;
   }
 
   public update(deltaTime: number): void {
@@ -438,8 +784,23 @@ export class BossMissile {
     const flicker = 0.5 + 0.3 * Math.sin(t * 46) + 0.2 * Math.sin(t * 73 + 1.3);
     this.bodyMaterial.emissiveIntensity = 0.12 + pulse * 0.16;
     this.ringMaterial.emissiveIntensity = 0.56 + pulse * 0.42;
-    this.thrustMaterial.opacity = 0.55 + flicker * 0.35;
+
+    // 弹体缓慢滚转（朝向由外层 Group 的四元数控制，不受影响）
+    this.rollGroup.rotation.z = t * BOSS_ROLL_SPEED;
+
+    // 三层尾焰：焰口锚定喷管，焰长与径向随闪烁抖动
+    this.thrustMaterial.opacity = 0.18 + flicker * 0.16;
+    const outerScale = 0.85 + flicker * 0.3;
+    this.flameOuter.scale.set(outerScale, outerScale, 0.8 + flicker * 0.45);
+
+    this.midThrustMaterial.opacity = 0.5 + flicker * 0.35;
+    const midScale = 0.85 + flicker * 0.3;
+    this.flameMid.scale.set(midScale, midScale, 0.82 + flicker * 0.42);
+
     this.innerThrustMaterial.opacity = 0.7 + flicker * 0.3;
+    const coreScale = 0.88 + flicker * 0.28;
+    this.flameCore.scale.set(coreScale, coreScale, 0.85 + flicker * 0.45);
+
     this.engineGlowMaterial.opacity = 0.5 + flicker * 0.4;
     const glowPulse = 1 + flicker * 0.45;
     const glowBase = BOSS_BODY_RADIUS * BOSS_MISSILE_CONFIG.SCALE * 4.2;

@@ -36,6 +36,7 @@ export class MissileDestroyerAI {
   private launcherCaps: THREE.Mesh[] = [];
   private exhaustGlows: THREE.Mesh[] = [];
   private signalBeacons: THREE.Mesh[] = [];
+  private radarArray: THREE.Object3D | null = null;
   private readonly hitFlashColor = new THREE.Color(0xd8f7ff);
   private readonly weakpointBaseColor = new THREE.Color(0xff703e);
   private readonly weakpointCriticalColor = new THREE.Color(0xffb87d);
@@ -156,20 +157,21 @@ export class MissileDestroyerAI {
     this.signalBeacons = this.mesh.children.filter((child) =>
       child.name.startsWith('destroyer_signal_beacon_')
     ) as THREE.Mesh[];
+    this.radarArray = this.mesh.getObjectByName('destroyer_radar_array') ?? null;
   }
 
   private updateVisualEffects(): void {
     const healthRatio = this.getHealth().current / this.getHealth().max;
     const alertBoost = 1 + (1 - healthRatio) * 0.65;
     const criticalState = THREE.MathUtils.clamp(
-      (MissileDestroyerAI.CRITICAL_HEALTH_THRESHOLD - healthRatio)
-        / MissileDestroyerAI.CRITICAL_HEALTH_THRESHOLD,
+      (MissileDestroyerAI.CRITICAL_HEALTH_THRESHOLD - healthRatio) /
+        MissileDestroyerAI.CRITICAL_HEALTH_THRESHOLD,
       0,
       1
     );
     const terminalState = THREE.MathUtils.clamp(
-      (MissileDestroyerAI.TERMINAL_HEALTH_THRESHOLD - healthRatio)
-        / MissileDestroyerAI.TERMINAL_HEALTH_THRESHOLD,
+      (MissileDestroyerAI.TERMINAL_HEALTH_THRESHOLD - healthRatio) /
+        MissileDestroyerAI.TERMINAL_HEALTH_THRESHOLD,
       0,
       1
     );
@@ -180,12 +182,13 @@ export class MissileDestroyerAI {
     const phaseSeparation = 1 + terminalWarning * 0.9 + criticalState * 0.25;
     const damagePhase = hitFlash * 0.68 + terminalWarning * 0.38;
     const criticalPulse =
-      (Math.sin(this.animationTime * MissileDestroyerAI.CRITICAL_PULSE_SPEED) * 0.5 + 0.5)
-      * criticalState;
+      (Math.sin(this.animationTime * MissileDestroyerAI.CRITICAL_PULSE_SPEED) * 0.5 + 0.5) *
+      criticalState;
     const terminalPulse =
-      (Math.sin(this.animationTime * MissileDestroyerAI.TERMINAL_PULSE_SPEED) * 0.5 + 0.5)
-      * terminalState;
-    const bridgePulse = Math.sin(this.animationTime * MissileDestroyerAI.WEAKPOINT_PULSE_SPEED) * 0.5 + 0.5;
+      (Math.sin(this.animationTime * MissileDestroyerAI.TERMINAL_PULSE_SPEED) * 0.5 + 0.5) *
+      terminalState;
+    const bridgePulse =
+      Math.sin(this.animationTime * MissileDestroyerAI.WEAKPOINT_PULSE_SPEED) * 0.5 + 0.5;
     this.setGlowState(this.bridgeWindow, {
       intensity:
         0.35 +
@@ -200,10 +203,7 @@ export class MissileDestroyerAI {
           this.weakpointCriticalColor,
           bridgePulse * 0.35 + criticalPulse * 0.15 + criticalBias * 0.25
         )
-        .lerp(
-          this.terminalColor,
-          terminalState * 0.74 + terminalPulse * 0.36 + terminalBias * 0.2
-        )
+        .lerp(this.terminalColor, terminalState * 0.74 + terminalPulse * 0.36 + terminalBias * 0.2)
         .lerp(this.hitFlashColor, hitFlash * 0.65),
     });
 
@@ -237,7 +237,10 @@ export class MissileDestroyerAI {
         color: this.weaponBaseColor
           .clone()
           .lerp(this.weaponCriticalColor, criticalState + criticalPulse * 0.25 + criticalBias * 0.2)
-          .lerp(this.terminalColor, terminalState * 0.52 + terminalPulse * 0.37 + terminalBias * 0.2)
+          .lerp(
+            this.terminalColor,
+            terminalState * 0.52 + terminalPulse * 0.37 + terminalBias * 0.2
+          )
           .lerp(this.hitFlashColor, hitFlash * 0.25),
       });
     }
@@ -274,12 +277,16 @@ export class MissileDestroyerAI {
         color: this.weaponBaseColor
           .clone()
           .lerp(this.weaponCriticalColor, criticalState + (isNextLauncher ? 0.1 : 0))
-          .lerp(this.terminalColor, terminalState * 0.48 + terminalPulse * 0.34 + terminalBias * 0.2)
+          .lerp(
+            this.terminalColor,
+            terminalState * 0.48 + terminalPulse * 0.34 + terminalBias * 0.2
+          )
           .lerp(this.hitFlashColor, hitFlash * 0.3),
       });
     }
 
-    const enginePulse = Math.sin(this.animationTime * MissileDestroyerAI.ENERGY_PULSE_SPEED) * 0.5 + 0.5;
+    const enginePulse =
+      Math.sin(this.animationTime * MissileDestroyerAI.ENERGY_PULSE_SPEED) * 0.5 + 0.5;
     for (const exhaustGlow of this.exhaustGlows) {
       this.setGlowState(exhaustGlow, {
         intensity:
@@ -300,7 +307,10 @@ export class MissileDestroyerAI {
           .clone()
           .lerp(this.hitFlashColor, hitFlash * 0.22)
           .lerp(this.energyCriticalColor, criticalState * 0.25 + criticalBias * 0.22)
-          .lerp(this.terminalColor, terminalState * 0.38 + terminalPulse * 0.25 + terminalBias * 0.2),
+          .lerp(
+            this.terminalColor,
+            terminalState * 0.38 + terminalPulse * 0.25 + terminalBias * 0.2
+          ),
       });
     }
 
@@ -309,6 +319,11 @@ export class MissileDestroyerAI {
       Math.sin(this.animationTime * MissileDestroyerAI.BEACON_PULSE_SPEED) * 0.5 + 0.5;
     for (const beacon of this.signalBeacons) {
       this.setBeaconOpacity(beacon, 0.3 + beaconWave * 0.7);
+    }
+
+    // 桅顶导航雷达持续旋转
+    if (this.radarArray) {
+      this.radarArray.rotation.y = this.animationTime * 1.5;
     }
   }
 
@@ -323,11 +338,7 @@ export class MissileDestroyerAI {
       return 0;
     }
 
-    return THREE.MathUtils.clamp(
-      this.hitFlashTimer / MissileDestroyerAI.HIT_FLASH_DURATION,
-      0,
-      1
-    );
+    return THREE.MathUtils.clamp(this.hitFlashTimer / MissileDestroyerAI.HIT_FLASH_DURATION, 0, 1);
   }
 
   private setGlowState(
@@ -545,14 +556,16 @@ export class MissileDestroyerAI {
     while (this.mesh.children.length > 0) {
       const child = this.mesh.children[0];
       this.mesh.remove(child);
-      if (child instanceof THREE.Mesh) {
-        child.geometry.dispose();
-        if (Array.isArray(child.material)) {
-          child.material.forEach((m) => m.dispose());
-        } else if (child.material instanceof THREE.Material) {
-          child.material.dispose();
+      child.traverse((node) => {
+        if (node instanceof THREE.Mesh) {
+          node.geometry.dispose();
+          if (Array.isArray(node.material)) {
+            node.material.forEach((m) => m.dispose());
+          } else if (node.material instanceof THREE.Material) {
+            node.material.dispose();
+          }
         }
-      }
+      });
     }
   }
 }
@@ -562,589 +575,107 @@ export function createMissileDestroyerMesh(config: BossConfig): THREE.Group {
   const scale = config.scale;
   const parts: THREE.Mesh[] = [];
 
+  // ===== 几何构造辅助（尺寸单位：未缩放的设计单位，舰艏朝 +Z 即航向）=====
+  const box = (w: number, h: number, d: number) =>
+    new THREE.BoxGeometry(w * scale, h * scale, d * scale);
+  const cyl = (rTop: number, rBottom: number, h: number, seg = 10) =>
+    new THREE.CylinderGeometry(rTop * scale, rBottom * scale, h * scale, seg);
+  const cone = (r: number, h: number, seg = 10) =>
+    new THREE.ConeGeometry(r * scale, h * scale, seg);
+  const ball = (r: number, seg = 10) => new THREE.SphereGeometry(r * scale, seg, seg);
+  const ring = (r: number, tube: number, radSeg = 8, tubSeg = 20) =>
+    new THREE.TorusGeometry(r * scale, tube * scale, radSeg, tubSeg);
+
+  const add = (
+    geometry: THREE.BufferGeometry,
+    material: THREE.Material,
+    name: string,
+    x: number,
+    y: number,
+    z: number,
+    options: { rx?: number; ry?: number; rz?: number; collide?: boolean; shadow?: boolean } = {}
+  ): THREE.Mesh => {
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.position.set(x * scale, y * scale, z * scale);
+    if (options.rx !== undefined) mesh.rotation.x = options.rx;
+    if (options.ry !== undefined) mesh.rotation.y = options.ry;
+    if (options.rz !== undefined) mesh.rotation.z = options.rz;
+    mesh.name = name;
+    mesh.castShadow = options.shadow !== false;
+    group.add(mesh);
+    if (options.collide) parts.push(mesh);
+    return mesh;
+  };
+
+  // ===== 材质（白昼海面可读的雾灰海军涂装）=====
   const hullMaterial = new THREE.MeshStandardMaterial({
     color: 0x5f7892,
-    metalness: 0.64,
-    roughness: 0.18,
+    metalness: 0.55,
+    roughness: 0.34,
     emissive: 0x254867,
-    emissiveIntensity: 0.24,
+    emissiveIntensity: 0.12,
   });
-
+  const lowerHullMaterial = new THREE.MeshStandardMaterial({
+    color: new THREE.Color(0x5f7892).offsetHSL(0, 0.02, -0.16),
+    metalness: 0.6,
+    roughness: 0.4,
+  });
+  const bootTopMaterial = new THREE.MeshStandardMaterial({
+    color: 0x6e2b22,
+    metalness: 0.4,
+    roughness: 0.5,
+  });
   const deckMaterial = new THREE.MeshStandardMaterial({
     color: 0x8ea2b7,
     metalness: 0.42,
-    roughness: 0.24,
+    roughness: 0.34,
     emissive: 0x274863,
-    emissiveIntensity: 0.18,
+    emissiveIntensity: 0.1,
   });
-
   const superstructureMaterial = new THREE.MeshStandardMaterial({
     color: 0xa5b7c8,
-    metalness: 0.52,
-    roughness: 0.18,
-    emissive: 0x2e5373,
-    emissiveIntensity: 0.22,
-  });
-
-  const glowMaterial = new THREE.MeshStandardMaterial({
-    color: 0x55cfff,
-    emissive: 0x11b8ff,
-    emissiveIntensity: 1.15,
     metalness: 0.5,
-    roughness: 0.15,
+    roughness: 0.28,
+    emissive: 0x2e5373,
+    emissiveIntensity: 0.12,
   });
-
-  const commandMaterial = new THREE.MeshStandardMaterial({
-    color: 0xc7d8e6,
+  const trimMaterial = new THREE.MeshStandardMaterial({
+    color: 0xe6eef4,
     metalness: 0.66,
-    roughness: 0.14,
-    emissive: 0x2f5678,
-    emissiveIntensity: 0.26,
+    roughness: 0.18,
+    emissive: 0x41637e,
+    emissiveIntensity: 0.12,
   });
-
-  const weaponDeckMaterial = new THREE.MeshStandardMaterial({
+  const weaponMaterial = new THREE.MeshStandardMaterial({
     color: 0x6f8399,
     metalness: 0.86,
-    roughness: 0.14,
+    roughness: 0.18,
     emissive: 0x324e69,
-    emissiveIntensity: 0.24,
+    emissiveIntensity: 0.16,
   });
-
-  const exhaustMaterial = new THREE.MeshStandardMaterial({
-    color: 0x66d8ff,
-    emissive: 0x26c4ff,
-    emissiveIntensity: 0.95,
-    metalness: 0.48,
-    roughness: 0.14,
-  });
-
-  const hullTrimMaterial = new THREE.MeshStandardMaterial({
-    color: 0xe6eef4,
-    metalness: 0.72,
-    roughness: 0.12,
-    emissive: 0x41637e,
-    emissiveIntensity: 0.2,
-  });
-
-  const hullLength = 24;
-  const hullWidth = 6;
-  const hullHeight = 3;
-
-  const hull = new THREE.Mesh(
-    new THREE.BoxGeometry(hullLength * scale, hullHeight * scale, hullWidth * scale),
-    hullMaterial
-  );
-  hull.position.set(0, hullHeight * scale * 0.5, 0);
-  hull.name = 'destroyer_hull';
-  hull.castShadow = true;
-  group.add(hull);
-  parts.push(hull);
-
-  const hullStripe = new THREE.Mesh(
-    new THREE.BoxGeometry(hullLength * scale * 0.82, 0.25 * scale, 0.45 * scale),
-    hullTrimMaterial
-  );
-  hullStripe.position.set(0, hullHeight * scale + 0.2 * scale, 0);
-  hullStripe.name = 'destroyer_hull_stripe';
-  hullStripe.castShadow = true;
-  group.add(hullStripe);
-
-  const armorBeltPort = new THREE.Mesh(
-    new THREE.BoxGeometry(hullLength * scale * 0.78, 1 * scale, 0.24 * scale),
-    hullTrimMaterial.clone()
-  );
-  armorBeltPort.position.set(0, hullHeight * scale * 0.55, -(hullWidth * 0.5 + 0.18) * scale);
-  armorBeltPort.name = 'destroyer_armor_belt_port';
-  armorBeltPort.castShadow = true;
-  group.add(armorBeltPort);
-
-  const armorBeltStarboard = new THREE.Mesh(
-    new THREE.BoxGeometry(hullLength * scale * 0.78, 1 * scale, 0.24 * scale),
-    hullTrimMaterial.clone()
-  );
-  armorBeltStarboard.position.set(0, hullHeight * scale * 0.55, (hullWidth * 0.5 + 0.18) * scale);
-  armorBeltStarboard.name = 'destroyer_armor_belt_starboard';
-  armorBeltStarboard.castShadow = true;
-  group.add(armorBeltStarboard);
-
-  const bow = new THREE.Mesh(
-    new THREE.ConeGeometry(hullWidth * scale * 0.5, 4 * scale, 4),
-    hullMaterial
-  );
-  bow.rotation.z = -Math.PI / 2;
-  bow.rotation.y = Math.PI / 4;
-  bow.position.set(-(hullLength * 0.5 + 1.5) * scale, hullHeight * scale * 0.5, 0);
-  bow.name = 'destroyer_bow';
-  bow.castShadow = true;
-  group.add(bow);
-  parts.push(bow);
-
-  const deck = new THREE.Mesh(
-    new THREE.BoxGeometry(hullLength * scale * 0.9, 0.5 * scale, hullWidth * scale * 0.9),
-    deckMaterial
-  );
-  deck.position.set(0, hullHeight * scale + 0.25 * scale, 0);
-  deck.name = 'destroyer_deck';
-  deck.castShadow = true;
-  group.add(deck);
-  parts.push(deck);
-
-  const foreDeckArmor = new THREE.Mesh(
-    new THREE.BoxGeometry(7 * scale, 0.22 * scale, 4.8 * scale),
-    deckMaterial.clone()
-  );
-  foreDeckArmor.position.set(-6.8 * scale, hullHeight * scale + 0.57 * scale, 0);
-  foreDeckArmor.name = 'destroyer_fore_deck_armor';
-  foreDeckArmor.castShadow = true;
-  group.add(foreDeckArmor);
-
-  const foreSpine = new THREE.Mesh(
-    new THREE.BoxGeometry(7.8 * scale, 0.24 * scale, 0.7 * scale),
-    hullTrimMaterial.clone()
-  );
-  foreSpine.position.set(-6.2 * scale, hullHeight * scale + 0.72 * scale, 0);
-  foreSpine.name = 'destroyer_fore_spine';
-  foreSpine.castShadow = true;
-  group.add(foreSpine);
-
-  const aftDeckArmor = new THREE.Mesh(
-    new THREE.BoxGeometry(6 * scale, 0.22 * scale, 4.6 * scale),
-    deckMaterial.clone()
-  );
-  aftDeckArmor.position.set(4.8 * scale, hullHeight * scale + 0.57 * scale, 0);
-  aftDeckArmor.name = 'destroyer_aft_deck_armor';
-  aftDeckArmor.castShadow = true;
-  group.add(aftDeckArmor);
-
-  const aftSpine = new THREE.Mesh(
-    new THREE.BoxGeometry(6.8 * scale, 0.24 * scale, 0.7 * scale),
-    hullTrimMaterial.clone()
-  );
-  aftSpine.position.set(4.8 * scale, hullHeight * scale + 0.72 * scale, 0);
-  aftSpine.name = 'destroyer_aft_spine';
-  aftSpine.castShadow = true;
-  group.add(aftSpine);
-
-  for (let i = 0; i < 2; i++) {
-    const deckEdgeTrim = new THREE.Mesh(
-      new THREE.BoxGeometry(15.8 * scale, 0.18 * scale, 0.22 * scale),
-      hullTrimMaterial.clone()
-    );
-    deckEdgeTrim.position.set(0, hullHeight * scale + 0.6 * scale, (i === 0 ? -2.85 : 2.85) * scale);
-    deckEdgeTrim.name = `destroyer_deck_edge_trim_${i}`;
-    deckEdgeTrim.castShadow = true;
-    group.add(deckEdgeTrim);
-  }
-
-  const bridge = new THREE.Mesh(
-    new THREE.BoxGeometry(4 * scale, 4 * scale, 3 * scale),
-    commandMaterial
-  );
-  bridge.position.set(2 * scale, hullHeight * scale + 2.5 * scale, 0);
-  bridge.name = 'destroyer_bridge';
-  bridge.castShadow = true;
-  group.add(bridge);
-  parts.push(bridge);
-
-  const bridgeSidePodLeft = new THREE.Mesh(
-    new THREE.BoxGeometry(0.9 * scale, 2.1 * scale, 1.4 * scale),
-    commandMaterial.clone()
-  );
-  bridgeSidePodLeft.position.set(2.5 * scale, hullHeight * scale + 2.1 * scale, -2.25 * scale);
-  bridgeSidePodLeft.name = 'destroyer_bridge_side_pod_left';
-  bridgeSidePodLeft.castShadow = true;
-  group.add(bridgeSidePodLeft);
-
-  const bridgeSidePodRight = new THREE.Mesh(
-    new THREE.BoxGeometry(0.9 * scale, 2.1 * scale, 1.4 * scale),
-    commandMaterial.clone()
-  );
-  bridgeSidePodRight.position.set(2.5 * scale, hullHeight * scale + 2.1 * scale, 2.25 * scale);
-  bridgeSidePodRight.name = 'destroyer_bridge_side_pod_right';
-  bridgeSidePodRight.castShadow = true;
-  group.add(bridgeSidePodRight);
-
-  const bridgeCrown = new THREE.Mesh(
-    new THREE.BoxGeometry(2.8 * scale, 0.35 * scale, 2.2 * scale),
-    hullTrimMaterial
-  );
-  bridgeCrown.position.set(2 * scale, hullHeight * scale + 4.6 * scale, 0);
-  bridgeCrown.name = 'destroyer_bridge_crown';
-  bridgeCrown.castShadow = true;
-  group.add(bridgeCrown);
-
-  const bridgeMidDeck = new THREE.Mesh(
-    new THREE.BoxGeometry(3.2 * scale, 0.32 * scale, 2.5 * scale),
-    deckMaterial.clone()
-  );
-  bridgeMidDeck.position.set(1.9 * scale, hullHeight * scale + 3.55 * scale, 0);
-  bridgeMidDeck.name = 'destroyer_bridge_mid_deck';
-  bridgeMidDeck.castShadow = true;
-  group.add(bridgeMidDeck);
-
-  const bridgeRearBlock = new THREE.Mesh(
-    new THREE.BoxGeometry(1.8 * scale, 1.6 * scale, 2.2 * scale),
-    commandMaterial.clone()
-  );
-  bridgeRearBlock.position.set(3.55 * scale, hullHeight * scale + 2.4 * scale, 0);
-  bridgeRearBlock.name = 'destroyer_bridge_rear_block';
-  bridgeRearBlock.castShadow = true;
-  group.add(bridgeRearBlock);
-
-  for (let i = 0; i < 2; i++) {
-    const bridgeShoulder = new THREE.Mesh(
-      new THREE.BoxGeometry(1.35 * scale, 1.3 * scale, 1.7 * scale),
-      commandMaterial.clone()
-    );
-    bridgeShoulder.position.set(0.9 * scale, hullHeight * scale + 2.3 * scale, (i === 0 ? -2.2 : 2.2) * scale);
-    bridgeShoulder.name = `destroyer_bridge_shoulder_${i}`;
-    bridgeShoulder.castShadow = true;
-    group.add(bridgeShoulder);
-  }
-
-  const bridgeWindow = new THREE.Mesh(
-    new THREE.BoxGeometry(0.2 * scale, 1.5 * scale, 2 * scale),
-    new THREE.MeshStandardMaterial({
-      color: 0x00aaff,
-      emissive: 0x00aaff,
-      emissiveIntensity: 0.5,
-      metalness: 0.9,
-      roughness: 0.1,
-    })
-  );
-  bridgeWindow.position.set(2 * scale - 2.1 * scale, hullHeight * scale + 3 * scale, 0);
-  bridgeWindow.name = 'destroyer_bridge_window';
-  group.add(bridgeWindow);
-  parts.push(bridgeWindow);
-
-  const mast = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.3 * scale, 0.3 * scale, 5 * scale, 8),
-    superstructureMaterial
-  );
-  mast.position.set(2 * scale, hullHeight * scale + 6.5 * scale, 0);
-  mast.name = 'destroyer_mast';
-  mast.castShadow = true;
-  group.add(mast);
-  parts.push(mast);
-
-  const radar = new THREE.Mesh(
-    new THREE.BoxGeometry(0.2 * scale, 1.5 * scale, 2 * scale),
-    new THREE.MeshStandardMaterial({
-      color: 0x888888,
-      metalness: 0.8,
-      roughness: 0.2,
-    })
-  );
-  radar.position.set(2 * scale, hullHeight * scale + 8 * scale, 0);
-  radar.name = 'destroyer_radar';
-  group.add(radar);
-  parts.push(radar);
-
-  const radarFrame = new THREE.Mesh(
-    new THREE.TorusGeometry(0.95 * scale, 0.08 * scale, 8, 16),
-    hullTrimMaterial.clone()
-  );
-  radarFrame.rotation.y = Math.PI / 2;
-  radarFrame.position.set(2 * scale, hullHeight * scale + 8 * scale, 0);
-  radarFrame.name = 'destroyer_radar_frame';
-  radarFrame.castShadow = true;
-  group.add(radarFrame);
-
-  const radarSupportLeft = new THREE.Mesh(
-    new THREE.BoxGeometry(0.18 * scale, 1.4 * scale, 0.18 * scale),
-    hullTrimMaterial.clone()
-  );
-  radarSupportLeft.position.set(1.45 * scale, hullHeight * scale + 7.1 * scale, -0.8 * scale);
-  radarSupportLeft.name = 'destroyer_radar_support_left';
-  radarSupportLeft.castShadow = true;
-  group.add(radarSupportLeft);
-
-  const radarSupportRight = radarSupportLeft.clone();
-  radarSupportRight.position.z = 0.8 * scale;
-  radarSupportRight.name = 'destroyer_radar_support_right';
-  group.add(radarSupportRight);
-
-  const flakPositions = [
-    {
-      name: 'front_left',
-      pos: new THREE.Vector3(-8 * scale, hullHeight * scale + 1 * scale, -2.5 * scale),
-    },
-    {
-      name: 'front_right',
-      pos: new THREE.Vector3(-8 * scale, hullHeight * scale + 1 * scale, 2.5 * scale),
-    },
-    {
-      name: 'back_left',
-      pos: new THREE.Vector3(6 * scale, hullHeight * scale + 1 * scale, -2.5 * scale),
-    },
-    {
-      name: 'back_right',
-      pos: new THREE.Vector3(6 * scale, hullHeight * scale + 1 * scale, 2.5 * scale),
-    },
-  ];
-
-  for (const flakPos of flakPositions) {
-    const base = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.5 * scale, 0.6 * scale, 0.5 * scale, 8),
-      weaponDeckMaterial
-    );
-    base.position.copy(flakPos.pos);
-    base.name = `destroyer_flak_base_${flakPos.name}`;
-    base.castShadow = true;
-    group.add(base);
-    parts.push(base);
-
-    const barrel = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.15 * scale, 0.15 * scale, 2.5 * scale, 8),
-      weaponDeckMaterial
-    );
-    barrel.position.copy(flakPos.pos);
-    barrel.position.y += 1.2 * scale;
-    barrel.rotation.x = -Math.PI / 3;
-    barrel.name = `destroyer_flak_barrel_${flakPos.name}`;
-    barrel.castShadow = true;
-    group.add(barrel);
-    parts.push(barrel);
-
-    const muzzle = new THREE.Mesh(
-      new THREE.SphereGeometry(0.18 * scale, 8, 8),
-      new THREE.MeshStandardMaterial({
-        color: 0xff8f4a,
-        emissive: 0xff5a00,
-        emissiveIntensity: 1,
-        metalness: 0.35,
-        roughness: 0.2,
-      })
-    );
-    muzzle.position.copy(barrel.position);
-    muzzle.position.y += 0.8 * scale;
-    muzzle.position.z += flakPos.name.includes('left') ? -0.48 * scale : 0.48 * scale;
-    muzzle.name = `destroyer_flak_muzzle_${flakPos.name}`;
-    group.add(muzzle);
-  }
-
-  const missileLauncherPositions = [
-    {
-      name: 'front_left',
-      pos: new THREE.Vector3(-4 * scale, hullHeight * scale + 1.5 * scale, -2 * scale),
-    },
-    {
-      name: 'front_right',
-      pos: new THREE.Vector3(-4 * scale, hullHeight * scale + 1.5 * scale, 2 * scale),
-    },
-    {
-      name: 'back_left',
-      pos: new THREE.Vector3(0 * scale, hullHeight * scale + 1.5 * scale, -2 * scale),
-    },
-    {
-      name: 'back_right',
-      pos: new THREE.Vector3(0 * scale, hullHeight * scale + 1.5 * scale, 2 * scale),
-    },
-  ];
-
-  for (const launcherPos of missileLauncherPositions) {
-    const launcher = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.8 * scale, 0.8 * scale, 3 * scale, 8),
-      weaponDeckMaterial
-    );
-    launcher.position.copy(launcherPos.pos);
-    launcher.name = `destroyer_missile_launcher_${launcherPos.name}`;
-    launcher.castShadow = true;
-    group.add(launcher);
-    parts.push(launcher);
-
-    const launcherCollar = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.95 * scale, 0.95 * scale, 0.24 * scale, 10),
-      hullTrimMaterial.clone()
-    );
-    launcherCollar.position.copy(launcherPos.pos);
-    launcherCollar.position.y += 1.64 * scale;
-    launcherCollar.name = `destroyer_launcher_collar_${launcherPos.name}`;
-    launcherCollar.castShadow = true;
-    group.add(launcherCollar);
-
-    const launcherSupport = new THREE.Mesh(
-      new THREE.BoxGeometry(1.4 * scale, 0.4 * scale, 1.4 * scale),
-      weaponDeckMaterial.clone()
-    );
-    launcherSupport.position.copy(launcherPos.pos);
-    launcherSupport.position.y -= 1.1 * scale;
-    launcherSupport.name = `destroyer_launcher_support_${launcherPos.name}`;
-    launcherSupport.castShadow = true;
-    group.add(launcherSupport);
-
-    const launcherFrame = new THREE.Mesh(
-      new THREE.BoxGeometry(1.75 * scale, 0.2 * scale, 1.75 * scale),
-      hullTrimMaterial.clone()
-    );
-    launcherFrame.position.copy(launcherPos.pos);
-    launcherFrame.position.y += 1.78 * scale;
-    launcherFrame.name = `destroyer_launcher_frame_${launcherPos.name}`;
-    launcherFrame.castShadow = true;
-    group.add(launcherFrame);
-
-    const launcherCap = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.58 * scale, 0.68 * scale, 0.3 * scale, 8),
-      glowMaterial
-    );
-    launcherCap.position.copy(launcherPos.pos);
-    launcherCap.position.y += 1.65 * scale;
-    launcherCap.name = `destroyer_launcher_cap_${launcherPos.name}`;
-    group.add(launcherCap);
-
-    const cellCount = 4;
-    for (let i = 0; i < cellCount; i++) {
-      const cell = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.25 * scale, 0.25 * scale, 0.5 * scale, 6),
-        new THREE.MeshStandardMaterial({
-          color: 0x4c5a6b,
-          metalness: 0.9,
-          roughness: 0.14,
-          emissive: 0x1f2b3a,
-          emissiveIntensity: 0.08,
-        })
-      );
-      const angle = (i / cellCount) * Math.PI * 2;
-      cell.position.copy(launcherPos.pos);
-      cell.position.x += Math.cos(angle) * 0.4 * scale;
-      cell.position.z += Math.sin(angle) * 0.4 * scale;
-      cell.position.y += 1.5 * scale;
-      cell.name = `destroyer_missile_cell_${launcherPos.name}_${i}`;
-      group.add(cell);
-      parts.push(cell);
-    }
-  }
-
-  for (let i = 0; i < 2; i++) {
-    const midshipModule = new THREE.Mesh(
-      new THREE.BoxGeometry(3.4 * scale, 1.4 * scale, 1.8 * scale),
-      superstructureMaterial.clone()
-    );
-    midshipModule.position.set((-1.4 + i * 4.8) * scale, hullHeight * scale + 1.55 * scale, 0);
-    midshipModule.name = `destroyer_midship_module_${i}`;
-    midshipModule.castShadow = true;
-    group.add(midshipModule);
-    parts.push(midshipModule);
-  }
-
-  for (let i = 0; i < 2; i++) {
-    const hangarBlock = new THREE.Mesh(
-      new THREE.BoxGeometry(3.2 * scale, 1.9 * scale, 2.4 * scale),
-      deckMaterial.clone()
-    );
-    hangarBlock.position.set(8.1 * scale, hullHeight * scale + 1.75 * scale, (i === 0 ? -1.7 : 1.7) * scale);
-    hangarBlock.name = `destroyer_aft_hangar_block_${i}`;
-    hangarBlock.castShadow = true;
-    group.add(hangarBlock);
-    parts.push(hangarBlock);
-  }
-
-  for (let i = 0; i < 2; i++) {
-    const vlsCluster = new THREE.Mesh(
-      new THREE.BoxGeometry(2.4 * scale, 0.22 * scale, 1.8 * scale),
-      hullTrimMaterial.clone()
-    );
-    vlsCluster.position.set((-6.3 + i * 10.6) * scale, hullHeight * scale + 0.92 * scale, 0);
-    vlsCluster.name = `destroyer_vls_cluster_${i}`;
-    vlsCluster.castShadow = true;
-    group.add(vlsCluster);
-
-    for (let cell = 0; cell < 6; cell++) {
-      const vlsCell = new THREE.Mesh(
-        new THREE.BoxGeometry(0.42 * scale, 0.18 * scale, 0.42 * scale),
-        weaponDeckMaterial.clone()
-      );
-      vlsCell.position.set(
-        (-7.1 + i * 10.6 + (cell % 3) * 0.75) * scale,
-        hullHeight * scale + 1.05 * scale,
-        (-0.55 + Math.floor(cell / 3) * 1.1) * scale
-      );
-      vlsCell.name = `destroyer_vls_cell_${i}_${cell}`;
-      vlsCell.castShadow = true;
-      group.add(vlsCell);
-    }
-  }
-
-  const funnels = [{ x: 3.5 * scale, z: 0 }];
-
-  for (let i = 0; i < funnels.length; i++) {
-    const funnel = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.4 * scale, 0.5 * scale, 2 * scale, 8),
-      superstructureMaterial
-    );
-    funnel.position.set(funnels[i].x, hullHeight * scale + 3 * scale, funnels[i].z);
-    funnel.name = `destroyer_funnel_${i}`;
-    funnel.castShadow = true;
-    group.add(funnel);
-    parts.push(funnel);
-
-    const exhaustGlow = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.22 * scale, 0.3 * scale, 0.35 * scale, 8),
-      exhaustMaterial
-    );
-    exhaustGlow.position.set(funnels[i].x, hullHeight * scale + 4.15 * scale, funnels[i].z);
-    exhaustGlow.name = `destroyer_exhaust_glow_${i}`;
-    group.add(exhaustGlow);
-  }
-
-  const keel = new THREE.Mesh(
-    new THREE.BoxGeometry(hullLength * scale * 0.62, 0.55 * scale, 0.9 * scale),
-    hullMaterial.clone()
-  );
-  keel.position.set(0, -0.05 * scale, 0);
-  keel.name = 'destroyer_keel';
-  keel.castShadow = true;
-  group.add(keel);
-
-  for (let i = 0; i < 3; i++) {
-    const sidePanelPort = new THREE.Mesh(
-      new THREE.BoxGeometry(3.6 * scale, 0.7 * scale, 0.16 * scale),
-      hullTrimMaterial.clone()
-    );
-    sidePanelPort.position.set((-7 + i * 7) * scale, hullHeight * scale * 0.7, -(hullWidth * 0.5 + 0.28) * scale);
-    sidePanelPort.name = `destroyer_side_panel_port_${i}`;
-    sidePanelPort.castShadow = true;
-    group.add(sidePanelPort);
-
-    const sidePanelStarboard = sidePanelPort.clone();
-    sidePanelStarboard.position.z = (hullWidth * 0.5 + 0.28) * scale;
-    sidePanelStarboard.name = `destroyer_side_panel_starboard_${i}`;
-    group.add(sidePanelStarboard);
-  }
-
-  const sideStabilizerLeft = new THREE.Mesh(
-    new THREE.BoxGeometry(5 * scale, 0.26 * scale, 0.9 * scale),
-    superstructureMaterial.clone()
-  );
-  sideStabilizerLeft.position.set(-1 * scale, hullHeight * scale * 0.38, -(hullWidth * 0.5 + 0.65) * scale);
-  sideStabilizerLeft.name = 'destroyer_side_stabilizer_left';
-  sideStabilizerLeft.castShadow = true;
-  group.add(sideStabilizerLeft);
-
-  const sideStabilizerRight = new THREE.Mesh(
-    new THREE.BoxGeometry(5 * scale, 0.26 * scale, 0.9 * scale),
-    superstructureMaterial.clone()
-  );
-  sideStabilizerRight.position.set(-1 * scale, hullHeight * scale * 0.38, (hullWidth * 0.5 + 0.65) * scale);
-  sideStabilizerRight.name = 'destroyer_side_stabilizer_right';
-  sideStabilizerRight.castShadow = true;
-  group.add(sideStabilizerRight);
-
-  // ===== 细节增强：船体镶板 / 上层结构 / 武备细节 / 信号灯 =====
-  const hullPlateDetailMaterial = new THREE.MeshStandardMaterial({
-    color: new THREE.Color(0x5f7892).offsetHSL(0, 0.05, -0.07),
-    metalness: 0.68,
-    roughness: 0.2,
-  });
-  const deckDetailMaterial = new THREE.MeshStandardMaterial({
-    color: new THREE.Color(0x8ea2b7).offsetHSL(0, 0.04, -0.1),
-    metalness: 0.5,
-    roughness: 0.26,
-  });
-  const armamentDetailMaterial = new THREE.MeshStandardMaterial({
-    color: new THREE.Color(0x6f8399).offsetHSL(0, 0.05, -0.08),
+  const darkMetalMaterial = new THREE.MeshStandardMaterial({
+    color: 0x434f5b,
     metalness: 0.88,
-    roughness: 0.16,
+    roughness: 0.24,
+  });
+  const spyPanelMaterial = new THREE.MeshStandardMaterial({
+    color: 0x7e93a8,
+    metalness: 0.7,
+    roughness: 0.2,
+    emissive: 0x2a4a66,
+    emissiveIntensity: 0.3,
+  });
+  const ciwsDomeMaterial = new THREE.MeshStandardMaterial({
+    color: 0xeef2f5,
+    metalness: 0.4,
+    roughness: 0.3,
+  });
+  const bridgeWindowMaterial = new THREE.MeshStandardMaterial({
+    color: 0x00aaff,
+    emissive: 0x00aaff,
+    emissiveIntensity: 0.5,
+    metalness: 0.9,
+    roughness: 0.1,
   });
   const sideWindowMaterial = new THREE.MeshStandardMaterial({
     color: 0x7fc4ef,
@@ -1152,6 +683,44 @@ export function createMissileDestroyerMesh(config: BossConfig): THREE.Group {
     emissiveIntensity: 0.85,
     metalness: 0.6,
     roughness: 0.1,
+  });
+  const glowMaterial = new THREE.MeshStandardMaterial({
+    color: 0x55cfff,
+    emissive: 0x11b8ff,
+    emissiveIntensity: 1.15,
+    metalness: 0.5,
+    roughness: 0.15,
+  });
+  const muzzleGlowMaterial = new THREE.MeshStandardMaterial({
+    color: 0xff8f4a,
+    emissive: 0xff5a00,
+    emissiveIntensity: 1,
+    metalness: 0.35,
+    roughness: 0.2,
+  });
+  const exhaustMaterial = new THREE.MeshStandardMaterial({
+    color: 0x66d8ff,
+    emissive: 0x26c4ff,
+    emissiveIntensity: 0.95,
+    metalness: 0.48,
+    roughness: 0.14,
+  });
+  const heloMarkMaterial = new THREE.MeshStandardMaterial({
+    color: 0xf2f6f9,
+    metalness: 0.3,
+    roughness: 0.4,
+    emissive: 0x4a606e,
+    emissiveIntensity: 0.18,
+  });
+  const numberPlateMaterial = new THREE.MeshStandardMaterial({
+    color: 0xf4f7fa,
+    metalness: 0.35,
+    roughness: 0.35,
+  });
+  const rhibMaterial = new THREE.MeshStandardMaterial({
+    color: 0x39424c,
+    metalness: 0.5,
+    roughness: 0.5,
   });
   const runningLightRedMaterial = new THREE.MeshBasicMaterial({ color: 0xff2a2a });
   const runningLightGreenMaterial = new THREE.MeshBasicMaterial({ color: 0x2aff5a });
@@ -1166,224 +735,501 @@ export function createMissileDestroyerMesh(config: BossConfig): THREE.Group {
     opacity: 0.85,
   });
 
-  // 复用几何体
-  const hullPlateGeometry = new THREE.BoxGeometry(1.8 * scale, 0.5 * scale, 0.12 * scale);
-  const deckRibGeometry = new THREE.BoxGeometry(0.18 * scale, 0.14 * scale, 5.0 * scale);
-  const sideWindowGeometry = new THREE.BoxGeometry(1.8 * scale, 0.32 * scale, 0.1 * scale);
-  const antennaRodGeometry = new THREE.CylinderGeometry(
-    0.045 * scale,
-    0.06 * scale,
-    2.2 * scale,
-    6
-  );
-  const railPostGeometry = new THREE.BoxGeometry(0.05 * scale, 0.35 * scale, 0.05 * scale);
-  const railBarGeometry = new THREE.BoxGeometry(13.5 * scale, 0.04 * scale, 0.04 * scale);
-  const flakSleeveGeometry = new THREE.CylinderGeometry(0.2 * scale, 0.24 * scale, 0.6 * scale, 8);
-  const flakAmmoGeometry = new THREE.BoxGeometry(0.6 * scale, 0.4 * scale, 0.5 * scale);
-  const flakShieldGeometry = new THREE.BoxGeometry(0.12 * scale, 0.6 * scale, 1.2 * scale);
-  const deflectorGeometry = new THREE.BoxGeometry(1.7 * scale, 0.12 * scale, 1.0 * scale);
-  const runningLightGeometry = new THREE.SphereGeometry(0.16 * scale, 8, 8);
-  const beaconGeometry = new THREE.SphereGeometry(0.18 * scale, 8, 8);
-  const thrusterDiscGeometry = new THREE.CylinderGeometry(0.4 * scale, 0.4 * scale, 0.15 * scale, 10);
-
-  // 船舷镶板
-  for (let side = 0; side < 2; side++) {
-    for (let i = 0; i < 6; i++) {
-      const hullPlate = new THREE.Mesh(hullPlateGeometry, hullPlateDetailMaterial);
-      hullPlate.position.set(
-        (-9 + i * 3.6) * scale,
-        1.1 * scale,
-        (side === 0 ? -1 : 1) * (hullWidth * 0.5 + 0.22) * scale
-      );
-      hullPlate.name = `destroyer_hull_plate_${side === 0 ? 'port' : 'starboard'}_${i}`;
-      hullPlate.castShadow = true;
-      group.add(hullPlate);
-    }
-  }
-
-  // 甲板横向肋条
-  const deckRibXs = [-10.5, -2.5, 10.5];
-  deckRibXs.forEach((x, i) => {
-    const deckRib = new THREE.Mesh(deckRibGeometry, deckDetailMaterial);
-    deckRib.position.set(x * scale, (hullHeight + 0.55) * scale, 0);
-    deckRib.name = `destroyer_deck_rib_${i}`;
-    deckRib.castShadow = true;
-    group.add(deckRib);
+  // ===== 舰体（阿利·伯克风格：飞剪艏 + 折角舷墙 + 直壁船舯）=====
+  add(box(4.8, 1.2, 22), lowerHullMaterial, 'destroyer_lower_hull', 0, 0.55, 0, {
+    collide: true,
   });
+  add(box(6, 2.0, 26), hullMaterial, 'destroyer_hull', 0, 2.0, 0, { collide: true });
+  add(cone(2.6, 5, 4), hullMaterial, 'destroyer_bow', 0, 1.75, 15.4, {
+    rx: Math.PI / 2,
+    collide: true,
+  });
+  add(box(5.7, 2.1, 0.55), hullMaterial, 'destroyer_stern_transom', 0, 1.95, -13.2);
 
-  // 烟囱箍带
-  const funnelCollar = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.46 * scale, 0.46 * scale, 0.18 * scale, 10),
-    armamentDetailMaterial
-  );
-  funnelCollar.position.set(3.5 * scale, (hullHeight + 3.7) * scale, 0);
-  funnelCollar.name = 'destroyer_funnel_collar';
-  funnelCollar.castShadow = true;
-  group.add(funnelCollar);
-
-  // 舰桥侧舷窗（发光条）
-  for (let i = 0; i < 2; i++) {
-    const sideWindow = new THREE.Mesh(sideWindowGeometry, sideWindowMaterial);
-    sideWindow.position.set(
-      2 * scale,
-      (hullHeight + 3.4) * scale,
-      (i === 0 ? -1.55 : 1.55) * scale
+  // 水线红色防污带
+  for (const side of [-1, 1] as const) {
+    add(
+      box(0.14, 0.5, 21.5),
+      bootTopMaterial,
+      `destroyer_boot_top_${side < 0 ? 'port' : 'starboard'}`,
+      side * 3.04,
+      1.05,
+      0,
+      { shadow: false }
     );
-    sideWindow.name = `destroyer_bridge_side_window_${i}`;
-    group.add(sideWindow);
   }
 
-  // 天线阵列与横桁
-  const antennaSpots = [
-    { x: 1.45, y: 5.3, z: -0.55 },
-    { x: 2.65, y: 5.5, z: 0.4 },
-    { x: 1.3, y: 5.6, z: 0.75 },
-  ];
-  antennaSpots.forEach((spot, i) => {
-    const antenna = new THREE.Mesh(antennaRodGeometry, deckDetailMaterial);
-    antenna.position.set(spot.x * scale, (hullHeight + spot.y) * scale, spot.z * scale);
-    antenna.name = `destroyer_antenna_rod_${i}`;
-    antenna.castShadow = true;
-    group.add(antenna);
+  // 舰艏球鼻声呐罩与舭龙骨
+  const sonarDome = add(ball(0.85, 10), darkMetalMaterial, 'destroyer_sonar_dome', 0, 0.55, 13.2);
+  sonarDome.scale.set(0.8, 0.6, 1.4);
+  for (const side of [-1, 1] as const) {
+    add(
+      box(0.5, 0.14, 12),
+      darkMetalMaterial,
+      `destroyer_bilge_keel_${side < 0 ? 'port' : 'starboard'}`,
+      side * 2.6,
+      0.35,
+      0
+    );
+  }
+
+  // 主甲板
+  add(box(5.6, 0.4, 23.5), deckMaterial, 'destroyer_deck', 0, 3.15, 0.5, { collide: true });
+  add(box(3.2, 0.32, 3.4), deckMaterial, 'destroyer_bow_deck', 0, 3.05, 14.0);
+
+  // 船舷镶板与舷窗
+  const hullPlateGeometry = box(0.12, 0.6, 2.2);
+  for (const side of [-1, 1] as const) {
+    for (let i = 0; i < 5; i++) {
+      add(
+        hullPlateGeometry,
+        lowerHullMaterial,
+        `destroyer_hull_plate_${side < 0 ? 'port' : 'starboard'}_${i}`,
+        side * 3.07,
+        2.3,
+        -9 + i * 4.4,
+        { shadow: false }
+      );
+    }
+  }
+
+  // 舷侧舰号牌（白色铭牌 + 暗色编号条）
+  const digitGeometry = box(0.03, 0.42, 0.16);
+  for (const side of [-1, 1] as const) {
+    add(
+      box(0.08, 0.75, 1.4),
+      numberPlateMaterial,
+      `destroyer_hull_number_plate_${side < 0 ? 'port' : 'starboard'}`,
+      side * 3.06,
+      2.35,
+      11.0
+    );
+    for (let d = 0; d < 3; d++) {
+      add(
+        digitGeometry,
+        darkMetalMaterial,
+        `destroyer_hull_number_digit_${side < 0 ? 'port' : 'starboard'}_${d}`,
+        side * 3.12,
+        2.35,
+        10.6 + d * 0.4,
+        { shadow: false }
+      );
+    }
+  }
+
+  // ===== 舰艏主炮（单装舰炮 + 防盾）=====
+  add(cyl(0.95, 1.1, 0.5, 12), weaponMaterial, 'destroyer_gun_barbette', 0, 3.6, 9.6);
+  add(box(1.7, 0.95, 2.3), superstructureMaterial, 'destroyer_main_gun_turret', 0, 4.25, 9.6, {
+    collide: true,
+  });
+  add(box(1.5, 0.7, 0.8), superstructureMaterial, 'destroyer_main_gun_glacis', 0, 4.1, 10.9, {
+    rx: 0.4,
+  });
+  add(cyl(0.12, 0.16, 3.4, 8), darkMetalMaterial, 'destroyer_main_gun_barrel', 0, 4.45, 12.6, {
+    rx: Math.PI / 2 - 0.08,
+    collide: true,
+  });
+  add(cyl(0.2, 0.2, 0.4, 8), darkMetalMaterial, 'destroyer_main_gun_brake', 0, 4.58, 14.2, {
+    rx: Math.PI / 2 - 0.08,
   });
 
-  const yardarm = new THREE.Mesh(
-    new THREE.BoxGeometry(0.08 * scale, 0.08 * scale, 2.4 * scale),
-    deckDetailMaterial
-  );
-  yardarm.position.set(2 * scale, (hullHeight + 5.7) * scale, 0);
-  yardarm.name = 'destroyer_yardarm';
-  yardarm.castShadow = true;
-  group.add(yardarm);
-
-  // 第二雷达盘（圆柱 + 环形格栅）
-  const radarPost2 = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.08 * scale, 0.1 * scale, 0.5 * scale, 6),
-    deckDetailMaterial
-  );
-  radarPost2.position.set(3.1 * scale, (hullHeight + 5.0) * scale, 0);
-  radarPost2.name = 'destroyer_radar_dish_post';
-  radarPost2.castShadow = true;
-  group.add(radarPost2);
-
-  const radarDish2 = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.5 * scale, 0.62 * scale, 0.14 * scale, 12),
-    hullPlateDetailMaterial
-  );
-  radarDish2.position.set(3.1 * scale, (hullHeight + 5.35) * scale, 0);
-  radarDish2.rotation.z = 0.5;
-  radarDish2.name = 'destroyer_radar_dish';
-  radarDish2.castShadow = true;
-  group.add(radarDish2);
-
-  const radarLattice2 = new THREE.Mesh(
-    new THREE.TorusGeometry(0.48 * scale, 0.05 * scale, 6, 14),
-    deckDetailMaterial
-  );
-  radarLattice2.position.set(3.1 * scale, (hullHeight + 5.35) * scale, 0);
-  radarLattice2.rotation.set(Math.PI / 2, 0, 0.5);
-  radarLattice2.name = 'destroyer_radar_dish_lattice';
-  radarLattice2.castShadow = true;
-  group.add(radarLattice2);
-
-  // 甲板边缘栏杆
-  for (let side = 0; side < 2; side++) {
-    for (let i = 0; i < 5; i++) {
-      const railPost = new THREE.Mesh(railPostGeometry, deckDetailMaterial);
-      railPost.position.set(
-        (-9 + i * 3) * scale,
-        (hullHeight + 0.85) * scale,
-        (side === 0 ? -2.65 : 2.65) * scale
+  // ===== 垂直发射系统（艏 32 单元 / 艉 18 单元格栅）=====
+  const vlsCellGeometry = box(0.34, 0.14, 0.34);
+  add(box(3.6, 0.18, 2.2), trimMaterial, 'destroyer_vls_field_fore', 0, 3.42, 6.4, {
+    collide: true,
+  });
+  for (let col = 0; col < 8; col++) {
+    for (let row = 0; row < 4; row++) {
+      add(
+        vlsCellGeometry,
+        weaponMaterial,
+        `destroyer_vls_cell_fore_${col}_${row}`,
+        -1.47 + col * 0.42,
+        3.54,
+        5.77 + row * 0.42,
+        { shadow: false }
       );
-      railPost.name = `destroyer_rail_post_${side === 0 ? 'port' : 'starboard'}_${i}`;
-      railPost.castShadow = true;
-      group.add(railPost);
     }
-
-    const railBar = new THREE.Mesh(railBarGeometry, deckDetailMaterial);
-    railBar.position.set(-3 * scale, (hullHeight + 1.02) * scale, (side === 0 ? -2.65 : 2.65) * scale);
-    railBar.name = `destroyer_rail_bar_${side === 0 ? 'port' : 'starboard'}`;
-    railBar.castShadow = true;
-    group.add(railBar);
+  }
+  add(box(2.9, 0.18, 1.8), trimMaterial, 'destroyer_vls_field_aft', 0, 3.42, -7.2, {
+    collide: true,
+  });
+  for (let col = 0; col < 6; col++) {
+    for (let row = 0; row < 3; row++) {
+      add(
+        vlsCellGeometry,
+        weaponMaterial,
+        `destroyer_vls_cell_aft_${col}_${row}`,
+        -1.05 + col * 0.42,
+        3.54,
+        -7.62 + row * 0.42,
+        { shadow: false }
+      );
+    }
   }
 
-  // 防空炮武备细节（炮管护套 / 供弹箱 / 防爆挡板）—— 不移动炮位锚点
-  for (const flakPos of flakPositions) {
-    const flakSleeve = new THREE.Mesh(flakSleeveGeometry, armamentDetailMaterial);
-    flakSleeve.position.copy(flakPos.pos);
-    flakSleeve.position.y += 0.75 * scale;
-    flakSleeve.rotation.x = -Math.PI / 3;
-    flakSleeve.name = `destroyer_flak_sleeve_${flakPos.name}`;
-    flakSleeve.castShadow = true;
-    group.add(flakSleeve);
-
-    const flakAmmo = new THREE.Mesh(flakAmmoGeometry, armamentDetailMaterial);
-    flakAmmo.position.copy(flakPos.pos);
-    flakAmmo.position.x += 0.8 * scale;
-    flakAmmo.position.y += 0.15 * scale;
-    flakAmmo.name = `destroyer_flak_ammo_${flakPos.name}`;
-    flakAmmo.castShadow = true;
-    group.add(flakAmmo);
-
-    const flakShield = new THREE.Mesh(flakShieldGeometry, hullPlateDetailMaterial);
-    flakShield.position.copy(flakPos.pos);
-    flakShield.position.x -= 0.75 * scale;
-    flakShield.position.y += 0.55 * scale;
-    flakShield.name = `destroyer_flak_blast_shield_${flakPos.name}`;
-    flakShield.castShadow = true;
-    group.add(flakShield);
+  // 导弹发射单元辉光舱盖（运行时按充能脉冲，独立材质）
+  const launcherCapGeometry = cyl(0.46, 0.54, 0.16, 8);
+  const launcherCapSpots = [
+    { name: 'front_left', x: -1.15, z: 6.4 },
+    { name: 'front_right', x: 1.15, z: 6.4 },
+    { name: 'back_left', x: -0.85, z: -7.2 },
+    { name: 'back_right', x: 0.85, z: -7.2 },
+  ];
+  for (const spot of launcherCapSpots) {
+    add(
+      launcherCapGeometry,
+      glowMaterial.clone(),
+      `destroyer_launcher_cap_${spot.name}`,
+      spot.x,
+      3.56,
+      spot.z,
+      { shadow: false }
+    );
   }
 
-  // 导弹发射器尾焰导流板
-  for (const launcherPos of missileLauncherPositions) {
-    const deflector = new THREE.Mesh(deflectorGeometry, armamentDetailMaterial);
-    deflector.position.copy(launcherPos.pos);
-    deflector.position.x += 1.05 * scale;
-    deflector.position.y += 0.45 * scale;
-    deflector.rotation.z = -0.35;
-    deflector.name = `destroyer_launcher_deflector_${launcherPos.name}`;
-    deflector.castShadow = true;
-    group.add(deflector);
+  // ===== 上层建筑（层叠舰桥 + 相控阵雷达面板）=====
+  add(box(4.6, 2.4, 5.6), superstructureMaterial, 'destroyer_deckhouse', 0, 4.55, 1.8, {
+    collide: true,
+  });
+  add(box(3.6, 1.6, 2.6), superstructureMaterial, 'destroyer_bridge', 0, 6.55, 2.6, {
+    collide: true,
+  });
+  add(box(2.6, 0.5, 0.14), bridgeWindowMaterial, 'destroyer_bridge_window', 0, 6.9, 3.95, {
+    collide: true,
+    shadow: false,
+  });
+  for (const side of [-1, 1] as const) {
+    add(
+      box(0.75, 0.7, 1.3),
+      superstructureMaterial,
+      `destroyer_bridge_wing_${side < 0 ? 'port' : 'starboard'}`,
+      side * 2.15,
+      6.6,
+      2.6
+    );
+    add(
+      box(1.7, 0.32, 0.1),
+      sideWindowMaterial,
+      `destroyer_bridge_side_window_${side < 0 ? 0 : 1}`,
+      side * 1.86,
+      6.9,
+      2.2,
+      { shadow: false }
+    );
+  }
+  add(box(3.0, 0.35, 2.2), trimMaterial, 'destroyer_bridge_crown', 0, 7.5, 2.6);
+
+  // SPY 相控阵面板（前向两面 / 后向两面）
+  const spyPanelGeometry = box(1.5, 1.5, 0.16);
+  const spyFrameGeometry = box(1.7, 1.7, 0.08);
+  for (const side of [-1, 1] as const) {
+    add(
+      spyFrameGeometry,
+      trimMaterial,
+      `destroyer_spy_frame_fore_${side < 0 ? 'port' : 'starboard'}`,
+      side * 1.45,
+      5.1,
+      4.5,
+      { ry: side * -0.45 }
+    );
+    add(
+      spyPanelGeometry,
+      spyPanelMaterial,
+      `destroyer_spy_panel_fore_${side < 0 ? 'port' : 'starboard'}`,
+      side * 1.47,
+      5.1,
+      4.55,
+      { ry: side * -0.45 }
+    );
+    add(
+      spyFrameGeometry,
+      trimMaterial,
+      `destroyer_spy_frame_aft_${side < 0 ? 'port' : 'starboard'}`,
+      side * 1.45,
+      5.1,
+      -0.85,
+      { ry: Math.PI + side * 0.45 }
+    );
+    add(
+      spyPanelGeometry,
+      spyPanelMaterial,
+      `destroyer_spy_panel_aft_${side < 0 ? 'port' : 'starboard'}`,
+      side * 1.47,
+      5.1,
+      -0.9,
+      { ry: Math.PI + side * 0.45 }
+    );
   }
 
-  // 航行灯（港左红 / 右舷绿）
+  // ===== 后倾主桅（旋转导航雷达 + 横桁 + 鞭状天线）=====
+  add(cyl(0.14, 0.28, 4.6, 8), superstructureMaterial, 'destroyer_mast', 0, 8.1, 1.1, {
+    rx: -0.1,
+    collide: true,
+  });
+  add(box(2.6, 0.07, 0.07), darkMetalMaterial, 'destroyer_yardarm', 0, 9.3, 0.95);
+  add(box(0.07, 0.07, 1.7), darkMetalMaterial, 'destroyer_yardarm_cross', 0, 8.7, 1.05);
+  add(ball(0.34, 8), ciwsDomeMaterial, 'destroyer_ew_dome', 0, 9.8, 0.9);
+
+  const radarArray = new THREE.Group();
+  radarArray.name = 'destroyer_radar_array';
+  radarArray.position.set(0, 10.45 * scale, 0.85 * scale);
+  group.add(radarArray);
+  const navRadar = new THREE.Mesh(box(0.18, 0.2, 2.2), darkMetalMaterial);
+  navRadar.name = 'destroyer_radar';
+  navRadar.castShadow = true;
+  radarArray.add(navRadar);
+  parts.push(navRadar);
+  const navRadarHub = new THREE.Mesh(cyl(0.1, 0.14, 0.35, 8), darkMetalMaterial);
+  navRadarHub.name = 'destroyer_radar_hub';
+  navRadarHub.position.y = -0.25 * scale;
+  radarArray.add(navRadarHub);
+
+  const whipAntennaGeometry = cyl(0.025, 0.045, 2.4, 6);
+  [
+    { x: -2.0, z: 0.0 },
+    { x: 2.0, z: 0.0 },
+    { x: -1.7, z: 3.6 },
+    { x: 1.7, z: 3.6 },
+  ].forEach((spot, i) => {
+    add(
+      whipAntennaGeometry,
+      darkMetalMaterial,
+      `destroyer_whip_antenna_${i}`,
+      spot.x,
+      6.9,
+      spot.z,
+      { shadow: false }
+    );
+  });
+
+  // ===== 烟囱（双角型烟囱 + 排气辉光）=====
+  add(box(1.5, 1.5, 1.9), superstructureMaterial, 'destroyer_funnel_0', 0, 6.45, -0.1, {
+    collide: true,
+  });
+  add(box(1.3, 1.3, 1.6), superstructureMaterial, 'destroyer_funnel_1', 0, 5.0, -2.4, {
+    collide: true,
+  });
+  add(cyl(0.5, 0.6, 0.3, 10), exhaustMaterial.clone(), 'destroyer_exhaust_glow_0', 0, 7.3, -0.1, {
+    shadow: false,
+  });
+  add(
+    cyl(0.42, 0.52, 0.28, 10),
+    exhaustMaterial.clone(),
+    'destroyer_exhaust_glow_1',
+    0,
+    5.75,
+    -2.4,
+    { shadow: false }
+  );
+
+  // ===== 机库与直升机甲板 =====
+  add(box(4.4, 2.0, 4.6), superstructureMaterial, 'destroyer_hangar', 0, 4.15, -4.5, {
+    collide: true,
+  });
+  add(box(1.9, 1.5, 0.14), deckMaterial, 'destroyer_hangar_door', 0, 4.0, -6.85, { shadow: false });
+  for (let i = 0; i < 3; i++) {
+    add(
+      box(0.12, 1.3, 0.1),
+      trimMaterial,
+      `destroyer_hangar_door_rib_${i}`,
+      -0.55 + i * 0.55,
+      4.0,
+      -6.92,
+      { shadow: false }
+    );
+  }
+
+  add(box(5.2, 0.16, 4.4), heloMarkMaterial.clone(), 'destroyer_helo_deck', 0, 3.4, -10.6);
+  add(ring(1.6, 0.07, 6, 24), heloMarkMaterial, 'destroyer_helo_circle', 0, 3.52, -10.6, {
+    rx: Math.PI / 2,
+    shadow: false,
+  });
+  add(cyl(0.26, 0.26, 0.05, 10), heloMarkMaterial, 'destroyer_helo_center_mark', 0, 3.52, -10.6, {
+    shadow: false,
+  });
+
+  // ===== 近防武器（CIWS ×2 + 四角速射炮位锚点）=====
+  const ciwsBaseGeometry = cyl(0.4, 0.5, 0.7, 10);
+  const ciwsGunGeometry = box(0.26, 0.3, 0.95);
+  add(ciwsBaseGeometry, ciwsDomeMaterial, 'destroyer_ciws_base_fore', 0, 6.1, 5.0);
+  add(ball(0.45, 10), ciwsDomeMaterial, 'destroyer_ciws_dome_fore', 0, 6.7, 5.0);
+  add(ciwsGunGeometry, darkMetalMaterial, 'destroyer_ciws_gun_fore', 0, 6.25, 5.55, { rx: 0.3 });
+  add(ciwsBaseGeometry, ciwsDomeMaterial, 'destroyer_ciws_base_aft', 0, 5.55, -4.5);
+  add(ball(0.45, 10), ciwsDomeMaterial, 'destroyer_ciws_dome_aft', 0, 6.15, -4.5);
+  add(ciwsGunGeometry, darkMetalMaterial, 'destroyer_ciws_gun_aft', 0, 5.7, -5.05, { rx: -0.3 });
+
+  const flakPositions = [
+    { name: 'front_left', x: -2.0, y: 3.5, z: 8.4, forward: 1 },
+    { name: 'front_right', x: 2.0, y: 3.5, z: 8.4, forward: 1 },
+    { name: 'back_left', x: -1.55, y: 5.35, z: -3.2, forward: -1 },
+    { name: 'back_right', x: 1.55, y: 5.35, z: -3.2, forward: -1 },
+  ];
+  const flakBaseGeometry = cyl(0.42, 0.52, 0.5, 8);
+  const flakHousingGeometry = box(0.75, 0.45, 0.95);
+  const flakBarrelGeometry = cyl(0.07, 0.09, 1.8, 8);
+  const flakMuzzleGeometry = ball(0.18, 8);
+  for (const flak of flakPositions) {
+    add(
+      flakBaseGeometry,
+      weaponMaterial,
+      `destroyer_flak_base_${flak.name}`,
+      flak.x,
+      flak.y,
+      flak.z,
+      { collide: true }
+    );
+    add(
+      flakHousingGeometry,
+      weaponMaterial,
+      `destroyer_flak_housing_${flak.name}`,
+      flak.x,
+      flak.y + 0.42,
+      flak.z
+    );
+    for (const barrelSide of [-1, 1] as const) {
+      add(
+        flakBarrelGeometry,
+        darkMetalMaterial,
+        `destroyer_flak_barrel_${flak.name}_${barrelSide < 0 ? 0 : 1}`,
+        flak.x + barrelSide * 0.16,
+        flak.y + 1.05,
+        flak.z + flak.forward * 0.5,
+        { rx: flak.forward * 0.55, collide: barrelSide < 0 }
+      );
+    }
+    add(
+      flakMuzzleGeometry,
+      muzzleGlowMaterial.clone(),
+      `destroyer_flak_muzzle_${flak.name}`,
+      flak.x,
+      flak.y + 1.7,
+      flak.z + flak.forward * 1.0,
+      { shadow: false }
+    );
+  }
+
+  // ===== 舰载小艇与栏杆 =====
+  const rhibGeometry = new THREE.CapsuleGeometry(0.32 * scale, 1.3 * scale, 4, 8);
+  for (const side of [-1, 1] as const) {
+    add(
+      box(0.55, 0.12, 2.0),
+      darkMetalMaterial,
+      `destroyer_davit_shelf_${side < 0 ? 'port' : 'starboard'}`,
+      side * 3.0,
+      3.55,
+      -1.4
+    );
+    add(
+      rhibGeometry,
+      rhibMaterial,
+      `destroyer_rhib_${side < 0 ? 'port' : 'starboard'}`,
+      side * 3.0,
+      3.85,
+      -1.4,
+      { rx: Math.PI / 2 }
+    );
+  }
+
+  const railPostGeometry = box(0.05, 0.36, 0.05);
+  const foreRailBarGeometry = box(0.04, 0.04, 8.6);
+  const aftRailBarGeometry = box(0.04, 0.04, 4.4);
+  for (const side of [-1, 1] as const) {
+    for (let i = 0; i < 6; i++) {
+      add(
+        railPostGeometry,
+        trimMaterial,
+        `destroyer_rail_post_fore_${side < 0 ? 'port' : 'starboard'}_${i}`,
+        side * 2.62,
+        3.55,
+        4.4 + i * 1.7,
+        { shadow: false }
+      );
+    }
+    add(
+      foreRailBarGeometry,
+      trimMaterial,
+      `destroyer_rail_bar_fore_${side < 0 ? 'port' : 'starboard'}`,
+      side * 2.62,
+      3.75,
+      8.6,
+      { shadow: false }
+    );
+    for (let i = 0; i < 3; i++) {
+      add(
+        railPostGeometry,
+        trimMaterial,
+        `destroyer_rail_post_aft_${side < 0 ? 'port' : 'starboard'}_${i}`,
+        side * 2.5,
+        3.55,
+        -8.8 - i * 1.8,
+        { shadow: false }
+      );
+    }
+    add(
+      aftRailBarGeometry,
+      trimMaterial,
+      `destroyer_rail_bar_aft_${side < 0 ? 'port' : 'starboard'}`,
+      side * 2.5,
+      3.75,
+      -10.6,
+      { shadow: false }
+    );
+  }
+
+  // ===== 艉部推进辉光与舵 =====
+  for (let i = 0; i < 3; i++) {
+    add(
+      cyl(0.4, 0.4, 0.15, 10),
+      thrusterGlowMaterial,
+      `destroyer_thruster_glow_${i}`,
+      -1.1 + i * 1.1,
+      0.9,
+      -13.5,
+      { rx: Math.PI / 2, shadow: false }
+    );
+  }
+  for (const side of [-1, 1] as const) {
+    add(
+      box(0.12, 0.9, 0.7),
+      darkMetalMaterial,
+      `destroyer_rudder_${side < 0 ? 'port' : 'starboard'}`,
+      side * 1.0,
+      0.1,
+      -12.4
+    );
+  }
+
+  // ===== 航行灯（左红右绿）与警示信标 =====
+  const runningLightGeometry = ball(0.16, 8);
   const runningLightSpots = [
-    { name: 'bow_port', x: -10.8, z: 3.05, red: true },
-    { name: 'bow_starboard', x: -10.8, z: -3.05, red: false },
-    { name: 'stern_port', x: 10.8, z: 3.05, red: true },
-    { name: 'stern_starboard', x: 10.8, z: -3.05, red: false },
+    { name: 'bow_port', x: -2.9, z: 12.6, red: true },
+    { name: 'bow_starboard', x: 2.9, z: 12.6, red: false },
+    { name: 'stern_port', x: -2.7, z: -12.9, red: true },
+    { name: 'stern_starboard', x: 2.7, z: -12.9, red: false },
   ];
   for (const spot of runningLightSpots) {
-    const runningLight = new THREE.Mesh(
+    add(
       runningLightGeometry,
-      spot.red ? runningLightRedMaterial : runningLightGreenMaterial
+      spot.red ? runningLightRedMaterial : runningLightGreenMaterial,
+      `destroyer_running_light_${spot.name}`,
+      spot.x,
+      3.6,
+      spot.z,
+      { shadow: false }
     );
-    runningLight.position.set(spot.x * scale, (hullHeight + 0.9) * scale, spot.z * scale);
-    runningLight.name = `destroyer_running_light_${spot.name}`;
-    group.add(runningLight);
   }
 
-  // 警示信标（慢速脉冲）
-  const beaconSpots = [
-    { x: 2, y: 12.2, z: 0 },
-    { x: -11.3, y: 4.1, z: 0 },
-    { x: 3.5, y: 7.35, z: 0 },
-  ];
-  beaconSpots.forEach((spot, i) => {
-    const beacon = new THREE.Mesh(beaconGeometry, beaconMaterial);
-    beacon.position.set(spot.x * scale, spot.y * scale, spot.z * scale);
-    beacon.name = `destroyer_signal_beacon_${i}`;
-    group.add(beacon);
+  const beaconGeometry = ball(0.18, 8);
+  [
+    { x: 0, y: 10.95, z: 0.85 },
+    { x: 0, y: 4.35, z: 14.1 },
+    { x: 0, y: 4.05, z: -12.95 },
+  ].forEach((spot, i) => {
+    add(beaconGeometry, beaconMaterial, `destroyer_signal_beacon_${i}`, spot.x, spot.y, spot.z, {
+      shadow: false,
+    });
   });
-
-  // 艉部推进辉光阵列
-  for (let i = 0; i < 3; i++) {
-    const thrusterDisc = new THREE.Mesh(thrusterDiscGeometry, thrusterGlowMaterial);
-    thrusterDisc.rotation.z = Math.PI / 2;
-    thrusterDisc.position.set(12.15 * scale, 1.5 * scale, (-1.2 + i * 1.2) * scale);
-    thrusterDisc.name = `destroyer_thruster_glow_${i}`;
-    group.add(thrusterDisc);
-  }
 
   group.name = `BOSS_${config.type}`;
   (group as BossGroup).bossParts = parts;

@@ -12,6 +12,7 @@ type BossGroup = THREE.Group & {
   weakpointMeshes?: THREE.Mesh[];
   muzzleMeshes?: THREE.Mesh[];
   signalBeaconMeshes?: THREE.Mesh[];
+  rotorMeshes?: THREE.Mesh[];
 };
 
 /**
@@ -40,6 +41,7 @@ export class BossAI {
   private readonly engineMeshes: THREE.Mesh[];
   private readonly engineRingMeshes: THREE.Mesh[];
   private readonly signalBeaconMeshes: THREE.Mesh[];
+  private readonly rotorMeshes: THREE.Mesh[];
   private readonly weakpointBaseColor = new THREE.Color(0xff6a3a);
   private readonly weakpointCriticalColor = new THREE.Color(0xffb67a);
   private readonly weaponBaseColor = new THREE.Color(0xff924f);
@@ -94,6 +96,7 @@ export class BossAI {
     this.engineMeshes = bossGroup.engineMeshes ?? [];
     this.engineRingMeshes = bossGroup.engineRingMeshes ?? [];
     this.signalBeaconMeshes = bossGroup.signalBeaconMeshes ?? [];
+    this.rotorMeshes = bossGroup.rotorMeshes ?? [];
 
     this.velocity = new THREE.Vector3(0, 0, -config.speed);
 
@@ -143,8 +146,8 @@ export class BossAI {
     this.missileSystem.update(deltaTime);
     this.updateVisualPulse(deltaTime);
 
-    // 更新尾迹
-    const engineLocalPos = new THREE.Vector3(0, 0, 3);
+    // 更新尾迹（机尾位于 -Z，机体沿 +Z 方向飞行）
+    const engineLocalPos = new THREE.Vector3(0, 0.2 * this.config.scale, -7.0 * this.config.scale);
     const engineWorldPos = engineLocalPos.applyMatrix4(this.mesh.matrixWorld);
     this.trail.addPoint(engineWorldPos);
     this.trail.update(deltaTime);
@@ -198,8 +201,14 @@ export class BossAI {
           hitPhaseMix * 1.3,
         this.weakpointBaseColor
           .clone()
-          .lerp(this.weakpointCriticalColor, criticalState + criticalPulse * 0.35 + criticalBias * 0.2)
-          .lerp(this.terminalColor, terminalState * 0.8 + terminalPulse * 0.3 + terminalPulseBias * 0.2)
+          .lerp(
+            this.weakpointCriticalColor,
+            criticalState + criticalPulse * 0.35 + criticalBias * 0.2
+          )
+          .lerp(
+            this.terminalColor,
+            terminalState * 0.8 + terminalPulse * 0.3 + terminalPulseBias * 0.2
+          )
       );
       const pulseScale =
         1 +
@@ -213,7 +222,8 @@ export class BossAI {
 
     const activeMuzzleIndex = this.getCurrentMuzzleIndex();
     for (let i = 0; i < this.muzzleMeshes.length; i++) {
-      const activeBoost = i === activeMuzzleIndex ? 0.75 + cannonCharge * 1.4 : 0.25 + cannonCharge * 0.35;
+      const activeBoost =
+        i === activeMuzzleIndex ? 0.75 + cannonCharge * 1.4 : 0.25 + cannonCharge * 0.35;
       this.setGlowState(
         this.muzzleMeshes[i],
         0.45 +
@@ -225,7 +235,10 @@ export class BossAI {
         this.weaponBaseColor
           .clone()
           .lerp(this.weaponCriticalColor, criticalState + criticalBias * 0.2 + criticalPulse * 0.25)
-          .lerp(this.terminalColor, terminalState * 0.7 + terminalPulse * 0.3 + terminalPulseBias * 0.2)
+          .lerp(
+            this.terminalColor,
+            terminalState * 0.7 + terminalPulse * 0.3 + terminalPulseBias * 0.2
+          )
       );
     }
 
@@ -252,8 +265,14 @@ export class BossAI {
           hitPhaseMix * 0.55,
         this.energyBaseColor
           .clone()
-          .lerp(this.energyCriticalColor, criticalState + criticalPulse * 0.45 + criticalBias * 0.25)
-          .lerp(this.terminalColor, terminalState * 0.52 + terminalPulse * 0.38 + terminalPulseBias * 0.18)
+          .lerp(
+            this.energyCriticalColor,
+            criticalState + criticalPulse * 0.45 + criticalBias * 0.25
+          )
+          .lerp(
+            this.terminalColor,
+            terminalState * 0.52 + terminalPulse * 0.38 + terminalPulseBias * 0.18
+          )
       );
       const ringScale =
         1 +
@@ -268,6 +287,12 @@ export class BossAI {
     const beaconWave = Math.sin(this.visualPulseTime * BossAI.BEACON_PULSE_SPEED) * 0.5 + 0.5;
     for (const beacon of this.signalBeaconMeshes) {
       this.setMaterialOpacity(beacon, 0.3 + beaconWave * 0.7);
+    }
+
+    // 发动机进气风扇旋转（速度随飞行速度变化）
+    const rotorSpeed = 14 + speedRatio * 10;
+    for (const rotor of this.rotorMeshes) {
+      rotor.rotation.z += deltaTime * rotorSpeed;
     }
   }
 
@@ -524,22 +549,26 @@ export class BossAI {
     while (this.mesh.children.length > 0) {
       const child = this.mesh.children[0];
       this.mesh.remove(child);
-      if (child instanceof THREE.Mesh) {
-        child.geometry.dispose();
-        if (Array.isArray(child.material)) {
-          child.material.forEach((m) => m.dispose());
-        } else if (child.material instanceof THREE.Material) {
-          child.material.dispose();
+      child.traverse((node) => {
+        if (node instanceof THREE.Mesh) {
+          node.geometry.dispose();
+          if (Array.isArray(node.material)) {
+            node.material.forEach((m) => m.dispose());
+          } else if (node.material instanceof THREE.Material) {
+            node.material.dispose();
+          }
         }
-      }
+      });
     }
   }
 }
 
 /**
  * 创建 Boss 专用模型
- * 重型轰炸机 Boss - 复杂的几何结构
- * 飞机前进方向: -Z，上方向: +Y
+ * 重型轰炸机 Boss —— 战略轰炸机重制版
+ * 机体朝向: 机头 +Z（AI 通过 lookAt 使 +Z 对准航向），上方向 +Y
+ * 结构: 长加压机身 + 高置后掠主翼 + 6 台吊舱发动机（带旋转风扇）+
+ *       防御炮塔群（翼根/背部/腹部球塔/尾炮）+ 开放弹舱 + 完整尾翼组
  */
 export function createBossMesh(config: BossConfig): THREE.Group {
   const group = new THREE.Group();
@@ -548,589 +577,108 @@ export function createBossMesh(config: BossConfig): THREE.Group {
   const weakpointMeshes: THREE.Mesh[] = [];
   const muzzleMeshes: THREE.Mesh[] = [];
   const signalBeaconMeshes: THREE.Mesh[] = [];
+  const engineMeshes: THREE.Mesh[] = [];
+  const engineRingMeshes: THREE.Mesh[] = [];
+  const rotorMeshes: THREE.Mesh[] = [];
 
-  const bodyMaterial = new THREE.MeshStandardMaterial({
+  // ===== 几何构造辅助（尺寸单位：未缩放的设计单位）=====
+  const box = (w: number, h: number, d: number) =>
+    new THREE.BoxGeometry(w * scale, h * scale, d * scale);
+  const cyl = (rTop: number, rBottom: number, h: number, seg = 10) =>
+    new THREE.CylinderGeometry(rTop * scale, rBottom * scale, h * scale, seg);
+  const cone = (r: number, h: number, seg = 10) =>
+    new THREE.ConeGeometry(r * scale, h * scale, seg);
+  const ball = (r: number, seg = 10) => new THREE.SphereGeometry(r * scale, seg, seg);
+  const ring = (r: number, tube: number, radSeg = 8, tubSeg = 18) =>
+    new THREE.TorusGeometry(r * scale, tube * scale, radSeg, tubSeg);
+
+  const add = (
+    geometry: THREE.BufferGeometry,
+    material: THREE.Material,
+    name: string,
+    x: number,
+    y: number,
+    z: number,
+    options: { rx?: number; ry?: number; rz?: number; collide?: boolean; shadow?: boolean } = {}
+  ): THREE.Mesh => {
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.position.set(x * scale, y * scale, z * scale);
+    if (options.rx !== undefined) mesh.rotation.x = options.rx;
+    if (options.ry !== undefined) mesh.rotation.y = options.ry;
+    if (options.rz !== undefined) mesh.rotation.z = options.rz;
+    mesh.name = name;
+    mesh.castShadow = options.shadow !== false;
+    group.add(mesh);
+    if (options.collide) parts.push(mesh);
+    return mesh;
+  };
+
+  // ===== 材质（保持冷灰蓝战略轰炸机涂装基调）=====
+  const fuselageMaterial = new THREE.MeshStandardMaterial({
     color: 0xaebcca,
     metalness: 0.62,
-    roughness: 0.18,
+    roughness: 0.28,
     emissive: 0x2d3946,
-    emissiveIntensity: 0.24,
+    emissiveIntensity: 0.18,
   });
-
   const wingMaterial = new THREE.MeshStandardMaterial({
     color: 0xc4cfd8,
     metalness: 0.56,
-    roughness: 0.2,
+    roughness: 0.26,
     emissive: 0x303b49,
-    emissiveIntensity: 0.2,
+    emissiveIntensity: 0.16,
   });
-
+  const bellyMaterial = new THREE.MeshStandardMaterial({
+    color: new THREE.Color(0xaebcca).offsetHSL(0, 0.02, -0.12),
+    metalness: 0.6,
+    roughness: 0.34,
+  });
   const accentMaterial = new THREE.MeshStandardMaterial({
     color: 0xcd7458,
-    metalness: 0.9,
-    roughness: 0.16,
+    metalness: 0.78,
+    roughness: 0.22,
     emissive: 0x7a3527,
-    emissiveIntensity: 0.48,
+    emissiveIntensity: 0.4,
   });
-
   const turretMaterial = new THREE.MeshStandardMaterial({
     color: 0x758392,
     metalness: 0.84,
-    roughness: 0.14,
+    roughness: 0.18,
     emissive: 0x293440,
-    emissiveIntensity: 0.28,
+    emissiveIntensity: 0.24,
   });
-
-  const sensorMaterial = new THREE.MeshStandardMaterial({
-    color: 0x7fb4d8,
-    metalness: 0.78,
-    roughness: 0.12,
-    emissive: 0x245c8a,
-    emissiveIntensity: 0.38,
-  });
-
   const weaponMaterial = new THREE.MeshStandardMaterial({
-    color: 0x8c6a5b,
+    color: 0x49545f,
     metalness: 0.88,
-    roughness: 0.14,
-    emissive: 0x5a2f21,
-    emissiveIntensity: 0.3,
+    roughness: 0.18,
+    emissive: 0x1c242c,
+    emissiveIntensity: 0.22,
   });
-
-  const glowMaterial = new THREE.MeshStandardMaterial({
-    color: 0xff5533,
-    emissive: 0xff3300,
-    emissiveIntensity: 1.4,
-    metalness: 0.4,
-    roughness: 0.2,
-  });
-
   const panelMaterial = new THREE.MeshStandardMaterial({
     color: 0xd9e2e9,
     metalness: 0.68,
-    roughness: 0.16,
+    roughness: 0.2,
     emissive: 0x30414e,
-    emissiveIntensity: 0.2,
+    emissiveIntensity: 0.16,
   });
-
-  // 机身 - 沿 Z 轴，机头朝向 -Z
-  const bodyGeometry = new THREE.CylinderGeometry(1.2 * scale, 0.8 * scale, 8 * scale, 12);
-  const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
-  body.rotation.x = Math.PI / 2;
-  body.name = 'boss_body';
-  body.castShadow = true;
-  group.add(body);
-  parts.push(body);
-
-  const spine = new THREE.Mesh(
-    new THREE.BoxGeometry(1.1 * scale, 0.35 * scale, 6.2 * scale),
-    panelMaterial
-  );
-  spine.position.set(0, 0.85 * scale, -0.2 * scale);
-  spine.name = 'boss_spine';
-  spine.castShadow = true;
-  group.add(spine);
-
-  const dorsalArmor = new THREE.Mesh(
-    new THREE.BoxGeometry(1.6 * scale, 0.28 * scale, 4.2 * scale),
-    wingMaterial
-  );
-  dorsalArmor.position.set(0, 1.15 * scale, -0.4 * scale);
-  dorsalArmor.name = 'boss_dorsal_armor';
-  dorsalArmor.castShadow = true;
-  group.add(dorsalArmor);
-
-  for (let i = 0; i < 3; i++) {
-    const dorsalFin = new THREE.Mesh(
-      new THREE.BoxGeometry(0.32 * scale, 0.9 * scale, 0.95 * scale),
-      panelMaterial
-    );
-    dorsalFin.position.set(0, 1.38 * scale, (-1.9 + i * 1.9) * scale);
-    dorsalFin.name = `boss_dorsal_fin_${i}`;
-    dorsalFin.castShadow = true;
-    group.add(dorsalFin);
-  }
-
-  const ventralHull = new THREE.Mesh(
-    new THREE.BoxGeometry(1.5 * scale, 0.55 * scale, 5.5 * scale),
-    bodyMaterial
-  );
-  ventralHull.position.set(0, -0.95 * scale, -0.1 * scale);
-  ventralHull.name = 'boss_ventral_hull';
-  ventralHull.castShadow = true;
-  group.add(ventralHull);
-  parts.push(ventralHull);
-
-  const ventralKeel = new THREE.Mesh(
-    new THREE.BoxGeometry(0.6 * scale, 0.45 * scale, 3.2 * scale),
-    panelMaterial
-  );
-  ventralKeel.position.set(0, -1.4 * scale, 0.8 * scale);
-  ventralKeel.name = 'boss_ventral_keel';
-  ventralKeel.castShadow = true;
-  group.add(ventralKeel);
-
-  for (let i = 0; i < 2; i++) {
-    const intake = new THREE.Mesh(
-      new THREE.BoxGeometry(0.55 * scale, 0.24 * scale, 1.15 * scale),
-      turretMaterial
-    );
-    intake.position.set(0, -1.15 * scale, (-1.4 + i * 2.8) * scale);
-    intake.name = `boss_ventral_intake_${i}`;
-    intake.castShadow = true;
-    group.add(intake);
-  }
-
-  // 机头 - 尖端朝向 -Z（前方）
-  // ConeGeometry 默认尖端朝向 +Y，rotation.x = +PI/2 使尖端朝向 -Z
-  const noseGeometry = new THREE.ConeGeometry(0.8 * scale, 3 * scale, 12);
-  const nose = new THREE.Mesh(noseGeometry, accentMaterial);
-  nose.rotation.x = Math.PI / 2; // 正值使尖端朝向 -Z（前方）
-  nose.position.set(0, 0, -5.5 * scale);
-  nose.name = 'boss_nose';
-  nose.castShadow = true;
-  group.add(nose);
-  parts.push(nose);
-
-  const noseWeakpoint = new THREE.Mesh(
-    new THREE.SphereGeometry(0.45 * scale, 12, 12),
-    glowMaterial
-  );
-  noseWeakpoint.position.set(0, 0.1 * scale, -4.7 * scale);
-  noseWeakpoint.name = 'boss_nose_weakpoint';
-  group.add(noseWeakpoint);
-  weakpointMeshes.push(noseWeakpoint);
-
-  for (let i = 0; i < 2; i++) {
-    const canard = new THREE.Mesh(
-      new THREE.BoxGeometry(1.55 * scale, 0.12 * scale, 1.2 * scale),
-      panelMaterial
-    );
-    canard.position.set((i === 0 ? -1.55 : 1.55) * scale, 0.3 * scale, -3.55 * scale);
-    canard.rotation.z = i === 0 ? 0.24 : -0.24;
-    canard.name = `boss_canard_${i}`;
-    canard.castShadow = true;
-    group.add(canard);
-  }
-
-  const sensorSpine = new THREE.Mesh(
-    new THREE.BoxGeometry(0.45 * scale, 0.32 * scale, 1.7 * scale),
-    sensorMaterial
-  );
-  sensorSpine.position.set(0, 1.05 * scale, -3.9 * scale);
-  sensorSpine.name = 'boss_sensor_spine';
-  sensorSpine.castShadow = true;
-  group.add(sensorSpine);
-
-  // 主翼 - 使用 BoxGeometry 更简单可靠
-  const wingGeometry = new THREE.BoxGeometry(12 * scale, 0.3 * scale, 3 * scale);
-
-  const leftWing = new THREE.Mesh(wingGeometry, wingMaterial);
-  leftWing.position.set(-7.5 * scale, 0, 0);
-  leftWing.name = 'boss_left_wing';
-  leftWing.castShadow = true;
-  group.add(leftWing);
-  parts.push(leftWing);
-
-  const leftWingRoot = new THREE.Mesh(
-    new THREE.BoxGeometry(2.4 * scale, 0.42 * scale, 2.6 * scale),
-    bodyMaterial
-  );
-  leftWingRoot.position.set(-4.6 * scale, -0.15 * scale, 0.2 * scale);
-  leftWingRoot.name = 'boss_left_wing_root';
-  leftWingRoot.castShadow = true;
-  group.add(leftWingRoot);
-
-  for (let i = 0; i < 3; i++) {
-    const panel = new THREE.Mesh(
-      new THREE.BoxGeometry(2.6 * scale, 0.15 * scale, 0.8 * scale),
-      panelMaterial
-    );
-    panel.position.set((-9 + i * 2.4) * scale, 0.22 * scale, -0.95 * scale);
-    panel.name = `boss_left_wing_panel_${i}`;
-    panel.castShadow = true;
-    group.add(panel);
-  }
-
-  const leftWingPod = new THREE.Mesh(
-    new THREE.BoxGeometry(2.2 * scale, 0.45 * scale, 1.2 * scale),
-    panelMaterial
-  );
-  leftWingPod.position.set(-5.6 * scale, 0.35 * scale, 0.5 * scale);
-  leftWingPod.name = 'boss_left_wing_pod';
-  leftWingPod.castShadow = true;
-  group.add(leftWingPod);
-
-  for (let i = 0; i < 2; i++) {
-    const hardpoint = new THREE.Mesh(
-      new THREE.BoxGeometry(0.55 * scale, 0.32 * scale, 1.35 * scale),
-      weaponMaterial
-    );
-    hardpoint.position.set((-8.8 + i * 3.4) * scale, -0.18 * scale, 0.3 * scale);
-    hardpoint.name = `boss_left_wing_hardpoint_${i}`;
-    hardpoint.castShadow = true;
-    group.add(hardpoint);
-  }
-
-  const leftWingTip = new THREE.Mesh(
-    new THREE.BoxGeometry(1.3 * scale, 0.32 * scale, 1.25 * scale),
-    weaponMaterial
-  );
-  leftWingTip.position.set(-13.2 * scale, 0.1 * scale, 0.15 * scale);
-  leftWingTip.name = 'boss_left_wingtip_module';
-  leftWingTip.castShadow = true;
-  group.add(leftWingTip);
-
-  const rightWing = new THREE.Mesh(wingGeometry, wingMaterial);
-  rightWing.position.set(7.5 * scale, 0, 0);
-  rightWing.name = 'boss_right_wing';
-  rightWing.castShadow = true;
-  group.add(rightWing);
-  parts.push(rightWing);
-
-  const rightWingRoot = new THREE.Mesh(
-    new THREE.BoxGeometry(2.4 * scale, 0.42 * scale, 2.6 * scale),
-    bodyMaterial
-  );
-  rightWingRoot.position.set(4.6 * scale, -0.15 * scale, 0.2 * scale);
-  rightWingRoot.name = 'boss_right_wing_root';
-  rightWingRoot.castShadow = true;
-  group.add(rightWingRoot);
-
-  for (let i = 0; i < 3; i++) {
-    const panel = new THREE.Mesh(
-      new THREE.BoxGeometry(2.6 * scale, 0.15 * scale, 0.8 * scale),
-      panelMaterial
-    );
-    panel.position.set((9 - i * 2.4) * scale, 0.22 * scale, -0.95 * scale);
-    panel.name = `boss_right_wing_panel_${i}`;
-    panel.castShadow = true;
-    group.add(panel);
-  }
-
-  const rightWingPod = new THREE.Mesh(
-    new THREE.BoxGeometry(2.2 * scale, 0.45 * scale, 1.2 * scale),
-    panelMaterial
-  );
-  rightWingPod.position.set(5.6 * scale, 0.35 * scale, 0.5 * scale);
-  rightWingPod.name = 'boss_right_wing_pod';
-  rightWingPod.castShadow = true;
-  group.add(rightWingPod);
-
-  for (let i = 0; i < 2; i++) {
-    const hardpoint = new THREE.Mesh(
-      new THREE.BoxGeometry(0.55 * scale, 0.32 * scale, 1.35 * scale),
-      weaponMaterial
-    );
-    hardpoint.position.set((8.8 - i * 3.4) * scale, -0.18 * scale, 0.3 * scale);
-    hardpoint.name = `boss_right_wing_hardpoint_${i}`;
-    hardpoint.castShadow = true;
-    group.add(hardpoint);
-  }
-
-  const rightWingTip = new THREE.Mesh(
-    new THREE.BoxGeometry(1.3 * scale, 0.32 * scale, 1.25 * scale),
-    weaponMaterial
-  );
-  rightWingTip.position.set(13.2 * scale, 0.1 * scale, 0.15 * scale);
-  rightWingTip.name = 'boss_right_wingtip_module';
-  rightWingTip.castShadow = true;
-  group.add(rightWingTip);
-
-  for (let i = 0; i < 2; i++) {
-    const sponson = new THREE.Mesh(
-      new THREE.BoxGeometry(1.35 * scale, 0.82 * scale, 2.4 * scale),
-      bodyMaterial
-    );
-    sponson.position.set((i === 0 ? -2.2 : 2.2) * scale, -0.2 * scale, 1.15 * scale);
-    sponson.name = `boss_side_sponson_${i}`;
-    sponson.castShadow = true;
-    group.add(sponson);
-    parts.push(sponson);
-
-    const sponsonTrim = new THREE.Mesh(
-      new THREE.BoxGeometry(0.25 * scale, 0.5 * scale, 1.7 * scale),
-      panelMaterial
-    );
-    sponsonTrim.position.set((i === 0 ? -2.9 : 2.9) * scale, -0.05 * scale, 1.15 * scale);
-    sponsonTrim.name = `boss_side_sponson_trim_${i}`;
-    sponsonTrim.castShadow = true;
-    group.add(sponsonTrim);
-  }
-
-  // 四门重炮炮塔
-  const turretGeometry = new THREE.CylinderGeometry(0.3 * scale, 0.4 * scale, 1 * scale, 8);
-
-  const leftTurret = new THREE.Mesh(turretGeometry, turretMaterial);
-  leftTurret.position.set(-4 * scale, 0.6 * scale, 0);
-  leftTurret.name = 'boss_left_turret';
-  leftTurret.castShadow = true;
-  group.add(leftTurret);
-  parts.push(leftTurret);
-
-  const leftTurretHousing = new THREE.Mesh(
-    new THREE.BoxGeometry(1.45 * scale, 0.45 * scale, 1.2 * scale),
-    panelMaterial
-  );
-  leftTurretHousing.position.set(-4 * scale, 0.42 * scale, 0);
-  leftTurretHousing.name = 'boss_left_turret_housing';
-  leftTurretHousing.castShadow = true;
-  group.add(leftTurretHousing);
-
-  const leftMuzzle = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.16 * scale, 0.2 * scale, 0.35 * scale, 8),
-    glowMaterial
-  );
-  leftMuzzle.rotation.z = Math.PI / 2;
-  leftMuzzle.position.set(-4 * scale, 0.6 * scale, -0.65 * scale);
-  leftMuzzle.name = 'boss_left_muzzle';
-  group.add(leftMuzzle);
-  muzzleMeshes.push(leftMuzzle);
-
-  const rightTurret = new THREE.Mesh(turretGeometry, turretMaterial);
-  rightTurret.position.set(4 * scale, 0.6 * scale, 0);
-  rightTurret.name = 'boss_right_turret';
-  rightTurret.castShadow = true;
-  group.add(rightTurret);
-  parts.push(rightTurret);
-
-  const rightTurretHousing = new THREE.Mesh(
-    new THREE.BoxGeometry(1.45 * scale, 0.45 * scale, 1.2 * scale),
-    panelMaterial
-  );
-  rightTurretHousing.position.set(4 * scale, 0.42 * scale, 0);
-  rightTurretHousing.name = 'boss_right_turret_housing';
-  rightTurretHousing.castShadow = true;
-  group.add(rightTurretHousing);
-
-  const rightMuzzle = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.16 * scale, 0.2 * scale, 0.35 * scale, 8),
-    glowMaterial
-  );
-  rightMuzzle.rotation.z = Math.PI / 2;
-  rightMuzzle.position.set(4 * scale, 0.6 * scale, -0.65 * scale);
-  rightMuzzle.name = 'boss_right_muzzle';
-  group.add(rightMuzzle);
-  muzzleMeshes.push(rightMuzzle);
-
-  const topTurret = new THREE.Mesh(turretGeometry, turretMaterial);
-  topTurret.position.set(0, 1.5 * scale, 0);
-  topTurret.name = 'boss_top_turret';
-  topTurret.castShadow = true;
-  group.add(topTurret);
-  parts.push(topTurret);
-
-  const topTurretPod = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.75 * scale, 0.9 * scale, 0.4 * scale, 10),
-    panelMaterial
-  );
-  topTurretPod.position.set(0, 1.24 * scale, 0);
-  topTurretPod.name = 'boss_top_turret_pod';
-  topTurretPod.castShadow = true;
-  group.add(topTurretPod);
-
-  const topMuzzle = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.16 * scale, 0.2 * scale, 0.35 * scale, 8),
-    glowMaterial
-  );
-  topMuzzle.position.set(0, 2.05 * scale, -0.35 * scale);
-  topMuzzle.name = 'boss_top_muzzle';
-  group.add(topMuzzle);
-  muzzleMeshes.push(topMuzzle);
-
-  const bottomTurret = new THREE.Mesh(turretGeometry, turretMaterial);
-  bottomTurret.position.set(0, -1.5 * scale, 0);
-  bottomTurret.name = 'boss_bottom_turret';
-  bottomTurret.castShadow = true;
-  group.add(bottomTurret);
-  parts.push(bottomTurret);
-
-  const bottomTurretPod = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.75 * scale, 0.9 * scale, 0.4 * scale, 10),
-    panelMaterial
-  );
-  bottomTurretPod.position.set(0, -1.24 * scale, 0);
-  bottomTurretPod.name = 'boss_bottom_turret_pod';
-  bottomTurretPod.castShadow = true;
-  group.add(bottomTurretPod);
-
-  const bottomMuzzle = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.16 * scale, 0.2 * scale, 0.35 * scale, 8),
-    glowMaterial
-  );
-  bottomMuzzle.position.set(0, -2.05 * scale, -0.35 * scale);
-  bottomMuzzle.name = 'boss_bottom_muzzle';
-  group.add(bottomMuzzle);
-  muzzleMeshes.push(bottomMuzzle);
-
-  // 尾翼（水平）
-  const tailGeometry = new THREE.BoxGeometry(3 * scale, 0.2 * scale, 1.5 * scale);
-  const tail = new THREE.Mesh(tailGeometry, wingMaterial);
-  tail.position.set(0, 0, 4 * scale);
-  tail.name = 'boss_tail';
-  tail.castShadow = true;
-  group.add(tail);
-  parts.push(tail);
-
-  const tailBridge = new THREE.Mesh(
-    new THREE.BoxGeometry(1.2 * scale, 0.35 * scale, 2.2 * scale),
-    panelMaterial
-  );
-  tailBridge.position.set(0, 0.45 * scale, 3.3 * scale);
-  tailBridge.name = 'boss_tail_bridge';
-  tailBridge.castShadow = true;
-  group.add(tailBridge);
-
-  // 垂直尾翼
-  const vTailGeometry = new THREE.BoxGeometry(0.2 * scale, 2 * scale, 1 * scale);
-  const vTail = new THREE.Mesh(vTailGeometry, wingMaterial);
-  vTail.position.set(0, 1 * scale, 4 * scale);
-  vTail.name = 'boss_vtail';
-  vTail.castShadow = true;
-  group.add(vTail);
-  parts.push(vTail);
-
-  // 驾驶舱
-  const cockpitGeometry = new THREE.SphereGeometry(0.6 * scale, 12, 12);
-  const cockpitMaterial = new THREE.MeshStandardMaterial({
+  const panelBandMaterial = new THREE.MeshStandardMaterial({
+    color: new THREE.Color(0xaebcca).offsetHSL(0, 0.04, -0.16),
+    metalness: 0.64,
+    roughness: 0.3,
+  });
+  const detailMaterial = new THREE.MeshStandardMaterial({
+    color: new THREE.Color(0xc4cfd8).offsetHSL(0, 0.03, -0.14),
+    metalness: 0.66,
+    roughness: 0.26,
+  });
+  const canopyMaterial = new THREE.MeshStandardMaterial({
     color: 0x82bfeb,
-    metalness: 0.62,
+    metalness: 0.6,
     roughness: 0.1,
     emissive: 0x2870a8,
-    emissiveIntensity: 0.44,
+    emissiveIntensity: 0.42,
     transparent: true,
-    opacity: 0.8,
-  });
-  const cockpit = new THREE.Mesh(cockpitGeometry, cockpitMaterial);
-  cockpit.position.set(0, 0.8 * scale, -2 * scale);
-  cockpit.scale.set(1, 0.6, 1.5);
-  cockpit.name = 'boss_cockpit';
-  cockpit.castShadow = true;
-  group.add(cockpit);
-  parts.push(cockpit);
-
-  const cockpitFrame = new THREE.Mesh(
-    new THREE.TorusGeometry(0.72 * scale, 0.08 * scale, 8, 18),
-    panelMaterial
-  );
-  cockpitFrame.rotation.y = Math.PI / 2;
-  cockpitFrame.scale.set(1.05, 0.7, 1.45);
-  cockpitFrame.position.copy(cockpit.position);
-  cockpitFrame.name = 'boss_cockpit_frame';
-  cockpitFrame.castShadow = true;
-  group.add(cockpitFrame);
-
-  // 四个引擎（尾部）
-  const engineGeometry = new THREE.CylinderGeometry(0.4 * scale, 0.3 * scale, 1.5 * scale, 8);
-  const engineMaterial = new THREE.MeshBasicMaterial({
-    color: 0xff6600,
-    transparent: true,
-    opacity: 0.9,
-  });
-
-  const enginePositions = [
-    new THREE.Vector3(-3 * scale, 0, 4.5 * scale),
-    new THREE.Vector3(3 * scale, 0, 4.5 * scale),
-    new THREE.Vector3(-1.5 * scale, 0, 4.5 * scale),
-    new THREE.Vector3(1.5 * scale, 0, 4.5 * scale),
-  ];
-
-  const engineMeshes: THREE.Mesh[] = [];
-  const engineRingMeshes: THREE.Mesh[] = [];
-  enginePositions.forEach((pos, i) => {
-    const enginePylon = new THREE.Mesh(
-      new THREE.BoxGeometry(0.8 * scale, 0.55 * scale, 1.05 * scale),
-      wingMaterial
-    );
-    enginePylon.position.set(pos.x, -0.18 * scale, pos.z - 0.15 * scale);
-    enginePylon.name = `boss_engine_pylon_${i}`;
-    enginePylon.castShadow = true;
-    group.add(enginePylon);
-
-    const engine = new THREE.Mesh(engineGeometry, engineMaterial);
-    engine.position.copy(pos);
-    engine.name = `boss_engine_${i}`;
-    group.add(engine);
-    parts.push(engine);
-    engineMeshes.push(engine);
-
-    const engineRing = new THREE.Mesh(
-      new THREE.TorusGeometry(0.42 * scale, 0.1 * scale, 8, 16),
-      glowMaterial
-    );
-    engineRing.rotation.y = Math.PI / 2;
-    engineRing.position.copy(pos).setZ(pos.z + 0.8 * scale);
-    engineRing.name = `boss_engine_ring_${i}`;
-    group.add(engineRing);
-    engineRingMeshes.push(engineRing);
-  });
-
-  for (let i = 0; i < 4; i++) {
-    const bellyPanel = new THREE.Mesh(
-      new THREE.BoxGeometry(0.72 * scale, 0.14 * scale, 1.35 * scale),
-      panelMaterial
-    );
-    bellyPanel.position.set((-1.2 + i * 0.8) * scale, -1.05 * scale, (0.5 + i * 0.55) * scale);
-    bellyPanel.name = `boss_belly_panel_${i}`;
-    group.add(bellyPanel);
-  }
-
-  for (let i = 0; i < 2; i++) {
-    const bombBay = new THREE.Mesh(
-      new THREE.BoxGeometry(0.88 * scale, 0.42 * scale, 2.05 * scale),
-      weaponMaterial
-    );
-    bombBay.position.set((i === 0 ? -0.82 : 0.82) * scale, -1.32 * scale, 1.65 * scale);
-    bombBay.name = `boss_bomb_bay_${i}`;
-    bombBay.castShadow = true;
-    group.add(bombBay);
-  }
-
-  for (let i = 0; i < 2; i++) {
-    const tailBoom = new THREE.Mesh(
-      new THREE.BoxGeometry(0.4 * scale, 0.42 * scale, 1.8 * scale),
-      panelMaterial
-    );
-    tailBoom.position.set((i === 0 ? -1.1 : 1.1) * scale, 0.2 * scale, 3.55 * scale);
-    tailBoom.name = `boss_tail_boom_${i}`;
-    tailBoom.castShadow = true;
-    group.add(tailBoom);
-  }
-
-  for (let i = 0; i < 2; i++) {
-    const tailFin = new THREE.Mesh(
-      new THREE.BoxGeometry(0.22 * scale, 0.85 * scale, 1.1 * scale),
-      wingMaterial
-    );
-    tailFin.position.set((i === 0 ? -0.78 : 0.78) * scale, 0.3 * scale, 4.35 * scale);
-    tailFin.rotation.z = i === 0 ? 0.12 : -0.12;
-    tailFin.name = `boss_tail_fin_${i}`;
-    tailFin.castShadow = true;
-    group.add(tailFin);
-  }
-
-  // ===== 细节增强：船体镶板 / 上层结构 / 武备细节 / 信号灯 =====
-  const hullDetailMaterial = new THREE.MeshStandardMaterial({
-    color: new THREE.Color(0xaebcca).offsetHSL(0, 0.05, -0.08),
-    metalness: 0.66,
-    roughness: 0.2,
-    emissive: 0x232c37,
-    emissiveIntensity: 0.18,
-  });
-  const ribDetailMaterial = new THREE.MeshStandardMaterial({
-    color: new THREE.Color(0xc4cfd8).offsetHSL(0, 0.04, -0.12),
-    metalness: 0.6,
-    roughness: 0.24,
-  });
-  const railingMaterial = new THREE.MeshStandardMaterial({
-    color: new THREE.Color(0xd9e2e9).offsetHSL(0, 0.03, -0.18),
-    metalness: 0.7,
-    roughness: 0.2,
-  });
-  const armamentDetailMaterial = new THREE.MeshStandardMaterial({
-    color: new THREE.Color(0x758392).offsetHSL(0, 0.05, -0.1),
-    metalness: 0.86,
-    roughness: 0.16,
+    opacity: 0.78,
   });
   const windowStripMaterial = new THREE.MeshStandardMaterial({
     color: 0x9fd4ef,
@@ -1139,223 +687,503 @@ export function createBossMesh(config: BossConfig): THREE.Group {
     metalness: 0.6,
     roughness: 0.1,
   });
+  const glowMaterial = new THREE.MeshStandardMaterial({
+    color: 0xff5533,
+    emissive: 0xff3300,
+    emissiveIntensity: 1.4,
+    metalness: 0.4,
+    roughness: 0.2,
+  });
+  const ringGlowMaterial = new THREE.MeshStandardMaterial({
+    color: 0x54d4ff,
+    emissive: 0x22b8ff,
+    emissiveIntensity: 1.0,
+    metalness: 0.45,
+    roughness: 0.16,
+  });
+  const exhaustMaterial = new THREE.MeshBasicMaterial({
+    color: 0xff6600,
+    transparent: true,
+    opacity: 0.9,
+  });
+  const rotorBladeMaterial = new THREE.MeshStandardMaterial({
+    color: 0x3a444e,
+    metalness: 0.82,
+    roughness: 0.3,
+  });
   const runningLightRedMaterial = new THREE.MeshBasicMaterial({ color: 0xff2a2a });
   const runningLightGreenMaterial = new THREE.MeshBasicMaterial({ color: 0x2aff5a });
+  const tailLightMaterial = new THREE.MeshBasicMaterial({ color: 0xfff4d8 });
   const beaconMaterial = new THREE.MeshBasicMaterial({
     color: 0xffb030,
     transparent: true,
     opacity: 0.85,
   });
-  const thrusterGlowMaterial = new THREE.MeshBasicMaterial({
-    color: 0xffa64d,
-    transparent: true,
-    opacity: 0.8,
+
+  // ===== 机身（机头 +Z）=====
+  const body = add(cyl(1.15, 1.15, 10, 14), fuselageMaterial, 'boss_body', 0, 0, 0.5, {
+    rx: Math.PI / 2,
+    collide: true,
+  });
+  body.castShadow = true;
+
+  // 前段收束 + 防眩光机头锥
+  add(cyl(0.88, 1.15, 2.6, 14), fuselageMaterial, 'boss_fore_fuselage', 0, 0, 6.8, {
+    rx: Math.PI / 2,
+  });
+  add(cone(0.88, 1.9, 14), accentMaterial, 'boss_nose', 0, 0, 9.05, {
+    rx: Math.PI / 2,
+    collide: true,
   });
 
-  // 复用几何体
-  const hullPlateGeometry = new THREE.BoxGeometry(0.55 * scale, 0.1 * scale, 0.85 * scale);
-  const spineRibGeometry = new THREE.BoxGeometry(2.0 * scale, 0.1 * scale, 0.18 * scale);
-  const wingStripGeometry = new THREE.BoxGeometry(2.4 * scale, 0.08 * scale, 0.3 * scale);
-  const railPostGeometry = new THREE.BoxGeometry(0.05 * scale, 0.3 * scale, 0.05 * scale);
-  const railBarGeometry = new THREE.BoxGeometry(0.04 * scale, 0.04 * scale, 3.6 * scale);
-  const antennaRodGeometry = new THREE.CylinderGeometry(0.04 * scale, 0.06 * scale, 0.9 * scale, 6);
-  const barrelSleeveGeometry = new THREE.CylinderGeometry(
-    0.12 * scale,
-    0.14 * scale,
-    0.6 * scale,
-    8
+  // 领航员观察舱玻璃（机头温室式玻璃带）
+  const noseGlazing = add(ball(0.84, 12), canopyMaterial, 'boss_nose_glazing', 0, 0.05, 8.15);
+  noseGlazing.scale.set(1, 0.9, 1.45);
+  for (let i = 0; i < 3; i++) {
+    add(box(0.06, 1.0, 1.7), detailMaterial, `boss_nose_frame_${i}`, -0.45 + i * 0.45, 0.25, 8.2, {
+      shadow: false,
+    });
+  }
+
+  // 机头弱点传感球（下颌雷达罩）
+  const noseWeakpoint = add(ball(0.48, 12), glowMaterial, 'boss_nose_weakpoint', 0, -0.5, 8.5, {
+    shadow: false,
+  });
+  weakpointMeshes.push(noseWeakpoint);
+  add(ball(0.55, 10), turretMaterial, 'boss_chin_radome', 0, -0.92, 7.3);
+
+  // 驾驶舱（抬升的飞行甲板）
+  const cockpit = add(ball(0.62, 12), canopyMaterial, 'boss_cockpit', 0, 0.92, 5.5, {
+    collide: true,
+  });
+  cockpit.scale.set(1, 0.62, 1.55);
+  const cockpitFrame = add(
+    ring(0.66, 0.07, 8, 18),
+    panelMaterial,
+    'boss_cockpit_frame',
+    0,
+    0.92,
+    5.5,
+    { ry: Math.PI / 2 }
   );
-  const ammoFeedGeometry = new THREE.BoxGeometry(0.5 * scale, 0.3 * scale, 0.7 * scale);
-  const blastShieldGeometry = new THREE.BoxGeometry(0.9 * scale, 0.5 * scale, 0.08 * scale);
-  const runningLightGeometry = new THREE.SphereGeometry(0.14 * scale, 8, 8);
-  const beaconGeometry = new THREE.SphereGeometry(0.16 * scale, 8, 8);
-  const thrusterDotGeometry = new THREE.SphereGeometry(0.12 * scale, 6, 6);
+  cockpitFrame.scale.set(1.05, 0.68, 1.5);
 
-  // 机身侧面镶板
-  for (let side = 0; side < 2; side++) {
-    for (let i = 0; i < 4; i++) {
-      const hullPlate = new THREE.Mesh(hullPlateGeometry, hullDetailMaterial);
-      hullPlate.position.set(
-        (side === 0 ? -1.15 : 1.15) * scale,
-        0.25 * scale,
-        (-2.8 + i * 1.8) * scale
-      );
-      hullPlate.rotation.z = side === 0 ? Math.PI / 2 : -Math.PI / 2;
-      hullPlate.name = `boss_hull_plate_${side === 0 ? 'left' : 'right'}_${i}`;
-      hullPlate.castShadow = true;
-      group.add(hullPlate);
-    }
-  }
-
-  // 背脊横向肋条
-  for (let i = 0; i < 5; i++) {
-    const spineRib = new THREE.Mesh(spineRibGeometry, ribDetailMaterial);
-    spineRib.position.set(0, 1.33 * scale, (-2.2 + i * 1.1) * scale);
-    spineRib.name = `boss_spine_rib_${i}`;
-    spineRib.castShadow = true;
-    group.add(spineRib);
-  }
-
-  // 机翼后缘饰条
-  for (let side = 0; side < 2; side++) {
-    for (let i = 0; i < 3; i++) {
-      const wingStrip = new THREE.Mesh(wingStripGeometry, ribDetailMaterial);
-      wingStrip.position.set(
-        (side === 0 ? -1 : 1) * (4.5 + i * 2.5) * scale,
-        0.2 * scale,
-        1.3 * scale
-      );
-      wingStrip.name = `boss_wing_strip_${side === 0 ? 'left' : 'right'}_${i}`;
-      wingStrip.castShadow = true;
-      group.add(wingStrip);
-    }
-  }
-
-  // 舰桥舷窗（发光条）
+  // 驾驶舱侧舷窗发光条
   for (let i = 0; i < 2; i++) {
-    const windowStrip = new THREE.Mesh(
-      new THREE.BoxGeometry(0.08 * scale, 0.2 * scale, 1.0 * scale),
-      windowStripMaterial
+    add(
+      box(0.06, 0.18, 1.1),
+      windowStripMaterial,
+      `boss_bridge_window_strip_${i}`,
+      i === 0 ? -0.7 : 0.7,
+      0.62,
+      5.4,
+      { shadow: false }
     );
-    windowStrip.position.set((i === 0 ? -0.72 : 0.72) * scale, 0.72 * scale, -2.1 * scale);
-    windowStrip.name = `boss_bridge_window_strip_${i}`;
-    group.add(windowStrip);
   }
 
-  // 天线阵列
-  const antennaSpots = [
-    { x: 0, y: 1.74, z: -1.0 },
-    { x: 0, y: 1.74, z: 1.2 },
-  ];
-  antennaSpots.forEach((spot, i) => {
-    const antenna = new THREE.Mesh(antennaRodGeometry, railingMaterial);
-    antenna.position.set(spot.x * scale, spot.y * scale, spot.z * scale);
-    antenna.name = `boss_antenna_rod_${i}`;
-    antenna.castShadow = true;
-    group.add(antenna);
+  // 背脊与背部装甲
+  add(box(0.92, 0.34, 8.6), panelMaterial, 'boss_spine', 0, 1.1, 0.4);
+  add(box(1.55, 0.24, 5.2), wingMaterial, 'boss_dorsal_armor', 0, 1.28, 0.2);
+  for (let i = 0; i < 4; i++) {
+    add(box(1.9, 0.1, 0.2), detailMaterial, `boss_spine_rib_${i}`, 0, 1.42, -2.2 + i * 1.6);
+  }
+
+  // 机身环形蒙皮接缝带
+  const bandGeometry = new THREE.CylinderGeometry(
+    1.18 * scale,
+    1.18 * scale,
+    0.14 * scale,
+    14,
+    1,
+    true
+  );
+  [-3.2, -0.9, 1.5, 3.6].forEach((z, i) => {
+    add(bandGeometry, panelBandMaterial, `boss_panel_band_${i}`, 0, 0, z, {
+      rx: Math.PI / 2,
+      shadow: false,
+    });
   });
 
-  // 雷达盘（圆柱 + 环形格栅）
-  const radarPost = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.06 * scale, 0.08 * scale, 0.5 * scale, 6),
-    railingMaterial
-  );
-  radarPost.position.set(0, 0.87 * scale, 3.0 * scale);
-  radarPost.name = 'boss_radar_post';
-  radarPost.castShadow = true;
-  group.add(radarPost);
+  // 腹部整流与龙骨
+  add(box(1.62, 0.5, 6.2), bellyMaterial, 'boss_ventral_hull', 0, -1.0, 1.2, { collide: true });
+  add(box(0.6, 0.34, 3.0), panelBandMaterial, 'boss_ventral_keel', 0, -1.32, 3.0);
 
-  const radarDish = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.4 * scale, 0.5 * scale, 0.1 * scale, 12),
-    ribDetailMaterial
-  );
-  radarDish.position.set(0, 1.2 * scale, 3.0 * scale);
-  radarDish.rotation.z = 0.4;
-  radarDish.name = 'boss_radar_dish';
-  radarDish.castShadow = true;
-  group.add(radarDish);
-
-  const radarLattice = new THREE.Mesh(
-    new THREE.TorusGeometry(0.45 * scale, 0.04 * scale, 6, 14),
-    railingMaterial
-  );
-  radarLattice.position.set(0, 1.2 * scale, 3.0 * scale);
-  radarLattice.rotation.set(Math.PI / 2, 0, 0.4);
-  radarLattice.name = 'boss_radar_lattice';
-  radarLattice.castShadow = true;
-  group.add(radarLattice);
-
-  // 背部栏杆
-  for (let side = 0; side < 2; side++) {
-    for (let i = 0; i < 4; i++) {
-      const railPost = new THREE.Mesh(railPostGeometry, railingMaterial);
-      railPost.position.set(
-        (side === 0 ? -0.62 : 0.62) * scale,
-        1.44 * scale,
-        (-1.5 + i * 1.0) * scale
-      );
-      railPost.name = `boss_rail_post_${side === 0 ? 'left' : 'right'}_${i}`;
-      railPost.castShadow = true;
-      group.add(railPost);
-    }
-
-    const railBar = new THREE.Mesh(railBarGeometry, railingMaterial);
-    railBar.position.set((side === 0 ? -0.62 : 0.62) * scale, 1.56 * scale, 0);
-    railBar.name = `boss_rail_bar_${side === 0 ? 'left' : 'right'}`;
-    railBar.castShadow = true;
-    group.add(railBar);
-  }
-
-  // 炮塔武备细节（炮管套筒 / 弹药供给箱 / 防爆挡板）—— 不移动炮塔锚点
-  const turretDressingSpots = [
-    { name: 'left', x: -4, y: 0.6, sleeveZ: -0.2, ammoX: -4.95, ammoY: 0.45 },
-    { name: 'right', x: 4, y: 0.6, sleeveZ: -0.2, ammoX: 4.95, ammoY: 0.45 },
-    { name: 'top', x: 0, y: 2.05, sleeveZ: 0.05, ammoX: 0.95, ammoY: 1.5 },
-    { name: 'bottom', x: 0, y: -2.05, sleeveZ: 0.05, ammoX: 0.95, ammoY: -1.5 },
-  ];
-  for (const spot of turretDressingSpots) {
-    const barrelSleeve = new THREE.Mesh(barrelSleeveGeometry, armamentDetailMaterial);
-    barrelSleeve.rotation.x = Math.PI / 2;
-    barrelSleeve.position.set(spot.x * scale, spot.y * scale, spot.sleeveZ * scale);
-    barrelSleeve.name = `boss_turret_barrel_sleeve_${spot.name}`;
-    barrelSleeve.castShadow = true;
-    group.add(barrelSleeve);
-
-    const ammoFeed = new THREE.Mesh(ammoFeedGeometry, armamentDetailMaterial);
-    ammoFeed.position.set(spot.ammoX * scale, spot.ammoY * scale, 0.4 * scale);
-    ammoFeed.name = `boss_turret_ammo_feed_${spot.name}`;
-    ammoFeed.castShadow = true;
-    group.add(ammoFeed);
-
-    const blastShield = new THREE.Mesh(blastShieldGeometry, hullDetailMaterial);
-    blastShield.position.set(
-      spot.x * scale,
-      (spot.y + (spot.y >= 0 ? 0.15 : -0.15)) * scale,
-      0.7 * scale
+  // 机身侧面突出舱（设备短舱）
+  for (let i = 0; i < 2; i++) {
+    const sideSign = i === 0 ? -1 : 1;
+    add(
+      box(0.5, 0.8, 3.0),
+      fuselageMaterial,
+      `boss_side_sponson_${i}`,
+      sideSign * 1.28,
+      -0.1,
+      2.4,
+      {
+        collide: true,
+      }
     );
-    blastShield.name = `boss_turret_blast_shield_${spot.name}`;
-    blastShield.castShadow = true;
-    group.add(blastShield);
+    add(
+      box(0.14, 0.5, 2.2),
+      detailMaterial,
+      `boss_side_sponson_trim_${i}`,
+      sideSign * 1.56,
+      -0.1,
+      2.4
+    );
   }
 
-  // 翼尖航行灯（左红右绿）
-  const leftRunningLight = new THREE.Mesh(runningLightGeometry, runningLightRedMaterial);
-  leftRunningLight.position.set(-13.2 * scale, 0.34 * scale, 0.15 * scale);
-  leftRunningLight.name = 'boss_running_light_left';
-  group.add(leftRunningLight);
-
-  const rightRunningLight = new THREE.Mesh(runningLightGeometry, runningLightGreenMaterial);
-  rightRunningLight.position.set(13.2 * scale, 0.34 * scale, 0.15 * scale);
-  rightRunningLight.name = 'boss_running_light_right';
-  group.add(rightRunningLight);
-
-  // 警示信标（慢速脉冲）
-  const beaconSpots = [
-    { x: 0, y: 2.15, z: 4.0 },
-    { x: 0, y: -1.72, z: 0.8 },
-    { x: 0, y: 1.32, z: -3.9 },
+  // ===== 开放式弹舱（腹部，含挂载弹药）=====
+  add(box(1.5, 0.32, 3.4), weaponMaterial, 'boss_bomb_bay_recess', 0, -1.22, -1.2);
+  const bayCore = add(box(1.2, 0.1, 3.0), glowMaterial, 'boss_bomb_bay_core', 0, -1.4, -1.2, {
+    shadow: false,
+  });
+  weakpointMeshes.push(bayCore);
+  for (let i = 0; i < 2; i++) {
+    const sideSign = i === 0 ? -1 : 1;
+    add(
+      box(0.1, 0.85, 3.4),
+      bellyMaterial,
+      `boss_bomb_bay_door_${i}`,
+      sideSign * 1.05,
+      -1.62,
+      -1.2,
+      {
+        rz: sideSign * 0.72,
+      }
+    );
+  }
+  const bombGeometry = cyl(0.15, 0.15, 0.92, 8);
+  const bombTipGeometry = cone(0.15, 0.3, 8);
+  const bombFinGeometry = box(0.5, 0.06, 0.24);
+  const bombSpots = [
+    { x: -0.38, z: -2.4 },
+    { x: -0.38, z: -1.2 },
+    { x: -0.38, z: 0.0 },
+    { x: 0.38, z: -2.4 },
+    { x: 0.38, z: -1.2 },
+    { x: 0.38, z: 0.0 },
   ];
-  beaconSpots.forEach((spot, i) => {
-    const beacon = new THREE.Mesh(beaconGeometry, beaconMaterial);
-    beacon.position.set(spot.x * scale, spot.y * scale, spot.z * scale);
-    beacon.name = `boss_warning_beacon_${i}`;
-    group.add(beacon);
+  bombSpots.forEach((spot, i) => {
+    add(bombGeometry, weaponMaterial, `boss_bomb_${i}`, spot.x, -1.62, spot.z, {
+      rx: Math.PI / 2,
+    });
+    add(bombTipGeometry, accentMaterial, `boss_bomb_tip_${i}`, spot.x, -1.62, spot.z + 0.6, {
+      rx: Math.PI / 2,
+    });
+    add(bombFinGeometry, detailMaterial, `boss_bomb_fin_${i}`, spot.x, -1.62, spot.z - 0.42, {
+      shadow: false,
+    });
+  });
+
+  // ===== 高置后掠主翼（左右各带 3 台吊舱发动机）=====
+  const wingGeometry = box(12.5, 0.3, 3.6);
+  const wingSweep = 0.42;
+
+  const leftWing = add(wingGeometry, wingMaterial, 'boss_left_wing', -6.9, 0.85, -0.4, {
+    ry: -wingSweep,
+    rz: 0.045,
+    collide: true,
+  });
+  const rightWing = add(wingGeometry, wingMaterial, 'boss_right_wing', 6.9, 0.85, -0.4, {
+    ry: wingSweep,
+    rz: -0.045,
+    collide: true,
+  });
+  leftWing.castShadow = true;
+  rightWing.castShadow = true;
+
+  // 翼根整流罩
+  const wingRootGeometry = box(2.8, 0.6, 3.6);
+  add(wingRootGeometry, fuselageMaterial, 'boss_left_wing_root', -1.95, 0.72, 0.4, {
+    ry: -wingSweep * 0.5,
+    collide: true,
+  });
+  add(wingRootGeometry, fuselageMaterial, 'boss_right_wing_root', 1.95, 0.72, 0.4, {
+    ry: wingSweep * 0.5,
+    collide: true,
+  });
+
+  // 沿翼展方向的位置计算（含后掠：外侧越远越靠后）
+  const wingPoint = (side: -1 | 1, outboard: number) => ({
+    x: side * (6.9 + 0.913 * outboard),
+    z: -0.4 - 0.408 * outboard,
+  });
+
+  // 翼面检修板带
+  const wingPanelGeometry = box(2.0, 0.1, 1.0);
+  for (const side of [-1, 1] as const) {
+    for (let i = 0; i < 3; i++) {
+      const p = wingPoint(side, -2.6 + i * 2.2);
+      add(
+        wingPanelGeometry,
+        detailMaterial,
+        `boss_wing_panel_${side < 0 ? 'left' : 'right'}_${i}`,
+        p.x,
+        0.95,
+        p.z - 0.7,
+        { ry: side * wingSweep, shadow: false }
+      );
+    }
+  }
+
+  // 6 台吊舱发动机（每侧 3 台：短舱 + 挂架 + 进气环 + 旋转风扇 + 尾喷）
+  const nacelleGeometry = cyl(0.52, 0.44, 2.3, 10);
+  const pylonGeometry = box(0.18, 0.55, 1.5);
+  const intakeRingGeometry = ring(0.5, 0.1, 8, 18);
+  const fanBladeGeometry = box(0.8, 0.13, 0.05);
+  const exhaustGeometry = cyl(0.3, 0.4, 0.55, 10);
+  let nacelleIndex = 0;
+  for (const side of [-1, 1] as const) {
+    for (const outboard of [-3.2, -0.8, 1.6]) {
+      const p = wingPoint(side, outboard);
+      add(
+        nacelleGeometry,
+        turretMaterial,
+        `boss_engine_nacelle_${nacelleIndex}`,
+        p.x,
+        0.26,
+        p.z + 0.25,
+        {
+          rx: Math.PI / 2,
+          collide: true,
+        }
+      );
+      add(pylonGeometry, wingMaterial, `boss_engine_pylon_${nacelleIndex}`, p.x, 0.6, p.z);
+
+      const intakeRing = add(
+        intakeRingGeometry,
+        ringGlowMaterial,
+        `boss_engine_ring_${nacelleIndex}`,
+        p.x,
+        0.26,
+        p.z + 1.42,
+        { shadow: false }
+      );
+      engineRingMeshes.push(intakeRing);
+
+      for (let blade = 0; blade < 2; blade++) {
+        const fan = add(
+          fanBladeGeometry,
+          rotorBladeMaterial,
+          `boss_engine_fan_${nacelleIndex}_${blade}`,
+          p.x,
+          0.26,
+          p.z + 1.3,
+          { shadow: false }
+        );
+        fan.rotation.z = blade * (Math.PI / 2);
+        rotorMeshes.push(fan);
+      }
+
+      const exhaust = add(
+        exhaustGeometry,
+        exhaustMaterial,
+        `boss_engine_${nacelleIndex}`,
+        p.x,
+        0.26,
+        p.z - 1.1,
+        { rx: Math.PI / 2, shadow: false }
+      );
+      engineMeshes.push(exhaust);
+      nacelleIndex++;
+    }
+  }
+
+  // 翼尖模块与航行灯（左红右绿）
+  const tipModuleGeometry = box(1.1, 0.26, 1.1);
+  const navLightGeometry = ball(0.16, 8);
+  for (const side of [-1, 1] as const) {
+    const tip = wingPoint(side, 5.45);
+    add(
+      tipModuleGeometry,
+      weaponMaterial,
+      `boss_wingtip_module_${side < 0 ? 'left' : 'right'}`,
+      tip.x,
+      0.85,
+      tip.z,
+      {
+        ry: side * wingSweep,
+      }
+    );
+    add(
+      navLightGeometry,
+      side < 0 ? runningLightRedMaterial : runningLightGreenMaterial,
+      `boss_running_light_${side < 0 ? 'left' : 'right'}`,
+      tip.x + side * 0.35,
+      0.95,
+      tip.z,
+      { shadow: false }
+    );
+  }
+
+  // ===== 防御炮塔群（保留 4 门重炮锚点：左/右/上/下）=====
+  const turretDrumGeometry = cyl(0.36, 0.48, 0.7, 10);
+  const turretBarrelGeometry = cyl(0.07, 0.09, 1.5, 8);
+  const muzzleGeometry = ball(0.2, 8);
+
+  // 左/右翼下炮塔（吊篮式）
+  for (const side of [-1, 1] as const) {
+    const name = side < 0 ? 'left' : 'right';
+    const tx = side * 4;
+    add(turretDrumGeometry, turretMaterial, `boss_${name}_turret`, tx, 0.4, 0.9, {
+      collide: true,
+    });
+    add(box(0.95, 0.34, 1.0), panelMaterial, `boss_${name}_turret_housing`, tx, 0.66, 0.9);
+    for (let b = 0; b < 2; b++) {
+      add(
+        turretBarrelGeometry,
+        weaponMaterial,
+        `boss_${name}_turret_barrel_${b}`,
+        tx + (b === 0 ? -0.14 : 0.14),
+        0.34,
+        1.7,
+        {
+          rx: Math.PI / 2,
+        }
+      );
+    }
+    const muzzle = add(
+      muzzleGeometry,
+      glowMaterial.clone(),
+      `boss_${name}_muzzle`,
+      tx,
+      0.34,
+      2.55,
+      {
+        shadow: false,
+      }
+    );
+    muzzleMeshes.push(muzzle);
+  }
+
+  // 背部炮塔（驾驶舱后方）
+  add(cyl(0.62, 0.74, 0.26, 12), panelMaterial, 'boss_top_turret_pod', 0, 1.34, 3.2);
+  const topTurret = add(ball(0.52, 10), turretMaterial, 'boss_top_turret', 0, 1.5, 3.2, {
+    collide: true,
+  });
+  topTurret.scale.set(1, 0.72, 1);
+  for (let b = 0; b < 2; b++) {
+    add(
+      turretBarrelGeometry,
+      weaponMaterial,
+      `boss_top_turret_barrel_${b}`,
+      b === 0 ? -0.14 : 0.14,
+      1.72,
+      3.75,
+      {
+        rx: 1.2,
+      }
+    );
+  }
+  const topMuzzle = add(muzzleGeometry, glowMaterial.clone(), 'boss_top_muzzle', 0, 1.92, 4.2, {
+    shadow: false,
+  });
+  muzzleMeshes.push(topMuzzle);
+
+  // 腹部球形炮塔
+  add(cyl(0.66, 0.56, 0.26, 12), panelMaterial, 'boss_bottom_turret_pod', 0, -1.3, 1.8);
+  add(ball(0.55, 10), turretMaterial, 'boss_bottom_turret', 0, -1.5, 1.8, {
+    collide: true,
+  });
+  for (let b = 0; b < 2; b++) {
+    add(
+      turretBarrelGeometry,
+      weaponMaterial,
+      `boss_bottom_turret_barrel_${b}`,
+      b === 0 ? -0.14 : 0.14,
+      -1.7,
+      2.3,
+      {
+        rx: 1.92,
+      }
+    );
+  }
+  const bottomMuzzle = add(
+    muzzleGeometry,
+    glowMaterial.clone(),
+    'boss_bottom_muzzle',
+    0,
+    -1.92,
+    2.7,
+    {
+      shadow: false,
+    }
+  );
+  muzzleMeshes.push(bottomMuzzle);
+
+  // 尾部防御炮塔（纯视觉）
+  add(box(0.85, 0.7, 0.8), turretMaterial, 'boss_tail_turret_housing', 0, 0.05, -7.2);
+  const tailGlazing = add(ball(0.4, 10), canopyMaterial, 'boss_tail_gunner_glazing', 0, 0.3, -7.4, {
+    shadow: false,
+  });
+  tailGlazing.scale.set(1, 0.8, 1);
+  for (let b = 0; b < 2; b++) {
+    add(
+      turretBarrelGeometry,
+      weaponMaterial,
+      `boss_tail_turret_barrel_${b}`,
+      b === 0 ? -0.16 : 0.16,
+      -0.05,
+      -7.9,
+      {
+        rx: -Math.PI / 2,
+      }
+    );
+  }
+
+  // ===== 尾段与尾翼组 =====
+  add(cyl(1.12, 0.4, 2.9, 12), fuselageMaterial, 'boss_tail_cone', 0, 0.12, -5.9, {
+    rx: Math.PI / 2,
+    collide: true,
+  });
+
+  // 水平尾翼（后掠）
+  add(box(7.0, 0.18, 1.7), wingMaterial, 'boss_tail', 0, 0.55, -6.2, { collide: true });
+  const tailTipGeometry = box(1.5, 0.14, 1.2);
+  add(tailTipGeometry, detailMaterial, 'boss_tail_tip_left', -3.9, 0.55, -6.6, { ry: -0.5 });
+  add(tailTipGeometry, detailMaterial, 'boss_tail_tip_right', 3.9, 0.55, -6.6, { ry: 0.5 });
+
+  // 垂直尾翼（带前缘斜削与顶帽）
+  add(box(0.2, 2.7, 1.9), wingMaterial, 'boss_vtail', 0, 1.75, -6.2, { collide: true });
+  add(box(0.18, 1.5, 1.1), panelMaterial, 'boss_vtail_leading_edge', 0, 1.6, -5.3, { rx: 0.5 });
+  add(box(0.46, 0.22, 1.4), detailMaterial, 'boss_vtail_cap', 0, 3.05, -6.45);
+  add(box(0.1, 1.7, 0.45), accentMaterial, 'boss_rudder_trim', 0, 1.9, -7.15);
+  add(navLightGeometry, tailLightMaterial, 'boss_running_light_tail', 0, 3.2, -6.9, {
+    shadow: false,
+  });
+
+  // ===== 天线与传感器 =====
+  const bladeAntennaGeometry = box(0.05, 0.4, 0.5);
+  [
+    { x: 0.3, z: 4.4 },
+    { x: -0.35, z: 2.2 },
+    { x: 0.2, z: -1.6 },
+  ].forEach((spot, i) => {
+    add(bladeAntennaGeometry, detailMaterial, `boss_blade_antenna_${i}`, spot.x, 1.5, spot.z, {
+      shadow: false,
+    });
+  });
+  add(cyl(0.03, 0.05, 0.9, 6), detailMaterial, 'boss_wire_mast', 0, 1.85, 4.6, { shadow: false });
+
+  // ===== 警示信标（慢速脉冲）=====
+  const beaconGeometry = ball(0.17, 8);
+  [
+    { x: 0, y: 1.55, z: 0.4 },
+    { x: 0, y: -1.42, z: -0.6 },
+    { x: 0, y: 3.18, z: -6.0 },
+  ].forEach((spot, i) => {
+    const beacon = add(
+      beaconGeometry,
+      beaconMaterial,
+      `boss_warning_beacon_${i}`,
+      spot.x,
+      spot.y,
+      spot.z,
+      {
+        shadow: false,
+      }
+    );
     signalBeaconMeshes.push(beacon);
-  });
-
-  // 引擎喷口辉光点阵
-  enginePositions.forEach((pos, i) => {
-    for (let j = 0; j < 2; j++) {
-      const thrusterDot = new THREE.Mesh(thrusterDotGeometry, thrusterGlowMaterial);
-      thrusterDot.position.set(
-        pos.x + (j === 0 ? -0.18 : 0.18) * scale,
-        pos.y,
-        pos.z + 1.0 * scale
-      );
-      thrusterDot.name = `boss_thruster_glow_${i}_${j}`;
-      group.add(thrusterDot);
-      signalBeaconMeshes.push(thrusterDot);
-    }
   });
 
   const bossGroup = group as BossGroup;
@@ -1365,6 +1193,7 @@ export function createBossMesh(config: BossConfig): THREE.Group {
   bossGroup.weakpointMeshes = weakpointMeshes;
   bossGroup.muzzleMeshes = muzzleMeshes;
   bossGroup.signalBeaconMeshes = signalBeaconMeshes;
+  bossGroup.rotorMeshes = rotorMeshes;
   group.name = `BOSS_${config.type}`;
   return group;
 }

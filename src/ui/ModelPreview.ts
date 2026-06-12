@@ -1,21 +1,21 @@
 import {
   AmbientLight,
-  BoxGeometry,
+  Box3,
   Color,
-  ConeGeometry,
-  CylinderGeometry,
   DirectionalLight,
   Group,
   Mesh,
-  MeshBasicMaterial,
-  MeshStandardMaterial,
   PerspectiveCamera,
   Scene,
-  TorusGeometry,
+  Vector3,
   WebGLRenderer,
 } from 'three';
 import { EnemyType, ENEMY_CONFIGS } from '@/features/enemy/EnemyTypes';
-import { BossType, BOSS_CONFIGS, BOSS_MISSILE_CONFIG } from '@/features/boss/BossTypes';
+import { BossType, BOSS_CONFIGS } from '@/features/boss/BossTypes';
+
+// 包围盒自适应取景的目标包围球半径（相机固定在 (0,2,8)，fov 50°）。
+// 包围球半径是盒对角线的一半（≥ 各半轴），按 3.1 取景仍留有安全余量
+const PREVIEW_FIT_RADIUS = 3.1;
 
 interface AircraftMeshFactoryModule {
   createPlayerMesh: () => Group;
@@ -218,7 +218,8 @@ export class ModelPreview {
   }
 
   private setupLighting(): void {
-    const ambientLight = new AmbientLight(0xffffff, 0.5);
+    // 偏高的环境光让深色船体（八爪鱼战舰、空中航母）在深色背景上仍可读
+    const ambientLight = new AmbientLight(0xffffff, 0.78);
     this.scene.add(ambientLight);
 
     const directionalLight = new DirectionalLight(0xffffff, 1);
@@ -315,11 +316,25 @@ export class ModelPreview {
       }
     }
 
+    // 导弹：直接复用战斗模型的视觉装配工厂，与实战外观完全一致
+    this.aircrafts.push({
+      id: 'player_missile',
+      name: '玩家导弹',
+      type: 'missile',
+      createMesh: async () => {
+        const module = await import('@/features/combat/MissileSystem');
+        return module.createMissileVisualMesh();
+      },
+    });
+
     this.aircrafts.push({
       id: 'boss_missile',
       name: 'Boss 导弹',
       type: 'missile',
-      createMesh: () => this.createBossMissileMesh(),
+      createMesh: async () => {
+        const module = await import('@/features/boss/BossMissileSystem');
+        return module.createBossMissileVisualMesh();
+      },
     });
   }
 
@@ -329,97 +344,6 @@ export class ModelPreview {
     }
 
     return this.aircraftMeshFactoryPromise;
-  }
-
-  private createBossMissileMesh(): Group {
-    const group = new Group();
-    const scale = BOSS_MISSILE_CONFIG.SCALE;
-
-    const bodyMaterial = new MeshStandardMaterial({
-      color: 0x8b0000,
-      metalness: 0.7,
-      roughness: 0.3,
-    });
-
-    const noseMaterial = new MeshStandardMaterial({
-      color: 0x1a1a1a,
-      metalness: 0.9,
-      roughness: 0.2,
-    });
-
-    const finMaterial = new MeshStandardMaterial({
-      color: 0x2a2a2a,
-      metalness: 0.8,
-      roughness: 0.3,
-    });
-
-    const bodyLength = 2.0 * scale;
-    const bodyRadius = 0.35 * scale;
-
-    const bodyGeometry = new CylinderGeometry(bodyRadius * 0.8, bodyRadius, bodyLength, 12);
-    const body = new Mesh(bodyGeometry, bodyMaterial);
-    body.rotation.x = Math.PI / 2;
-    body.position.z = bodyLength * 0.1;
-    group.add(body);
-
-    const noseGeometry = new ConeGeometry(bodyRadius * 0.8, bodyLength * 0.6, 12);
-    const nose = new Mesh(noseGeometry, noseMaterial);
-    nose.rotation.x = Math.PI / 2;
-    nose.position.z = bodyLength * 0.7;
-    group.add(nose);
-
-    const finCount = 4;
-    const finLength = bodyLength * 0.4;
-    const finHeight = bodyRadius * 1.0;
-
-    for (let i = 0; i < finCount; i++) {
-      const angle = (i / finCount) * Math.PI * 2;
-
-      const finGeometry = new BoxGeometry(0.1 * scale, finHeight, finLength);
-      const fin = new Mesh(finGeometry, finMaterial);
-
-      fin.position.x = Math.cos(angle) * (bodyRadius + finHeight * 0.5);
-      fin.position.y = Math.sin(angle) * (bodyRadius + finHeight * 0.5);
-      fin.position.z = -bodyLength * 0.3;
-
-      fin.rotation.z = angle;
-
-      group.add(fin);
-    }
-
-    const ringGeometry = new TorusGeometry(bodyRadius * 1.1, 0.05 * scale, 8, 16);
-    const ringMaterial = new MeshStandardMaterial({
-      color: 0xffaa00,
-      emissive: 0xff6600,
-      emissiveIntensity: 0.5,
-    });
-    const ring = new Mesh(ringGeometry, ringMaterial);
-    ring.position.z = -bodyLength * 0.1;
-    group.add(ring);
-
-    const thrustGeometry = new ConeGeometry(bodyRadius * 0.6, bodyLength * 0.8, 8);
-    const thrustMaterial = new MeshBasicMaterial({
-      color: 0xff4400,
-      transparent: true,
-      opacity: 0.9,
-    });
-    const thrust = new Mesh(thrustGeometry, thrustMaterial);
-    thrust.rotation.x = Math.PI / 2;
-    thrust.position.z = -bodyLength * 0.7;
-    group.add(thrust);
-
-    const innerThrustGeometry = new ConeGeometry(bodyRadius * 0.3, bodyLength * 0.5, 8);
-    const innerThrustMaterial = new MeshBasicMaterial({
-      color: 0xffff00,
-      transparent: true,
-      opacity: 1,
-    });
-    const innerThrust = new Mesh(innerThrustGeometry, innerThrustMaterial);
-    innerThrust.rotation.x = Math.PI / 2;
-    innerThrust.position.z = -bodyLength * 0.5;
-    group.add(innerThrust);
-
-    return group;
   }
 
   private setupControls(): void {
@@ -507,44 +431,34 @@ export class ModelPreview {
 
     const mesh = await aircraft.createMesh();
     if (loadSequence !== this.meshLoadSequence || this.container.style.display === 'none') {
-      mesh.traverse((object) => {
-        if (object instanceof Mesh) {
-          object.geometry.dispose();
-          if (Array.isArray(object.material)) {
-            object.material.forEach((material) => material.dispose());
-          } else {
-            object.material.dispose();
-          }
-        }
-      });
+      this.disposeMeshTree(mesh);
       return;
     }
 
-    this.currentMesh = mesh;
+    // 包围盒自适应取景：把模型统一缩放到固定包围球半径，
+    // 并用外层包装组让模型围绕真实几何中心旋转（渲染循环旋转 currentMesh）
+    const bounds = new Box3().setFromObject(mesh);
+    const center = bounds.getCenter(new Vector3());
+    const radius = bounds.getSize(new Vector3()).length() / 2;
+    const fitScale = radius > 0 ? PREVIEW_FIT_RADIUS / radius : 1;
+    // 乘以而非覆盖：Boss 工厂组自带固有缩放（如八爪鱼战舰 scale=5），
+    // setScalar 会把固有缩放一并抹掉导致模型远小于取景预期
+    mesh.scale.multiplyScalar(fitScale);
+    mesh.position.copy(center).multiplyScalar(-fitScale);
 
-    let scale: number;
-    if (aircraft.type === 'boss') {
-      scale = 0.3;
-    } else if (aircraft.type === 'missile') {
-      scale = 0.15;
-    } else {
-      scale = 0.8;
-    }
-    this.currentMesh.scale.set(scale, scale, scale);
+    const wrapper = new Group();
+    wrapper.add(mesh);
 
-    this.scene.add(this.currentMesh);
+    this.currentMesh = wrapper;
+    this.scene.add(wrapper);
 
     this.nameDisplay.textContent = aircraft.name;
   }
 
-  private disposeCurrentMesh(): void {
-    if (!this.currentMesh) {
-      return;
-    }
-
-    this.scene.remove(this.currentMesh);
-    this.currentMesh.traverse((object) => {
-      // 跨机体共享的资源（航空信号灯、引擎尾焰材质等）不随预览销毁释放
+  private disposeMeshTree(root: Group): void {
+    root.traverse((object) => {
+      // 跨机体共享的资源（航空信号灯、引擎尾焰材质、导弹共享几何体/涂装等）
+      // 不随预览销毁释放
       if (object.userData.sharedResource === true) {
         return;
       }
@@ -557,6 +471,15 @@ export class ModelPreview {
         }
       }
     });
+  }
+
+  private disposeCurrentMesh(): void {
+    if (!this.currentMesh) {
+      return;
+    }
+
+    this.scene.remove(this.currentMesh);
+    this.disposeMeshTree(this.currentMesh);
     this.currentMesh = null;
   }
 
