@@ -1,0 +1,17 @@
+{"node":"explore-transparent-stack","event":"opened","ts":"2026-06-13T09:48:26.708Z"}
+{"node":"explore-transparent-stack","event":"evidence","ts":"2026-06-13T09:51:15.319Z"}
+{"node":"explore-transparent-stack","event":"closed","ts":"2026-06-13T09:51:20.649Z"}
+{"node":"design-depth-policy","event":"opened","ts":"2026-06-13T09:51:20.707Z"}
+{"node":"design-depth-policy","event":"evidence","ts":"2026-06-13T09:59:42.103Z"}
+{"node":"design-depth-policy","event":"closed","ts":"2026-06-13T09:59:48.131Z"}
+{"node":"fix-transparent-depth","event":"opened","ts":"2026-06-13T09:59:48.193Z"}
+{"node":"fix-transparent-depth","event":"evidence","ts":"2026-06-13T10:04:07.767Z"}
+{"node":"fix-transparent-depth","event":"closed","ts":"2026-06-13T10:04:13.695Z"}
+{"node":"review-depth-fix","event":"opened","ts":"2026-06-13T10:04:13.755Z"}
+{"node":"review-depth-fix","event":"closed","ts":"2026-06-13T10:09:23.705Z"}
+{"node":"update-plan-state","event":"opened","ts":"2026-06-13T10:09:23.763Z"}
+{"node":"update-plan-state","event":"evidence","ts":"2026-06-13T10:10:41.806Z"}
+{"node":"update-plan-state","event":"closed","ts":"2026-06-13T10:10:46.867Z"}
+{"node":"finalize","event":"opened","ts":"2026-06-13T10:10:46.927Z"}
+{"node":"finalize","event":"evidence","ts":"2026-06-13T10:11:58.927Z"}
+{"node":"finalize","event":"closed","ts":"2026-06-13T10:12:10.755Z"}
