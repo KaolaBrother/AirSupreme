@@ -58,6 +58,7 @@ export interface CloudFieldOptions {
   /** 基础尺寸放大（worldshowcase 云为 1800m 世界设计，4000m 世界需放大） */
   scaleMultiplier?: number;
   opacity?: number;
+  renderOrder?: number;
 }
 
 /**
@@ -87,9 +88,11 @@ export class CloudField {
     this.fieldSize = options.fieldSize ?? 4800;
     this.tintColor = new THREE.Color(options.tint ?? 0xffffff);
     const scaleMultiplier = options.scaleMultiplier ?? 2.3;
+    const renderOrder = options.renderOrder ?? 6;
 
     this.group = new THREE.Group();
     this.group.name = 'worldscapeClouds';
+    this.group.renderOrder = renderOrder;
     this.material = new THREE.MeshStandardMaterial({
       color: 0xffffff,
       emissive: 0xffffff,
@@ -99,6 +102,7 @@ export class CloudField {
       transparent: true,
       opacity: options.opacity ?? 0.92,
       depthWrite: false,
+      depthTest: true,
     });
     this.material.emissive.copy(this.tintColor);
 
@@ -110,7 +114,7 @@ export class CloudField {
       im.frustumCulled = false;
       im.castShadow = false;
       im.receiveShadow = false;
-      im.renderOrder = 6;
+      im.renderOrder = renderOrder;
       this.meshes.push(im);
       this.group.add(im);
 

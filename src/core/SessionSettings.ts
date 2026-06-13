@@ -45,6 +45,10 @@ export const DEFAULT_START_FLOW_SETTINGS: StartFlowSettings = {
   testScore: 0,
 };
 
+export const TEST_SCORE_OPTIONS = [0, 5000, 10000, 15000, 20000] as const;
+export type TestScoreOption = (typeof TEST_SCORE_OPTIONS)[number];
+export const MAX_TEST_SCORE = TEST_SCORE_OPTIONS[TEST_SCORE_OPTIONS.length - 1];
+
 const QUALITY_PRESETS: QualityPreset[] = ['auto', 'performance', 'balanced', 'quality'];
 
 function clampInt(value: unknown, min: number, max: number, fallback: number): number {
@@ -78,6 +82,25 @@ function normalizeGameMode(value: unknown, fallback: GameMode = 'normal'): GameM
   return value === 'boss' ? 'boss' : fallback;
 }
 
+function normalizeTestScore(
+  value: unknown,
+  fallback: TestScoreOption = 0
+): TestScoreOption {
+  const clamped = clampInt(value, 0, MAX_TEST_SCORE, fallback);
+  let closest: TestScoreOption = TEST_SCORE_OPTIONS[0];
+  let closestDistance = Math.abs(clamped - closest);
+
+  for (const option of TEST_SCORE_OPTIONS) {
+    const distance = Math.abs(clamped - option);
+    if (distance < closestDistance) {
+      closest = option;
+      closestDistance = distance;
+    }
+  }
+
+  return closest;
+}
+
 export function normalizeStartFlowSettings(raw?: Partial<StartFlowSettings>): StartFlowSettings {
   const source = raw ?? {};
 
@@ -108,12 +131,7 @@ export function normalizeStartFlowSettings(raw?: Partial<StartFlowSettings>): St
       DEFAULT_START_FLOW_SETTINGS.startLevel
     ),
     gameMode: normalizeGameMode(source.gameMode, DEFAULT_START_FLOW_SETTINGS.gameMode),
-    testScore: clampInt(
-      source.testScore,
-      0,
-      5000,
-      DEFAULT_START_FLOW_SETTINGS.testScore
-    ),
+    testScore: normalizeTestScore(source.testScore),
   };
 }
 

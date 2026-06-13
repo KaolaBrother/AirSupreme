@@ -2,15 +2,14 @@ import {
   CanvasTexture,
   Color,
   CylinderGeometry,
-  DoubleSide,
   Group,
   Material,
   Mesh,
-  MeshBasicMaterial,
   MeshStandardMaterial,
-  PlaneGeometry,
   Scene,
   SphereGeometry,
+  Sprite,
+  SpriteMaterial,
   Vector3,
 } from 'three';
 import { PowerUpType, POWER_UP_CONFIGS } from './PowerUpSystem';
@@ -24,8 +23,10 @@ export class BalloonPowerUp {
   private config: { type: PowerUpType; icon: string; isRandom: boolean };
 
   // 气球组件
+  private rotatingParts!: Group;
   private balloon!: Mesh;
   private string!: Mesh;
+  private iconSprite?: Sprite;
 
   // 浮动参数
   private baseY: number;
@@ -75,6 +76,11 @@ export class BalloonPowerUp {
     this.string = new Mesh(stringGeometry, stringMaterial);
     this.string.position.y = -2.5;
 
+    this.rotatingParts = new Group();
+    this.rotatingParts.add(this.string);
+    this.rotatingParts.add(this.balloon);
+    this.mesh.add(this.rotatingParts);
+
     // 气球道具图标/问号（使用文本纹理）- 放大并提高位置避免被气球遮挡
     const iconCanvas = document.createElement('canvas');
     iconCanvas.width = 128; // 放大一倍（64 → 128）
@@ -99,18 +105,17 @@ export class BalloonPowerUp {
 
     // 创建纹理
     const iconTexture = new CanvasTexture(iconCanvas);
-    const iconGeometry = new PlaneGeometry(5, 5); // 放大一倍（2.5 → 5）
-    const iconMaterial = new MeshBasicMaterial({
+    const iconMaterial = new SpriteMaterial({
       map: iconTexture,
       transparent: true,
-      side: DoubleSide,
+      depthWrite: false,
+      depthTest: true,
     });
-    const icon = new Mesh(iconGeometry, iconMaterial);
+    const icon = new Sprite(iconMaterial);
+    icon.scale.set(5, 5, 1); // 放大一倍（2.5 → 5）
     icon.position.y = 5.5; // 提高位置（3.5 → 5.5）避免被气球遮挡
 
-    // 组装气球
-    this.mesh.add(this.string);
-    this.mesh.add(this.balloon);
+    this.iconSprite = icon;
     this.mesh.add(icon);
   }
 
@@ -129,8 +134,8 @@ export class BalloonPowerUp {
     const yOffset = Math.sin(this.time * this.bobSpeed) * this.floatAmount;
     this.mesh.position.y = this.baseY + yOffset;
 
-    // 缓慢旋转
-    this.mesh.rotation.y += deltaTime * 0.5;
+    // 缓慢旋转气球本体；图标作为 Sprite 保持朝向相机
+    this.rotatingParts.rotation.y += deltaTime * 0.5;
 
     // 彩虹闪烁效果 - 颜色不断变化
     const hue = (this.time * 0.5) % 1; // 色相循环
@@ -186,13 +191,12 @@ export class BalloonPowerUp {
     this.string.geometry.dispose();
     (this.string.material as Material).dispose();
 
-    const iconMesh = this.mesh.children.find(
-      (c) => c instanceof Mesh && c.geometry instanceof PlaneGeometry
-    ) as Mesh | undefined;
-    if (iconMesh) {
-      iconMesh.geometry.dispose();
-      (iconMesh.material as MeshBasicMaterial).dispose();
-      (iconMesh.material as MeshBasicMaterial).map?.dispose();
+    if (this.iconSprite) {
+      const iconMaterial = this.iconSprite.material as SpriteMaterial;
+      iconMaterial.map?.dispose();
+      iconMaterial.dispose();
+      this.iconSprite.removeFromParent();
+      this.iconSprite = undefined;
     }
   }
 }

@@ -285,6 +285,12 @@ const TYPE_GRAVITY: Record<ParticleType, number> = {
   [ParticleType.DEBRIS]: 1.15,
 };
 
+const VFX_RENDER_ORDER = {
+  shockwave: 20,
+  particle: 21,
+  debris: 21,
+} as const;
+
 const WHITE_HOT = new THREE.Color(1, 1, 1);
 const SOFT_GRAY = new THREE.Color(0.6, 0.6, 0.62);
 
@@ -428,9 +434,11 @@ export class ParticleSystem {
         opacity: 0,
         blending: THREE.AdditiveBlending,
         depthWrite: false,
+        depthTest: true,
         side: THREE.DoubleSide,
       });
       const mesh = new THREE.Mesh(getSharedShockwaveGeometry(), material);
+      mesh.renderOrder = VFX_RENDER_ORDER.shockwave;
       mesh.visible = false;
       this.particleMeshes.add(mesh);
       this.shockwaves.push({
@@ -1572,7 +1580,7 @@ export class ParticleSystem {
     intensity: number = 1
   ): void {
     const trailIntensity = THREE.MathUtils.clamp(intensity, 0.8, 1.9);
-    const isHeavyMissileTrail = trailIntensity >= 1.35;
+    const isHeavyMissileTrail = trailIntensity >= 1.25;
     this.trailColor.copy(color);
     this.directedVelocity.copy(direction).normalize();
 
@@ -2446,9 +2454,11 @@ export class ParticleSystem {
       transparent: true,
       opacity: 1,
       depthWrite: false,
+      depthTest: true,
       blending: THREE.AdditiveBlending,
     });
     const sprite = new THREE.Sprite(spriteMaterial);
+    sprite.renderOrder = VFX_RENDER_ORDER.particle;
     sprite.visible = false;
     this.particleMeshes.add(sprite);
 
@@ -2456,8 +2466,11 @@ export class ParticleSystem {
       color: 0x666666,
       transparent: true,
       opacity: 1,
+      depthWrite: false,
+      depthTest: true,
     });
     const debrisMesh = new THREE.Mesh(getSharedDebrisGeometry(), debrisMaterial);
+    debrisMesh.renderOrder = VFX_RENDER_ORDER.debris;
     debrisMesh.visible = false;
     this.particleMeshes.add(debrisMesh);
 

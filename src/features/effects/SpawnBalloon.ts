@@ -124,7 +124,7 @@ export class SpawnBalloon {
     if (this.isComplete || this.isCancelled) return;
 
     this.lifetime += deltaTime;
-    const progress = this.lifetime / this.maxLifetime;
+    const progress = Math.min(1, this.lifetime / this.maxLifetime);
 
     // 1. 扩展动画（0-0.5秒）
     if (progress < 0.25) {
@@ -133,6 +133,9 @@ export class SpawnBalloon {
 
       this.glowSphere.scale.set(scale, scale, scale);
       this.ring.scale.set(scale * 1.5, scale * 1.5, scale * 1.5);
+    } else {
+      this.glowSphere.scale.setScalar(1);
+      this.ring.scale.setScalar(1.5);
     }
 
     // 2. 持续旋转和脉动（整个生命周期）
@@ -141,8 +144,9 @@ export class SpawnBalloon {
 
     // 脉动效果
     const pulse = 1 + Math.sin(this.lifetime * 6) * 0.15;
-    if (progress >= 0.25) {
-      this.glowSphere.scale.multiplyScalar(pulse);
+    if (progress >= 0.25 && progress <= 0.75) {
+      this.glowSphere.scale.setScalar(pulse);
+      this.ring.scale.setScalar(1.5 * pulse);
     }
 
     // 3. 星星粒子效果（0.3-1.5秒）
@@ -173,11 +177,11 @@ export class SpawnBalloon {
 
     // 4. 收缩消失（1.5-2秒）
     if (progress > 0.75) {
-      const fadeProgress = (progress - 0.75) / 0.25;
+      const fadeProgress = Math.min(1, (progress - 0.75) / 0.25);
       const fadeScale = 1 - fadeProgress;
 
-      this.glowSphere.scale.multiplyScalar(fadeScale);
-      this.ring.scale.multiplyScalar(fadeScale);
+      this.glowSphere.scale.setScalar(fadeScale * pulse);
+      this.ring.scale.setScalar(fadeScale * 1.5);
 
       // 淡出透明度
       const opacity = 1 - fadeProgress;

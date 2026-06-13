@@ -145,13 +145,6 @@ export class PowerUpManager {
 
       // 移除生成位置标记
       this.spawningPositions.delete(posKey);
-
-      // 移除特效
-      const effectIndex = this.spawnEffects.indexOf(spawnEffect);
-      if (effectIndex !== -1) {
-        this.spawnEffects.splice(effectIndex, 1);
-      }
-      spawnEffect.dispose();
     });
     this.spawnEffects.push(spawnEffect);
     this.scene.add(spawnEffect.getMesh());

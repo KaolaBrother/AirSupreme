@@ -40,4 +40,16 @@ describe('HUD', () => {
       GAME_CONSTANTS.MISSILE.MAX_MISSILES
     );
   });
+
+  it('shows mission completion without reusing the game over title', () => {
+    hud.showMissionComplete(20000);
+
+    expect(document.getElementById('game-over-title')?.textContent).toBe('MISSION COMPLETE');
+    expect(document.getElementById('final-score')?.textContent).toBe('最终得分: 20000');
+
+    hud.hideGameOver();
+    hud.showGameOver(0);
+
+    expect(document.getElementById('game-over-title')?.textContent).toBe('GAME OVER');
+  });
 });

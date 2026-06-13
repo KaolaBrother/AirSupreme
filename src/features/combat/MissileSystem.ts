@@ -5,7 +5,9 @@ import { getLogger } from '@/core/utils/Logger';
 
 const log = getLogger('MissileSystem');
 // 稍微加密尾迹步进，让烟线更连续
-const MISSILE_TRAIL_INTERVAL = 0.035;
+const MISSILE_TRAIL_INTERVAL = 0.03;
+// 海面和云层背景较亮，玩家导弹默认需要高于中性的尾迹强度
+const MISSILE_TRAIL_VISIBILITY_INTENSITY = 1.25;
 
 // 弹体轴向范围（+Z 朝前）：喷口缘 → 弹尖，总长 2.8
 const MISSILE_TAIL_Z = -1.02;
@@ -680,7 +682,12 @@ export class Missile {
     this.backwardDirection.copy(this.velocity).normalize().multiplyScalar(-1.5);
     this.trailPosition.add(this.backwardDirection);
     this.trailColor.setHSL(0.08 + Math.random() * 0.03, 1, 0.6);
-    this.particleSystem.createMissileTrail(this.trailPosition, this.velocity, this.trailColor, 1);
+    this.particleSystem.createMissileTrail(
+      this.trailPosition,
+      this.velocity,
+      this.trailColor,
+      MISSILE_TRAIL_VISIBILITY_INTENSITY
+    );
   }
 
   private updateVisuals(): void {

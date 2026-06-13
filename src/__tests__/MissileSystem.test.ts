@@ -17,13 +17,15 @@ describe('MissileSystem', () => {
     } as unknown as ParticleSystem;
   });
 
-  it('should emit missile trail effects while active missiles update', () => {
+  it('should emit enhanced missile trail effects while active missiles update', () => {
     const system = new MissileSystem(scene, particleSystem);
+    const createMissileTrail = vi.mocked(particleSystem.createMissileTrail);
 
     system.fire(new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, -1));
     system.update(0.05);
 
-    expect(particleSystem.createMissileTrail).toHaveBeenCalled();
+    expect(createMissileTrail).toHaveBeenCalled();
+    expect(createMissileTrail.mock.calls[0][3]).toBeGreaterThan(1);
   });
 
   it('should emit missile impact effects when colliding with a target', () => {

@@ -34,6 +34,7 @@ export class HUD {
   private powerUpBigText: HTMLDivElement;
   private powerUpBigSubtext: HTMLDivElement;
   private gameOverDisplay: HTMLDivElement;
+  private gameOverTitle: HTMLDivElement;
   private finalScoreDisplay: HTMLDivElement;
   private upgradePointsDisplay: HTMLDivElement;
   private damageFlashOverlay: HTMLDivElement;
@@ -379,8 +380,9 @@ export class HUD {
       transition: opacity 0.5s;
       pointer-events: none;
     `;
-    const gameOverTitle = document.createElement('div');
-    gameOverTitle.style.cssText = `
+    this.gameOverTitle = document.createElement('div');
+    this.gameOverTitle.id = 'game-over-title';
+    this.gameOverTitle.style.cssText = `
       text-align: center;
       color: #ff3333;
       font-size: ${isMobile ? '48px' : '72px'};
@@ -389,7 +391,7 @@ export class HUD {
       margin-bottom: 30px;
       animation: pulse 1s ease-in-out infinite;
     `;
-    this.setTextContent(gameOverTitle, 'GAME OVER');
+    this.setTextContent(this.gameOverTitle, 'GAME OVER');
 
     this.finalScoreDisplay = document.createElement('div');
     this.finalScoreDisplay.id = 'final-score';
@@ -400,7 +402,7 @@ export class HUD {
       text-shadow: 2px 2px 4px rgba(0, 0, 0, 1);
     `;
 
-    this.gameOverDisplay.appendChild(gameOverTitle);
+    this.gameOverDisplay.appendChild(this.gameOverTitle);
     this.gameOverDisplay.appendChild(this.finalScoreDisplay);
 
     this.damageFlashOverlay = document.createElement('div');
@@ -953,6 +955,31 @@ export class HUD {
   public showGameOver(finalScore: number): void {
     this.ensureInitialized();
     this.hideEventObjective();
+    this.setTextContent(this.gameOverTitle, 'GAME OVER');
+    this.setStyleValue(this.gameOverTitle, 'color', '#ff3333');
+    this.setStyleValue(
+      this.gameOverTitle,
+      'textShadow',
+      '0 0 20px rgba(255, 0, 0, 0.8), 4px 4px 8px rgba(0, 0, 0, 1)'
+    );
+    this.setTextContent(this.finalScoreDisplay, `最终得分: ${finalScore}`);
+    this.setStyleValue(this.gameOverDisplay, 'opacity', '1');
+    this.setStyleValue(this.gameOverDisplay, 'pointerEvents', 'auto');
+  }
+
+  /**
+   * 显示最终胜利
+   */
+  public showMissionComplete(finalScore: number): void {
+    this.ensureInitialized();
+    this.hideEventObjective();
+    this.setTextContent(this.gameOverTitle, 'MISSION COMPLETE');
+    this.setStyleValue(this.gameOverTitle, 'color', '#66ffcc');
+    this.setStyleValue(
+      this.gameOverTitle,
+      'textShadow',
+      '0 0 20px rgba(102, 255, 204, 0.8), 4px 4px 8px rgba(0, 0, 0, 1)'
+    );
     this.setTextContent(this.finalScoreDisplay, `最终得分: ${finalScore}`);
     this.setStyleValue(this.gameOverDisplay, 'opacity', '1');
     this.setStyleValue(this.gameOverDisplay, 'pointerEvents', 'auto');

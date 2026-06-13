@@ -188,6 +188,8 @@ export function buildWorldscapeWater(options: WorldscapeWaterOptions): Worldscap
     fragmentShader: FRAG,
     uniforms,
     transparent: true,
+    depthWrite: false,
+    depthTest: true,
     fog: true,
     side: THREE.FrontSide,
   });

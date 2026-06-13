@@ -43,6 +43,13 @@ const log = getLogger('TerrainGenerator');
 const WORLDSCAPE_WATER_Y = -48;
 /** 旧版地面基准（-50）与 worldscape 水位基准的差值 */
 const WORLDSCAPE_BASE_OFFSET = WORLDSCAPE_WATER_Y - -50;
+const TRANSPARENT_LAYER_RENDER_ORDER = {
+  water: 2,
+  clouds: 6,
+  cirrus: 8,
+  haze: 9,
+  weather: 10,
+} as const;
 
 type WeatherType = 'clear' | 'rain' | 'snow' | 'dust' | 'mist' | 'storm' | 'smog';
 type SurfacePattern = 'grass' | 'sand' | 'snow' | 'rock' | 'asphalt' | 'water' | 'beach';
@@ -4264,6 +4271,7 @@ export class TerrainGenerator {
       tint: profile.cloudTint,
       scaleMultiplier: 2.3,
       opacity: THREE.MathUtils.clamp(profile.cloudOpacity + 0.2, 0.55, 0.95),
+      renderOrder: TRANSPARENT_LAYER_RENDER_ORDER.clouds,
     });
     this.terrainGroup.add(this.cloudField.group);
     // 初始铺排：先推进一帧，让云在第一帧就出现在天上而非从零浮现
@@ -4290,6 +4298,7 @@ export class TerrainGenerator {
       transparent: true,
       opacity: 0.08,
       depthWrite: false,
+      depthTest: true,
       fog: false,
       toneMapped: false,
       side: THREE.DoubleSide,
@@ -4312,7 +4321,7 @@ export class TerrainGenerator {
       );
       const scale = 300 + Math.random() * 200;
       sheet.scale.set(scale, scale * (0.5 + Math.random() * 0.4), 1);
-      sheet.renderOrder = 8;
+      sheet.renderOrder = TRANSPARENT_LAYER_RENDER_ORDER.cirrus;
       this.terrainGroup.add(sheet);
       sheets.push(sheet);
       driftSpeeds[i] = 1.2 + Math.random() * 1.6;
@@ -4360,10 +4369,12 @@ export class TerrainGenerator {
       transparent: true,
       opacity: this.getParticleBaseOpacity(profile),
       depthWrite: false,
+      depthTest: true,
     });
 
     this.weatherParticles = new THREE.Points(geometry, material);
     this.weatherParticles.position.y = -20;
+    this.weatherParticles.renderOrder = TRANSPARENT_LAYER_RENDER_ORDER.weather;
     this.terrainGroup.add(this.weatherParticles);
   }
 

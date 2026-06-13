@@ -614,13 +614,16 @@ export class GameCoordinator {
     this.gameState.reset();
     this.sessionState.setInBossBattle(false);
     this.sessionState.resume();
+    this.hud.updateScore(this.gameState.getScore());
     this.lockOnIndicator.setLockTime(this.playerStats.getMissileLockTime());
     this.lockOnIndicator.setLockCircleScale(
       this.playerStats.getMissileLockRadiusMultiplier()
     );
 
     if (settings.testScore > 0) {
+      this.gameState.addScore(settings.testScore);
       this.playerStats.addScore(settings.testScore);
+      this.hud.updateScore(this.gameState.getScore());
       this.hud.updateUpgradePoints(this.playerStats.getUpgrades().getAvailablePoints());
     }
   }
@@ -2009,7 +2012,7 @@ export class GameCoordinator {
       } else {
         this.sessionState.setGameOver();
         this.musicSystem.stopMusic();
-        this.hud.showGameOver(this.gameState.getScore());
+        this.hud.showMissionComplete(this.gameState.getScore());
       }
     }, 1000);
   }

@@ -4,6 +4,7 @@ import {
   getAudioSettings,
   getPresentationSettings,
   normalizeStartFlowSettings,
+  TEST_SCORE_OPTIONS,
   type StartFlowSettings,
 } from '@/core/SessionSettings';
 import type { ModelPreview } from './ModelPreview';
@@ -96,8 +97,31 @@ export class StartMenu {
     }
   }
 
+  private getStorage(): Storage | null {
+    try {
+      const storage = window.localStorage;
+      if (
+        !storage ||
+        typeof storage.getItem !== 'function' ||
+        typeof storage.setItem !== 'function' ||
+        typeof storage.removeItem !== 'function'
+      ) {
+        return null;
+      }
+
+      return storage;
+    } catch {
+      return null;
+    }
+  }
+
   private loadSettings(): void {
-    const raw = window.localStorage.getItem(StartMenu.STORAGE_KEY);
+    const storage = this.getStorage();
+    if (!storage) {
+      return;
+    }
+
+    const raw = storage.getItem(StartMenu.STORAGE_KEY);
     if (!raw) {
       return;
     }
@@ -109,14 +133,19 @@ export class StartMenu {
         ...parsed,
       });
     } catch {
-      window.localStorage.removeItem(StartMenu.STORAGE_KEY);
+      storage.removeItem(StartMenu.STORAGE_KEY);
     }
   }
 
   private saveSettings(): void {
+    const storage = this.getStorage();
+    if (!storage) {
+      return;
+    }
+
     const normalizedSettings = normalizeStartFlowSettings(this.settings);
     this.settings = normalizedSettings;
-    window.localStorage.setItem(StartMenu.STORAGE_KEY, JSON.stringify(normalizedSettings));
+    storage.setItem(StartMenu.STORAGE_KEY, JSON.stringify(normalizedSettings));
   }
 
   private createContainer(): HTMLDivElement {
@@ -449,17 +478,17 @@ export class StartMenu {
     modeRow.id = 'mode-row';
     panel.appendChild(modeRow);
 
-    const testScoreValues = [0, 2000, 3000, 4000, 5000];
+    const testScoreValues: readonly number[] = TEST_SCORE_OPTIONS;
     const testScoreRow = this.createSettingRow(
       '测试分数',
       this.settings.testScore === 0 ? '关闭' : `${this.settings.testScore}`,
       () => {
-        const currentIndex = testScoreValues.indexOf(this.settings.testScore);
+        const currentIndex = Math.max(0, testScoreValues.indexOf(this.settings.testScore));
         this.settings.testScore = testScoreValues[Math.max(0, currentIndex - 1)];
         this.updateDisplay();
       },
       () => {
-        const currentIndex = testScoreValues.indexOf(this.settings.testScore);
+        const currentIndex = Math.max(0, testScoreValues.indexOf(this.settings.testScore));
         this.settings.testScore =
           testScoreValues[Math.min(testScoreValues.length - 1, currentIndex + 1)];
         this.updateDisplay();
