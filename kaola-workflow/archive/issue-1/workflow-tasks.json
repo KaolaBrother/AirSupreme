@@ -1,0 +1,54 @@
+{
+  "source_plan_hash": "78f52062718e8224a33b69a86f9b9618a88e4810533cc32b0ce8754d27d1cc0d",
+  "tasks": [
+    {
+      "id": "explore",
+      "role": "code-explorer",
+      "status": "completed",
+      "ledger_status": "complete"
+    },
+    {
+      "id": "plan",
+      "role": "planner",
+      "status": "completed",
+      "ledger_status": "complete"
+    },
+    {
+      "id": "impl-rendering",
+      "role": "tdd-guide",
+      "status": "completed",
+      "ledger_status": "complete"
+    },
+    {
+      "id": "impl-powerups",
+      "role": "tdd-guide",
+      "status": "completed",
+      "ledger_status": "complete"
+    },
+    {
+      "id": "impl-ui-state",
+      "role": "tdd-guide",
+      "status": "completed",
+      "ledger_status": "complete"
+    },
+    {
+      "id": "review",
+      "role": "code-reviewer",
+      "status": "completed",
+      "ledger_status": "complete"
+    },
+    {
+      "id": "security",
+      "role": "security-reviewer",
+      "status": "completed",
+      "ledger_status": "complete"
+    },
+    {
+      "id": "finalize",
+      "role": "finalize",
+      "status": "completed",
+      "ledger_status": "complete"
+    }
+  ],
+  "last_synced_from_ledger": "2026-06-13T09:05:12.411Z"
+}
