@@ -44,11 +44,11 @@ const WORLDSCAPE_WATER_Y = -48;
 /** 旧版地面基准（-50）与 worldscape 水位基准的差值 */
 const WORLDSCAPE_BASE_OFFSET = WORLDSCAPE_WATER_Y - -50;
 const TRANSPARENT_LAYER_RENDER_ORDER = {
-  water: 2,
-  clouds: 6,
-  cirrus: 8,
-  haze: 9,
-  weather: 10,
+  water: 0,
+  clouds: 0,
+  cirrus: 0,
+  haze: 0,
+  weather: 0,
 } as const;
 
 type WeatherType = 'clear' | 'rain' | 'snow' | 'dust' | 'mist' | 'storm' | 'smog';
@@ -1019,9 +1019,10 @@ export class TerrainGenerator {
       map: this.createDetailTexture(tokens.water, tokens.waterSparkle, tokens.waterDeep, 'water'),
     });
     const pond = new THREE.Mesh(new THREE.ShapeGeometry(pondShape, 16), pondMaterial);
+    pond.name = 'desertOasisWater';
     pond.rotation.x = -Math.PI / 2;
     pond.position.set(oasisX, groundY + 0.55, oasisZ);
-    pond.renderOrder = 3;
+    pond.renderOrder = TRANSPARENT_LAYER_RENDER_ORDER.water;
     this.terrainGroup.add(pond);
     this.animatedProps.push((_deltaTime, time) => {
       pondMaterial.map?.offset.set(time * 0.004, time * 0.0026);
@@ -2975,8 +2976,9 @@ export class TerrainGenerator {
       sunColor: 0xcfe2ff,
       sunIntensity: 0.55,
     });
+    pondWater.mesh.name = 'cityParkPondWater';
     pondWater.mesh.position.set(62, -48.92, -46);
-    pondWater.mesh.renderOrder = 7;
+    pondWater.mesh.renderOrder = TRANSPARENT_LAYER_RENDER_ORDER.water;
     this.terrainGroup.add(pondWater.mesh);
     this.animatedProps.push((_deltaTime, time) => {
       pondWater.update(time);
@@ -4312,6 +4314,7 @@ export class TerrainGenerator {
 
     for (let i = 0; i < count; i++) {
       const sheet = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), cirrusMaterial);
+      sheet.name = 'worldscapeCirrus';
       sheet.rotation.x = -Math.PI / 2;
       sheet.rotation.z = Math.random() * Math.PI * 2;
       sheet.position.set(
@@ -4373,6 +4376,7 @@ export class TerrainGenerator {
     });
 
     this.weatherParticles = new THREE.Points(geometry, material);
+    this.weatherParticles.name = 'weatherParticles';
     this.weatherParticles.position.y = -20;
     this.weatherParticles.renderOrder = TRANSPARENT_LAYER_RENDER_ORDER.weather;
     this.terrainGroup.add(this.weatherParticles);
@@ -4675,7 +4679,7 @@ export class TerrainGenerator {
     );
     hazeWall.name = 'perimeterHaze';
     hazeWall.position.set(0, -50 + 150, 0);
-    hazeWall.renderOrder = 9;
+    hazeWall.renderOrder = TRANSPARENT_LAYER_RENDER_ORDER.haze;
     hazeWall.frustumCulled = false;
     this.terrainGroup.add(hazeWall);
 

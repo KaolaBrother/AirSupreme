@@ -26,10 +26,13 @@ export class TrailRenderer {
       transparent: true,
       opacity: 0.9,
       linewidth: 2,
+      depthWrite: false,
+      depthTest: true,
     });
 
     this.line = new THREE.Line(geometry, material);
     this.line.frustumCulled = false;
+    this.line.renderOrder = 0;
 
     // 创建发光底层线（使用更透明和更低的不透明度）
     const glowGeometry = new THREE.BufferGeometry();
@@ -41,12 +44,13 @@ export class TrailRenderer {
       color: color,
       transparent: true,
       opacity: 0.3,
-      depthTest: false, // 不进行深度测试，让发光效果叠加
+      depthWrite: false,
+      depthTest: true,
     });
 
     this.glowLine = new THREE.Line(glowGeometry, glowMaterial);
     this.glowLine.frustumCulled = false;
-    this.glowLine.renderOrder = -1; // 在主线条之前渲染
+    this.glowLine.renderOrder = 0;
 
     this.scene.add(this.glowLine);
     this.scene.add(this.line);

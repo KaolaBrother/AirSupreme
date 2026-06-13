@@ -195,7 +195,7 @@ export function buildWorldscapeWater(options: WorldscapeWaterOptions): Worldscap
   });
 
   const mesh = new THREE.Mesh(geo, mat);
-  mesh.renderOrder = 2;
+  mesh.renderOrder = 0;
   mesh.name = 'worldscapeWater';
 
   return {

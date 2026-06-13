@@ -286,9 +286,9 @@ const TYPE_GRAVITY: Record<ParticleType, number> = {
 };
 
 const VFX_RENDER_ORDER = {
-  shockwave: 20,
-  particle: 21,
-  debris: 21,
+  shockwave: 0,
+  particle: 0,
+  debris: 0,
 } as const;
 
 const WHITE_HOT = new THREE.Color(1, 1, 1);

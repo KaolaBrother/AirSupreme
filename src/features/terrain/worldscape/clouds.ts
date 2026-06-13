@@ -88,7 +88,7 @@ export class CloudField {
     this.fieldSize = options.fieldSize ?? 4800;
     this.tintColor = new THREE.Color(options.tint ?? 0xffffff);
     const scaleMultiplier = options.scaleMultiplier ?? 2.3;
-    const renderOrder = options.renderOrder ?? 6;
+    const renderOrder = options.renderOrder ?? 0;
 
     this.group = new THREE.Group();
     this.group.name = 'worldscapeClouds';
