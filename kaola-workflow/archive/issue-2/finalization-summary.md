@@ -34,5 +34,5 @@
 | doc-updater | subagent-invoked | `.cache/doc-updater.md`; adaptive node `update-plan-state` | |
 | documentation docking | invoked | `.cache/doc-docking.md` | |
 | roadmap refresh | invoked | `kaola-workflow/ROADMAP.md` | |
-| archive completed folder | pending | contractor finalization step | |
-| final commit and push | pending | contractor finalization step | |
+| archive completed folder | invoked | `kaola-workflow/archive/issue-2`; commit `1c7006e` | |
+| final commit and push | invoked | final workflow commit `d082093`; merge sink pending in main session | |
