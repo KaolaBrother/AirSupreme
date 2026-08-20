@@ -114,4 +114,42 @@ describe('UpgradeMenu', () => {
     expect(document.getElementById('upgrade-menu')).toBeNull();
     expect(menu.isVisible()).toBe(false);
   });
+
+  it('labels upgrade cards with HP/SPD/ROE/DMG/RAD/RLD/LCK, not ❤️🚀 icons', () => {
+    menu.show();
+
+    const codes: Array<[UpgradeType, string]> = [
+      [UpgradeType.MAX_HEALTH, 'HP'],
+      [UpgradeType.SPEED, 'SPD'],
+      [UpgradeType.FIRE_RATE, 'ROE'],
+      [UpgradeType.DAMAGE, 'DMG'],
+      [UpgradeType.MISSILE_LOCK_RADIUS, 'RAD'],
+      [UpgradeType.MISSILE_RELOAD_TIME, 'RLD'],
+      [UpgradeType.MISSILE_LOCK_TIME, 'LCK'],
+    ];
+    const forbiddenIconGlyphs = /❤️|❤|♥|🚀|⚡|🔫|💥|📡|🎯/u;
+
+    for (const [type, code] of codes) {
+      const card = document.getElementById(`upgrade-card-${type}`);
+      expect(card, `expected #upgrade-card-${type}`).toBeTruthy();
+
+      const icon = card?.querySelector('.card-icon');
+      const name = card?.querySelector('.card-name');
+      const header = card?.querySelector('.card-header');
+      const surface = [icon, name, header]
+        .map((element) => element?.textContent ?? '')
+        .join(' ');
+
+      expect(surface, `${type} should show short code ${code}`).toMatch(
+        new RegExp(`\\b${code}\\b`, 'i')
+      );
+      expect(surface, `${type} should not use emoji as the card icon`).not.toMatch(
+        forbiddenIconGlyphs
+      );
+      if (icon) {
+        expect(icon.textContent ?? '').not.toMatch(forbiddenIconGlyphs);
+      }
+    }
+  });
 });
+

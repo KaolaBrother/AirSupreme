@@ -4,6 +4,49 @@
 
 - Initialized Kaola-Workflow documentation structure.
 
+### 活地形坠毁（GitHub #10）
+
+- 玩家坠毁判定改为活地形/水面采样，不再使用固定世界平面
+- `PlayerSystem.setCrashSurfaceSampler((x, z) => number)`：世界 `Y <=` 采样表面即击杀；未注入采样时回落 `WORLDSCAPE_WATER_Y`（`-48`，导出自 `src/features/terrain/TerrainGenerator.ts`）
+- `GameCoordinator` 注入 `enemySystem.getLevelManager().getCrashSurfaceY(x, z)`，地形未加载时同样回落 `WORLDSCAPE_WATER_Y`
+- `TerrainGenerator.getCrashSurfaceY` / `LevelManager.getCrashSurfaceY`：高度场局部 0 为水面；无高度场时回落水面高度
+
+### 站点 chrome（GitHub #11）
+
+- `index.html`：`<link rel="icon" href="/favicon.svg" type="image/svg+xml" />`；源文件 `public/favicon.svg`
+- viewport：`width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover`
+- HUD 结算层与 `PauseMenu` 使用 `env(safe-area-inset-*)` 贴齐刘海/安全区
+
+### 航电 HUD 与锁定（GitHub #5）
+
+- 新增 `src/ui/theme/hudTokens.ts`：`injectHudTokens()` 向 `:root` 注入航电 CSS 变量（仅一次，style id `hud-tokens`）
+- 色板：`--hud-sys #8FE4FF`、`--hud-weapon #FFB347`、`--hud-lock #5CFFB0`、`--hud-threat #FF4D4D`、`--hud-ally #F4D35E`
+- 布局密度 `HudLayoutDensity`：`desktop | touch-landscape | touch-portrait`；`HUD.setLayoutDensity` / `LockOnIndicator.setLayoutDensity`
+- 锁定状态 `LockOnState`：`search | track | lock | break | dry`。SEARCH 空心虚线环；TRACK 菱形+弧（weapon `#FFB347`）；LOCK 薄荷绿 `#5CFFB0`（非 `#00ff00`）；BREAK 威胁红 `#FF4D4D`；DRY 文案 `NO MSL`（非 `NO MISSILE`）
+- `AudioManager.playMissileLockBreak()` / `playMissileDry()`（`SoundType.MISSILE_LOCK_BREAK` / `MISSILE_DRY`）
+
+### 战斗可读性（GitHub #6）
+
+- `RadarMinimap` 三档都创建 `#radar-minimap`：桌面 120px 左下，触摸横屏 72px / 竖屏 64px 在摇杆上方 8px，`pointer-events: none`
+- 新增 `OffscreenChevron`：敌机琥珀 / 来袭导弹绯红；`playIncomingWarning` 带 minInterval
+- 护盾改为双层 `--hud-sys` 球，不再是 `#00ffff` 塑料球
+
+### 战役节拍（GitHub #7）
+
+- `HUD.showBriefing`：1–5 关标题 湖畔晨曦 / 沙漠风暴 / 雪山之巅 / 深海决战 / 城市废墟；Boss 重型轰炸机 / 沙漠堡垒 / 八爪鱼战舰 / 导弹驱逐舰 / 空中航空母舰
+- 非 game-over 死亡显示 `LIFE × N` 复活 overlay；`showGameOver` 不显示
+
+### 外壳统一（GitHub #8）
+
+- StartMenu 去掉 `min-width: 400px`，改为 `width: min(420px, 100%)`；主按钮不再 `#4CAF50` 胶囊；标题无 ✈️🎮👹
+- 升级卡缩写 HP / SPD / ROE / DMG / RAD / RLD / LCK；移动端暂停钮文案「暂停」；`.mobile-controls` 跟随 `GameConfig.isMobile`
+- A4「最终统一 HUD 与关卡视觉语言」记为完成（#3 / #5–#8）
+
+### 测试与工程状态（#10 / #11 / #5–#8）
+
+- 全量门槛通过：`npx tsc --noEmit`、`npm run lint`、`npm run test:run`（**39 个测试文件 / 387 个测试**，两次）、`npm run build`
+- `vendor-three` chunk-size warning 仍在（约 517.43 kB）
+
 ### 会话循环（experience-upgrade 1/5）
 
 - 页级 `StartMenu`：开局调用 `hide()`，不再 `dispose()`；`GameCoordinator` 以 `{ showStartMenu: false, onRetry, onExitToMenu }` 启动

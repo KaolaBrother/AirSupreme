@@ -26,6 +26,9 @@ export enum SoundType {
   GAME_OVER = 'GAME_OVER',
   BALLOON_POP = 'BALLOON_POP', // 气球打破音效
   MISSILE_LOCK = 'MISSILE_LOCK', // 导弹锁定音效
+  MISSILE_LOCK_CONFIRM = 'MISSILE_LOCK_CONFIRM',
+  MISSILE_LOCK_BREAK = 'MISSILE_LOCK_BREAK',
+  MISSILE_DRY = 'MISSILE_DRY',
   MISSILE_FIRE = 'MISSILE_FIRE', // 导弹发射音效
   MISSILE_EXPLOSION = 'MISSILE_EXPLOSION', // 导弹爆炸音效
   FLAK_FIRE = 'FLAK_FIRE',
@@ -73,6 +76,11 @@ export class AudioManager {
   private wasHighSpeedEngine: boolean = false;
   private lastEngineBoostPulseMs: number = 0;
   private lastMissileLockPulseMs: number = 0;
+  private lastIncomingWarningMs: number = Number.NEGATIVE_INFINITY;
+  private static readonly INCOMING_WARNING_FAR_MS = 500;
+  private static readonly INCOMING_WARNING_NEAR_MS = 160;
+  private static readonly INCOMING_WARNING_NEAR_DIST = 40;
+  private static readonly INCOMING_WARNING_FAR_DIST = 800;
   private isEnginePlaying: boolean = false;
   private isDisposed: boolean = false;
   private activeSoundCounts: Map<SoundType, number> = new Map();
@@ -189,6 +197,9 @@ export class AudioManager {
       duckAmount: 0.06,
       duckDurationMs: 220,
     },
+    [SoundType.MISSILE_LOCK]: { minIntervalMs: 180, maxConcurrent: 1 },
+    [SoundType.MISSILE_LOCK_BREAK]: { minIntervalMs: 220, maxConcurrent: 1 },
+    [SoundType.MISSILE_DRY]: { minIntervalMs: 400, maxConcurrent: 1 },
   };
 
   constructor() {
@@ -1739,13 +1750,17 @@ export class AudioManager {
    * 播放导弹锁定音效
    */
   public playMissileLock(): void {
+    const nowMs = performance.now();
+    const lockPulse = nowMs - this.lastMissileLockPulseMs;
+    if (lockPulse < 180 && this.lastMissileLockPulseMs > 0) {
+      return;
+    }
+
     const sound = this.beginSound(SoundType.MISSILE_LOCK, 150);
     if (!sound) return;
     const { now, context, sfxGain } = sound;
 
     try {
-      const nowMs = performance.now();
-      const lockPulse = nowMs - this.lastMissileLockPulseMs;
       this.lastMissileLockPulseMs = nowMs;
 
       const scanOsc = context.createOscillator();
@@ -1787,8 +1802,72 @@ export class AudioManager {
     }
   }
 
+  public playMissileLockBreak(): void {
+    const sound = this.beginSound(SoundType.MISSILE_LOCK_BREAK, 180);
+    if (!sound) return;
+    const { now, context, sfxGain } = sound;
+
+    try {
+      const breakOsc = context.createOscillator();
+      const breakGain = context.createGain();
+      breakOsc.type = 'sawtooth';
+      breakOsc.frequency.setValueAtTime(520, now);
+      breakOsc.frequency.exponentialRampToValueAtTime(140, now + 0.16);
+      breakGain.gain.setValueAtTime(0, now);
+      breakGain.gain.linearRampToValueAtTime(0.14 * this.sfxVolume, now + 0.01);
+      breakGain.gain.exponentialRampToValueAtTime(0.001, now + 0.17);
+      breakOsc.connect(breakGain);
+      breakGain.connect(sfxGain);
+      breakOsc.start(now);
+      breakOsc.stop(now + 0.18);
+
+      this.playFilteredNoise(
+        0.12,
+        0.006,
+        0.04 * this.sfxVolume,
+        'bandpass',
+        720,
+        1.1
+      );
+    } catch {
+      // Ignore
+    }
+  }
+
+  public playMissileDry(): void {
+    const sound = this.beginSound(SoundType.MISSILE_DRY, 140);
+    if (!sound) return;
+    const { now, context, sfxGain } = sound;
+
+    try {
+      const dryOsc = context.createOscillator();
+      const dryGain = context.createGain();
+      dryOsc.type = 'square';
+      dryOsc.frequency.setValueAtTime(180, now);
+      dryOsc.frequency.exponentialRampToValueAtTime(90, now + 0.08);
+      dryGain.gain.setValueAtTime(0, now);
+      dryGain.gain.linearRampToValueAtTime(0.08 * this.sfxVolume, now + 0.006);
+      dryGain.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
+      dryOsc.connect(dryGain);
+      dryGain.connect(sfxGain);
+      dryOsc.start(now);
+      dryOsc.stop(now + 0.11);
+
+      this.playFilteredNoise(
+        0.05,
+        0.004,
+        0.02 * this.sfxVolume,
+        'highpass',
+        2400,
+        0.8
+      );
+    } catch {
+      // Ignore
+    }
+  }
+
   public playMissileLockConfirm(): void {
-    const sound = this.beginSound(SoundType.MISSILE_LOCK, 150);
+    const sound = this.beginSound(SoundType.MISSILE_LOCK_CONFIRM, 150);
     if (!sound) return;
     const { now, context, sfxGain } = sound;
 
@@ -2267,6 +2346,77 @@ export class AudioManager {
     } catch {
       // Ignore
     }
+  }
+
+  /**
+   * 来袭警告。minInterval 随距离从 500ms（远）收紧到 160ms（近）。
+   */
+  public playIncomingWarning(distance?: number): void {
+    this.initContext();
+    if (!this.canPlay() || !this.context || !this.sfxGain) {
+      return;
+    }
+
+    const nowMs = performance.now();
+    const minIntervalMs = this.getIncomingWarningMinInterval(distance);
+    if (nowMs - this.lastIncomingWarningMs < minIntervalMs) {
+      return;
+    }
+    this.lastIncomingWarningMs = nowMs;
+
+    try {
+      const now = this.context.currentTime;
+      const closeness = this.getIncomingWarningCloseness(distance);
+      const pitch = 720 + closeness * 380;
+
+      const osc = this.context.createOscillator();
+      const gain = this.context.createGain();
+      osc.type = 'square';
+      osc.frequency.setValueAtTime(pitch, now);
+      osc.frequency.exponentialRampToValueAtTime(Math.max(180, pitch * 0.55), now + 0.08);
+      gain.gain.setValueAtTime(0, now);
+      gain.gain.linearRampToValueAtTime((0.07 + closeness * 0.05) * this.sfxVolume, now + 0.008);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
+      osc.connect(gain);
+      gain.connect(this.sfxGain);
+      osc.start(now);
+      osc.stop(now + 0.11);
+
+      const tick = this.context.createOscillator();
+      const tickGain = this.context.createGain();
+      tick.type = 'sine';
+      tick.frequency.setValueAtTime(pitch * 1.6, now);
+      tickGain.gain.setValueAtTime(0, now);
+      tickGain.gain.linearRampToValueAtTime((0.04 + closeness * 0.03) * this.sfxVolume, now + 0.004);
+      tickGain.gain.exponentialRampToValueAtTime(0.001, now + 0.06);
+      tick.connect(tickGain);
+      tickGain.connect(this.sfxGain);
+      tick.start(now);
+      tick.stop(now + 0.06);
+    } catch {
+      // Ignore
+    }
+  }
+
+  private getIncomingWarningCloseness(distance?: number): number {
+    if (distance == null || !Number.isFinite(distance)) {
+      return 0;
+    }
+    const span =
+      AudioManager.INCOMING_WARNING_FAR_DIST - AudioManager.INCOMING_WARNING_NEAR_DIST;
+    return Math.max(
+      0,
+      Math.min(1, 1 - (distance - AudioManager.INCOMING_WARNING_NEAR_DIST) / span)
+    );
+  }
+
+  private getIncomingWarningMinInterval(distance?: number): number {
+    const closeness = this.getIncomingWarningCloseness(distance);
+    return (
+      AudioManager.INCOMING_WARNING_NEAR_MS +
+      (1 - closeness) *
+        (AudioManager.INCOMING_WARNING_FAR_MS - AudioManager.INCOMING_WARNING_NEAR_MS)
+    );
   }
 
   public playLaserWarning(): void {

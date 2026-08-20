@@ -5,10 +5,11 @@ import { EventBus, GameEventType } from '@/core/EventBus';
 import { PlayerController } from '@/features/player/PlayerController';
 import { HealthSystem } from '@/features/combat/HealthSystem';
 import { PlayerStats } from '@/features/upgrade/UpgradeSystem';
+import { WORLDSCAPE_WATER_Y } from '@/features/terrain/TerrainGenerator';
+import { HUD_COLORS } from '@/ui/theme/hudTokens';
 
 export class PlayerSystem implements IGameSystem {
   readonly name = 'PlayerSystem';
-  private static readonly GROUND_COLLISION_Y = -45;
   private static readonly RESPAWN_ALTITUDE_BUFFER = 10;
 
   private controller: PlayerController;
@@ -21,9 +22,19 @@ export class PlayerSystem implements IGameSystem {
   private respawnTimer: number = 0;
   private respawnDelay: number = 2;
   private lastSafeRespawnPosition: THREE.Vector3;
+  private crashSurfaceSampler: ((x: number, z: number) => number) | null = null;
 
   private shieldActive: boolean = false;
-  private shieldMesh?: THREE.Mesh;
+  private shieldGroup?: THREE.Group;
+  private readonly shieldMaterials: THREE.MeshBasicMaterial[] = [];
+  private shieldTime: number = 0;
+  private shieldFade: number = 0;
+  private shieldFadingOut: boolean = false;
+  private static readonly SHIELD_FADE_MS = 200;
+  private static readonly SHIELD_INNER_OPACITY = 0.16;
+  private static readonly SHIELD_OUTER_OPACITY = 0.08;
+  private static readonly SHIELD_BREATHE_MIN = 1.0;
+  private static readonly SHIELD_BREATHE_MAX = 1.03;
   private pendingDamageOptions: PlayerHitFeedbackMetadata | null = null;
 
   private fireCooldown: number = 0;
@@ -69,7 +80,7 @@ export class PlayerSystem implements IGameSystem {
     }
 
     this.fireCooldown = Math.max(0, this.fireCooldown - deltaTime);
-    this.updateShieldPosition();
+    this.updateShield(deltaTime);
     this.checkGroundCollision();
     this.updateLastSafeRespawnPosition();
   }
@@ -110,34 +121,118 @@ export class PlayerSystem implements IGameSystem {
     });
   }
 
-  private updateShieldPosition(): void {
-    if (this.shieldMesh && this.shieldActive) {
-      this.shieldMesh.position.copy(this.mesh.position);
+  private updateShield(deltaTime: number): void {
+    if (!this.shieldGroup) {
+      return;
+    }
+
+    if (!this.shieldActive && !this.shieldFadingOut) {
+      return;
+    }
+
+    this.shieldGroup.position.copy(this.mesh.position);
+    this.shieldTime += deltaTime;
+    const wave = 0.5 + 0.5 * Math.sin(this.shieldTime * Math.PI * 2);
+    const breathe =
+      PlayerSystem.SHIELD_BREATHE_MIN +
+      (PlayerSystem.SHIELD_BREATHE_MAX - PlayerSystem.SHIELD_BREATHE_MIN) * wave;
+    this.shieldGroup.scale.setScalar(breathe);
+
+    if (this.shieldFadingOut) {
+      const fadeSeconds = PlayerSystem.SHIELD_FADE_MS / 1000;
+      this.shieldFade = Math.max(0, this.shieldFade - deltaTime / fadeSeconds);
+      this.applyShieldOpacity(this.shieldFade);
+      if (this.shieldFade <= 0) {
+        this.shieldFadingOut = false;
+        this.shieldGroup.visible = false;
+      }
     }
   }
 
+  private applyShieldOpacity(fade: number): void {
+    if (this.shieldMaterials[0]) {
+      this.shieldMaterials[0].opacity = PlayerSystem.SHIELD_INNER_OPACITY * fade;
+    }
+    if (this.shieldMaterials[1]) {
+      this.shieldMaterials[1].opacity = PlayerSystem.SHIELD_OUTER_OPACITY * fade;
+    }
+  }
+
+  private createShieldVisual(scene: THREE.Scene): void {
+    const group = new THREE.Group();
+    group.name = 'player-shield';
+    const sysColor = new THREE.Color(HUD_COLORS.sys);
+
+    const makeSphere = (radius: number, opacity: number): THREE.Mesh => {
+      const geometry = new THREE.SphereGeometry(radius, 24, 24);
+      const material = new THREE.MeshBasicMaterial({
+        color: sysColor,
+        transparent: true,
+        opacity,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+        blending: THREE.AdditiveBlending,
+      });
+      this.shieldMaterials.push(material);
+      return new THREE.Mesh(geometry, material);
+    };
+
+    const inner = makeSphere(2.85, PlayerSystem.SHIELD_INNER_OPACITY);
+    const outer = makeSphere(3.1, PlayerSystem.SHIELD_OUTER_OPACITY);
+    group.add(inner);
+    group.add(outer);
+    scene.add(group);
+
+    this.shieldGroup = group;
+  }
+
+  private sampleCrashSurfaceY(worldX: number, worldZ: number): number {
+    if (this.crashSurfaceSampler) {
+      const sampled = this.crashSurfaceSampler(worldX, worldZ);
+      if (Number.isFinite(sampled)) {
+        return sampled;
+      }
+    }
+    return WORLDSCAPE_WATER_Y;
+  }
+
   private checkGroundCollision(): void {
-    const groundLevel = PlayerSystem.GROUND_COLLISION_Y;
-    if (this.mesh.position.y < groundLevel) {
+    const { x, y, z } = this.mesh.position;
+    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
+      return;
+    }
+
+    const surfaceY = this.sampleCrashSurfaceY(x, z);
+    if (y <= surfaceY) {
       this.health.takeDamage(1000);
     }
   }
 
   private updateLastSafeRespawnPosition(): void {
-    const minSafeY = PlayerSystem.GROUND_COLLISION_Y + PlayerSystem.RESPAWN_ALTITUDE_BUFFER;
-    if (this.mesh.position.y > minSafeY) {
+    const { x, y, z } = this.mesh.position;
+    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
+      return;
+    }
+
+    const minSafeY = this.sampleCrashSurfaceY(x, z) + PlayerSystem.RESPAWN_ALTITUDE_BUFFER;
+    if (y > minSafeY) {
       this.lastSafeRespawnPosition.copy(this.mesh.position);
     }
   }
 
   private getSafeRespawnPosition(): THREE.Vector3 {
     const safeRespawnPosition = this.lastSafeRespawnPosition.clone();
-    safeRespawnPosition.y = Math.max(
-      safeRespawnPosition.y,
-      PlayerSystem.GROUND_COLLISION_Y + PlayerSystem.RESPAWN_ALTITUDE_BUFFER
-    );
+    const surfaceY = this.sampleCrashSurfaceY(safeRespawnPosition.x, safeRespawnPosition.z);
+    const minSafeY = surfaceY + PlayerSystem.RESPAWN_ALTITUDE_BUFFER;
+    const currentY = Number.isFinite(safeRespawnPosition.y) ? safeRespawnPosition.y : minSafeY;
+    safeRespawnPosition.y = Math.max(currentY, minSafeY);
 
     return safeRespawnPosition;
+  }
+
+  /** 注入活地形/水面高度采样；未设置时坠毁判定回落到 WORLDSCAPE_WATER_Y */
+  setCrashSurfaceSampler(sampler: (x: number, z: number) => number): void {
+    this.crashSurfaceSampler = sampler;
   }
 
   getController(): PlayerController {
@@ -208,27 +303,26 @@ export class PlayerSystem implements IGameSystem {
 
   activateShield(scene: THREE.Scene): void {
     this.shieldActive = true;
+    this.shieldFadingOut = false;
+    this.shieldFade = 1;
 
-    if (!this.shieldMesh) {
-      const geometry = new THREE.SphereGeometry(3, 16, 16);
-      const material = new THREE.MeshBasicMaterial({
-        color: 0x00ffff,
-        transparent: true,
-        opacity: 0.3,
-        side: THREE.DoubleSide,
-      });
-      this.shieldMesh = new THREE.Mesh(geometry, material);
-      scene.add(this.shieldMesh);
+    if (!this.shieldGroup) {
+      this.createShieldVisual(scene);
     }
 
-    this.shieldMesh.visible = true;
+    if (this.shieldGroup) {
+      this.shieldGroup.visible = true;
+      this.shieldGroup.scale.setScalar(PlayerSystem.SHIELD_BREATHE_MIN);
+      this.applyShieldOpacity(1);
+    }
     EventBus.emit(GameEventType.SHIELD_ACTIVATED, { duration: 10 });
   }
 
   deactivateShield(): void {
     this.shieldActive = false;
-    if (this.shieldMesh) {
-      this.shieldMesh.visible = false;
+    if (this.shieldGroup && this.shieldGroup.visible) {
+      this.shieldFadingOut = true;
+      this.shieldFade = Math.max(this.shieldFade, 0.0001);
     }
     EventBus.emit(GameEventType.SHIELD_DEACTIVATED, undefined as never);
   }

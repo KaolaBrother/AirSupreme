@@ -1,4 +1,5 @@
 import { UpgradeType, PlayerUpgrades, UPGRADE_CONFIGS } from '@/features/upgrade/UpgradeSystem';
+import { HUD_COLORS, injectHudTokens } from '@/ui/theme/hudTokens';
 
 interface UpgradeCardElements {
   card: HTMLDivElement;
@@ -24,13 +25,13 @@ export class UpgradeMenu {
   private pointsDisplay: HTMLDivElement | null = null;
 
   private static readonly UPGRADE_INFO: Record<UpgradeType, { icon: string; label: string }> = {
-    [UpgradeType.MAX_HEALTH]: { icon: '❤️', label: 'HP' },
-    [UpgradeType.SPEED]: { icon: '⚡', label: 'Speed' },
-    [UpgradeType.FIRE_RATE]: { icon: '🔫', label: 'Fire Rate' },
-    [UpgradeType.DAMAGE]: { icon: '💥', label: 'Damage' },
-    [UpgradeType.MISSILE_LOCK_RADIUS]: { icon: '📡', label: 'Lock Radius' },
-    [UpgradeType.MISSILE_RELOAD_TIME]: { icon: '🚀', label: 'Missile Reload' },
-    [UpgradeType.MISSILE_LOCK_TIME]: { icon: '🎯', label: 'Missile Lock' },
+    [UpgradeType.MAX_HEALTH]: { icon: 'HP', label: 'HP' },
+    [UpgradeType.SPEED]: { icon: 'SPD', label: 'SPD' },
+    [UpgradeType.FIRE_RATE]: { icon: 'ROE', label: 'ROE' },
+    [UpgradeType.DAMAGE]: { icon: 'DMG', label: 'DMG' },
+    [UpgradeType.MISSILE_LOCK_RADIUS]: { icon: 'RAD', label: 'RAD' },
+    [UpgradeType.MISSILE_RELOAD_TIME]: { icon: 'RLD', label: 'RLD' },
+    [UpgradeType.MISSILE_LOCK_TIME]: { icon: 'LCK', label: 'LCK' },
   };
 
   private static readonly DISPLAY_ORDER: UpgradeType[] = [
@@ -48,6 +49,7 @@ export class UpgradeMenu {
     onUpgrade: (type: UpgradeType) => void,
     onResume: () => void
   ) {
+    injectHudTokens();
     this.upgrades = upgrades;
     this.onUpgrade = onUpgrade;
     this.onResume = onResume;
@@ -106,14 +108,14 @@ export class UpgradeMenu {
         left: 0;
         width: 100%;
         height: 100%;
-        background: rgba(0, 0, 0, 0.85);
+        background: rgba(8, 14, 24, 0.92);
         display: flex;
         flex-direction: column;
         align-items: center;
         padding: 20px;
         z-index: 999;
-        font-family: 'Segoe UI', 'Arial', sans-serif;
-        color: white;
+        font-family: var(--hud-font, 'Arial', sans-serif);
+        color: var(--hud-text, ${HUD_COLORS.text});
         box-sizing: border-box;
         overflow-y: auto;
         -webkit-overflow-scrolling: touch;
@@ -248,14 +250,19 @@ export class UpgradeMenu {
       }
 
       .card-icon {
-        font-size: 24px;
-        filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3));
+        font-size: 13px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        font-family: var(--hud-mono, 'Consolas', monospace);
+        color: var(--hud-sys, ${HUD_COLORS.sys});
+        min-width: 2.4em;
       }
 
       .card-name {
         font-size: 16px;
         font-weight: 600;
-        color: #e0e8f0;
+        letter-spacing: 0.08em;
+        color: var(--hud-text, ${HUD_COLORS.text});
         flex: 1;
       }
 
@@ -383,23 +390,23 @@ export class UpgradeMenu {
         padding: 14px 36px;
         font-size: 16px;
         font-weight: 700;
-        border: none;
-        border-radius: 50px;
-        background: linear-gradient(135deg, #00ff88, #00cc66);
-        color: #0a1015;
+        border: 1px solid var(--hud-edge, ${HUD_COLORS.edge});
+        border-radius: var(--hud-radius, 12px);
+        background: var(--hud-glass, ${HUD_COLORS.glass});
+        color: var(--hud-text, ${HUD_COLORS.text});
         cursor: pointer;
-        transition: all 0.25s ease;
+        transition: border-color 0.2s, box-shadow 0.2s;
         letter-spacing: 1px;
-        box-shadow: 0 4px 16px rgba(0, 255, 136, 0.35);
+        box-shadow: var(--hud-shadow, ${HUD_COLORS.shadow});
       }
 
       .resume-btn:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 8px 24px rgba(0, 255, 136, 0.5);
+        border-color: var(--hud-sys, ${HUD_COLORS.sys});
+        box-shadow: 0 0 16px rgba(143, 228, 255, 0.28);
       }
 
       .resume-btn:active {
-        transform: translateY(0);
+        box-shadow: inset 0 3px 10px rgba(0, 0, 0, 0.45);
       }
 
       @media (max-width: 600px) {
@@ -492,7 +499,7 @@ export class UpgradeMenu {
 
     const name = document.createElement('span');
     name.className = 'card-name';
-    name.textContent = config.name;
+    name.textContent = info.label;
 
     const dots = document.createElement('div');
     dots.className = 'level-dots';

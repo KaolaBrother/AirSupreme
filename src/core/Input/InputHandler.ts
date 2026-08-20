@@ -40,7 +40,23 @@ export class InputHandler {
 
   constructor() {
     this.isMobile = GameConfig.isMobile;
+    this.syncMobileControlsVisibility();
     this.setupListeners();
+  }
+
+  /**
+   * 移动端控件显隐跟随 GameConfig.isMobile，不走 pointer:coarse CSS。
+   */
+  private syncMobileControlsVisibility(): void {
+    const controls = document.getElementById('mobile-controls');
+    if (!controls) {
+      return;
+    }
+
+    const visible = this.isMobile;
+    controls.classList.toggle('is-visible', visible);
+    controls.classList.toggle('hidden', !visible);
+    controls.style.display = visible ? 'flex' : 'none';
   }
 
   /**
