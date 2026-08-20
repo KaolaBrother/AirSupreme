@@ -16,6 +16,7 @@ import { FriendlyAI } from '@/features/enemy/FriendlyAI';
 import { EnemyType, ENEMY_CONFIGS } from '@/features/enemy/EnemyTypes';
 import { PowerUpType, POWER_UP_CONFIGS } from '@/features/powerups/PowerUpSystem';
 import type { UpgradeMenu } from '@/ui/UpgradeMenu';
+import type { PauseMenu } from '@/ui/PauseMenu';
 import type { HUD } from '@/ui/HUD';
 import type { GameSettings } from '@/ui/StartMenu';
 import type { EnemyHealthBars } from '@/ui/EnemyHealthBars';
@@ -29,6 +30,7 @@ import { getDifficultyProfile } from '@/core/Difficulty';
 import { getLevelConfig, LevelWaveEventType, TerrainType } from '@/features/terrain/LevelConfig';
 import { LevelState } from '@/features/levels/LevelManager';
 import { GameSessionState } from '@/core/GameSessionState';
+import { loadStartFlowSettings, saveStartFlowSettings } from '@/core/SessionSettings';
 import { ResourceRegistry } from '@/core/ResourceRegistry';
 import type { PresentationController } from '@/core/PresentationController';
 import type { BossBattleController } from '@/core/BossBattleController';
@@ -57,6 +59,8 @@ interface EyeBoss {
 
 interface GameCoordinatorOptions {
   showStartMenu?: boolean;
+  onRetry?: () => void;
+  onExitToMenu?: () => void;
 }
 
 interface TutorialCombatState {
@@ -144,6 +148,7 @@ export class GameCoordinator {
   private musicSystem: MusicSystem;
   private particleSystem: ParticleSystem | null = null;
   private thirdPersonCamera: ThirdPersonCamera;
+  private readonly options: GameCoordinatorOptions;
   private readonly showStartMenu: boolean;
   private presentationRuntimePromise: Promise<void> | null = null;
   private presentationRuntimeReady: boolean = false;
@@ -171,12 +176,14 @@ export class GameCoordinator {
 
   private audioInitialized: boolean = false;
   private upgradeMenuPromise: Promise<UpgradeMenu> | null = null;
+  private pauseMenuPromise: Promise<PauseMenu> | null = null;
 
   private bossIndicator!: BossMissileIndicator;
   private bossBattleController: BossBattleController | null = null;
   private bossBattleControllerPromise: Promise<BossBattleController> | null = null;
 
   private upgradeMenu: UpgradeMenu | null = null;
+  private pauseMenu: PauseMenu | null = null;
 
   private lastAppliedQualityPreset: Exclude<QualityPreset, 'auto'> =
     GameConfig.getEffectiveQualityPreset();
@@ -226,6 +233,7 @@ export class GameCoordinator {
         import('@/core/systems/EnemySystem'),
         import('@/core/BossBattleController'),
         import('@/ui/UpgradeMenu'),
+        import('@/ui/PauseMenu'),
         import('@/features/terrain/TerrainGenerator'),
         import('@/core/PresentationRuntimeLoader').then(({ warmPresentationRuntimeChunks }) =>
           warmPresentationRuntimeChunks()
@@ -237,6 +245,7 @@ export class GameCoordinator {
   }
 
   constructor(options: GameCoordinatorOptions = {}) {
+    this.options = options;
     this.showStartMenu = options.showStartMenu ?? true;
     this.gameLoop = new GameLoop();
     this.resourceRegistry = new ResourceRegistry();
@@ -296,6 +305,10 @@ export class GameCoordinator {
           this.lockOnIndicator.setLockCircleScale(
             this.playerStats.getMissileLockRadiusMultiplier()
           );
+          this.hud.setSettlementActions({
+            onRetry: () => this.options.onRetry?.(),
+            onExitToMenu: () => this.options.onExitToMenu?.(),
+          });
           this.presentationRuntimeReady = true;
         });
     }
@@ -385,6 +398,8 @@ export class GameCoordinator {
           this.sessionState.setGameOver();
           this.audioManager.playGameOver();
           this.musicSystem.stopMusic();
+          this.pauseMenu?.hide();
+          this.upgradeMenu?.hide();
           this.hud.showGameOver(this.gameState.getScore());
         }
       })
@@ -672,6 +687,16 @@ export class GameCoordinator {
   }
 
   private update(deltaTime: number): void {
+    if (this.inputHandler.isPauseToggled()) {
+      this.handlePauseToggle();
+      return;
+    }
+
+    if (this.inputHandler.isUpgradeToggled()) {
+      this.handleUpgradeToggle();
+      return;
+    }
+
     if (!this.sessionState.isPlaying()) {
       return;
     }
@@ -681,15 +706,6 @@ export class GameCoordinator {
     this.previousCameraTargetQuaternion.copy(this.currentCameraTargetQuaternion);
 
     this.syncRuntimeQuality();
-
-    if (this.inputHandler.isPauseToggled() || this.inputHandler.isUpgradeToggled()) {
-      if (this.sessionState.isPaused()) {
-        this.resumeGame();
-      } else {
-        this.pauseGame();
-      }
-      return;
-    }
 
     if (this.sessionState.isPaused()) {
       return;
@@ -1880,12 +1896,60 @@ export class GameCoordinator {
           (type: UpgradeType) => this.handleUpgrade(type),
           () => this.resumeGame()
         );
+        if (this.isDisposed) {
+          menu.dispose();
+          return menu;
+        }
         this.upgradeMenu = menu;
         return menu;
       });
     }
 
     return this.upgradeMenuPromise;
+  }
+
+  private async ensurePauseMenu(): Promise<PauseMenu> {
+    if (this.pauseMenu) {
+      return this.pauseMenu;
+    }
+
+    if (!this.pauseMenuPromise) {
+      this.pauseMenuPromise = import('@/ui/PauseMenu').then(({ PauseMenu }) => {
+        const menu = new PauseMenu({
+          onContinue: () => this.resumeGame(),
+          onUpgrade: () => {
+            void this.ensureUpgradeMenu().then((upgradeMenu) => {
+              if (
+                this.isDisposed ||
+                !this.sessionState.isPaused() ||
+                !this.sessionState.isPlaying()
+              ) {
+                return;
+              }
+              upgradeMenu.updateDisplay();
+              upgradeMenu.show();
+            });
+          },
+          onExitToMenu: () => this.options.onExitToMenu?.(),
+          applyAudio: (sfx, music) => {
+            this.audioManager.setSFXVolume(sfx);
+            this.audioManager.setMusicVolume(music);
+            this.musicSystem.setVolume(music);
+          },
+          applyQuality: (preset) => this.setQualityPreset(preset),
+          loadSettings: loadStartFlowSettings,
+          saveSettings: saveStartFlowSettings,
+        });
+        if (this.isDisposed) {
+          menu.dispose();
+          return menu;
+        }
+        this.pauseMenu = menu;
+        return menu;
+      });
+    }
+
+    return this.pauseMenuPromise;
   }
 
   private async ensureBossBattleController(): Promise<BossBattleController> {
@@ -2011,7 +2075,10 @@ export class GameCoordinator {
         }, 2000);
       } else {
         this.sessionState.setGameOver();
+        this.audioManager.stopEngine();
         this.musicSystem.stopMusic();
+        this.pauseMenu?.hide();
+        this.upgradeMenu?.hide();
         this.hud.showMissionComplete(this.gameState.getScore());
       }
     }, 1000);
@@ -2159,12 +2226,36 @@ export class GameCoordinator {
     return levelMusicMap[levelId] || LevelMusic.LAKE;
   }
 
-  private pauseGame(): void {
-    this.sessionState.pause();
-    this.inputHandler.resetPauseState();
-    this.inputHandler.resetUpgradeState();
+  private handlePauseToggle(): void {
+    if (!this.sessionState.isPlaying()) {
+      this.pauseGame();
+      return;
+    }
+
+    if (this.sessionState.isPaused()) {
+      if (this.pauseMenu?.handleEscape()) {
+        return;
+      }
+      this.resumeGame();
+      return;
+    }
+
+    this.pauseGame();
+  }
+
+  private handleUpgradeToggle(): void {
+    if (!this.sessionState.isPlaying()) {
+      this.inputHandler.resetPauseState();
+      this.inputHandler.resetUpgradeState();
+      return;
+    }
+
+    if (!this.sessionState.isPaused()) {
+      this.pauseGame();
+    }
+
     void this.ensureUpgradeMenu().then((upgradeMenu) => {
-      if (!this.sessionState.isPaused()) {
+      if (this.isDisposed || !this.sessionState.isPaused() || !this.sessionState.isPlaying()) {
         return;
       }
 
@@ -2173,12 +2264,36 @@ export class GameCoordinator {
     });
   }
 
-  private resumeGame(): void {
-    this.sessionState.resume();
-    this.presentationController.resetHudThrottle();
-    this.upgradeMenu?.hide();
+  private pauseGame(): void {
+    if (!this.sessionState.isPlaying()) {
+      this.inputHandler.resetPauseState();
+      this.inputHandler.resetUpgradeState();
+      return;
+    }
+
+    this.sessionState.pause();
+    this.audioManager.stopEngine();
     this.inputHandler.resetPauseState();
     this.inputHandler.resetUpgradeState();
+    void this.ensurePauseMenu().then((pauseMenu) => {
+      if (this.isDisposed || !this.sessionState.isPaused() || !this.sessionState.isPlaying()) {
+        return;
+      }
+
+      pauseMenu.show();
+    });
+  }
+
+  private resumeGame(): void {
+    this.sessionState.resume();
+    this.pauseMenu?.hide();
+    this.upgradeMenu?.hide();
+    this.presentationController.resetHudThrottle();
+    this.inputHandler.resetPauseState();
+    this.inputHandler.resetUpgradeState();
+    if (this.sessionState.isPlaying() && this.playerSystem.getLives() > 0) {
+      this.audioManager.startEngine();
+    }
   }
 
   private handleUpgrade(type: UpgradeType): void {
@@ -2237,8 +2352,13 @@ export class GameCoordinator {
     if (this.presentationRuntimeReady) {
       this.presentationController.dispose();
     }
+    this.pauseMenu?.dispose();
+    this.pauseMenu = null;
+    this.pauseMenuPromise = null;
     this.upgradeMenu?.dispose();
+    this.upgradeMenu = null;
     this.upgradeMenuPromise = null;
+    this.inputHandler.dispose();
     this.bossBattleControllerPromise = null;
     this.gameScene.dispose();
     this.audioManager.dispose();

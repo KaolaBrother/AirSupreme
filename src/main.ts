@@ -1,5 +1,6 @@
 import { getLogger } from './core/utils/Logger';
 import { configLoader } from './core/utils/ConfigLoader';
+import type { GameCoordinator } from './core/GameCoordinator';
 import { StartMenu, type GameSettings } from './ui/StartMenu';
 
 const log = getLogger('Main');
@@ -8,6 +9,19 @@ function hideLoadingScreen(): void {
   const loadingScreen = document.getElementById('loading-screen');
   if (loadingScreen) {
     loadingScreen.classList.add('hidden');
+  }
+}
+
+function showEnteringBattlefield(): void {
+  const loadingScreen = document.getElementById('loading-screen');
+  if (loadingScreen) {
+    loadingScreen.classList.remove('hidden');
+    loadingScreen.innerHTML = `
+          <div style="text-align: center; color: white;">
+            <h1 style="font-size: 32px; margin-bottom: 20px;">⏳ 正在进入战场</h1>
+            <p style="font-size: 16px; opacity: 0.8;">正在初始化游戏运行时...</p>
+          </div>
+        `;
   }
 }
 
@@ -66,32 +80,53 @@ async function main(): Promise<void> {
   try {
     await configLoader.load();
     const startMenu = new StartMenu();
-    let game: { dispose: () => void } | null = null;
+    let game: GameCoordinator | null = null;
+    let lastSettings: GameSettings | null = null;
 
-    startMenu.setOnStart(async (settings: GameSettings) => {
-      const loadingScreen = document.getElementById('loading-screen');
-      if (loadingScreen) {
-        loadingScreen.classList.remove('hidden');
-        loadingScreen.innerHTML = `
-          <div style="text-align: center; color: white;">
-            <h1 style="font-size: 32px; margin-bottom: 20px;">⏳ 正在进入战场</h1>
-            <p style="font-size: 16px; opacity: 0.8;">正在初始化游戏运行时...</p>
-          </div>
-        `;
+    function disposeGame(): void {
+      game?.dispose();
+      game = null;
+    }
+
+    function onExitToMenu(): void {
+      disposeGame();
+      startMenu.reloadFromStorage();
+      startMenu.show();
+    }
+
+    function onRetry(): void {
+      if (!lastSettings) {
+        return;
       }
+      startMenu.hide();
+      void bootGame(lastSettings);
+    }
+
+    async function bootGame(settings: GameSettings): Promise<void> {
+      showEnteringBattlefield();
 
       try {
         const [{ GameCoordinator }] = await Promise.all([import('./core/GameCoordinator')]);
         void GameCoordinator.warmRuntimeChunks();
-        startMenu.dispose();
-        const coordinator = new GameCoordinator({ showStartMenu: false });
+        disposeGame();
+        const coordinator = new GameCoordinator({
+          showStartMenu: false,
+          onRetry,
+          onExitToMenu,
+        });
         coordinator.boot(settings);
         game = coordinator;
+        lastSettings = settings;
         hideLoadingScreen();
       } catch (error) {
         log.error('游戏启动失败:', error);
         showError('游戏启动失败，请查看控制台了解详情');
       }
+    }
+
+    startMenu.setOnStart(async (settings: GameSettings) => {
+      startMenu.hide();
+      await bootGame(settings);
     });
 
     hideLoadingScreen();

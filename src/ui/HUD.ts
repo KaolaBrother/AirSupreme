@@ -3,12 +3,18 @@ import { GAME_CONSTANTS, GameConfig } from '@/config';
 type BigMessageVariant = 'announcement' | 'powerup';
 type EventObjectiveTone = 'default' | 'complete';
 
+type SettlementActions = {
+  onRetry: () => void;
+  onExitToMenu: () => void;
+};
+
 /**
  * 游戏界面 (HUD)
  */
 export class HUD {
   private static readonly MAX_DISPLAY_LIVES = 5;
   private static readonly UPGRADE_HINT_STYLE_ID = 'hud-upgrade-hint-style';
+  private static readonly SETTLEMENT_STYLE_ID = 'hud-settlement-style';
   private initialized: boolean = false;
   private container: HTMLDivElement;
   private leftStatusPanel: HTMLDivElement;
@@ -36,6 +42,9 @@ export class HUD {
   private gameOverDisplay: HTMLDivElement;
   private gameOverTitle: HTMLDivElement;
   private finalScoreDisplay: HTMLDivElement;
+  private settlementPanel: HTMLDivElement;
+  private settlementActionsRow: HTMLDivElement;
+  private settlementActions: SettlementActions | null = null;
   private upgradePointsDisplay: HTMLDivElement;
   private damageFlashOverlay: HTMLDivElement;
 
@@ -362,8 +371,10 @@ export class HUD {
     this.powerUpBigDisplay.appendChild(this.powerUpBigText);
     this.powerUpBigDisplay.appendChild(this.powerUpBigSubtext);
 
-    // 游戏结束显示（居中覆盖层）
+    // 结算覆盖层（失败 / 通关共用）
+    this.ensureSettlementStyle();
     this.gameOverDisplay = document.createElement('div');
+    this.gameOverDisplay.id = 'hud-settlement-overlay';
     this.gameOverDisplay.style.cssText = `
       position: fixed;
       top: 0;
@@ -375,10 +386,23 @@ export class HUD {
       justify-content: center;
       align-items: center;
       background: rgba(0, 0, 0, 0.8);
-      z-index: 100;
+      z-index: 120;
       opacity: 0;
       transition: opacity 0.5s;
       pointer-events: none;
+      box-sizing: border-box;
+      padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+    `;
+    this.settlementPanel = document.createElement('div');
+    this.settlementPanel.id = 'hud-settlement-panel';
+    this.settlementPanel.style.cssText = `
+      width: min(360px, calc(100% - 32px));
+      max-width: 360px;
+      box-sizing: border-box;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
     `;
     this.gameOverTitle = document.createElement('div');
     this.gameOverTitle.id = 'game-over-title';
@@ -391,7 +415,7 @@ export class HUD {
       margin-bottom: 30px;
       animation: pulse 1s ease-in-out infinite;
     `;
-    this.setTextContent(this.gameOverTitle, 'GAME OVER');
+    this.setTextContent(this.gameOverTitle, 'MISSION FAILED');
 
     this.finalScoreDisplay = document.createElement('div');
     this.finalScoreDisplay.id = 'final-score';
@@ -402,8 +426,31 @@ export class HUD {
       text-shadow: 2px 2px 4px rgba(0, 0, 0, 1);
     `;
 
-    this.gameOverDisplay.appendChild(this.gameOverTitle);
-    this.gameOverDisplay.appendChild(this.finalScoreDisplay);
+    this.settlementActionsRow = document.createElement('div');
+    this.settlementActionsRow.id = 'hud-settlement-actions';
+    this.settlementActionsRow.style.cssText = `
+      display: none;
+      flex-direction: row;
+      gap: 12px;
+      width: 100%;
+      margin-top: 28px;
+      pointer-events: auto;
+    `;
+    this.settlementActionsRow.appendChild(
+      this.createSettlementButton('再来一局', () => {
+        this.settlementActions?.onRetry();
+      })
+    );
+    this.settlementActionsRow.appendChild(
+      this.createSettlementButton('返回菜单', () => {
+        this.settlementActions?.onExitToMenu();
+      })
+    );
+
+    this.settlementPanel.appendChild(this.gameOverTitle);
+    this.settlementPanel.appendChild(this.finalScoreDisplay);
+    this.settlementPanel.appendChild(this.settlementActionsRow);
+    this.gameOverDisplay.appendChild(this.settlementPanel);
 
     this.damageFlashOverlay = document.createElement('div');
     this.damageFlashOverlay.style.cssText = `
@@ -500,6 +547,85 @@ export class HUD {
     const style = element.style as CSSStyleDeclaration & Record<string, string>;
     style[property] = value;
     cache.set(property, value);
+  }
+
+  /**
+   * 绑定结算按钮回调（再来一局 / 返回菜单）
+   */
+  public setSettlementActions(actions: {
+    onRetry: () => void;
+    onExitToMenu: () => void;
+  }): void {
+    this.settlementActions = {
+      onRetry: actions.onRetry,
+      onExitToMenu: actions.onExitToMenu,
+    };
+  }
+
+  private createSettlementButton(label: string, onClick: () => void): HTMLButtonElement {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = label;
+    button.style.cssText = `
+      flex: 1;
+      min-height: 48px;
+      pointer-events: auto;
+      cursor: pointer;
+      border: 1px solid rgba(118, 204, 255, 0.35);
+      border-radius: 12px;
+      padding: 12px 16px;
+      font-size: 16px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      color: #eef8ff;
+      background: linear-gradient(160deg, rgba(18, 30, 48, 0.92), rgba(10, 14, 22, 0.82));
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 12px 24px rgba(0, 0, 0, 0.18);
+    `;
+    button.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      onClick();
+    });
+    return button;
+  }
+
+  private ensureSettlementStyle(): void {
+    if (document.getElementById(HUD.SETTLEMENT_STYLE_ID)) {
+      return;
+    }
+
+    const style = document.createElement('style');
+    style.id = HUD.SETTLEMENT_STYLE_ID;
+    style.textContent = `
+      #hud-settlement-overlay {
+        z-index: 120;
+        box-sizing: border-box;
+        padding: env(safe-area-inset-top) env(safe-area-inset-right)
+          env(safe-area-inset-bottom) env(safe-area-inset-left);
+      }
+
+      #hud-settlement-panel {
+        width: min(360px, calc(100% - 32px));
+        max-width: 360px;
+        box-sizing: border-box;
+      }
+
+      #hud-settlement-actions {
+        pointer-events: auto;
+      }
+
+      #hud-settlement-actions button {
+        min-height: 48px;
+        pointer-events: auto;
+      }
+
+      @media (max-width: 480px) {
+        #hud-settlement-actions {
+          flex-direction: column;
+        }
+      }
+    `;
+    document.head.appendChild(style);
   }
 
   private ensureUpgradeHintStyle(): void {
@@ -955,7 +1081,7 @@ export class HUD {
   public showGameOver(finalScore: number): void {
     this.ensureInitialized();
     this.hideEventObjective();
-    this.setTextContent(this.gameOverTitle, 'GAME OVER');
+    this.setTextContent(this.gameOverTitle, 'MISSION FAILED');
     this.setStyleValue(this.gameOverTitle, 'color', '#ff3333');
     this.setStyleValue(
       this.gameOverTitle,
@@ -963,6 +1089,7 @@ export class HUD {
       '0 0 20px rgba(255, 0, 0, 0.8), 4px 4px 8px rgba(0, 0, 0, 1)'
     );
     this.setTextContent(this.finalScoreDisplay, `最终得分: ${finalScore}`);
+    this.setStyleValue(this.settlementActionsRow, 'display', 'flex');
     this.setStyleValue(this.gameOverDisplay, 'opacity', '1');
     this.setStyleValue(this.gameOverDisplay, 'pointerEvents', 'auto');
   }
@@ -981,6 +1108,7 @@ export class HUD {
       '0 0 20px rgba(102, 255, 204, 0.8), 4px 4px 8px rgba(0, 0, 0, 1)'
     );
     this.setTextContent(this.finalScoreDisplay, `最终得分: ${finalScore}`);
+    this.setStyleValue(this.settlementActionsRow, 'display', 'flex');
     this.setStyleValue(this.gameOverDisplay, 'opacity', '1');
     this.setStyleValue(this.gameOverDisplay, 'pointerEvents', 'auto');
   }
@@ -990,6 +1118,7 @@ export class HUD {
    */
   public hideGameOver(): void {
     this.ensureInitialized();
+    this.setStyleValue(this.settlementActionsRow, 'display', 'none');
     this.setStyleValue(this.gameOverDisplay, 'opacity', '0');
     this.setStyleValue(this.gameOverDisplay, 'pointerEvents', 'none');
   }
