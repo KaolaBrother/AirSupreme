@@ -1,5 +1,9 @@
 # AirSupreme 更新日志
 
+## Unreleased
+
+- Initialized Kaola-Workflow documentation structure.
+
 ## [2.2.1] - 2026-06-13
 
 ### 透明层与导弹可读性
