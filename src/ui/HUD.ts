@@ -1,4 +1,10 @@
 import { GAME_CONSTANTS, GameConfig } from '@/config';
+import {
+  HUD_COLORS,
+  detectHudLayoutDensity,
+  injectHudTokens,
+  type HudLayoutDensity,
+} from '@/ui/theme/hudTokens';
 
 type BigMessageVariant = 'announcement' | 'powerup';
 type EventObjectiveTone = 'default' | 'complete';
@@ -15,6 +21,8 @@ export class HUD {
   private static readonly MAX_DISPLAY_LIVES = 5;
   private static readonly UPGRADE_HINT_STYLE_ID = 'hud-upgrade-hint-style';
   private static readonly SETTLEMENT_STYLE_ID = 'hud-settlement-style';
+  private static readonly LAYOUT_STYLE_ID = 'hud-layout-style';
+  private static readonly TOAST_DEFAULT_MS = 800;
   private initialized: boolean = false;
   private container: HTMLDivElement;
   private leftStatusPanel: HTMLDivElement;
@@ -24,7 +32,6 @@ export class HUD {
   private scoreDisplay: HTMLDivElement;
   private speedDisplay: HTMLDivElement;
   private enemiesDisplay: HTMLDivElement;
-  private remainingEnemiesDisplay: HTMLDivElement; // 剩余敌人数量
   private eventObjectiveDisplay: HTMLDivElement;
   private eventObjectiveTitle: HTMLDivElement;
   private eventObjectiveText: HTMLDivElement;
@@ -58,15 +65,26 @@ export class HUD {
   private activePowerUpName: string = '';
   private activePowerUpIcon: string = '';
   private lastPowerUpRemainingSeconds: number = -1;
+  private layoutDensity: HudLayoutDensity = 'desktop';
+  private densityExplicit: boolean = false;
+  private aliveEnemyCount: number = 0;
+  private remainingEnemyCount: number = 0;
+  private lastLivesFilled: number | null = null;
+  private lastMissilesFilled: number | null = null;
+  private resizeHandler!: () => void;
   private readonly textContentCache = new WeakMap<HTMLElement, string>();
   private readonly styleValueCache = new WeakMap<HTMLElement, Map<string, string>>();
 
   constructor() {
+    injectHudTokens();
     this.ensureUpgradeHintStyle();
+    this.ensureLayoutStyle();
+    this.layoutDensity = detectHudLayoutDensity();
     this.container = document.createElement('div');
     this.container.id = 'hud';
+    this.container.setAttribute('data-layout-density', this.layoutDensity);
 
-    const isMobile = GameConfig.isMobile;
+    const isMobile = this.layoutDensity !== 'desktop';
     const padding = isMobile ? '10px' : '20px';
 
     this.container.style.cssText = `
@@ -76,14 +94,15 @@ export class HUD {
       width: 100%;
       padding: ${padding};
       pointer-events: none;
-      font-family: 'Arial', sans-serif;
-      color: white;
+      font-family: var(--hud-font, 'Arial', sans-serif);
+      color: var(--hud-text, ${HUD_COLORS.text});
       text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
       z-index: 50;
     `;
 
     this.healthBarContainer = this.createHealthBar(isMobile);
     this.leftStatusPanel = document.createElement('div');
+    this.leftStatusPanel.className = 'hud-cabin';
     this.leftStatusPanel.style.cssText = `
       position: absolute;
       top: ${isMobile ? '14px' : '18px'};
@@ -92,7 +111,7 @@ export class HUD {
       flex-direction: column;
       gap: ${isMobile ? '8px' : '10px'};
       width: fit-content;
-      max-width: min(${isMobile ? '58vw' : '28vw'}, ${isMobile ? '220px' : '260px'});
+      max-width: ${this.getCabinMaxWidth()};
       pointer-events: none;
     `;
 
@@ -170,18 +189,6 @@ export class HUD {
     `;
     this.setTextContent(this.speedDisplay, '速度 000');
 
-    this.remainingEnemiesDisplay = document.createElement('div');
-    this.remainingEnemiesDisplay.style.cssText = `
-      font-size: ${isMobile ? '14px' : '18px'};
-      position: absolute;
-      top: ${isMobile ? '32px' : '45px'};
-      right: ${padding};
-      color: #ff4444;
-      text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.8);
-    `;
-    this.setTextContent(this.remainingEnemiesDisplay, '剩余: 0');
-    this.container.appendChild(this.remainingEnemiesDisplay);
-
     this.eventObjectiveDisplay = document.createElement('div');
     this.eventObjectiveDisplay.style.cssText = `
       position: absolute;
@@ -250,33 +257,47 @@ export class HUD {
 
     this.enemiesDisplay = document.createElement('div');
     this.enemiesDisplay.style.cssText = `
-      font-size: ${isMobile ? '14px' : '18px'};
+      font-size: ${isMobile ? '12px' : '14px'};
       position: absolute;
       top: ${isMobile ? '54px' : '70px'};
       right: ${padding};
+      color: var(--hud-muted, ${HUD_COLORS.muted});
+      letter-spacing: 0.08em;
+      font-variant-numeric: tabular-nums;
     `;
-    this.setTextContent(this.enemiesDisplay, '敌人: 0');
+    this.setTextContent(this.enemiesDisplay, '敌人 0 · 剩余 0');
 
-    // 生命值显示（生命数）
+    // 生命值显示（几何 pip，非 emoji）
     this.livesDisplay = document.createElement('div');
+    this.livesDisplay.id = 'hud-lives';
+    this.livesDisplay.setAttribute('data-hud', 'lives');
+    this.livesDisplay.className = 'hud-pip-row';
     this.livesDisplay.style.cssText = `
-      font-size: ${isMobile ? '14px' : '18px'};
       position: absolute;
       top: ${isMobile ? '76px' : '95px'};
       right: ${padding};
+      display: flex;
+      flex-direction: row;
+      align-items: center;
+      gap: 4px;
     `;
-    this.setTextContent(this.livesDisplay, '生命: ❤️❤️❤️');
+    this.renderLifePips(HUD.MAX_DISPLAY_LIVES);
 
-    // 导弹数量显示
+    // 导弹数量显示（几何 pip，非 emoji）
     this.missilesDisplay = document.createElement('div');
+    this.missilesDisplay.id = 'hud-missiles';
+    this.missilesDisplay.setAttribute('data-hud', 'missiles');
+    this.missilesDisplay.className = 'hud-pip-row';
     this.missilesDisplay.style.cssText = `
-      font-size: ${isMobile ? '14px' : '18px'};
       position: absolute;
       top: ${isMobile ? '98px' : '120px'};
       right: ${padding};
-      color: #ff6600;
+      display: flex;
+      flex-direction: row;
+      align-items: center;
+      gap: 4px;
     `;
-    this.setTextContent(this.missilesDisplay, '导弹: 🚀🚀');
+    this.renderMissilePips(GAME_CONSTANTS.MISSILE.MAX_MISSILES);
 
     // 导弹补给进度条（导弹UI下方）
     const progressTop = isMobile ? 120 : 144;
@@ -338,7 +359,11 @@ export class HUD {
     this.powerUpBigIcon = document.createElement('div');
     this.powerUpBigIcon.className = 'powerup-big-icon';
     this.powerUpBigIcon.style.cssText = `
-      font-size: ${isMobile ? '120px' : '150px'};
+      font-size: 48px;
+      max-width: 48px;
+      max-height: 48px;
+      line-height: 1;
+      overflow: hidden;
       text-shadow: 0 0 30px rgba(255, 215, 0, 0.8), 0 0 60px rgba(255, 215, 0, 0.4);
       margin-bottom: 20px;
       animation: bounce 0.5s ease-out;
@@ -403,6 +428,11 @@ export class HUD {
       flex-direction: column;
       align-items: center;
       text-align: center;
+      background: var(--hud-glass, ${HUD_COLORS.glass});
+      border: 1px solid var(--hud-edge, ${HUD_COLORS.edge});
+      border-radius: var(--hud-radius, 12px);
+      box-shadow: var(--hud-shadow, ${HUD_COLORS.shadow});
+      padding: 28px 20px;
     `;
     this.gameOverTitle = document.createElement('div');
     this.gameOverTitle.id = 'game-over-title';
@@ -472,6 +502,13 @@ export class HUD {
     this.container.appendChild(this.missilesDisplay);
     this.container.appendChild(this.missileProgressDisplay);
     this.container.appendChild(this.powerUpDisplay);
+
+    this.resizeHandler = () => {
+      if (!this.densityExplicit) {
+        this.layoutDensity = detectHudLayoutDensity();
+      }
+      this.applyLayoutDensity();
+    };
   }
 
   public init(): void {
@@ -483,6 +520,9 @@ export class HUD {
     document.body.appendChild(this.powerUpBigDisplay);
     document.body.appendChild(this.damageFlashOverlay);
     document.body.appendChild(this.gameOverDisplay);
+    window.addEventListener('resize', this.resizeHandler);
+    window.addEventListener('orientationchange', this.resizeHandler);
+    this.applyLayoutDensity();
     this.initialized = true;
   }
 
@@ -516,7 +556,7 @@ export class HUD {
     this.healthBarFill.style.cssText = `
       width: 100%;
       height: 100%;
-      background: linear-gradient(90deg, #00ff66, #00ff33, #00cc00);
+      background: linear-gradient(90deg, ${HUD_COLORS.lock}, ${HUD_COLORS.sys});
       transition: width 0.3s, background 0.3s;
     `;
 
@@ -571,15 +611,16 @@ export class HUD {
       min-height: 48px;
       pointer-events: auto;
       cursor: pointer;
-      border: 1px solid rgba(118, 204, 255, 0.35);
-      border-radius: 12px;
+      border: 1px solid var(--hud-edge, ${HUD_COLORS.edge});
+      border-radius: var(--hud-radius, 12px);
       padding: 12px 16px;
       font-size: 16px;
       font-weight: 700;
       letter-spacing: 0.08em;
-      color: #eef8ff;
-      background: linear-gradient(160deg, rgba(18, 30, 48, 0.92), rgba(10, 14, 22, 0.82));
-      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 12px 24px rgba(0, 0, 0, 0.18);
+      color: var(--hud-text, ${HUD_COLORS.text});
+      background: var(--hud-glass, ${HUD_COLORS.glass});
+      box-shadow: var(--hud-shadow, ${HUD_COLORS.shadow});
+      backdrop-filter: blur(10px);
     `;
     button.addEventListener('click', (event) => {
       event.preventDefault();
@@ -623,6 +664,60 @@ export class HUD {
         #hud-settlement-actions {
           flex-direction: column;
         }
+      }
+    `;
+    document.head.appendChild(style);
+  }
+
+  private ensureLayoutStyle(): void {
+    if (document.getElementById(HUD.LAYOUT_STYLE_ID)) {
+      return;
+    }
+
+    const style = document.createElement('style');
+    style.id = HUD.LAYOUT_STYLE_ID;
+    style.textContent = `
+      #hud[data-layout-density="desktop"] .hud-cabin {
+        max-width: min(28vw, 260px);
+      }
+
+      #hud[data-layout-density="touch-landscape"] .hud-cabin {
+        max-width: min(38vw, 180px);
+      }
+
+      #hud[data-layout-density="touch-portrait"] .hud-cabin {
+        max-width: min(58vw, 220px);
+      }
+
+      .hud-pip {
+        display: inline-block;
+        width: 8px;
+        height: 10px;
+        box-sizing: border-box;
+        border-radius: 2px;
+        border: 1px solid var(--hud-edge, ${HUD_COLORS.edge});
+      }
+
+      .hud-life-pip.is-on {
+        background: var(--hud-lock, ${HUD_COLORS.lock});
+      }
+
+      .hud-life-pip.is-off {
+        background: transparent;
+      }
+
+      .hud-missile-pip.is-on {
+        background: var(--hud-weapon, ${HUD_COLORS.weapon});
+      }
+
+      .hud-missile-pip.is-off {
+        background: transparent;
+      }
+
+      .powerup-big-icon {
+        max-width: 48px;
+        max-height: 48px;
+        font-size: 48px;
       }
     `;
     document.head.appendChild(style);
@@ -679,13 +774,13 @@ export class HUD {
     let gradient: string;
 
     if (clampedPercent > 0.6) {
-      gradient = 'linear-gradient(90deg, #00ff66, #00ff33, #00cc00)';
+      gradient = `linear-gradient(90deg, ${HUD_COLORS.lock}, ${HUD_COLORS.sys})`;
     } else if (clampedPercent > 0.3) {
-      gradient = 'linear-gradient(90deg, #ffcc00, #ffdd00, #88aa00)';
+      gradient = `linear-gradient(90deg, ${HUD_COLORS.ally}, ${HUD_COLORS.weapon})`;
     } else if (clampedPercent > 0.15) {
-      gradient = 'linear-gradient(90deg, #ff9900, #ffcc00, #ffaa00)';
+      gradient = `linear-gradient(90deg, ${HUD_COLORS.weapon}, ${HUD_COLORS.ally})`;
     } else {
-      gradient = 'linear-gradient(90deg, #ff3300, #cc0000, #ff0000)';
+      gradient = `linear-gradient(90deg, ${HUD_COLORS.threat}, #be123c)`;
     }
 
     this.setStyleValue(this.healthBarFill, 'background', gradient);
@@ -726,7 +821,8 @@ export class HUD {
    */
   public updateEnemies(count: number): void {
     this.ensureInitialized();
-    this.setTextContent(this.enemiesDisplay, `敌人: ${count}`);
+    this.aliveEnemyCount = count;
+    this.renderWaveLine();
   }
 
   /**
@@ -734,7 +830,8 @@ export class HUD {
    */
   public updateRemainingEnemies(count: number): void {
     this.ensureInitialized();
-    this.setTextContent(this.remainingEnemiesDisplay, `剩余: ${count}`);
+    this.remainingEnemyCount = count;
+    this.renderWaveLine();
   }
 
   public showEventObjective(title: string, objective: string, status?: string): void {
@@ -848,13 +945,88 @@ export class HUD {
    */
   public updateLives(lives: number): void {
     this.ensureInitialized();
-    const displayLives = Math.max(
-      0,
-      Math.min(lives, HUD.MAX_DISPLAY_LIVES)
+    const filled = Math.max(0, Math.min(lives, HUD.MAX_DISPLAY_LIVES));
+    this.renderLifePips(filled);
+  }
+
+  public setLayoutDensity(density: HudLayoutDensity): void {
+    this.layoutDensity = density;
+    this.densityExplicit = true;
+    this.applyLayoutDensity();
+  }
+
+  public getLayoutDensity(): HudLayoutDensity {
+    return this.layoutDensity;
+  }
+
+  private getCabinMaxWidth(): string {
+    if (this.layoutDensity === 'touch-landscape') {
+      return 'min(38vw, 180px)';
+    }
+    if (this.layoutDensity === 'touch-portrait') {
+      return 'min(58vw, 220px)';
+    }
+    return 'min(28vw, 260px)';
+  }
+
+  private applyLayoutDensity(): void {
+    this.container.setAttribute('data-layout-density', this.layoutDensity);
+    this.setStyleValue(this.leftStatusPanel, 'maxWidth', this.getCabinMaxWidth());
+  }
+
+  private renderWaveLine(): void {
+    this.setTextContent(
+      this.enemiesDisplay,
+      `敌人 ${this.aliveEnemyCount} · 剩余 ${this.remainingEnemyCount}`
     );
-    const emptyLives = Math.max(0, HUD.MAX_DISPLAY_LIVES - displayLives);
-    const hearts = '❤️'.repeat(displayLives) + '🖤'.repeat(emptyLives);
-    this.setTextContent(this.livesDisplay, `生命: ${hearts}`);
+  }
+
+  private renderLifePips(filled: number): void {
+    if (this.lastLivesFilled === filled) {
+      return;
+    }
+    this.lastLivesFilled = filled;
+    this.renderPips(this.livesDisplay, filled, HUD.MAX_DISPLAY_LIVES, 'hud-life-pip', HUD_COLORS.lock);
+  }
+
+  private renderMissilePips(filled: number): void {
+    if (this.lastMissilesFilled === filled) {
+      return;
+    }
+    this.lastMissilesFilled = filled;
+    this.renderPips(
+      this.missilesDisplay,
+      filled,
+      GAME_CONSTANTS.MISSILE.MAX_MISSILES,
+      'hud-missile-pip',
+      HUD_COLORS.weapon
+    );
+  }
+
+  private renderPips(
+    host: HTMLElement,
+    filled: number,
+    total: number,
+    kindClass: string,
+    onColor: string
+  ): void {
+    const fragment = document.createDocumentFragment();
+    for (let i = 0; i < total; i += 1) {
+      const on = i < filled;
+      const pip = document.createElement('span');
+      pip.className = `hud-pip ${kindClass} ${on ? 'is-on' : 'is-off'}`;
+      pip.setAttribute('data-hud-pip', on ? 'on' : 'off');
+      pip.style.width = '8px';
+      pip.style.height = '10px';
+      pip.style.display = 'inline-block';
+      pip.style.boxSizing = 'border-box';
+      pip.style.borderRadius = '2px';
+      pip.style.border = `1px solid ${HUD_COLORS.edge}`;
+      pip.style.backgroundColor = on ? onColor : 'transparent';
+      fragment.appendChild(pip);
+    }
+    host.replaceChildren(fragment);
+    host.setAttribute('data-filled', String(filled));
   }
 
   public updateUpgradePoints(points: number): void {
@@ -878,9 +1050,8 @@ export class HUD {
   public updateMissiles(count: number): void {
     this.ensureInitialized();
     const maxMissiles = GAME_CONSTANTS.MISSILE.MAX_MISSILES;
-    const displayCount = Math.max(0, Math.min(count, maxMissiles));
-    const icons = '🚀'.repeat(displayCount) + '⬜'.repeat(Math.max(0, maxMissiles - displayCount));
-    this.setTextContent(this.missilesDisplay, `导弹: ${icons}`);
+    const filled = Math.max(0, Math.min(count, maxMissiles));
+    this.renderMissilePips(filled);
   }
 
   /**
@@ -977,13 +1148,13 @@ export class HUD {
    * 显示道具大字提示（屏幕中央）
    * @param icon 道具图标
    * @param name 道具名称
-   * @param minDisplayTime 最小显示时间（秒），默认1秒
+   * @param minDisplayTime 最小显示时间（秒），默认 800ms
    * @param hideSubtext 是否隐藏副标题，默认false
    */
   public showPowerUpBig(
     icon: string,
     name: string,
-    minDisplayTime: number = 1,
+    minDisplayTime: number = HUD.TOAST_DEFAULT_MS / 1000,
     hideSubtext: boolean = false,
     variant: BigMessageVariant = 'announcement'
   ): void {
@@ -1125,6 +1296,10 @@ export class HUD {
 
   public dispose(): void {
     this.hideEventObjective();
+    if (this.initialized) {
+      window.removeEventListener('resize', this.resizeHandler);
+      window.removeEventListener('orientationchange', this.resizeHandler);
+    }
     if (this.container.parentElement) {
       this.container.remove();
     }

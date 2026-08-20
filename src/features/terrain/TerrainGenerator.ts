@@ -40,7 +40,7 @@ import { CloudField } from './worldscape/clouds';
 const log = getLogger('TerrainGenerator');
 
 /** worldscape 高度场局部 0（水位）对应的世界 Y */
-const WORLDSCAPE_WATER_Y = -48;
+export const WORLDSCAPE_WATER_Y = -48;
 /** 旧版地面基准（-50）与 worldscape 水位基准的差值 */
 const WORLDSCAPE_BASE_OFFSET = WORLDSCAPE_WATER_Y - -50;
 const TRANSPARENT_LAYER_RENDER_ORDER = {
@@ -4488,6 +4488,19 @@ export class TerrainGenerator {
     for (const animate of this.animatedProps) {
       animate(deltaTime, this.time);
     }
+  }
+
+  /**
+   * 返回 (worldX, worldZ) 处地形/水面的世界 Y。
+   * 高度场局部 0 为水面；未生成高度场时回落到 WORLDSCAPE_WATER_Y。
+   */
+  public getCrashSurfaceY(worldX: number, worldZ: number): number {
+    if (!this.stageField) {
+      return WORLDSCAPE_WATER_Y;
+    }
+
+    const worldY = WORLDSCAPE_WATER_Y + this.stageField.heightAt(worldX, worldZ);
+    return Number.isFinite(worldY) ? worldY : WORLDSCAPE_WATER_Y;
   }
 
   /**
