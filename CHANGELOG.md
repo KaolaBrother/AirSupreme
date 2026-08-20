@@ -4,6 +4,18 @@
 
 - Initialized Kaola-Workflow documentation structure.
 
+### 会话循环（experience-upgrade 1/5）
+
+- 页级 `StartMenu`：开局调用 `hide()`，不再 `dispose()`；`GameCoordinator` 以 `{ showStartMenu: false, onRetry, onExitToMenu }` 启动
+- 结算 HUD：`#game-over-title` 失败为 `MISSION FAILED`、通关为 `MISSION COMPLETE`；按钮 **再来一局** / **返回菜单**（`setSettlementActions`）
+- 再来一局使用本局 `lastSettings` 重开；返回菜单调用 `reloadFromStorage()` 后 `show()` StartMenu
+- 新增 `PauseMenu`（`#pause-menu`，z-index 200）：继续 / 升级 / 设置 / 返回菜单；设置仅 音效 / 音乐 / 画质；返回菜单确认文案 `返回主菜单？当前进度将丢失。`
+- ESC / P 与移动端 `#upgrade-button` 打开暂停舱（引擎 `stopEngine`）；桌面 `U` 先暂停再打开升级商店；`GAME_OVER` 忽略暂停
+- `SessionSettings` 以 `START_MENU_STORAGE_KEY = 'air-supreme:start-menu-settings'` 通过 `loadStartFlowSettings` / `saveStartFlowSettings`（先合并再规范化）持久化开始流程设置
+- `InputHandler.dispose()` 清理监听；`UpgradeMenu.show()` 在 `dispose()` 之后为空操作
+- 构建拆出独立 chunk `PauseMenu-*.js`
+- 全量门槛通过：`npx tsc --noEmit`、`npm run lint`、`npm run test:run`、`npm run build`（**33 个测试文件 / 338 个测试**）；`vendor-three` chunk-size warning 仍在（约 517 kB）
+
 ## [2.2.1] - 2026-06-13
 
 ### 透明层与导弹可读性

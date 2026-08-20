@@ -3,7 +3,8 @@ import {
   DEFAULT_START_FLOW_SETTINGS,
   getAudioSettings,
   getPresentationSettings,
-  normalizeStartFlowSettings,
+  loadStartFlowSettings,
+  saveStartFlowSettings,
   TEST_SCORE_OPTIONS,
   type StartFlowSettings,
 } from '@/core/SessionSettings';
@@ -11,7 +12,6 @@ import type { ModelPreview } from './ModelPreview';
 type ModelPreviewModule = typeof import('./ModelPreview');
 
 export class StartMenu {
-  private static readonly STORAGE_KEY = 'air-supreme:start-menu-settings';
   private container: HTMLDivElement;
   private settingsContainer: HTMLDivElement;
   private onStart?: (settings: GameSettings) => void;
@@ -97,55 +97,12 @@ export class StartMenu {
     }
   }
 
-  private getStorage(): Storage | null {
-    try {
-      const storage = window.localStorage;
-      if (
-        !storage ||
-        typeof storage.getItem !== 'function' ||
-        typeof storage.setItem !== 'function' ||
-        typeof storage.removeItem !== 'function'
-      ) {
-        return null;
-      }
-
-      return storage;
-    } catch {
-      return null;
-    }
-  }
-
   private loadSettings(): void {
-    const storage = this.getStorage();
-    if (!storage) {
-      return;
-    }
-
-    const raw = storage.getItem(StartMenu.STORAGE_KEY);
-    if (!raw) {
-      return;
-    }
-
-    try {
-      const parsed = JSON.parse(raw) as Partial<GameSettings>;
-      this.settings = normalizeStartFlowSettings({
-        ...this.settings,
-        ...parsed,
-      });
-    } catch {
-      storage.removeItem(StartMenu.STORAGE_KEY);
-    }
+    this.settings = loadStartFlowSettings();
   }
 
   private saveSettings(): void {
-    const storage = this.getStorage();
-    if (!storage) {
-      return;
-    }
-
-    const normalizedSettings = normalizeStartFlowSettings(this.settings);
-    this.settings = normalizedSettings;
-    storage.setItem(StartMenu.STORAGE_KEY, JSON.stringify(normalizedSettings));
+    saveStartFlowSettings(this.settings);
   }
 
   private createContainer(): HTMLDivElement {
@@ -695,7 +652,13 @@ export class StartMenu {
     this.onStart = callback;
   }
 
+  public reloadFromStorage(): void {
+    this.loadSettings();
+    this.updateDisplay();
+  }
+
   public show(): void {
+    this.reloadFromStorage();
     this.container.style.display = 'flex';
   }
 

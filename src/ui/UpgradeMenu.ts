@@ -19,6 +19,7 @@ export class UpgradeMenu {
   private onUpgrade: (type: UpgradeType) => void;
   private onResume: () => void;
   private visible: boolean = false;
+  private disposed: boolean = false;
   private upgradeCards: Map<UpgradeType, UpgradeCardElements> = new Map();
   private pointsDisplay: HTMLDivElement | null = null;
 
@@ -53,6 +54,9 @@ export class UpgradeMenu {
   }
 
   public show(): void {
+    if (this.disposed) {
+      return;
+    }
     if (!this.container) {
       this.container = this.createContainer();
       document.body.appendChild(this.container);
@@ -63,6 +67,9 @@ export class UpgradeMenu {
   }
 
   public hide(): void {
+    if (this.disposed) {
+      return;
+    }
     if (this.container) {
       this.container.style.display = 'none';
     }
@@ -74,7 +81,7 @@ export class UpgradeMenu {
   }
 
   public updateDisplay(): void {
-    if (!this.container) return;
+    if (this.disposed || !this.container) return;
 
     const points = this.upgrades.getAvailablePoints();
     if (this.pointsDisplay) {
@@ -647,6 +654,8 @@ export class UpgradeMenu {
   }
 
   public dispose(): void {
+    this.disposed = true;
+    this.visible = false;
     if (this.container && this.container.parentNode) {
       this.container.parentNode.removeChild(this.container);
     }

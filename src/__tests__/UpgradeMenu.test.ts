@@ -101,4 +101,17 @@ describe('UpgradeMenu', () => {
     const container = document.getElementById('upgrade-menu') as HTMLDivElement;
     expect(container.style.display).toBe('none');
   });
+
+  it('does not recreate #upgrade-menu when show() is called after dispose()', () => {
+    menu.show();
+    expect(document.getElementById('upgrade-menu')).not.toBeNull();
+    expect(menu.isVisible()).toBe(true);
+
+    menu.dispose();
+    expect(document.getElementById('upgrade-menu')).toBeNull();
+
+    menu.show();
+    expect(document.getElementById('upgrade-menu')).toBeNull();
+    expect(menu.isVisible()).toBe(false);
+  });
 });
