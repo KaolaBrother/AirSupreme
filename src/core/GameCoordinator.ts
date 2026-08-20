@@ -28,6 +28,7 @@ import { BOSS_CONFIGS, BossType, BossConfig } from '@/features/boss/BossTypes';
 import { createPlayerMesh, createEnemyMesh } from '@/features/aircraft/AircraftMeshFactory';
 import { getDifficultyProfile } from '@/core/Difficulty';
 import { getLevelConfig, LevelWaveEventType, TerrainType } from '@/features/terrain/LevelConfig';
+import { WORLDSCAPE_WATER_Y } from '@/features/terrain/TerrainGenerator';
 import { LevelState } from '@/features/levels/LevelManager';
 import { GameSessionState } from '@/core/GameSessionState';
 import { loadStartFlowSettings, saveStartFlowSettings } from '@/core/SessionSettings';
@@ -173,6 +174,7 @@ export class GameCoordinator {
   private missileRespawnTimer: number = 0;
   private missileFiringScheduled: boolean = false;
   private multiShotActive: boolean = false;
+  private lastMissileLockState: string | null = null;
 
   private audioInitialized: boolean = false;
   private upgradeMenuPromise: Promise<UpgradeMenu> | null = null;
@@ -266,6 +268,9 @@ export class GameCoordinator {
     this.thirdPersonCamera = new ThirdPersonCamera(this.gameScene.camera, this.playerAircraft);
 
     this.playerSystem = new PlayerSystem(this.gameScene.scene, this.playerAircraft, this.playerStats);
+    this.playerSystem.setCrashSurfaceSampler(
+      (x, z) => this.enemySystem?.getLevelManager().getCrashSurfaceY(x, z) ?? WORLDSCAPE_WATER_Y,
+    );
 
     this.initSystems();
     this.setupEventListeners();
@@ -808,8 +813,11 @@ export class GameCoordinator {
     if (this.missileCount <= 0) {
       if (input.missile) {
         this.lockOnIndicator.setNoMissiles(true);
+        this.audioManager.playMissileDry();
+        this.lastMissileLockState = this.lockOnIndicator.getLockState();
       } else {
         this.lockOnIndicator.setNoMissiles(false);
+        this.lastMissileLockState = null;
       }
       return;
     }
@@ -824,6 +832,14 @@ export class GameCoordinator {
         deltaTime,
         enemyScreenPos
       );
+
+      const lockState = this.lockOnIndicator.getLockState();
+      if (lockState === 'track') {
+        this.audioManager.playMissileLock();
+      } else if (lockState === 'break' && this.lastMissileLockState !== 'break') {
+        this.audioManager.playMissileLockBreak();
+      }
+      this.lastMissileLockState = lockState;
 
       if (lockComplete) {
         this.handleTutorialMissileLockCompleted();
@@ -843,8 +859,10 @@ export class GameCoordinator {
       this.handleTutorialMissileLockStarted();
       this.audioManager.playMissileLock();
       this.lockOnIndicator.startLockOn();
+      this.lastMissileLockState = this.lockOnIndicator.getLockState();
     } else {
       this.lockOnIndicator.cancelLockOn();
+      this.lastMissileLockState = this.lockOnIndicator.getLockState();
     }
   }
 

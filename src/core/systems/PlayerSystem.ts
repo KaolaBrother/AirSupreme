@@ -5,10 +5,10 @@ import { EventBus, GameEventType } from '@/core/EventBus';
 import { PlayerController } from '@/features/player/PlayerController';
 import { HealthSystem } from '@/features/combat/HealthSystem';
 import { PlayerStats } from '@/features/upgrade/UpgradeSystem';
+import { WORLDSCAPE_WATER_Y } from '@/features/terrain/TerrainGenerator';
 
 export class PlayerSystem implements IGameSystem {
   readonly name = 'PlayerSystem';
-  private static readonly GROUND_COLLISION_Y = -45;
   private static readonly RESPAWN_ALTITUDE_BUFFER = 10;
 
   private controller: PlayerController;
@@ -21,6 +21,7 @@ export class PlayerSystem implements IGameSystem {
   private respawnTimer: number = 0;
   private respawnDelay: number = 2;
   private lastSafeRespawnPosition: THREE.Vector3;
+  private crashSurfaceSampler: ((x: number, z: number) => number) | null = null;
 
   private shieldActive: boolean = false;
   private shieldMesh?: THREE.Mesh;
@@ -116,28 +117,53 @@ export class PlayerSystem implements IGameSystem {
     }
   }
 
+  private sampleCrashSurfaceY(worldX: number, worldZ: number): number {
+    if (this.crashSurfaceSampler) {
+      const sampled = this.crashSurfaceSampler(worldX, worldZ);
+      if (Number.isFinite(sampled)) {
+        return sampled;
+      }
+    }
+    return WORLDSCAPE_WATER_Y;
+  }
+
   private checkGroundCollision(): void {
-    const groundLevel = PlayerSystem.GROUND_COLLISION_Y;
-    if (this.mesh.position.y < groundLevel) {
+    const { x, y, z } = this.mesh.position;
+    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
+      return;
+    }
+
+    const surfaceY = this.sampleCrashSurfaceY(x, z);
+    if (y <= surfaceY) {
       this.health.takeDamage(1000);
     }
   }
 
   private updateLastSafeRespawnPosition(): void {
-    const minSafeY = PlayerSystem.GROUND_COLLISION_Y + PlayerSystem.RESPAWN_ALTITUDE_BUFFER;
-    if (this.mesh.position.y > minSafeY) {
+    const { x, y, z } = this.mesh.position;
+    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
+      return;
+    }
+
+    const minSafeY = this.sampleCrashSurfaceY(x, z) + PlayerSystem.RESPAWN_ALTITUDE_BUFFER;
+    if (y > minSafeY) {
       this.lastSafeRespawnPosition.copy(this.mesh.position);
     }
   }
 
   private getSafeRespawnPosition(): THREE.Vector3 {
     const safeRespawnPosition = this.lastSafeRespawnPosition.clone();
-    safeRespawnPosition.y = Math.max(
-      safeRespawnPosition.y,
-      PlayerSystem.GROUND_COLLISION_Y + PlayerSystem.RESPAWN_ALTITUDE_BUFFER
-    );
+    const surfaceY = this.sampleCrashSurfaceY(safeRespawnPosition.x, safeRespawnPosition.z);
+    const minSafeY = surfaceY + PlayerSystem.RESPAWN_ALTITUDE_BUFFER;
+    const currentY = Number.isFinite(safeRespawnPosition.y) ? safeRespawnPosition.y : minSafeY;
+    safeRespawnPosition.y = Math.max(currentY, minSafeY);
 
     return safeRespawnPosition;
+  }
+
+  /** 注入活地形/水面高度采样；未设置时坠毁判定回落到 WORLDSCAPE_WATER_Y */
+  setCrashSurfaceSampler(sampler: (x: number, z: number) => number): void {
+    this.crashSurfaceSampler = sampler;
   }
 
   getController(): PlayerController {

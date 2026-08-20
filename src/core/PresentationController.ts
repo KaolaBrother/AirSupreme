@@ -4,6 +4,7 @@ import { StartMenu, GameSettings } from '@/ui/StartMenu';
 import { EnemyHealthBars } from '@/ui/EnemyHealthBars';
 import { BossMissileIndicator } from '@/ui/BossMissileIndicator';
 import { LockOnIndicator } from '@/ui/LockOnIndicator';
+import { injectHudTokens } from '@/ui/theme/hudTokens';
 
 export interface HudSnapshot {
   healthPercent: number;
@@ -67,6 +68,7 @@ export class PresentationController {
   private lastEventObjectiveStatusUpdatedAt: number = 0;
 
   constructor(options: PresentationControllerOptions) {
+    injectHudTokens();
     this.hud = options.hud;
     this.startMenu = options.startMenu ?? null;
     this.enemyHealthBars = options.enemyHealthBars;
@@ -76,6 +78,7 @@ export class PresentationController {
   }
 
   public initializeCombatUi(): void {
+    injectHudTokens();
     this.hud.init();
     this.enemyHealthBars.init();
     this.lockOnIndicator.init();
@@ -105,6 +108,9 @@ export class PresentationController {
     this.hud.updateRemainingEnemies(snapshot.remainingEnemies);
     this.hud.updateLives(snapshot.lives);
     this.hud.update(snapshot.isPlaying ? uiDeltaTime : 0);
+    if (typeof this.lockOnIndicator.setPaused === 'function') {
+      this.lockOnIndicator.setPaused(!snapshot.isPlaying);
+    }
     return true;
   }
 

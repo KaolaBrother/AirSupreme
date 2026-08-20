@@ -3,6 +3,7 @@ import {
   DEFAULT_START_FLOW_SETTINGS,
   type StartFlowSettings,
 } from '@/core/SessionSettings';
+import { HUD_COLORS, injectHudTokens } from '@/ui/theme/hudTokens';
 
 export interface IPauseMenuOptions {
   onContinue: () => void;
@@ -43,8 +44,10 @@ export class PauseMenu {
 
   constructor(options: IPauseMenuOptions) {
     this.options = options;
+    injectHudTokens();
     this.overlay = document.createElement('div');
     this.overlay.id = 'pause-menu';
+    this.overlay.className = 'hud-glass';
     this.overlay.setAttribute('aria-hidden', 'true');
     this.overlay.style.cssText = `
       position: fixed;
@@ -53,11 +56,11 @@ export class PauseMenu {
       display: none;
       align-items: center;
       justify-content: center;
-      background: rgba(8, 14, 24, 0.72);
+      background: var(--hud-glass, ${HUD_COLORS.glass});
       backdrop-filter: blur(14px);
       -webkit-backdrop-filter: blur(14px);
-      font-family: 'Arial', sans-serif;
-      color: #eef8ff;
+      font-family: var(--hud-font, 'Arial', sans-serif);
+      color: var(--hud-text, ${HUD_COLORS.text});
       box-sizing: border-box;
       padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
     `;
@@ -98,10 +101,10 @@ export class PauseMenu {
       flex-direction: column;
       gap: 12px;
       padding: 24px 20px;
-      border-radius: 16px;
-      background: linear-gradient(160deg, rgba(18, 30, 48, 0.92), rgba(10, 14, 22, 0.84));
-      border: 1px solid rgba(118, 204, 255, 0.28);
-      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 18px 36px rgba(0, 0, 0, 0.28);
+      border-radius: var(--hud-radius, 12px);
+      background: var(--hud-glass, ${HUD_COLORS.glass});
+      border: 1px solid var(--hud-edge, ${HUD_COLORS.edge});
+      box-shadow: var(--hud-shadow, ${HUD_COLORS.shadow});
     `;
 
     this.overlay.appendChild(style);
@@ -190,7 +193,7 @@ export class PauseMenu {
       font-size: 16px;
       line-height: 1.5;
       text-align: center;
-      color: #f5fbff;
+      color: var(--hud-text, ${HUD_COLORS.text});
     `;
     this.panel.appendChild(message);
 
@@ -295,15 +298,15 @@ export class PauseMenu {
       pointer-events: auto;
       cursor: pointer;
       flex: 1;
-      border: 1px solid rgba(118, 204, 255, 0.35);
-      border-radius: 12px;
+      border: 1px solid var(--hud-edge, ${HUD_COLORS.edge});
+      border-radius: var(--hud-radius, 12px);
       padding: 12px 16px;
       font-size: 16px;
       font-weight: 700;
       letter-spacing: 0.08em;
-      color: #eef8ff;
-      background: linear-gradient(160deg, rgba(24, 38, 58, 0.95), rgba(12, 18, 28, 0.88));
-      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 10px 20px rgba(0, 0, 0, 0.18);
+      color: var(--hud-text, ${HUD_COLORS.text});
+      background: var(--hud-glass, ${HUD_COLORS.glass});
+      box-shadow: var(--hud-shadow, ${HUD_COLORS.shadow});
     `;
     button.addEventListener('click', (event) => {
       event.preventDefault();
