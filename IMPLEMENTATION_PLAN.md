@@ -119,7 +119,7 @@
 
 ## 当前概览
 
-会话循环（experience-upgrade 1/5，GitHub #4）已完成：页级 StartMenu、`PauseMenu` 暂停舱、结算再来一局/返回菜单、`SessionSettings` 开始流程持久化。A4「最终统一 HUD 与关卡视觉语言」仍为 `[later]`；设计源 #3 与 issues #5–#8 不在本轮。
+会话循环（experience-upgrade 1/5，GitHub #4）已完成：页级 StartMenu、`PauseMenu` 暂停舱、结算再来一局/返回菜单、`SessionSettings` 开始流程持久化。本轮（`workflow/bundle-5-10-11`）关闭 GitHub #10（活地形坠毁）、#11（favicon / `viewport-fit=cover`）、#5（航电 HUD token 与锁定 chrome）。A4「最终统一 HUD 与关卡视觉语言」仍为 `[later]`（GitHub #8）；本轮不把 A4 标为完成。
 
 ### 已完成基线
 - [done] 开始菜单设置接入运行时: 难度、音量、画质、试玩关卡
@@ -128,7 +128,7 @@
 - [done] 场景整体抖动修复，玩家/敌机渲染插值接入
 - [done] HUD、锁定、Boss 指示器、粒子、导弹尾迹多轮性能优化
 - [done] MISSILE 上限收口为 5（`maxMissiles` / `maxRespawnMissiles`）
-- [done] 坠毁复活安全复位已完成
+- [done] 坠毁复活安全复位已完成；坠毁判定改为活地形/水面采样（GitHub #10）：`PlayerSystem.setCrashSurfaceSampler` → `LevelManager.getCrashSurfaceY` / `TerrainGenerator.getCrashSurfaceY`，世界 `Y <=` 表面即击杀，未采样时回落 `WORLDSCAPE_WATER_Y`（`-48`）
 - [done] HUD 生命 / 导弹显示收口已完成
 - [done] `GameCoordinator` 已拆出部分控制器
 - [done] 五个 Boss 都已完成结构复杂度增强
@@ -246,8 +246,12 @@
 - [done] 左上角状态区已重构为统一状态面板
   - 分数、速度、升级点已不再互相重叠
   - 观感从纯文本提升到状态卡片式布局
+- [done] 航电 HUD token 与锁定 chrome（GitHub #5）
+  - `src/ui/theme/hudTokens.ts`：`--hud-sys #8FE4FF` / `--hud-weapon #FFB347` / `--hud-lock #5CFFB0` / `--hud-threat #FF4D4D` / `--hud-ally #F4D35E`
+  - 布局密度 `desktop | touch-landscape | touch-portrait`；锁定 `search | track | lock | break | dry`；DRY 文案 `NO MSL`；LOCK 色 `#5CFFB0`（非 `#00ff00`）
+  - `AudioManager.playMissileLockBreak()` / `playMissileDry()`
 - [watch] 继续在试玩中观察是否还有视觉脏区或信息抢读
-- [later] 最终统一 HUD 与关卡视觉语言
+- [later] 最终统一 HUD 与关卡视觉语言（GitHub #8；本轮未完成）
 
 ### B. 特效系统
 

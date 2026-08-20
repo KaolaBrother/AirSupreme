@@ -13,7 +13,10 @@ import {
   getEnemyTypesForWave,
 } from '@/features/enemy/EnemyTypes';
 import { EnemyAI } from '@/features/enemy/EnemyAI';
-import type { TerrainGenerator } from '@/features/terrain/TerrainGenerator';
+import {
+  WORLDSCAPE_WATER_Y,
+  type TerrainGenerator,
+} from '@/features/terrain/TerrainGenerator';
 import type { SpawnPortal } from '@/features/effects/SpawnPortal';
 import { createEnemyMesh, updateAircraftSignals } from '@/features/aircraft/AircraftMeshFactory';
 import { getLogger } from '@/core/utils/Logger';
@@ -448,6 +451,16 @@ export class LevelManager {
     const isInvisible = mesh && !mesh.visible;
 
     return hasPortalNearby || isInvisible;
+  }
+
+  /**
+   * 玩家坠毁判定用的活地形/水面世界 Y。地形未加载时回落到水面高度。
+   */
+  public getCrashSurfaceY(worldX: number, worldZ: number): number {
+    if (this.terrainGenerator) {
+      return this.terrainGenerator.getCrashSurfaceY(worldX, worldZ);
+    }
+    return WORLDSCAPE_WATER_Y;
   }
 
   /**

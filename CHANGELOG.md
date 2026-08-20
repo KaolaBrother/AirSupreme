@@ -4,6 +4,34 @@
 
 - Initialized Kaola-Workflow documentation structure.
 
+### 活地形坠毁（GitHub #10）
+
+- 玩家坠毁判定改为活地形/水面采样，不再使用固定世界平面
+- `PlayerSystem.setCrashSurfaceSampler((x, z) => number)`：世界 `Y <=` 采样表面即击杀；未注入采样时回落 `WORLDSCAPE_WATER_Y`（`-48`，导出自 `src/features/terrain/TerrainGenerator.ts`）
+- `GameCoordinator` 注入 `enemySystem.getLevelManager().getCrashSurfaceY(x, z)`，地形未加载时同样回落 `WORLDSCAPE_WATER_Y`
+- `TerrainGenerator.getCrashSurfaceY` / `LevelManager.getCrashSurfaceY`：高度场局部 0 为水面；无高度场时回落水面高度
+
+### 站点 chrome（GitHub #11）
+
+- `index.html`：`<link rel="icon" href="/favicon.svg" type="image/svg+xml" />`；源文件 `public/favicon.svg`
+- viewport：`width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover`
+- HUD 结算层与 `PauseMenu` 使用 `env(safe-area-inset-*)` 贴齐刘海/安全区
+
+### 航电 HUD 与锁定（GitHub #5）
+
+- 新增 `src/ui/theme/hudTokens.ts`：`injectHudTokens()` 向 `:root` 注入航电 CSS 变量（仅一次，style id `hud-tokens`）
+- 色板：`--hud-sys #8FE4FF`、`--hud-weapon #FFB347`、`--hud-lock #5CFFB0`、`--hud-threat #FF4D4D`、`--hud-ally #F4D35E`
+- 布局密度 `HudLayoutDensity`：`desktop | touch-landscape | touch-portrait`；`HUD.setLayoutDensity` / `LockOnIndicator.setLayoutDensity`
+- 锁定状态 `LockOnState`：`search | track | lock | break | dry`。SEARCH 空心虚线环；TRACK 菱形+弧（weapon `#FFB347`）；LOCK 薄荷绿 `#5CFFB0`（非 `#00ff00`）；BREAK 威胁红 `#FF4D4D`；DRY 文案 `NO MSL`（非 `NO MISSILE`）
+- `AudioManager.playMissileLockBreak()` / `playMissileDry()`（`SoundType.MISSILE_LOCK_BREAK` / `MISSILE_DRY`）
+- A4「最终统一 HUD 与关卡视觉语言」仍由 GitHub #8 持有，本轮不标记完成
+
+### 测试与工程状态（#10 / #11 / #5）
+
+- 全量门槛通过：`npx tsc --noEmit`（exit 0，两次）、`npm run lint`（exit 0，0 errors；`HUD.test.ts` 2 条 non-null assertion warning）、`npm run test:run`（**35 个测试文件 / 359 个测试**，两次）、`npm run build`（exit 0；vite 77 modules；`dist/index.html` 7.05 kB）
+- 定向：`PlayerSystem` 11、`siteChrome` 3、`HUD` 9、`LockOnIndicator` 8、`PauseMenu` 7（38 passed）
+- `vendor-three` chunk-size warning 仍在（约 517.43 kB）
+
 ### 会话循环（experience-upgrade 1/5）
 
 - 页级 `StartMenu`：开局调用 `hide()`，不再 `dispose()`；`GameCoordinator` 以 `{ showStartMenu: false, onRetry, onExitToMenu }` 启动

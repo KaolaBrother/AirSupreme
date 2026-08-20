@@ -13,6 +13,8 @@
 - **暂停舱与局内结算**
   - ESC / P 打开暂停舱；桌面 U 先暂停再开升级商店
   - 失败 `MISSION FAILED` / 通关 `MISSION COMPLETE`，可再来一局或返回菜单
+- **站点 chrome**
+  - `index.html`：`<link rel="icon" href="/favicon.svg">`（`public/favicon.svg`）；viewport 含 `viewport-fit=cover`
 - **运行时边界与按需加载**
   - 开始菜单与游戏运行时已拆边界
   - 战斗 UI / presentation runtime 已按需创建
@@ -34,12 +36,12 @@
 ### 🚀 导弹系统
 
 - **智能锁定** - 按住导弹键（M或右Shift）锁定目标
-- **锁定进度** - 1.5 秒锁定时间（可升级），橙色进度圈从中心移动到敌人位置
+- **锁定进度** - 1.5 秒锁定时间（可升级），TRACK 菱形+弧（`--hud-weapon` `#FFB347`）
 - **锁定范围升级** - 新增独立升级项，满级后锁定圈可扩大到基础值的 `2x`
-- **视觉提示** - 大黄色圈（瞄准区域）+ 橙色进度圈 + 锁定完成变绿
+- **视觉提示** - SEARCH 空心虚线环 / TRACK 菱形+弧 / LOCK 薄荷绿 `#5CFFB0` / BREAK 威胁红 `#FF4D4D` / DRY `NO MSL`
 - **追踪导弹** - 自动追踪目标，目标被毁后自动重新锁定最近敌人
 - **资源管理** - 初始 2 发，自动补给（每 7.5 秒恢复 1 发，最多 5 发，可升级）
-- **弹药提示** - 导弹耗尽时按下 M 键会显示 "NO MISSILE" 提示
+- **弹药提示** - 导弹耗尽时按下 M 键会显示 `NO MSL`（不是 `NO MISSILE`）
 - **UI 进度条** - 右上角显示白色进度条，距离下一发导弹的进度
 - **伤害** - 导弹伤害 50 点（比机炮高 4 倍）
 - **玩家导弹外观** - AIM-120 风格一体车削弹体，黑雷达罩 / 滚转色带 / 铭文 / X 翼布局
@@ -187,8 +189,8 @@ npm run build
 
 - 主要功能与表现层已经进入阶段性收口，当前没有已知阻塞性开发项
 - `GameCoordinator`、战斗运行时、Boss 控制器、presentation/UI runtime 都已后移到按需初始化路径
-- 当前测试规模为 **33 个测试文件 / 338 个测试**
-- 已知观察项仅剩构建中的 `vendor-three` chunk 约 517 kB warning
+- 当前测试规模为 **35 个测试文件 / 359 个测试**
+- 已知观察项仅剩构建中的 `vendor-three` chunk 约 517.43 kB warning
 
 ## 📁 项目结构
 
@@ -259,9 +261,11 @@ src/
 │   ├── PauseMenu.ts         # 暂停舱
 │   ├── LockOnIndicator.ts  # 导弹锁定
 │   ├── ModelPreview.ts      # 模型预览廊
-│   └── UpgradeMenu.ts       # 升级菜单
+│   ├── UpgradeMenu.ts       # 升级菜单
+│   └── theme/
+│       └── hudTokens.ts     # 航电 CSS token / 布局密度
 │
-├── __tests__/              # 测试文件 (338 个测试)
+├── __tests__/              # 测试文件 (359 个测试)
 │
 ├── Game.ts                  # 向后兼容导出
 ├── Game.legacy.ts           # 旧实现 (@deprecated)
@@ -300,6 +304,7 @@ src/
 - 玩家子弹 vs 敌人
 - 敌人子弹 vs 玩家（友军子弹不伤玩家）
 - 玩家 vs 道具
+- 玩家 vs 活地形/水面：世界 `Y <=` `getCrashSurfaceY`（无地形时 `WORLDSCAPE_WATER_Y` `-48`）则坠毁
 
 ## 📝 开发说明
 

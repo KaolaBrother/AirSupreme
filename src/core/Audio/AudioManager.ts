@@ -26,6 +26,9 @@ export enum SoundType {
   GAME_OVER = 'GAME_OVER',
   BALLOON_POP = 'BALLOON_POP', // 气球打破音效
   MISSILE_LOCK = 'MISSILE_LOCK', // 导弹锁定音效
+  MISSILE_LOCK_CONFIRM = 'MISSILE_LOCK_CONFIRM',
+  MISSILE_LOCK_BREAK = 'MISSILE_LOCK_BREAK',
+  MISSILE_DRY = 'MISSILE_DRY',
   MISSILE_FIRE = 'MISSILE_FIRE', // 导弹发射音效
   MISSILE_EXPLOSION = 'MISSILE_EXPLOSION', // 导弹爆炸音效
   FLAK_FIRE = 'FLAK_FIRE',
@@ -189,6 +192,9 @@ export class AudioManager {
       duckAmount: 0.06,
       duckDurationMs: 220,
     },
+    [SoundType.MISSILE_LOCK]: { minIntervalMs: 180, maxConcurrent: 1 },
+    [SoundType.MISSILE_LOCK_BREAK]: { minIntervalMs: 220, maxConcurrent: 1 },
+    [SoundType.MISSILE_DRY]: { minIntervalMs: 400, maxConcurrent: 1 },
   };
 
   constructor() {
@@ -1739,13 +1745,17 @@ export class AudioManager {
    * 播放导弹锁定音效
    */
   public playMissileLock(): void {
+    const nowMs = performance.now();
+    const lockPulse = nowMs - this.lastMissileLockPulseMs;
+    if (lockPulse < 180 && this.lastMissileLockPulseMs > 0) {
+      return;
+    }
+
     const sound = this.beginSound(SoundType.MISSILE_LOCK, 150);
     if (!sound) return;
     const { now, context, sfxGain } = sound;
 
     try {
-      const nowMs = performance.now();
-      const lockPulse = nowMs - this.lastMissileLockPulseMs;
       this.lastMissileLockPulseMs = nowMs;
 
       const scanOsc = context.createOscillator();
@@ -1787,8 +1797,72 @@ export class AudioManager {
     }
   }
 
+  public playMissileLockBreak(): void {
+    const sound = this.beginSound(SoundType.MISSILE_LOCK_BREAK, 180);
+    if (!sound) return;
+    const { now, context, sfxGain } = sound;
+
+    try {
+      const breakOsc = context.createOscillator();
+      const breakGain = context.createGain();
+      breakOsc.type = 'sawtooth';
+      breakOsc.frequency.setValueAtTime(520, now);
+      breakOsc.frequency.exponentialRampToValueAtTime(140, now + 0.16);
+      breakGain.gain.setValueAtTime(0, now);
+      breakGain.gain.linearRampToValueAtTime(0.14 * this.sfxVolume, now + 0.01);
+      breakGain.gain.exponentialRampToValueAtTime(0.001, now + 0.17);
+      breakOsc.connect(breakGain);
+      breakGain.connect(sfxGain);
+      breakOsc.start(now);
+      breakOsc.stop(now + 0.18);
+
+      this.playFilteredNoise(
+        0.12,
+        0.006,
+        0.04 * this.sfxVolume,
+        'bandpass',
+        720,
+        1.1
+      );
+    } catch {
+      // Ignore
+    }
+  }
+
+  public playMissileDry(): void {
+    const sound = this.beginSound(SoundType.MISSILE_DRY, 140);
+    if (!sound) return;
+    const { now, context, sfxGain } = sound;
+
+    try {
+      const dryOsc = context.createOscillator();
+      const dryGain = context.createGain();
+      dryOsc.type = 'square';
+      dryOsc.frequency.setValueAtTime(180, now);
+      dryOsc.frequency.exponentialRampToValueAtTime(90, now + 0.08);
+      dryGain.gain.setValueAtTime(0, now);
+      dryGain.gain.linearRampToValueAtTime(0.08 * this.sfxVolume, now + 0.006);
+      dryGain.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
+      dryOsc.connect(dryGain);
+      dryGain.connect(sfxGain);
+      dryOsc.start(now);
+      dryOsc.stop(now + 0.11);
+
+      this.playFilteredNoise(
+        0.05,
+        0.004,
+        0.02 * this.sfxVolume,
+        'highpass',
+        2400,
+        0.8
+      );
+    } catch {
+      // Ignore
+    }
+  }
+
   public playMissileLockConfirm(): void {
-    const sound = this.beginSound(SoundType.MISSILE_LOCK, 150);
+    const sound = this.beginSound(SoundType.MISSILE_LOCK_CONFIRM, 150);
     if (!sound) return;
     const { now, context, sfxGain } = sound;
 
