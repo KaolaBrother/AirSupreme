@@ -24,12 +24,27 @@
 - 布局密度 `HudLayoutDensity`：`desktop | touch-landscape | touch-portrait`；`HUD.setLayoutDensity` / `LockOnIndicator.setLayoutDensity`
 - 锁定状态 `LockOnState`：`search | track | lock | break | dry`。SEARCH 空心虚线环；TRACK 菱形+弧（weapon `#FFB347`）；LOCK 薄荷绿 `#5CFFB0`（非 `#00ff00`）；BREAK 威胁红 `#FF4D4D`；DRY 文案 `NO MSL`（非 `NO MISSILE`）
 - `AudioManager.playMissileLockBreak()` / `playMissileDry()`（`SoundType.MISSILE_LOCK_BREAK` / `MISSILE_DRY`）
-- A4「最终统一 HUD 与关卡视觉语言」仍由 GitHub #8 持有，本轮不标记完成
 
-### 测试与工程状态（#10 / #11 / #5）
+### 战斗可读性（GitHub #6）
 
-- 全量门槛通过：`npx tsc --noEmit`（exit 0，两次）、`npm run lint`（exit 0，0 errors；`HUD.test.ts` 2 条 non-null assertion warning）、`npm run test:run`（**35 个测试文件 / 359 个测试**，两次）、`npm run build`（exit 0；vite 77 modules；`dist/index.html` 7.05 kB）
-- 定向：`PlayerSystem` 11、`siteChrome` 3、`HUD` 9、`LockOnIndicator` 8、`PauseMenu` 7（38 passed）
+- `RadarMinimap` 三档都创建 `#radar-minimap`：桌面 120px 左下，触摸横屏 72px / 竖屏 64px 在摇杆上方 8px，`pointer-events: none`
+- 新增 `OffscreenChevron`：敌机琥珀 / 来袭导弹绯红；`playIncomingWarning` 带 minInterval
+- 护盾改为双层 `--hud-sys` 球，不再是 `#00ffff` 塑料球
+
+### 战役节拍（GitHub #7）
+
+- `HUD.showBriefing`：1–5 关标题 湖畔晨曦 / 沙漠风暴 / 雪山之巅 / 深海决战 / 城市废墟；Boss 重型轰炸机 / 沙漠堡垒 / 八爪鱼战舰 / 导弹驱逐舰 / 空中航空母舰
+- 非 game-over 死亡显示 `LIFE × N` 复活 overlay；`showGameOver` 不显示
+
+### 外壳统一（GitHub #8）
+
+- StartMenu 去掉 `min-width: 400px`，改为 `width: min(420px, 100%)`；主按钮不再 `#4CAF50` 胶囊；标题无 ✈️🎮👹
+- 升级卡缩写 HP / SPD / ROE / DMG / RAD / RLD / LCK；移动端暂停钮文案「暂停」；`.mobile-controls` 跟随 `GameConfig.isMobile`
+- A4「最终统一 HUD 与关卡视觉语言」记为完成（#3 / #5–#8）
+
+### 测试与工程状态（#10 / #11 / #5–#8）
+
+- 全量门槛通过：`npx tsc --noEmit`、`npm run lint`、`npm run test:run`（**39 个测试文件 / 387 个测试**，两次）、`npm run build`
 - `vendor-three` chunk-size warning 仍在（约 517.43 kB）
 
 ### 会话循环（experience-upgrade 1/5）

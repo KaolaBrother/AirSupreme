@@ -4,6 +4,7 @@ import { EventBus, GameEventType } from '@/core/EventBus';
 import { PlayerSystem } from '@/core/systems/PlayerSystem';
 import { WORLDSCAPE_WATER_Y } from '@/features/terrain/TerrainGenerator';
 import { PlayerStats } from '@/features/upgrade/UpgradeSystem';
+import { HUD_COLORS } from '@/ui/theme/hudTokens';
 
 vi.mock('@/features/player/PlayerController', () => ({
   PlayerController: vi.fn().mockImplementation((aircraft: THREE.Group) => ({
@@ -205,4 +206,112 @@ describe('PlayerSystem', () => {
       expect(respawnHandler).toHaveBeenCalledTimes(1);
     });
   });
+
+  describe('activateShield visual', () => {
+    const SYS_COLOR = new THREE.Color(HUD_COLORS.sys);
+    const CYAN = 0x00ffff;
+
+    const isCyanPlastic = (material: THREE.Material): boolean => {
+      if (!(material instanceof THREE.MeshBasicMaterial)) {
+        return false;
+      }
+      return material.color.getHex() === CYAN;
+    };
+
+    const isSysTint = (color: THREE.Color): boolean => {
+      return (
+        Math.abs(color.r - SYS_COLOR.r) < 0.03 &&
+        Math.abs(color.g - SYS_COLOR.g) < 0.03 &&
+        Math.abs(color.b - SYS_COLOR.b) < 0.03
+      );
+    };
+
+    const materialsOf = (object: THREE.Object3D): THREE.Material[] => {
+      const found: THREE.Material[] = [];
+      object.traverse((child) => {
+        if (!(child instanceof THREE.Mesh)) {
+          return;
+        }
+        const material = child.material;
+        if (Array.isArray(material)) {
+          found.push(...material);
+        } else if (material) {
+          found.push(material);
+        }
+      });
+      return found;
+    };
+
+    const sphereMeshesOf = (object: THREE.Object3D): THREE.Mesh[] => {
+      const spheres: THREE.Mesh[] = [];
+      object.traverse((child) => {
+        if (!(child instanceof THREE.Mesh)) {
+          return;
+        }
+        const geometry = child.geometry;
+        if (
+          geometry instanceof THREE.SphereGeometry ||
+          geometry instanceof THREE.IcosahedronGeometry
+        ) {
+          spheres.push(child);
+        }
+      });
+      return spheres;
+    };
+
+    const addedRoots = (
+      root: THREE.Object3D,
+      before: Set<THREE.Object3D>,
+    ): THREE.Object3D[] => root.children.filter((child) => !before.has(child));
+
+    it('does not wrap the player in a MeshBasicMaterial 0x00ffff plastic ball', () => {
+      const { system, mesh } = createPlayerSystem(20);
+      const sceneBefore = new Set(scene.children);
+      const meshBefore = new Set(mesh.children);
+
+      system.activateShield(scene);
+
+      const roots = [
+        ...addedRoots(scene, sceneBefore),
+        ...addedRoots(mesh, meshBefore),
+      ];
+      expect(roots.length, 'activateShield should add a shield object').toBeGreaterThan(0);
+
+      const materials = roots.flatMap(materialsOf);
+      expect(materials.some(isCyanPlastic)).toBe(false);
+      expect(materials.some((material) => {
+        const color = (material as THREE.MeshBasicMaterial).color;
+        return color instanceof THREE.Color && color.getHex() === CYAN;
+      })).toBe(false);
+    });
+
+    it('uses a dual-sphere shield tinted with --hud-sys / HUD_COLORS.sys', () => {
+      const { system, mesh } = createPlayerSystem(20);
+      const sceneBefore = new Set(scene.children);
+      const meshBefore = new Set(mesh.children);
+
+      system.activateShield(scene);
+
+      const roots = [
+        ...addedRoots(scene, sceneBefore),
+        ...addedRoots(mesh, meshBefore),
+      ];
+      expect(roots.length).toBeGreaterThan(0);
+
+      const spheres = roots.flatMap(sphereMeshesOf);
+      expect(spheres.length, 'shield should be a dual-sphere, not a single plastic ball').toBeGreaterThanOrEqual(
+        2,
+      );
+
+      const colors = roots.flatMap(materialsOf)
+        .map((material) => ('color' in material ? material.color : null))
+        .filter((color): color is THREE.Color => color instanceof THREE.Color);
+
+      expect(colors.some(isSysTint), 'shield tint should use HUD_COLORS.sys / --hud-sys').toBe(
+        true,
+      );
+      expect(colors.some((color) => color.getHex() === CYAN)).toBe(false);
+    });
+  });
 });
+

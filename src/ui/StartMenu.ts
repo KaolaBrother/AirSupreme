@@ -8,6 +8,7 @@ import {
   TEST_SCORE_OPTIONS,
   type StartFlowSettings,
 } from '@/core/SessionSettings';
+import { HUD_COLORS, injectHudTokens } from '@/ui/theme/hudTokens';
 import type { ModelPreview } from './ModelPreview';
 type ModelPreviewModule = typeof import('./ModelPreview');
 
@@ -24,6 +25,7 @@ export class StartMenu {
 
   constructor() {
     this.loadSettings();
+    injectHudTokens();
     this.container = this.createContainer();
     this.settingsContainer = this.createSettingsPanel();
     this.container.appendChild(this.settingsContainer);
@@ -116,45 +118,43 @@ export class StartMenu {
           left: 0;
           width: 100%;
           height: 100%;
-          background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+          background: rgba(8, 14, 24, 1);
           display: flex;
           flex-direction: column;
           align-items: center;
           padding: 40px 20px;
           overflow-y: auto;
           z-index: 1000;
-          font-family: 'Arial', sans-serif;
-          color: white;
+          font-family: var(--hud-font, 'Arial', sans-serif);
+          color: var(--hud-text, ${HUD_COLORS.text});
         }
 
         .menu-title {
-          font-size: 72px;
+          font-size: 56px;
           font-weight: bold;
+          letter-spacing: 0.14em;
           margin-bottom: 10px;
-          text-shadow: 0 0 20px rgba(100, 200, 255, 0.8),
-                       0 0 40px rgba(100, 200, 255, 0.5);
-          animation: pulse 2s ease-in-out infinite;
-        }
-
-        @keyframes pulse {
-          0%, 100% { transform: scale(1); }
-          50% { transform: scale(1.02); }
+          color: var(--hud-sys, ${HUD_COLORS.sys});
+          text-shadow: 0 0 20px rgba(143, 228, 255, 0.45);
         }
 
         .menu-subtitle {
           font-size: 24px;
           opacity: 0.8;
           margin-bottom: 40px;
+          color: var(--hud-muted, ${HUD_COLORS.muted});
         }
 
         .settings-panel {
-          background: rgba(255, 255, 255, 0.1);
-          border-radius: 15px;
+          background: var(--hud-glass, ${HUD_COLORS.glass});
+          border-radius: var(--hud-radius, 12px);
           padding: 30px 40px;
           margin-bottom: 30px;
           backdrop-filter: blur(10px);
-          border: 1px solid rgba(255, 255, 255, 0.2);
-          min-width: 400px;
+          border: 1px solid var(--hud-edge, ${HUD_COLORS.edge});
+          width: min(420px, 100%);
+          box-sizing: border-box;
+          box-shadow: var(--hud-shadow, ${HUD_COLORS.shadow});
         }
 
         .setting-row {
@@ -198,22 +198,25 @@ export class StartMenu {
           text-align: center;
         }
 
-        .start-btn {
-          padding: 20px 40px;
-          font-size: 24px;
-          font-weight: bold;
-          border: none;
-          border-radius: 50px;
-          background: linear-gradient(135deg, #4CAF50, #45a049);
-          color: white;
+        .start-btn,
+        .preview-btn {
+          padding: 16px 28px;
+          font-size: 20px;
+          font-weight: 700;
+          letter-spacing: 0.08em;
+          border: 1px solid var(--hud-edge, ${HUD_COLORS.edge});
+          border-radius: var(--hud-radius, 12px);
+          background: var(--hud-glass, ${HUD_COLORS.glass});
+          color: var(--hud-text, ${HUD_COLORS.text});
           cursor: pointer;
-          transition: all 0.3s;
-          box-shadow: 0 5px 20px rgba(76, 175, 80, 0.4);
+          transition: border-color 0.2s, box-shadow 0.2s;
+          box-shadow: var(--hud-shadow, ${HUD_COLORS.shadow});
         }
 
-        .start-btn:hover {
-          transform: translateY(-3px);
-          box-shadow: 0 8px 30px rgba(76, 175, 80, 0.6);
+        .start-btn:hover,
+        .preview-btn:hover {
+          border-color: var(--hud-sys, ${HUD_COLORS.sys});
+          box-shadow: 0 0 16px rgba(143, 228, 255, 0.28);
         }
 
         .button-container {
@@ -221,24 +224,7 @@ export class StartMenu {
           gap: 20px;
           justify-content: center;
           margin-bottom: 30px;
-        }
-
-        .preview-btn {
-          padding: 20px 40px;
-          font-size: 24px;
-          font-weight: bold;
-          border: none;
-          border-radius: 50px;
-          background: linear-gradient(135deg, #2196F3, #1976D2);
-          color: white;
-          cursor: pointer;
-          transition: all 0.3s;
-          box-shadow: 0 5px 15px rgba(33, 150, 243, 0.4);
-        }
-
-        .preview-btn:hover {
-          transform: translateY(-3px);
-          box-shadow: 0 8px 25px rgba(33, 150, 243, 0.6);
+          flex-wrap: wrap;
         }
 
         .controls-info {
@@ -293,7 +279,7 @@ export class StartMenu {
         }
       </style>
 
-      <div class="menu-title">✈️ Air Supreme</div>
+      <div class="menu-title">AIR SUPREME</div>
       <div class="menu-subtitle">3D 空战游戏</div>
     `;
     return container;
@@ -461,7 +447,7 @@ export class StartMenu {
     // 开始按钮
     const startBtn = document.createElement('button');
     startBtn.className = 'start-btn';
-    startBtn.textContent = this.settings.gameMode === 'normal' ? '🎮 开始游戏' : '👹 Boss 挑战';
+    startBtn.textContent = this.settings.gameMode === 'normal' ? '开始游戏' : 'Boss 挑战';
     startBtn.id = 'start-btn';
     startBtn.onclick = () => this.startGame();
     buttonContainer.appendChild(startBtn);
@@ -470,7 +456,7 @@ export class StartMenu {
     const previewBtn = document.createElement('button');
     previewBtn.className = 'preview-btn';
     previewBtn.id = 'preview-btn';
-    previewBtn.innerHTML = '✈️ 模型预览';
+    previewBtn.textContent = '模型预览';
     previewBtn.onmouseenter = () => this.preloadModelPreviewModule();
     previewBtn.onfocus = () => this.preloadModelPreviewModule();
     previewBtn.onclick = async () => {
@@ -478,9 +464,9 @@ export class StartMenu {
         return;
       }
 
-      const originalLabel = previewBtn.innerHTML;
+      const originalLabel = previewBtn.textContent ?? '模型预览';
       previewBtn.disabled = true;
-      previewBtn.innerHTML = '⏳ 加载中...';
+      previewBtn.textContent = '加载中...';
 
       try {
         const preview = await this.ensureModelPreview();
@@ -491,7 +477,7 @@ export class StartMenu {
       } finally {
         if (!this.isDisposed) {
           previewBtn.disabled = false;
-          previewBtn.innerHTML = originalLabel;
+          previewBtn.textContent = originalLabel;
         }
       }
     };
@@ -638,7 +624,7 @@ export class StartMenu {
       testScoreValue.textContent =
         this.settings.testScore === 0 ? '关闭' : `${this.settings.testScore}`;
     if (startBtn)
-      startBtn.textContent = this.settings.gameMode === 'normal' ? '🎮 开始游戏' : '👹 Boss 挑战';
+      startBtn.textContent = this.settings.gameMode === 'normal' ? '开始游戏' : 'Boss 挑战';
 
     this.saveSettings();
   }

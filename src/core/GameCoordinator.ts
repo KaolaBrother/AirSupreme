@@ -17,7 +17,7 @@ import { EnemyType, ENEMY_CONFIGS } from '@/features/enemy/EnemyTypes';
 import { PowerUpType, POWER_UP_CONFIGS } from '@/features/powerups/PowerUpSystem';
 import type { UpgradeMenu } from '@/ui/UpgradeMenu';
 import type { PauseMenu } from '@/ui/PauseMenu';
-import type { HUD } from '@/ui/HUD';
+import type { BriefingRequest, HUD } from '@/ui/HUD';
 import type { GameSettings } from '@/ui/StartMenu';
 import type { EnemyHealthBars } from '@/ui/EnemyHealthBars';
 import type { LockOnIndicator } from '@/ui/LockOnIndicator';
@@ -33,7 +33,7 @@ import { LevelState } from '@/features/levels/LevelManager';
 import { GameSessionState } from '@/core/GameSessionState';
 import { loadStartFlowSettings, saveStartFlowSettings } from '@/core/SessionSettings';
 import { ResourceRegistry } from '@/core/ResourceRegistry';
-import type { PresentationController } from '@/core/PresentationController';
+import type { PresentationController, RadarBlip } from '@/core/PresentationController';
 import type { BossBattleController } from '@/core/BossBattleController';
 import type { PresentationRuntime } from '@/core/PresentationRuntimeLoader';
 import type { SurfaceImpactType } from '@/features/effects/ParticleSystem';
@@ -128,6 +128,81 @@ export class GameCoordinator {
   private static readonly TUTORIAL_HINT_LONG_MS = 1700;
   private static readonly WAVE_EVENT_START_COOLDOWN_MS = 1000;
   private static readonly WAVE_EVENT_COMPLETE_COOLDOWN_MS = 900;
+  private static readonly RESPAWN_OVERLAY_MS = 2000;
+  private static readonly LEVEL_BRIEFINGS: Record<number, BriefingRequest> = {
+    1: {
+      kicker: '入关',
+      title: '湖畔晨曦',
+      line: '在湖面上空完成首波接敌',
+      tone: 'sys',
+      durationMs: 1600,
+    },
+    2: {
+      kicker: '入关',
+      title: '沙漠风暴',
+      line: '在热浪中清场',
+      tone: 'sys',
+      durationMs: 1600,
+    },
+    3: {
+      kicker: '入关',
+      title: '雪山之巅',
+      line: '在冰雾里打穿防线',
+      tone: 'sys',
+      durationMs: 1600,
+    },
+    4: {
+      kicker: '入关',
+      title: '深海决战',
+      line: '在洋面上压制敌群',
+      tone: 'sys',
+      durationMs: 1600,
+    },
+    5: {
+      kicker: '入关',
+      title: '城市废墟',
+      line: '最终空域，清场后迎战航母',
+      tone: 'sys',
+      durationMs: 1600,
+    },
+  };
+  private static readonly BOSS_BRIEFINGS: Record<number, BriefingRequest> = {
+    1: {
+      kicker: 'BOSS',
+      title: '重型轰炸机',
+      line: '优先打弹舱弱点',
+      tone: 'threat',
+      durationMs: 1800,
+    },
+    2: {
+      kicker: 'BOSS',
+      title: '沙漠堡垒',
+      line: '防空炮与主炮分区处理',
+      tone: 'threat',
+      durationMs: 1800,
+    },
+    3: {
+      kicker: 'BOSS',
+      title: '八爪鱼战舰',
+      line: '先破触手再打脑核',
+      tone: 'threat',
+      durationMs: 1800,
+    },
+    4: {
+      kicker: 'BOSS',
+      title: '导弹驱逐舰',
+      line: '注意垂发导弹来袭',
+      tone: 'threat',
+      durationMs: 1800,
+    },
+    5: {
+      kicker: 'BOSS',
+      title: '空中航空母舰',
+      line: '甲板与舷岛分区打击',
+      tone: 'threat',
+      durationMs: 1800,
+    },
+  };
   private static readonly UPGRADE_FEEDBACK: Record<UpgradeType, { icon: string; label: string }> = {
     [UpgradeType.MAX_HEALTH]: { icon: '❤️', label: '最大生命值升级' },
     [UpgradeType.SPEED]: { icon: '⚡', label: '飞行速度升级' },
@@ -195,6 +270,8 @@ export class GameCoordinator {
   private readonly previousCameraTargetQuaternion = new THREE.Quaternion();
   private readonly currentCameraTargetQuaternion = new THREE.Quaternion();
   private readonly interpolatedCameraTargetQuaternion = new THREE.Quaternion();
+  private readonly hitMarkerNdc = new THREE.Vector3();
+  private readonly radarBlips: RadarBlip[] = [];
   private readonly tutorialCombatState: TutorialCombatState = {
     active: false,
     startPosition: null,
@@ -405,13 +482,20 @@ export class GameCoordinator {
           this.musicSystem.stopMusic();
           this.pauseMenu?.hide();
           this.upgradeMenu?.hide();
+          this.hud.hideRespawnOverlay();
           this.hud.showGameOver(this.gameState.getScore());
+        } else {
+          this.hud.showRespawnOverlay({
+            lives: payload.lives,
+            durationMs: GameCoordinator.RESPAWN_OVERLAY_MS,
+          });
         }
       })
     );
 
     this.resourceRegistry.addUnsubscriber(
       EventBus.on(GameEventType.PLAYER_RESPAWN, ({ payload }) => {
+        this.hud.hideRespawnOverlay();
         this.particleSystem?.createExplosion(payload.position, 1.5);
         this.playerAircraft.visible = true;
         this.missileCount = GAME_CONSTANTS.MISSILE.STARTING_MISSILES;
@@ -505,8 +589,6 @@ export class GameCoordinator {
 
     this.resourceRegistry.addUnsubscriber(
       EventBus.on(GameEventType.LEVEL_COMPLETE, () => {
-        this.audioManager.playLevelUp();
-
         this.playerSystem.syncMaxHealth();
         this.playerSystem.getHealth().healToMax();
         this.hud.updateHealth(this.playerSystem.getHealth().getHealthPercent());
@@ -518,7 +600,9 @@ export class GameCoordinator {
 
         this.musicSystem.stopMusic();
 
-        this.startLevelBossBattle();
+        this.presentBossBriefing(this.sessionState.getLevel(), () => {
+          this.startLevelBossBattle();
+        });
       })
     );
 
@@ -680,7 +764,7 @@ export class GameCoordinator {
       return;
     }
     this.enemySystem.spawnEnemyAt(enemyType, position);
-    this.hud.showPowerUpBig('⚠️', '敌机起飞！');
+    this.hud.showPowerUpBig('', '敌机起飞');
   }
 
   private syncCameraInterpolationState(): void {
@@ -932,6 +1016,8 @@ export class GameCoordinator {
     const aliveEnemies = this.enemySystem?.getAliveEnemyCount() ?? 0;
     const killedEnemies = spawnedEnemies - aliveEnemies;
     const remaining = totalEnemies - killedEnemies;
+
+    this.updateRadar();
 
     const didUpdateHud = this.presentationController.updateHud(deltaTime, {
       healthPercent: this.playerSystem.getHealth().getHealthPercent(),
@@ -1191,6 +1277,54 @@ export class GameCoordinator {
     );
   }
 
+  private updateRadar(): void {
+    this.radarBlips.length = 0;
+    const levelManager = this.enemySystem?.getLevelManager();
+    const enemies = this.enemySystem?.getEnemies() ?? [];
+
+    for (const enemy of enemies) {
+      if (!enemy.isAlive()) {
+        continue;
+      }
+      const spawning = levelManager?.isEnemySpawning(enemy) ?? false;
+      this.radarBlips.push({
+        position: enemy.getPosition(),
+        kind: spawning ? 'spawning' : 'enemy',
+      });
+    }
+
+    for (const portalPos of levelManager?.getActivePortalPositions() ?? []) {
+      this.radarBlips.push({
+        position: portalPos,
+        kind: 'spawning',
+      });
+    }
+
+    for (const friendly of this.enemySystem?.getFriendlyAIs() ?? []) {
+      if (!friendly.isAlive()) {
+        continue;
+      }
+      this.radarBlips.push({
+        position: friendly.getMesh().position,
+        kind: 'ally',
+      });
+    }
+
+    const currentBoss = this.bossBattleController?.getCurrentBoss() ?? null;
+    if (currentBoss?.isAlive()) {
+      this.radarBlips.push({
+        position: currentBoss.getMesh().position,
+        kind: 'boss',
+      });
+    }
+
+    this.presentationController.updateRadar(
+      this.playerSystem.getPosition(),
+      this.radarBlips,
+      this.playerSystem.getQuaternion()
+    );
+  }
+
   private hasEyeBoss(boss: unknown): boss is EyeBoss {
     if (!boss || typeof boss !== 'object') {
       return false;
@@ -1383,9 +1517,12 @@ export class GameCoordinator {
         this.audioManager.startEngine();
 
         if (this.sessionState.isBossMode()) {
-          this.startBossBattle();
+          this.presentBossBriefing(this.sessionState.getLevel(), () => {
+            this.startBossBattle();
+          });
         } else {
           const level = this.sessionState.getLevel();
+          this.presentLevelBriefing(level);
           enemySystem.loadLevel(level);
           this.applyCurrentLevelEnvironment(level);
           const shouldRunTutorialIntro = this.shouldRunTutorialIntro();
@@ -2070,7 +2207,7 @@ export class GameCoordinator {
     this.bossBattleController?.clear();
     this.enemySystem?.clearFriendlies();
 
-    this.hud.showPowerUpBig('🏆', 'Boss 已击败！');
+    this.hud.showPowerUpBig('', '已击坠');
 
     this.scheduleTimeout(() => {
       const nextLevel = this.sessionState.getLevel() + 1;
@@ -2078,19 +2215,21 @@ export class GameCoordinator {
       this.sessionState.setInBossBattle(false);
 
       if (nextLevel <= 5) {
-        this.hud.showPowerUpBig('⏭️', `进入第 ${nextLevel} 关`);
-        this.scheduleTimeout(() => {
-          this.applyCurrentLevelEnvironment(nextLevel);
-          if (isBossMode) {
+        this.applyCurrentLevelEnvironment(nextLevel);
+        if (isBossMode) {
+          this.presentBossBriefing(nextLevel, () => {
             this.startBossBattle();
-          } else {
-            this.enemySystem?.loadLevel(nextLevel);
-            this.applyCurrentLevelEnvironment(nextLevel);
-            this.hud.updateRemainingEnemies(this.enemySystem?.getTotalEnemyCount() ?? 0);
-            this.musicSystem.playLevelMusic(this.getLevelMusic(nextLevel));
+          });
+        } else {
+          this.presentLevelBriefing(nextLevel);
+          this.enemySystem?.loadLevel(nextLevel);
+          this.applyCurrentLevelEnvironment(nextLevel);
+          this.hud.updateRemainingEnemies(this.enemySystem?.getTotalEnemyCount() ?? 0);
+          this.musicSystem.playLevelMusic(this.getLevelMusic(nextLevel));
+          this.scheduleTimeout(() => {
             this.enemySystem?.startWave(this.playerSystem.getPosition());
-          }
-        }, 2000);
+          }, GAME_CONSTANTS.LEVEL.START_DELAY * 1000);
+        }
       } else {
         this.sessionState.setGameOver();
         this.audioManager.stopEngine();
@@ -2113,6 +2252,20 @@ export class GameCoordinator {
     const hitIntensity = THREE.MathUtils.clamp((damage / 16) * intensityMultiplier, 0.82, 1.95);
     this.audioManager.playHit(hitIntensity, profile, hitTone);
     this.particleSystem?.createHit(hitPosition, hitIntensity, profile);
+
+    if (source === 'player-bullet' || source === 'missile') {
+      this.requestPlayerHitMarker(hitPosition);
+    }
+  }
+
+  private requestPlayerHitMarker(worldPosition: THREE.Vector3): void {
+    this.hitMarkerNdc.copy(worldPosition).project(this.gameScene.camera);
+    if (this.hitMarkerNdc.z >= 1) {
+      return;
+    }
+    const screenX = (this.hitMarkerNdc.x * 0.5 + 0.5) * window.innerWidth;
+    const screenY = (-this.hitMarkerNdc.y * 0.5 + 0.5) * window.innerHeight;
+    this.presentationController.requestHitMarker(screenX, screenY);
   }
 
   private resolveProjectileHitFeedback(source: ProjectileHitSource): {
@@ -2163,6 +2316,26 @@ export class GameCoordinator {
         this.sessionState.setInBossBattle(false);
       }
     });
+  }
+
+  private presentLevelBriefing(level: number): void {
+    const briefing = GameCoordinator.LEVEL_BRIEFINGS[level];
+    if (!briefing) {
+      return;
+    }
+    this.hud.showBriefing(briefing);
+    this.audioManager.playWaveStart();
+  }
+
+  private presentBossBriefing(level: number, thenStart: () => void): void {
+    const briefing = GameCoordinator.BOSS_BRIEFINGS[level];
+    if (!briefing) {
+      thenStart();
+      return;
+    }
+    this.hud.showBriefing(briefing);
+    this.audioManager.playLevelUp();
+    this.scheduleTimeout(thenStart, briefing.durationMs);
   }
 
   private applyCurrentLevelEnvironment(level: number = this.sessionState.getLevel()): void {

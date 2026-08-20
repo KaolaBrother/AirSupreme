@@ -1,17 +1,12 @@
 import { Quaternion, Vector3 } from 'three';
 import type { Camera } from 'three';
+import { OffscreenChevron } from '@/ui/OffscreenChevron';
+import { HUD_COLORS } from '@/ui/theme/hudTokens';
 
 export class BossMissileIndicator {
   private container: HTMLDivElement;
   private initialized: boolean = false;
-  private indicators: Map<
-    string,
-    {
-      root: HTMLDivElement;
-      distanceLabel: HTMLSpanElement;
-    }
-  > = new Map();
-  private readonly textContentCache = new WeakMap<HTMLElement, string>();
+  private indicators: Map<string, OffscreenChevron> = new Map();
   private readonly styleValueCache = new WeakMap<HTMLElement, Map<string, string>>();
   private readonly fromCamera = new Vector3();
   private readonly cameraLocal = new Vector3();
@@ -55,7 +50,7 @@ export class BossMissileIndicator {
 
     for (const [id, indicator] of this.indicators) {
       if (!activeIds.has(id)) {
-        indicator.root.remove();
+        indicator.dispose();
         this.indicators.delete(id);
       }
     }
@@ -81,32 +76,22 @@ export class BossMissileIndicator {
 
     if (!indicator) {
       indicator = this.createIndicator();
-      this.container.appendChild(indicator.root);
+      this.container.appendChild(indicator.element);
       this.indicators.set(missile.id, indicator);
     }
 
     const { arrowX, arrowY, rotation } = this.calculateIndicatorPosition(missile.worldPos, camera);
 
-    this.setStyleValue(indicator.root, 'left', `${arrowX * 100}%`);
-    this.setStyleValue(indicator.root, 'top', `${arrowY * 100}%`);
-    this.setStyleValue(
-      indicator.root,
-      'transform',
-      `translate(-50%, -50%) rotate(${rotation}deg)`
-    );
-    this.setTextContent(indicator.distanceLabel, `${Math.round(missile.distance)}m`);
-    this.setStyleValue(indicator.root, 'display', 'block');
-    this.setStyleValue(indicator.root, 'opacity', '1');
-    this.setStyleValue(indicator.root, 'visibility', 'visible');
-  }
-
-  private setTextContent(element: HTMLElement, text: string): void {
-    if (this.textContentCache.get(element) === text) {
-      return;
-    }
-
-    element.textContent = text;
-    this.textContentCache.set(element, text);
+    this.setStyleValue(indicator.element, 'left', `${arrowX * 100}%`);
+    this.setStyleValue(indicator.element, 'top', `${arrowY * 100}%`);
+    this.setStyleValue(indicator.element, 'display', 'flex');
+    this.setStyleValue(indicator.element, 'opacity', '1');
+    this.setStyleValue(indicator.element, 'visibility', 'visible');
+    indicator.update({
+      rotationDeg: rotation,
+      distance: missile.distance,
+      kind: 'missile',
+    });
   }
 
   private setStyleValue(element: HTMLElement, property: string, value: string): void {
@@ -125,52 +110,13 @@ export class BossMissileIndicator {
     cache.set(property, value);
   }
 
-  private createIndicator(): { root: HTMLDivElement; distanceLabel: HTMLSpanElement } {
-    const root = document.createElement('div');
-    root.className = 'boss-missile-indicator';
-
-    const color = '#ff0000';
-    const size = '40px';
-
-    root.style.cssText = `
-      position: absolute;
-      width: ${size};
-      height: ${size};
-      display: none;
-      opacity: 0;
-      visibility: hidden;
-      transform: translate(-50%, -50%) rotate(0deg);
-      contain: layout style paint;
-      backface-visibility: hidden;
-      will-change: transform, left, top, opacity;
-    `;
-
-    const arrow = document.createElement('div');
-    // SVG 箭头默认指向上方（尖端在 12 点钟方向）
-    arrow.innerHTML = `
-      <svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="${color}">
-        <path d="M12 2 L22 12 L12 8 L2 12 Z" />
-      </svg>
-    `;
-
-    const distanceLabel = document.createElement('span');
-    distanceLabel.className = 'distance-label';
-    distanceLabel.style.cssText = `
-      position: absolute;
-      top: 100%;
-      left: 50%;
-      transform: translateX(-50%);
-      color: ${color};
-      font-size: 12px;
-      font-weight: bold;
-      text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.95);
-      white-space: nowrap;
-    `;
-
-    root.appendChild(arrow);
-    root.appendChild(distanceLabel);
-
-    return { root, distanceLabel };
+  private createIndicator(): OffscreenChevron {
+    const chevron = new OffscreenChevron({ color: HUD_COLORS.threat });
+    chevron.element.classList.add('boss-missile-indicator');
+    chevron.element.style.display = 'none';
+    chevron.element.style.opacity = '0';
+    chevron.element.style.visibility = 'hidden';
+    return chevron;
   }
 
   private calculateIndicatorPosition(
@@ -242,19 +188,17 @@ export class BossMissileIndicator {
   private hideIndicator(id: string): void {
     const indicator = this.indicators.get(id);
     if (indicator) {
-      this.setTextContent(indicator.distanceLabel, '');
-      this.setStyleValue(indicator.root, 'display', 'none');
-      this.setStyleValue(indicator.root, 'opacity', '0');
-      this.setStyleValue(indicator.root, 'visibility', 'hidden');
-      this.setStyleValue(indicator.root, 'left', '50%');
-      this.setStyleValue(indicator.root, 'top', '50%');
-      this.setStyleValue(indicator.root, 'transform', 'translate(-50%, -50%) rotate(0deg)');
+      this.setStyleValue(indicator.element, 'display', 'none');
+      this.setStyleValue(indicator.element, 'opacity', '0');
+      this.setStyleValue(indicator.element, 'visibility', 'hidden');
+      this.setStyleValue(indicator.element, 'left', '50%');
+      this.setStyleValue(indicator.element, 'top', '50%');
     }
   }
 
   public clear(): void {
     for (const indicator of this.indicators.values()) {
-      indicator.root.remove();
+      indicator.dispose();
     }
     this.indicators.clear();
   }

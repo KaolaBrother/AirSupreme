@@ -425,7 +425,6 @@ export class BossBattleController {
     };
     boss.onEnemySpawn = (position, enemyType) => {
       this.deps.onSpawnEnemyFromBoss(position, enemyType);
-      this.deps.hud.showPowerUpBig('⚠️', '敌机起飞！');
     };
     boss.onDestroy = (position, bossConfig) => {
       this.handleBossDestroy(position, bossConfig, isBossMode);
@@ -693,6 +692,17 @@ export class BossBattleController {
     if (snapshotCount === 0) {
       this.resetBossIndicatorState();
       return;
+    }
+
+    let closestDistance = Infinity;
+    for (let i = 0; i < snapshotCount; i++) {
+      const distance = this.bossIndicatorSnapshots[i].distance;
+      if (distance < closestDistance) {
+        closestDistance = distance;
+      }
+    }
+    if (Number.isFinite(closestDistance)) {
+      this.deps.audioManager.playIncomingWarning(closestDistance);
     }
 
     this.deps.bossIndicator.update(this.bossIndicatorSnapshots, this.deps.camera);

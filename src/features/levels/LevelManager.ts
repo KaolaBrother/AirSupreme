@@ -435,6 +435,11 @@ export class LevelManager {
     return this.enemies;
   }
 
+  /** 传送门世界坐标，供雷达绘制生成中光点 */
+  public getActivePortalPositions(): Vector3[] {
+    return this.activePortals.map((portal) => portal.getMesh().position);
+  }
+
   /**
    * 检查敌人是否正在生成（传送门动画中）
    */

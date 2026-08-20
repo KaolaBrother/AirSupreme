@@ -23,6 +23,11 @@ const CONTROL_DECK_TOP_RATIO = 0.65;
 export class LockOnIndicator {
   private static readonly CANDIDATE_REFRESH_INTERVAL = 0.12;
   private static readonly STYLE_ID = 'lock-on-indicator-style';
+  private static readonly MISSILE_BUTTON_STATE_CLASSES = [
+    'is-search',
+    'is-lock',
+    'is-dry',
+  ] as const;
 
   private container: HTMLDivElement;
   private lockCircle: HTMLDivElement;
@@ -683,6 +688,24 @@ export class LockOnIndicator {
   private setLockState(state: LockOnState): void {
     this.lockState = state;
     this.container.setAttribute('data-lock-state', state);
+    this.syncMissileButtonClasses(state);
+  }
+
+  /** 只读锁状态映射到 #missile-button，不改变锁定目标逻辑。 */
+  private syncMissileButtonClasses(state: LockOnState): void {
+    const button = document.getElementById('missile-button');
+    if (!button) {
+      return;
+    }
+
+    button.classList.remove(...LockOnIndicator.MISSILE_BUTTON_STATE_CLASSES);
+    if (state === 'lock') {
+      button.classList.add('is-lock');
+    } else if (state === 'dry') {
+      button.classList.add('is-dry');
+    } else {
+      button.classList.add('is-search');
+    }
   }
 
   private applySearchRingChrome(): void {

@@ -76,6 +76,11 @@ export class AudioManager {
   private wasHighSpeedEngine: boolean = false;
   private lastEngineBoostPulseMs: number = 0;
   private lastMissileLockPulseMs: number = 0;
+  private lastIncomingWarningMs: number = Number.NEGATIVE_INFINITY;
+  private static readonly INCOMING_WARNING_FAR_MS = 500;
+  private static readonly INCOMING_WARNING_NEAR_MS = 160;
+  private static readonly INCOMING_WARNING_NEAR_DIST = 40;
+  private static readonly INCOMING_WARNING_FAR_DIST = 800;
   private isEnginePlaying: boolean = false;
   private isDisposed: boolean = false;
   private activeSoundCounts: Map<SoundType, number> = new Map();
@@ -2341,6 +2346,77 @@ export class AudioManager {
     } catch {
       // Ignore
     }
+  }
+
+  /**
+   * 来袭警告。minInterval 随距离从 500ms（远）收紧到 160ms（近）。
+   */
+  public playIncomingWarning(distance?: number): void {
+    this.initContext();
+    if (!this.canPlay() || !this.context || !this.sfxGain) {
+      return;
+    }
+
+    const nowMs = performance.now();
+    const minIntervalMs = this.getIncomingWarningMinInterval(distance);
+    if (nowMs - this.lastIncomingWarningMs < minIntervalMs) {
+      return;
+    }
+    this.lastIncomingWarningMs = nowMs;
+
+    try {
+      const now = this.context.currentTime;
+      const closeness = this.getIncomingWarningCloseness(distance);
+      const pitch = 720 + closeness * 380;
+
+      const osc = this.context.createOscillator();
+      const gain = this.context.createGain();
+      osc.type = 'square';
+      osc.frequency.setValueAtTime(pitch, now);
+      osc.frequency.exponentialRampToValueAtTime(Math.max(180, pitch * 0.55), now + 0.08);
+      gain.gain.setValueAtTime(0, now);
+      gain.gain.linearRampToValueAtTime((0.07 + closeness * 0.05) * this.sfxVolume, now + 0.008);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
+      osc.connect(gain);
+      gain.connect(this.sfxGain);
+      osc.start(now);
+      osc.stop(now + 0.11);
+
+      const tick = this.context.createOscillator();
+      const tickGain = this.context.createGain();
+      tick.type = 'sine';
+      tick.frequency.setValueAtTime(pitch * 1.6, now);
+      tickGain.gain.setValueAtTime(0, now);
+      tickGain.gain.linearRampToValueAtTime((0.04 + closeness * 0.03) * this.sfxVolume, now + 0.004);
+      tickGain.gain.exponentialRampToValueAtTime(0.001, now + 0.06);
+      tick.connect(tickGain);
+      tickGain.connect(this.sfxGain);
+      tick.start(now);
+      tick.stop(now + 0.06);
+    } catch {
+      // Ignore
+    }
+  }
+
+  private getIncomingWarningCloseness(distance?: number): number {
+    if (distance == null || !Number.isFinite(distance)) {
+      return 0;
+    }
+    const span =
+      AudioManager.INCOMING_WARNING_FAR_DIST - AudioManager.INCOMING_WARNING_NEAR_DIST;
+    return Math.max(
+      0,
+      Math.min(1, 1 - (distance - AudioManager.INCOMING_WARNING_NEAR_DIST) / span)
+    );
+  }
+
+  private getIncomingWarningMinInterval(distance?: number): number {
+    const closeness = this.getIncomingWarningCloseness(distance);
+    return (
+      AudioManager.INCOMING_WARNING_NEAR_MS +
+      (1 - closeness) *
+        (AudioManager.INCOMING_WARNING_FAR_MS - AudioManager.INCOMING_WARNING_NEAR_MS)
+    );
   }
 
   public playLaserWarning(): void {

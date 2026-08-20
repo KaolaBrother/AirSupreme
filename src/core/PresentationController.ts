@@ -1,10 +1,13 @@
-import type { Camera, Object3D, Vector3 } from 'three';
+import type { Camera, Object3D, Quaternion, Vector3 } from 'three';
 import { HUD } from '@/ui/HUD';
 import { StartMenu, GameSettings } from '@/ui/StartMenu';
 import { EnemyHealthBars } from '@/ui/EnemyHealthBars';
 import { BossMissileIndicator } from '@/ui/BossMissileIndicator';
 import { LockOnIndicator } from '@/ui/LockOnIndicator';
-import { injectHudTokens } from '@/ui/theme/hudTokens';
+import { RadarMinimap, type RadarBlip } from '@/ui/RadarMinimap';
+import { HUD_COLORS, injectHudTokens } from '@/ui/theme/hudTokens';
+
+export type { RadarBlip } from '@/ui/RadarMinimap';
 
 export interface HudSnapshot {
   healthPercent: number;
@@ -66,6 +69,13 @@ export class PresentationController {
   private lastEventObjectiveText: string = '';
   private lastEventObjectiveStatus: string = '';
   private lastEventObjectiveStatusUpdatedAt: number = 0;
+  private radar: RadarMinimap | null = null;
+  private readonly hitMarkers: HTMLDivElement[] = [];
+  private readonly hitMarkerTimeouts: number[] = [];
+  private hitMarkerCursor: number = 0;
+  private static readonly HIT_MARKER_POOL = 8;
+  private static readonly HIT_MARKER_SIZE_PX = 12;
+  private static readonly HIT_MARKER_DURATION_MS = 80;
 
   constructor(options: PresentationControllerOptions) {
     injectHudTokens();
@@ -83,6 +93,8 @@ export class PresentationController {
     this.enemyHealthBars.init();
     this.lockOnIndicator.init();
     this.bossIndicator.init();
+    this.ensureRadar();
+    this.ensureHitMarkers();
   }
 
   public wireStartMenu(onStart: (settings: GameSettings) => void): void {
@@ -163,6 +175,91 @@ export class PresentationController {
     this.bossIndicator.clear();
   }
 
+  public updateRadar(
+    playerPos: Vector3,
+    blips: RadarBlip[],
+    playerRotation: Quaternion
+  ): void {
+    this.ensureRadar();
+    this.radar?.updateBlips(playerPos, blips, playerRotation);
+  }
+
+  /**
+   * 玩家命中反馈：8 个 12px 标记，80ms 后回收。
+   */
+  public requestHitMarker(screenX: number, screenY: number): void {
+    this.ensureHitMarkers();
+    if (this.hitMarkers.length === 0) {
+      return;
+    }
+
+    const index = this.hitMarkerCursor % this.hitMarkers.length;
+    this.hitMarkerCursor += 1;
+    const marker = this.hitMarkers[index];
+    marker.style.left = `${screenX}px`;
+    marker.style.top = `${screenY}px`;
+    marker.style.display = 'block';
+    marker.style.opacity = '1';
+
+    if (this.hitMarkerTimeouts[index]) {
+      window.clearTimeout(this.hitMarkerTimeouts[index]);
+    }
+    this.hitMarkerTimeouts[index] = window.setTimeout(() => {
+      marker.style.display = 'none';
+      marker.style.opacity = '0';
+      this.hitMarkerTimeouts[index] = 0;
+    }, PresentationController.HIT_MARKER_DURATION_MS);
+  }
+
+  private ensureRadar(): void {
+    if (!this.radar) {
+      this.radar = new RadarMinimap();
+    }
+  }
+
+  private ensureHitMarkers(): void {
+    if (this.hitMarkers.length > 0) {
+      return;
+    }
+
+    for (let i = 0; i < PresentationController.HIT_MARKER_POOL; i++) {
+      const marker = document.createElement('div');
+      marker.className = 'hit-marker';
+      marker.style.cssText = `
+        position: fixed;
+        width: ${PresentationController.HIT_MARKER_SIZE_PX}px;
+        height: ${PresentationController.HIT_MARKER_SIZE_PX}px;
+        margin-left: -${PresentationController.HIT_MARKER_SIZE_PX / 2}px;
+        margin-top: -${PresentationController.HIT_MARKER_SIZE_PX / 2}px;
+        pointer-events: none;
+        display: none;
+        opacity: 0;
+        z-index: 48;
+        box-sizing: border-box;
+        border: 1px solid var(--hud-weapon, ${HUD_COLORS.weapon});
+        box-shadow: 0 0 6px var(--hud-weapon, ${HUD_COLORS.weapon});
+        transform: rotate(45deg);
+      `;
+      document.body.appendChild(marker);
+      this.hitMarkers.push(marker);
+      this.hitMarkerTimeouts.push(0);
+    }
+  }
+
+  private disposeHitMarkers(): void {
+    for (const timeoutId of this.hitMarkerTimeouts) {
+      if (timeoutId) {
+        window.clearTimeout(timeoutId);
+      }
+    }
+    this.hitMarkerTimeouts.length = 0;
+    for (const marker of this.hitMarkers) {
+      marker.remove();
+    }
+    this.hitMarkers.length = 0;
+    this.hitMarkerCursor = 0;
+  }
+
   public showEventObjective(title: string, objective: string, status?: string): void {
     this.updateEventObjective('default', title, objective, status);
   }
@@ -229,6 +326,9 @@ export class PresentationController {
     this.enemyHealthBars.dispose();
     this.lockOnIndicator.dispose();
     this.bossIndicator.dispose();
+    this.radar?.dispose();
+    this.radar = null;
+    this.disposeHitMarkers();
     this.startMenu?.dispose();
   }
 }

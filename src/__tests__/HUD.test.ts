@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { GAME_CONSTANTS, GameConfig } from '@/config';
 import { HUD } from '@/ui/HUD';
+import { HUD_COLORS } from '@/ui/theme/hudTokens';
 
 type SettlementActions = {
   onRetry: () => void;
@@ -12,6 +13,21 @@ type LayoutDensity = 'desktop' | 'touch-landscape' | 'touch-portrait';
 type HUDLayoutApi = {
   getLayoutDensity?: () => LayoutDensity;
   setLayoutDensity?: (density: LayoutDensity) => void;
+};
+
+type BriefingTone = 'sys' | 'threat';
+
+type BriefingRequest = {
+  kicker: string;
+  title: string;
+  line: string;
+  tone: BriefingTone;
+  durationMs: number;
+};
+
+type HUDCampaignApi = HUD & {
+  showBriefing: (briefing: BriefingRequest) => void;
+  showRespawnOverlay: (overlay: { lives: number; durationMs: number }) => void;
 };
 
 type HUDSettlement = HUD & {
@@ -33,12 +49,95 @@ const VIEWPORTS: Record<LayoutDensity, { width: number; height: number; touch: b
   'touch-portrait': { width: 400, height: 800, touch: true },
 };
 
+const LEVEL_BRIEFINGS: BriefingRequest[] = [
+  {
+    kicker: '入关',
+    title: '湖畔晨曦',
+    line: '在湖面上空完成首波接敌',
+    tone: 'sys',
+    durationMs: 1600,
+  },
+  {
+    kicker: '入关',
+    title: '沙漠风暴',
+    line: '在热浪中清场',
+    tone: 'sys',
+    durationMs: 1600,
+  },
+  {
+    kicker: '入关',
+    title: '雪山之巅',
+    line: '在冰雾里打穿防线',
+    tone: 'sys',
+    durationMs: 1600,
+  },
+  {
+    kicker: '入关',
+    title: '深海决战',
+    line: '在洋面上压制敌群',
+    tone: 'sys',
+    durationMs: 1600,
+  },
+  {
+    kicker: '入关',
+    title: '城市废墟',
+    line: '最终空域，清场后迎战航母',
+    tone: 'sys',
+    durationMs: 1600,
+  },
+];
+
+const BOSS_BRIEFINGS: BriefingRequest[] = [
+  {
+    kicker: 'BOSS',
+    title: '重型轰炸机',
+    line: '优先打弹舱弱点',
+    tone: 'threat',
+    durationMs: 1800,
+  },
+  {
+    kicker: 'BOSS',
+    title: '沙漠堡垒',
+    line: '防空炮与主炮分区处理',
+    tone: 'threat',
+    durationMs: 1800,
+  },
+  {
+    kicker: 'BOSS',
+    title: '八爪鱼战舰',
+    line: '先破触手再打脑核',
+    tone: 'threat',
+    durationMs: 1800,
+  },
+  {
+    kicker: 'BOSS',
+    title: '导弹驱逐舰',
+    line: '注意垂发导弹来袭',
+    tone: 'threat',
+    durationMs: 1800,
+  },
+  {
+    kicker: 'BOSS',
+    title: '空中航空母舰',
+    line: '甲板与舷岛分区打击',
+    tone: 'threat',
+    durationMs: 1800,
+  },
+];
+
+const LIFE_OVERLAY_COPY = /LIFE\s*×\s*(\d+)/u;
+const BRIEFING_MAX_WIDTH = /min\(\s*80vw\s*,\s*420px\s*\)/;
+
 function settlementHud(hud: HUD): HUDSettlement {
   return hud as HUDSettlement;
 }
 
 function layoutHud(hud: HUD): HUDLayoutApi {
   return hud as unknown as HUDLayoutApi;
+}
+
+function campaignHud(hud: HUD): HUDCampaignApi {
+  return hud as unknown as HUDCampaignApi;
 }
 
 function collectRelatedCss(element: HTMLElement): string {
@@ -233,6 +332,243 @@ function findCabinPanel(): HTMLElement {
   return (score as HTMLElement).parentElement ?? (score as HTMLElement);
 }
 
+function elapseHudTime(instance: HUD, ms: number): void {
+  vi.advanceTimersByTime(ms);
+  instance.update(ms / 1000);
+}
+
+function isEffectivelyHidden(element: HTMLElement): boolean {
+  let current: HTMLElement | null = element;
+  while (current) {
+    const computed = getComputedStyle(current);
+    const display = computed.display || current.style.display;
+    const visibility = computed.visibility || current.style.visibility;
+    const opacityRaw = computed.opacity || current.style.opacity || '1';
+    if (display === 'none' || visibility === 'hidden') {
+      return true;
+    }
+    if (Number.parseFloat(opacityRaw) === 0) {
+      return true;
+    }
+    current = current.parentElement;
+  }
+  return !element.isConnected;
+}
+
+function nodesWithText(text: string): HTMLElement[] {
+  return Array.from(document.querySelectorAll<HTMLElement>('body *')).filter((element) =>
+    (element.textContent ?? '').includes(text)
+  );
+}
+
+function copyIsShowing(text: string): boolean {
+  return nodesWithText(text).some((element) => !isEffectivelyHidden(element));
+}
+
+function smallestNodeWithText(text: string): HTMLElement {
+  const matches = nodesWithText(text).sort(
+    (a, b) => (a.textContent?.length ?? 0) - (b.textContent?.length ?? 0)
+  );
+  expect(matches.length, `expected copy "${text}" in the document`).toBeGreaterThan(0);
+  return matches[0] as HTMLElement;
+}
+
+function namedBriefingHost(): HTMLElement | null {
+  return document.querySelector<HTMLElement>(
+    '#hud-briefing, [data-hud="briefing"], [data-briefing]'
+  );
+}
+
+function findBriefingCard(title: string): HTMLElement {
+  const named = namedBriefingHost();
+  if (named && (named.textContent ?? '').includes(title) && !isEffectivelyHidden(named)) {
+    return named;
+  }
+
+  const leaf = smallestNodeWithText(title);
+  let current: HTMLElement | null = leaf;
+  while (current && current !== document.body) {
+    const css = `${current.style.maxWidth} ${current.style.width} ${
+      current.getAttribute('style') ?? ''
+    }`;
+    if (
+      current.id === 'hud-briefing' ||
+      current.getAttribute('data-hud') === 'briefing' ||
+      current.hasAttribute('data-briefing') ||
+      BRIEFING_MAX_WIDTH.test(css)
+    ) {
+      return current;
+    }
+    current = current.parentElement;
+  }
+  return leaf.parentElement ?? leaf;
+}
+
+function briefingChrome(host: HTMLElement): string {
+  return `${host.getAttribute('style') ?? ''}\n${collectRelatedCss(host)}`;
+}
+
+function collectOwnChrome(element: HTMLElement): string {
+  const chunks: string[] = [];
+  let current: HTMLElement | null = element;
+  while (current && current !== document.body) {
+    chunks.push(current.getAttribute('style') ?? '');
+    chunks.push(current.className);
+    chunks.push(current.getAttribute('data-tone') ?? '');
+    chunks.push(current.getAttribute('data-hud-tone') ?? '');
+    current = current.parentElement;
+  }
+  return chunks.join('\n');
+}
+
+function briefingToneMarker(host: HTMLElement): string {
+  const marked = [
+    host.getAttribute('data-tone'),
+    host.getAttribute('data-hud-tone'),
+    ...Array.from(host.querySelectorAll<HTMLElement>('[data-tone], [data-hud-tone]')).map(
+      (element) => element.getAttribute('data-tone') ?? element.getAttribute('data-hud-tone')
+    ),
+  ].filter((value): value is string => Boolean(value));
+  if (marked.includes('threat')) {
+    return 'threat';
+  }
+  if (marked.includes('sys')) {
+    return 'sys';
+  }
+
+  const classBlob = [
+    host.className,
+    ...Array.from(host.querySelectorAll('*')).map((el) => el.className),
+  ].join(' ');
+  if (/\bthreat\b/i.test(classBlob)) {
+    return 'threat';
+  }
+  if (/\bsys\b/i.test(classBlob)) {
+    return 'sys';
+  }
+
+  const inline = collectOwnChrome(host);
+  const threatHit =
+    inline.toLowerCase().includes(HUD_COLORS.threat.toLowerCase()) ||
+    /--hud-threat/.test(inline);
+  const sysHit =
+    inline.toLowerCase().includes(HUD_COLORS.sys.toLowerCase()) || /--hud-sys/.test(inline);
+  if (threatHit && !sysHit) {
+    return 'threat';
+  }
+  if (sysHit && !threatHit) {
+    return 'sys';
+  }
+  return threatHit ? 'threat' : sysHit ? 'sys' : '';
+}
+
+function mountStickAndFire(): void {
+  const controls = document.createElement('div');
+  controls.id = 'mobile-controls';
+  controls.className = 'mobile-controls';
+  controls.style.cssText =
+    'position:fixed;bottom:0;left:0;width:100%;height:35%;z-index:100;pointer-events:none;';
+
+  const joystick = document.createElement('div');
+  joystick.id = 'joystick';
+  joystick.style.cssText =
+    'position:absolute;bottom:20px;left:20px;width:140px;height:140px;pointer-events:auto;';
+
+  const fire = document.createElement('button');
+  fire.id = 'fire-button';
+  fire.type = 'button';
+  fire.textContent = '开火';
+  fire.style.cssText =
+    'position:absolute;bottom:20px;right:20px;width:80px;height:80px;pointer-events:auto;';
+
+  controls.appendChild(joystick);
+  controls.appendChild(fire);
+  document.body.appendChild(controls);
+}
+
+function overlayPlacementHost(lifeHost: HTMLElement): HTMLElement {
+  let current: HTMLElement | null = lifeHost;
+  while (current && current !== document.body) {
+    if (current.id === 'hud') {
+      return lifeHost;
+    }
+    const position = current.style.position || getComputedStyle(current).position;
+    if (position === 'fixed' || position === 'absolute') {
+      return current;
+    }
+    current = current.parentElement;
+  }
+  return lifeHost;
+}
+
+function effectivePointerEvents(element: HTMLElement): string {
+  let current: HTMLElement | null = element;
+  while (current && current !== document.documentElement) {
+    const value = current.style.pointerEvents || getComputedStyle(current).pointerEvents;
+    if (value === 'none' || value === 'auto') {
+      return value;
+    }
+    current = current.parentElement;
+  }
+  return 'auto';
+}
+
+function nearControlEdge(value: string | undefined): boolean {
+  return !!value && /^(0|0px|4px|8px|10px|12px|16px|20px|24px|32px)$/i.test(value.trim());
+}
+
+function avoidsStickAndFire(host: HTMLElement): boolean {
+  const style = `${host.getAttribute('style') ?? ''}\n${collectOwnChrome(host)}`.replace(
+    /\s+/g,
+    ' '
+  );
+  const fullBleed =
+    (/width\s*:\s*100%/.test(style) && /height\s*:\s*100%/.test(style)) ||
+    /inset\s*:\s*0/.test(style);
+  if (fullBleed && effectivePointerEvents(host) === 'auto') {
+    return false;
+  }
+
+  const bottom = style.match(/bottom\s*:\s*([^;]+)/i)?.[1];
+  const left = style.match(/left\s*:\s*([^;]+)/i)?.[1];
+  const right = style.match(/right\s*:\s*([^;]+)/i)?.[1];
+  const top = style.match(/top\s*:\s*([^;]+)/i)?.[1];
+  if (nearControlEdge(bottom) && (nearControlEdge(left) || nearControlEdge(right))) {
+    return false;
+  }
+  if (nearControlEdge(bottom) && !top) {
+    return false;
+  }
+  return true;
+}
+
+function isLifeCopy(element: HTMLElement): boolean {
+  return LIFE_OVERLAY_COPY.test((element.textContent ?? '').replace(/\s+/g, ' '));
+}
+
+function visibleLifeNodes(): HTMLElement[] {
+  return Array.from(document.querySelectorAll<HTMLElement>('body *')).filter(
+    (element) => isLifeCopy(element) && !isEffectivelyHidden(element)
+  );
+}
+
+function findLifeReadout(): HTMLElement {
+  const named = document.querySelector<HTMLElement>(
+    '#hud-respawn-overlay, [data-hud="respawn"], [data-respawn]'
+  );
+  const haystack = named ?? document.body;
+  const matches = Array.from(haystack.querySelectorAll<HTMLElement>('*')).filter(isLifeCopy);
+  const fromNamed = named && isLifeCopy(named) ? named : null;
+  const pool = [...matches, ...(fromNamed ? [fromNamed] : [])];
+  const visible = pool.filter((element) => !isEffectivelyHidden(element));
+  const ranked = (visible.length > 0 ? visible : pool).sort(
+    (a, b) => (a.textContent?.length ?? 0) - (b.textContent?.length ?? 0)
+  );
+  const readout = ranked[0];
+  expect(readout, 'expected a LIFE × N readout').toBeTruthy();
+  return readout as HTMLElement;
+}
+
 describe('HUD', () => {
   let hud: HUD;
   let originalIsMobile: boolean;
@@ -252,6 +588,7 @@ describe('HUD', () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     hud.dispose();
     GameConfig.isMobile = originalIsMobile;
     Object.defineProperty(window, 'innerWidth', {
@@ -410,5 +747,148 @@ describe('HUD', () => {
     const css = `${collectRelatedCss(overlay as HTMLElement)}\n${collectRelatedCss(retry)}`;
     expect(hasEquivalentPanelWidth(css)).toBe(true);
     expect(css).toMatch(/env\(\s*safe-area-inset-/);
+  });
+
+  it('shows each level briefing title and line from the issue copy', () => {
+    hud.init();
+
+    for (const briefing of LEVEL_BRIEFINGS) {
+      campaignHud(hud).showBriefing(briefing);
+      const card = findBriefingCard(briefing.title);
+      const text = card.textContent ?? '';
+      expect(text, `level briefing should include ${briefing.title}`).toContain(briefing.title);
+      expect(text, `level briefing should include line for ${briefing.title}`).toContain(
+        briefing.line
+      );
+      expect(copyIsShowing(briefing.title)).toBe(true);
+    }
+  });
+
+  it('shows each boss briefing title and line from the issue copy', () => {
+    hud.init();
+
+    for (const briefing of BOSS_BRIEFINGS) {
+      campaignHud(hud).showBriefing(briefing);
+      const card = findBriefingCard(briefing.title);
+      const text = card.textContent ?? '';
+      expect(text, `boss briefing should include ${briefing.title}`).toContain(briefing.title);
+      expect(text, `boss briefing should include line for ${briefing.title}`).toContain(
+        briefing.line
+      );
+      expect(text, `boss title should not use BOSS_CONFIGS " Boss" suffix`).not.toMatch(
+        new RegExp(`${briefing.title}\\s*Boss`)
+      );
+      expect(copyIsShowing(briefing.title)).toBe(true);
+    }
+  });
+
+  it('caps briefing max-width at min(80vw, 420px) and paints sys vs threat tone', () => {
+    hud.init();
+    const sysBriefing = LEVEL_BRIEFINGS[0];
+    campaignHud(hud).showBriefing(sysBriefing);
+
+    const sysCard = findBriefingCard(sysBriefing.title);
+    const sysCss = briefingChrome(sysCard).replace(/\s+/g, ' ');
+    const sysTone = briefingToneMarker(sysCard);
+    expect(sysCss).toMatch(BRIEFING_MAX_WIDTH);
+    expect(sysTone).toBe('sys');
+
+    const threatBriefing = BOSS_BRIEFINGS[0];
+    campaignHud(hud).showBriefing(threatBriefing);
+    const threatCard = findBriefingCard(threatBriefing.title);
+    const threatCss = briefingChrome(threatCard).replace(/\s+/g, ' ');
+    const threatTone = briefingToneMarker(threatCard);
+    expect(threatCss).toMatch(BRIEFING_MAX_WIDTH);
+    expect(threatTone).toBe('threat');
+    expect(threatTone).not.toBe(sysTone);
+  });
+
+  it('replaces the previous briefing instead of stacking cards', () => {
+    hud.init();
+    campaignHud(hud).showBriefing(LEVEL_BRIEFINGS[0]);
+    expect(copyIsShowing('湖畔晨曦')).toBe(true);
+
+    campaignHud(hud).showBriefing(LEVEL_BRIEFINGS[1]);
+    expect(copyIsShowing('沙漠风暴')).toBe(true);
+    expect(copyIsShowing('湖畔晨曦')).toBe(false);
+    expect(copyIsShowing('在湖面上空完成首波接敌')).toBe(false);
+    expect(copyIsShowing('在热浪中清场')).toBe(true);
+  });
+
+  it('auto-hides a briefing when durationMs elapses', () => {
+    vi.useFakeTimers();
+    hud.init();
+    const briefing = LEVEL_BRIEFINGS[0];
+    campaignHud(hud).showBriefing(briefing);
+
+    expect(copyIsShowing(briefing.title)).toBe(true);
+    elapseHudTime(hud, 1000);
+    expect(copyIsShowing(briefing.title)).toBe(true);
+
+    elapseHudTime(hud, 700);
+    expect(copyIsShowing(briefing.title)).toBe(false);
+    expect(copyIsShowing(briefing.line)).toBe(false);
+  });
+
+  it('shows LIFE × N on a non-game-over respawn overlay away from stick and fire', () => {
+    hud.init();
+    mountStickAndFire();
+    campaignHud(hud).showRespawnOverlay({ lives: 3, durationMs: 2000 });
+
+    const three = findLifeReadout();
+    expect((three.textContent ?? '').replace(/\s+/g, ' ')).toMatch(/LIFE\s*×\s*3/);
+    expect(three.closest('#hud-settlement-overlay')).toBeNull();
+    expect(three.closest('#hud-lives, [data-hud="lives"]')).toBeNull();
+    expect(document.getElementById('game-over-title')?.textContent ?? '').not.toContain('LIFE');
+
+    const placement = overlayPlacementHost(three);
+    expect(
+      avoidsStickAndFire(placement),
+      'LIFE × N overlay should not cover or steal the stick/fire deck'
+    ).toBe(true);
+
+    const joystick = document.getElementById('joystick');
+    const fire = document.getElementById('fire-button');
+    expect(joystick, 'joystick should remain mounted').toBeTruthy();
+    expect(fire, 'fire button should remain mounted').toBeTruthy();
+    const joystickEl = joystick as HTMLElement;
+    const fireEl = fire as HTMLElement;
+    expect(placement.contains(joystickEl)).toBe(false);
+    expect(placement.contains(fireEl)).toBe(false);
+    expect(getComputedStyle(joystickEl).display).not.toBe('none');
+    expect(getComputedStyle(fireEl).display).not.toBe('none');
+
+    campaignHud(hud).showRespawnOverlay({ lives: 1, durationMs: 2000 });
+    const one = findLifeReadout();
+    expect((one.textContent ?? '').replace(/\s+/g, ' ')).toMatch(/LIFE\s*×\s*1/);
+    expect((one.textContent ?? '').replace(/\s+/g, ' ')).not.toMatch(/LIFE\s*×\s*3/);
+  });
+
+  it('auto-hides the LIFE overlay when durationMs elapses', () => {
+    vi.useFakeTimers();
+    hud.init();
+    campaignHud(hud).showRespawnOverlay({ lives: 2, durationMs: 2000 });
+
+    expect(visibleLifeNodes().length, 'LIFE overlay should be visible after show').toBeGreaterThan(
+      0
+    );
+    elapseHudTime(hud, 1500);
+    expect(
+      visibleLifeNodes().length,
+      'LIFE overlay should still be up before durationMs'
+    ).toBeGreaterThan(0);
+
+    elapseHudTime(hud, 600);
+    expect(visibleLifeNodes().length, 'LIFE overlay should auto-hide after durationMs').toBe(0);
+  });
+
+  it('does not show the LIFE overlay on showGameOver', () => {
+    hud.init();
+    campaignHud(hud).showRespawnOverlay({ lives: 2, durationMs: 2000 });
+    expect(visibleLifeNodes().length).toBeGreaterThan(0);
+
+    hud.showGameOver(440);
+    expect(document.getElementById('game-over-title')?.textContent).toBe('MISSION FAILED');
+    expect(visibleLifeNodes().length, 'game over must not keep the LIFE × N overlay').toBe(0);
   });
 });

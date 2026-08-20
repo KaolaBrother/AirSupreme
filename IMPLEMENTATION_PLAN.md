@@ -119,7 +119,7 @@
 
 ## 当前概览
 
-会话循环（experience-upgrade 1/5，GitHub #4）已完成：页级 StartMenu、`PauseMenu` 暂停舱、结算再来一局/返回菜单、`SessionSettings` 开始流程持久化。本轮（`workflow/bundle-5-10-11`）关闭 GitHub #10（活地形坠毁）、#11（favicon / `viewport-fit=cover`）、#5（航电 HUD token 与锁定 chrome）。A4「最终统一 HUD 与关卡视觉语言」仍为 `[later]`（GitHub #8）；本轮不把 A4 标为完成。
+会话循环（experience-upgrade 1/5，GitHub #4）已完成：页级 StartMenu、`PauseMenu` 暂停舱、结算再来一局/返回菜单、`SessionSettings` 开始流程持久化。本轮（`workflow/bundle-5-10-11`）关闭 GitHub #10（活地形坠毁）、#11（favicon / `viewport-fit=cover`）、#5（航电 HUD token 与锁定 chrome）。A4「最终统一 HUD 与关卡视觉语言」已完成（GitHub #3 / #5–#8）：航电 token、锁定 chrome、开始/加载/升级/移动端壳层。
 
 ### 已完成基线
 - [done] 开始菜单设置接入运行时: 难度、音量、画质、试玩关卡
@@ -251,7 +251,14 @@
   - 布局密度 `desktop | touch-landscape | touch-portrait`；锁定 `search | track | lock | break | dry`；DRY 文案 `NO MSL`；LOCK 色 `#5CFFB0`（非 `#00ff00`）
   - `AudioManager.playMissileLockBreak()` / `playMissileDry()`
 - [watch] 继续在试玩中观察是否还有视觉脏区或信息抢读
-- [later] 最终统一 HUD 与关卡视觉语言（GitHub #8；本轮未完成）
+- [done] 最终统一 HUD 与关卡视觉语言（GitHub #3 / #5–#8）
+  - StartMenu 设置板 `width: min(420px, 100%)`，去掉 `min-width: 400px`
+  - 开始 / Boss 按钮玻璃态，无 `#4CAF50` 胶囊、无 ✈️🎮👹 标题装饰
+  - 升级卡短码 `HP / SPD / ROE / DMG / RAD / RLD / LCK`；继续按钮玻璃态
+  - 加载屏 `rgba(8,14,24,1)` + 冰蓝条，标题 `AIR SUPREME`
+  - 移动端控件显隐跟随 `GameConfig.isMobile`（无 `pointer:coarse` 显示分支）；暂停钮「暂停」
+  - 控件尺寸：joystick 108/96、fire 68/64、missile 60/56、boost 56/52、pause 48；`:active` inset
+  - `#missile-button` 只读锁状态 class：`is-search` / `is-lock` / `is-dry`
 
 ### B. 特效系统
 

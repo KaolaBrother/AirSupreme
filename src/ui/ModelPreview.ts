@@ -82,21 +82,23 @@ export class ModelPreview {
           left: 0;
           width: 100%;
           height: 100%;
-          background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+          background: rgba(8, 14, 24, 1);
           display: flex;
           flex-direction: column;
           align-items: center;
           justify-content: center;
           z-index: 1001;
-          font-family: 'Arial', sans-serif;
-          color: white;
+          font-family: var(--hud-font, 'Arial', sans-serif);
+          color: var(--hud-text, #eef8ff);
         }
 
         .preview-header {
           font-size: 36px;
           font-weight: bold;
+          letter-spacing: 0.12em;
           margin-bottom: 20px;
-          text-shadow: 0 0 15px rgba(100, 200, 255, 0.8);
+          color: var(--hud-sys, #8fe4ff);
+          text-shadow: 0 0 15px rgba(143, 228, 255, 0.45);
         }
 
         .preview-canvas-container {
@@ -104,10 +106,10 @@ export class ModelPreview {
           width: 80%;
           max-width: 600px;
           height: 400px;
-          border-radius: 15px;
+          border-radius: var(--hud-radius, 12px);
           overflow: hidden;
-          border: 2px solid rgba(255, 255, 255, 0.2);
-          box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+          border: 1px solid var(--hud-edge, rgba(143, 228, 255, 0.28));
+          box-shadow: var(--hud-shadow, 0 12px 24px rgba(0, 0, 0, 0.28));
         }
 
         .aircraft-name {
@@ -118,9 +120,10 @@ export class ModelPreview {
           font-size: 24px;
           font-weight: bold;
           text-shadow: 0 2px 10px rgba(0, 0, 0, 0.8);
-          background: rgba(0, 0, 0, 0.5);
+          background: var(--hud-glass, rgba(8, 14, 24, 0.72));
+          border: 1px solid var(--hud-edge, rgba(143, 228, 255, 0.28));
           padding: 10px 30px;
-          border-radius: 25px;
+          border-radius: var(--hud-radius, 12px);
         }
 
         .nav-controls {
@@ -134,17 +137,17 @@ export class ModelPreview {
           width: 60px;
           height: 60px;
           border-radius: 50%;
-          border: 2px solid rgba(255, 255, 255, 0.5);
-          background: rgba(255, 255, 255, 0.1);
-          color: white;
+          border: 1px solid var(--hud-edge, rgba(143, 228, 255, 0.28));
+          background: var(--hud-glass, rgba(8, 14, 24, 0.72));
+          color: var(--hud-text, #eef8ff);
           font-size: 28px;
           cursor: pointer;
-          transition: all 0.2s;
+          transition: border-color 0.2s, box-shadow 0.2s;
         }
 
         .nav-btn:hover {
-          background: rgba(255, 255, 255, 0.3);
-          transform: scale(1.1);
+          border-color: var(--hud-sys, #8fe4ff);
+          box-shadow: 0 0 16px rgba(143, 228, 255, 0.28);
         }
 
         .page-indicator {
@@ -158,18 +161,18 @@ export class ModelPreview {
           padding: 15px 40px;
           font-size: 20px;
           font-weight: bold;
-          border: none;
-          border-radius: 30px;
-          background: linear-gradient(135deg, #4CAF50, #45a049);
-          color: white;
+          border: 1px solid var(--hud-edge, rgba(143, 228, 255, 0.28));
+          border-radius: var(--hud-radius, 12px);
+          background: var(--hud-glass, rgba(8, 14, 24, 0.72));
+          color: var(--hud-text, #eef8ff);
           cursor: pointer;
-          transition: all 0.3s;
-          box-shadow: 0 5px 15px rgba(76, 175, 80, 0.4);
+          transition: border-color 0.2s, box-shadow 0.2s;
+          box-shadow: var(--hud-shadow, 0 12px 24px rgba(0, 0, 0, 0.28));
         }
 
         .back-btn:hover {
-          transform: translateY(-3px);
-          box-shadow: 0 8px 25px rgba(76, 175, 80, 0.6);
+          border-color: var(--hud-sys, #8fe4ff);
+          box-shadow: 0 0 16px rgba(143, 228, 255, 0.28);
         }
 
         .touch-hint {
@@ -182,16 +185,16 @@ export class ModelPreview {
           margin-top: 15px;
           padding: 10px 25px;
           font-size: 16px;
-          border: 1px solid rgba(255, 255, 255, 0.3);
-          border-radius: 20px;
-          background: rgba(255, 255, 255, 0.1);
-          color: white;
+          border: 1px solid var(--hud-edge, rgba(143, 228, 255, 0.28));
+          border-radius: var(--hud-radius, 12px);
+          background: var(--hud-glass, rgba(8, 14, 24, 0.72));
+          color: var(--hud-text, #eef8ff);
           cursor: pointer;
-          transition: all 0.2s;
+          transition: border-color 0.2s, box-shadow 0.2s;
         }
 
         .rotate-toggle:hover {
-          background: rgba(255, 255, 255, 0.2);
+          border-color: var(--hud-sys, #8fe4ff);
         }
       </style>
 

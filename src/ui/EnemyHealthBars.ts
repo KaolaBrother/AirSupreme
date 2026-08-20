@@ -1,5 +1,7 @@
 import { Quaternion, Vector3 } from 'three';
 import type { Camera, Object3D } from 'three';
+import { OffscreenChevron } from '@/ui/OffscreenChevron';
+import { HUD_COLORS } from '@/ui/theme/hudTokens';
 
 const CAMERA_POSITION_THRESHOLD_SQ = 0.01;
 const PLAYER_POSITION_THRESHOLD_SQ = 0.01;
@@ -20,9 +22,7 @@ export class EnemyHealthBars {
       bar: HTMLDivElement;
       background: HTMLDivElement;
       targetName: HTMLSpanElement;
-      arrow: HTMLDivElement | null;
-      arrowShape: HTMLDivElement | null;
-      arrowDistanceLabel: HTMLSpanElement | null;
+      chevron: OffscreenChevron | null;
       screenPos: { x: number; y: number; z: number } | null; // 缓存屏幕位置
       lastBarWorldPosition: Vector3;
       lastHealthPercent: number;
@@ -193,22 +193,20 @@ export class EnemyHealthBars {
       const bar = this.createHealthBar();
       const background = this.createBackgroundBar(barWidth, isBoss);
       const targetName = this.createTargetName(isFriendly, isBoss);
-      const arrowData = isFriendly ? null : this.createArrowIndicator();
+      const chevron = isFriendly ? null : this.createArrowIndicator();
 
       bar.appendChild(background);
       bar.appendChild(targetName);
       this.container.appendChild(bar);
-      if (arrowData) {
-        this.container.appendChild(arrowData.root);
+      if (chevron) {
+        this.container.appendChild(chevron.element);
       }
 
       barData = {
         bar,
         background,
         targetName,
-        arrow: arrowData?.root ?? null,
-        arrowShape: arrowData?.shape ?? null,
-        arrowDistanceLabel: arrowData?.distanceLabel ?? null,
+        chevron,
         screenPos: null,
         lastBarWorldPosition: this.barWorldPosition.clone(),
         lastHealthPercent: Number.NaN,
@@ -259,8 +257,8 @@ export class EnemyHealthBars {
       const barHeight = isBoss ? 10 : 6;
 
       this.setStyleValue(barData.bar, 'display', 'block');
-      if (barData.arrow) {
-        this.resetArrowIndicator(barData.arrow, barData.arrowDistanceLabel);
+      if (barData.chevron) {
+        this.resetArrowIndicator(barData.chevron);
       }
 
       if (needsPositionUpdate) {
@@ -282,10 +280,10 @@ export class EnemyHealthBars {
       }
     } else {
       this.setStyleValue(barData.bar, 'display', 'none');
-      if (barData.arrow) {
-        this.setStyleValue(barData.arrow, 'display', 'block');
-        this.setStyleValue(barData.arrow, 'opacity', '1');
-        this.setStyleValue(barData.arrow, 'visibility', 'visible');
+      if (barData.chevron) {
+        this.setStyleValue(barData.chevron.element, 'display', 'flex');
+        this.setStyleValue(barData.chevron.element, 'opacity', '1');
+        this.setStyleValue(barData.chevron.element, 'visibility', 'visible');
         if (needsArrowUpdate) {
           const distance = playerPosition.distanceTo(worldPos);
           // 使用相机位置计算方向向量，而不是玩家位置
@@ -293,13 +291,7 @@ export class EnemyHealthBars {
           this.cameraLocal.copy(worldPos).sub(camera.position);
           this.invertedCameraQuaternion.copy(camera.quaternion).invert();
           this.cameraLocal.applyQuaternion(this.invertedCameraQuaternion);
-          this.updateArrowIndicator(
-            barData.arrow,
-            barData.arrowShape,
-            barData.arrowDistanceLabel,
-            this.cameraLocal,
-            distance
-          );
+          this.updateArrowIndicator(barData.chevron, this.cameraLocal, distance);
         }
       }
     }
@@ -369,61 +361,15 @@ export class EnemyHealthBars {
   }
 
   /**
-   * 创建箭头指示器
+   * 创建屏幕外指向箭头（琥珀色敌人威胁）
    */
-  private createArrowIndicator(): {
-    root: HTMLDivElement;
-    shape: HTMLDivElement;
-    distanceLabel: HTMLSpanElement;
-  } {
-    const root = document.createElement('div');
-    root.className = 'enemy-arrow-indicator';
-    root.style.cssText = `
-      position: absolute;
-      width: 30px;
-      height: 30px;
-      display: none;
-      opacity: 0;
-      visibility: hidden;
-      pointer-events: none;
-      justify-content: center;
-      align-items: center;
-      transform: translate(-50%, -50%) rotate(0deg);
-      contain: layout style paint;
-      backface-visibility: hidden;
-      will-change: transform, left, top, opacity;
-    `;
-
-    // 创建三角形箭头 - 使用更显眼的亮黄色
-    const shape = document.createElement('div');
-    shape.style.cssText = `
-      width: 0;
-      height: 0;
-      border-left: 8px solid transparent;
-      border-right: 8px solid transparent;
-      border-bottom: 16px solid #ffff00;
-    `;
-    root.appendChild(shape);
-
-    // 创建距离标签
-    const distanceLabel = document.createElement('span');
-    distanceLabel.className = 'arrow-distance-label';
-    distanceLabel.style.cssText = `
-      position: absolute;
-      top: 100%;
-      left: 50%;
-      transform: translateX(-50%);
-      color: #ffff00;
-      font-size: 11px;
-      font-weight: bold;
-      text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.95);
-      white-space: nowrap;
-      margin-top: 4px;
-    `;
-    distanceLabel.textContent = '';
-    root.appendChild(distanceLabel);
-
-    return { root, shape, distanceLabel };
+  private createArrowIndicator(): OffscreenChevron {
+    const chevron = new OffscreenChevron({ color: HUD_COLORS.weapon });
+    chevron.element.classList.add('enemy-arrow-indicator');
+    chevron.element.style.display = 'none';
+    chevron.element.style.opacity = '0';
+    chevron.element.style.visibility = 'hidden';
+    return chevron;
   }
 
   /**
@@ -431,9 +377,7 @@ export class EnemyHealthBars {
    * 使用相机局部坐标系进行角度计算，正确处理敌人在相机后面或下方的情况
    */
   private updateArrowIndicator(
-    arrow: HTMLDivElement,
-    arrowShape: HTMLDivElement | null,
-    distanceLabel: HTMLSpanElement | null,
+    chevron: OffscreenChevron,
     cameraLocal: Vector3,
     distance: number
   ): void {
@@ -508,41 +452,23 @@ export class EnemyHealthBars {
     // - 左方 (x<0): atan2(-1, 0) = -90°
     const rotationAngle = Math.atan2(cameraLocal.x, cameraLocal.y) * (180 / Math.PI);
 
+    const arrow = chevron.element;
     this.setStyleValue(arrow, 'left', `${arrowX * 100}%`);
     this.setStyleValue(arrow, 'top', `${arrowY * 100}%`);
-    this.setStyleValue(
-      arrow,
-      'transform',
-      `translate(-50%, -50%) rotate(${rotationAngle}deg)`
-    );
-
-    // 更新箭头颜色（亮黄色）
-    if (arrowShape) {
-      this.setStyleValue(arrowShape, 'borderBottomColor', '#ffff00');
-    }
-
-    // 更新距离标签
-    if (distanceLabel) {
-      this.setTextContent(distanceLabel, `${Math.round(distance)}m`);
-      this.setStyleValue(distanceLabel, 'transform', 'translateX(-50%)');
-    }
+    chevron.update({
+      rotationDeg: rotationAngle,
+      distance,
+      kind: 'enemy',
+    });
   }
 
-  private resetArrowIndicator(
-    arrow: HTMLDivElement,
-    distanceLabel: HTMLSpanElement | null
-  ): void {
+  private resetArrowIndicator(chevron: OffscreenChevron): void {
+    const arrow = chevron.element;
     this.setStyleValue(arrow, 'display', 'none');
     this.setStyleValue(arrow, 'opacity', '0');
     this.setStyleValue(arrow, 'visibility', 'hidden');
     this.setStyleValue(arrow, 'left', '50%');
     this.setStyleValue(arrow, 'top', '50%');
-    this.setStyleValue(arrow, 'transform', 'translate(-50%, -50%) rotate(0deg)');
-
-    if (distanceLabel) {
-      this.setTextContent(distanceLabel, '');
-      this.setStyleValue(distanceLabel, 'transform', 'translateX(-50%)');
-    }
   }
 
   /**
@@ -644,11 +570,11 @@ export class EnemyHealthBars {
   private removeHealthBar(id: string): void {
     const barData = this.healthBars.get(id);
     if (barData) {
-      if (barData.arrow) {
-        this.resetArrowIndicator(barData.arrow, barData.arrowDistanceLabel);
+      if (barData.chevron) {
+        this.resetArrowIndicator(barData.chevron);
+        barData.chevron.dispose();
       }
       barData.bar.remove();
-      barData.arrow?.remove();
       this.healthBars.delete(id);
     }
   }
@@ -658,11 +584,11 @@ export class EnemyHealthBars {
    */
   public clear(): void {
     for (const barData of this.healthBars.values()) {
-      if (barData.arrow) {
-        this.resetArrowIndicator(barData.arrow, barData.arrowDistanceLabel);
+      if (barData.chevron) {
+        this.resetArrowIndicator(barData.chevron);
+        barData.chevron.dispose();
       }
       barData.bar.remove();
-      barData.arrow?.remove();
     }
     this.healthBars.clear();
   }

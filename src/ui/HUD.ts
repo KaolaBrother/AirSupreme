@@ -9,9 +9,27 @@ import {
 type BigMessageVariant = 'announcement' | 'powerup';
 type EventObjectiveTone = 'default' | 'complete';
 
+export type BriefingTone = 'sys' | 'threat';
+
+export interface BriefingRequest {
+  kicker: string;
+  title: string;
+  line: string;
+  tone: BriefingTone;
+  durationMs: number;
+}
+
 type SettlementActions = {
   onRetry: () => void;
   onExitToMenu: () => void;
+};
+
+type PendingBigMessage = {
+  icon: string;
+  name: string;
+  minDisplayTime: number;
+  hideSubtext: boolean;
+  variant: BigMessageVariant;
 };
 
 /**
@@ -54,10 +72,20 @@ export class HUD {
   private settlementActions: SettlementActions | null = null;
   private upgradePointsDisplay: HTMLDivElement;
   private damageFlashOverlay: HTMLDivElement;
+  private briefingDisplay: HTMLDivElement;
+  private briefingKicker: HTMLDivElement;
+  private briefingTitle: HTMLDivElement;
+  private briefingLine: HTMLDivElement;
+  private respawnOverlay: HTMLDivElement;
+  private respawnLifeReadout: HTMLDivElement;
+  private respawnCountdown: HTMLDivElement;
 
   private powerUpTimer: number = 0;
   private activePowerUpDuration: number = 0; // 道具持续时间
   private powerUpBigTimer: number = 0; // 大字提示显示计时器
+  private briefingTimer: number = 0;
+  private respawnTimer: number = 0;
+  private pendingBigMessage: PendingBigMessage | null = null;
   private damageFlashTimer: number = 0;
   private damageFlashDuration: number = 0;
   private damageFlashPeakOpacity: number = 0;
@@ -249,6 +277,77 @@ export class HUD {
     this.eventObjectiveDisplay.appendChild(this.eventObjectiveText);
     this.eventObjectiveDisplay.appendChild(this.eventObjectiveStatus);
     this.container.appendChild(this.eventObjectiveDisplay);
+
+    this.briefingDisplay = document.createElement('div');
+    this.briefingDisplay.id = 'hud-briefing';
+    this.briefingDisplay.setAttribute('data-hud', 'briefing');
+    this.briefingDisplay.setAttribute('data-briefing', '');
+    this.briefingDisplay.setAttribute('data-tone', 'sys');
+    this.briefingDisplay.style.cssText = `
+      position: absolute;
+      top: ${isMobile ? '52px' : '70px'};
+      left: 50%;
+      transform: translateX(-50%);
+      width: min(80vw, 420px);
+      max-width: min(80vw, 420px);
+      box-sizing: border-box;
+      padding: ${isMobile ? '10px 14px' : '12px 16px'};
+      display: none;
+      opacity: 0;
+      pointer-events: none;
+      z-index: 4;
+      text-align: center;
+      background: var(--hud-glass, ${HUD_COLORS.glass});
+      border: 1px solid var(--hud-sys, ${HUD_COLORS.sys});
+      border-radius: var(--hud-radius, 12px);
+      box-shadow: var(--hud-shadow, ${HUD_COLORS.shadow});
+      backdrop-filter: blur(12px);
+    `;
+
+    const briefingTitleRow = document.createElement('div');
+    briefingTitleRow.style.cssText = `
+      display: flex;
+      flex-direction: row;
+      align-items: baseline;
+      justify-content: center;
+      gap: 8px;
+      line-height: 1.25;
+    `;
+
+    this.briefingKicker = document.createElement('div');
+    this.briefingKicker.style.cssText = `
+      font-size: ${isMobile ? '10px' : '11px'};
+      font-weight: 700;
+      letter-spacing: 0.16em;
+      color: var(--hud-sys, ${HUD_COLORS.sys});
+      white-space: nowrap;
+    `;
+
+    this.briefingTitle = document.createElement('div');
+    this.briefingTitle.style.cssText = `
+      font-size: ${isMobile ? '16px' : '18px'};
+      font-weight: 700;
+      color: var(--hud-text, ${HUD_COLORS.text});
+      letter-spacing: 0.04em;
+      white-space: nowrap;
+    `;
+
+    this.briefingLine = document.createElement('div');
+    this.briefingLine.style.cssText = `
+      margin-top: 6px;
+      font-size: ${isMobile ? '12px' : '13px'};
+      font-weight: 600;
+      color: var(--hud-muted, ${HUD_COLORS.muted});
+      line-height: 1.35;
+      white-space: normal;
+      word-break: break-word;
+    `;
+
+    briefingTitleRow.appendChild(this.briefingKicker);
+    briefingTitleRow.appendChild(this.briefingTitle);
+    this.briefingDisplay.appendChild(briefingTitleRow);
+    this.briefingDisplay.appendChild(this.briefingLine);
+    this.container.appendChild(this.briefingDisplay);
     this.leftPrimaryRow.appendChild(this.scoreDisplay);
     this.leftPrimaryRow.appendChild(this.speedDisplay);
     this.leftStatusPanel.appendChild(this.leftPrimaryRow);
@@ -482,6 +581,65 @@ export class HUD {
     this.settlementPanel.appendChild(this.settlementActionsRow);
     this.gameOverDisplay.appendChild(this.settlementPanel);
 
+    this.respawnOverlay = document.createElement('div');
+    this.respawnOverlay.id = 'hud-respawn-overlay';
+    this.respawnOverlay.setAttribute('data-hud', 'respawn');
+    this.respawnOverlay.setAttribute('data-respawn', '');
+    this.respawnOverlay.style.cssText = `
+      position: fixed;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      display: none;
+      opacity: 0;
+      pointer-events: none;
+      z-index: 90;
+      align-items: flex-start;
+      justify-content: center;
+      padding-top: 18vh;
+      box-sizing: border-box;
+      background: rgba(4, 8, 14, 0.48);
+    `;
+
+    const respawnCard = document.createElement('div');
+    respawnCard.style.cssText = `
+      width: min(72vw, 280px);
+      max-width: min(72vw, 280px);
+      box-sizing: border-box;
+      text-align: center;
+      padding: 20px 18px 18px;
+      background: var(--hud-glass, ${HUD_COLORS.glass});
+      border: 1px solid var(--hud-edge, ${HUD_COLORS.edge});
+      border-radius: var(--hud-radius, 12px);
+      box-shadow: var(--hud-shadow, ${HUD_COLORS.shadow});
+      backdrop-filter: blur(10px);
+      pointer-events: none;
+    `;
+
+    this.respawnLifeReadout = document.createElement('div');
+    this.respawnLifeReadout.style.cssText = `
+      font-size: ${isMobile ? '28px' : '34px'};
+      font-weight: 800;
+      letter-spacing: 0.12em;
+      color: var(--hud-text, ${HUD_COLORS.text});
+      text-shadow: 0 0 16px rgba(143, 228, 255, 0.28), 2px 2px 6px rgba(0, 0, 0, 0.85);
+      font-variant-numeric: tabular-nums;
+    `;
+
+    this.respawnCountdown = document.createElement('div');
+    this.respawnCountdown.style.cssText = `
+      margin-top: 10px;
+      font-size: ${isMobile ? '18px' : '22px'};
+      font-weight: 700;
+      letter-spacing: 0.18em;
+      color: var(--hud-sys, ${HUD_COLORS.sys});
+      font-variant-numeric: tabular-nums;
+    `;
+
+    respawnCard.appendChild(this.respawnLifeReadout);
+    respawnCard.appendChild(this.respawnCountdown);
+    this.respawnOverlay.appendChild(respawnCard);
+
     this.damageFlashOverlay = document.createElement('div');
     this.damageFlashOverlay.style.cssText = `
       position: fixed;
@@ -519,6 +677,7 @@ export class HUD {
     document.body.appendChild(this.container);
     document.body.appendChild(this.powerUpBigDisplay);
     document.body.appendChild(this.damageFlashOverlay);
+    document.body.appendChild(this.respawnOverlay);
     document.body.appendChild(this.gameOverDisplay);
     window.addEventListener('resize', this.resizeHandler);
     window.addEventListener('orientationchange', this.resizeHandler);
@@ -718,6 +877,16 @@ export class HUD {
         max-width: 48px;
         max-height: 48px;
         font-size: 48px;
+      }
+
+      #hud-briefing {
+        max-width: min(80vw, 420px);
+        width: min(80vw, 420px);
+        pointer-events: none;
+      }
+
+      #hud-respawn-overlay {
+        pointer-events: none;
       }
     `;
     document.head.appendChild(style);
@@ -1116,6 +1285,21 @@ export class HUD {
       }
     }
 
+    if (this.briefingTimer > 0) {
+      this.briefingTimer = Math.max(0, this.briefingTimer - safeDeltaTime);
+      if (this.briefingTimer <= 0) {
+        this.hideBriefing();
+      }
+    }
+
+    if (this.respawnTimer > 0) {
+      this.respawnTimer = Math.max(0, this.respawnTimer - safeDeltaTime);
+      this.renderRespawnCountdown();
+      if (this.respawnTimer <= 0) {
+        this.hideRespawnOverlay();
+      }
+    }
+
     if (this.damageFlashTimer > 0) {
       this.damageFlashTimer = Math.max(0, this.damageFlashTimer - safeDeltaTime);
       const duration = Math.max(this.damageFlashDuration, 0.001);
@@ -1159,17 +1343,70 @@ export class HUD {
     variant: BigMessageVariant = 'announcement'
   ): void {
     this.ensureInitialized();
-    this.applyBigMessageVariant(variant);
-    this.setTextContent(this.powerUpBigIcon, icon);
-    this.setTextContent(this.powerUpBigText, name);
-    const shouldHideSubtext = variant === 'announcement' ? true : hideSubtext;
-    this.setTextContent(
-      this.powerUpBigSubtext,
-      variant === 'powerup' ? '获得道具！' : ''
-    );
-    this.setStyleValue(this.powerUpBigSubtext, 'display', shouldHideSubtext ? 'none' : 'block');
-    this.setStyleValue(this.powerUpBigDisplay, 'opacity', '1');
-    this.powerUpBigTimer = minDisplayTime;
+    if (this.briefingTimer > 0) {
+      this.pendingBigMessage = { icon, name, minDisplayTime, hideSubtext, variant };
+      return;
+    }
+    this.presentPowerUpBig(icon, name, minDisplayTime, hideSubtext, variant);
+  }
+
+  /**
+   * 入关 / Boss 简报：顶栏玻璃卡片，不遮挡锁定中心。新简报替换旧简报。
+   */
+  public showBriefing(briefing: BriefingRequest): void {
+    this.ensureInitialized();
+    if (this.powerUpBigTimer > 0) {
+      this.hidePowerUpBig();
+    }
+
+    this.applyBriefingTone(briefing.tone);
+    this.setTextContent(this.briefingKicker, briefing.kicker);
+    this.setTextContent(this.briefingTitle, briefing.title);
+    this.setTextContent(this.briefingLine, briefing.line);
+    this.setStyleValue(this.briefingDisplay, 'display', 'block');
+    this.setStyleValue(this.briefingDisplay, 'opacity', '1');
+    this.briefingTimer = Math.max(0, briefing.durationMs) / 1000;
+    if (this.briefingTimer <= 0) {
+      this.hideBriefing();
+    }
+  }
+
+  public hideBriefing(): void {
+    this.ensureInitialized();
+    this.briefingTimer = 0;
+    this.setTextContent(this.briefingKicker, '');
+    this.setTextContent(this.briefingTitle, '');
+    this.setTextContent(this.briefingLine, '');
+    this.setStyleValue(this.briefingDisplay, 'opacity', '0');
+    this.setStyleValue(this.briefingDisplay, 'display', 'none');
+    this.flushPendingBigMessage();
+  }
+
+  /**
+   * 非结算死亡：压暗画面并显示 LIFE × N 与倒计时，避开摇杆/开火键。
+   */
+  public showRespawnOverlay(overlay: { lives: number; durationMs: number }): void {
+    this.ensureInitialized();
+    this.pendingBigMessage = null;
+    this.hidePowerUpBig();
+    this.hideBriefingWithoutFlush();
+    this.setTextContent(this.respawnLifeReadout, `LIFE × ${Math.max(0, overlay.lives)}`);
+    this.respawnTimer = Math.max(0, overlay.durationMs) / 1000;
+    this.renderRespawnCountdown();
+    this.setStyleValue(this.respawnOverlay, 'display', 'flex');
+    this.setStyleValue(this.respawnOverlay, 'opacity', '1');
+    if (this.respawnTimer <= 0) {
+      this.hideRespawnOverlay();
+    }
+  }
+
+  public hideRespawnOverlay(): void {
+    this.ensureInitialized();
+    this.respawnTimer = 0;
+    this.setTextContent(this.respawnLifeReadout, '');
+    this.setTextContent(this.respawnCountdown, '');
+    this.setStyleValue(this.respawnOverlay, 'opacity', '0');
+    this.setStyleValue(this.respawnOverlay, 'display', 'none');
   }
 
   public triggerDamageFlash(intensity: number = 1): void {
@@ -1187,6 +1424,69 @@ export class HUD {
   private hidePowerUpBig(): void {
     this.setStyleValue(this.powerUpBigDisplay, 'opacity', '0');
     this.powerUpBigTimer = 0;
+  }
+
+  private presentPowerUpBig(
+    icon: string,
+    name: string,
+    minDisplayTime: number,
+    hideSubtext: boolean,
+    variant: BigMessageVariant
+  ): void {
+    this.applyBigMessageVariant(variant);
+    this.setTextContent(this.powerUpBigIcon, icon);
+    this.setStyleValue(this.powerUpBigIcon, 'display', icon ? 'block' : 'none');
+    this.setTextContent(this.powerUpBigText, name);
+    const shouldHideSubtext = variant === 'announcement' ? true : hideSubtext;
+    this.setTextContent(
+      this.powerUpBigSubtext,
+      variant === 'powerup' ? '获得道具！' : ''
+    );
+    this.setStyleValue(this.powerUpBigSubtext, 'display', shouldHideSubtext ? 'none' : 'block');
+    this.setStyleValue(this.powerUpBigDisplay, 'opacity', '1');
+    this.powerUpBigTimer = minDisplayTime;
+  }
+
+  private flushPendingBigMessage(): void {
+    const pending = this.pendingBigMessage;
+    this.pendingBigMessage = null;
+    if (!pending) {
+      return;
+    }
+    this.presentPowerUpBig(
+      pending.icon,
+      pending.name,
+      pending.minDisplayTime,
+      pending.hideSubtext,
+      pending.variant
+    );
+  }
+
+  private hideBriefingWithoutFlush(): void {
+    this.briefingTimer = 0;
+    this.setTextContent(this.briefingKicker, '');
+    this.setTextContent(this.briefingTitle, '');
+    this.setTextContent(this.briefingLine, '');
+    this.setStyleValue(this.briefingDisplay, 'opacity', '0');
+    this.setStyleValue(this.briefingDisplay, 'display', 'none');
+  }
+
+  private applyBriefingTone(tone: BriefingTone): void {
+    this.briefingDisplay.setAttribute('data-tone', tone);
+    this.briefingDisplay.setAttribute('data-hud-tone', tone);
+    const accent = tone === 'threat' ? HUD_COLORS.threat : HUD_COLORS.sys;
+    this.setStyleValue(this.briefingDisplay, 'border', `1px solid ${accent}`);
+    this.setStyleValue(this.briefingKicker, 'color', accent);
+    this.setStyleValue(
+      this.briefingTitle,
+      'color',
+      tone === 'threat' ? HUD_COLORS.threat : HUD_COLORS.text
+    );
+  }
+
+  private renderRespawnCountdown(): void {
+    const seconds = Math.max(0, Math.ceil(this.respawnTimer));
+    this.setTextContent(this.respawnCountdown, String(seconds));
   }
 
   private applyBigMessageVariant(variant: BigMessageVariant): void {
@@ -1252,6 +1552,10 @@ export class HUD {
   public showGameOver(finalScore: number): void {
     this.ensureInitialized();
     this.hideEventObjective();
+    this.pendingBigMessage = null;
+    this.hidePowerUpBig();
+    this.hideRespawnOverlay();
+    this.hideBriefingWithoutFlush();
     this.setTextContent(this.gameOverTitle, 'MISSION FAILED');
     this.setStyleValue(this.gameOverTitle, 'color', '#ff3333');
     this.setStyleValue(
@@ -1271,6 +1575,10 @@ export class HUD {
   public showMissionComplete(finalScore: number): void {
     this.ensureInitialized();
     this.hideEventObjective();
+    this.pendingBigMessage = null;
+    this.hidePowerUpBig();
+    this.hideRespawnOverlay();
+    this.hideBriefingWithoutFlush();
     this.setTextContent(this.gameOverTitle, 'MISSION COMPLETE');
     this.setStyleValue(this.gameOverTitle, 'color', '#66ffcc');
     this.setStyleValue(
@@ -1312,6 +1620,12 @@ export class HUD {
     if (this.gameOverDisplay.parentElement) {
       this.gameOverDisplay.remove();
     }
+    if (this.respawnOverlay.parentElement) {
+      this.respawnOverlay.remove();
+    }
+    this.briefingTimer = 0;
+    this.respawnTimer = 0;
+    this.pendingBigMessage = null;
     this.initialized = false;
   }
 }
