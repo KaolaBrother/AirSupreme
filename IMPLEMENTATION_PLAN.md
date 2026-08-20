@@ -1,6 +1,6 @@
 # AirSupreme - 持续实施计划
 
-最后更新: `2026-06-13`
+最后更新: `2026-08-20`
 状态: `进行中`
 用途: 这是当前项目后续开发的单一计划源。后续非 trivial 改动，应优先对齐这份文件，并在完成重要阶段后更新状态。
 
@@ -119,6 +119,8 @@
 
 ## 当前概览
 
+会话循环（experience-upgrade 1/5，GitHub #4）已完成：页级 StartMenu、`PauseMenu` 暂停舱、结算再来一局/返回菜单、`SessionSettings` 开始流程持久化。A4「最终统一 HUD 与关卡视觉语言」仍为 `[later]`；设计源 #3 与 issues #5–#8 不在本轮。
+
 ### 已完成基线
 - [done] 开始菜单设置接入运行时: 难度、音量、画质、试玩关卡
 - [done] 试玩关卡可在开始菜单关闭，并已接入首关开场流程
@@ -136,6 +138,7 @@
 - [done] 后续总计划已固化为仓库文件，并由 `AGENTS.md` 显式引用
 - [done] 第一关/第五关环境视觉收口已完成（地形参数与夜景/地表层次）
 - [done] 环境透明层与玩法 VFX 深度排序策略已收口，水面/云/卷云/雾霾/天气层不再用抬高 `renderOrder` 覆盖玩法透明特效
+- [done] 会话循环 experience-upgrade 1/5（GitHub #4）：页级 StartMenu（`hide()` 非 `dispose()`）、`PauseMenu` 暂停舱、结算 `再来一局` / `返回菜单`、`SessionSettings` 开始流程持久化
 
 ### 当前重点
 - [active] 五个 Boss 视觉统一第二轮继续推进
@@ -151,7 +154,7 @@
 - [done] 子弹 / Boss 炮弹飞行轮廓分流已完成当前轮
 
 ### 已知未收尾
-- [watch] `vendor-three` 构建块仍约 `503 kB`，warning 仍在；当前降级为观察项，不再作为近期主目标
+- [watch] `vendor-three` 构建块仍约 `517 kB`，warning 仍在；当前降级为观察项，不再作为近期主目标
 - [watch] 视觉主线进入后段，需要避免无限细修而不切换到后续系统项
 
 ## 工作流总览
@@ -450,10 +453,13 @@
 
 #### D3. 升级系统 UI 闭环
 - [done] 升级菜单第一版已落地
-  - 暂停菜单 / 移动端升级按钮 / 桌面 `U` 键已接入
+  - `PauseMenu` 暂停舱已接入：ESC / P 打开暂停舱（继续 / 升级 / 设置 / 返回菜单）；桌面 `U` 先暂停再打开升级商店；移动端 `#upgrade-button` 当前打开暂停舱
   - 当前点数、当前等级、升级成本、升级后数值、每级收益已展示
   - 升级成功后已有音效和 HUD 提示反馈
   - `武器伤害` 升级已接回 `PLAYER_FIRED -> CombatSystem -> 命中结算` 运行时链路
+- [done] 会话循环结算与返回菜单已接入
+  - `#game-over-title` 失败为 `MISSION FAILED`，通关为 `MISSION COMPLETE`
+  - 按钮 **再来一局**（`lastSettings` 重开）/ **返回菜单**（`reloadFromStorage()` + StartMenu `show()`）
 - [done] 新增 `导弹锁定范围` 升级项
   - 锁定圈尺寸已可通过升级扩大
   - 满级后锁定圈范围可达到当前基础值的 `2.0x`
@@ -493,6 +499,7 @@
 - [done] `LevelManager` 的 `TerrainGenerator` 已改成真正按需动态导入
 - [done] `SpawnPortal` 已从 `LevelManager` 顶层静态依赖移到按需动态导入
 - [done] `UpgradeMenu` 已延后到首次暂停时才动态导入
+- [done] `PauseMenu` 已按需动态导入，构建拆出独立 chunk `PauseMenu-*.js`
 - [done] `BossBattleController` 已延后到首次进入 Boss 流程时才动态导入
 - [done] 菜单空闲时已接入 `GameCoordinator` chunk 预取
 - [done] 菜单空闲预取已通过构建和全量测试验证
@@ -517,6 +524,7 @@
 #### F1. 自动化测试
 - [done] 已补强 `Flak` / Boss 关键链路回归测试
 - [done] 升级系统 UI 第一版对应测试已补
+- [done] 会话循环对应测试已补（`PauseMenu.test.ts`、HUD 结算、`SessionSettings` persist）
 - [done] `LevelManager` 事件波次第一批测试已补
 - [done] 已补充 `TransparentLayerDepth.test.ts`，覆盖透明环境层与限定玩法 VFX / 尾迹的深度排序策略
 - [later] 环境配置、事件波次、持久化设置补更多集成测试

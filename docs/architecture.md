@@ -4,8 +4,8 @@ AirSupreme is a Three.js + TypeScript aerial combat game. Runtime assembly lives
 
 ## Boundaries
 
-- Entry: `src/main.ts` → start menu → dynamic import of `GameCoordinator`
-- Combat, boss controllers, upgrade menu, and presentation HUD load on demand
+- Entry: `src/main.ts` keeps one `StartMenu` for the page lifetime (`hide()`, not `dispose()`), then dynamically imports `GameCoordinator({ showStartMenu: false, onRetry, onExitToMenu })`
+- Combat, boss controllers, `PauseMenu`, upgrade menu, and presentation HUD load on demand
 - `PresentationRuntimeLoader` creates `HUD`, health bars, lock-on, and related presentation objects
 - `src/Game.ts` re-exports `GameCoordinator`. `src/Game.legacy.ts` is deprecated
 
@@ -33,6 +33,8 @@ Feature modules under `src/features/` own AI, terrain, effects, powerups, and bo
 
 - Orchestration: `src/core/GameCoordinator.ts`
 - Events: `src/core/EventBus.ts`
+- Session persist: `src/core/SessionSettings.ts` (`START_MENU_STORAGE_KEY`, `loadStartFlowSettings` / `saveStartFlowSettings`)
+- Pause cabin: `src/ui/PauseMenu.ts`
 - Presentation boundary: `src/core/PresentationRuntimeLoader.ts`, `src/core/PresentationController.ts`
 - Config: `src/config.ts`, `public/config/game-config.json`
 - Player: `src/core/systems/PlayerSystem.ts`, `src/features/player/PlayerController.ts`

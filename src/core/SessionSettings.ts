@@ -45,6 +45,9 @@ export const DEFAULT_START_FLOW_SETTINGS: StartFlowSettings = {
   testScore: 0,
 };
 
+/** 开始菜单与暂停设置共用的 localStorage 键 */
+export const START_MENU_STORAGE_KEY = 'air-supreme:start-menu-settings';
+
 export const TEST_SCORE_OPTIONS = [0, 5000, 10000, 15000, 20000] as const;
 export type TestScoreOption = (typeof TEST_SCORE_OPTIONS)[number];
 export const MAX_TEST_SCORE = TEST_SCORE_OPTIONS[TEST_SCORE_OPTIONS.length - 1];
@@ -133,6 +136,76 @@ export function normalizeStartFlowSettings(raw?: Partial<StartFlowSettings>): St
     gameMode: normalizeGameMode(source.gameMode, DEFAULT_START_FLOW_SETTINGS.gameMode),
     testScore: normalizeTestScore(source.testScore),
   };
+}
+
+function getLocalStorage(): Storage | null {
+  try {
+    const storage = window.localStorage;
+    if (
+      !storage ||
+      typeof storage.getItem !== 'function' ||
+      typeof storage.setItem !== 'function' ||
+      typeof storage.removeItem !== 'function'
+    ) {
+      return null;
+    }
+
+    return storage;
+  } catch {
+    return null;
+  }
+}
+
+/** 读取并规范化开始流程设置；损坏或不可用时回退默认值。 */
+export function loadStartFlowSettings(): StartFlowSettings {
+  try {
+    const storage = getLocalStorage();
+    if (!storage) {
+      return normalizeStartFlowSettings();
+    }
+
+    const raw = storage.getItem(START_MENU_STORAGE_KEY);
+    if (!raw) {
+      return normalizeStartFlowSettings();
+    }
+
+    try {
+      const parsed = JSON.parse(raw) as Partial<StartFlowSettings>;
+      return normalizeStartFlowSettings(parsed);
+    } catch {
+      try {
+        storage.removeItem(START_MENU_STORAGE_KEY);
+      } catch {
+        // 清除失败时仍回退默认值，避免抛出
+      }
+      return normalizeStartFlowSettings();
+    }
+  } catch {
+    return normalizeStartFlowSettings();
+  }
+}
+
+/**
+ * 与已存储字段合并后再规范化写入。
+ * 暂停菜单只写音量时不得重置难度 / 生命 / 关卡 / 模式 / 测试分数。
+ */
+export function saveStartFlowSettings(settings?: Partial<StartFlowSettings>): void {
+  const storage = getLocalStorage();
+  if (!storage) {
+    return;
+  }
+
+  const previous = loadStartFlowSettings();
+  const normalized = normalizeStartFlowSettings({
+    ...previous,
+    ...settings,
+  });
+
+  try {
+    storage.setItem(START_MENU_STORAGE_KEY, JSON.stringify(normalized));
+  } catch {
+    // 配额或隐私模式写入失败时静默忽略
+  }
 }
 
 export function getAudioSettings(settings: Pick<StartFlowSettings, 'sfxVolume' | 'musicVolume'>): AudioSettings {
