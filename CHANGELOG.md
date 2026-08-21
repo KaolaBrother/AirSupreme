@@ -4,6 +4,14 @@
 
 - Initialized Kaola-Workflow documentation structure.
 
+### 战斗音效解锁（共享 AudioContext）
+
+- 开始游戏 / 再来一局点击时解锁 Web Audio：战斗 SFX 与 BGM 现在能在该点击上手势上出声
+- `StartMenu.startGame()` 在隐藏菜单 / 调用 `onStart` 之前同步 `unlockAudioFromUserGesture()`；`main.ts` `bootGame` 在 `disposeGame()` 之后、`await import('./core/GameCoordinator')` 之前同样解锁（重试走 `bootGame`）
+- SFX 与 BGM 共用 `src/core/Audio/AudioContextHost.ts` 上的一个 `AudioContext`；`AudioManager` 与 `MusicSystem` 的增益图仍各自独立
+- `AudioManager.beginSound()` 在 `canPlay()` 之前调用 `this.resume()`；`GameCoordinator.startInternal` 始终 `audioManager.resume()` / `musicSystem.resume()`（无 `audioInitialized` 闩锁）
+- 全量门槛通过：`npx tsc --noEmit && npm run lint && npm run test:run && npm run build`（**40 个测试文件 / 399 个测试**）；lint 0 errors（`src/__tests__/HUD.test.ts` 仍有 2 条既有 `@typescript-eslint/no-non-null-assertion` warnings）；`vendor-three` chunk-size warning 仍在（约 517.43 kB）
+
 ### 活地形坠毁（GitHub #10）
 
 - 玩家坠毁判定改为活地形/水面采样，不再使用固定世界平面

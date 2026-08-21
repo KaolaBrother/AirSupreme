@@ -125,6 +125,10 @@ added or changed it in this file, is yours.
 - `docs/conventions.md` — coding, testing, Git, and review rules.
 - `docs/decisions/` — architecture decision records.
 
+## Documentation Update Checklist
+
+When behavior, contracts, or plan status change, update the matching map entry or record a no-impact reason: `CHANGELOG.md` (player-visible), `docs/architecture.md` / `docs/api.md` (structure and contracts), `IMPLEMENTATION_PLAN.md` (phase status).
+
 ## Maintenance
 
 - Keep this file under 200 lines — a recommendation, not a limit; move detail to docs or skills.

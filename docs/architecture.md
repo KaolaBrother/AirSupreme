@@ -7,6 +7,7 @@ AirSupreme is a Three.js + TypeScript aerial combat game. Runtime assembly lives
 - Entry: `src/main.ts` keeps one `StartMenu` for the page lifetime (`hide()`, not `dispose()`), then dynamically imports `GameCoordinator({ showStartMenu: false, onRetry, onExitToMenu })`
 - Combat, boss controllers, `PauseMenu`, upgrade menu, and presentation HUD load on demand
 - `PresentationRuntimeLoader` creates `HUD`, health bars, lock-on, and related presentation objects
+- Audio: one shared `AudioContext` via `AudioContextHost`; start/retry unlock on the user-gesture stack; SFX and music gain graphs stay separate
 - `src/Game.ts` re-exports `GameCoordinator`. `src/Game.legacy.ts` is deprecated
 
 ## Runtime systems
@@ -36,6 +37,14 @@ Feature modules under `src/features/` own AI, terrain, effects, powerups, and bo
 - Entry HTML: `index.html` — `<link rel="icon" href="/favicon.svg" type="image/svg+xml" />` (file `public/favicon.svg`); viewport includes `viewport-fit=cover`.
 - `PauseMenu` and HUD settlement overlay pad with `env(safe-area-inset-*)`.
 
+## Audio
+
+- Shared context: `src/core/Audio/AudioContextHost.ts`. `AudioManager` and `MusicSystem` `acquireSharedAudioContext(this)` / `releaseSharedAudioContext(this)`; last holder close shuts the context.
+- Unlock on the click stack (no `await` between gesture and unlock): `StartMenu.startGame()` calls `unlockAudioFromUserGesture()` before hiding the menu / `onStart`. `src/main.ts` `bootGame` calls `disposeGame()` then `unlockAudioFromUserGesture()` before `await import('./core/GameCoordinator')`. Retry uses `bootGame`.
+- `unlockAudioFromUserGesture()` creates the shared context if needed and resumes it; unlock itself does not occupy a holder.
+- `AudioManager.beginSound()` calls `this.resume()` before `canPlay()`. `GameCoordinator.startInternal` always `audioManager.resume()` / `musicSystem.resume()`.
+- Gain graphs remain separate: `AudioManager` builds `masterGain` / `sfxGain` / `musicGain`; `MusicSystem` builds its own `masterGain`. Both connect to the shared context destination.
+
 ## Key files
 
 - Orchestration: `src/core/GameCoordinator.ts`
@@ -45,7 +54,7 @@ Feature modules under `src/features/` own AI, terrain, effects, powerups, and bo
 - Presentation boundary: `src/core/PresentationRuntimeLoader.ts`, `src/core/PresentationController.ts`
 - HUD tokens: `src/ui/theme/hudTokens.ts` (`injectHudTokens`, `HUD_COLORS`, `HudLayoutDensity`, `LockOnState`)
 - HUD / lock: `src/ui/HUD.ts`, `src/ui/LockOnIndicator.ts` (`setLayoutDensity`)
-- Audio: `src/core/Audio/AudioManager.ts` (`playMissileLockBreak`, `playMissileDry`)
+- Audio: `src/core/Audio/AudioContextHost.ts` (`unlockAudioFromUserGesture`, shared `AudioContext`), `src/core/Audio/AudioManager.ts` (`playMissileLockBreak`, `playMissileDry`), `src/core/Audio/MusicSystem.ts`
 - Config: `src/config.ts`, `public/config/game-config.json`
 - Player: `src/core/systems/PlayerSystem.ts` (`setCrashSurfaceSampler`), `src/features/player/PlayerController.ts`
 - Enemy AI: `src/features/enemy/EnemyAI.ts`

@@ -1,3 +1,4 @@
+import { unlockAudioFromUserGesture } from './core/Audio/AudioContextHost';
 import { getLogger } from './core/utils/Logger';
 import { configLoader } from './core/utils/ConfigLoader';
 import type { GameCoordinator } from './core/GameCoordinator';
@@ -104,11 +105,12 @@ async function main(): Promise<void> {
 
     async function bootGame(settings: GameSettings): Promise<void> {
       showEnteringBattlefield();
+      disposeGame();
+      unlockAudioFromUserGesture();
 
       try {
         const [{ GameCoordinator }] = await Promise.all([import('./core/GameCoordinator')]);
         void GameCoordinator.warmRuntimeChunks();
-        disposeGame();
         const coordinator = new GameCoordinator({
           showStartMenu: false,
           onRetry,

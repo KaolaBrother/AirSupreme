@@ -103,6 +103,29 @@ public setLayoutDensity(density: HudLayoutDensity): void;
 
 `PauseMenu` has no `setLayoutDensity`.
 
+## AudioContextHost
+
+Source: `src/core/Audio/AudioContextHost.ts`.
+
+`AudioManager` and `MusicSystem` acquire/release the same `AudioContext` as holders. SFX and music gain graphs stay separate.
+
+```typescript
+export function getSharedAudioContext(): AudioContext | null;
+export function acquireSharedAudioContext(holder: object): AudioContext | null;
+export function releaseSharedAudioContext(holder: object): void;
+export function resumeSharedAudioContext(): void;
+export function unlockAudioFromUserGesture(): void;
+export function resetSharedAudioContextForTests(): void;
+```
+
+- `getSharedAudioContext()` — current shared context, or `null` if none exists / it is closed.
+- `acquireSharedAudioContext(holder)` — ref-counted get-or-create; last `releaseSharedAudioContext(holder)` closes the context.
+- `resumeSharedAudioContext()` — if the shared context is `suspended` or `interrupted`, calls `resume()`.
+- `unlockAudioFromUserGesture()` — create (if needed) and resume on the user-gesture stack. Unlock itself does not occupy a holder, so `AudioManager` / `MusicSystem` can take over later.
+- `resetSharedAudioContextForTests()` — test isolation only: clear holders, close a live context, drop the singleton. Not a runtime API.
+
+Call sites: `StartMenu.startGame()` and `src/main.ts` `bootGame` call `unlockAudioFromUserGesture()`; `AudioManager.resume()` / `MusicSystem.resume()` call `resumeSharedAudioContext()` after `initContext()`; both dispose paths call `releaseSharedAudioContext(this)`.
+
 ## Missile lock audio
 
 Source: `src/core/Audio/AudioManager.ts`.
