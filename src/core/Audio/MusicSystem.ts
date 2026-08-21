@@ -1,12 +1,14 @@
+import {
+  acquireSharedAudioContext,
+  releaseSharedAudioContext,
+  resumeSharedAudioContext,
+} from '@/core/Audio/AudioContextHost';
 import { getLogger } from '@/core/utils/Logger';
 
 const log = getLogger('MusicSystem');
 
 const clamp01 = (value: number): number => Math.max(0, Math.min(1, value));
 const DEFAULT_CROSSFADE_MS = 800;
-type WebkitAudioWindow = Window & typeof globalThis & {
-  webkitAudioContext?: typeof AudioContext;
-};
 
 type MusicDuckListener = (amount: number, durationMs: number) => void;
 
@@ -139,17 +141,17 @@ export class MusicSystem {
   }
 
   private initContext(): void {
-    if (this.context && this.context.state !== 'closed') return;
+    if (this.isDisposed) return;
+    if (this.context && this.context.state !== 'closed' && this.masterGain) return;
 
     try {
-      const AudioContextCtor =
-        window.AudioContext || (window as WebkitAudioWindow).webkitAudioContext;
-      if (!AudioContextCtor) {
+      const context = acquireSharedAudioContext(this);
+      if (!context) {
         log.warn('Web Audio API not supported for music');
         return;
       }
 
-      this.context = new AudioContextCtor();
+      this.context = context;
       this.masterGain = this.context.createGain();
       this.masterGain.gain.value = MusicSystem.MASTER_OUTPUT_GAIN;
       this.masterGain.connect(this.context.destination);
@@ -183,11 +185,7 @@ export class MusicSystem {
   public resume(): void {
     if (this.isDisposed) return;
     this.initContext();
-    if (this.context?.state === 'suspended') {
-      this.context.resume().catch(() => {
-        log.warn('Music AudioContext resume blocked by autoplay policy');
-      });
-    }
+    resumeSharedAudioContext();
   }
 
   // ==================== 关卡1: 湖畔 - 平和、流畅的A小调 ====================
@@ -2065,9 +2063,10 @@ export class MusicSystem {
       return;
     }
 
-    if (this.context?.state === 'suspended') {
+    const contextState = this.context?.state as string | undefined;
+    if (contextState === 'suspended' || contextState === 'interrupted') {
       this.context
-        .resume()
+        ?.resume()
         .then(() => {
           this.crossfadeTo(level, options);
         })
@@ -2242,15 +2241,16 @@ export class MusicSystem {
     this.stopMusic();
     this.unsubscribeDucking?.();
     this.unsubscribeDucking = undefined;
-    if (this.context) {
-      void this.context.close().catch(() => {
-        // Ignore
-      });
-      this.context = null;
-      this.masterGain = null;
-      this.currentSession = null;
-      this.sessions.clear();
-      this.isDisposed = true;
+    try {
+      this.masterGain?.disconnect();
+    } catch {
+      // Ignore
     }
+    releaseSharedAudioContext(this);
+    this.context = null;
+    this.masterGain = null;
+    this.currentSession = null;
+    this.sessions.clear();
+    this.isDisposed = true;
   }
 }

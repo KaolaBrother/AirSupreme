@@ -1,12 +1,14 @@
+import {
+  acquireSharedAudioContext,
+  releaseSharedAudioContext,
+  resumeSharedAudioContext,
+} from '@/core/Audio/AudioContextHost';
 import { musicDuckingBridge } from '@/core/Audio/MusicSystem';
 import { getLogger } from '@/core/utils/Logger';
 
 const log = getLogger('AudioManager');
 
 const clamp01 = (value: number): number => Math.max(0, Math.min(1, value));
-type WebkitAudioWindow = Window & typeof globalThis & {
-  webkitAudioContext?: typeof AudioContext;
-};
 
 export type AudioBus = 'master' | 'sfx' | 'music';
 
@@ -207,21 +209,28 @@ export class AudioManager {
   }
 
   /**
-   * 初始化音频上下文
+   * 初始化音频上下文（复用共享 AudioContext，本实例增益图只建一次）
    */
   private initContext(): void {
     if (this.isDisposed) return;
-    if (this.context && this.context.state !== 'closed') return;
+    if (
+      this.context &&
+      this.context.state !== 'closed' &&
+      this.masterGain &&
+      this.sfxGain &&
+      this.musicGain
+    ) {
+      return;
+    }
 
     try {
-      const AudioContextCtor =
-        window.AudioContext || (window as WebkitAudioWindow).webkitAudioContext;
-      if (!AudioContextCtor) {
+      const context = acquireSharedAudioContext(this);
+      if (!context) {
         log.warn('Web Audio API not supported');
         return;
       }
 
-      this.context = new AudioContextCtor();
+      this.context = context;
       this.masterGain = this.context.createGain();
       this.sfxGain = this.context.createGain();
       this.musicGain = this.context.createGain();
@@ -334,7 +343,7 @@ export class AudioManager {
     soundType: SoundType,
     durationMs: number
   ): { now: number; context: AudioContext; sfxGain: GainNode } | null {
-    this.initContext();
+    this.resume();
     if (!this.canPlay()) return null;
 
     const policy = this.soundPolicies[soundType];
@@ -401,11 +410,7 @@ export class AudioManager {
   public resume(): void {
     if (this.isDisposed) return;
     this.initContext();
-    if (this.context?.state === 'suspended') {
-      this.context.resume().catch(() => {
-        log.warn('AudioContext resume blocked by autoplay policy');
-      });
-    }
+    resumeSharedAudioContext();
   }
 
   public get isClosed(): boolean {
@@ -2664,32 +2669,24 @@ export class AudioManager {
     this.soundReleaseTimeouts.clear();
     this.activeSoundCounts.clear();
     this.lastSoundPlayTimes.clear();
-    if (this.context?.state === 'running' || this.context?.state === 'suspended') {
-      if (this.masterGain) {
-        this.masterGain.disconnect();
-      }
-      if (this.sfxGain) {
-        this.sfxGain.disconnect();
-      }
-      if (this.musicGain) {
-        this.musicGain.disconnect();
-      }
+    try {
+      this.masterGain?.disconnect();
+      this.sfxGain?.disconnect();
+      this.musicGain?.disconnect();
+    } catch {
+      // Ignore
     }
-    if (this.context) {
-      void this.context.close().catch(() => {
-        // Ignore
-      });
-      this.context = null;
-      this.masterGain = null;
-      this.sfxGain = null;
-      this.musicGain = null;
-      this.engineGain = null;
-      this.engineSubGain = null;
-      this.engineLayerGain = null;
-      this.engineTextureGain = null;
-      this.engineFilter = null;
-      this.engineBandpassFilter = null;
-      this.engineHighpassFilter = null;
-    }
+    releaseSharedAudioContext(this);
+    this.context = null;
+    this.masterGain = null;
+    this.sfxGain = null;
+    this.musicGain = null;
+    this.engineGain = null;
+    this.engineSubGain = null;
+    this.engineLayerGain = null;
+    this.engineTextureGain = null;
+    this.engineFilter = null;
+    this.engineBandpassFilter = null;
+    this.engineHighpassFilter = null;
   }
 }

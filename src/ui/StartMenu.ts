@@ -1,4 +1,5 @@
 import { type QualityPreset } from '@/config';
+import { unlockAudioFromUserGesture } from '@/core/Audio/AudioContextHost';
 import {
   DEFAULT_START_FLOW_SETTINGS,
   getAudioSettings,
@@ -630,6 +631,7 @@ export class StartMenu {
   }
 
   private startGame(): void {
+    unlockAudioFromUserGesture();
     this.container.style.display = 'none';
     this.onStart?.(this.settings);
   }

@@ -402,6 +402,10 @@
 - [done] BGM/SFX 已拆分并接入设置
 - [done] 交叉淡入淡出和 ducking 已有基线
 - [done] 重新审校关卡音乐与战斗音效平衡（第一轮）
+- [done] 战斗音效解锁：SFX 与 BGM 共用一个 `AudioContext`
+  - 开始按钮 / 重试点击栈上同步 `unlockAudioFromUserGesture()`（任何 `await` 之前）
+  - `beginSound()` 在 `suspended` / `interrupted` 时补 `resume()`，开火手势可自救
+  - 入口：`src/core/Audio/AudioContextHost.ts`
 - [later] 关卡完成 / Boss 击破 / 临界血量阶段增加更明确音乐动机
 
 ### D. 玩法与体验

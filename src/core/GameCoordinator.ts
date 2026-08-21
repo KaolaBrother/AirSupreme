@@ -251,7 +251,6 @@ export class GameCoordinator {
   private multiShotActive: boolean = false;
   private lastMissileLockState: string | null = null;
 
-  private audioInitialized: boolean = false;
   private upgradeMenuPromise: Promise<UpgradeMenu> | null = null;
   private pauseMenuPromise: Promise<PauseMenu> | null = null;
 
@@ -1485,11 +1484,8 @@ export class GameCoordinator {
     this.applyCurrentLevelEnvironment();
     this.syncCameraInterpolationState();
 
-    if (!this.audioInitialized) {
-      this.audioManager.resume();
-      this.musicSystem.resume();
-      this.audioInitialized = true;
-    }
+    this.audioManager.resume();
+    this.musicSystem.resume();
 
     this.missileCount = GAME_CONSTANTS.MISSILE.STARTING_MISSILES;
     this.lowHealthWarningTimer = 0;
