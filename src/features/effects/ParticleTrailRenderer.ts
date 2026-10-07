@@ -45,7 +45,14 @@ export class ParticleTrailRenderer {
     }
 
     // 创建径向渐变（中心亮，边缘透明）
-    const gradient = context.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+    const gradient = context.createRadialGradient(
+      size / 2,
+      size / 2,
+      0,
+      size / 2,
+      size / 2,
+      size / 2
+    );
     gradient.addColorStop(0, 'rgba(255, 255, 255, 1)');
     gradient.addColorStop(0.3, 'rgba(255, 255, 255, 0.8)');
     gradient.addColorStop(0.5, 'rgba(255, 255, 255, 0.4)');

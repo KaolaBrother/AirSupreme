@@ -46,7 +46,7 @@ const PALETTES: Record<
     fireHueJitter: 0.03,
     fireLightness: 0.5,
     sparkColor: 0xffc45a,
-    emberColor: 0xff8a2e,
+    emberColor: 0xffa23a,
     smokeLightness: 0.13,
     ringColor: 0xff9a52,
   },
@@ -56,7 +56,7 @@ const PALETTES: Record<
     fireHueJitter: 0.026,
     fireLightness: 0.48,
     sparkColor: 0xffb070,
-    emberColor: 0xff6a2a,
+    emberColor: 0xff9030,
     smokeLightness: 0.1,
     ringColor: 0xffb866,
   },
@@ -76,7 +76,7 @@ const PALETTES: Record<
     fireHueJitter: 0.03,
     fireLightness: 0.47,
     sparkColor: 0xffb24d,
-    emberColor: 0xff6a24,
+    emberColor: 0xff9a34,
     smokeLightness: 0.09,
     ringColor: 0xff7b4f,
   },
@@ -220,7 +220,7 @@ export function emitLayeredExplosion(
       life: rand(1.1, 2.3),
       size: rand(0.5, 0.85) * root,
       color: scratchColor.set(palette.emberColor),
-      intensity: 4,
+      intensity: 2.4,
       gravityScale: 0.9,
       smokeTrail: i % 2 === 0,
     });
@@ -254,16 +254,16 @@ export function emitLayeredExplosion(
         scratchVelocity
           .set(rand(-1.5, 1.5), rand(2.5, 5.5), rand(-1.5, 1.5))
           .multiplyScalar(0.7 + 0.3 * root);
-        const light = palette.smokeLightness + Math.random() * 0.07;
+        const light = palette.smokeLightness * 0.8 + Math.random() * 0.05;
         fx.emit(ParticleType.SMOKE, scratchPosition, {
           speed: 0,
           velocity: scratchVelocity,
           life: rand(2.6, 4.6) * (0.8 + 0.2 * smokeScale),
           size: rand(2.4, 4) * s,
           sizeEnd: rand(2.6, 3.2),
-          color: scratchColor.setHSL(0.06, 0.12, light),
-          colorEnd: scratchColorEnd.setHSL(0.06, 0.05, light + 0.2),
-          alpha: 0.78,
+          color: scratchColor.setHSL(0.06, 0.14, light),
+          colorEnd: scratchColorEnd.setHSL(0.06, 0.06, light + 0.13),
+          alpha: 0.86,
           drag: 0.9,
           gravityScale: -0.08,
         });
@@ -415,8 +415,8 @@ export function emitBossDeathExplosion(
         velocity: scratchVelocity,
         life: rand(2, 3.4),
         size: rand(0.9, 1.4),
-        color: scratchColor.set(0xff8a2e),
-        intensity: 4.5,
+        color: scratchColor.set(0xffa23a),
+        intensity: 2.8,
         gravityScale: 0.85,
         smokeTrail: true,
       });

@@ -165,7 +165,7 @@ export class DebrisField {
       if (chunk.smokeTrail && onTrail) {
         chunk.trailTimer -= deltaTime;
         if (chunk.trailTimer <= 0) {
-          chunk.trailTimer = 0.05 + Math.random() * 0.05;
+          chunk.trailTimer = 0.035 + Math.random() * 0.03;
           onTrail(chunk.position);
         }
       }

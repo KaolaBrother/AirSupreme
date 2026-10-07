@@ -302,8 +302,7 @@ export class SpawnPortal {
 
     // 垂直光柱：微弱呼吸
     this.shaft.scale.set(master, 1, master);
-    this.shaftMaterial.opacity =
-      0.14 * opacityMaster * (0.8 + Math.sin(this.lifetime * 2.6) * 0.2);
+    this.shaftMaterial.opacity = 0.14 * opacityMaster * (0.8 + Math.sin(this.lifetime * 2.6) * 0.2);
 
     // 3. 内旋粒子（0.4~4.25 秒窗口）
     if (progress > 0.08 && progress < 0.85) {

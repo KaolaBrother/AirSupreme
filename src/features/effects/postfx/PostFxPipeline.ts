@@ -5,6 +5,7 @@ import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { createGradeMaterial, createInverseBackgroundMaterial } from './GradeShader';
 import type { ScreenEffectsValues } from './ScreenEffectsState';
+import { installDisplayReferredPatch, setDisplayReferredSceneTarget } from './DisplayReferredPatch';
 
 export interface PostFxGrade {
   exposure: number;
@@ -22,12 +23,14 @@ export interface PostFxQualityOptions {
 }
 
 /** 泛光：基础强度（保证爆炸/自发光有辉光）+ 关卡附加强度 */
-const BASE_BLOOM_STRENGTH = 0.42;
-const LEVEL_BLOOM_GAIN = 1.4;
-const BLOOM_RADIUS = 0.5;
-/** 阈值（场景线性亮度）：高于天空逆变换上限，避免天空/白云整体泛光 */
-const BLOOM_THRESHOLD = 1.6;
-const BLOOM_SMOOTH_WIDTH = 0.9;
+const BASE_BLOOM_STRENGTH = 0.3;
+const LEVEL_BLOOM_GAIN = 1.3;
+const BLOOM_RADIUS = 0.42;
+/** 阈值（场景线性亮度）：高于天空逆变换上限，避免天空/白云整体泛光；爆炸等 HDR 粒子远超此值 */
+const BLOOM_THRESHOLD = 2.3;
+const BLOOM_SMOOTH_WIDTH = 1.2;
+/** 天空逆变换的显示值上限（线性），对应场景亮度约 1.6，低于泛光阈值 */
+const SKY_MAX_DISPLAY = 0.86;
 
 /**
  * 场景渲染 Pass：先以逆 ACES 绘制 sRGB 天空背景，再渲染场景（不让 three 绘制背景），
@@ -74,6 +77,7 @@ class SkyAwareScenePass extends Pass {
       (uniforms.uvTransform.value as THREE.Matrix3).copy(background.matrix);
       uniforms.backgroundIntensity.value = this.scene.backgroundIntensity;
       uniforms.uExposure.value = exposure;
+      uniforms.uMaxTarget.value = SKY_MAX_DISPLAY;
       uniforms.uInvert.value =
         THREE.ColorManagement.getTransfer(background.colorSpace) === THREE.SRGBTransfer ? 1 : 0;
       this.backgroundQuad.render(renderer);
@@ -94,9 +98,11 @@ class SkyAwareScenePass extends Pass {
     if (handled) {
       this.scene.background = null;
     }
+    setDisplayReferredSceneTarget(this.renderToScreen ? null : readBuffer, exposure);
     try {
       renderer.render(this.scene, this.camera);
     } finally {
+      setDisplayReferredSceneTarget(null, exposure);
       if (handled) {
         this.scene.background = background;
       }
@@ -137,7 +143,11 @@ const inverseColor = new THREE.Color();
 
 /** CPU 版逆 ACES（与着色器一致），输入/输出均为线性工作空间颜色 */
 export function inverseAcesColor(color: THREE.Color, exposure: number): THREE.Color {
-  inverseScratch.set(Math.min(color.r, 0.9), Math.min(color.g, 0.9), Math.min(color.b, 0.9));
+  inverseScratch.set(
+    Math.min(color.r, SKY_MAX_DISPLAY),
+    Math.min(color.g, SKY_MAX_DISPLAY),
+    Math.min(color.b, SKY_MAX_DISPLAY)
+  );
   inverseScratch.applyMatrix3(ACES_OUTPUT_INV);
   const solve = (yRaw: number): number => {
     const y = Math.min(Math.max(yRaw, 0), 0.98);
@@ -194,6 +204,7 @@ export class PostFxPipeline {
   ) {
     this.renderer = renderer;
     this.bloomResolution = THREE.MathUtils.clamp(quality.bloomResolution, 0.25, 1);
+    installDisplayReferredPatch();
 
     const size = renderer.getSize(new THREE.Vector2());
     const pixelRatio = renderer.getPixelRatio();
@@ -280,6 +291,7 @@ export class PostFxPipeline {
     uniforms.uEmp.value = effects.empFlash;
     uniforms.uTime.value = effects.time;
     (uniforms.uAspect.value as THREE.Vector2).set(Math.max(1, aspect), Math.max(1, 1 / aspect));
+
     this.composer.render(deltaTime);
   }
 

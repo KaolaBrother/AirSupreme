@@ -126,11 +126,11 @@ const TYPE_PROFILES: Record<ParticleType, TypeProfile> = {
   },
   [ParticleType.EMBER]: {
     cells: [VfxCell.GLOW],
-    additive: 1,
+    additive: 0.75,
     gravity: 1,
     drag: 0.4,
     sizeEnd: 0.6,
-    intensity: 3.5,
+    intensity: 2.6,
     alpha: 1,
     stretch: 0.012,
   },
@@ -199,7 +199,7 @@ const TYPE_PROFILES: Record<ParticleType, TypeProfile> = {
 const WHITE_HOT = new THREE.Color(1, 0.96, 0.88);
 const SOFT_GRAY = new THREE.Color(0.58, 0.58, 0.6);
 const GRAVITY = -9.8;
-const MAX_TRAIL_EMITS = 24;
+const MAX_TRAIL_EMITS = 32;
 const BUDGET_REFRESH_SECONDS = 0.5;
 
 /**
@@ -784,15 +784,14 @@ export class ParticleSystem {
             age < 0.2
               ? 0.55 + 0.45 * easeOutCubic(age / 0.2)
               : 1 + (p.sizeEnd - 1) * easeOutCubic((age - 0.2) / 0.8);
-          if (age < 0.2) {
-            color.copy(WHITE_HOT).lerp(p.c1, age / 0.2);
-          } else if (age < 0.42) {
-            color.copy(p.c1);
+          if (age < 0.18) {
+            color.copy(WHITE_HOT).lerp(p.c1, age / 0.18);
           } else {
-            color.copy(p.c1).lerp(p.c0, smoothstep(0.42, 0.8, age));
+            // 先在加色阶段变暗（避免中间色调的“土黄”），再切换为普通混合的煤烟
+            color.copy(p.c1).lerp(p.c0, smoothstep(0.3, 0.62, age));
           }
-          intensity = p.intensity + (1 - p.intensity) * smoothstep(0.3, 0.7, age);
-          additive = p.additive * (1 - smoothstep(0.38, 0.78, age));
+          intensity = p.intensity + (1 - p.intensity) * smoothstep(0.25, 0.55, age);
+          additive = p.additive * (1 - smoothstep(0.45, 0.75, age));
           alpha *= Math.min(1, age * 14) * Math.pow(1 - age, 0.75);
           break;
         }
@@ -891,7 +890,7 @@ export class ParticleSystem {
       if (p.smokeTrail) {
         p.trailTimer -= dt;
         if (p.trailTimer <= 0 && this.trailEmitCount < MAX_TRAIL_EMITS) {
-          p.trailTimer = 0.05 + Math.random() * 0.04;
+          p.trailTimer = 0.035 + Math.random() * 0.025;
           this.trailEmitQueue[this.trailEmitCount++].copy(p.position);
         }
       }
@@ -903,10 +902,10 @@ export class ParticleSystem {
     if (this.trailEmitCount > 0) {
       for (let i = 0; i < this.trailEmitCount; i++) {
         this.spawnParticle(ParticleType.SMOKE, this.trailEmitQueue[i], {
-          speed: 0.5 + Math.random() * 0.6,
-          life: 0.7 + Math.random() * 0.5,
-          size: 0.7 + Math.random() * 0.4,
-          sizeEnd: 2.4,
+          speed: 0.4 + Math.random() * 0.5,
+          life: 0.8 + Math.random() * 0.5,
+          size: 1 + Math.random() * 0.4,
+          sizeEnd: 2.6,
           color: this.trailColor.setRGB(0.16, 0.15, 0.14),
           alpha: 0.5,
         });
