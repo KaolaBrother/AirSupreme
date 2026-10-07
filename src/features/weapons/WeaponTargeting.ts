@@ -56,6 +56,36 @@ export function isTargetAlive(target: CombatTarget): boolean {
 }
 
 /**
+ * 安全地对目标造成伤害：包装层抛错时吞掉异常，避免一次命中打断整帧武器更新。
+ * 返回是否成功调用。
+ */
+export function safeApplyDamage(
+  target: CombatTarget,
+  amount: number,
+  source: DamageSource,
+  hitPoint?: THREE.Vector3
+): boolean {
+  if (!(amount > 0) || !Number.isFinite(amount)) return false;
+  try {
+    target.applyDamage(amount, source, hitPoint);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** 安全地施加瘫痪（目标不支持时忽略） */
+export function safeApplyStun(target: CombatTarget, seconds: number): boolean {
+  if (typeof target.applyStun !== 'function' || !(seconds > 0)) return false;
+  try {
+    target.applyStun(seconds);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * 一帧的目标快照：每个目标每帧只读取一次世界坐标，供射线 / 溅射 / 近炸复用。
  */
 export interface TargetSnapshot {
@@ -261,7 +291,7 @@ export function applySplashDamage(
       continue;
     }
     if (!isTargetAlive(entry.target)) continue;
-    entry.target.applyDamage(amount, source, center);
+    if (!safeApplyDamage(entry.target, amount, source, center)) continue;
     onDamaged?.(entry, amount);
     hits++;
   }

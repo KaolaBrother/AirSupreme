@@ -11,6 +11,8 @@ import {
   isDroneTarget,
   isFiniteVector,
   isTargetAlive,
+  safeApplyDamage,
+  safeApplyStun,
   segmentPointDistanceSq,
   type TargetSnapshot,
 } from './WeaponTargeting';
@@ -849,7 +851,7 @@ export class LaserController {
     this.end.copy(this.origin).addScaledVector(dir, bestT);
     if (bestTarget) {
       this.hitPoint.copy(this.end);
-      bestTarget.applyDamage(stats.damage * deltaTime, 'laser', this.hitPoint);
+      safeApplyDamage(bestTarget, stats.damage * deltaTime, 'laser', this.hitPoint);
       surface = 'air';
     }
 
@@ -1010,7 +1012,7 @@ export class RailgunController {
     for (const hit of this.hits) {
       if (!isTargetAlive(hit.target)) continue;
       this.point.copy(this.origin).addScaledVector(dir, hit.t);
-      hit.target.applyDamage(damage, 'railgun', this.point);
+      safeApplyDamage(hit.target, damage, 'railgun', this.point);
       this.ctx.emitImpact(runtime.id, this.point, 0.8 + charge * 0.6);
       fx?.emitRailImpact(this.point, dir);
     }
@@ -1062,9 +1064,9 @@ export class EmpController {
       const target = entry.target;
       if (!isTargetAlive(target)) continue;
       affected++;
-      target.applyStun?.(stunSeconds);
+      safeApplyStun(target, stunSeconds);
       if (target.kind === 'projectile' || isDroneTarget(target)) {
-        target.applyDamage(stats.damage, 'emp', entry.position);
+        safeApplyDamage(target, stats.damage, 'emp', entry.position);
       }
       fx?.emitStunCrackle(
         entry.position,
