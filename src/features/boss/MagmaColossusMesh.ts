@@ -992,6 +992,96 @@ export function createMagmaColossusMesh(config: BossConfig): THREE.Group {
       0.55
     );
 
+    // 腿部玄武岩甲块（外侧）与膝盖尖刺：让细长的腿在近处也有岩石质感
+    const thighRocks = mergeInto(
+      [
+        placed(
+          new THREE.DodecahedronGeometry(1.0 * s, 0),
+          -0.95 * s,
+          LEG_UPPER * 0.32 * s,
+          0.2 * s,
+          0.3,
+          0.6,
+          0,
+          0.8,
+          1.5,
+          1.1
+        ),
+        placed(
+          new THREE.DodecahedronGeometry(0.9 * s, 0),
+          -0.9 * s,
+          LEG_UPPER * 0.72 * s,
+          -0.25 * s,
+          -0.2,
+          1.1,
+          0,
+          0.75,
+          1.3,
+          1.0
+        ),
+      ],
+      materials.plate,
+      `colossus_thigh_rocks_${def.id}`
+    );
+    thighRocks.castShadow = true;
+    thigh.add(thighRocks);
+    const shinRocks = mergeInto(
+      [
+        placed(
+          new THREE.DodecahedronGeometry(1.05 * s, 0),
+          -0.85 * s,
+          LEG_LOWER * 0.18 * s,
+          0.15 * s,
+          0.2,
+          0.4,
+          0,
+          0.8,
+          1.7,
+          1.1
+        ),
+        placed(
+          new THREE.DodecahedronGeometry(0.95 * s, 0),
+          -0.8 * s,
+          LEG_LOWER * 0.46 * s,
+          -0.2 * s,
+          -0.3,
+          1.3,
+          0,
+          0.75,
+          1.6,
+          1.0
+        ),
+        placed(
+          new THREE.DodecahedronGeometry(0.8 * s, 0),
+          -0.7 * s,
+          LEG_LOWER * 0.7 * s,
+          0.1 * s,
+          0.1,
+          2.1,
+          0,
+          0.7,
+          1.4,
+          0.9
+        ),
+      ],
+      materials.plate,
+      `colossus_shin_rocks_${def.id}`
+    );
+    shinRocks.castShadow = true;
+    shin.add(shinRocks);
+    add(
+      knee,
+      new THREE.ConeGeometry(0.55 * s, 2.4 * s, 5),
+      materials.basalt,
+      `colossus_knee_spike_${def.id}`,
+      -1.6,
+      0.3,
+      0,
+      {
+        z: Math.PI / 2 + 0.35,
+      }
+    );
+
     const foot = new THREE.Group();
     foot.name = `colossus_foot_${def.id}`;
     legsRoot.add(foot);
