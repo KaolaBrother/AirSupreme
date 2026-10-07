@@ -20,11 +20,22 @@ by the user's interrupt). The user moved the run to their own computer (Claude d
 tooling (eslint, vitest, vite build, real GPU browser) can run, with their local clone as the git home.
 Integration branch pushed to origin; WIP branches batch/audio, batch/progression, batch/story-ui pushed too.
 Per-batch wiring instructions and known gaps: integration-notes.md (read it before integrating).
+Session 3 (2026-10-07/08, cloud session linked to the user's Mac): the Mac-side sandbox shell has no route to
+GitHub or npm, Terminal typing is blocked, and the user cannot run npm — so the git home is the cloud clone
+(/home/claude/airsupreme), the local clone is kept in sync by git bundles over the device bridge, and gates run in
+the cloud on a copy of the user's installed node_modules (/home/claude/node_modules). Harness: /home/claude/harness
+(README inside; vitest needs ESBUILD_BINARY_PATH=/home/claude/harness/esbuild-shim.sh). Baseline at 25a103c:
+tsc clean · lint 2 errors (no-this-alias) · vitest 397 pass / 2 stale boss pins · `vite build` blocked (no Linux
+Rollup native) · harness reproduces the VFX regression (alternating frames, see VFX item).
 
 - item: Survey the codebase and build a sandbox verification harness (esbuild bundle + static server + Playwright smoke + bun test baseline + vitest type shim)
   status: done
   dispatched: self; four read-only Explore maps (terrain, audio, VFX, bosses) returned inline
   result: harness in session scratchpad; baseline screenshots render level 1; prod/tests typecheck clean; bun baseline 320 pass
+
+- item: Make the real gates runnable in the sandbox — vitest (esbuild shim) and `vite build` via a pure-JS stand-in for Rollup's missing Linux native binding (acorn → Rollup AST buffer, round-trip-validated)
+  status: in-flight
+  dispatched: session 3 · infra engineer (reasoning tier) in /home/claude/harness/rollup-native (no repo changes); output = @rollup/rollup-linux-x64-gnu stand-in under /home/claude/node_modules + validation report
 
 - item: Lay foundation contracts — CampaignData (10-chapter story), BossTypes 6-10 + BossContracts, CombatContracts, Faction.CIVILIAN, getLevelScaling
   status: done
@@ -69,7 +80,8 @@ Per-batch wiring instructions and known gaps: integration-notes.md (read it befo
   result: 13 commits merged as 8995456; 11 files; logic script 92/92; tsc/bun/bundle/prettier clean; visuals tuned under SwiftShader only — re-check glow through post-fx on a real GPU
 
 - item: VFX overhaul — instanced particle backend, upgraded recipes, contrails, post-processing (bloom/grade/vignette/screen effects), hex shield
-  status: todo
+  status: in-flight
+  dispatched: session 3 · regression fix = orchestrator single-file change to src/features/effects/postfx/PostFxPipeline.ts on workflow/ten-level-campaign (cause measured by the harness: the final ShaderPass keeps needsSwap=true, so every other frame RenderPass draws into the depthless 1×1-turned-full-size writeBuffer); regression test + stale boss pins = tdd-guide (reasoning tier) in /home/claude/wt/vfx-tests on batch/vfx-tests; lint no-this-alias ×2 = build-error-resolver (standard tier) in /home/claude/wt/lint on batch/lint; output = commits on those branches + reports; real-GPU look = orchestrator via a private artifact in the user's Claude browser pane
   dispatched: round 1 · implementer (reasoning tier) in /home/claude/wt/vfx on batch/vfx; output = commits on batch/vfx + final report
   result (partial): worker stopped by the user's interrupt after 70d039f with no report; 9 commits merged as 310cd42 + typecheck fix c11ee94 so the work is preserved; REGRESSION under the composer (quality preset): player jet body not drawn, enemy jets translucent — performance preset and pre-VFX tree are fine. Next: fix forward on the integration branch, then verify (real vitest/eslint/build + real-GPU look) — details in integration-notes.md
 
