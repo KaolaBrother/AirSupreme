@@ -272,9 +272,9 @@ export class MagmaColossusStompMarker {
   private time = 0;
   private visibleProgress = 0;
 
-  constructor(parent: THREE.Object3D) {
+  constructor(parent: THREE.Object3D, name: string = 'colossus_stomp_marker') {
     this.root = new THREE.Group();
-    this.root.name = 'colossus_stomp_marker';
+    this.root.name = name;
     this.root.visible = false;
     parent.add(this.root);
     this.ringGeometry = new THREE.RingGeometry(0.95, 1, 72, 1);

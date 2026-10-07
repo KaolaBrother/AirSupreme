@@ -411,7 +411,7 @@ export class AbyssalLeviathanAI implements IAdvancedBoss {
     this.shards = new AbyssalLeviathanShards(this.hazardRoot, 36, 2.2 * sf);
     this.wake = new AbyssalLeviathanWake(this.hazardRoot, 150 * sf, 90 * sf);
     this.lane = new AbyssalLeviathanLaneMarker(this.hazardRoot);
-    this.breachMarker = new SurfaceWarningMarker(this.hazardRoot);
+    this.breachMarker = new SurfaceWarningMarker(this.hazardRoot, 'leviathan_breach_marker');
     for (let i = 0; i < MAX_PENDING_TORPEDOES; i++) {
       this.pendingTorpedoes.push({ active: false, timer: 0, position: new THREE.Vector3() });
     }
