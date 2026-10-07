@@ -256,7 +256,13 @@ export class ProjectileController {
       projectile.velocity.copy(this.tmpB).multiplyScalar(projectile.speed);
       projectile.maxLife = projectile.range / projectile.speed + 1;
       if (fx) {
-        fx.emitMuzzleFlash(projectile.position, this.tmpB, frame.carry, ROCKET_FLASH, 0.9);
+        fx.particles.emitMuzzleFlash(
+          projectile.position,
+          this.tmpB,
+          frame.carry,
+          ROCKET_FLASH,
+          0.9
+        );
       }
     } else {
       // 微型导弹：从机腹两侧弹出，向外 / 向上绽开后点火
@@ -279,7 +285,13 @@ export class ProjectileController {
       projectile.wobbleFreq = 5 + Math.random() * 4;
       projectile.wobbleAmp = 0.3 + Math.random() * 0.25;
       if (fx) {
-        fx.emitMuzzleFlash(projectile.position, this.tmpB, frame.carry, SWARM_FLASH, 0.55);
+        fx.particles.emitMuzzleFlash(
+          projectile.position,
+          this.tmpB,
+          frame.carry,
+          SWARM_FLASH,
+          0.55
+        );
       }
     }
     projectile.prevPosition.copy(projectile.position);
@@ -301,7 +313,7 @@ export class ProjectileController {
 
     if (this.checkFlightCollision(rocket, ROCKET_PROXIMITY, null)) return;
 
-    this.ctx.fx?.emitTrail(
+    this.ctx.fx?.particles.emitTrail(
       'rocket',
       rocket.prevPosition,
       rocket.position,
@@ -415,7 +427,7 @@ export class ProjectileController {
 
     if (this.checkFlightCollision(missile, 0, missile.target)) return;
 
-    this.ctx.fx?.emitTrail(
+    this.ctx.fx?.particles.emitTrail(
       'swarm',
       missile.prevPosition,
       missile.position,
@@ -532,7 +544,12 @@ export class ProjectileController {
     this.ctx.emitImpact(id, position, scale);
     const fx = this.ctx.fx;
     if (fx) {
-      fx.emitDetonation(position, projectile.kind === 'rocket' ? 1 : 0.7, surface, projectile.kind);
+      fx.particles.emitDetonation(
+        position,
+        projectile.kind === 'rocket' ? 1 : 0.7,
+        surface,
+        projectile.kind
+      );
     }
     const ps = this.ctx.particleSystem;
     if (ps && this.psCooldown <= 0) {

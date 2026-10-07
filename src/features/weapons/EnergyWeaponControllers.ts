@@ -132,9 +132,9 @@ export class LaserController {
     const fx = this.ctx.fx;
     if (fx) {
       fx.setLaserBeam(true, frame.position, this.end, hitSomething, runtime.heat);
-      fx.emitLaserMuzzle(frame.position, frame.carry);
+      fx.particles.emitLaserMuzzle(frame.position, frame.carry);
       if (hitSomething) {
-        fx.emitLaserImpact(this.end, dir, deltaTime, surface);
+        fx.particles.emitLaserImpact(this.end, dir, deltaTime, surface);
       }
     }
 
@@ -145,7 +145,7 @@ export class LaserController {
       if (fx) {
         this.hitPoint.copy(frame.carry).multiplyScalar(0.6);
         this.hitPoint.y += 3;
-        fx.emitPuff(frame.position, this.hitPoint, 1.2, 5.5, 1.3, OVERHEAT_STEAM, 0.5);
+        fx.particles.emitPuff(frame.position, this.hitPoint, 1.2, 5.5, 1.3, OVERHEAT_STEAM, 0.5);
       }
       this.ctx.emitOverheat();
       return true;
@@ -282,15 +282,15 @@ export class RailgunController {
       this.point.copy(this.origin).addScaledVector(dir, hit.t);
       safeApplyDamage(hit.target, damage, 'railgun', this.point);
       this.ctx.emitImpact(runtime.id, this.point, 0.8 + charge * 0.6);
-      fx?.emitRailImpact(this.point, dir);
+      fx?.particles.emitRailImpact(this.point, dir);
     }
     this.hits.length = 0;
 
     this.end.copy(this.origin).addScaledVector(dir, maxT);
     if (surface !== 'air') {
       this.ctx.emitImpact(runtime.id, this.end, 0.6 + charge * 0.5);
-      fx?.emitDetonation(this.end, 0.45 + charge * 0.35, surface, 'swarm');
-      fx?.emitRailImpact(this.end, dir);
+      fx?.particles.emitDetonation(this.end, 0.45 + charge * 0.35, surface, 'swarm');
+      fx?.particles.emitRailImpact(this.end, dir);
     }
     fx?.fireRailTracer(this.origin, this.end, charge);
     this.ctx.emitFired(runtime.id, this.origin, dir);
@@ -336,7 +336,7 @@ export class EmpController {
       if (target.kind === 'projectile' || isDroneTarget(target)) {
         safeApplyDamage(target, stats.damage, 'emp', entry.position);
       }
-      fx?.emitStunCrackle(
+      fx?.particles.emitStunCrackle(
         entry.position,
         entry.radius,
         (Math.max(0, distance) / Math.max(1, radius)) * EMP_WAVE_TIME
