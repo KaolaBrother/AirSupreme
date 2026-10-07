@@ -101,6 +101,8 @@ function applyEnvelope(
   const hold = Math.max(0, shape.hold ?? 0);
   const decay = Math.max(0.008, shape.decay);
   const peak = Math.max(MIN_GAIN, shape.peak * level);
+  // 声层起点通常不在帧边界：固有值先清零，避免声源先于包络一帧发声造成爆音
+  param.value = 0;
   param.setValueAtTime(0, start);
   param.linearRampToValueAtTime(peak, start + attack);
   if (hold > 0) {
@@ -155,7 +157,10 @@ function createFilter(
   return filter;
 }
 
-/** 低频振荡器 → 深度增益 → 目标参数；返回 LFO（需要随声部一起 stop） */
+/**
+ * 低频振荡器 → 深度增益 → 目标参数。LFO 只登记到 parts.sources，由调用方统一 start / stop
+ * （同一声源 start 两次会抛 InvalidStateError，导致后续声层全部丢失）。
+ */
 function attachLfo(
   ctx: BaseAudioContext,
   target: AudioParam,
@@ -172,7 +177,6 @@ function attachLfo(
   amount.gain.setValueAtTime(depth, start);
   lfo.connect(amount);
   amount.connect(target);
-  lfo.start(start);
   parts.sources.push(lfo);
   parts.nodes.push(lfo, amount);
 }
@@ -222,8 +226,7 @@ function finish(parts: VoiceParts, start: number, end: number): number {
   return Math.max(start, end);
 }
 
-/** 振荡器声部 */
-export function tone(s: SfxTarget, spec: ToneSpec): number {
+function toneLayer(s: SfxTarget, spec: ToneSpec): number {
   const { ctx } = s;
   const start = s.t + (spec.at ?? 0);
   const parts: VoiceParts = { sources: [], nodes: [] };
@@ -259,8 +262,7 @@ export function tone(s: SfxTarget, spec: ToneSpec): number {
   return finish(parts, start, end);
 }
 
-/** 缓存噪声声部（白 / 粉 / 布朗），随机起点，每次听感不同 */
-export function noise(s: SfxTarget, spec: NoiseSpec): number {
+function noiseLayer(s: SfxTarget, spec: NoiseSpec): number {
   const { ctx } = s;
   const start = s.t + (spec.at ?? 0);
   const parts: VoiceParts = { sources: [], nodes: [] };
@@ -291,8 +293,7 @@ export function noise(s: SfxTarget, spec: NoiseSpec): number {
   return finish(parts, start, end);
 }
 
-/** 两算子 FM：金属 / 钟 / 能量护盾类音色 */
-export function fm(s: SfxTarget, spec: FmSpec): number {
+function fmLayer(s: SfxTarget, spec: FmSpec): number {
   const { ctx } = s;
   const start = s.t + (spec.at ?? 0);
   const parts: VoiceParts = { sources: [], nodes: [] };
@@ -320,6 +321,30 @@ export function fm(s: SfxTarget, spec: FmSpec): number {
   return finish(parts, start, end);
 }
 
+/** 单个声层失败（例如受限的测试替身）只丢掉这一层，不影响其余声层 */
+function safeLayer<T>(build: (s: SfxTarget, spec: T) => number, s: SfxTarget, spec: T): number {
+  try {
+    return build(s, spec);
+  } catch {
+    return s.t;
+  }
+}
+
+/** 振荡器声部 */
+export function tone(s: SfxTarget, spec: ToneSpec): number {
+  return safeLayer(toneLayer, s, spec);
+}
+
+/** 缓存噪声声部（白 / 粉 / 布朗），随机起点，每次听感不同 */
+export function noise(s: SfxTarget, spec: NoiseSpec): number {
+  return safeLayer(noiseLayer, s, spec);
+}
+
+/** 两算子 FM：金属 / 钟 / 能量护盾类音色 */
+export function fm(s: SfxTarget, spec: FmSpec): number {
+  return safeLayer(fmLayer, s, spec);
+}
+
 /** 持续声部的控制柄（激光束 / 电磁炮蓄力） */
 export interface SustainedSfx {
   /** 以给定淡出时长停止；重复调用安全 */
@@ -337,6 +362,7 @@ export interface SustainedBuilder {
 /** 为持续声部创建总线（淡入到 level），调用方往 bus 里接声源 */
 export function beginSustained(s: SfxTarget, fadeIn: number, level: number): SustainedBuilder {
   const bus = s.ctx.createGain();
+  bus.gain.value = 0;
   bus.gain.setValueAtTime(0, s.t);
   bus.gain.linearRampToValueAtTime(
     Math.max(MIN_GAIN, level * s.level),

@@ -168,6 +168,8 @@ export function applyPercussiveEnvelope(
 ): number {
   const safeAttack = Math.max(0.001, attack);
   const safeDecay = Math.max(0.005, decay);
+  // 声源可能比首个自动化事件早一帧开始（起点不在帧边界上），先把固有值清零避免单帧爆音
+  param.value = 0;
   param.setValueAtTime(0, start);
   param.linearRampToValueAtTime(Math.max(MIN_GAIN, peak), start + safeAttack);
   param.exponentialRampToValueAtTime(MIN_GAIN, start + safeAttack + safeDecay);

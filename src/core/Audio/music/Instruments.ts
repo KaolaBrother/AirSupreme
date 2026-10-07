@@ -209,6 +209,8 @@ export function applyAdsr(
   const safeDecay = Math.max(0.005, decay);
   const sustainLevel = Math.max(MIN_GAIN, safePeak * clamp01(sustain));
   const safeGate = Math.max(0.005, gate);
+  // 起点不在帧边界时声源可能先于包络一帧发声：固有值先清零
+  param.value = 0;
   param.setValueAtTime(0, start);
   if (safeGate <= safeAttack) {
     param.linearRampToValueAtTime(
@@ -372,6 +374,7 @@ function clapVoice(host: VoiceHost, p: InstrumentParams, n: VoiceNote): VoiceRes
   const filter = createFilter(ctx, 'bandpass', p.cutoff ?? 1150, 1.3, t);
   const gain = ctx.createGain();
   const g = gain.gain;
+  g.value = 0;
   g.setValueAtTime(0, t);
   for (let i = 0; i < 3; i++) {
     const burst = t + i * 0.011;
@@ -446,6 +449,7 @@ function riserVoice(host: VoiceHost, p: InstrumentParams, n: VoiceNote): VoiceRe
   const filter = createFilter(ctx, 'bandpass', p.cutoff ?? 300, p.resonance ?? 3, t);
   filter.frequency.exponentialRampToValueAtTime(safeFrequency((p.cutoff ?? 300) * 20), t + length);
   const gain = ctx.createGain();
+  gain.gain.value = 0;
   gain.gain.setValueAtTime(0, t);
   gain.gain.linearRampToValueAtTime(level * 0.25, t + length * 0.6);
   gain.gain.linearRampToValueAtTime(level, t + length);
@@ -618,6 +622,7 @@ function pluckVoice(host: VoiceHost, p: InstrumentParams, n: VoiceNote): VoiceRe
   filter.frequency.exponentialRampToValueAtTime(safeFrequency(cutoff * 0.35), t + decay);
   const amp = ctx.createGain();
   const holdEnd = t + Math.max(0.02, Math.min(decay, n.duration));
+  amp.gain.value = 0;
   amp.gain.setValueAtTime(0, t);
   amp.gain.linearRampToValueAtTime(Math.max(MIN_GAIN, level), t + 0.003);
   amp.gain.exponentialRampToValueAtTime(Math.max(MIN_GAIN, level * 0.08), t + decay);
