@@ -903,7 +903,6 @@ export class MagmaColossusAI implements IAdvancedBoss {
 
   private handleFootfall(leg: LegState): void {
     this.fx.emit('createGroundImpact', leg.current, 1.5, 'ground');
-    this.fx.emit('createShockwave', leg.current, 24 * this.sizeFactor, 0.55, 0x9a7458, 0.4);
     this.bodyBobVelocity -= 5.5 * this.sizeFactor;
     this.emitCue('footfall', leg.current, 0.55);
   }
@@ -1094,12 +1093,13 @@ export class MagmaColossusAI implements IAdvancedBoss {
 
   private handleShellArrive(position: THREE.Vector3, spec: ArcShellSpec): void {
     this.fx.emit('createExplosion', position, 1.5, 'enemy');
-    this.fx.emit('createShockwave', position, spec.burstRadius * 1.15, 0.45, 0xff8a3a, 0.75);
     if (spec.groundY !== null && position.y - spec.groundY < 12) {
       this.fx.emit('createGroundImpact', position, 1.4, 'ground');
     }
+    // 粒子系统的冲击波环是全局共享的小池子：同一轮齐射只画一圈，音效同样节流
     if (this.time - this.lastImpactCue > 0.3) {
       this.lastImpactCue = this.time;
+      this.fx.emit('createShockwave', position, spec.burstRadius * 1.15, 0.45, 0xff8a3a, 0.75);
       this.emitCue('mortar-impact', position, 0.7);
     }
   }
