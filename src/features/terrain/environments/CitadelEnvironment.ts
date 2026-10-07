@@ -77,7 +77,7 @@ export class CitadelEnvironment extends EnvironmentBase {
         roughness: 0.42,
         metalness: 0.25,
         // 熔火映照：抬起黑曜石暗部，避免整片死黑
-        emissive: new THREE.Color(tokens.glow).multiplyScalar(0.08),
+        emissive: new THREE.Color(tokens.glow).multiplyScalar(0.03),
       })
     );
     ground.name = 'citadelCraterGround';
