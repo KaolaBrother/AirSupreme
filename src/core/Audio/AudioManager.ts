@@ -1386,7 +1386,7 @@ export class AudioManager {
   }
 
   public playGroundImpact(
-    surface: 'ground' | 'desert' | 'snow' | 'city',
+    surface: 'ground' | 'desert' | 'snow' | 'city' | 'lava' | 'ice' | 'rock' | 'cloud',
     intensity: number = 1
   ): void {
     switch (surface) {
