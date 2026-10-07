@@ -259,6 +259,8 @@ export interface PuffFieldOptions {
   additive?: boolean;
   /** 出生瞬间的提亮（熔岩蒸汽、炉口火光：底部发亮） */
   baseGlow?: THREE.ColorRepresentation;
+  /** 翻滚感 0..1：边缘侵蚀成菜花状并带自阴影（火山灰柱 / 浓烟用高值），默认 0.35 */
+  billow?: number;
   name: string;
   seed?: number;
 }
@@ -304,6 +306,7 @@ const PUFF_VERTEX = /* glsl */ `
 
 const PUFF_FRAGMENT = /* glsl */ `
   uniform float uOpacity;
+  uniform float uBillow;
   uniform vec3 uBaseGlow;
   varying vec2 vUv;
   varying float vAlpha;
@@ -326,8 +329,11 @@ const PUFF_FRAGMENT = /* glsl */ `
   void main() {
     vec2 p = vUv - 0.5;
     float d = length(p) * 2.0;
-    float billow = 0.65 + 0.35 * puffNoise(vUv * 5.0 + vAge * 2.0);
-    float soft = smoothstep(1.0, 0.15, d * (1.15 - 0.3 * billow));
+    float n = puffNoise(vUv * 4.0 + vAge * 2.0) * 0.6 + puffNoise(vUv * 11.0 - vAge * 3.0) * 0.4;
+    float billow = 1.0 - uBillow + uBillow * n;
+    // 噪声侵蚀边缘：翻滚的菜花状轮廓，而非完美圆斑
+    float edge = d + (0.5 - n) * uBillow * 0.9;
+    float soft = smoothstep(1.0, 0.18, edge);
     float alpha = soft * vAlpha * uOpacity;
     #if defined(PUFF_ADDITIVE) && defined(USE_FOG)
       // 加色粒子随雾衰减，而不是叠加雾色
@@ -338,7 +344,9 @@ const PUFF_FRAGMENT = /* glsl */ `
       #endif
     #endif
     if (alpha < 0.004) discard;
-    vec3 col = vColor * (0.82 + 0.3 * billow);
+    // 自阴影：团块下缘偏暗、受光上缘偏亮
+    float shade = 0.78 + 0.32 * billow + 0.18 * uBillow * (vUv.y - 0.5);
+    vec3 col = vColor * shade;
     col += uBaseGlow * (1.0 - smoothstep(0.0, 0.35, vAge));
     gl_FragColor = vec4(col, alpha);
     #include <tonemapping_fragment>
@@ -404,6 +412,7 @@ export function createPuffField(options: PuffFieldOptions): PuffField {
       uTime: { value: 0 },
       uWind: { value: new THREE.Vector2(options.wind.x, options.wind.z) },
       uOpacity: { value: options.opacity },
+      uBillow: { value: THREE.MathUtils.clamp(options.billow ?? 0.35, 0, 1) },
       uBaseGlow: { value: new THREE.Color(options.baseGlow ?? 0x000000) },
     },
   ]);

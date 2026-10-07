@@ -609,8 +609,9 @@ export class VolcanoEnvironment extends EnvironmentBase {
     const ash = createPuffField({
       emitters: ashEmitters,
       wind,
-      opacity: 0.66,
+      opacity: 0.72,
       baseGlow: 0xa8400e,
+      billow: 0.85,
       name: 'volcanoAshPlumes',
       seed: 61,
     });
@@ -657,6 +658,7 @@ export class VolcanoEnvironment extends EnvironmentBase {
       wind,
       opacity: 0.55,
       baseGlow: 0x3a1206,
+      billow: 0.7,
       name: 'foundrySmoke',
       seed: 63,
     });
