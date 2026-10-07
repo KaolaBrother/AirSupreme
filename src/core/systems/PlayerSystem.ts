@@ -7,6 +7,7 @@ import { HealthSystem } from '@/features/combat/HealthSystem';
 import { PlayerStats } from '@/features/upgrade/UpgradeSystem';
 import { WORLDSCAPE_WATER_Y } from '@/features/terrain/TerrainGenerator';
 import { HUD_COLORS } from '@/ui/theme/hudTokens';
+import { ShieldRipple } from '@/features/effects/ShieldRipple';
 
 export class PlayerSystem implements IGameSystem {
   readonly name = 'PlayerSystem';
@@ -27,6 +28,8 @@ export class PlayerSystem implements IGameSystem {
   private shieldActive: boolean = false;
   private shieldGroup?: THREE.Group;
   private readonly shieldMaterials: THREE.MeshBasicMaterial[] = [];
+  private shieldRipple?: ShieldRipple;
+  private readonly shieldHitDirection = new THREE.Vector3();
   private shieldTime: number = 0;
   private shieldFade: number = 0;
   private shieldFadingOut: boolean = false;
@@ -85,7 +88,40 @@ export class PlayerSystem implements IGameSystem {
     this.updateLastSafeRespawnPosition();
   }
 
-  dispose(): void {}
+  dispose(): void {
+    if (this.shieldGroup) {
+      this.shieldRipple?.dispose();
+      this.shieldRipple = undefined;
+      this.shieldGroup.removeFromParent();
+      this.shieldGroup.traverse((child) => {
+        if (child instanceof THREE.Mesh) {
+          child.geometry.dispose();
+        }
+      });
+      this.shieldMaterials.forEach((material) => material.dispose());
+      this.shieldMaterials.length = 0;
+      this.shieldGroup = undefined;
+    }
+  }
+
+  /**
+   * 护盾受击涟漪：以命中点方向在六边形护盾上播放闪光 + 扩散环（护盾不可见时忽略）
+   */
+  notifyShieldHit(worldPosition: THREE.Vector3): void {
+    if (!this.shieldGroup || !this.shieldGroup.visible || !this.shieldRipple) {
+      return;
+    }
+    const { x, y, z } = worldPosition;
+    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
+      return;
+    }
+    this.shieldHitDirection.copy(worldPosition).sub(this.shieldGroup.position);
+    if (this.shieldHitDirection.lengthSq() < 1e-6) {
+      // 命中点与护盾中心重合时取机头前方
+      this.shieldHitDirection.set(0, 0, -1).applyQuaternion(this.mesh.quaternion);
+    }
+    this.shieldRipple.notifyHit(this.shieldHitDirection);
+  }
 
   private handleDeath(): void {
     this.lives--;
@@ -137,6 +173,7 @@ export class PlayerSystem implements IGameSystem {
       PlayerSystem.SHIELD_BREATHE_MIN +
       (PlayerSystem.SHIELD_BREATHE_MAX - PlayerSystem.SHIELD_BREATHE_MIN) * wave;
     this.shieldGroup.scale.setScalar(breathe);
+    this.shieldRipple?.update(deltaTime);
 
     if (this.shieldFadingOut) {
       const fadeSeconds = PlayerSystem.SHIELD_FADE_MS / 1000;
@@ -150,6 +187,7 @@ export class PlayerSystem implements IGameSystem {
   }
 
   private applyShieldOpacity(fade: number): void {
+    this.shieldRipple?.setFade(fade);
     if (this.shieldMaterials[0]) {
       this.shieldMaterials[0].opacity = PlayerSystem.SHIELD_INNER_OPACITY * fade;
     }
@@ -181,6 +219,9 @@ export class PlayerSystem implements IGameSystem {
     const outer = makeSphere(3.1, PlayerSystem.SHIELD_OUTER_OPACITY);
     group.add(inner);
     group.add(outer);
+    // 六边形能量网格 + 受击涟漪层
+    this.shieldRipple = new ShieldRipple(3.0, sysColor);
+    group.add(this.shieldRipple.mesh);
     scene.add(group);
 
     this.shieldGroup = group;
