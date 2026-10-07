@@ -2,13 +2,16 @@
  * 程序化乐器：每次调用为一个音符搭建一条短命的节点链，并在声源结束后自动断开。
  *
  * 所有乐器只用 Oscillator / Gain / BiquadFilter / BufferSource（缓存噪声），
- * 因此可以在任意 BaseAudioContext（包括 OfflineAudioContext）上运行。
+ * StereoPanner 可选，因此可以在任意 BaseAudioContext（包括 OfflineAudioContext）上运行。
+ * 静态失谐直接换算成频率（不依赖 detune 参数，测试替身也安全）。
  */
 import {
   MIN_GAIN,
   applyPercussiveEnvelope,
+  centsToRatio,
   clamp01,
   createNoiseSource,
+  createPanner,
   disconnectNodes,
   safeFrequency,
 } from '../AudioKit';
@@ -88,7 +91,7 @@ export const INSTRUMENT_DEFAULTS: Readonly<Record<InstrumentKind, InstrumentPara
     release: 0.06,
     level: 0.7,
   },
-  bell: { decay: 1.5, filterEnv: 3.5, detuneCents: 2, level: 0.55 },
+  bell: { decay: 1.5, filterEnv: 3.5, detuneCents: 2, index: 1, level: 0.55 },
   pad: {
     wave: 'sawtooth',
     voices: 2,
@@ -100,6 +103,7 @@ export const INSTRUMENT_DEFAULTS: Readonly<Record<InstrumentKind, InstrumentPara
     sustain: 0.85,
     release: 1.1,
     center: 60,
+    width: 0.6,
     level: 0.6,
   },
   brass: {
@@ -113,6 +117,7 @@ export const INSTRUMENT_DEFAULTS: Readonly<Record<InstrumentKind, InstrumentPara
     sustain: 0.72,
     release: 0.18,
     center: 52,
+    width: 0.35,
     level: 0.7,
   },
   choir: {
@@ -126,12 +131,17 @@ export const INSTRUMENT_DEFAULTS: Readonly<Record<InstrumentKind, InstrumentPara
     vibratoHz: 4.6,
     vibratoCents: 16,
     center: 62,
+    width: 0.5,
     level: 0.75,
   },
 };
 
 /** 估算一个音符会占用的声源数量，供音序器做复音上限控制 */
-export function estimateVoiceCost(kind: InstrumentKind, params: InstrumentParams, notes: number): number {
+export function estimateVoiceCost(
+  kind: InstrumentKind,
+  params: InstrumentParams,
+  notes: number
+): number {
   const count = Math.max(1, notes);
   switch (kind) {
     case 'pad':
@@ -201,7 +211,10 @@ export function applyAdsr(
   const safeGate = Math.max(0.005, gate);
   param.setValueAtTime(0, start);
   if (safeGate <= safeAttack) {
-    param.linearRampToValueAtTime(Math.max(MIN_GAIN, safePeak * (safeGate / safeAttack)), start + safeGate);
+    param.linearRampToValueAtTime(
+      Math.max(MIN_GAIN, safePeak * (safeGate / safeAttack)),
+      start + safeGate
+    );
   } else {
     param.linearRampToValueAtTime(safePeak, start + safeAttack);
     if (safeGate <= safeAttack + safeDecay) {
@@ -234,6 +247,7 @@ function createFilter(
   return filter;
 }
 
+/** 静态失谐换算为频率倍数，不使用 detune 参数 */
 function createOsc(
   ctx: BaseAudioContext,
   type: OscillatorType,
@@ -243,14 +257,11 @@ function createOsc(
 ): OscillatorNode {
   const osc = ctx.createOscillator();
   osc.type = type;
-  osc.frequency.setValueAtTime(safeFrequency(frequency), time);
-  if (detuneCents !== 0) {
-    osc.detune.setValueAtTime(detuneCents, time);
-  }
+  osc.frequency.setValueAtTime(safeFrequency(frequency * centsToRatio(detuneCents)), time);
   return osc;
 }
 
-/** 颤音 LFO：起音后渐入，连接到若干振荡器的 detune */
+/** 颤音 LFO：起音后渐入，连接到若干振荡器的 detune（参数缺失时跳过） */
 function attachVibrato(
   host: VoiceHost,
   targets: readonly OscillatorNode[],
@@ -259,7 +270,7 @@ function attachVibrato(
   start: number,
   nodes: AudioNode[]
 ): OscillatorNode | null {
-  if (rate <= 0 || depthCents <= 0) {
+  if (rate <= 0 || depthCents <= 0 || targets.length === 0 || !targets[0].detune) {
     return null;
   }
   const lfo = createOsc(host.ctx, 'sine', rate, start);
@@ -269,7 +280,9 @@ function attachVibrato(
   depth.gain.linearRampToValueAtTime(depthCents, start + 0.45);
   lfo.connect(depth);
   for (const target of targets) {
-    depth.connect(target.detune);
+    if (target.detune) {
+      depth.connect(target.detune);
+    }
   }
   lfo.start(start);
   nodes.push(lfo, depth);
@@ -404,7 +417,10 @@ function boomVoice(host: VoiceHost, p: InstrumentParams, n: VoiceNote): VoiceRes
   body.start(t);
   const noise = createNoiseSource(ctx, 'brown', host.random);
   const filter = createFilter(ctx, 'lowpass', p.cutoff ?? 1100, 0.8, t);
-  filter.frequency.exponentialRampToValueAtTime(safeFrequency((p.cutoff ?? 1100) * 0.12), t + decay * 0.6);
+  filter.frequency.exponentialRampToValueAtTime(
+    safeFrequency((p.cutoff ?? 1100) * 0.12),
+    t + decay * 0.6
+  );
   const noiseGain = ctx.createGain();
   const noiseEnd = applyPercussiveEnvelope(noiseGain.gain, t, level * 0.7, 0.006, decay * 0.65);
   noise.source.connect(filter);
@@ -468,8 +484,17 @@ function bassVoice(host: VoiceHost, p: InstrumentParams, n: VoiceNote): VoiceRes
   const frequency = midiToFrequency(n.midi[0]);
   const level = (p.level ?? 0.9) * n.velocity;
   const cutoff = (p.cutoff ?? 520) * n.brightness;
-  const filter = createFilter(ctx, 'lowpass', cutoff * (1 + (p.filterEnv ?? 2.2)), p.resonance ?? 2, t);
-  filter.frequency.exponentialRampToValueAtTime(safeFrequency(cutoff), t + (p.decay ?? 0.18) + 0.04);
+  const filter = createFilter(
+    ctx,
+    'lowpass',
+    cutoff * (1 + (p.filterEnv ?? 2.2)),
+    p.resonance ?? 2,
+    t
+  );
+  filter.frequency.exponentialRampToValueAtTime(
+    safeFrequency(cutoff),
+    t + (p.decay ?? 0.18) + 0.04
+  );
   const amp = ctx.createGain();
   const end = applyAdsr(
     amp.gain,
@@ -518,8 +543,17 @@ function leadVoice(host: VoiceHost, p: InstrumentParams, n: VoiceNote): VoiceRes
   const frequency = midiToFrequency(n.midi[0]);
   const level = (p.level ?? 0.75) * n.velocity;
   const cutoff = (p.cutoff ?? 2400) * n.brightness;
-  const filter = createFilter(ctx, 'lowpass', cutoff * (1 + (p.filterEnv ?? 1.2)), p.resonance ?? 3, t);
-  filter.frequency.exponentialRampToValueAtTime(safeFrequency(cutoff), t + (p.decay ?? 0.25) + 0.05);
+  const filter = createFilter(
+    ctx,
+    'lowpass',
+    cutoff * (1 + (p.filterEnv ?? 1.2)),
+    p.resonance ?? 3,
+    t
+  );
+  filter.frequency.exponentialRampToValueAtTime(
+    safeFrequency(cutoff),
+    t + (p.decay ?? 0.25) + 0.05
+  );
   const amp = ctx.createGain();
   const end = applyAdsr(
     amp.gain,
@@ -549,7 +583,14 @@ function leadVoice(host: VoiceHost, p: InstrumentParams, n: VoiceNote): VoiceRes
     [oscB, end + 0.01],
   ];
   if (n.duration > 0.3) {
-    const lfo = attachVibrato(host, [oscA, oscB], p.vibratoHz ?? 5.4, p.vibratoCents ?? 14, t, nodes);
+    const lfo = attachVibrato(
+      host,
+      [oscA, oscB],
+      p.vibratoHz ?? 5.4,
+      p.vibratoCents ?? 14,
+      t,
+      nodes
+    );
     if (lfo) {
       sources.push([lfo, end + 0.01]);
     }
@@ -567,7 +608,13 @@ function pluckVoice(host: VoiceHost, p: InstrumentParams, n: VoiceNote): VoiceRe
   const level = (p.level ?? 0.7) * n.velocity;
   const decay = p.decay ?? 0.32;
   const cutoff = (p.cutoff ?? 2200) * n.brightness;
-  const filter = createFilter(ctx, 'lowpass', cutoff * (1 + (p.filterEnv ?? 2.5)), p.resonance ?? 2, t);
+  const filter = createFilter(
+    ctx,
+    'lowpass',
+    cutoff * (1 + (p.filterEnv ?? 2.5)),
+    p.resonance ?? 2,
+    t
+  );
   filter.frequency.exponentialRampToValueAtTime(safeFrequency(cutoff * 0.35), t + decay);
   const amp = ctx.createGain();
   const holdEnd = t + Math.max(0.02, Math.min(decay, n.duration));
@@ -613,11 +660,18 @@ function bellVoice(host: VoiceHost, p: InstrumentParams, n: VoiceNote): VoiceRes
   const level = (p.level ?? 0.55) * n.velocity;
   const decay = p.decay ?? 1.5;
   const ratio = p.filterEnv ?? 3.5;
+  const indexScale = Math.max(0, p.index ?? 1);
   const carrier = createOsc(ctx, 'sine', frequency, t, p.detuneCents ?? 0);
   const modulator = createOsc(ctx, 'sine', frequency * ratio, t);
   const index = ctx.createGain();
-  index.gain.setValueAtTime(frequency * 1.6 * Math.min(1.6, n.brightness), t);
-  index.gain.exponentialRampToValueAtTime(Math.max(MIN_GAIN, frequency * 0.08), t + decay * 0.6);
+  index.gain.setValueAtTime(
+    Math.max(MIN_GAIN, frequency * 1.6 * indexScale * Math.min(1.6, n.brightness)),
+    t
+  );
+  index.gain.exponentialRampToValueAtTime(
+    Math.max(MIN_GAIN, frequency * 0.08 * indexScale),
+    t + decay * 0.6
+  );
   modulator.connect(index);
   index.connect(carrier.frequency);
   const amp = ctx.createGain();
@@ -636,7 +690,7 @@ function bellVoice(host: VoiceHost, p: InstrumentParams, n: VoiceNote): VoiceRes
   );
 }
 
-/** pad / brass / choir 共用：一组失谐振荡器 → 共享滤波 → 共享振幅包络 */
+/** pad / brass / choir 共用：一组失谐振荡器 →（左右声像）→ 共享滤波 → 共享振幅包络 */
 function stackVoice(
   host: VoiceHost,
   kind: 'pad' | 'brass' | 'choir',
@@ -694,7 +748,10 @@ function stackVoice(
     if (kind === 'pad') {
       // 缓慢的滤波扫频
       filter.frequency.setValueAtTime(safeFrequency(cutoff * 0.55), t);
-      filter.frequency.linearRampToValueAtTime(safeFrequency(cutoff * 1.25), t + Math.max(0.2, n.duration));
+      filter.frequency.linearRampToValueAtTime(
+        safeFrequency(cutoff * 1.25),
+        t + Math.max(0.2, n.duration)
+      );
     } else {
       filter.frequency.setValueAtTime(safeFrequency(cutoff * 0.25), t);
       filter.frequency.exponentialRampToValueAtTime(
@@ -711,25 +768,47 @@ function stackVoice(
     input = filter;
   }
   amp.connect(host.output);
+  // 立体声展开：奇偶声部各走一个声像器
+  const width = clamp01(p.width ?? 0);
+  const left = width > 0 && totalVoices > 1 ? createPanner(ctx, -width) : null;
+  const right = left ? createPanner(ctx, width) : null;
+  if (left && right) {
+    left.connect(input);
+    right.connect(input);
+    nodes.push(left, right);
+  }
   const spread = p.detuneCents ?? 10;
+  let voiceIndex = 0;
   for (const midi of n.midi) {
     const frequency = midiToFrequency(midi);
     for (let v = 0; v < voicesPerNote; v++) {
       const offset =
-        voicesPerNote === 1 ? 0 : (v / (voicesPerNote - 1) - 0.5) * 2 * spread + (host.random() - 0.5) * 3;
-      const wave = kind === 'choir' && v % 2 === 1 ? (p.wave2 ?? 'triangle') : (p.wave ?? 'sawtooth');
+        voicesPerNote === 1
+          ? 0
+          : (v / (voicesPerNote - 1) - 0.5) * 2 * spread + (host.random() - 0.5) * 3;
+      const wave =
+        kind === 'choir' && v % 2 === 1 ? (p.wave2 ?? 'triangle') : (p.wave ?? 'sawtooth');
       const osc = createOsc(ctx, wave, frequency, t, offset);
-      osc.connect(input);
+      const target = left && right ? (voiceIndex % 2 === 0 ? left : right) : input;
+      osc.connect(target);
       osc.start(t);
       oscillators.push(osc);
       nodes.push(osc);
+      voiceIndex += 1;
     }
   }
   const sources: Array<readonly [AudioScheduledSourceNode, number]> = oscillators.map(
     (osc) => [osc, end + 0.01] as const
   );
   if (kind === 'choir') {
-    const lfo = attachVibrato(host, oscillators, p.vibratoHz ?? 4.6, p.vibratoCents ?? 16, t, nodes);
+    const lfo = attachVibrato(
+      host,
+      oscillators,
+      p.vibratoHz ?? 4.6,
+      p.vibratoCents ?? 16,
+      t,
+      nodes
+    );
     if (lfo) {
       sources.push([lfo, end + 0.01]);
     }

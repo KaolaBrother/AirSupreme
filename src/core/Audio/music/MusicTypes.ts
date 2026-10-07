@@ -45,7 +45,7 @@ export interface InstrumentParams {
   cutoff?: number;
   /** 滤波器 Q */
   resonance?: number;
-  /** 滤波包络：峰值 = cutoff × (1 + filterEnv) */
+  /** 滤波包络：峰值 = cutoff × (1 + filterEnv)；bell 用作 FM 调制比 */
   filterEnv?: number;
   attack?: number;
   decay?: number;
@@ -57,7 +57,7 @@ export interface InstrumentParams {
   /** 震音（音量 LFO），用于西部风格的颤音吉他 */
   tremoloHz?: number;
   tremoloDepth?: number;
-  /** 贝斯的同频正弦加厚 */
+  /** 贝斯的低八度正弦加厚 */
   sub?: number;
   /** 打击乐音高包络 */
   pitchStart?: number;
@@ -68,6 +68,10 @@ export interface InstrumentParams {
   center?: number;
   /** 输出音量倍数（instrument 内部配平） */
   level?: number;
+  /** pad / brass / choir 的立体声展开（0..1），奇偶声部左右分开 */
+  width?: number;
+  /** bell 的调制指数倍数（1 为设计值） */
+  index?: number;
 }
 
 export interface ArpSettings {
@@ -93,6 +97,10 @@ export interface TrackDef {
   maxIntensity?: number;
   /** 延迟效果发送量 0..1 */
   send?: number;
+  /** 混响发送量 0..1 */
+  reverb?: number;
+  /** 声像 -1（左）..1（右） */
+  pan?: number;
   /** 设置后该轨道读取和弦样式并按琶音器展开 */
   arp?: ArpSettings;
   /** 强度对滤波亮度的影响 0..1（缺省：鼓 0、贝斯 0.5、其余 1） */
@@ -101,11 +109,14 @@ export interface TrackDef {
 
 export interface SectionDef {
   name: string;
+  /** 小节数（整数） */
   bars: number;
   /** trackId → 样式 id（数组表示按顺序串联） */
   play: Readonly<Record<string, string | readonly string[]>>;
   /** 当前强度低于该值时跳过该段（如 Boss 的高潮段） */
   minIntensity?: number;
+  /** 当前强度高于该值时跳过该段（如安静的间奏） */
+  maxIntensity?: number;
 }
 
 export interface DelaySettings {
@@ -120,8 +131,14 @@ export interface DelaySettings {
 export interface Composition {
   id: string;
   bpm: number;
+  /** 主音音级 0..11（C = 0），刺激音据此移调到当前调性 */
+  key: number;
   /** 0..0.5，偶数位 16 分音符后移比例（shuffle） */
   swing?: number;
+  /** 强度 1 时的速度提升比例（如 0.06 = 快 6%），随强度平滑变化 */
+  tempoRamp?: number;
+  /** 强度 0 时会话低通的截止频率（Hz）；强度升高时逐渐全开 */
+  filterFloor?: number;
   /** 曲目整体电平（会话增益） */
   mix: number;
   /** 开始播放时的强度 */
@@ -136,9 +153,16 @@ export interface Composition {
 
 /** 刺激音：一次性短乐句 + 对主音乐的闪避参数 */
 export interface StingerDef {
+  /** 以 C 为主音写成；播放时移调到当前曲目的调性 */
   composition: Composition;
   /** 闪避时主音乐保留的比例（0..1） */
   duckTo: number;
   /** 乐句结束后的余音（秒），闪避在此之后恢复 */
   tail: number;
+  /** true：刺激音接管，当前曲目随之淡出结束（胜利 / 失败 / 关卡完成） */
+  endsMusic?: boolean;
+  /** 对齐方式：下一拍 / 下一小节 / 立即 */
+  quantize: 'beat' | 'bar' | 'none';
+  /** 是否跟随当前曲目移调 */
+  followKey: boolean;
 }

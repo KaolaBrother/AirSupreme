@@ -1,7 +1,8 @@
 /**
- * 作曲辅助：常用鼓型与“根音 + 级数”贝斯写法，让曲目数据保持紧凑。
+ * 作曲辅助：常用鼓型、“根音 + 级数”贝斯写法与和弦节奏型，让曲目数据保持紧凑。
  */
 import { parseNoteName } from './Theory';
+import type { InstrumentKind, TrackDef } from './MusicTypes';
 
 const PITCH_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 
@@ -25,9 +26,15 @@ const DEGREE_OFFSETS: Readonly<Record<string, number>> = {
   OF: 19,
 };
 
+const RHYTHM_TOKEN = /^([^:!?]+)(:\d+)?([!?])?$/;
+
 export function midiToNoteName(midi: number): string {
   const rounded = Math.round(midi);
   return `${PITCH_NAMES[((rounded % 12) + 12) % 12]}${Math.floor(rounded / 12) - 1}`;
+}
+
+function rhythmTokens(rhythm: string): string[] {
+  return rhythm.split(/\s+/).filter((token) => token.length > 0);
 }
 
 /**
@@ -35,7 +42,7 @@ export function midiToNoteName(midi: number): string {
  * rhythm 例：`'R:2 R:2 F:2 O:2'`；`-:4` 为休止；后缀 `!` / `?` 透传为力度标记。
  */
 export function bassRiff(roots: readonly string[], rhythm: string): string {
-  const tokens = rhythm.split(/\s+/).filter((token) => token.length > 0);
+  const tokens = rhythmTokens(rhythm);
   const out: string[] = [];
   for (const root of roots) {
     const rootMidi = parseNoteName(root);
@@ -43,7 +50,7 @@ export function bassRiff(roots: readonly string[], rhythm: string): string {
       continue;
     }
     for (const token of tokens) {
-      const match = /^([^:!?]+)(:\d+)?([!?])?$/.exec(token);
+      const match = RHYTHM_TOKEN.exec(token);
       if (!match) {
         continue;
       }
@@ -63,6 +70,42 @@ export function bassRiff(roots: readonly string[], rhythm: string): string {
   return out.join(' ');
 }
 
+/**
+ * 和弦节奏型：每个和弦符号套用一遍 rhythm，`R` 代表该和弦、`-` 为休止。
+ * 例：`chordRiff(['Am', 'F'], 'R:3 R:3 R:2 -:8')`。
+ */
+export function chordRiff(chords: readonly string[], rhythm: string): string {
+  const tokens = rhythmTokens(rhythm);
+  const out: string[] = [];
+  for (const chord of chords) {
+    for (const token of tokens) {
+      const match = RHYTHM_TOKEN.exec(token);
+      if (!match) {
+        continue;
+      }
+      const body = match[1] === 'R' ? chord : match[1] === '-' ? '-' : null;
+      if (body !== null) {
+        out.push(`${body}${match[2] ?? ''}${match[3] ?? ''}`);
+      }
+    }
+  }
+  return out.join(' ');
+}
+
+/** 把一个 16 步鼓型重复 n 小节 */
+export function bars(grid: string, count: number): string {
+  return grid.repeat(Math.max(0, Math.floor(count)));
+}
+
+/** 轨道定义的简写 */
+export function track(
+  inst: InstrumentKind,
+  gain: number,
+  extra: Omit<TrackDef, 'inst' | 'gain'> = {}
+): TrackDef {
+  return { inst, gain, ...extra };
+}
+
 /** 常用 16 步鼓型 */
 export const DRUM = {
   KICK_FOUR: 'X...x...X...x...',
@@ -74,6 +117,7 @@ export const DRUM = {
   KICK_HEART: 'X..x............',
   KICK_STOMP: 'X.......X.......',
   KICK_METAL: 'X.x.X.x.X.x.X.xx',
+  KICK_POP: 'X.....x.X.......',
   SNARE_BACK: '....X.......X...',
   SNARE_HALF: '........X.......',
   SNARE_GHOST: '....X..g.g..X..g',

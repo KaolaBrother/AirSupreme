@@ -1,14 +1,15 @@
 /**
  * 前瞻式音序器（lookahead scheduler）。
  *
- * - 时间以 AudioContext 时钟为准：外部定时器每 ~25ms 调用一次 tick(now)，
- *   音序器把 now + LOOKAHEAD 之前的所有 16 分音符事件提前调度到音频线程。
+ * - 时间以 AudioContext 时钟为准：外部定时器周期性调用 tick(now)，音序器把 now + lookahead
+ *   之前的所有 16 分音符事件提前调度到音频线程；JS 定时器的抖动不会累积成漂移。
+ * - 每一步的时间由上一步累加得到，因此速度可以随强度平滑变化（强度越高越快）。
  * - 段落（section）以整小节为单位推进；每条轨道在段内按自身样式长度循环，
  *   所以各图层天然对齐、不会出现旧实现中“贝斯先结束”的空档。
  * - 只依赖 BaseAudioContext：既能实时播放，也能直接 scheduleUntil() 后离线渲染。
  * - 复音上限按时间线记账（不依赖 onended），离线渲染时同样有效。
  */
-import { clamp01, createRandom, supportsDelay } from '../AudioKit';
+import { clamp01, createPanner, createRandom, supportsDelay } from '../AudioKit';
 import {
   INSTRUMENT_DEFAULTS,
   estimateVoiceCost,
@@ -33,16 +34,17 @@ import {
   type PatternEvent,
 } from './Theory';
 
-/** 定时器间隔（毫秒）与前瞻窗口（秒） */
-export const SEQUENCER_TICK_MS = 25;
+/** 前瞻窗口缺省值（秒）；调用方可按实际定时器间隔放大 */
 export const SEQUENCER_LOOKAHEAD_SECONDS = 0.12;
 
 /** 时间线上同时存在的声源上限（软上限丢弃低优先级图层，硬上限丢弃一切） */
-const DEFAULT_MAX_VOICES = 72;
-const HARD_VOICE_MARGIN = 18;
-/** 落后超过该时长（后台标签页节流）就跳过错过的步，而不是集中补发 */
+const DEFAULT_MAX_VOICES = 64;
+const HARD_VOICE_MARGIN = 16;
+/** 落后超过该时长（后台标签页节流 / 主线程卡顿）就跳过错过的步，而不是集中补发 */
 const RESYNC_THRESHOLD_SECONDS = 0.05;
 const LAYER_FADE_SECONDS = 0.45;
+/** 每个 16 分音符向目标速度逼近的比例（约 2 秒完成一次加速） */
+const TEMPO_SMOOTHING = 0.05;
 
 const DRUM_KINDS: ReadonlySet<InstrumentKind> = new Set<InstrumentKind>([
   'kick',
@@ -90,6 +92,10 @@ export interface SequencerOptions {
   intensity?: number;
   seed?: number;
   maxVoices?: number;
+  /** 整体移调（半音），用于刺激音跟随当前曲目调性 */
+  transpose?: number;
+  /** 共享混响总线入口（可选） */
+  reverbInput?: AudioNode | null;
 }
 
 export interface SequencerPosition {
@@ -105,7 +111,6 @@ interface TrackState {
   params: InstrumentParams;
   input: PatternInput;
   bus: GainNode;
-  send: GainNode | null;
   host: VoiceHost;
   priority: boolean;
   isDrum: boolean;
@@ -129,10 +134,16 @@ function defaultInput(kind: InstrumentKind, arp: ArpSettings | undefined): Patte
   return 'notes';
 }
 
+function inIntensityRange(
+  min: number | undefined,
+  max: number | undefined,
+  value: number
+): boolean {
+  return value + 1e-6 >= (min ?? 0) && value <= (max ?? 1) + 1e-6;
+}
+
 function layerFactor(def: TrackDef, intensity: number): number {
-  const min = def.minIntensity ?? 0;
-  const max = def.maxIntensity ?? 1;
-  return intensity + 1e-6 >= min && intensity <= max + 1e-6 ? 1 : 0;
+  return inIntensityRange(def.minIntensity, def.maxIntensity, intensity) ? 1 : 0;
 }
 
 function concatPatterns(parts: readonly CompiledPattern[]): CompiledPattern {
@@ -163,10 +174,15 @@ export class Sequencer {
   private readonly compiled = new Map<string, CompiledPattern | null>();
   private readonly ledger: VoiceLedgerEntry[] = [];
   private readonly ownedNodes: AudioNode[] = [];
-  private readonly stepDuration: number;
-  private readonly swingOffset: number;
+  private readonly baseStepDuration: number;
+  private readonly swing: number;
+  private readonly tempoRamp: number;
+  private readonly transpose: number;
   private intensity: number;
-  private startTime = 0;
+  private tempoFactor: number;
+  private tempoTarget: number;
+  /** 当前 globalStep 的网格时间（未加 swing） */
+  private nextStepTime = 0;
   private started = false;
   private stopped = false;
   private finished = false;
@@ -188,13 +204,18 @@ export class Sequencer {
     this.loop = options.loop ?? true;
     this.maxVoices = Math.max(8, options.maxVoices ?? DEFAULT_MAX_VOICES);
     this.random = createRandom(options.seed ?? 1);
+    this.transpose = Math.round(options.transpose ?? 0);
     this.intensity = clamp01(options.intensity ?? composition.defaultIntensity);
     const bpm = Math.max(20, Math.min(300, composition.bpm));
-    this.stepDuration = 60 / bpm / 4;
-    this.swingOffset = Math.max(0, Math.min(0.5, composition.swing ?? 0)) * this.stepDuration;
+    this.baseStepDuration = 60 / bpm / 4;
+    this.swing = Math.max(0, Math.min(0.5, composition.swing ?? 0));
+    this.tempoRamp = Math.max(0, Math.min(0.3, composition.tempoRamp ?? 0));
+    this.tempoTarget = 1 + this.tempoRamp * this.intensity;
+    this.tempoFactor = this.tempoTarget;
     const delayInput = this.createDelay(output, bpm);
+    const reverbInput = options.reverbInput ?? null;
     for (const [id, def] of Object.entries(composition.tracks)) {
-      this.tracks.push(this.createTrack(id, def, output, delayInput));
+      this.tracks.push(this.createTrack(id, def, output, delayInput, reverbInput));
     }
     this.sectionIndex = this.findPlayableSection(0, false);
   }
@@ -232,18 +253,31 @@ export class Sequencer {
     id: string,
     def: TrackDef,
     output: AudioNode,
-    delayInput: AudioNode | null
+    delayInput: AudioNode | null,
+    reverbInput: AudioNode | null
   ): TrackState {
     const bus = this.ctx.createGain();
     bus.gain.value = clamp01(def.gain) * layerFactor(def, this.intensity);
-    bus.connect(output);
     this.ownedNodes.push(bus);
-    let send: GainNode | null = null;
+    const panner = createPanner(this.ctx, def.pan ?? 0);
+    const post: AudioNode = panner ?? bus;
+    if (panner) {
+      bus.connect(panner);
+      this.ownedNodes.push(panner);
+    }
+    post.connect(output);
     if (delayInput && (def.send ?? 0) > 0) {
-      send = this.ctx.createGain();
+      const send = this.ctx.createGain();
       send.gain.value = clamp01(def.send ?? 0);
-      bus.connect(send);
+      post.connect(send);
       send.connect(delayInput);
+      this.ownedNodes.push(send);
+    }
+    if (reverbInput && (def.reverb ?? 0) > 0) {
+      const send = this.ctx.createGain();
+      send.gain.value = clamp01(def.reverb ?? 0);
+      post.connect(send);
+      send.connect(reverbInput);
       this.ownedNodes.push(send);
     }
     return {
@@ -252,7 +286,6 @@ export class Sequencer {
       params: { ...INSTRUMENT_DEFAULTS[def.inst], ...def.params },
       input: def.input ?? defaultInput(def.inst, def.arp),
       bus,
-      send,
       host: { ctx: this.ctx, output: bus, random: this.random, live: this.live },
       priority: PRIORITY_KINDS.has(def.inst),
       isDrum: DRUM_KINDS.has(def.inst),
@@ -276,7 +309,7 @@ export class Sequencer {
         candidate = loopFrom;
       }
       const section = sections[candidate];
-      if ((section.minIntensity ?? 0) <= this.intensity + 1e-6) {
+      if (inIntensityRange(section.minIntensity, section.maxIntensity, this.intensity)) {
         return candidate;
       }
       candidate += 1;
@@ -305,15 +338,24 @@ export class Sequencer {
       if (source === undefined) {
         continue;
       }
-      parts.push(compilePattern(source, track.input, transpose, track.params.center ?? 60));
+      parts.push(
+        compilePattern(source, track.input, transpose + this.transpose, track.params.center ?? 60)
+      );
     }
     const result = parts.length > 0 ? concatPatterns(parts) : null;
     this.compiled.set(key, result);
     return result;
   }
 
-  private timeOfStep(step: number): number {
-    return this.startTime + step * this.stepDuration + (step % 2 === 1 ? this.swingOffset : 0);
+  private currentStepDuration(): number {
+    return this.baseStepDuration / this.tempoFactor;
+  }
+
+  /** 当前步的发声时间（奇数步加 swing） */
+  private eventTime(): number {
+    return (
+      this.nextStepTime + (this.globalStep % 2 === 1 ? this.swing * this.currentStepDuration() : 0)
+    );
   }
 
   /** 时间线复音记账；返回 false 表示该音符应被丢弃 */
@@ -336,7 +378,8 @@ export class Sequencer {
   }
 
   private brightnessFor(track: TrackState): number {
-    const follow = track.def.brightnessFollow ?? (track.isDrum ? 0 : track.def.inst === 'bass' ? 0.5 : 1);
+    const follow =
+      track.def.brightnessFollow ?? (track.isDrum ? 0 : track.def.inst === 'bass' ? 0.5 : 1);
     return Math.max(0.3, 1 + follow * (0.8 * this.intensity - 0.4));
   }
 
@@ -349,7 +392,7 @@ export class Sequencer {
     open: boolean,
     gate: number
   ): void {
-    const duration = Math.max(0.02, lengthSteps * this.stepDuration * gate);
+    const duration = Math.max(0.02, lengthSteps * this.currentStepDuration() * gate);
     const cost = estimateVoiceCost(track.def.inst, track.params, midi.length);
     const tail = track.params.release ?? track.params.decay ?? 0.3;
     if (!this.reserveVoices(time, time + duration + tail, cost, track.priority)) {
@@ -372,12 +415,12 @@ export class Sequencer {
     }
   }
 
-  private scheduleStep(step: number): void {
+  private scheduleStep(): void {
     const section = this.getSection();
     if (!section) {
       return;
     }
-    const time = this.timeOfStep(step);
+    const time = this.eventTime();
     for (const track of this.tracks) {
       if (layerFactor(track.def, this.intensity) === 0) {
         continue;
@@ -416,6 +459,8 @@ export class Sequencer {
   }
 
   private advanceStep(): void {
+    this.nextStepTime += this.currentStepDuration();
+    this.tempoFactor += (this.tempoTarget - this.tempoFactor) * TEMPO_SMOOTHING;
     this.globalStep += 1;
     this.sectionStep += 1;
     const section = this.getSection();
@@ -437,7 +482,7 @@ export class Sequencer {
       return;
     }
     this.started = true;
-    this.startTime = Math.max(0, when);
+    this.nextStepTime = Math.max(0, when);
   }
 
   /** 调度所有起始时间早于 until 的步 */
@@ -446,8 +491,8 @@ export class Sequencer {
       return;
     }
     let guard = 0;
-    while (!this.finished && this.timeOfStep(this.globalStep) < until && guard < 4096) {
-      this.scheduleStep(this.globalStep);
+    while (!this.finished && this.eventTime() < until && guard < 4096) {
+      this.scheduleStep();
       this.advanceStep();
       guard += 1;
     }
@@ -455,17 +500,17 @@ export class Sequencer {
 
   /**
    * 定时器回调：若落后（定时器被长时间挂起）则跳过错过的步，再调度前瞻窗口。
-   * lookahead 可由调用方按实际定时器间隔放大，避免后台节流时出现空档。
+   * lookahead 可由调用方按实际定时器间隔放大，避免卡顿时出现空档。
    */
   public tick(now: number, lookahead: number = SEQUENCER_LOOKAHEAD_SECONDS): void {
     if (!this.started || this.stopped || this.finished) {
       return;
     }
-    const behind = now - this.timeOfStep(this.globalStep);
-    if (behind > RESYNC_THRESHOLD_SECONDS) {
-      const missed = Math.min(1 << 20, Math.ceil(behind / this.stepDuration));
-      for (let i = 0; i < missed && !this.finished; i++) {
+    if (now - this.eventTime() > RESYNC_THRESHOLD_SECONDS) {
+      let guard = 0;
+      while (!this.finished && this.nextStepTime < now && guard < 1 << 16) {
         this.advanceStep();
+        guard += 1;
       }
     }
     this.scheduleUntil(now + Math.max(0.02, lookahead));
@@ -474,6 +519,7 @@ export class Sequencer {
   public setIntensity(value: number, when: number = this.ctx.currentTime): void {
     const next = clamp01(value);
     this.intensity = next;
+    this.tempoTarget = 1 + this.tempoRamp * next;
     for (const track of this.tracks) {
       const target = clamp01(track.def.gain) * layerFactor(track.def, next);
       try {
@@ -487,6 +533,29 @@ export class Sequencer {
 
   public getIntensity(): number {
     return this.intensity;
+  }
+
+  /** 当前（随强度变化后的）速度 */
+  public getBpm(): number {
+    return this.composition.bpm * this.tempoFactor;
+  }
+
+  /**
+   * 不早于 after 的下一个节拍点（unitSteps=4 为四分音符，16 为小节线）。
+   * 未开始或已结束时直接返回 after。
+   */
+  public getNextGridTime(after: number, unitSteps = 4): number {
+    if (!this.started || this.finished || this.stopped) {
+      return after;
+    }
+    const unit = Math.max(1, Math.floor(unitSteps));
+    const stepDuration = this.currentStepDuration();
+    let step = this.globalStep + Math.ceil((after - this.nextStepTime) / stepDuration - 1e-9);
+    const remainder = ((step % unit) + unit) % unit;
+    if (remainder !== 0) {
+      step += unit - remainder;
+    }
+    return this.nextStepTime + (step - this.globalStep) * stepDuration;
   }
 
   /** 不再调度新事件；已调度的音符会自然播完 */
@@ -528,13 +597,13 @@ export class Sequencer {
     return this.lastEventEnd;
   }
 
-  /** 全部段落（不含循环）的时长（秒） */
+  /** 全部段落（不含循环）的时长（秒，按基础速度） */
   public getArrangementDuration(): number {
     let steps = 0;
     for (const section of this.composition.sections) {
       steps += Math.round(section.bars * STEPS_PER_BAR);
     }
-    return steps * this.stepDuration;
+    return steps * this.baseStepDuration;
   }
 
   public getPosition(): SequencerPosition {
