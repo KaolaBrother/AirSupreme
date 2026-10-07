@@ -67,24 +67,24 @@ describe('UpgradeMenu', () => {
     const speedCard = document.getElementById(`upgrade-card-${UpgradeType.SPEED}`);
     expect(speedCard).not.toBeNull();
 
+    // api-spec §8：SPEED 10 级 45 → 85，每级 +4
     const statValues = speedCard?.querySelectorAll('.stat-value');
     expect(statValues?.[0]?.textContent).toBe('45');
-    expect(statValues?.[1]?.textContent).toBe('53');
-    expect(statValues?.[2]?.textContent).toBe('+8');
+    expect(statValues?.[1]?.textContent).toBe('49');
+    expect(statValues?.[2]?.textContent).toBe('+4');
   });
 
   it('shows missile lock radius upgrade card with multiplier values', () => {
     menu.show();
 
-    const radiusCard = document.getElementById(
-      `upgrade-card-${UpgradeType.MISSILE_LOCK_RADIUS}`
-    );
+    const radiusCard = document.getElementById(`upgrade-card-${UpgradeType.MISSILE_LOCK_RADIUS}`);
     expect(radiusCard).not.toBeNull();
 
+    // api-spec §8：锁定范围 10 级 1x → 2x，每级 +0.1x
     const statValues = radiusCard?.querySelectorAll('.stat-value');
     expect(statValues?.[0]?.textContent).toBe('1x');
-    expect(statValues?.[1]?.textContent).toBe('1.2x');
-    expect(statValues?.[2]?.textContent).toBe('+0.2x');
+    expect(statValues?.[1]?.textContent).toBe('1.1x');
+    expect(statValues?.[2]?.textContent).toBe('+0.1x');
   });
 
   it('triggers resume callback and toggles visibility with show/hide', () => {
@@ -136,9 +136,7 @@ describe('UpgradeMenu', () => {
       const icon = card?.querySelector('.card-icon');
       const name = card?.querySelector('.card-name');
       const header = card?.querySelector('.card-header');
-      const surface = [icon, name, header]
-        .map((element) => element?.textContent ?? '')
-        .join(' ');
+      const surface = [icon, name, header].map((element) => element?.textContent ?? '').join(' ');
 
       expect(surface, `${type} should show short code ${code}`).toMatch(
         new RegExp(`\\b${code}\\b`, 'i')
@@ -152,4 +150,3 @@ describe('UpgradeMenu', () => {
     }
   });
 });
-
