@@ -784,15 +784,15 @@ export class ParticleSystem {
             age < 0.2
               ? 0.55 + 0.45 * easeOutCubic(age / 0.2)
               : 1 + (p.sizeEnd - 1) * easeOutCubic((age - 0.2) / 0.8);
-          if (age < 0.25) {
-            color.copy(WHITE_HOT).lerp(p.c1, age / 0.25);
-          } else if (age < 0.55) {
+          if (age < 0.2) {
+            color.copy(WHITE_HOT).lerp(p.c1, age / 0.2);
+          } else if (age < 0.42) {
             color.copy(p.c1);
           } else {
-            color.copy(p.c1).lerp(p.c0, smoothstep(0.55, 0.92, age));
+            color.copy(p.c1).lerp(p.c0, smoothstep(0.42, 0.8, age));
           }
-          intensity = p.intensity + (1 - p.intensity) * smoothstep(0.4, 0.8, age);
-          additive = p.additive * (1 - smoothstep(0.5, 0.88, age));
+          intensity = p.intensity + (1 - p.intensity) * smoothstep(0.3, 0.7, age);
+          additive = p.additive * (1 - smoothstep(0.38, 0.78, age));
           alpha *= Math.min(1, age * 14) * Math.pow(1 - age, 0.75);
           break;
         }

@@ -100,12 +100,13 @@ void main() {
     rgb = mix(mix(rgb, fogColor, fogFactor), rgb * (1.0 - fogFactor), vAdditive);
   #endif
 
-  // 先在直通色上做色调映射/色彩空间转换，再预乘输出
-  gl_FragColor = vec4(rgb, 1.0);
+  // 色调映射：烟尘在直通色上映射后再预乘（正确的 over 混合）；
+  // 加色粒子映射其预乘辐亮度（柔边保留饱和色，核心才趋白）
+  gl_FragColor = vec4(mix(rgb, rgb * alpha, vAdditive), 1.0);
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
   // 预乘混合：加色粒子 alpha=0 → 纯叠加；烟尘按覆盖度遮挡
-  gl_FragColor = vec4(gl_FragColor.rgb * alpha, alpha * (1.0 - vAdditive));
+  gl_FragColor = vec4(mix(gl_FragColor.rgb * alpha, gl_FragColor.rgb, vAdditive), alpha * (1.0 - vAdditive));
 }
 `;
 

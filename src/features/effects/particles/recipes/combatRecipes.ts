@@ -42,8 +42,8 @@ const PALETTES: Record<
 > = {
   enemy: {
     flash: 0xffd9a8,
-    fireHue: 0.055,
-    fireHueJitter: 0.04,
+    fireHue: 0.028,
+    fireHueJitter: 0.03,
     fireLightness: 0.5,
     sparkColor: 0xffc45a,
     emberColor: 0xff8a2e,
@@ -52,8 +52,8 @@ const PALETTES: Record<
   },
   player: {
     flash: 0xffe2c0,
-    fireHue: 0.035,
-    fireHueJitter: 0.035,
+    fireHue: 0.018,
+    fireHueJitter: 0.026,
     fireLightness: 0.48,
     sparkColor: 0xffb070,
     emberColor: 0xff6a2a,
@@ -62,9 +62,9 @@ const PALETTES: Record<
   },
   friendly: {
     flash: 0xd8fbff,
-    fireHue: 0.075,
+    fireHue: 0.04,
     fireHueJitter: 0.03,
-    fireLightness: 0.55,
+    fireLightness: 0.52,
     sparkColor: 0xa8fff3,
     emberColor: 0xffb24a,
     smokeLightness: 0.2,
@@ -72,8 +72,8 @@ const PALETTES: Record<
   },
   boss: {
     flash: 0xfff1d8,
-    fireHue: 0.035,
-    fireHueJitter: 0.04,
+    fireHue: 0.02,
+    fireHueJitter: 0.03,
     fireLightness: 0.47,
     sparkColor: 0xffb24d,
     emberColor: 0xff6a24,
@@ -92,7 +92,7 @@ const PALETTES: Record<
   },
   flak: {
     flash: 0xffcfa0,
-    fireHue: 0.025,
+    fireHue: 0.015,
     fireHueJitter: 0.02,
     fireLightness: 0.46,
     sparkColor: 0xff9a5a,
@@ -172,9 +172,10 @@ export function emitLayeredExplosion(
       color: scratchColor.setHSL(
         palette.fireHue + Math.random() * palette.fireHueJitter,
         1,
-        palette.fireLightness + Math.random() * 0.08
+        palette.fireLightness + Math.random() * 0.06
       ),
-      intensity: 2.8,
+      intensity: rand(1.6, 2.3),
+      alpha: 0.85,
       drag: 2.6,
     });
   }
@@ -186,8 +187,9 @@ export function emitLayeredExplosion(
       life: rand(0.45, 0.7),
       size: rand(2.6, 3.6) * s,
       sizeEnd: 1.5,
-      color: scratchColor.setHSL(palette.fireHue + 0.03, 1, palette.fireLightness + 0.12),
-      intensity: 3.4,
+      color: scratchColor.setHSL(palette.fireHue + 0.025, 1, palette.fireLightness + 0.06),
+      intensity: 2.4,
+      alpha: 0.9,
       drag: 3,
     });
   }

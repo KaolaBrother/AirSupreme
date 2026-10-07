@@ -107,7 +107,7 @@ export function emitMissileTrail(
 
   // 烟带：按速度回填（发射间隔 ~0.03s）
   const gap = speed > 1 ? speed * 0.03 : 0;
-  const puffs = gap > 0 ? Math.min(3, Math.max(1, Math.ceil(gap / 1.4))) : 1;
+  const puffs = gap > 0 ? Math.min(4, Math.max(1, Math.ceil(gap / 1.1))) : 1;
   for (let i = 0; i < puffs; i++) {
     if (i > 0 && Math.random() > fx.detail) continue;
     scratchPosition.copy(position).addScaledVector(scratchDirection, -(gap * i) / puffs);
@@ -117,13 +117,13 @@ export function emitMissileTrail(
     scratchVelocity.z += rand(-0.6, 0.6);
     const smoke = resetOptions();
     smoke.velocity = scratchVelocity;
-    smoke.life = rand(1.3, 2.1);
-    smoke.size = 0.75 * k;
-    smoke.sizeEnd = 3.8;
+    smoke.life = rand(1.4, 2.2);
+    smoke.size = 1 * k;
+    smoke.sizeEnd = 4.2;
     const light = rand(0.72, 0.84);
     smoke.color = scratchColor.setRGB(light, light, light * 1.02);
     smoke.colorEnd = scratchColorEnd.setRGB(light + 0.08, light + 0.08, light + 0.1);
-    smoke.alpha = 0.5;
+    smoke.alpha = 0.42;
     smoke.drag = 1.2;
     smoke.gravityScale = -0.03;
     fx.emit(ParticleType.SMOKE, scratchPosition, smoke);
