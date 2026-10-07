@@ -552,11 +552,13 @@ export class WeaponSystem {
       }
     }
     if (runtime.charging) {
-      this.railgun.updateCharge(dt, runtime, this.fireFrame);
+      // 本帧内已松开：按松开前的蓄力发射，不再累积
       if (this.releaseQueued && !this.triggerHeld) {
         if (this.railgun.release(runtime, this.fireFrame)) {
           this.consumeShot(runtime);
         }
+      } else {
+        this.railgun.updateCharge(dt, runtime, this.fireFrame);
       }
     }
   }
