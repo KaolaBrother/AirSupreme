@@ -35,6 +35,42 @@ const BLOOM_SMOOTH_WIDTH = 0.1;
 type FlaggedRenderTarget = THREE.WebGLRenderTarget & { isXRRenderTarget?: boolean };
 
 /**
+ * three 为画布传入的“非光照颜色”（雾色、纯色背景清屏色）会先编码到输出色彩空间，
+ * 而渲染到目标时保持工作空间（线性）。场景目标已改为显示参考输出，
+ * 因此渲染期间临时把雾色/背景色换成其 sRGB 编码值，渲染后精确还原。
+ */
+class DisplayReferredRenderPass extends RenderPass {
+  private readonly savedFogColor = new THREE.Color();
+  private readonly savedBackground = new THREE.Color();
+
+  render(
+    renderer: THREE.WebGLRenderer,
+    writeBuffer: THREE.WebGLRenderTarget,
+    readBuffer: THREE.WebGLRenderTarget,
+    deltaTime: number,
+    maskActive: boolean
+  ): void {
+    const fog = this.scene.fog;
+    const background = this.scene.background;
+    const backgroundColor = background instanceof THREE.Color ? background : null;
+    if (fog) {
+      this.savedFogColor.copy(fog.color);
+      fog.color.convertLinearToSRGB();
+    }
+    if (backgroundColor) {
+      this.savedBackground.copy(backgroundColor);
+      backgroundColor.convertLinearToSRGB();
+    }
+    try {
+      super.render(renderer, writeBuffer, readBuffer, deltaTime, maskActive);
+    } finally {
+      if (fog) fog.color.copy(this.savedFogColor);
+      if (backgroundColor) backgroundColor.copy(this.savedBackground);
+    }
+  }
+}
+
+/**
  * 让场景渲染目标与画布走完全相同的着色路径：
  * three 仅在“画布或 XR 目标”上启用逐材质色调映射与 sRGB 输出编码。
  * 标记后，场景（含天空背景、未做色彩转换的自定义着色器、加色/半透明混合）
@@ -51,7 +87,7 @@ function markDisplayReferred(target: THREE.WebGLRenderTarget): void {
 export class PostFxPipeline {
   readonly composer: EffectComposer;
   private readonly renderer: THREE.WebGLRenderer;
-  private readonly renderPass: RenderPass;
+  private readonly renderPass: DisplayReferredRenderPass;
   private readonly bloomPass: UnrealBloomPass;
   private readonly gradePass: ShaderPass;
   private readonly bloomResolution: number;
@@ -103,7 +139,7 @@ export class PostFxPipeline {
     markDisplayReferred(composer.readBuffer);
     this.composer = composer;
 
-    this.renderPass = new RenderPass(scene, camera);
+    this.renderPass = new DisplayReferredRenderPass(scene, camera);
     composer.addPass(this.renderPass);
 
     this.bloomPass = new UnrealBloomPass(

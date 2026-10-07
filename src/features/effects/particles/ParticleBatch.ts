@@ -91,22 +91,31 @@ void main() {
   float light = mix(mix(0.68, 1.14, vShade), 1.0, vAdditive);
   vec3 rgb = vColor.rgb * tex.rgb * light;
 
+  // 色调映射：烟尘在直通色上映射后再预乘（正确的 over 混合）；
+  // 加色粒子映射其预乘辐亮度（柔边保留饱和色，核心才趋白）
+  gl_FragColor = vec4(mix(rgb, rgb * alpha, vAdditive), 1.0);
+  #include <tonemapping_fragment>
+  #include <colorspace_fragment>
+
+  // 雾在输出色彩空间混合（与 three 内置材质一致）：烟尘趋向雾色，加色粒子按雾淡出
   #ifdef USE_FOG
     #ifdef FOG_EXP2
       float fogFactor = 1.0 - exp(-fogDensity * fogDensity * vFogDepth * vFogDepth);
     #else
       float fogFactor = smoothstep(fogNear, fogFar, vFogDepth);
     #endif
-    rgb = mix(mix(rgb, fogColor, fogFactor), rgb * (1.0 - fogFactor), vAdditive);
+    gl_FragColor.rgb = mix(
+      mix(gl_FragColor.rgb, fogColor, fogFactor),
+      gl_FragColor.rgb * (1.0 - fogFactor),
+      vAdditive
+    );
   #endif
 
-  // 色调映射：烟尘在直通色上映射后再预乘（正确的 over 混合）；
-  // 加色粒子映射其预乘辐亮度（柔边保留饱和色，核心才趋白）
-  gl_FragColor = vec4(mix(rgb, rgb * alpha, vAdditive), 1.0);
-  #include <tonemapping_fragment>
-  #include <colorspace_fragment>
   // 预乘混合：加色粒子 alpha=0 → 纯叠加；烟尘按覆盖度遮挡
-  gl_FragColor = vec4(mix(gl_FragColor.rgb * alpha, gl_FragColor.rgb, vAdditive), alpha * (1.0 - vAdditive));
+  gl_FragColor = vec4(
+    mix(gl_FragColor.rgb * alpha, gl_FragColor.rgb, vAdditive),
+    alpha * (1.0 - vAdditive)
+  );
 }
 `;
 

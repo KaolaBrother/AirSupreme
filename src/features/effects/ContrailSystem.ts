@@ -128,19 +128,18 @@ void main() {
   float edge = 1.0 - vSide * vSide;
   float alpha = vAlpha * edge * edge;
   if (alpha < 0.003) discard;
-  vec3 rgb = vColor;
+  gl_FragColor = vec4(vColor, 1.0);
+  #include <tonemapping_fragment>
+  #include <colorspace_fragment>
   #ifdef USE_FOG
     #ifdef FOG_EXP2
       float fogFactor = 1.0 - exp(-fogDensity * fogDensity * vFogDepth * vFogDepth);
     #else
       float fogFactor = smoothstep(fogNear, fogFar, vFogDepth);
     #endif
-    rgb = mix(rgb, fogColor, fogFactor);
+    gl_FragColor.rgb = mix(gl_FragColor.rgb, fogColor, fogFactor);
     alpha *= 1.0 - fogFactor * 0.6;
   #endif
-  gl_FragColor = vec4(rgb, 1.0);
-  #include <tonemapping_fragment>
-  #include <colorspace_fragment>
   gl_FragColor = vec4(gl_FragColor.rgb * alpha, alpha);
 }
 `;
