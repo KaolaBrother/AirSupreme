@@ -141,6 +141,7 @@ export class WeaponFx {
   private readonly tmpMatrix = new THREE.Matrix4();
   private readonly basisU = new THREE.Vector3();
   private readonly basisW = new THREE.Vector3();
+  private railRingTimer = 0;
 
   constructor(scene: THREE.Scene) {
     this.scene = scene;
@@ -839,36 +840,49 @@ export class WeaponFx {
     deltaTime: number
   ): void {
     const c = THREE.MathUtils.clamp(charge, 0, 1);
-    this.emitFlash(position, carry, 1.2 + c * 3.6, 0.05, COLORS.rail, 0.4 + c * 0.6);
+    // 枪口能量球：白热小核 + 电紫光晕，随蓄力增大并脉动
+    const pulse = 0.85 + 0.15 * Math.sin(this.time * (18 + c * 24));
+    this.emitFlash(position, carry, (0.5 + c * 1.3) * pulse, 0.05, COLORS.railCore, 0.6 + c * 0.4);
+    this.emitFlash(position, carry, (1.6 + c * 3) * pulse, 0.05, COLORS.railRing, 0.1);
     const spec = this.spec;
-    const count = randomCount((24 + c * 60) * deltaTime * this.glow.getDensity());
+    const count = randomCount((30 + c * 70) * deltaTime * this.glow.getDensity());
     for (let i = 0; i < count; i++) {
-      const distance = 3 + Math.random() * 4;
+      // 电离粒子从四周被吸向枪口（流光细线）
+      const distance = 2.5 + Math.random() * 4.5;
       randomUnit(this.tmpA);
       spec.position.copy(position).addScaledVector(this.tmpA, distance);
-      const life = 0.18 + Math.random() * 0.08;
+      const life = 0.16 + Math.random() * 0.1;
       spec.velocity
         .copy(this.tmpA)
         .multiplyScalar(-distance / life)
         .add(carry);
       spec.delay = 0;
       spec.life = life;
-      spec.size0 = 0.22 + c * 0.2;
-      spec.size1 = 0.5 + c * 0.4;
-      spec.color.copy(COLORS.railSpiral);
-      spec.alpha = 0.9;
+      spec.size0 = 0.14 + c * 0.08;
+      spec.size1 = 0.22 + c * 0.1;
+      spec.color.copy(i % 4 === 0 ? COLORS.railCore : COLORS.railRing);
+      spec.alpha = 0.95;
       spec.drag = 0;
       spec.gravity = 0;
-      spec.stretch = 0.02;
-      spec.fade = 0.6;
-      spec.heat = 0.5;
+      spec.stretch = 0.018;
+      spec.fade = 0.5;
+      spec.heat = 0.3;
       this.glow.emit(spec);
     }
     spec.stretch = 0;
-    // 满蓄力时沿炮管方向的电弧闪烁
-    if (c >= 0.999 && Math.random() < deltaTime * 18) {
-      this.tmpB.copy(position).addScaledVector(forward, 1.5);
-      this.emitSparks(this.tmpB, forward, 3, COLORS.railCore, 12, 0.18);
+    // 满蓄力：炮管电弧闪烁 + 周期性的能量环
+    if (c >= 0.999) {
+      if (Math.random() < deltaTime * 20) {
+        this.tmpB.copy(position).addScaledVector(forward, 1.2);
+        this.emitSparks(this.tmpB, forward, 3, COLORS.railCore, 12, 0.18, 0.22);
+      }
+      this.railRingTimer -= deltaTime;
+      if (this.railRingTimer <= 0) {
+        this.railRingTimer = 0.32;
+        this.spawnRing(position, forward, 0.4, 2.6, 0.28, RAIL_RING_TINT, 0.65, 0.2, false);
+      }
+    } else {
+      this.railRingTimer = 0;
     }
   }
 
@@ -1065,37 +1079,41 @@ export class WeaponFx {
   public emitStunCrackle(position: THREE.Vector3, radius: number, delay: number): void {
     const spec = this.spec;
     const r = THREE.MathUtils.clamp(radius, 1, 20);
-    spec.position.copy(position);
-    spec.velocity.set(0, 0, 0);
-    spec.delay = delay;
-    spec.life = 0.22;
-    spec.size0 = r * 1.5;
-    spec.size1 = r * 1.1;
-    spec.color.copy(COLORS.emp);
-    spec.alpha = 1;
-    spec.drag = 0;
-    spec.gravity = 0;
-    spec.stretch = 0;
-    spec.fade = 1.3;
-    spec.heat = 0.6;
-    this.glow.emit(spec);
-    const sparks = this.glow.scaledCount(9, 3);
-    for (let i = 0; i < sparks; i++) {
-      randomUnit(this.tmpA);
-      spec.position.copy(position).addScaledVector(this.tmpA, r * 0.6);
-      spec.velocity.copy(this.tmpA).multiplyScalar(10 + Math.random() * 18);
-      spec.delay = delay + Math.random() * 0.25;
-      spec.life = 0.2 + Math.random() * 0.25;
-      spec.size0 = 0.35;
-      spec.size1 = 0.15;
-      spec.color.copy(COLORS.empCore);
-      spec.alpha = 1;
-      spec.drag = 2;
-      spec.gravity = -6;
-      spec.stretch = 0.03;
-      spec.fade = 0.8;
-      spec.heat = 0.4;
+    // 三次逐渐减弱的电弧爆闪，持续约 0.9 秒，清楚标示被瘫痪的目标
+    for (let burst = 0; burst < 3; burst++) {
+      const burstDelay = delay + burst * 0.3 + Math.random() * 0.06;
+      spec.position.copy(position);
+      spec.velocity.set(0, 0, 0);
+      spec.delay = burstDelay;
+      spec.life = 0.2;
+      spec.size0 = r * (1.5 - burst * 0.3);
+      spec.size1 = spec.size0 * 0.75;
+      spec.color.copy(COLORS.emp);
+      spec.alpha = 1 - burst * 0.2;
+      spec.drag = 0;
+      spec.gravity = 0;
+      spec.stretch = 0;
+      spec.fade = 1.3;
+      spec.heat = 0.6;
       this.glow.emit(spec);
+      const sparks = this.glow.scaledCount(7 - burst * 2, 2);
+      for (let i = 0; i < sparks; i++) {
+        randomUnit(this.tmpA);
+        spec.position.copy(position).addScaledVector(this.tmpA, r * 0.6);
+        spec.velocity.copy(this.tmpA).multiplyScalar(10 + Math.random() * 18);
+        spec.delay = burstDelay + Math.random() * 0.12;
+        spec.life = 0.2 + Math.random() * 0.25;
+        spec.size0 = 0.35;
+        spec.size1 = 0.15;
+        spec.color.copy(COLORS.empCore);
+        spec.alpha = 1;
+        spec.drag = 2;
+        spec.gravity = -6;
+        spec.stretch = 0.03;
+        spec.fade = 0.8;
+        spec.heat = 0.4;
+        this.glow.emit(spec);
+      }
     }
     spec.stretch = 0;
   }
