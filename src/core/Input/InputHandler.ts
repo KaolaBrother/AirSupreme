@@ -67,6 +67,8 @@ export class InputHandler {
   private weaponCycleQueued: boolean = false;
   private weaponSlotQueued: number = -1;
   private flareQueued: boolean = false;
+  /** F / 特殊武器按钮的按下沿：低帧率下即使按键短于一帧，下一次模拟步也能看到一次扣扳机 */
+  private specialTapQueued: boolean = false;
 
   private isMobile: boolean;
 
@@ -128,6 +130,8 @@ export class InputHandler {
       this.flareQueued = true;
     } else if (code in WEAPON_SLOT_KEYS) {
       this.weaponSlotQueued = WEAPON_SLOT_KEYS[code];
+    } else if (code === 'KeyF') {
+      this.specialTapQueued = true;
     }
   };
 
@@ -335,6 +339,7 @@ export class InputHandler {
       const handleSpecialStart = (e: TouchEvent): void => {
         e.preventDefault();
         this.specialPressed = true;
+        this.specialTapQueued = true;
       };
       const handleSpecialEnd = (): void => {
         this.specialPressed = false;
@@ -420,7 +425,7 @@ export class InputHandler {
       fire: this.firePressed,
       missile: this.missilePressed,
       throttle: this.throttlePressed,
-      special: this.specialPressed,
+      special: this.specialPressed || this.takeSpecialTap(),
     };
   }
 
@@ -438,7 +443,7 @@ export class InputHandler {
       fire: this.keys.has('Space'),
       missile: this.keys.has('KeyM') || this.keys.has('ShiftRight'), // M键或右Shift发射导弹
       throttle: this.keys.has('ShiftLeft') || this.keys.has('ControlLeft'),
-      special: this.keys.has('KeyF'),
+      special: this.keys.has('KeyF') || this.takeSpecialTap(),
     };
   }
 
@@ -470,12 +475,20 @@ export class InputHandler {
     return queued;
   }
 
+  /** 读取并清除 F 的按下沿（getState 每个模拟步调用一次） */
+  private takeSpecialTap(): boolean {
+    const queued = this.specialTapQueued;
+    this.specialTapQueued = false;
+    return queued;
+  }
+
   /** 清空所有单次动作（暂停 / 剧情卡片 / 换关时调用，避免恢复后误触发） */
   public resetActionQueue(): void {
     this.cameraToggleQueued = false;
     this.weaponCycleQueued = false;
     this.weaponSlotQueued = -1;
     this.flareQueued = false;
+    this.specialTapQueued = false;
   }
 
   public isPauseToggled(): boolean {
