@@ -10,7 +10,23 @@ import {
 
 const log = getLogger('RadarMinimap');
 
-export type RadarBlipKind = 'enemy' | 'spawning' | 'ally' | 'boss' | 'pickup';
+/**
+ * 雷达点类型：
+ * - enemy 敌机（红点）· spawning 正在进场（琥珀点）· boss（大红点 + 外环）
+ * - enemy-ground 敌方地面单位（红色方块）· enemy-sea 敌方舰艇（红色菱形）
+ * - ally 友军战机（金点）· ally-unit 友军地面 / 海上 / 预警机（金色三角）
+ * - neutral 平民（灰色空心圆，勿开火）· pickup 道具（绿点）
+ */
+export type RadarBlipKind =
+  | 'enemy'
+  | 'spawning'
+  | 'ally'
+  | 'boss'
+  | 'pickup'
+  | 'enemy-ground'
+  | 'enemy-sea'
+  | 'neutral'
+  | 'ally-unit';
 
 export interface RadarBlip {
   position: Vector3;
@@ -47,6 +63,21 @@ const FALLBACK_STICK_SIZE: Record<Exclude<HudLayoutDensity, 'desktop'>, number> 
 
 const BASE_DOT_RADIUS = 3.5;
 const BOSS_DOT_SCALE = 1.6;
+/** 雷达基础量程（米）；预警机等效果通过 setRangeMultiplier 放大 */
+const BASE_RANGE = 800;
+const MIN_RANGE_MULTIPLIER = 0.25;
+const MAX_RANGE_MULTIPLIER = 4;
+const NEUTRAL_COLOR = '#C3CCD6';
+
+/** 绘制顺序：平民与道具垫底，友军其次，敌方在上，Boss 最上层 */
+const DRAW_PASSES: ReadonlyArray<ReadonlyArray<RadarBlipKind>> = [
+  ['neutral', 'pickup'],
+  ['ally-unit', 'ally'],
+  ['enemy-ground', 'enemy-sea'],
+  ['spawning', 'enemy'],
+  ['boss'],
+];
+const KNOWN_KINDS: ReadonlySet<string> = new Set<string>(DRAW_PASSES.flat());
 
 function parsePx(value: string): number | null {
   const match = value.trim().match(/^(-?\d+(?:\.\d+)?)px$/i);
@@ -62,10 +93,16 @@ export class RadarMinimap {
   private radarCanvas: HTMLCanvasElement;
   private ctx: CanvasRenderingContext2D | null = null;
   private size: number = RADAR_SIZE.desktop;
-  private range: number = 800;
+  private range: number = BASE_RANGE;
+  private rangeMultiplier: number = 1;
   private layoutDensity: HudLayoutDensity;
   private readonly playerDirection = new Vector3();
   private readonly resizeHandler: () => void;
+  /** 每帧复用：玩家航向的正余弦与投影结果，避免为每个雷达点分配对象 */
+  private headingCos: number = 1;
+  private headingSin: number = 0;
+  private projectedX: number = 0;
+  private projectedY: number = 0;
 
   constructor() {
     injectHudTokens();
@@ -89,6 +126,7 @@ export class RadarMinimap {
       this.applyLayout();
     };
     window.addEventListener('resize', this.resizeHandler);
+    window.addEventListener('orientationchange', this.resizeHandler);
     this.applyLayout();
   }
 
@@ -99,6 +137,17 @@ export class RadarMinimap {
 
   public getLayoutDensity(): HudLayoutDensity {
     return this.layoutDensity;
+  }
+
+  /** 雷达量程倍率（友军预警机在线时 > 1）；钳制在 0.25..4，非法值回到 1 */
+  public setRangeMultiplier(multiplier: number): void {
+    const safe = Number.isFinite(multiplier) && multiplier > 0 ? multiplier : 1;
+    this.rangeMultiplier = Math.min(MAX_RANGE_MULTIPLIER, Math.max(MIN_RANGE_MULTIPLIER, safe));
+    this.range = BASE_RANGE * this.rangeMultiplier;
+  }
+
+  public getRangeMultiplier(): number {
+    return this.rangeMultiplier;
   }
 
   /**
@@ -157,9 +206,16 @@ export class RadarMinimap {
     let stickSize = fallbackSize;
 
     if (stick) {
-      stickLeft = parsePx(stick.style.left) ?? stickLeft;
-      stickBottom = parsePx(stick.style.bottom) ?? stickBottom;
-      stickSize = parsePx(stick.style.height) ?? parsePx(stick.style.width) ?? stickSize;
+      // 页面里的摇杆由 CSS 定位（含安全区内边距），没有内联尺寸时按实际包围盒放置
+      const rect = stick.getBoundingClientRect();
+      const measured = rect.width > 0 && rect.height > 0;
+      stickLeft = parsePx(stick.style.left) ?? (measured ? rect.left : stickLeft);
+      stickBottom =
+        parsePx(stick.style.bottom) ?? (measured ? window.innerHeight - rect.bottom : stickBottom);
+      stickSize =
+        parsePx(stick.style.height) ??
+        parsePx(stick.style.width) ??
+        (measured ? rect.height : stickSize);
     }
 
     this.container.style.left = `${stickLeft}px`;
@@ -190,41 +246,41 @@ export class RadarMinimap {
     this.ctx.clearRect(0, 0, this.size, this.size);
     this.drawBackground();
     this.drawPlayer();
-    this.drawEnemies(playerPos, enemies, playerRotation);
-    this.drawAllies(playerPos, allies, playerRotation);
-    this.drawBalloons(playerPos, balloons, playerRotation);
+    this.computeHeading(playerRotation);
+    this.drawBalloons(playerPos, balloons);
+    this.drawAllies(playerPos, allies);
+    this.drawEnemies(playerPos, enemies);
   }
 
+  /**
+   * 按类型绘制雷达点：分几轮遍历同一个数组，不分配临时对象。
+   * 未知类型按敌机处理。
+   */
   public updateBlips(
     playerPos: Vector3,
-    blips: RadarBlip[],
+    blips: readonly RadarBlip[],
     playerRotation: Quaternion
   ): void {
-    const enemies: EnemyRadarInfo[] = [];
-    const balloons: BalloonRadarInfo[] = [];
-    const allies: AllyRadarInfo[] = [];
-
-    for (const blip of blips) {
-      switch (blip.kind) {
-        case 'spawning':
-          enemies.push({ position: blip.position, isSpawning: true });
-          break;
-        case 'boss':
-          enemies.push({ position: blip.position, isSpawning: false, isBoss: true });
-          break;
-        case 'ally':
-          allies.push({ position: blip.position });
-          break;
-        case 'pickup':
-          balloons.push({ position: blip.position });
-          break;
-        default:
-          enemies.push({ position: blip.position, isSpawning: false });
-          break;
-      }
+    const ctx = this.ctx;
+    if (!ctx) {
+      return;
     }
 
-    this.update(playerPos, enemies, balloons, playerRotation, allies);
+    ctx.clearRect(0, 0, this.size, this.size);
+    this.drawBackground();
+    this.drawPlayer();
+    this.computeHeading(playerRotation);
+
+    for (const pass of DRAW_PASSES) {
+      for (const blip of blips) {
+        const kind = KNOWN_KINDS.has(blip.kind) ? blip.kind : 'enemy';
+        if (!pass.includes(kind) || !this.project(playerPos, blip.position)) {
+          continue;
+        }
+        this.drawBlip(kind, this.projectedX, this.projectedY);
+      }
+    }
+    this.drawRangeLabel();
   }
 
   private drawBackground(): void {
@@ -285,26 +341,30 @@ export class RadarMinimap {
     ctx.stroke();
   }
 
-  private projectToRadar(
-    playerPos: Vector3,
-    targetPos: Vector3,
-    playerRotation: Quaternion
-  ): { dx: number; dy: number } {
-    const scale = this.size / this.range;
-
+  /** 每帧算一次玩家航向（绕 Y 轴），供所有雷达点复用 */
+  private computeHeading(playerRotation: Quaternion): void {
     this.playerDirection.set(0, 0, -1);
     this.playerDirection.applyQuaternion(playerRotation);
     const playerAngle = Math.atan2(this.playerDirection.x, this.playerDirection.z);
+    const cos = Math.cos(-playerAngle);
+    const sin = Math.sin(-playerAngle);
+    this.headingCos = Number.isFinite(cos) ? cos : 1;
+    this.headingSin = Number.isFinite(sin) ? sin : 0;
+  }
 
+  /** 投影到雷达平面（结果写入 projectedX/Y，超出量程贴边）；坐标非法时返回 false */
+  private project(playerPos: Vector3, targetPos: Vector3): boolean {
     const relativeX = targetPos.x - playerPos.x;
     const relativeZ = targetPos.z - playerPos.z;
-
-    const rotatedX = relativeX * Math.cos(-playerAngle) - relativeZ * Math.sin(-playerAngle);
-    const rotatedZ = relativeX * Math.sin(-playerAngle) + relativeZ * Math.cos(-playerAngle);
+    if (!Number.isFinite(relativeX) || !Number.isFinite(relativeZ)) {
+      return false;
+    }
+    const scale = this.size / this.range;
+    const rotatedX = relativeX * this.headingCos - relativeZ * this.headingSin;
+    const rotatedZ = relativeX * this.headingSin + relativeZ * this.headingCos;
 
     let dx = rotatedX * scale;
     let dy = -rotatedZ * scale;
-
     const maxR = this.size / 2 - 6;
     const dist = Math.hypot(dx, dy);
     if (dist > maxR && dist > 0) {
@@ -312,16 +372,116 @@ export class RadarMinimap {
       dx *= clampScale;
       dy *= clampScale;
     }
-
-    return { dx, dy };
+    this.projectedX = dx;
+    this.projectedY = dy;
+    return true;
   }
 
-  private drawDot(
-    dx: number,
-    dy: number,
-    color: string,
-    radius: number
-  ): void {
+  private drawBlip(kind: RadarBlipKind, dx: number, dy: number): void {
+    switch (kind) {
+      case 'boss':
+        this.drawDot(dx, dy, HUD_COLORS.threat, BASE_DOT_RADIUS * BOSS_DOT_SCALE);
+        this.drawRing(dx, dy, HUD_COLORS.threat, BASE_DOT_RADIUS * BOSS_DOT_SCALE + 4.5);
+        break;
+      case 'spawning':
+        this.drawDot(dx, dy, HUD_COLORS.weapon, BASE_DOT_RADIUS);
+        break;
+      case 'enemy-ground':
+        this.drawSquare(dx, dy, HUD_COLORS.threat, BASE_DOT_RADIUS);
+        break;
+      case 'enemy-sea':
+        this.drawDiamond(dx, dy, HUD_COLORS.threat, BASE_DOT_RADIUS + 1);
+        break;
+      case 'ally':
+        this.drawDot(dx, dy, HUD_COLORS.ally, BASE_DOT_RADIUS);
+        break;
+      case 'ally-unit':
+        this.drawTriangle(dx, dy, HUD_COLORS.ally, BASE_DOT_RADIUS + 0.8);
+        break;
+      case 'neutral':
+        this.drawRing(dx, dy, NEUTRAL_COLOR, BASE_DOT_RADIUS);
+        break;
+      case 'pickup':
+        this.drawDot(dx, dy, HUD_COLORS.lock, BASE_DOT_RADIUS);
+        break;
+      default:
+        this.drawDot(dx, dy, HUD_COLORS.threat, BASE_DOT_RADIUS);
+        break;
+    }
+  }
+
+  /** 量程放大时在底部标注倍率 */
+  private drawRangeLabel(): void {
+    const ctx = this.ctx;
+    if (!ctx || Math.abs(this.rangeMultiplier - 1) < 0.01) {
+      return;
+    }
+    ctx.font = 'bold 9px Arial';
+    ctx.fillStyle = this.rangeMultiplier > 1 ? HUD_COLORS.ally : HUD_COLORS.weapon;
+    ctx.textAlign = 'center';
+    ctx.fillText(`×${this.rangeMultiplier.toFixed(1)}`, this.size / 2, this.size - 6);
+  }
+
+  private drawSquare(dx: number, dy: number, color: string, half: number): void {
+    const ctx = this.ctx;
+    if (!ctx) {
+      return;
+    }
+    const x = this.size / 2 + dx;
+    const y = this.size / 2 + dy;
+    ctx.beginPath();
+    ctx.moveTo(x - half, y - half);
+    ctx.lineTo(x + half, y - half);
+    ctx.lineTo(x + half, y + half);
+    ctx.lineTo(x - half, y + half);
+    ctx.fillStyle = color;
+    ctx.fill();
+  }
+
+  private drawDiamond(dx: number, dy: number, color: string, radius: number): void {
+    const ctx = this.ctx;
+    if (!ctx) {
+      return;
+    }
+    const x = this.size / 2 + dx;
+    const y = this.size / 2 + dy;
+    ctx.beginPath();
+    ctx.moveTo(x, y - radius);
+    ctx.lineTo(x + radius, y);
+    ctx.lineTo(x, y + radius);
+    ctx.lineTo(x - radius, y);
+    ctx.fillStyle = color;
+    ctx.fill();
+  }
+
+  private drawTriangle(dx: number, dy: number, color: string, radius: number): void {
+    const ctx = this.ctx;
+    if (!ctx) {
+      return;
+    }
+    const x = this.size / 2 + dx;
+    const y = this.size / 2 + dy;
+    ctx.beginPath();
+    ctx.moveTo(x, y - radius);
+    ctx.lineTo(x + radius * 0.9, y + radius * 0.75);
+    ctx.lineTo(x - radius * 0.9, y + radius * 0.75);
+    ctx.fillStyle = color;
+    ctx.fill();
+  }
+
+  private drawRing(dx: number, dy: number, color: string, radius: number): void {
+    const ctx = this.ctx;
+    if (!ctx) {
+      return;
+    }
+    ctx.beginPath();
+    ctx.arc(this.size / 2 + dx, this.size / 2 + dy, radius, 0, Math.PI * 2);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.4;
+    ctx.stroke();
+  }
+
+  private drawDot(dx: number, dy: number, color: string, radius: number): void {
     const ctx = this.ctx;
     if (!ctx) {
       return;
@@ -344,43 +504,35 @@ export class RadarMinimap {
     ctx.globalAlpha = 1;
   }
 
-  private drawEnemies(
-    playerPos: Vector3,
-    enemies: EnemyRadarInfo[],
-    playerRotation: Quaternion
-  ): void {
+  private drawEnemies(playerPos: Vector3, enemies: EnemyRadarInfo[]): void {
     for (const enemy of enemies) {
-      const { dx, dy } = this.projectToRadar(playerPos, enemy.position, playerRotation);
-      const color = enemy.isSpawning ? HUD_COLORS.weapon : HUD_COLORS.threat;
-      const radius = enemy.isBoss ? BASE_DOT_RADIUS * BOSS_DOT_SCALE : BASE_DOT_RADIUS;
-      this.drawDot(dx, dy, color, radius);
+      if (!this.project(playerPos, enemy.position)) {
+        continue;
+      }
+      const kind: RadarBlipKind = enemy.isBoss ? 'boss' : enemy.isSpawning ? 'spawning' : 'enemy';
+      this.drawBlip(kind, this.projectedX, this.projectedY);
     }
   }
 
-  private drawAllies(
-    playerPos: Vector3,
-    allies: AllyRadarInfo[],
-    playerRotation: Quaternion
-  ): void {
+  private drawAllies(playerPos: Vector3, allies: AllyRadarInfo[]): void {
     for (const ally of allies) {
-      const { dx, dy } = this.projectToRadar(playerPos, ally.position, playerRotation);
-      this.drawDot(dx, dy, HUD_COLORS.ally, BASE_DOT_RADIUS);
+      if (this.project(playerPos, ally.position)) {
+        this.drawBlip('ally', this.projectedX, this.projectedY);
+      }
     }
   }
 
-  private drawBalloons(
-    playerPos: Vector3,
-    balloons: BalloonRadarInfo[],
-    playerRotation: Quaternion
-  ): void {
+  private drawBalloons(playerPos: Vector3, balloons: BalloonRadarInfo[]): void {
     for (const balloon of balloons) {
-      const { dx, dy } = this.projectToRadar(playerPos, balloon.position, playerRotation);
-      this.drawDot(dx, dy, HUD_COLORS.lock, BASE_DOT_RADIUS);
+      if (this.project(playerPos, balloon.position)) {
+        this.drawBlip('pickup', this.projectedX, this.projectedY);
+      }
     }
   }
 
   public dispose(): void {
     window.removeEventListener('resize', this.resizeHandler);
+    window.removeEventListener('orientationchange', this.resizeHandler);
     this.container.remove();
   }
 }

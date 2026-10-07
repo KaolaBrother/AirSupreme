@@ -1,4 +1,14 @@
 import { GAME_CONSTANTS, GameConfig } from '@/config';
+import { SPECIAL_WEAPON_IDS } from '@/core/CombatContracts';
+import { SPECIAL_WEAPON_CONFIGS } from '@/features/weapons/WeaponTypes';
+import { injectHudExtrasStyles } from '@/ui/theme/hudExtrasStyles';
+import {
+  GLYPH_CAMERA,
+  GLYPH_LOCK,
+  GLYPH_MISSILE,
+  GLYPH_SAVE,
+  GLYPH_WARNING,
+} from '@/ui/theme/hudGlyphs';
 import {
   HUD_COLORS,
   detectHudLayoutDensity,
@@ -17,6 +27,110 @@ export interface BriefingRequest {
   line: string;
   tone: BriefingTone;
   durationMs: number;
+}
+
+export type HudCameraMode = 'third-person' | 'first-person';
+export type HudMissileWarningLevel = 'none' | 'locking' | 'incoming';
+export type HudWarningTone = 'threat' | 'sys' | 'ally';
+export type HudWeaponMode = 'salvo' | 'beam' | 'charge' | 'pulse';
+
+export interface HudWeaponSlotState {
+  icon: string;
+  shortCode: string;
+  selected: boolean;
+  ready: boolean;
+}
+
+/** 特殊武器面板状态（与 WeaponSystem.getHudState() 对齐；visible=false 时隐藏面板） */
+export interface HudWeaponPanelState {
+  visible: boolean;
+  icon: string;
+  name: string;
+  shortCode: string;
+  mode: HudWeaponMode | null;
+  ammo: number;
+  maxAmmo: number;
+  /** 0..1，装填下一发的进度；满弹时为 1 */
+  reloadProgress: number;
+  /** 0..1 */
+  heat: number;
+  overheated: boolean;
+  /** 0..1 */
+  charge: number;
+  /** 0..1，冷却剩余比例（1 = 刚开火） */
+  cooldown: number;
+  ready: boolean;
+  slots: HudWeaponSlotState[];
+}
+
+interface WeaponSlotUi {
+  root: HTMLDivElement;
+  key: HTMLSpanElement;
+  code: HTMLSpanElement;
+}
+
+interface WeaponPanelUi {
+  panel: HTMLDivElement;
+  code: HTMLSpanElement;
+  icon: HTMLSpanElement;
+  name: HTMLSpanElement;
+  lamp: HTMLSpanElement;
+  meterFill: HTMLDivElement;
+  ammoPipsHost: HTMLSpanElement;
+  ammoPips: HTMLSpanElement[];
+  ammoText: HTMLSpanElement;
+  label: HTMLSpanElement;
+  slotsHost: HTMLDivElement;
+  slots: WeaponSlotUi[];
+}
+
+interface FlareUi {
+  section: HTMLDivElement;
+  pipsHost: HTMLDivElement;
+  pips: HTMLSpanElement[];
+  fill: HTMLDivElement;
+  count: HTMLSpanElement;
+}
+
+interface BossStatusUi {
+  root: HTMLDivElement;
+  pipsHost: HTMLSpanElement;
+  pips: HTMLSpanElement[];
+  phase: HTMLSpanElement;
+  label: HTMLSpanElement;
+}
+
+interface WarningLaneUi {
+  lane: HTMLDivElement;
+  missile: HTMLDivElement;
+  missileGlyph: HTMLSpanElement;
+  missileMain: HTMLSpanElement;
+  missileHint: HTMLSpanElement;
+  flash: HTMLDivElement;
+  flashText: HTMLSpanElement;
+  edge: HTMLDivElement;
+}
+
+/** 触控按键簇（index.html）：HUD 只读写它们的 data-* / 角标，不绑定输入 */
+interface TouchDeckRefs {
+  special: HTMLElement | null;
+  specialMain: HTMLElement | null;
+  specialSub: HTMLElement | null;
+  flare: HTMLElement | null;
+  flareSub: HTMLElement | null;
+  cycle: HTMLElement | null;
+  cycleSub: HTMLElement | null;
+  camera: HTMLElement | null;
+  cameraSub: HTMLElement | null;
+}
+
+interface WeaponSlotEntry {
+  code: string;
+  key: number;
+  rank: number;
+  selected: boolean;
+  ready: boolean;
+  locked: boolean;
 }
 
 type SettlementActions = {
@@ -103,8 +217,49 @@ export class HUD {
   private readonly textContentCache = new WeakMap<HTMLElement, string>();
   private readonly styleValueCache = new WeakMap<HTMLElement, Map<string, string>>();
 
+  // 战役 HUD（首次使用时才创建）
+  private static readonly AUTOSAVE_TOAST_SECONDS = 2.6;
+  private static readonly AUTOSAVE_LEAVE_SECONDS = 0.35;
+  private static readonly FLASH_WARNING_SECONDS = 2.2;
+  private static readonly CAMERA_FLASH_SECONDS = 1.4;
+  private static readonly BOSS_PHASE_FLASH_SECONDS = 1.2;
+  private static readonly MAX_AMMO_PIPS = 8;
+  private static readonly MAX_FLARE_PIPS = 8;
+  private static readonly MAX_BOSS_PIPS = 6;
+  private storesPanel: HTMLDivElement | null = null;
+  private weaponUi: WeaponPanelUi | null = null;
+  private flareUi: FlareUi | null = null;
+  private autosaveToast: HTMLDivElement | null = null;
+  private autosaveLabel: HTMLSpanElement | null = null;
+  private cameraChip: HTMLDivElement | null = null;
+  private cameraChipLabel: HTMLSpanElement | null = null;
+  private bossUi: BossStatusUi | null = null;
+  private warningUi: WarningLaneUi | null = null;
+  private deckRefs: TouchDeckRefs | null = null;
+  private weaponPanelVisible: boolean = false;
+  private flaresVisible: boolean = false;
+  private deckMode: boolean = false;
+  private lastSlotSignature: string = '';
+  private lastFlareCount: number = -1;
+  private autosaveTimer: number = 0;
+  private autosaveLeaving: boolean = false;
+  private autosaveSeq: 'a' | 'b' = 'a';
+  private cameraMode: HudCameraMode | null = null;
+  private cameraFlashTimer: number = 0;
+  private bossStatusVisible: boolean = false;
+  private bossLabel: string = '';
+  private bossPhaseCurrent: number = 0;
+  private bossPhaseTotal: number = 0;
+  private bossFlashTimer: number = 0;
+  private missileWarningLevel: HudMissileWarningLevel = 'none';
+  private flashWarningTimer: number = 0;
+  private flashWarningText: string = '';
+  private flashWarningTone: HudWarningTone = 'threat';
+  private flashSeq: 'a' | 'b' = 'a';
+
   constructor() {
     injectHudTokens();
+    injectHudExtrasStyles();
     this.ensureUpgradeHintStyle();
     this.ensureLayoutStyle();
     this.layoutDensity = detectHudLayoutDensity();
@@ -1141,6 +1296,45 @@ export class HUD {
   private applyLayoutDensity(): void {
     this.container.setAttribute('data-layout-density', this.layoutDensity);
     this.setStyleValue(this.leftStatusPanel, 'maxWidth', this.getCabinMaxWidth());
+    this.applyHealthBarLayout();
+    this.refreshDeckMode();
+    this.applyCameraChipVisibility();
+    this.applyTopStackOffset();
+    if (this.warningUi && this.missileWarningLevel !== 'none') {
+      this.renderMissileWarning(this.warningUi);
+    }
+  }
+
+  /** 竖屏时血条靠右并收窄，避免压住左上角的得分舱 */
+  private applyHealthBarLayout(): void {
+    const density = this.layoutDensity;
+    const portrait = density === 'touch-portrait';
+    const width =
+      density === 'desktop' ? '250px' : portrait ? 'min(150px, calc(100% - 190px))' : '180px';
+    this.setStyleValue(this.healthBarContainer, 'width', width);
+    this.setStyleValue(this.healthBarContainer, 'left', portrait ? 'auto' : '50%');
+    this.setStyleValue(
+      this.healthBarContainer,
+      'right',
+      portrait ? 'max(10px, env(safe-area-inset-right))' : 'auto'
+    );
+    this.setStyleValue(
+      this.healthBarContainer,
+      'transform',
+      portrait ? 'none' : 'translateX(-50%)'
+    );
+  }
+
+  /** Boss 阶段条出现时把简报卡 / 事件目标往下让一行（竖屏阶段条在别处，不需要让） */
+  private applyTopStackOffset(): void {
+    const touch = this.layoutDensity !== 'desktop';
+    let shift = 0;
+    if (this.bossStatusVisible) {
+      shift =
+        this.layoutDensity === 'touch-landscape' ? 22 : this.layoutDensity === 'desktop' ? 8 : 0;
+    }
+    this.setStyleValue(this.briefingDisplay, 'top', `${(touch ? 52 : 70) + shift}px`);
+    this.setStyleValue(this.eventObjectiveDisplay, 'top', `${(touch ? 56 : 74) + shift}px`);
   }
 
   private renderWaveLine(): void {
@@ -1313,6 +1507,8 @@ export class HUD {
         this.setStyleValue(this.damageFlashOverlay, 'opacity', '0');
       }
     }
+
+    this.updateCampaignTimers(safeDeltaTime);
   }
 
   /**
@@ -1530,6 +1726,961 @@ export class HUD {
     );
   }
 
+  // ---------------------------------------------------------------------------
+  // 战役 HUD：挂载物 / 热焰弹 / 自动存档 / 视角 / Boss 阶段 / 告警
+  // 每帧调用安全：数值不变时不写 DOM。
+  // ---------------------------------------------------------------------------
+
+  /**
+   * 特殊武器面板：salvo 显示弹药与装填，beam 显示热量 / 过热，charge 显示蓄能，pulse 显示冷却；
+   * 下方一排 1-5 挂架（选中 / 就绪 / 未解锁）。触控端改为把同样的状态写到特武 / 切换按键上。
+   */
+  public updateWeaponPanel(state: HudWeaponPanelState): void {
+    this.ensureInitialized();
+    const ui = this.ensureWeaponUi();
+    const visible = Boolean(state && state.visible);
+    if (visible !== this.weaponPanelVisible) {
+      this.weaponPanelVisible = visible;
+      this.setStyleValue(ui.panel, 'display', visible ? 'block' : 'none');
+      this.syncStoresVisibility();
+    }
+    if (!visible) {
+      this.syncDeckWeapon(null, '');
+      return;
+    }
+
+    const mode = state.mode ?? null;
+    const maxAmmo = HUD.normalizeMaxAmmo(state.maxAmmo);
+    const ammo = Math.max(0, HUD.finiteOr(state.ammo, 0));
+    const reload = HUD.clamp01(state.reloadProgress);
+    const heat = HUD.clamp01(state.heat);
+    const charge = HUD.clamp01(state.charge);
+    const cooldown = HUD.clamp01(state.cooldown);
+    const ready = Boolean(state.ready);
+    const overheated = Boolean(state.overheated);
+
+    HUD.setAttr(ui.panel, 'data-mode', mode ?? 'none');
+    HUD.setAttr(ui.panel, 'data-ready', ready ? 'true' : 'false');
+    HUD.setAttr(ui.panel, 'data-overheated', overheated ? 'true' : 'false');
+    this.setTextContent(ui.code, state.shortCode || '—');
+    this.setTextContent(ui.icon, state.icon || '');
+    this.setTextContent(ui.name, state.name || '');
+    this.setTextContent(ui.lamp, overheated ? '过热' : ready ? '就绪' : '');
+
+    const meter = HUD.describeWeaponMeter(
+      mode,
+      ammo,
+      maxAmmo,
+      reload,
+      heat,
+      overheated,
+      charge,
+      cooldown,
+      this.layoutDensity === 'desktop'
+    );
+    this.setStyleValue(ui.meterFill, 'transform', `scaleX(${HUD.quantize(meter.value)})`);
+    this.setTextContent(ui.label, meter.label);
+    this.renderWeaponAmmo(ui, ammo, maxAmmo, reload);
+    const dots = this.renderWeaponSlots(ui, Array.isArray(state.slots) ? state.slots : []);
+
+    this.syncDeckWeapon(
+      {
+        code: state.shortCode || '',
+        mode: mode ?? 'none',
+        ready,
+        overheated,
+        meter: meter.value,
+        ammoText: Number.isFinite(maxAmmo) && maxAmmo > 0 ? String(Math.floor(ammo)) : '',
+      },
+      dots
+    );
+  }
+
+  /** 热焰弹：菱形 pip 表示剩余次数，细条表示下一枚的回复进度 */
+  public updateFlares(charges: number, max: number, rechargeProgress: number): void {
+    this.ensureInitialized();
+    const ui = this.ensureFlareUi();
+    const maxCount = Math.max(0, Math.min(HUD.MAX_FLARE_PIPS, Math.round(HUD.finiteOr(max, 0))));
+    const count = Math.max(0, Math.min(maxCount, Math.floor(HUD.finiteOr(charges, 0))));
+    const progress = HUD.clamp01(rechargeProgress);
+    const visible = maxCount > 0;
+    if (visible !== this.flaresVisible) {
+      this.flaresVisible = visible;
+      this.setStyleValue(ui.section, 'display', visible ? 'flex' : 'none');
+      this.syncStoresVisibility();
+    }
+
+    if (ui.pips.length !== maxCount) {
+      const fragment = document.createDocumentFragment();
+      ui.pips = [];
+      for (let i = 0; i < maxCount; i += 1) {
+        const pip = document.createElement('span');
+        pip.className = 'hx-fl-pip';
+        ui.pips.push(pip);
+        fragment.appendChild(pip);
+      }
+      ui.pipsHost.replaceChildren(fragment);
+      this.lastFlareCount = -1;
+    }
+    if (count !== this.lastFlareCount) {
+      this.lastFlareCount = count;
+      ui.pips.forEach((pip, index) => pip.classList.toggle('is-on', index < count));
+      ui.section.setAttribute('data-charges', String(count));
+    }
+    this.setTextContent(ui.count, visible ? `${count}/${maxCount}` : '');
+    const fill = count >= maxCount ? 1 : progress;
+    this.setStyleValue(ui.fill, 'transform', `scaleX(${HUD.quantize(fill)})`);
+    HUD.setAttr(ui.section, 'data-empty', visible && count === 0 ? 'true' : 'false');
+
+    if (this.deckMode) {
+      const deck = this.getTouchDeck();
+      if (deck.flare) {
+        HUD.setAttr(deck.flare, 'data-empty', visible && count === 0 ? 'true' : 'false');
+        this.setStyleVar(deck.flare, '--tc-meter', String(HUD.quantize(fill)));
+      }
+      if (deck.flareSub) {
+        this.setTextContent(deck.flareSub, visible ? String(count) : '');
+      }
+    }
+  }
+
+  /** 自动存档提示：驾驶舱信息栏下方的短暂绿色提示，约 2.6 秒后淡出（由 update 驱动） */
+  public showAutosave(label?: string): void {
+    this.ensureInitialized();
+    const toast = this.ensureAutosaveToast();
+    const text = typeof label === 'string' ? label.trim() : '';
+    if (this.autosaveLabel) {
+      this.setTextContent(this.autosaveLabel, text);
+      this.setStyleValue(this.autosaveLabel, 'display', text ? 'inline' : 'none');
+    }
+    toast.classList.remove('is-leaving');
+    this.autosaveSeq = this.autosaveSeq === 'a' ? 'b' : 'a';
+    toast.setAttribute('data-seq', this.autosaveSeq);
+    this.setStyleValue(toast, 'display', 'flex');
+    this.autosaveTimer = HUD.AUTOSAVE_TOAST_SECONDS;
+    this.autosaveLeaving = false;
+  }
+
+  /**
+   * 视角：#hud 与 <html> 上标记 data-camera-mode / data-hud-camera 供样式切换；
+   * 第一人称下驾驶舱信息栏改用更通透的玻璃，下方面板换成仪表板显示器风格；切换时标签闪亮一下。
+   */
+  public setCameraMode(mode: HudCameraMode): void {
+    this.ensureInitialized();
+    const next: HudCameraMode = mode === 'first-person' ? 'first-person' : 'third-person';
+    const previous = this.cameraMode;
+    this.cameraMode = next;
+    HUD.setAttr(this.container, 'data-camera-mode', next);
+    HUD.setRootMarker('data-hud-camera', next);
+
+    const chip = this.ensureCameraChip();
+    if (this.cameraChipLabel) {
+      this.setTextContent(this.cameraChipLabel, next === 'first-person' ? '第一人称' : '第三人称');
+    }
+    this.applyCameraChipVisibility();
+    this.applyCabinCameraStyle(next);
+    if (previous !== null && previous !== next) {
+      chip.classList.add('is-flash');
+      this.cameraFlashTimer = HUD.CAMERA_FLASH_SECONDS;
+    }
+
+    const deck = this.getTouchDeck();
+    if (deck.camera) {
+      HUD.setAttr(deck.camera, 'data-camera-mode', next);
+      HUD.setAttr(deck.camera, 'aria-pressed', next === 'first-person' ? 'true' : 'false');
+    }
+    if (deck.cameraSub) {
+      this.setTextContent(deck.cameraSub, next === 'first-person' ? '座舱' : '机外');
+    }
+  }
+
+  /**
+   * Boss 状态条（血条下方）：标签 + 阶段菱形；label 为 null 时隐藏。
+   * 阶段推进时整条闪一下。
+   */
+  public setBossStatus(label: string | null, phase?: { current: number; total: number }): void {
+    this.ensureInitialized();
+    if (label === null || label === undefined) {
+      if (!this.bossStatusVisible) {
+        return;
+      }
+      this.bossStatusVisible = false;
+      this.bossLabel = '';
+      this.bossPhaseCurrent = 0;
+      this.bossPhaseTotal = 0;
+      this.bossFlashTimer = 0;
+      if (this.bossUi) {
+        this.bossUi.root.classList.remove('is-phase-up');
+        this.setStyleValue(this.bossUi.root, 'display', 'none');
+      }
+      HUD.setRootMarker('data-hud-boss', null);
+      this.applyTopStackOffset();
+      return;
+    }
+
+    const ui = this.ensureBossUi();
+    const total = phase
+      ? Math.max(0, Math.min(HUD.MAX_BOSS_PIPS, Math.round(HUD.finiteOr(phase.total, 0))))
+      : 0;
+    const current = phase
+      ? Math.max(0, Math.min(total, Math.round(HUD.finiteOr(phase.current, 0))))
+      : 0;
+    const text = String(label);
+    if (
+      this.bossStatusVisible &&
+      text === this.bossLabel &&
+      total === this.bossPhaseTotal &&
+      current === this.bossPhaseCurrent
+    ) {
+      return;
+    }
+
+    const phaseAdvanced = this.bossStatusVisible && current > this.bossPhaseCurrent;
+    this.setTextContent(ui.label, text);
+    this.setStyleValue(ui.label, 'display', text ? 'inline' : 'none');
+
+    if (ui.pips.length !== total) {
+      const fragment = document.createDocumentFragment();
+      ui.pips = [];
+      for (let i = 0; i < total; i += 1) {
+        const pip = document.createElement('span');
+        pip.className = 'hx-boss-pip';
+        ui.pips.push(pip);
+        fragment.appendChild(pip);
+      }
+      ui.pipsHost.replaceChildren(fragment);
+    }
+    ui.pips.forEach((pip, index) => {
+      pip.classList.toggle('is-past', index + 1 < current);
+      pip.classList.toggle('is-current', index + 1 === current);
+    });
+    this.setStyleValue(ui.pipsHost, 'display', total > 0 ? 'flex' : 'none');
+    this.setTextContent(ui.phase, total > 0 ? `阶段 ${current}/${total}` : '');
+    this.setStyleValue(ui.phase, 'display', total > 0 ? 'inline' : 'none');
+    ui.root.setAttribute('data-phase', String(current));
+    ui.root.setAttribute('data-phase-total', String(total));
+
+    this.bossLabel = text;
+    this.bossPhaseCurrent = current;
+    this.bossPhaseTotal = total;
+    if (!this.bossStatusVisible) {
+      this.bossStatusVisible = true;
+      this.setStyleValue(ui.root, 'display', 'flex');
+      // 竖屏时阶段条占一整行，无线电面板据此下移
+      HUD.setRootMarker('data-hud-boss', 'on');
+      this.applyTopStackOffset();
+    }
+    if (phaseAdvanced) {
+      ui.root.classList.remove('is-phase-up');
+      // 强制重排以重播动画：只在阶段推进时发生
+      void ui.root.offsetWidth;
+      ui.root.classList.add('is-phase-up');
+      this.bossFlashTimer = HUD.BOSS_PHASE_FLASH_SECONDS;
+    }
+  }
+
+  /**
+   * 导弹告警逐级升级：locking 琥珀色“被锁定”慢闪 + 边缘微光；incoming 红色“导弹来袭”快闪
+   * + 屏幕边缘红色脉冲，并提示投放热焰弹（触控端热焰按键同步进入告警态）。
+   */
+  public setMissileWarning(level: HudMissileWarningLevel): void {
+    this.ensureInitialized();
+    const next: HudMissileWarningLevel =
+      level === 'locking' || level === 'incoming' ? level : 'none';
+    if (next === this.missileWarningLevel) {
+      return;
+    }
+    this.missileWarningLevel = next;
+    HUD.setAttr(this.container, 'data-missile-warning', next);
+    const ui = this.ensureWarningUi();
+    this.renderMissileWarning(ui);
+
+    const deck = this.getTouchDeck();
+    if (deck.flare) {
+      HUD.setAttr(deck.flare, 'data-alert', next);
+    }
+  }
+
+  /** 屏幕中下方的闪烁告警（Boss 招式预警、武器过热等），约 2.2 秒后消失；同一句话重复调用只续时 */
+  public flashWarning(text: string, tone: HudWarningTone = 'threat'): void {
+    this.ensureInitialized();
+    const message = typeof text === 'string' ? text.trim() : '';
+    if (!message) {
+      return;
+    }
+    const ui = this.ensureWarningUi();
+    const nextTone: HudWarningTone = tone === 'sys' || tone === 'ally' ? tone : 'threat';
+    const repeat =
+      this.flashWarningTimer > 0 &&
+      this.flashWarningText === message &&
+      this.flashWarningTone === nextTone;
+    this.flashWarningText = message;
+    this.flashWarningTone = nextTone;
+    this.setTextContent(ui.flashText, message);
+    ui.flash.setAttribute('data-tone', nextTone);
+    if (!repeat) {
+      this.flashSeq = this.flashSeq === 'a' ? 'b' : 'a';
+      ui.flash.setAttribute('data-seq', this.flashSeq);
+    }
+    this.setStyleValue(ui.flash, 'display', 'flex');
+    this.flashWarningTimer = HUD.FLASH_WARNING_SECONDS;
+  }
+
+  private updateCampaignTimers(deltaTime: number): void {
+    if (this.autosaveTimer > 0) {
+      this.autosaveTimer = Math.max(0, this.autosaveTimer - deltaTime);
+      if (!this.autosaveLeaving && this.autosaveTimer <= HUD.AUTOSAVE_LEAVE_SECONDS) {
+        this.autosaveLeaving = true;
+        this.autosaveToast?.classList.add('is-leaving');
+      }
+      if (this.autosaveTimer <= 0) {
+        this.hideAutosave();
+      }
+    }
+
+    if (this.flashWarningTimer > 0) {
+      this.flashWarningTimer = Math.max(0, this.flashWarningTimer - deltaTime);
+      if (this.flashWarningTimer <= 0) {
+        this.hideFlashWarning();
+      }
+    }
+
+    if (this.cameraFlashTimer > 0) {
+      this.cameraFlashTimer = Math.max(0, this.cameraFlashTimer - deltaTime);
+      if (this.cameraFlashTimer <= 0) {
+        this.cameraChip?.classList.remove('is-flash');
+      }
+    }
+
+    if (this.bossFlashTimer > 0) {
+      this.bossFlashTimer = Math.max(0, this.bossFlashTimer - deltaTime);
+      if (this.bossFlashTimer <= 0) {
+        this.bossUi?.root.classList.remove('is-phase-up');
+      }
+    }
+  }
+
+  private hideAutosave(): void {
+    this.autosaveTimer = 0;
+    this.autosaveLeaving = false;
+    if (this.autosaveToast) {
+      this.autosaveToast.classList.remove('is-leaving');
+      this.setStyleValue(this.autosaveToast, 'display', 'none');
+    }
+  }
+
+  private hideFlashWarning(): void {
+    this.flashWarningTimer = 0;
+    this.flashWarningText = '';
+    if (this.warningUi) {
+      this.setStyleValue(this.warningUi.flash, 'display', 'none');
+    }
+  }
+
+  /** 结算 / 失败时收起所有战斗告警与临时提示 */
+  private clearCombatAlerts(): void {
+    this.setMissileWarning('none');
+    this.hideFlashWarning();
+    this.setBossStatus(null);
+    this.hideAutosave();
+  }
+
+  private renderMissileWarning(ui: WarningLaneUi): void {
+    const level = this.missileWarningLevel;
+    ui.missile.setAttribute('data-level', level);
+    ui.edge.setAttribute('data-level', level);
+    if (level === 'none') {
+      this.setStyleValue(ui.missile, 'display', 'none');
+      return;
+    }
+    const incoming = level === 'incoming';
+    ui.missileGlyph.innerHTML = incoming ? GLYPH_MISSILE : GLYPH_WARNING;
+    this.setTextContent(ui.missileMain, incoming ? '导弹来袭' : '被锁定');
+    const hint = document.createDocumentFragment();
+    if (incoming) {
+      const key = document.createElement('span');
+      key.className = 'hx-key';
+      key.textContent = 'G';
+      hint.appendChild(key);
+    }
+    hint.appendChild(document.createTextNode(incoming ? '投放热焰弹' : '准备热焰弹'));
+    ui.missileHint.replaceChildren(hint);
+    this.textContentCache.delete(ui.missileHint);
+    this.setStyleValue(ui.missile, 'display', 'flex');
+  }
+
+  /** 主进度条的数值与说明；就绪时说明换成操作提示（灯已经显示“就绪”） */
+  private static describeWeaponMeter(
+    mode: HudWeaponMode | null,
+    ammo: number,
+    maxAmmo: number,
+    reload: number,
+    heat: number,
+    overheated: boolean,
+    charge: number,
+    cooldown: number,
+    keyboard: boolean
+  ): { value: number; label: string } {
+    const percent = (value: number): string => `${Math.round(value * 100)}%`;
+    if (mode === 'beam') {
+      if (overheated) {
+        return { value: heat, label: '过热冷却中' };
+      }
+      if (heat >= 0.01) {
+        return { value: heat, label: `热量 ${percent(heat)}` };
+      }
+    }
+    if (mode === 'charge' && charge > 0) {
+      return { value: charge, label: charge >= 1 ? '蓄满，松开发射' : `蓄能 ${percent(charge)}` };
+    }
+    if (Number.isFinite(maxAmmo) && maxAmmo > 0 && ammo <= 0) {
+      return { value: reload, label: `装填 ${percent(reload)}` };
+    }
+    if (cooldown > 0) {
+      return { value: 1 - cooldown, label: mode === 'pulse' ? '充能中' : '冷却中' };
+    }
+    if (mode === 'beam') {
+      return { value: 0, label: keyboard ? '按住 F 照射' : '按住照射' };
+    }
+    if (mode === 'charge') {
+      return { value: 1, label: keyboard ? '按住 F 蓄能' : '按住蓄能' };
+    }
+    if (mode === 'pulse') {
+      return { value: 1, label: keyboard ? 'F 键释放' : '轻触释放' };
+    }
+    return { value: 1, label: keyboard ? 'F 键齐射' : '轻触齐射' };
+  }
+
+  private renderWeaponAmmo(ui: WeaponPanelUi, ammo: number, maxAmmo: number, reload: number): void {
+    const limited = Number.isFinite(maxAmmo) && maxAmmo > 0;
+    const pipCount = limited && maxAmmo <= HUD.MAX_AMMO_PIPS ? Math.round(maxAmmo) : 0;
+    if (pipCount !== ui.ammoPips.length) {
+      const fragment = document.createDocumentFragment();
+      ui.ammoPips = [];
+      for (let i = 0; i < pipCount; i += 1) {
+        const pip = document.createElement('span');
+        pip.className = 'hx-ammo-pip';
+        ui.ammoPips.push(pip);
+        fragment.appendChild(pip);
+      }
+      ui.ammoPipsHost.replaceChildren(fragment);
+    }
+
+    if (pipCount > 0) {
+      const filled = Math.min(pipCount, Math.floor(ammo));
+      // 正在装填的那一发按进度从下往上填充（5% 一档）
+      const reloadFill = `${Math.round(reload * 20) * 5}%`;
+      ui.ammoPips.forEach((pip, index) => {
+        const on = index < filled;
+        pip.classList.toggle('is-on', on);
+        this.setStyleVar(pip, '--fill', !on && index === filled ? reloadFill : '0%');
+      });
+    }
+    // pip 之外再给出精确数字；热量武器（无限弹药）不显示
+    this.setStyleValue(ui.ammoText, 'display', limited ? 'inline' : 'none');
+    this.setTextContent(ui.ammoText, limited ? `${Math.floor(ammo)}/${Math.round(maxAmmo)}` : '');
+  }
+
+  /** 渲染挂架行；返回触控“切换”键上的挂架点阵（● 选中 / ○ 已解锁 / · 未解锁） */
+  private renderWeaponSlots(ui: WeaponPanelUi, slots: readonly HudWeaponSlotState[]): string {
+    let signature = '';
+    for (const slot of slots) {
+      signature += `${slot.shortCode}:${slot.selected ? 1 : 0}${slot.ready ? 1 : 0}|`;
+    }
+    if (signature === this.lastSlotSignature) {
+      return ui.slotsHost.getAttribute('data-dots') ?? '';
+    }
+    this.lastSlotSignature = signature;
+
+    const entries = HUD.buildSlotEntries(slots);
+    while (ui.slots.length < entries.length) {
+      ui.slots.push(HUD.createSlotElement(ui.slotsHost));
+    }
+    while (ui.slots.length > entries.length) {
+      ui.slots.pop()?.root.remove();
+    }
+
+    let dots = '';
+    entries.forEach((entry, index) => {
+      const slot = ui.slots[index];
+      slot.root.classList.toggle('is-selected', entry.selected);
+      slot.root.classList.toggle('is-ready', entry.ready && !entry.locked);
+      slot.root.classList.toggle('is-locked', entry.locked);
+      HUD.setAttr(slot.root, 'data-weapon-slot', entry.code);
+      HUD.setAttr(slot.root, 'data-selected', entry.selected ? 'true' : 'false');
+      HUD.setAttr(slot.root, 'data-ready', entry.ready ? 'true' : 'false');
+      HUD.setAttr(slot.root, 'data-locked', entry.locked ? 'true' : 'false');
+      this.setTextContent(slot.key, String(entry.key));
+      this.setTextContent(slot.code, entry.code);
+      dots += entry.locked ? '·' : entry.selected ? '●' : '○';
+    });
+    ui.slotsHost.setAttribute('data-dots', dots);
+    return dots;
+  }
+
+  /** 已解锁挂架 + 尚未解锁的武器占位，按 1-5 键位顺序排列 */
+  private static buildSlotEntries(slots: readonly HudWeaponSlotState[]): WeaponSlotEntry[] {
+    const order = SPECIAL_WEAPON_IDS.map((id) => SPECIAL_WEAPON_CONFIGS[id].shortCode);
+    const entries: WeaponSlotEntry[] = slots.map((slot, index) => {
+      const known = order.indexOf(slot.shortCode);
+      return {
+        code: slot.shortCode,
+        key: known >= 0 ? known + 1 : index + 1,
+        rank: known >= 0 ? known : order.length + index,
+        selected: Boolean(slot.selected),
+        ready: Boolean(slot.ready),
+        locked: false,
+      };
+    });
+    const present = new Set(slots.map((slot) => slot.shortCode));
+    order.forEach((code, index) => {
+      if (!present.has(code)) {
+        entries.push({
+          code,
+          key: index + 1,
+          rank: index,
+          selected: false,
+          ready: false,
+          locked: true,
+        });
+      }
+    });
+    entries.sort((a, b) => a.rank - b.rank);
+    return entries;
+  }
+
+  private static createSlotElement(host: HTMLDivElement): WeaponSlotUi {
+    const root = document.createElement('div');
+    root.className = 'hx-slot';
+    const key = document.createElement('span');
+    key.className = 'hx-slot-key';
+    const code = document.createElement('span');
+    code.className = 'hx-slot-code';
+    const lock = document.createElement('span');
+    lock.className = 'hx-slot-lock';
+    lock.setAttribute('aria-hidden', 'true');
+    lock.innerHTML = GLYPH_LOCK;
+    root.append(key, code, lock);
+    host.appendChild(root);
+    return { root, key, code };
+  }
+
+  private syncStoresVisibility(): void {
+    if (!this.storesPanel) {
+      return;
+    }
+    const show = (this.weaponPanelVisible || this.flaresVisible) && !this.deckMode;
+    this.setStyleValue(this.storesPanel, 'display', show ? 'flex' : 'none');
+    HUD.setAttr(
+      this.storesPanel,
+      'data-sections',
+      this.weaponPanelVisible && this.flaresVisible ? 'both' : 'single'
+    );
+  }
+
+  /** 触控端且页面里有按键簇时，挂载物状态改为写到按键上，面板隐藏 */
+  private refreshDeckMode(): void {
+    this.deckRefs = null;
+    const deck =
+      this.layoutDensity !== 'desktop' &&
+      typeof document !== 'undefined' &&
+      document.getElementById('special-button') !== null;
+    if (deck !== this.deckMode) {
+      this.deckMode = deck;
+      this.syncStoresVisibility();
+    }
+  }
+
+  private getTouchDeck(): TouchDeckRefs {
+    const cached = this.deckRefs;
+    if (cached && (!cached.special || cached.special.isConnected)) {
+      return cached;
+    }
+    const find = (id: string): HTMLElement | null =>
+      typeof document === 'undefined' ? null : document.getElementById(id);
+    const child = (host: HTMLElement | null, selector: string): HTMLElement | null =>
+      host ? host.querySelector<HTMLElement>(selector) : null;
+    const special = find('special-button');
+    const flare = find('flare-button');
+    const cycle = find('cycle-button');
+    const camera = find('camera-button');
+    this.deckRefs = {
+      special,
+      specialMain: child(special, '.tc-main'),
+      specialSub: child(special, '.tc-sub'),
+      flare,
+      flareSub: child(flare, '.tc-sub'),
+      cycle,
+      cycleSub: child(cycle, '.tc-sub'),
+      camera,
+      cameraSub: child(camera, '.tc-sub'),
+    };
+    return this.deckRefs;
+  }
+
+  private syncDeckWeapon(
+    info: {
+      code: string;
+      mode: string;
+      ready: boolean;
+      overheated: boolean;
+      meter: number;
+      ammoText: string;
+    } | null,
+    dots: string
+  ): void {
+    if (!this.deckMode) {
+      return;
+    }
+    const deck = this.getTouchDeck();
+    if (deck.special) {
+      HUD.setAttr(deck.special, 'data-weapon', info?.code ?? '');
+      HUD.setAttr(deck.special, 'data-mode', info?.mode ?? 'none');
+      HUD.setAttr(deck.special, 'data-ready', info?.ready ? 'true' : 'false');
+      HUD.setAttr(deck.special, 'data-overheated', info?.overheated ? 'true' : 'false');
+      this.setStyleVar(deck.special, '--tc-meter', info ? String(HUD.quantize(info.meter)) : '0');
+    }
+    if (deck.specialMain) {
+      this.setTextContent(deck.specialMain, info?.code || '特武');
+    }
+    if (deck.specialSub) {
+      this.setTextContent(deck.specialSub, info?.ammoText ?? '');
+    }
+    if (deck.cycle) {
+      let unlocked = 0;
+      for (const dot of dots) {
+        if (dot !== '·') {
+          unlocked += 1;
+        }
+      }
+      HUD.setAttr(deck.cycle, 'data-count', String(unlocked));
+    }
+    if (deck.cycleSub) {
+      this.setTextContent(deck.cycleSub, dots);
+    }
+  }
+
+  private applyCameraChipVisibility(): void {
+    if (!this.cameraChip) {
+      return;
+    }
+    const show = this.layoutDensity === 'desktop' && this.cameraMode !== null;
+    this.setStyleValue(this.cameraChip, 'display', show ? 'flex' : 'none');
+  }
+
+  /** 第一人称：驾驶舱信息栏换成更通透的玻璃，让出风挡视野 */
+  private applyCabinCameraStyle(mode: HudCameraMode): void {
+    const firstPerson = mode === 'first-person';
+    this.setStyleValue(
+      this.scoreDisplay,
+      'background',
+      firstPerson
+        ? 'linear-gradient(160deg, rgba(18, 30, 48, 0.5), rgba(10, 14, 22, 0.34))'
+        : 'linear-gradient(160deg, rgba(18, 30, 48, 0.88), rgba(10, 14, 22, 0.76))'
+    );
+    this.setStyleValue(
+      this.speedDisplay,
+      'background',
+      firstPerson
+        ? 'linear-gradient(165deg, rgba(17, 22, 34, 0.5), rgba(9, 12, 18, 0.34))'
+        : 'linear-gradient(165deg, rgba(17, 22, 34, 0.88), rgba(9, 12, 18, 0.76))'
+    );
+  }
+
+  private ensureStoresPanel(): HTMLDivElement {
+    if (this.storesPanel) {
+      return this.storesPanel;
+    }
+    const panel = document.createElement('div');
+    panel.id = 'hud-stores';
+    panel.setAttribute('data-hud', 'stores');
+    panel.style.display = 'none';
+    this.container.appendChild(panel);
+    this.storesPanel = panel;
+    return panel;
+  }
+
+  private ensureWeaponUi(): WeaponPanelUi {
+    if (this.weaponUi) {
+      return this.weaponUi;
+    }
+    const stores = this.ensureStoresPanel();
+    const panel = document.createElement('div');
+    panel.id = 'hud-weapon-panel';
+    panel.setAttribute('data-hud', 'weapon');
+    panel.style.display = 'none';
+
+    const head = document.createElement('div');
+    head.className = 'hx-wp-head';
+    const code = document.createElement('span');
+    code.className = 'hx-wp-code';
+    const icon = document.createElement('span');
+    icon.className = 'hx-wp-icon';
+    icon.setAttribute('aria-hidden', 'true');
+    const name = document.createElement('span');
+    name.className = 'hx-wp-name';
+    const lamp = document.createElement('span');
+    lamp.className = 'hx-wp-lamp';
+    head.append(code, icon, name, lamp);
+
+    const meter = document.createElement('div');
+    meter.className = 'hx-meter';
+    const meterFill = document.createElement('div');
+    meterFill.className = 'hx-meter-fill';
+    meter.appendChild(meterFill);
+
+    const sub = document.createElement('div');
+    sub.className = 'hx-wp-sub';
+    const ammo = document.createElement('div');
+    ammo.className = 'hx-wp-ammo';
+    const ammoPipsHost = document.createElement('span');
+    ammoPipsHost.className = 'hx-ammo-pips';
+    const ammoText = document.createElement('span');
+    ammoText.className = 'hx-wp-ammo-text';
+    ammoText.style.display = 'none';
+    ammo.append(ammoPipsHost, ammoText);
+    const label = document.createElement('span');
+    label.className = 'hx-wp-label';
+    sub.append(ammo, label);
+
+    const slotsHost = document.createElement('div');
+    slotsHost.className = 'hx-slots';
+
+    panel.append(head, meter, sub, slotsHost);
+    stores.insertBefore(panel, stores.firstChild);
+
+    this.weaponUi = {
+      panel,
+      code,
+      icon,
+      name,
+      lamp,
+      meterFill,
+      ammoPipsHost,
+      ammoPips: [],
+      ammoText,
+      label,
+      slotsHost,
+      slots: [],
+    };
+    return this.weaponUi;
+  }
+
+  private ensureFlareUi(): FlareUi {
+    if (this.flareUi) {
+      return this.flareUi;
+    }
+    const stores = this.ensureStoresPanel();
+    const section = document.createElement('div');
+    section.id = 'hud-flares';
+    section.setAttribute('data-hud', 'flares');
+    section.style.display = 'none';
+
+    const label = document.createElement('span');
+    label.className = 'hx-fl-label';
+    const key = document.createElement('span');
+    key.className = 'hx-key';
+    key.textContent = 'G';
+    label.append(document.createTextNode('热焰弹'), key);
+
+    const pipsHost = document.createElement('div');
+    pipsHost.className = 'hx-fl-pips';
+    const meter = document.createElement('div');
+    meter.className = 'hx-fl-meter';
+    const fill = document.createElement('div');
+    fill.className = 'hx-fl-fill';
+    meter.appendChild(fill);
+
+    const count = document.createElement('span');
+    count.className = 'hx-fl-count';
+
+    section.append(label, pipsHost, meter, count);
+    stores.appendChild(section);
+    this.flareUi = { section, pipsHost, pips: [], fill, count };
+    return this.flareUi;
+  }
+
+  private ensureAutosaveToast(): HTMLDivElement {
+    if (this.autosaveToast) {
+      return this.autosaveToast;
+    }
+    const toast = document.createElement('div');
+    toast.id = 'hud-autosave';
+    toast.className = 'hx-autosave';
+    toast.setAttribute('data-hud', 'autosave');
+    toast.setAttribute('role', 'status');
+    toast.style.display = 'none';
+    const glyph = document.createElement('span');
+    glyph.setAttribute('aria-hidden', 'true');
+    glyph.style.display = 'inline-flex';
+    glyph.innerHTML = GLYPH_SAVE;
+    const title = document.createElement('span');
+    title.textContent = '已自动保存';
+    const label = document.createElement('span');
+    label.className = 'hx-autosave-label';
+    label.style.display = 'none';
+    toast.append(glyph, title, label);
+    this.leftStatusPanel.appendChild(toast);
+    this.autosaveToast = toast;
+    this.autosaveLabel = label;
+    return toast;
+  }
+
+  private ensureCameraChip(): HTMLDivElement {
+    if (this.cameraChip) {
+      return this.cameraChip;
+    }
+    const chip = document.createElement('div');
+    chip.id = 'hud-camera-mode';
+    chip.setAttribute('data-hud', 'camera-mode');
+    chip.style.display = 'none';
+    const glyph = document.createElement('span');
+    glyph.setAttribute('aria-hidden', 'true');
+    glyph.style.display = 'inline-flex';
+    glyph.innerHTML = GLYPH_CAMERA;
+    const label = document.createElement('span');
+    const key = document.createElement('span');
+    key.className = 'hx-key';
+    key.textContent = 'V';
+    chip.append(glyph, label, key);
+    this.container.appendChild(chip);
+    this.cameraChip = chip;
+    this.cameraChipLabel = label;
+    return chip;
+  }
+
+  private ensureBossUi(): BossStatusUi {
+    if (this.bossUi) {
+      return this.bossUi;
+    }
+    const root = document.createElement('div');
+    root.id = 'hud-boss-status';
+    root.setAttribute('data-hud', 'boss-status');
+    root.style.display = 'none';
+    const tag = document.createElement('span');
+    tag.className = 'hx-boss-tag';
+    tag.textContent = 'BOSS';
+    const pipsHost = document.createElement('span');
+    pipsHost.className = 'hx-boss-pips';
+    const phase = document.createElement('span');
+    phase.className = 'hx-boss-phase';
+    const label = document.createElement('span');
+    label.className = 'hx-boss-label';
+    root.append(tag, pipsHost, phase, label);
+    this.container.appendChild(root);
+    this.bossUi = { root, pipsHost, pips: [], phase, label };
+    return this.bossUi;
+  }
+
+  private ensureWarningUi(): WarningLaneUi {
+    if (this.warningUi) {
+      return this.warningUi;
+    }
+    const lane = document.createElement('div');
+    lane.id = 'hud-warning-lane';
+
+    const missile = document.createElement('div');
+    missile.id = 'hud-missile-warning';
+    missile.setAttribute('data-hud', 'missile-warning');
+    missile.setAttribute('data-level', 'none');
+    missile.setAttribute('role', 'alert');
+    missile.style.display = 'none';
+    const missileGlyph = document.createElement('span');
+    missileGlyph.setAttribute('aria-hidden', 'true');
+    missileGlyph.style.display = 'inline-flex';
+    const missileMain = document.createElement('span');
+    missileMain.className = 'hx-mw-main';
+    const missileHint = document.createElement('span');
+    missileHint.className = 'hx-mw-hint';
+    missile.append(missileGlyph, missileMain, missileHint);
+
+    const flash = document.createElement('div');
+    flash.id = 'hud-flash-warning';
+    flash.setAttribute('data-hud', 'flash-warning');
+    flash.setAttribute('data-tone', 'threat');
+    flash.style.display = 'none';
+    const flashGlyph = document.createElement('span');
+    flashGlyph.setAttribute('aria-hidden', 'true');
+    flashGlyph.style.display = 'inline-flex';
+    flashGlyph.innerHTML = GLYPH_WARNING;
+    const flashText = document.createElement('span');
+    flashText.className = 'hx-flash-text';
+    flash.append(flashGlyph, flashText);
+
+    lane.append(missile, flash);
+
+    const edge = document.createElement('div');
+    edge.id = 'hud-edge-alert';
+    edge.setAttribute('aria-hidden', 'true');
+    edge.setAttribute('data-level', 'none');
+
+    this.container.append(edge, lane);
+    this.warningUi = {
+      lane,
+      missile,
+      missileGlyph,
+      missileMain,
+      missileHint,
+      flash,
+      flashText,
+      edge,
+    };
+    return this.warningUi;
+  }
+
+  private setStyleVar(element: HTMLElement, name: string, value: string): void {
+    let cache = this.styleValueCache.get(element);
+    if (!cache) {
+      cache = new Map<string, string>();
+      this.styleValueCache.set(element, cache);
+    }
+    if (cache.get(name) === value) {
+      return;
+    }
+    element.style.setProperty(name, value);
+    cache.set(name, value);
+  }
+
+  /** <html> 上的页面级标记（供无线电等独立面板的样式协同）；value 为 null 时移除 */
+  private static setRootMarker(name: string, value: string | null): void {
+    if (typeof document === 'undefined') {
+      return;
+    }
+    const root = document.documentElement;
+    if (value === null) {
+      root.removeAttribute(name);
+    } else if (root.getAttribute(name) !== value) {
+      root.setAttribute(name, value);
+    }
+  }
+
+  private static setAttr(element: Element, name: string, value: string): void {
+    if (element.getAttribute(name) !== value) {
+      element.setAttribute(name, value);
+    }
+  }
+
+  private static clamp01(value: number): number {
+    return Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : 0;
+  }
+
+  private static finiteOr(value: number, fallback: number): number {
+    return Number.isFinite(value) ? value : fallback;
+  }
+
+  /** Infinity 表示无限弹药（热量武器）；NaN / 负数按 0 处理 */
+  private static normalizeMaxAmmo(value: number): number {
+    if (value === Infinity) {
+      return Infinity;
+    }
+    return Number.isFinite(value) ? Math.max(0, value) : 0;
+  }
+
+  /** 百分之一精度，避免每帧微小变化都写样式 */
+  private static quantize(value: number): number {
+    return Math.round(HUD.clamp01(value) * 100) / 100;
+  }
+
   /**
    * 隐藏 HUD
    */
@@ -1552,6 +2703,7 @@ export class HUD {
   public showGameOver(finalScore: number): void {
     this.ensureInitialized();
     this.hideEventObjective();
+    this.clearCombatAlerts();
     this.pendingBigMessage = null;
     this.hidePowerUpBig();
     this.hideRespawnOverlay();
@@ -1575,6 +2727,7 @@ export class HUD {
   public showMissionComplete(finalScore: number): void {
     this.ensureInitialized();
     this.hideEventObjective();
+    this.clearCombatAlerts();
     this.pendingBigMessage = null;
     this.hidePowerUpBig();
     this.hideRespawnOverlay();
@@ -1626,6 +2779,51 @@ export class HUD {
     this.briefingTimer = 0;
     this.respawnTimer = 0;
     this.pendingBigMessage = null;
+    this.disposeCampaignHud();
     this.initialized = false;
+  }
+
+  /** 释放战役 HUD 状态；新元件都在 #hud 容器内，随容器一起移除 */
+  private disposeCampaignHud(): void {
+    const deck = this.deckMode || this.missileWarningLevel !== 'none' ? this.getTouchDeck() : null;
+    if (deck?.flare) {
+      deck.flare.removeAttribute('data-alert');
+    }
+    HUD.setRootMarker('data-hud-camera', null);
+    HUD.setRootMarker('data-hud-boss', null);
+    // 直接收起临时元件（不能调用会触发 init() 的公共方法）
+    if (this.warningUi) {
+      this.warningUi.missile.setAttribute('data-level', 'none');
+      this.warningUi.edge.setAttribute('data-level', 'none');
+      this.setStyleValue(this.warningUi.missile, 'display', 'none');
+      this.setStyleValue(this.warningUi.flash, 'display', 'none');
+    }
+    this.container.removeAttribute('data-missile-warning');
+    if (this.bossUi) {
+      this.bossUi.root.classList.remove('is-phase-up');
+      this.setStyleValue(this.bossUi.root, 'display', 'none');
+    }
+    if (this.autosaveToast) {
+      this.autosaveToast.classList.remove('is-leaving');
+      this.setStyleValue(this.autosaveToast, 'display', 'none');
+    }
+    if (this.cameraChip) {
+      this.cameraChip.classList.remove('is-flash');
+      this.setStyleValue(this.cameraChip, 'display', 'none');
+    }
+    this.autosaveTimer = 0;
+    this.autosaveLeaving = false;
+    this.flashWarningTimer = 0;
+    this.flashWarningText = '';
+    this.cameraFlashTimer = 0;
+    this.bossFlashTimer = 0;
+    this.bossStatusVisible = false;
+    this.bossLabel = '';
+    this.bossPhaseCurrent = 0;
+    this.bossPhaseTotal = 0;
+    this.missileWarningLevel = 'none';
+    this.cameraMode = null;
+    this.deckRefs = null;
+    this.applyTopStackOffset();
   }
 }
