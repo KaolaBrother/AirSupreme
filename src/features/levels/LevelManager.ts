@@ -17,10 +17,15 @@ import {
   WORLDSCAPE_WATER_Y,
   type TerrainGenerator,
 } from '@/features/terrain/TerrainGenerator';
+import type {
+  TerrainEnvironment,
+  TerrainSurfaceKind,
+  TerrainSurfaceSample,
+} from '@/features/terrain/environments/TerrainEnvironment';
 import type { SpawnPortal } from '@/features/effects/SpawnPortal';
 import { createEnemyMesh, updateAircraftSignals } from '@/features/aircraft/AircraftMeshFactory';
 import { getLogger } from '@/core/utils/Logger';
-import type { DifficultyProfile } from '@/core/Difficulty';
+import { getLevelScaling, type DifficultyProfile } from '@/core/Difficulty';
 import { GameConfig, GAME_CONSTANTS } from '@/config';
 import {
   DEFAULT_ONBOARDING_BEAT_PROFILE,
@@ -29,6 +34,9 @@ import {
 } from '@/ui/OnboardingManager';
 
 const log = getLogger('LevelManager');
+
+/** 敌机出生点相对地表的最小高度（米），避免在峡谷岩壁 / 火山 / 天梯立柱内部生成 */
+const SPAWN_TERRAIN_CLEARANCE = 45;
 
 export enum LevelState {
   IDLE = 'IDLE',
@@ -98,6 +106,16 @@ export class LevelManager {
   private difficultyProfile: DifficultyProfile | null = null;
   private currentWaveBeatProfile: OnboardingWaveBeatProfile = DEFAULT_ONBOARDING_BEAT_PROFILE;
 
+  /** 额外的“未清场”数量（如存活的敌方地面 / 海上单位）：大于 0 时波次不会完成 */
+  private waveHoldProvider: (() => number) | null = null;
+  /** 敌机生成时叠加的命中精度加成（如敌方雷达站存活） */
+  private accuracyBonusProvider: (() => number) | null = null;
+  /** 地形高度采样（传给敌机做避让）；地形未加载时回落到水面 */
+  private readonly terrainHeightSampler = (x: number, z: number): number =>
+    this.getCrashSurfaceY(x, z);
+  /** 地形尚未加载时 getSurfaceSample 的回退值（惰性创建：模块导入期不读取地形常量） */
+  private fallbackSurfaceSample: TerrainSurfaceSample | null = null;
+
   // 回调
   public onWaveStart?: (wave: number) => void;
   public onWaveEventStart?: (eventType: LevelWaveEventType, wave: number) => void;
@@ -156,7 +174,7 @@ export class LevelManager {
   /**
    * 加载关卡
    */
-  public loadLevel(levelId: number): void {
+  public loadLevel(levelId: number, startWave: number = 0): void {
     const config = getLevelConfig(levelId);
     if (!config) {
       log.error('Level not found', { levelId });
@@ -164,9 +182,16 @@ export class LevelManager {
     }
 
     this.currentLevel = config;
-    this.currentWave = 0;
+    // 读档续玩：从指定波次开始；之前波次的敌机计入“已生成”，保证 HUD 剩余数正确
+    const resumeWave = Number.isFinite(startWave)
+      ? Math.max(0, Math.min(config.totalWaves - 1, Math.floor(startWave)))
+      : 0;
+    this.currentWave = resumeWave;
     this.state = LevelState.IDLE;
-    this.totalEnemiesSpawned = 0;
+    this.waveDelayTimer = 0;
+    this.totalEnemiesSpawned = config.enemiesPerWave
+      .slice(0, resumeWave)
+      .reduce((sum, count) => sum + count, 0);
     this.enemiesSpawnedThisWave = 0;
     this.spawnInterval = 0.5;
     this.currentWaveEvent = null;
@@ -235,8 +260,8 @@ export class LevelManager {
   public startWave(playerPosition?: Vector3, isNextWave: boolean = false): void {
     if (!this.currentLevel) return;
 
-    // 第一次调用：设置第一波
-    if (this.currentWave === 0 && playerPosition && !isNextWave) {
+    // 第一次调用：设置第一波（读档时可能从第 N 波开始）
+    if (this.state === LevelState.IDLE && playerPosition && !isNextWave) {
       // 计算并保存第一波的敌人群中心（确保在战场内）
       this.waveGroupCenter = this.calculateWaveGroupCenter(playerPosition);
 
@@ -387,7 +412,8 @@ export class LevelManager {
       } else if (
         this.activePortals.length === 0 &&
         aliveEnemies === 0 &&
-        this.enemiesSpawnedThisWave >= maxEnemies
+        this.enemiesSpawnedThisWave >= maxEnemies &&
+        this.getWaveHoldCount() === 0
       ) {
         log.debug('Wave complete', { wave: this.currentWave });
         this.state = LevelState.WAVE_COMPLETE;
@@ -466,6 +492,74 @@ export class LevelManager {
       return this.terrainGenerator.getCrashSurfaceY(worldX, worldZ);
     }
     return WORLDSCAPE_WATER_Y;
+  }
+
+  /**
+   * 地表采样（地面单位 / 舰船 / Boss 落脚 / 命中特效）：委托 TerrainGenerator.sampleSurface；
+   * 地形分块尚未加载时回落到 { y: WORLDSCAPE_WATER_Y, water: false }。
+   */
+  public getSurfaceSample(worldX: number, worldZ: number): TerrainSurfaceSample {
+    if (this.terrainGenerator) {
+      return this.terrainGenerator.sampleSurface(worldX, worldZ);
+    }
+    this.fallbackSurfaceSample ??= { y: WORLDSCAPE_WATER_Y, water: false };
+    this.fallbackSurfaceSample.y = WORLDSCAPE_WATER_Y;
+    this.fallbackSurfaceSample.water = false;
+    return this.fallbackSurfaceSample;
+  }
+
+  /** 地表材质（命中特效 / 音效选型）；地形未加载时回落到 'ground' */
+  public getSurfaceKind(worldX: number, worldZ: number): TerrainSurfaceKind {
+    if (this.terrainGenerator) {
+      return this.terrainGenerator.getSurfaceKind(worldX, worldZ);
+    }
+    return 'ground';
+  }
+
+  /** 第 6-10 关的环境模块（CANYON 航线、CITADEL 决战区等扩展）；其余关卡或未加载时为 null */
+  public getTerrainEnvironment(): TerrainEnvironment | null {
+    return this.terrainGenerator?.getEnvironment() ?? null;
+  }
+
+  /** 地形是否已为当前关卡生成（采样结果可信） */
+  public isTerrainReady(): boolean {
+    return this.terrainGenerator !== null;
+  }
+
+  /** 设置额外的未清场计数（如存活敌方单位）；为 null 时只看敌机 */
+  public setWaveHoldProvider(provider: (() => number) | null): void {
+    this.waveHoldProvider = typeof provider === 'function' ? provider : null;
+  }
+
+  /** 设置敌机命中精度加成来源（生成时读取） */
+  public setAccuracyBonusProvider(provider: (() => number) | null): void {
+    this.accuracyBonusProvider = typeof provider === 'function' ? provider : null;
+  }
+
+  private getWaveHoldCount(): number {
+    if (!this.waveHoldProvider) return 0;
+    const count = this.waveHoldProvider();
+    return Number.isFinite(count) && count > 0 ? count : 0;
+  }
+
+  /** 当前波次的敌机是否全部清空（不含额外的未清场单位） */
+  public areWaveJetsCleared(): boolean {
+    if (!this.currentLevel || this.state !== LevelState.WAVE_ACTIVE) return false;
+    const maxEnemies = this.currentLevel.enemiesPerWave[this.currentWave] || 0;
+    return (
+      this.activePortals.length === 0 &&
+      this.enemiesSpawnedThisWave >= maxEnemies &&
+      this.getAliveEnemyCount() === 0
+    );
+  }
+
+  /** 当前波次序号（0 基） */
+  public getCurrentWaveIndex(): number {
+    return this.currentWave;
+  }
+
+  public getState(): LevelState {
+    return this.state;
   }
 
   /**
@@ -625,7 +719,7 @@ export class LevelManager {
           minHeight,
           Math.min(maxHeight, playerPosition.y + (Math.random() - 0.5) * 30)
         );
-        bestPosition = new Vector3(x, spawnY, z);
+        bestPosition = new Vector3(x, this.liftAboveTerrain(x, spawnY, z), z);
         break;
       }
 
@@ -648,7 +742,7 @@ export class LevelManager {
         Math.min(maxHeight, playerPosition.y + (Math.random() - 0.5) * 30)
       );
 
-      const position = new Vector3(x, spawnY, z);
+      const position = new Vector3(x, this.liftAboveTerrain(x, spawnY, z), z);
 
       // 计算与其他敌人的最小距离
       let minDistToOthers = Infinity;
@@ -681,10 +775,17 @@ export class LevelManager {
       x = this.clampToBattlefield(x);
       z = this.clampToBattlefield(z);
 
-      bestPosition = new Vector3(x, defaultY, z);
+      bestPosition = new Vector3(x, this.liftAboveTerrain(x, defaultY, z), z);
     }
 
     return bestPosition;
+  }
+
+  /** 出生高度至少高出地表 SPAWN_TERRAIN_CLEARANCE（高耸地形上不在岩体内生成） */
+  private liftAboveTerrain(x: number, y: number, z: number): number {
+    const ground = this.getCrashSurfaceY(x, z);
+    if (!Number.isFinite(ground)) return y;
+    return Math.max(y, ground + SPAWN_TERRAIN_CLEARANCE);
   }
 
   /**
@@ -697,6 +798,7 @@ export class LevelManager {
     if (pooledIndex !== -1) {
       const enemy = this.enemyPool.splice(pooledIndex, 1)[0];
       enemy.setConfig(this.getAdjustedEnemyConfig(type));
+      enemy.setTerrainSampler(this.terrainHeightSampler);
       // 重要：从池中取出的敌人也要添加回 enemies 数组
       this.enemies.push(enemy);
       return enemy;
@@ -708,6 +810,7 @@ export class LevelManager {
     this.scene.add(mesh);
 
     const enemy = new EnemyAI(mesh, config, this.scene);
+    enemy.setTerrainSampler(this.terrainHeightSampler);
     this.enemies.push(enemy);
 
     return enemy;
@@ -805,19 +908,28 @@ export class LevelManager {
     return filteredTypes.length > 0 ? filteredTypes : weightedTypes;
   }
 
+  /**
+   * 敌机强度 = 玩家所选难度档 × 战役关卡曲线（getLevelScaling：第 1 关 1.0 → 第 10 关上限）。
+   * LevelConfig.difficulty 为旧字段，不再参与计算。
+   */
   private getAdjustedEnemyConfig(type: EnemyType): EnemyConfig {
     const baseConfig = ENEMY_CONFIGS[type];
-    const levelDifficultyScale = this.currentLevel ? 1 + (this.currentLevel.difficulty - 5) * 0.04 : 1;
+    const scaling = getLevelScaling(this.currentLevel?.id ?? 1);
     const profile = this.difficultyProfile;
-    const healthMultiplier = (profile?.enemyHealthMultiplier ?? 1) * levelDifficultyScale;
-    const damageMultiplier = (profile?.enemyDamageMultiplier ?? 1) * levelDifficultyScale;
-    const cooldownMultiplier = profile?.enemyAttackCooldownMultiplier ?? 1;
+    const healthMultiplier = (profile?.enemyHealthMultiplier ?? 1) * scaling.enemyHealthMultiplier;
+    const damageMultiplier = (profile?.enemyDamageMultiplier ?? 1) * scaling.enemyDamageMultiplier;
+    const cooldownMultiplier =
+      (profile?.enemyAttackCooldownMultiplier ?? 1) * scaling.enemyCooldownMultiplier;
+    const providedBonus = this.accuracyBonusProvider?.() ?? 0;
+    const accuracyBonus =
+      scaling.enemyAccuracyBonus + (Number.isFinite(providedBonus) ? Math.max(0, providedBonus) : 0);
 
     return {
       ...baseConfig,
       health: Math.max(1, Math.round(baseConfig.health * healthMultiplier)),
       damage: Math.max(1, Math.round(baseConfig.damage * damageMultiplier * 10) / 10),
       attackCooldown: Math.max(0.1, baseConfig.attackCooldown * cooldownMultiplier),
+      accuracy: Math.min(0.95, baseConfig.accuracy + accuracyBonus),
     };
   }
 }

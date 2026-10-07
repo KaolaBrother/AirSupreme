@@ -27,7 +27,7 @@ import { GameConfig, GAME_CONSTANTS, type QualityPreset } from '@/config';
 import { BOSS_CONFIGS, BossType, BossConfig } from '@/features/boss/BossTypes';
 import { createPlayerMesh, createEnemyMesh } from '@/features/aircraft/AircraftMeshFactory';
 import { getDifficultyProfile } from '@/core/Difficulty';
-import { getLevelConfig, LevelWaveEventType, TerrainType } from '@/features/terrain/LevelConfig';
+import { getLevelConfig, LevelWaveEventType } from '@/features/terrain/LevelConfig';
 import { WORLDSCAPE_WATER_Y } from '@/features/terrain/TerrainGenerator';
 import { LevelState } from '@/features/levels/LevelManager';
 import { GameSessionState } from '@/core/GameSessionState';
@@ -36,7 +36,7 @@ import { ResourceRegistry } from '@/core/ResourceRegistry';
 import type { PresentationController, RadarBlip } from '@/core/PresentationController';
 import type { BossBattleController } from '@/core/BossBattleController';
 import type { PresentationRuntime } from '@/core/PresentationRuntimeLoader';
-import type { SurfaceImpactType } from '@/features/effects/ParticleSystem';
+import type { TerrainSurfaceKind } from '@/features/terrain/environments/TerrainEnvironment';
 import {
   DEFAULT_ONBOARDING_BEAT_PROFILE,
   getWaveOnboardingText,
@@ -2361,46 +2361,38 @@ export class GameCoordinator {
       return;
     }
 
-    const impactHeight = levelConfig.terrain === TerrainType.OCEAN ? -47.8 : -48.6;
-    this.combatSystem.setEnvironmentImpactHandler(impactHeight, (position, source) => {
-      const isWaterImpact = this.isWaterImpact(levelConfig.terrain, position);
-      if (isWaterImpact) {
-        this.particleSystem?.createWaterImpact(position, source === 'boss' ? 1.2 : 0.9);
+    // 子弹 / 炮弹撞上真实地表（采样高度；水面略抬高避免掠过浪尖），特效与音效按地表材质选型
+    this.combatSystem.setEnvironmentImpactHandler(this.impactSurfaceSampler, (position, source) => {
+      const surfaceKind = this.getSurfaceKindAt(position.x, position.z);
+      if (surfaceKind === 'water') {
+        if (source === 'boss') {
+          this.particleSystem?.createSplash(position, 0.9);
+        } else {
+          this.particleSystem?.createWaterImpact(position, 0.9);
+        }
         this.audioManager.playWaterImpact(source === 'boss' ? 1.1 : 0.85);
         return;
       }
 
-      const surfaceType = this.getSurfaceImpactType(levelConfig.terrain);
       const impactIntensity = source === 'boss' ? 1.15 : 0.85;
-      this.particleSystem?.createGroundImpact(position, impactIntensity, surfaceType);
-      this.audioManager.playGroundImpact(surfaceType, source === 'boss' ? 1.05 : 0.8);
+      this.particleSystem?.createGroundImpact(position, impactIntensity, surfaceKind);
+      this.audioManager.playGroundImpact(surfaceKind, source === 'boss' ? 1.05 : 0.8);
     });
   }
 
-  private getSurfaceImpactType(terrain: TerrainType): SurfaceImpactType {
-    switch (terrain) {
-      case TerrainType.DESERT:
-        return 'desert';
-      case TerrainType.MOUNTAINS:
-        return 'snow';
-      case TerrainType.CITY:
-        return 'city';
-      default:
-        return 'ground';
+  /** 环境命中面：地表采样高度（水面 +0.4 米，避免子弹贴着波面飞行时漏判） */
+  private readonly impactSurfaceSampler = (x: number, z: number): number => {
+    const levelManager = this.enemySystem?.getLevelManager();
+    if (!levelManager) {
+      return WORLDSCAPE_WATER_Y;
     }
-  }
+    const sample = levelManager.getSurfaceSample(x, z);
+    return sample.water ? sample.y + 0.4 : sample.y;
+  };
 
-  private isWaterImpact(terrain: TerrainType, position: THREE.Vector3): boolean {
-    if (terrain === TerrainType.OCEAN) {
-      return true;
-    }
-
-    if (terrain !== TerrainType.LAKE) {
-      return false;
-    }
-
-    const lakeRadius = 210;
-    return position.x * position.x + position.z * position.z <= lakeRadius * lakeRadius;
+  /** 地表材质（第 6-10 关熔岩 / 冰 / 岩石 / 云海）；地形未加载时回落到 'ground' */
+  private getSurfaceKindAt(x: number, z: number): TerrainSurfaceKind {
+    return this.enemySystem?.getLevelManager().getSurfaceKind(x, z) ?? 'ground';
   }
 
   public stop(): void {

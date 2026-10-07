@@ -7,6 +7,24 @@ import { getLogger } from '@/core/utils/Logger';
 
 const log = getLogger('EnemyAI');
 
+/** 地形高度采样（世界 Y）：用于敌机避让峡谷岩壁、火山、天梯立柱、城堡等高耸地形 */
+export type EnemyTerrainSampler = (x: number, z: number) => number;
+
+/** 前瞻采样时间点（秒）：沿当前速度方向检查前方地形 */
+const TERRAIN_LOOKAHEAD_SECONDS: readonly number[] = [0.5, 1.2, 2.2];
+/** 前瞻期望离地高度（米） */
+const TERRAIN_CLEARANCE = 32;
+/** 机下实时最低离地高度（米）：低于此值立即强制爬升 */
+const TERRAIN_MIN_CLEARANCE = 12;
+/** 绝对兜底：穿入地形时直接抬到地表以上（米） */
+const TERRAIN_HARD_FLOOR = 5;
+
+// 每帧复用的临时对象（所有敌机实例共享，update 内同步使用）
+const tmpDirection = new THREE.Vector3();
+const tmpForward = new THREE.Vector3();
+const tmpTarget = new THREE.Vector3();
+const lookHelper = new THREE.Object3D();
+
 export class EnemyAI {
   private mesh: THREE.Group;
   private config: EnemyConfig;
@@ -32,6 +50,11 @@ export class EnemyAI {
 
   // 友军列表（用于盘旋状态判断目标）
   private friendlyMeshes: THREE.Object3D[] = [];
+
+  // 地形避让与 EMP 瘫痪
+  private terrainSampler: EnemyTerrainSampler | null = null;
+  private stunTimer: number = 0;
+  private readonly engineWorldPos = new THREE.Vector3();
 
   // 回调
   public onFire?: (position: THREE.Vector3, direction: THREE.Vector3, damage: number) => void;
@@ -103,49 +126,55 @@ export class EnemyAI {
       this.friendlyMeshes = friendlyMeshes;
     }
 
-    this.stateTimer -= deltaTime;
-    if (this.stateTimer <= 0) {
-      this.selectNewState();
-      this.stateTimer = this.randomStateDuration();
+    const stunned = this.stunTimer > 0;
+    if (stunned) {
+      // EMP 瘫痪：航电失灵，保持惯性滑行、不切换状态、不开火
+      this.stunTimer = Math.max(0, this.stunTimer - deltaTime);
+    } else {
+      this.stateTimer -= deltaTime;
+      if (this.stateTimer <= 0) {
+        this.selectNewState();
+        this.stateTimer = this.randomStateDuration();
+      }
+
+      switch (this.currentState) {
+        case EnemyAIState.CHASE:
+          this.updateChase(deltaTime);
+          break;
+        case EnemyAIState.FIXED_DIRECTION:
+          this.updateFixedDirection(deltaTime);
+          break;
+        case EnemyAIState.CIRCLE:
+          this.updateCircle(deltaTime);
+          break;
+      }
     }
 
-    switch (this.currentState) {
-      case EnemyAIState.CHASE:
-        this.updateChase(deltaTime);
-        break;
-      case EnemyAIState.FIXED_DIRECTION:
-        this.updateFixedDirection(deltaTime);
-        break;
-      case EnemyAIState.CIRCLE:
-        this.updateCircle(deltaTime);
-        break;
-    }
+    this.applyTerrainAvoidance();
+    this.mesh.position.addScaledVector(this.velocity, deltaTime);
+    this.enforceTerrainFloor();
 
-    this.mesh.position.add(this.velocity.clone().multiplyScalar(deltaTime));
-
-    if (this.velocity.length() > 0) {
-      const targetPos = this.mesh.position.clone().add(this.velocity);
-      const dummy = new THREE.Object3D();
-      dummy.position.copy(this.mesh.position);
-      dummy.lookAt(targetPos);
-      this.mesh.quaternion.slerp(dummy.quaternion, 0.3);
+    if (this.velocity.lengthSq() > 0) {
+      tmpTarget.copy(this.mesh.position).add(this.velocity);
+      lookHelper.position.copy(this.mesh.position);
+      lookHelper.lookAt(tmpTarget);
+      this.mesh.quaternion.slerp(lookHelper.quaternion, 0.3);
     }
 
     // 从引擎 mesh 获取世界位置（名为 'engineGlow'）
     const engine = this.mesh.getObjectByName('engineGlow');
-    const engineWorldPos = new THREE.Vector3();
     if (engine) {
-      engine.getWorldPosition(engineWorldPos);
+      engine.getWorldPosition(this.engineWorldPos);
     } else {
-      engineWorldPos.copy(this.mesh.position);
+      this.engineWorldPos.copy(this.mesh.position);
     }
-    this.trail.addPoint(engineWorldPos);
+    this.trail.addPoint(this.engineWorldPos);
 
     this.attackCooldown = Math.max(0, this.attackCooldown - deltaTime);
 
-    if (this.attackCooldown <= 0 && fireTarget) {
-      const toTarget = new THREE.Vector3().subVectors(fireTarget, this.mesh.position).normalize();
-      const forward = this.velocity.clone().normalize();
+    if (!stunned && this.attackCooldown <= 0 && fireTarget) {
+      const toTarget = tmpDirection.subVectors(fireTarget, this.mesh.position).normalize();
+      const forward = tmpForward.copy(this.velocity).normalize();
       const dot = toTarget.dot(forward);
 
       const fireAngle = Math.cos((this.config.fireSpreadAngle * Math.PI) / 180);
@@ -167,12 +196,12 @@ export class EnemyAI {
     if (!this.targetPosition) return;
 
     // 计算到目标的方向
-    const targetDirection = new THREE.Vector3()
+    const targetDirection = tmpDirection
       .subVectors(this.targetPosition, this.mesh.position)
       .normalize();
 
     // 获取当前速度方向
-    const currentDirection = this.velocity.clone().normalize();
+    const currentDirection = tmpForward.copy(this.velocity).normalize();
 
     // 计算转向角度（限制转向速度）
     const turnAngle = this.config.turnSpeed * deltaTime;
@@ -202,12 +231,12 @@ export class EnemyAI {
    */
   private updateFixedDirection(deltaTime: number): void {
     // 计算到虚拟追踪点的方向
-    const targetDirection = new THREE.Vector3()
+    const targetDirection = tmpDirection
       .subVectors(this.fixedDirectionTarget, this.mesh.position)
       .normalize();
 
     // 获取当前速度方向
-    const currentDirection = this.velocity.clone().normalize();
+    const currentDirection = tmpForward.copy(this.velocity).normalize();
 
     // 计算转向角度（限制转向速度）
     const turnAngle = this.config.turnSpeed * deltaTime;
@@ -260,15 +289,13 @@ export class EnemyAI {
     const targetZ = circleTarget.z + Math.sin(this.circleAngle) * this.currentCircleRadius;
     const targetY = circleTarget.y + this.currentCircleHeight;
 
-    const targetPos = new THREE.Vector3(targetX, targetY, targetZ);
+    const targetPos = tmpTarget.set(targetX, targetY, targetZ);
 
     // 计算到目标位置的方向
-    const targetDirection = new THREE.Vector3()
-      .subVectors(targetPos, this.mesh.position)
-      .normalize();
+    const targetDirection = tmpDirection.subVectors(targetPos, this.mesh.position).normalize();
 
     // 获取当前速度方向
-    const currentDirection = this.velocity.clone().normalize();
+    const currentDirection = tmpForward.copy(this.velocity).normalize();
 
     // 计算转向角度（限制转向速度）
     const turnAngle = this.config.turnSpeed * deltaTime;
@@ -465,6 +492,72 @@ export class EnemyAI {
   }
 
   /**
+   * 地形采样（世界 Y）：设置后敌机沿速度方向前瞻并爬升避让高耸地形，
+   * 且任何时候都不会钻入地表。未设置时保持原有自由飞行。
+   */
+  public setTerrainSampler(sampler: EnemyTerrainSampler | null): void {
+    this.terrainSampler = typeof sampler === 'function' ? sampler : null;
+  }
+
+  /** EMP 瘫痪：期间不开火、不切换机动状态（保持惯性） */
+  public applyStun(seconds: number): void {
+    if (!Number.isFinite(seconds) || seconds <= 0 || !this.isAlive()) return;
+    this.stunTimer = Math.max(this.stunTimer, Math.min(6, seconds));
+  }
+
+  public isStunned(): boolean {
+    return this.stunTimer > 0;
+  }
+
+  /** 读取地形高度（非有限值视为无地形） */
+  private sampleTerrain(x: number, z: number): number {
+    const sampler = this.terrainSampler;
+    if (!sampler || !Number.isFinite(x) || !Number.isFinite(z)) return -Infinity;
+    const y = sampler(x, z);
+    return Number.isFinite(y) ? y : -Infinity;
+  }
+
+  /**
+   * 前瞻地形避让：沿当前水平速度在若干时间点采样地表，若预计高度低于“地表 + 安全高度”，
+   * 把竖直速度抬升为爬升速度（与亏欠高度成正比，上限为本机速度）。
+   */
+  private applyTerrainAvoidance(): void {
+    if (!this.terrainSampler) return;
+    const position = this.mesh.position;
+    const velocity = this.velocity;
+    let required = this.sampleTerrain(position.x, position.z) + TERRAIN_MIN_CLEARANCE;
+    for (const t of TERRAIN_LOOKAHEAD_SECONDS) {
+      const ground = this.sampleTerrain(position.x + velocity.x * t, position.z + velocity.z * t);
+      if (ground === -Infinity) continue;
+      // 预计 t 秒后的高度若低于地表 + 安全高度，则需要提前爬升
+      const predictedY = position.y + Math.max(0, velocity.y) * t;
+      const deficit = ground + TERRAIN_CLEARANCE - predictedY;
+      if (deficit > 0) {
+        required = Math.max(required, position.y + deficit);
+      }
+    }
+    if (!Number.isFinite(required) || position.y >= required) return;
+    const deficit = required - position.y;
+    const climbRate = Math.min(Math.max(this.config.speed, 20), deficit * 2.2 + 8);
+    if (velocity.y < climbRate) {
+      velocity.y = climbRate;
+    }
+  }
+
+  /** 硬兜底：位置一旦落到地表以下，直接抬到地表上方（避免穿模 / 卡在岩壁里） */
+  private enforceTerrainFloor(): void {
+    if (!this.terrainSampler) return;
+    const position = this.mesh.position;
+    const ground = this.sampleTerrain(position.x, position.z);
+    if (ground === -Infinity) return;
+    const floor = ground + TERRAIN_HARD_FLOOR;
+    if (position.y < floor) {
+      position.y = floor;
+      if (this.velocity.y < 0) this.velocity.y = 0;
+    }
+  }
+
+  /**
    * 获取位置
    */
   public getPosition(): THREE.Vector3 {
@@ -488,6 +581,7 @@ export class EnemyAI {
 
     // 重置速度（向前）
     this.velocity = new THREE.Vector3(0, 0, -this.config.speed);
+    this.stunTimer = 0;
 
     // 重置状态
     this.selectNewState();

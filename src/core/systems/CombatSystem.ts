@@ -2,7 +2,7 @@ import { Vector3 } from 'three';
 import type { Group, Object3D, Scene } from 'three';
 import { IGameSystem } from '@/core/interfaces/IGameSystem';
 import { EventBus, GameEventType } from '@/core/EventBus';
-import { ProjectilePool } from '@/features/combat/ProjectilePool';
+import { ProjectilePool, type ProjectileImpactSurface } from '@/features/combat/ProjectilePool';
 import { BossProjectilePool } from '@/features/combat/BossProjectilePool';
 import { MissileSystem } from '@/features/combat/MissileSystem';
 import { ParticleSystem } from '@/features/effects/ParticleSystem';
@@ -32,7 +32,7 @@ export class CombatSystem implements IGameSystem {
 
   private playerMesh: Group;
   private playerPosition: Vector3;
-  private environmentImpactHeight: number | null = null;
+  private environmentImpactHeight: ProjectileImpactSurface | null = null;
   private onEnvironmentImpact?: (position: Vector3, source: EnvironmentProjectileSource) => void;
 
   private damageMultiplier: number = 1;
@@ -117,8 +117,11 @@ export class CombatSystem implements IGameSystem {
     return this.damageMultiplier;
   }
 
+  /**
+   * 环境命中：impactHeight 为固定高度或 (x, z) → 地表高度的采样函数（子弹低于地表即命中地形）
+   */
   setEnvironmentImpactHandler(
-    impactHeight: number | null,
+    impactHeight: ProjectileImpactSurface | null,
     onEnvironmentImpact?: (position: Vector3, source: EnvironmentProjectileSource) => void
   ): void {
     this.environmentImpactHeight = impactHeight;
