@@ -146,7 +146,7 @@ void main() {
     float ang = acos(clamp(dot(n, hit.xyz), -1.0, 1.0));
     float life = 1.0 - age / 0.9;
     ripple += exp(-pow((ang - age * 2.6) / 0.16, 2.0)) * life * life;
-    hitFlash += exp(-ang * ang / 0.03) * pow(max(0.0, 1.0 - age / 0.3), 2.0);
+    hitFlash += exp(-ang * ang / 0.02) * pow(max(0.0, 1.0 - age / 0.3), 2.0) * 0.7;
   }
 
   float integrity = 0.3 + 0.7 * uIntegrity;

@@ -170,7 +170,7 @@ const PHASE_TUNING: readonly PhaseTuning[] = [
   {
     cannonInterval: 2.8,
     cannonCount: 4,
-    missileFactor: 1.05,
+    missileFactor: 1.5,
     missileCount: 3,
     minionInterval: 30,
     minions: ['drone', 'drone', 'drone'],
@@ -180,8 +180,8 @@ const PHASE_TUNING: readonly PhaseTuning[] = [
   {
     cannonInterval: 2.3,
     cannonCount: 5,
-    missileFactor: 0.95,
-    missileCount: 4,
+    missileFactor: 1.4,
+    missileCount: 3,
     minionInterval: 28,
     minions: ['drone', 'drone', 'fighter'],
     beatGap: 1.7,
@@ -472,7 +472,7 @@ export class OraclePrimeAI implements IAdvancedBoss {
     this.judgement = new OracleLance(this.hazardRoot, 'oracle_judgement', 0xffd27a, 0xffffff);
     this.pylonLance = new OracleLance(this.hazardRoot, 'oracle_pylon_lance', 0xa8fff6, 0xffffff);
     this.arcStrike = new OracleArcStrike(this.hazardRoot, 'oracle_arc', 0x6fb4ff);
-    this.shockwaves = new OracleShockwavePool(this.hazardRoot, 5, sf, {
+    this.shockwaves = new OracleShockwavePool(this.hazardRoot, 6, sf, {
       color: ORACLE_PALETTE.overload,
       hot: ORACLE_PALETTE.overloadHot,
       gate: 0xfff1d0,
@@ -799,8 +799,11 @@ export class OraclePrimeAI implements IAdvancedBoss {
         this.fx.emit('createHit', this.tmpA, 1.6, 'boss');
       }
     } else {
-      this.interruptMajor(duration + 1);
-      this.shockwaves.cancelTelegraphs();
+      // 「终焉之光」不可打断：EMP 只让瞳孔过热
+      if (this.major !== 'last-light') {
+        this.interruptMajor(duration + 1);
+        this.shockwaves.cancelTelegraphs();
+      }
       this.apertureTimer = Math.max(this.apertureTimer, duration);
     }
     this.fx.emit('createHit', this.coreWorld, 2.4, 'boss');
@@ -1561,9 +1564,6 @@ export class OraclePrimeAI implements IAdvancedBoss {
       .sub(origin)
       .normalize();
     if (!isFiniteVector(this.tmpB)) return;
-    this.tmpC.crossVectors(this.tmpB, UP);
-    if (this.tmpC.lengthSq() < 1e-6) this.tmpC.set(1, 0, 0);
-    this.tmpC.normalize();
     const spread = 0.12;
     for (let k = -2; k <= 2; k++) {
       this.tmpD
@@ -1651,7 +1651,7 @@ export class OraclePrimeAI implements IAdvancedBoss {
     const destroyed = this.pylons.length - this.getAlivePylonCount();
     if (this.getAlivePylonCount() > 0) {
       this.retaliationTimer = 1.3;
-      this.retaliationCount = 1 + destroyed;
+      this.retaliationCount = destroyed >= 3 ? 3 : 2;
       this.onHazardWarning?.(`护盾塔被毁 ${destroyed}/${this.pylons.length} · 神谕反击`);
     }
     this.partsDirty = true;
@@ -2262,7 +2262,7 @@ export class OraclePrimeAI implements IAdvancedBoss {
 
   private registerShieldHit(): void {
     if (!this.isShieldStage() || this.shieldFade <= 0.05) return;
-    if (this.time - this.lastShieldRipple < 0.08) return;
+    if (this.time - this.lastShieldRipple < 0.12) return;
     this.lastShieldRipple = this.time;
     // 子弹来自玩家方向：涟漪画在护盾朝向玩家的一侧
     const hits = this.rig.shieldMaterial.uniforms.uHits.value;
@@ -2279,7 +2279,7 @@ export class OraclePrimeAI implements IAdvancedBoss {
     this.tmpA.y += (Math.random() - 0.5) * 0.25;
     this.tmpA.normalize();
     slot.set(this.tmpA.x, this.tmpA.y, this.tmpA.z, this.time);
-    this.shieldFlash = Math.min(1, this.shieldFlash + 0.12);
+    this.shieldFlash = Math.min(0.5, this.shieldFlash + 0.05);
     if (this.time - this.lastShieldCue > 0.25) {
       this.lastShieldCue = this.time;
       this.tmpB.copy(this.coreWorld).addScaledVector(this.tmpA, this.rig.shieldRadius);
