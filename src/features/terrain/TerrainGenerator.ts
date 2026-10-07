@@ -6078,7 +6078,11 @@ export class TerrainGenerator {
         0.05,
         1
       ),
-      cloudTone: cloudToneByType[resolvedType],
+      cloudTone: THREE.MathUtils.clamp(
+        weatherConfig.cloudTone ?? cloudToneByType[resolvedType],
+        0,
+        1
+      ),
       windStrength: THREE.MathUtils.clamp(
         weatherConfig.windStrength ?? baseProfile.windStrength,
         0,

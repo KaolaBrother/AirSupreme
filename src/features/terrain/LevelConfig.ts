@@ -125,6 +125,8 @@ export interface LevelWeatherConfig {
   cloudSpeed?: number;
   cloudHeightMin?: number;
   cloudHeightMax?: number;
+  /** 云色调覆盖 0..1（1 = 晴日亮白低多边形切面，越低越柔和 / 阴沉）；缺省按天气预设推导 */
+  cloudTone?: number;
   intensity?: number;
   fogDensity?: number;
   particleCount?: number;
@@ -1233,11 +1235,11 @@ export const LEVELS: LevelConfig[] = [
       fogNear: 320,
       fogFar: 3600,
       fogDensity: 0.00024,
-      cloudCover: 0.22,
+      cloudCover: 0.1,
       cloudTint: 0xffe2cc,
       cloudSpeed: 3.2,
-      cloudHeightMin: -24,
-      cloudHeightMax: 70,
+      cloudHeightMin: 150,
+      cloudHeightMax: 300,
       weatherIntensity: 0.18,
       particleCount: 90,
       particleSize: 2,
@@ -1286,15 +1288,17 @@ export const LEVELS: LevelConfig[] = [
       ...DEFAULT_LEVEL_SCENE_CONFIG.weather,
       preset: 'clear',
       windStrength: 0.55,
-      cloudCoverage: 0.22,
+      cloudCoverage: 0.1,
       precipitation: 0,
       turbulence: 0.3,
       windAngle: -0.4,
       cloudOpacity: 0.86,
       cloudTint: 0xffe2cc,
       cloudSpeed: 3.2,
-      cloudHeightMin: -24,
-      cloudHeightMax: 70,
+      cloudHeightMin: 150,
+      cloudHeightMax: 300,
+      // 高空零星的云岛与云海同样柔和（不走晴日低多边形切面）
+      cloudTone: 0.72,
       intensity: 0.18,
       fogDensity: 0.00024,
       particleCount: 90,
@@ -1308,9 +1312,9 @@ export const LEVELS: LevelConfig[] = [
     // 稀薄空气：通透高饱和，云海受光面的燃烧感交给泛光，暗角轻
     postFx: {
       ...DEFAULT_LEVEL_SCENE_CONFIG.postFx,
-      exposure: 1.12,
-      contrast: 1.08,
-      saturation: 1.16,
+      exposure: 1.05,
+      contrast: 1.1,
+      saturation: 1.14,
       bloomStrength: 0.34,
       vignetteStrength: 0.16,
     },
