@@ -308,19 +308,19 @@ export class ParticleSystem {
       this.trailEmitQueue.push(new THREE.Vector3());
     }
 
-    const self = this;
+    const readDetail = (): number => this.getDetail();
     this.emitter = {
       get detail(): number {
-        return self.getDetail();
+        return readDetail();
       },
-      emit: (type, position, options) => self.spawnParticle(type, position, options) !== null,
-      count: (base, min = 1) => Math.max(min, Math.round(base * self.getDetail())),
-      schedule: (delaySeconds, emit) => self.scheduleBurst(delaySeconds, emit),
+      emit: (type, position, options) => this.spawnParticle(type, position, options) !== null,
+      count: (base, min = 1) => Math.max(min, Math.round(base * this.getDetail())),
+      schedule: (delaySeconds, emit) => this.scheduleBurst(delaySeconds, emit),
       debris: (position, velocity, size, color, life, smokeTrail = false) => {
-        self.debrisField.spawn(position, velocity, size, color, life, smokeTrail);
+        this.debrisField.spawn(position, velocity, size, color, life, smokeTrail);
       },
       shockwave: (position, radius, life, color, opacity = 0.85) =>
-        self.createShockwave(position, radius, life, color, opacity),
+        this.createShockwave(position, radius, life, color, opacity),
     };
   }
 
