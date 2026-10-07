@@ -105,6 +105,11 @@ export class VolcanoEnvironment extends EnvironmentBase {
     });
     this.root.add(foundry.group);
 
+    // 熔岩河畔的喷气锥（hornito）：平原上的竖向细节，顶部发光并冒烟
+    const hornitos = this.buildHornitos(ctx, rng);
+    foundry.smoke.push(...hornitos.smoke);
+    foundry.glows.push(...hornitos.glows);
+
     const atmosphere = this.buildAtmosphere(ctx, foundry);
     const plumeLightning = this.buildPlumeLightning(ctx, rng);
 
@@ -351,6 +356,105 @@ export class VolcanoEnvironment extends EnvironmentBase {
   /* ------------------------------------------------------------------ */
   /* 海岸玄武岩柱群与熔岩巨砾                                              */
   /* ------------------------------------------------------------------ */
+
+  private buildHornitos(
+    ctx: TerrainEnvironmentContext,
+    rng: () => number
+  ): { smoke: PuffEmitter[]; glows: GlowCard[] } {
+    const field = this.field;
+    const smoke: PuffEmitter[] = [];
+    const glows: GlowCard[] = [];
+    const target = Math.round(16 * Math.max(0.6, ctx.detailScale));
+    const placements: Array<{ x: number; z: number; y: number; height: number; radius: number }> =
+      [];
+    for (let attempt = 0; attempt < 400 && placements.length < target; attempt++) {
+      const river = VOLCANO_LAVA_RIVERS[Math.floor(rng() * VOLCANO_LAVA_RIVERS.length)];
+      const index = Math.floor(rng() * (river.points.length - 1));
+      const [ax, az] = river.points[index];
+      const [bx, bz] = river.points[index + 1];
+      const t = rng();
+      const side = rng() < 0.5 ? -1 : 1;
+      const dx = bx - ax;
+      const dz = bz - az;
+      const length = Math.max(1, Math.hypot(dx, dz));
+      const offset = 34 + rng() * 50;
+      const x = ax + dx * t + (-dz / length) * offset * side;
+      const z = az + dz * t + (dx / length) * offset * side;
+      const edge = field.riverEdgeDistance(x, z);
+      if (edge < 14 || edge > 90 || field.landFactor(x, z) < 0.95) continue;
+      if (
+        Math.hypot(x - VOLCANO_MAIN_CONE.x, z - VOLCANO_MAIN_CONE.z) <
+        VOLCANO_MAIN_CONE.radius * 0.55
+      ) {
+        continue;
+      }
+      if (placements.some((p) => Math.hypot(p.x - x, p.z - z) < 70)) continue;
+      const height = 8 + rng() * 14;
+      placements.push({
+        x,
+        z,
+        y: this.waterY + field.groundHeight(x, z),
+        height,
+        radius: height * 0.75,
+      });
+    }
+    if (placements.length === 0) {
+      return { smoke, glows };
+    }
+    const cone = new THREE.ConeGeometry(1, 1, 7, 1, true);
+    cone.translate(0, 0.5, 0);
+    const mesh = new THREE.InstancedMesh(
+      cone,
+      new THREE.MeshStandardMaterial({
+        color: new THREE.Color(ctx.tokens.terrainSecondary).multiplyScalar(1.3),
+        roughness: 0.95,
+        flatShading: true,
+        side: THREE.DoubleSide,
+      }),
+      placements.length
+    );
+    mesh.name = 'volcanoHornitos';
+    placements.forEach((p, i) => {
+      setInstanceTransform(
+        mesh,
+        i,
+        p.x,
+        p.y - 2,
+        p.z,
+        rng() * Math.PI,
+        p.radius,
+        p.height,
+        p.radius,
+        (rng() - 0.5) * 0.2
+      );
+      const topY = p.y - 2 + p.height;
+      glows.push({
+        x: p.x,
+        y: topY + 2,
+        z: p.z,
+        size: p.height * 2.6,
+        color: 0xff6a1a,
+        flicker: 2.4,
+      });
+      smoke.push({
+        x: p.x,
+        y: topY,
+        z: p.z,
+        count: 4,
+        life: 9,
+        rise: 6,
+        size: 4,
+        growth: 3.2,
+        spread: 4,
+        color: 0x3a3230,
+        colorJitter: 0.2,
+      });
+    });
+    mesh.instanceMatrix.needsUpdate = true;
+    mesh.castShadow = true;
+    this.root.add(mesh);
+    return { smoke, glows };
+  }
 
   private buildRocks(ctx: TerrainEnvironmentContext, rng: () => number): void {
     const field = this.field;
