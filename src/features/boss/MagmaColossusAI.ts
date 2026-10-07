@@ -1583,6 +1583,12 @@ export class MagmaColossusAI implements IAdvancedBoss {
     this.stompLeg = null;
     this.action = 'walk';
     this.statusKey = -1;
+    // 抬起的腿落回地面，坍塌时四足着地
+    for (const leg of this.legs) {
+      leg.stepping = false;
+      leg.current.copy(leg.planted);
+      leg.rig.footGlowMaterial.emissiveIntensity = 0.22;
+    }
     if (this.deathSequenceEnabled && !this.disposed) {
       this.dying = true;
       this.deathTimer = 0;
