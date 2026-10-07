@@ -12,6 +12,7 @@ import type { MissileSystem } from '@/features/combat/MissileSystem';
 import type {
   PlayerLockState,
   UnitInstance,
+  UnitRouteProvider,
   UnitSystem,
   UnitUpdateContext,
 } from '@/features/units/UnitSystem';
@@ -70,6 +71,7 @@ export class UnitController {
 
   private surfaceSampler: UnitSurfaceSampler | null = null;
   private decoyProvider: IDecoyProvider | null = null;
+  private routeProvider: UnitRouteProvider | null = null;
   private scaling: LevelScaling = getLevelScaling(1);
   private level = 1;
   private prewarmedLevel = -1;
@@ -139,6 +141,7 @@ export class UnitController {
   ): void {
     if (this.surfaceSampler) system.setSurfaceSampler(this.surfaceSampler);
     system.setDecoyProvider(this.decoyProvider);
+    system.setRouteProvider(this.routeProvider);
     system.setLevelScaling(this.scaling);
     this.unbridgeFire = bridgeModule.bridgeUnitFireToEventBus(system);
 
@@ -223,6 +226,12 @@ export class UnitController {
   public setDecoyProvider(provider: IDecoyProvider | null): void {
     this.decoyProvider = provider;
     this.system?.setDecoyProvider(provider);
+  }
+
+  /** 'route' 放置的外部航线（峡谷车队土路 / 城堡突击路线） */
+  public setRouteProvider(provider: UnitRouteProvider | null): void {
+    this.routeProvider = provider;
+    this.system?.setRouteProvider(provider);
   }
 
   /** 关卡强度（getLevelScaling × 玩家难度档） */

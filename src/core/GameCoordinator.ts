@@ -83,6 +83,12 @@ interface EyeBoss {
   getEyeSystem(): EyeBossSystem;
 }
 
+/** 地形环境的可选航线扩展（CanyonEnvironment.getConvoyRoute / CitadelEnvironment.getAssaultRoute） */
+interface TerrainRouteSource {
+  getConvoyRoute?: () => readonly THREE.Vector3[];
+  getAssaultRoute?: () => readonly THREE.Vector3[];
+}
+
 interface GameCoordinatorOptions {
   showStartMenu?: boolean;
   onRetry?: () => void;
@@ -1632,8 +1638,9 @@ export class GameCoordinator {
     );
 
     const now = performance.now();
+    // 乘模拟时间倍率（只有开发构建的调试钩子会改动，正式版恒为 1），相机跟随与加速后的模拟同步
     const renderDeltaTime = this.lastRenderTimestamp > 0
-      ? Math.min((now - this.lastRenderTimestamp) / 1000, 0.05)
+      ? Math.min((now - this.lastRenderTimestamp) / 1000, 0.05) * this.gameLoop.getTimeScale()
       : 0;
     this.lastRenderTimestamp = now;
 
@@ -1769,6 +1776,12 @@ export class GameCoordinator {
       levelManager.getSurfaceSample(x, z);
     this.units.setSurfaceSampler(sampleSurface);
     this.units.setDecoyProvider(this.weapons);
+    // 地面车队沿地形环境提供的道路行进：峡谷「长弓」车队土路、城堡南侧突击走廊
+    this.units.setRouteProvider((_type, domain) => {
+      if (domain !== 'ground') return null;
+      const environment = levelManager.getTerrainEnvironment() as TerrainRouteSource | null;
+      return environment?.getConvoyRoute?.() ?? environment?.getAssaultRoute?.() ?? null;
+    });
     levelManager.setWaveHoldProvider(() => this.units.getWaveHoldCount());
     levelManager.setAccuracyBonusProvider(() => this.units.getHostileRadarBonus());
     this.weapons.setSurfaceSampler(sampleSurface);
@@ -2247,23 +2260,30 @@ export class GameCoordinator {
       void import('@/core/dev/DevHooks').then(({ installDevHooks }) => {
         if (this.isDisposed) return;
         installDevHooks({
-        gameLoop: this.gameLoop,
-        getSession: () => this.sessionState,
-        getEnemySystem: () => this.enemySystem,
-        getBossController: () => this.bossBattleController,
-        getUnits: () => this.units,
-        getWeapons: () => this.weapons,
-        getView: () => this.view,
-        getPlayerSystem: () => this.playerSystem,
-        getPlayerAircraft: () => this.playerAircraft,
-        getScore: () => this.gameState.getScore(),
-        getStats: () => this.playerStats,
-        isStoryHold: () => this.storyHold,
-        getUpgradeMenuVisible: () => this.upgradeMenu?.isVisible() ?? false,
-        clickHangarContinue: () => {
-          const button = document.querySelector<HTMLButtonElement>('#upgrade-menu button.hangar');
-          button?.click();
-        },
+          gameLoop: this.gameLoop,
+          getSession: () => this.sessionState,
+          getEnemySystem: () => this.enemySystem,
+          getBossController: () => this.bossBattleController,
+          getUnits: () => this.units,
+          getWeapons: () => this.weapons,
+          getView: () => this.view,
+          getPlayerSystem: () => this.playerSystem,
+          getPlayerAircraft: () => this.playerAircraft,
+          getScore: () => this.gameState.getScore(),
+          getStats: () => this.playerStats,
+          isStoryHold: () => this.storyHold,
+          getUpgradeMenuVisible: () => this.upgradeMenu?.isVisible() ?? false,
+          clickHangarContinue: () => {
+            const button = document.querySelector<HTMLButtonElement>(
+              '#upgrade-menu button.hangar'
+            );
+            button?.click();
+          },
+          onPlayerTeleported: () => {
+            this.syncCameraInterpolationState();
+            this.view.snapToTarget();
+            this.vfx.clearTrails();
+          },
         });
       });
     }

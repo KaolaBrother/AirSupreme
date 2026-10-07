@@ -36,6 +36,8 @@ export interface DevHookAccess {
   isStoryHold(): boolean;
   getUpgradeMenuVisible(): boolean;
   clickHangarContinue(): void;
+  /** 瞬移之后：同步插值状态、相机就位、清掉拖尾 */
+  onPlayerTeleported(): void;
 }
 
 interface Vec3Like {
@@ -205,6 +207,7 @@ export function installDevHooks(access: DevHookAccess): void {
     // Object3D.lookAt 让本地 +Z 朝向目标；飞机机头为 -Z，再绕 Y 旋转 180°
     lookHelper.rotateY(Math.PI);
     access.getPlayerSystem().placeAt(position, lookHelper.quaternion);
+    access.onPlayerTeleported();
   };
 
   const nearestUnit = (hostileOnly: boolean = true): Vec3Like | null => {
@@ -281,6 +284,10 @@ export function installDevHooks(access: DevHookAccess): void {
     nearestUnit,
     setTimeScale: (scale: number) => access.gameLoop.setTimeScale(scale),
     continueHangar: () => access.clickHangarContinue(),
+    /** 直接扣血（无视无敌模式，测试阵亡 / 结算 / 检查点继续） */
+    damagePlayer: (amount: number) => {
+      originalTakeDamage(Number.isFinite(amount) ? amount : 0);
+    },
     healPlayer: () => {
       const playerSystem = access.getPlayerSystem();
       playerSystem.syncMaxHealth();
