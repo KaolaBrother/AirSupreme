@@ -68,6 +68,17 @@ export type UnitSurfaceSampler = (x: number, z: number) => { y: number; water: b
 
 export type PlayerLockState = 'none' | 'locking' | 'incoming';
 
+/**
+ * 可选特效覆盖：VFX 批次落地后，协调器可把受损冒烟 / 水花 / 枪口焰换成更强的专用特效
+ * （例如 particleSystem.createDamageSmoke / createSplash / createMuzzleFlash），
+ * 未设置时使用现有 ParticleSystem 方法组合出的默认效果。
+ */
+export interface UnitEffectOverrides {
+  damageSmoke?: (position: THREE.Vector3, intensity: number) => void;
+  splash?: (position: THREE.Vector3, scale: number) => void;
+  muzzleFlash?: (position: THREE.Vector3, intensity: number) => void;
+}
+
 /** 同时存在的单位上限（超出时 spawnUnit 返回 null） */
 export const MAX_UNITS = 80;
 
@@ -125,6 +136,7 @@ export class UnitSystem implements IGameSystem {
   private readonly missiles: UnitMissilePool;
   private readonly shots: UnitShotPool;
   private sampler: UnitSurfaceSampler | null = null;
+  private effects: UnitEffectOverrides = {};
   private decoyProvider: IDecoyProvider | null = null;
   private scaling: LevelScaling = getLevelScaling(1);
   private readonly seenTypes = new Set<UnitType>();
@@ -191,6 +203,11 @@ export class UnitSystem implements IGameSystem {
     for (const unit of this.units) {
       unit.surfaceSampleX = Number.NaN;
     }
+  }
+
+  /** 扩展：替换默认特效（见 UnitEffectOverrides） */
+  setEffectOverrides(overrides: UnitEffectOverrides | null): void {
+    this.effects = overrides ?? {};
   }
 
   setDecoyProvider(provider: IDecoyProvider | null): void {
@@ -635,13 +652,24 @@ export class UnitSystem implements IGameSystem {
   }
 
   private updateDamageSmoke(unit: UnitEntity, dt: number): void {
-    if (!this.particleSystem || unit.type === UnitType.DRONE) return;
+    if (unit.type === UnitType.DRONE) return;
+    const override = this.effects.damageSmoke;
+    if (!this.particleSystem && !override) return;
     const ratio = unit.getHealthRatio();
     if (ratio >= 0.5 || !unit.targetable) return;
     unit.smokeTimer -= dt;
     if (unit.smokeTimer > 0) return;
-    unit.smokeTimer = ratio < 0.25 ? 0.09 : 0.16;
     const p = unit.mesh.position;
+    if (override) {
+      // 专用冒烟特效按 ~8 Hz 调用
+      unit.smokeTimer = 0.125;
+      this.tmpA.copy(p);
+      if (unit.domain !== 'air') this.tmpA.y += unit.hitRadius * 0.35;
+      override(this.tmpA, ratio < 0.25 ? 1 : 0.55);
+      return;
+    }
+    if (!this.particleSystem) return;
+    unit.smokeTimer = ratio < 0.25 ? 0.09 : 0.16;
     if (unit.domain === 'air') {
       this.tmpDir.copy(unit.velocity);
       if (this.tmpDir.lengthSq() < 1e-4) this.tmpDir.copy(DOWN);
@@ -1004,10 +1032,12 @@ export class UnitSystem implements IGameSystem {
       },
       flakPuff: (position, scale) => system.shots.spawnPuff(position, scale),
       muzzleFlash: (position, intensity) => {
-        system.particleSystem?.createHit(position, intensity, 'enemy');
+        if (system.effects.muzzleFlash) system.effects.muzzleFlash(position, intensity);
+        else system.particleSystem?.createHit(position, intensity, 'enemy');
       },
       splash: (position, intensity) => {
-        system.particleSystem?.createWaterImpact(position, intensity);
+        if (system.effects.splash) system.effects.splash(position, intensity);
+        else system.particleSystem?.createWaterImpact(position, intensity);
       },
       visualTracer: (from, to) => {
         system.shots.fireVisual('tracer', from, to, 220);

@@ -64,6 +64,20 @@ const BUILDERS: Record<UnitType, () => NodeBuilder> = {
   [UnitType.CIVILIAN_TRUCK]: buildCivilianTruck,
 };
 
+/**
+ * 显示缩放：小型载具在真实尺寸下从空中难以辨认，按街机惯例适度放大
+ * （UNIT_CONFIGS.hitRadius 已按放大后的尺寸设定）。
+ */
+export const UNIT_DISPLAY_SCALE: Readonly<Partial<Record<UnitType, number>>> = {
+  [UnitType.TANK]: 1.35,
+  [UnitType.SAM_LAUNCHER]: 1.3,
+  [UnitType.AA_GUN]: 1.3,
+  [UnitType.ATTACK_HELICOPTER]: 1.2,
+  [UnitType.DRONE]: 1.6,
+  [UnitType.ALLY_CONVOY]: 1.3,
+  [UnitType.CIVILIAN_TRUCK]: 1.3,
+};
+
 const templateCache = new Map<UnitType, UnitTemplateNode>();
 let fallbackTemplate: UnitTemplateNode | null = null;
 
@@ -97,6 +111,8 @@ export function createUnitMesh(type: UnitType): THREE.Group {
   group.name = `UNIT_${type}`;
   group.userData.unitType = type;
   group.userData.hitRadius = config.hitRadius;
+  const displayScale = UNIT_DISPLAY_SCALE[type] ?? 1;
+  if (displayScale !== 1) group.scale.setScalar(displayScale);
   group.userData.faction = config.faction;
   if (type === UnitType.RADAR_STATION) {
     group.userData.priorityTarget = true;

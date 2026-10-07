@@ -534,7 +534,7 @@ function updateAaGun(unit: UnitEntity, world: UnitWorld, deltaTime: number): voi
           170
         );
       }
-      world.muzzleFlash(muzzlePos, 0.7);
+      if (unit.burstLeft % 2 === 1) world.muzzleFlash(muzzlePos, 0.7);
     }
   }
 }
