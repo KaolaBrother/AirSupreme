@@ -99,10 +99,7 @@ export function normalizeCameraModeSetting(
   return value === 'first-person' || value === 'third-person' ? value : fallback;
 }
 
-function normalizeTestScore(
-  value: unknown,
-  fallback: TestScoreOption = 0
-): TestScoreOption {
+function normalizeTestScore(value: unknown, fallback: TestScoreOption = 0): TestScoreOption {
   const clamped = clampInt(value, 0, MAX_TEST_SCORE, fallback);
   let closest: TestScoreOption = TEST_SCORE_OPTIONS[0];
   let closestDistance = Math.abs(clamped - closest);
@@ -122,12 +119,7 @@ export function normalizeStartFlowSettings(raw?: Partial<StartFlowSettings>): St
   const source = raw ?? {};
 
   return {
-    difficulty: clampInt(
-      source.difficulty,
-      1,
-      5,
-      DEFAULT_START_FLOW_SETTINGS.difficulty
-    ),
+    difficulty: clampInt(source.difficulty, 1, 5, DEFAULT_START_FLOW_SETTINGS.difficulty),
     sfxVolume: clampUnit(source.sfxVolume, DEFAULT_START_FLOW_SETTINGS.sfxVolume),
     musicVolume: clampUnit(source.musicVolume, DEFAULT_START_FLOW_SETTINGS.musicVolume),
     qualityPreset: normalizeQualityPreset(source.qualityPreset),
@@ -135,12 +127,7 @@ export function normalizeStartFlowSettings(raw?: Partial<StartFlowSettings>): St
       typeof source.tutorialEnabled === 'boolean'
         ? source.tutorialEnabled
         : DEFAULT_START_FLOW_SETTINGS.tutorialEnabled,
-    playerLives: clampInt(
-      source.playerLives,
-      1,
-      9,
-      DEFAULT_START_FLOW_SETTINGS.playerLives
-    ),
+    playerLives: clampInt(source.playerLives, 1, 9, DEFAULT_START_FLOW_SETTINGS.playerLives),
     startLevel: clampInt(
       source.startLevel,
       1,
@@ -230,7 +217,9 @@ export function saveStartFlowSettings(settings?: Partial<StartFlowSettings>): vo
   }
 }
 
-export function getAudioSettings(settings: Pick<StartFlowSettings, 'sfxVolume' | 'musicVolume'>): AudioSettings {
+export function getAudioSettings(
+  settings: Pick<StartFlowSettings, 'sfxVolume' | 'musicVolume'>
+): AudioSettings {
   return {
     sfxVolume: clampUnit(settings.sfxVolume, DEFAULT_START_FLOW_SETTINGS.sfxVolume),
     musicVolume: clampUnit(settings.musicVolume, DEFAULT_START_FLOW_SETTINGS.musicVolume),

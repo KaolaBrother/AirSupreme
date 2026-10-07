@@ -6,6 +6,8 @@ import {
   type CameraModeSetting,
 } from '@/core/SessionSettings';
 import { TOTAL_LEVELS, getCampaignChapter } from '@/features/campaign/CampaignData';
+import { isSpecialWeaponId } from '@/features/weapons/WeaponTypes';
+import type { WeaponSaveState } from '@/features/weapons/WeaponSystem';
 
 /**
  * 战役存档：中途自动存档（检查点）+ 战役进度记录。
@@ -21,13 +23,6 @@ export const CAMPAIGN_SAVE_VERSION = 1;
 /** 检查点类型：入关、波次之间、Boss 战之前 */
 export type CheckpointKind = 'level-start' | 'wave' | 'boss';
 
-/** 与 WeaponSystem.exportState() 的 WeaponSaveState 结构兼容 */
-export interface CampaignWeaponState {
-  unlocked: SpecialWeaponId[];
-  selected: SpecialWeaponId | null;
-  ammo: Partial<Record<SpecialWeaponId, number>>;
-}
-
 export interface CampaignRunStats {
   kills: number;
   civiliansLost: number;
@@ -42,7 +37,7 @@ export interface CampaignSaveData {
   checkpoint: CheckpointKind;
   /** 关卡号 1..TOTAL_LEVELS */
   level: number;
-  /** 下一个要进行的波次（从 0 开始） */
+  /** 下一个要进行的波次（从 0 开始）；Boss 检查点通常等于该关总波数 */
   wave: number;
   difficulty: number;
   score: number;
@@ -50,7 +45,9 @@ export interface CampaignSaveData {
   missiles: number;
   /** PlayerUpgrades.export() 的原样数据 */
   upgrades: Record<string, unknown>;
-  weapons: CampaignWeaponState;
+  /** WeaponSystem.exportState()（无限弹药的热量武器不写 ammo） */
+  weapons: WeaponSaveState;
+  /** 热焰弹剩余发数（CountermeasureSystem.exportState().charges） */
   flares: number;
   cameraMode: CameraModeSetting;
   stats: CampaignRunStats;
@@ -107,15 +104,16 @@ function clampLevel(value: unknown, fallback: number): number {
   return clampInt(value, 1, TOTAL_LEVELS, fallback);
 }
 
-function isSpecialWeaponId(value: unknown): value is SpecialWeaponId {
-  return typeof value === 'string' && (SPECIAL_WEAPON_IDS as readonly string[]).includes(value);
+function clampWave(value: unknown): number {
+  return clampInt(value, 0, MAX_SAVED_WAVE_INDEX, 0);
 }
 
-function normalizeCheckpointKind(value: unknown): CheckpointKind {
-  return CHECKPOINT_KINDS.find((kind) => kind === value) ?? 'level-start';
+/** 非法类型时按波次推断：已推进过波次视为波次检查点，否则视为入关检查点 */
+function normalizeCheckpointKind(value: unknown, wave: number): CheckpointKind {
+  return CHECKPOINT_KINDS.find((kind) => kind === value) ?? (wave > 0 ? 'wave' : 'level-start');
 }
 
-function normalizeWeapons(value: unknown): CampaignWeaponState {
+function normalizeWeapons(value: unknown): WeaponSaveState {
   const source = isPlainRecord(value) ? value : {};
 
   const unlocked: SpecialWeaponId[] = [];
@@ -132,10 +130,11 @@ function normalizeWeapons(value: unknown): CampaignWeaponState {
       ? source.selected
       : null;
 
-  // 无限弹药（Infinity）序列化后变成 null，这里直接丢弃，由武器系统按满弹恢复
+  // 只保留已解锁武器的有限弹药；无限弹药（Infinity）序列化后变成 null，
+  // 这里直接丢弃，由武器系统按满弹恢复
   const ammo: Partial<Record<SpecialWeaponId, number>> = {};
   if (isPlainRecord(source.ammo)) {
-    for (const id of SPECIAL_WEAPON_IDS) {
+    for (const id of SPECIAL_WEAPON_IDS.filter((weapon) => unlocked.includes(weapon))) {
       const count = source.ammo[id];
       if (typeof count === 'number' && Number.isFinite(count)) {
         ammo[id] = Math.max(0, Math.min(MAX_SAVED_AMMO, count));
@@ -158,17 +157,18 @@ function normalizeStats(value: unknown): CampaignRunStats {
 
 /**
  * 规范化检查点主体（不含 version / savedAt）。
- * 关卡号是检查点的身份：缺失或非数字视为损坏，返回 null。
+ * 关卡号是检查点的身份：缺失或非数字视为损坏，返回 null；其余字段越界钳制、缺失取默认值。
  */
 function normalizeCheckpointBody(source: PlainRecord): CampaignCheckpointInput | null {
   if (typeof source.level !== 'number' || !Number.isFinite(source.level)) {
     return null;
   }
 
+  const wave = clampWave(source.wave);
   return {
-    checkpoint: normalizeCheckpointKind(source.checkpoint),
+    checkpoint: normalizeCheckpointKind(source.checkpoint, wave),
     level: clampLevel(source.level, 1),
-    wave: clampInt(source.wave, 0, MAX_SAVED_WAVE_INDEX, 0),
+    wave,
     difficulty: clampInt(source.difficulty, 1, 5, DEFAULT_START_FLOW_SETTINGS.difficulty),
     score: clampInt(source.score, 0, Number.MAX_SAFE_INTEGER, 0),
     lives: clampInt(source.lives, 1, MAX_SAVED_LIVES, DEFAULT_START_FLOW_SETTINGS.playerLives),
@@ -229,7 +229,10 @@ function writeJson(storage: Storage, key: string, value: unknown): boolean {
   }
 }
 
-/** 写入检查点；存储不可用或写入失败时返回 false（不抛出） */
+/**
+ * 写入检查点（覆盖上一个）；写入前同样规范化。
+ * 存储不可用、写入失败或缺少关卡号时返回 false（不抛出）。
+ */
 export function saveCampaignCheckpoint(data: CampaignCheckpointInput): boolean {
   try {
     const storage = getLocalStorage();
@@ -311,12 +314,9 @@ export function hasCampaignCheckpoint(): boolean {
  * 波次以 1 开始计数（wave 字段是下一波的 0 基序号）。
  */
 export function describeCheckpoint(data: CampaignSaveData): string {
-  const level = clampLevel(data.level, 1);
+  const level = clampLevel(data?.level, 1);
   const title = getCampaignChapter(level).title;
-  const stage =
-    data.checkpoint === 'boss'
-      ? 'Boss 战'
-      : `第${clampInt(data.wave, 0, MAX_SAVED_WAVE_INDEX, 0) + 1}波`;
+  const stage = data?.checkpoint === 'boss' ? 'Boss 战' : `第${clampWave(data?.wave) + 1}波`;
   return `第${level}关 · ${title} · ${stage}`;
 }
 
@@ -344,7 +344,7 @@ function writeProgress(progress: CampaignProgress): void {
 }
 
 /**
- * 战役进度（与检查点独立）；不可用或损坏时返回默认值，损坏的记录会被删除。
+ * 战役进度（与检查点独立，清除检查点不会影响它）；不可用或损坏时返回默认值，损坏的记录会被删除。
  * 未写 version 的记录按当前版本读取，显式的其他版本视为外来数据。
  */
 export function getCampaignProgress(): CampaignProgress {
@@ -370,7 +370,7 @@ export function getCampaignProgress(): CampaignProgress {
   }
 }
 
-/** 通关：标记完成、刷新最高分、最高关卡记为最终关 */
+/** 通关：标记完成、刷新最高分、最高关卡记为最终关（不清除检查点，由调用方决定） */
 export function markCampaignCompleted(finalScore: number): void {
   const previous = getCampaignProgress();
   writeProgress({
@@ -380,7 +380,7 @@ export function markCampaignCompleted(finalScore: number): void {
   });
 }
 
-/** 记录到达的关卡（只升不降；非法值忽略） */
+/** 记录到达的关卡（只升不降；越界钳制到 1..TOTAL_LEVELS，非法值忽略） */
 export function recordLevelReached(level: number): void {
   if (typeof level !== 'number' || !Number.isFinite(level)) {
     return;
