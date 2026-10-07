@@ -50,6 +50,7 @@ const COLORS = {
   laser: new THREE.Color(2.6, 0.18, 0.42),
   laserCore: new THREE.Color(3.2, 2.3, 2.5),
   laserSpark: new THREE.Color(2.8, 1.2, 0.6),
+  laserHot: new THREE.Color(2.9, 1.1, 0.25),
   rail: new THREE.Color(1.1, 0.75, 2.8),
   railCore: new THREE.Color(2.6, 2.6, 3.4),
   railSpiral: new THREE.Color(0.85, 0.55, 2.5),
@@ -60,6 +61,8 @@ const COLORS = {
 } as const;
 
 const LASER_SHEATH_COLOR = 0xff2a55;
+const LASER_SHEATH = new THREE.Color(LASER_SHEATH_COLOR);
+const LASER_SHEATH_HOT = new THREE.Color(0xff8a1e);
 /** 轨道炮冲击环（普通混合，线性色） */
 const RAIL_RING_TINT = new THREE.Color(0.32, 0.16, 0.95);
 const RAIL_SHEATH_COLOR = 0x7a5cff;
@@ -819,6 +822,10 @@ export class WeaponFx {
     this.laser.sheathUniforms.uWidth.value = 1.05 * (1 + strain * 0.3);
     this.laser.sheathUniforms.uFadeTail.value = hit ? 0 : 1;
     this.laser.sheathUniforms.uEndWidth.value = hit ? 1.3 : 0.7;
+    // 过热预警：热量超过 60% 后光束由品红逐渐转为橙白
+    const warn = THREE.MathUtils.smoothstep(strain, 0.6, 1);
+    this.laser.coreUniforms.uColor.value.copy(COLORS.laser).lerp(COLORS.laserHot, warn);
+    this.laser.sheathUniforms.uColor.value.copy(LASER_SHEATH).lerp(LASER_SHEATH_HOT, warn);
     this.laser.setVisible(true);
   }
 
@@ -1222,9 +1229,6 @@ export class WeaponFx {
     this.ownedGeometries.length = 0;
     this.root.clear();
   }
-
-  /** 供逻辑层引用的色板（爆炸 / 枪口等） */
-  public static readonly colors = COLORS;
 }
 
 /** 由期望数量（可为小数）随机取整：期望值不变，低帧率 / 高帧率下发射率一致 */

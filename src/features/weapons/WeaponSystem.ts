@@ -711,6 +711,10 @@ export class WeaponSystem {
     this.snapshotFrame = -1;
     this.lastMuzzleValid = false;
     this.fireFrame.carry.set(0, 0, 0);
+    // 复活 / 读档后需要重新按下扳机，避免一按住就自动开火
+    this.pressQueued = false;
+    this.releaseQueued = false;
+    this.triggerLatched = this.triggerHeld;
   }
 
   public dispose(): void {
