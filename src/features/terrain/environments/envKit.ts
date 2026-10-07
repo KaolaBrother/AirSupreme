@@ -328,11 +328,23 @@ const PUFF_FRAGMENT = /* glsl */ `
     float billow = 0.65 + 0.35 * puffNoise(vUv * 5.0 + vAge * 2.0);
     float soft = smoothstep(1.0, 0.15, d * (1.15 - 0.3 * billow));
     float alpha = soft * vAlpha * uOpacity;
+    #if defined(PUFF_ADDITIVE) && defined(USE_FOG)
+      // 加色粒子随雾衰减，而不是叠加雾色
+      #ifdef FOG_EXP2
+        alpha *= exp(-fogDensity * fogDensity * vFogDepth * vFogDepth);
+      #else
+        alpha *= 1.0 - smoothstep(fogNear, fogFar, vFogDepth);
+      #endif
+    #endif
     if (alpha < 0.004) discard;
     vec3 col = vColor * (0.82 + 0.3 * billow);
     col += uBaseGlow * (1.0 - smoothstep(0.0, 0.35, vAge));
     gl_FragColor = vec4(col, alpha);
-    #include <fog_fragment>
+    #include <tonemapping_fragment>
+    #include <colorspace_fragment>
+    #ifndef PUFF_ADDITIVE
+      #include <fog_fragment>
+    #endif
   }
 `;
 
@@ -403,6 +415,7 @@ export function createPuffField(options: PuffFieldOptions): PuffField {
     depthTest: true,
     fog: true,
     blending: options.additive ? THREE.AdditiveBlending : THREE.NormalBlending,
+    defines: options.additive ? { PUFF_ADDITIVE: '' } : {},
   });
   const mesh = new THREE.Mesh(geometry, material);
   mesh.name = options.name;

@@ -404,21 +404,21 @@ export class VolcanoField {
    * 驱动地形着色器中的发光裂纹与暖色底光。
    */
   heatAt(x: number, z: number): number {
-    let heat = smoothstep(95, -2, this.riverEdgeDistance(x, z));
+    let heat = smoothstep(55, -2, this.riverEdgeDistance(x, z));
     for (const lake of VOLCANO_LAVA_LAKES) {
       const d = Math.hypot(x - lake.x, z - lake.z);
-      heat = Math.max(heat, smoothstep(lake.radius + 90, lake.radius * 0.8, d));
+      heat = Math.max(heat, smoothstep(lake.radius + 50, lake.radius * 0.8, d));
     }
     for (const cone of VOLCANO_CONES) {
       if (!cone.lavaCrater) {
         continue;
       }
       const d = Math.hypot(x - cone.x, z - cone.z);
-      heat = Math.max(heat, smoothstep(cone.craterRadius * 1.9, cone.craterRadius * 0.7, d));
+      heat = Math.max(heat, smoothstep(cone.craterRadius * 1.5, cone.craterRadius * 0.7, d));
     }
     // 尚未冷却的旧熔岩流：零星发光裂纹带
     const flows = smoothstep(0.32, 0.62, this.detail.fbm(x * 0.0022 - 13, z * 0.0022 + 29, 3));
-    heat = Math.max(heat, flows * 0.55 * (this.coast.edgeDistance(x, z) < -60 ? 1 : 0));
+    heat = Math.max(heat, flows * 0.32 * (this.coast.edgeDistance(x, z) < -60 ? 1 : 0));
     return heat;
   }
 

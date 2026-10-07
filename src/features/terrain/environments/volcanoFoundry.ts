@@ -89,7 +89,6 @@ export function buildVolcanoFoundry(ctx: FoundryContext): FoundryBuildResult {
   const steam: PuffEmitter[] = [];
   const fire: PuffEmitter[] = [];
   const glows: GlowCard[] = [];
-  const glowColor = new THREE.Color(tokens.glow);
 
   /* ---------------- 材质 ---------------- */
   const steel = new THREE.MeshStandardMaterial({
@@ -115,8 +114,8 @@ export function buildVolcanoFoundry(ctx: FoundryContext): FoundryBuildResult {
   });
   const furnace = new THREE.MeshStandardMaterial({
     color: 0x1a0a04,
-    emissive: glowColor,
-    emissiveIntensity: 2.6,
+    emissive: new THREE.Color(0xff4a0a),
+    emissiveIntensity: 1.5,
     roughness: 0.6,
   });
   const windowStrip = new THREE.MeshBasicMaterial({ color: 0xff5a26 });
@@ -185,7 +184,7 @@ export function buildVolcanoFoundry(ctx: FoundryContext): FoundryBuildResult {
       size: waistRadius * 1.3,
       growth: 3.4,
       spread: waistRadius,
-      color: 0xd8d2cc,
+      color: 0x7a746e,
       colorJitter: 0.1,
     });
     const topRadius = waistRadius * 1.12;
@@ -483,6 +482,27 @@ export function buildVolcanoFoundry(ctx: FoundryContext): FoundryBuildResult {
     glows.push({ x: flare.x, y: y + flare.height + 6, z: flare.z, size: 46, color: 0xff8a2a, flicker: 6 });
     beacons.push(new THREE.Vector3(flare.x, y + flare.height * 0.6, flare.z));
   }
+
+  /* ---------------- 场区照明灯杆（暖黄灯光，夜色中勾勒厂区轮廓） ---------------- */
+  const lampCount = 16;
+  const lampPoles = new THREE.InstancedMesh(
+    new THREE.CylinderGeometry(0.5, 0.7, 1, 6),
+    steel,
+    lampCount
+  );
+  lampPoles.name = 'foundryLampPoles';
+  for (let i = 0; i < lampCount; i++) {
+    const pad = pads[i % pads.length];
+    const angle = (i / lampCount) * Math.PI * 2 + rng() * 0.3;
+    const x = pad.x + Math.cos(angle) * pad.w * 0.42;
+    const z = pad.z + Math.sin(angle) * pad.d * 0.42;
+    const ground = groundAt(x, z);
+    const height = 16 + rng() * 6;
+    setInstanceTransform(lampPoles, i, x, ground + height / 2, z, 0, 1, height, 1);
+    glows.push({ x, y: ground + height + 1, z, size: 16, color: 0xffc27a, flicker: 0 });
+  }
+  lampPoles.instanceMatrix.needsUpdate = true;
+  group.add(lampPoles);
 
   /* ---------------- 航空障碍灯（统一闪烁） ---------------- */
   const beaconMesh = new THREE.InstancedMesh(

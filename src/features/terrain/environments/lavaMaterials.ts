@@ -46,16 +46,18 @@ const LAVA_FRAGMENT = /* glsl */ `
   void main() {
     vec2 flow = vec2(vFlowUv.x, vFlowUv.y - uTime * uFlowSpeed);
     vec2 warp = vec2(envFbm(flow * 0.018 + uTime * 0.03), envFbm(flow * 0.018 - 3.7));
-    vec2 cells = envCells((flow + warp * 18.0) * 0.05);
-    float crack = 1.0 - smoothstep(0.03, 0.17, cells.y);
+    vec2 cells = envCells((flow + warp * 18.0) * 0.07);
+    // 漂浮的冷却外壳板块只占一部分：板块之间与主流道都是炽热熔体
+    float crust = smoothstep(0.1, 0.24, cells.y) * smoothstep(0.42, 0.62, envFbm(flow * 0.025 + 9.0));
     float churn = envFbm(flow * 0.035 + vec2(uTime * 0.11, -uTime * 0.07));
-    float channel = smoothstep(0.35, 1.0, vEdge);
-    float heat = max(crack * (0.55 + 0.45 * channel), channel * smoothstep(0.35, 0.8, churn));
-    heat = max(heat, 0.18 + 0.2 * churn);
-    float pulse = 0.82 + 0.18 * sin(uTime * 1.6 + churn * 7.0 + vWorld.x * 0.01);
+    float streak = envNoise(vec2(flow.x * 0.25, flow.y * 0.02));
+    float channel = smoothstep(0.2, 1.0, vEdge);
+    float heat = 0.5 + 0.35 * churn + 0.25 * channel + 0.15 * streak;
+    heat = mix(heat, 0.12 + 0.1 * churn, crust * (1.0 - 0.55 * channel));
+    float pulse = 0.86 + 0.14 * sin(uTime * 1.6 + churn * 7.0 + vWorld.x * 0.01);
     heat *= pulse;
     // 岸边冷却：外壳更厚、更暗
-    heat *= mix(0.55, 1.0, smoothstep(0.0, 0.45, vEdge));
+    heat *= mix(0.6, 1.0, smoothstep(0.0, 0.4, vEdge));
     vec3 col = mix(uCrust, uWarm, smoothstep(0.18, 0.62, heat));
     col = mix(col, uHot, smoothstep(0.62, 1.0, heat));
     gl_FragColor = vec4(col * uGlow, 1.0);
@@ -139,13 +141,17 @@ export function injectLavaCracks(
         '#include <emissivemap_fragment>',
         `#include <emissivemap_fragment>
         if (vLavaHeat > 0.02) {
-          vec2 lavaCells = envCells(vLavaWorld.xz * 0.06);
-          float crackWidth = 0.035 + 0.06 * vLavaHeat;
+          // 域扭曲的细密裂纹网；低频噪声遮罩让裂纹成片断续，而非铺满的蜂窝
+          vec2 crackUv = vLavaWorld.xz * 0.12;
+          crackUv += vec2(envNoise(crackUv * 0.35), envNoise(crackUv * 0.35 + 7.1)) * 1.6;
+          vec2 lavaCells = envCells(crackUv);
+          float crackWidth = 0.025 + 0.05 * vLavaHeat;
           float crack = 1.0 - smoothstep(0.0, crackWidth, lavaCells.y);
+          float patches = smoothstep(0.38, 0.72, envNoise(vLavaWorld.xz * 0.018 + 3.3) + vLavaHeat * 0.35);
           float drift = envNoise(vLavaWorld.xz * 0.012 + uLavaTime * 0.05);
-          float pulse = 0.7 + 0.3 * sin(uLavaTime * 1.4 + drift * 6.2831);
-          float glow = crack * smoothstep(0.05, 0.9, vLavaHeat) * pulse;
-          totalEmissiveRadiance += uCrackColor * (glow * 2.4 + vLavaHeat * vLavaHeat * 0.22);
+          float pulse = 0.65 + 0.35 * sin(uLavaTime * 1.4 + drift * 6.2831);
+          float glow = crack * patches * smoothstep(0.08, 0.95, vLavaHeat) * pulse;
+          totalEmissiveRadiance += uCrackColor * (glow * 2.0 + vLavaHeat * vLavaHeat * 0.08);
         }`
       );
   };
@@ -196,9 +202,18 @@ const GLOW_FRAGMENT = /* glsl */ `
     float d = length(vUv - 0.5) * 2.0;
     float glow = pow(max(0.0, 1.0 - d), 2.2);
     float alpha = glow * vPulse * uIntensity;
+    // 加色辉光随雾衰减到“无”，而不是叠加雾色
+    #ifdef USE_FOG
+      #ifdef FOG_EXP2
+        alpha *= exp(-fogDensity * fogDensity * vFogDepth * vFogDepth);
+      #else
+        alpha *= 1.0 - smoothstep(fogNear, fogFar, vFogDepth);
+      #endif
+    #endif
     if (alpha < 0.003) discard;
-    gl_FragColor = vec4(vTint * alpha, alpha);
-    #include <fog_fragment>
+    gl_FragColor = vec4(vTint, alpha);
+    #include <tonemapping_fragment>
+    #include <colorspace_fragment>
   }
 `;
 

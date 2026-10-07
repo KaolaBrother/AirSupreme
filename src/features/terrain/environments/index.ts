@@ -5,6 +5,7 @@
  */
 import { TerrainType } from '../LevelConfig';
 import type { TerrainEnvironment, TerrainEnvironmentFactory } from './TerrainEnvironment';
+import { ArcticEnvironment } from './ArcticEnvironment';
 import { CanyonEnvironment } from './CanyonEnvironment';
 import { CitadelEnvironment } from './CitadelEnvironment';
 import { StratosphereEnvironment } from './StratosphereEnvironment';
@@ -14,6 +15,7 @@ export const TERRAIN_ENVIRONMENT_FACTORIES: Readonly<
   Partial<Record<TerrainType, TerrainEnvironmentFactory>>
 > = {
   [TerrainType.VOLCANO]: () => new VolcanoEnvironment(),
+  [TerrainType.ARCTIC]: () => new ArcticEnvironment(),
   [TerrainType.CANYON]: () => new CanyonEnvironment(),
   [TerrainType.STRATOSPHERE]: () => new StratosphereEnvironment(),
   [TerrainType.CITADEL]: () => new CitadelEnvironment(),

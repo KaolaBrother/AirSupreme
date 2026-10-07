@@ -6032,7 +6032,7 @@ export class TerrainGenerator {
       storm: 0.34,
       smog: 0.72,
       rain: 0.55,
-      ash: 0.46,
+      ash: 0.6,
       aurora: 0.62,
     };
     const weatherConfig = config.weather;

@@ -80,10 +80,18 @@ const EMBER_FRAGMENT = /* glsl */ `
     float d = length(p) * 2.0;
     float core = smoothstep(1.0, 0.0, d);
     float alpha = core * core * vFade;
+    #ifdef USE_FOG
+      #ifdef FOG_EXP2
+        alpha *= exp(-fogDensity * fogDensity * vFogDepth * vFogDepth);
+      #else
+        alpha *= 1.0 - smoothstep(fogNear, fogFar, vFogDepth);
+      #endif
+    #endif
     if (alpha < 0.01) discard;
     vec3 col = mix(uColor, uHotColor, clamp(vHeat, 0.0, 1.0));
     gl_FragColor = vec4(col * (0.6 + core), alpha);
-    #include <fog_fragment>
+    #include <tonemapping_fragment>
+    #include <colorspace_fragment>
   }
 `;
 
@@ -216,7 +224,9 @@ const AURORA_FRAGMENT = /* glsl */ `
     float alpha = curtain * ends * rays * pulse * uIntensity;
     col *= 0.75 + hem * 1.1;
     if (alpha < 0.003) discard;
-    gl_FragColor = vec4(col * alpha, alpha);
+    gl_FragColor = vec4(col, alpha);
+    #include <tonemapping_fragment>
+    #include <colorspace_fragment>
   }
 `;
 

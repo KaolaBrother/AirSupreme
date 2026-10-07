@@ -136,7 +136,12 @@ export class VolcanoEnvironment extends EnvironmentBase {
         const h = y - this.waterY;
         const land = field.landFactor(x, z);
         const variation = 0.5 + 0.5 * Math.sin(x * 0.013 + Math.sin(z * 0.011) * 2.2);
-        out.copy(basalt).lerp(freshLava, variation * 0.55);
+        out.copy(basalt).lerp(freshLava, variation * 0.5);
+        // 平地上的火山灰沉积与铁锈色风化斑块
+        const flat = 1 - smoothstep(0.12, 0.35, slope);
+        const ashPatch = smoothstep(0.15, 0.55, Math.sin(x * 0.0047 + 1.3) * Math.cos(z * 0.0061 - 0.7));
+        out.lerp(ashGrey, ashPatch * flat * 0.45 * land);
+        out.lerp(rustAsh, smoothstep(0.7, 1, variation) * flat * 0.3 * land);
         // 高处覆盖火山灰，带铁锈色条纹
         const highAsh = smoothstep(60, 220, h);
         out.lerp(ashGrey, highAsh * 0.55);
@@ -200,7 +205,7 @@ export class VolcanoEnvironment extends EnvironmentBase {
   private buildLava(ctx: TerrainEnvironmentContext): THREE.ShaderMaterial[] {
     const field = this.field;
     const riverMaterial = createLavaMaterial({ flowSpeed: 2.6, glow: 1 });
-    const lakeMaterial = createLavaMaterial({ flowSpeed: 0.7, glow: 1.08 });
+    const lakeMaterial = createLavaMaterial({ flowSpeed: 0.7, glow: 1.3 });
     const lavaGroup = new THREE.Group();
     lavaGroup.name = 'volcanoLava';
 
@@ -429,21 +434,21 @@ export class VolcanoEnvironment extends EnvironmentBase {
         x: cone.x,
         y: rimY - (isMain ? 30 : 10),
         z: cone.z,
-        count: Math.round((isMain ? 90 : isDistant ? 10 : 22) * scale),
-        life: isMain ? 30 : 22,
-        rise: isMain ? 15 : 9,
-        size: isMain ? 46 : cone.craterRadius * 0.9,
-        growth: isMain ? 4.6 : 3.4,
-        spread: isMain ? 60 : cone.craterRadius,
-        color: index === 0 ? 0x3a3230 : 0x4a4442,
+        count: Math.round((isMain ? 120 : isDistant ? 10 : 22) * scale),
+        life: isMain ? 32 : 22,
+        rise: isMain ? 17 : 9,
+        size: isMain ? 60 : cone.craterRadius * 0.9,
+        growth: isMain ? 5 : 3.4,
+        spread: isMain ? 70 : cone.craterRadius,
+        color: index === 0 ? 0x4a403c : 0x5a5250,
         colorJitter: 0.25,
       });
     });
     const ash = createPuffField({
       emitters: ashEmitters,
       wind,
-      opacity: 0.62,
-      baseGlow: 0x7a2a0a,
+      opacity: 0.66,
+      baseGlow: 0xa8400e,
       name: 'volcanoAshPlumes',
       seed: 61,
     });
@@ -467,7 +472,7 @@ export class VolcanoEnvironment extends EnvironmentBase {
             size: 22,
             growth: 3.2,
             spread: 34,
-            color: 0xc9c2bc,
+            color: 0x7a736e,
             colorJitter: 0.08,
           });
           break;
@@ -477,7 +482,7 @@ export class VolcanoEnvironment extends EnvironmentBase {
     const steam = createPuffField({
       emitters: steamEmitters,
       wind,
-      opacity: 0.5,
+      opacity: 0.36,
       name: 'volcanoSteam',
       seed: 62,
     });
