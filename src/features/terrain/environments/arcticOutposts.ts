@@ -118,7 +118,10 @@ export function buildArcticOutposts(
       dome.position.set(spec.x, 6 + spec.r * 0.55, spec.z);
       dome.castShadow = true;
       base.add(dome);
-      const band = new THREE.Mesh(new THREE.TorusGeometry(spec.r * 0.93, 0.5, 4, 24), stripeMaterial);
+      const band = new THREE.Mesh(
+        new THREE.TorusGeometry(spec.r * 0.93, 0.5, 4, 24),
+        stripeMaterial
+      );
       band.rotation.x = Math.PI / 2;
       band.position.set(spec.x, 6.4, spec.z);
       base.add(band);
@@ -196,18 +199,29 @@ export function buildArcticOutposts(
       cone.renderOrder = 0;
       base.add(cone);
       const lampWorld = new THREE.Vector3(lx, 14.5, lz).applyMatrix4(base.matrixWorld);
-      glows.push({ x: lampWorld.x, y: lampWorld.y, z: lampWorld.z, size: 14, color: 0xffd9a0, flicker: 0 });
+      glows.push({
+        x: lampWorld.x,
+        y: lampWorld.y,
+        z: lampWorld.z,
+        size: 14,
+        color: 0xffd9a0,
+        flicker: 0,
+      });
     }
 
     group.add(base);
     base.updateMatrixWorld(true);
     beacons.push(
-      new THREE.Vector3(site.large ? 20 : -4, antennaHeight + 0.8, site.large ? -20 : -14).applyMatrix4(
-        base.matrixWorld
-      ),
-      new THREE.Vector3(site.large ? 20 : -4, antennaHeight * 0.55, site.large ? -20 : -14).applyMatrix4(
-        base.matrixWorld
-      ),
+      new THREE.Vector3(
+        site.large ? 20 : -4,
+        antennaHeight + 0.8,
+        site.large ? -20 : -14
+      ).applyMatrix4(base.matrixWorld),
+      new THREE.Vector3(
+        site.large ? 20 : -4,
+        antennaHeight * 0.55,
+        site.large ? -20 : -14
+      ).applyMatrix4(base.matrixWorld),
       new THREE.Vector3(0, 6 + (site.large ? 14 : 11) * 1.5, 0).applyMatrix4(base.matrixWorld)
     );
   }

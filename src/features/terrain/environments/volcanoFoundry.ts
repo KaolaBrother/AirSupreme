@@ -68,7 +68,11 @@ function portalPosition(angleDeg: number): { x: number; z: number; outward: numb
 }
 
 /** 双曲面冷却塔轮廓（Lathe 点） */
-function coolingTowerProfile(height: number, baseRadius: number, waistRadius: number): THREE.Vector2[] {
+function coolingTowerProfile(
+  height: number,
+  baseRadius: number,
+  waistRadius: number
+): THREE.Vector2[] {
   const waistY = height * 0.72;
   const c = waistY / Math.sqrt((baseRadius / waistRadius) ** 2 - 1);
   const points: THREE.Vector2[] = [];
@@ -202,7 +206,11 @@ export function buildVolcanoFoundry(ctx: FoundryContext): FoundryBuildResult {
 
   /* ---------------- 高炉 ---------------- */
   const stoveCount = SMELTERS.length * 3;
-  const stoves = new THREE.InstancedMesh(new THREE.CylinderGeometry(5, 5.5, 30, 10), rust, stoveCount);
+  const stoves = new THREE.InstancedMesh(
+    new THREE.CylinderGeometry(5, 5.5, 30, 10),
+    rust,
+    stoveCount
+  );
   const stoveDomes = new THREE.InstancedMesh(
     new THREE.SphereGeometry(5, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2),
     rust,
@@ -264,9 +272,23 @@ export function buildVolcanoFoundry(ctx: FoundryContext): FoundryBuildResult {
     });
     beacons.push(new THREE.Vector3(-20, 55, -8).applyMatrix4(unit.matrixWorld));
     const mouthWorld = new THREE.Vector3(0, 6, 18).applyMatrix4(unit.matrixWorld);
-    glows.push({ x: mouthWorld.x, y: mouthWorld.y, z: mouthWorld.z, size: 34, color: 0xff6a1a, flicker: 3 });
+    glows.push({
+      x: mouthWorld.x,
+      y: mouthWorld.y,
+      z: mouthWorld.z,
+      size: 34,
+      color: 0xff6a1a,
+      flicker: 3,
+    });
     const slagWorld = new THREE.Vector3(0, 4, 26).applyMatrix4(unit.matrixWorld);
-    glows.push({ x: slagWorld.x, y: slagWorld.y, z: slagWorld.z, size: 30, color: 0xff4a10, flicker: 2 });
+    glows.push({
+      x: slagWorld.x,
+      y: slagWorld.y,
+      z: slagWorld.z,
+      size: 30,
+      color: 0xff4a10,
+      flicker: 2,
+    });
 
     for (let s = 0; s < 3; s++) {
       const local = new THREE.Vector3(22 + s * 11, 0, -14).applyMatrix4(unit.matrixWorld);
@@ -479,7 +501,14 @@ export function buildVolcanoFoundry(ctx: FoundryContext): FoundryBuildResult {
       color: 0xff7a26,
       colorJitter: 0.3,
     });
-    glows.push({ x: flare.x, y: y + flare.height + 6, z: flare.z, size: 46, color: 0xff8a2a, flicker: 6 });
+    glows.push({
+      x: flare.x,
+      y: y + flare.height + 6,
+      z: flare.z,
+      size: 46,
+      color: 0xff8a2a,
+      flicker: 6,
+    });
     beacons.push(new THREE.Vector3(flare.x, y + flare.height * 0.6, flare.z));
   }
 

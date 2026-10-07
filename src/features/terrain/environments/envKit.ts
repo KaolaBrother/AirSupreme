@@ -447,7 +447,13 @@ export interface HeightGridOptions {
   /** 世界坐标 → 世界 Y */
   heightAt: (worldX: number, worldZ: number) => number;
   /** 顶点色（可选）：slope 0 = 平地 … 1 = 垂直 */
-  colorAt?: (worldX: number, worldZ: number, worldY: number, slope: number, out: THREE.Color) => void;
+  colorAt?: (
+    worldX: number,
+    worldZ: number,
+    worldY: number,
+    slope: number,
+    out: THREE.Color
+  ) => void;
   /** 额外的逐顶点标量属性（如熔岩热度） */
   scalarAttributes?: Record<string, (worldX: number, worldZ: number, worldY: number) => number>;
 }
@@ -541,7 +547,8 @@ export function mergeStaticMeshes(group: THREE.Group): number {
     if (source instanceof THREE.InstancedBufferGeometry || !source.getAttribute('position')) {
       return;
     }
-    const useColor = (material as THREE.Material & { vertexColors?: boolean }).vertexColors === true;
+    const useColor =
+      (material as THREE.Material & { vertexColors?: boolean }).vertexColors === true;
     if (useColor && !source.getAttribute('color')) {
       return;
     }
@@ -577,7 +584,8 @@ export function mergeStaticMeshes(group: THREE.Group): number {
   const mergedMaterials = new Set<THREE.Material>();
   let created = 0;
   for (const [material, bucket] of buckets) {
-    const combined = bucket.geometries.length > 0 ? mergeGeometries(bucket.geometries, false) : null;
+    const combined =
+      bucket.geometries.length > 0 ? mergeGeometries(bucket.geometries, false) : null;
     bucket.geometries.forEach((geometry) => geometry.dispose());
     if (!combined) {
       continue;

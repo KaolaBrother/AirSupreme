@@ -61,7 +61,15 @@ export const VOLCANO_CONES: readonly VolcanoCone[] = [
     lavaCrater: true,
   },
   // 东南渣锥（只冒烟）
-  { x: 720, z: 560, height: 110, radius: 280, craterRadius: 34, craterDepth: 20, lavaCrater: false },
+  {
+    x: 720,
+    z: 560,
+    height: 110,
+    radius: 280,
+    craterRadius: 34,
+    craterDepth: 20,
+    lavaCrater: false,
+  },
   // 远景火山岛（战场之外的剪影）
   {
     x: -1850,
@@ -253,7 +261,10 @@ export class VolcanoField {
         const z = j * SDF_CELL - SDF_HALF;
         for (let i = i0; i <= i1; i++) {
           const x = i * SDF_CELL - SDF_HALF;
-          const t = Math.min(1, Math.max(0, ((x - segment.ax) * dx + (z - segment.az) * dz) / lengthSq));
+          const t = Math.min(
+            1,
+            Math.max(0, ((x - segment.ax) * dx + (z - segment.az) * dz) / lengthSq)
+          );
           const px = segment.ax + dx * t;
           const pz = segment.az + dz * t;
           const halfWidth = segment.wa + (segment.wb - segment.wa) * t;

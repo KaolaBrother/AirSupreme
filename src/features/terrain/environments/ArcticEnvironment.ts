@@ -61,7 +61,9 @@ export class ArcticEnvironment extends EnvironmentBase {
 
   build(ctx: TerrainEnvironmentContext): void {
     this.waterY = ctx.waterY;
-    this.field = new ArcticField(Math.round((ctx.isMobile ? 60 : 96) * Math.max(0.6, ctx.detailScale)));
+    this.field = new ArcticField(
+      Math.round((ctx.isMobile ? 60 : 96) * Math.max(0.6, ctx.detailScale))
+    );
     const tokens = ctx.tokens;
 
     this.buildSea(ctx);
@@ -75,7 +77,10 @@ export class ArcticEnvironment extends EnvironmentBase {
     const rng = mulberry32(7171);
     const mistEmitters: PuffEmitter[] = [];
     for (const feature of this.field.features) {
-      if (feature.kind === 'pinnacle' && Math.hypot(feature.shape.centerX, feature.shape.centerZ) > 1600) {
+      if (
+        feature.kind === 'pinnacle' &&
+        Math.hypot(feature.shape.centerX, feature.shape.centerZ) > 1600
+      ) {
         continue;
       }
       const samples = feature.kind === 'shelf' ? 7 : 2;
@@ -178,7 +183,10 @@ export class ArcticEnvironment extends EnvironmentBase {
   }
 
   /** 冰架 / 平顶冰山：星形轮廓挤出（倒角圆润冰缘），顶面雪、崖壁冰蓝渐变 */
-  private buildTabularGeometry(feature: IceFeature, ctx: TerrainEnvironmentContext): THREE.BufferGeometry {
+  private buildTabularGeometry(
+    feature: IceFeature,
+    ctx: TerrainEnvironmentContext
+  ): THREE.BufferGeometry {
     const shape = feature.shape;
     const segments = feature.kind === 'shelf' ? (ctx.isMobile ? 120 : 200) : ctx.isMobile ? 40 : 64;
     const height = feature.top + feature.draft;
@@ -200,7 +208,10 @@ export class ArcticEnvironment extends EnvironmentBase {
   }
 
   /** 尖顶冰山：极坐标网格 + 解析剖面（与采样一致）+ 水下裙边 */
-  private buildPinnacleGeometry(feature: IceFeature, ctx: TerrainEnvironmentContext): THREE.BufferGeometry {
+  private buildPinnacleGeometry(
+    feature: IceFeature,
+    ctx: TerrainEnvironmentContext
+  ): THREE.BufferGeometry {
     const shape = feature.shape;
     const rings = ctx.isMobile ? 7 : 10;
     const sectors = ctx.isMobile ? 18 : 26;
@@ -226,7 +237,11 @@ export class ArcticEnvironment extends EnvironmentBase {
       return [shape.centerX + dx * 1.08, this.waterY - feature.draft, shape.centerZ + dz * 1.08];
     });
     ringPoints.push(skirt);
-    const pushTri = (a: [number, number, number], b: [number, number, number], c: [number, number, number]): void => {
+    const pushTri = (
+      a: [number, number, number],
+      b: [number, number, number],
+      c: [number, number, number]
+    ): void => {
       positions.push(...a, ...b, ...c);
     };
     for (let r = 0; r < ringPoints.length - 1; r++) {
@@ -271,7 +286,8 @@ export class ArcticEnvironment extends EnvironmentBase {
       if (y < this.waterY) {
         color.lerp(deep, smoothstep(this.waterY, this.waterY - 10, y));
       }
-      const snowCover = smoothstep(0.55, 0.85, ny) * smoothstep(this.waterY + 1.5, this.waterY + 6, y);
+      const snowCover =
+        smoothstep(0.55, 0.85, ny) * smoothstep(this.waterY + 1.5, this.waterY + 6, y);
       const capBand = smoothstep(topY - 3.2, topY - 0.8, y);
       color.lerp(snow, Math.max(snowCover, capBand * 0.85));
       colors[i * 3] = color.r;
@@ -347,7 +363,9 @@ export class ArcticEnvironment extends EnvironmentBase {
         const mesh = meshes[v];
         for (let i = 0; i < indices.length; i++) {
           const floe = field.floes[indices[i]];
-          const bob = sampleWaveHeight(floe.x, floe.z, elapsed) * 0.35 + Math.sin(elapsed * 0.7 + floe.bobPhase) * 0.08;
+          const bob =
+            sampleWaveHeight(floe.x, floe.z, elapsed) * 0.35 +
+            Math.sin(elapsed * 0.7 + floe.bobPhase) * 0.08;
           position.set(floe.x, this.waterY + FLOE_FREEBOARD - thickness + bob, floe.z);
           quaternion.setFromAxisAngle(yAxis, floe.rotation);
           scale.set(floe.radius, thickness, floe.radius);
@@ -364,7 +382,8 @@ export class ArcticEnvironment extends EnvironmentBase {
         floe.x += currentX * floe.speed * dt;
         floe.z += currentZ * floe.speed * dt;
         floe.rotation += floe.spin * dt;
-        const outOfBounds = Math.abs(floe.x) > FLOE_HALF_EXTENT || Math.abs(floe.z) > FLOE_HALF_EXTENT;
+        const outOfBounds =
+          Math.abs(floe.x) > FLOE_HALF_EXTENT || Math.abs(floe.z) > FLOE_HALF_EXTENT;
         if (outOfBounds || field.staticIceTop(floe.x, floe.z, floe.radius * 0.5) !== null) {
           // 在上游边界重生（避开静态冰体）
           for (let attempt = 0; attempt < 6; attempt++) {

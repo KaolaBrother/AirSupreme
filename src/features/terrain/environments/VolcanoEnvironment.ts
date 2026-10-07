@@ -139,7 +139,11 @@ export class VolcanoEnvironment extends EnvironmentBase {
         out.copy(basalt).lerp(freshLava, variation * 0.5);
         // 平地上的火山灰沉积与铁锈色风化斑块
         const flat = 1 - smoothstep(0.12, 0.35, slope);
-        const ashPatch = smoothstep(0.15, 0.55, Math.sin(x * 0.0047 + 1.3) * Math.cos(z * 0.0061 - 0.7));
+        const ashPatch = smoothstep(
+          0.15,
+          0.55,
+          Math.sin(x * 0.0047 + 1.3) * Math.cos(z * 0.0061 - 0.7)
+        );
         out.lerp(ashGrey, ashPatch * flat * 0.45 * land);
         out.lerp(rustAsh, smoothstep(0.7, 1, variation) * flat * 0.3 * land);
         // 高处覆盖火山灰，带铁锈色条纹
@@ -270,7 +274,13 @@ export class VolcanoEnvironment extends EnvironmentBase {
     });
 
     // 熔岩湖（平原 + 火山口）：径向圆盘，aEdge = 1 - r
-    const addLakeDisc = (x: number, z: number, radius: number, level: number, name: string): void => {
+    const addLakeDisc = (
+      x: number,
+      z: number,
+      radius: number,
+      level: number,
+      name: string
+    ): void => {
       const rings = 6;
       const sectors = 40;
       const positions: number[] = [x, this.waterY + level, z];
@@ -364,7 +374,17 @@ export class VolcanoEnvironment extends EnvironmentBase {
         const height = 6 + rng() * 26 * (1 - radius / 70);
         const base = Math.min(ground, this.waterY) - 4;
         const top = Math.max(ground, this.waterY) + height;
-        setInstanceTransform(columns, placed++, x, (base + top) / 2, z, rng() * Math.PI, 1, top - base, 1);
+        setInstanceTransform(
+          columns,
+          placed++,
+          x,
+          (base + top) / 2,
+          z,
+          rng() * Math.PI,
+          1,
+          top - base,
+          1
+        );
       }
     }
     columns.count = placed;

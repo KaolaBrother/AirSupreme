@@ -8,7 +8,11 @@ import type { TerrainType } from '../LevelConfig';
 import type { TerrainEnvironment, TerrainEnvironmentContext } from './TerrainEnvironment';
 import { disposeObjectTree } from './envKit';
 
-export type EnvironmentAnimation = (deltaTime: number, elapsed: number, focus: THREE.Vector3) => void;
+export type EnvironmentAnimation = (
+  deltaTime: number,
+  elapsed: number,
+  focus: THREE.Vector3
+) => void;
 
 export abstract class EnvironmentBase implements TerrainEnvironment {
   abstract readonly terrain: TerrainType;
