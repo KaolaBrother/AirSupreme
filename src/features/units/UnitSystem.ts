@@ -475,7 +475,17 @@ export class UnitSystem implements IGameSystem {
 
   /** 估算敌机速度（友军护卫舰射击提前量） */
   private trackJets(dt: number): void {
-    for (const mesh of this.enemyAirMeshes) {
+    this.trackJetList(this.enemyAirMeshes, dt);
+    this.trackJetList(this.friendlyAirMeshes, dt);
+    if (this.frame % 60 === 0) {
+      for (const [mesh, track] of this.jetTracks) {
+        if (track.frame !== this.frame) this.jetTracks.delete(mesh);
+      }
+    }
+  }
+
+  private trackJetList(meshes: readonly THREE.Object3D[], dt: number): void {
+    for (const mesh of meshes) {
       if (!mesh) continue;
       mesh.getWorldPosition(this.tmpA);
       if (!isFiniteVector(this.tmpA)) continue;
@@ -492,11 +502,6 @@ export class UnitSystem implements IGameSystem {
           velocity: new THREE.Vector3(),
           frame: this.frame,
         });
-      }
-    }
-    if (this.frame % 60 === 0) {
-      for (const [mesh, track] of this.jetTracks) {
-        if (track.frame !== this.frame) this.jetTracks.delete(mesh);
       }
     }
   }

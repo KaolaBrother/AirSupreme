@@ -36,6 +36,7 @@ const muzzlePos = new THREE.Vector3();
 const pivotPos = new THREE.Vector3();
 const aimPoint = new THREE.Vector3();
 const direction = new THREE.Vector3();
+const objectPos = new THREE.Vector3();
 const tmpQuat = new THREE.Quaternion();
 const FORWARD = new THREE.Vector3(0, 0, 1);
 const UP = new THREE.Vector3(0, 1, 0);
@@ -157,6 +158,26 @@ export function nearestAlly(
     if (d < bestSq) {
       bestSq = d;
       best = ally;
+    }
+  }
+  return best;
+}
+
+/** 列表中距离 origin 最近（且可见）的对象 */
+function nearestObject(
+  objects: readonly THREE.Object3D[],
+  origin: THREE.Vector3,
+  range: number
+): THREE.Object3D | null {
+  let best: THREE.Object3D | null = null;
+  let bestSq = range * range;
+  for (const object of objects) {
+    if (!object || object.visible === false) continue;
+    object.getWorldPosition(objectPos);
+    const d = objectPos.distanceToSquared(origin);
+    if (d < bestSq) {
+      bestSq = d;
+      best = object;
     }
   }
   return best;
@@ -494,14 +515,21 @@ function updateAaGun(unit: UnitEntity, world: UnitWorld, deltaTime: number): voi
     target = nearestAlly(unit, world, 520, ['air']);
     if (target) aimPoint.copy(target.mesh.position);
   }
+  // 玩家与友军单位都不在射界时，转而射击友军喷气机（经 onUnitFire，敌方子弹池结算）
+  let jet: THREE.Object3D | null = null;
+  if (!engagePlayer && !target) {
+    jet = nearestObject(world.friendlyAirMeshes, p, 520);
+    if (jet) jet.getWorldPosition(aimPoint);
+  }
+  const hasTarget = engagePlayer || target !== null || jet !== null;
   let yawError = Math.PI;
-  if ((engagePlayer || target) && turret) {
+  if (hasTarget && turret) {
     const angles = aimAngles(unit, pivotPos, aimPoint);
     yawError = smoothTurretYaw(turret, angles.yaw, 2.2, deltaTime);
     if (barrel) smoothPitch(barrel, THREE.MathUtils.clamp(angles.pitch, 0, 1.35), 1.6, deltaTime);
   }
   unit.fireTimer -= deltaTime;
-  if (unit.fireTimer <= 0 && unit.burstLeft <= 0 && (engagePlayer || target) && yawError < 0.16) {
+  if (unit.fireTimer <= 0 && unit.burstLeft <= 0 && hasTarget && yawError < 0.16) {
     unit.burstLeft = 6;
     world.emitEvent(unit, 'flak-burst');
     unit.burstTimer = 0;
@@ -537,6 +565,8 @@ function updateAaGun(unit: UnitEntity, world: UnitWorld, deltaTime: number): voi
           0.35 + world.accuracyBonus,
           170
         );
+      } else if (jet) {
+        world.fireAtObject(unit, muzzlePos, jet, 3.5 * world.damageMultiplier, 0.03);
       }
       if (unit.burstLeft % 2 === 1) world.muzzleFlash(muzzlePos, 0.7);
     }
