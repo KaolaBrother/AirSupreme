@@ -38,6 +38,7 @@ import {
  *
  * createUnitMesh(type) 返回 THREE.Group：
  * - userData.unitType / userData.hitRadius（米）/ userData.faction
+ * - userData.aimPoint：车体 / 舰体中部的空节点（玩家导弹 / 自动瞄准的目标点）
  * - 可动部件（按类型存在）：turret、barrel、launcher、rackMissiles[]、muzzle、muzzles[]、
  *   dish、radar、ciws、vls、wake、bowWake、periscope、prop、props[]、mainRotor、tailRotor、
  *   rotodome、tailGun、bombBay、chinGun
@@ -78,6 +79,24 @@ export const UNIT_DISPLAY_SCALE: Readonly<Partial<Record<UnitType, number>>> = {
   [UnitType.CIVILIAN_TRUCK]: 1.3,
 };
 
+/**
+ * 瞄准点高度（模型局部坐标，米）：模型原点在地面 / 水线，导弹与自动瞄准应瞄向车体 / 舰体中部。
+ * 实例上以 userData.aimPoint（空 Object3D）暴露，findByMesh 可从它反查单位。
+ */
+const AIM_POINT_HEIGHT: Readonly<Partial<Record<UnitType, number>>> = {
+  [UnitType.TANK]: 2.2,
+  [UnitType.SAM_LAUNCHER]: 2.4,
+  [UnitType.AA_GUN]: 1.8,
+  [UnitType.RADAR_STATION]: 4,
+  [UnitType.GUNBOAT]: 2.4,
+  [UnitType.FRIGATE]: 6.5,
+  [UnitType.SUBMARINE]: 1.4,
+  [UnitType.ALLY_CONVOY]: 2.4,
+  [UnitType.ALLY_FRIGATE]: 6.5,
+  [UnitType.CIVILIAN_SHIP]: 8,
+  [UnitType.CIVILIAN_TRUCK]: 2.2,
+};
+
 const templateCache = new Map<UnitType, UnitTemplateNode>();
 let fallbackTemplate: UnitTemplateNode | null = null;
 
@@ -114,6 +133,11 @@ export function createUnitMesh(type: UnitType): THREE.Group {
   const displayScale = UNIT_DISPLAY_SCALE[type] ?? 1;
   if (displayScale !== 1) group.scale.setScalar(displayScale);
   group.userData.faction = config.faction;
+  const aimPoint = new THREE.Object3D();
+  aimPoint.name = 'aimPoint';
+  aimPoint.position.set(0, AIM_POINT_HEIGHT[type] ?? 0, 0);
+  group.add(aimPoint);
+  group.userData.aimPoint = aimPoint;
   if (type === UnitType.RADAR_STATION) {
     group.userData.priorityTarget = true;
   }

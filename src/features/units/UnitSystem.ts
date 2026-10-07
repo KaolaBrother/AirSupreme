@@ -800,6 +800,27 @@ export class UnitSystem implements IGameSystem {
     return null;
   }
 
+  /**
+   * 扩展：点命中测试——返回瞄准中心（userData.aimPoint）半径 hitRadius + padding 内最近的可命中单位。
+   * 供协调器对玩家子弹 / 导弹做半径感知的碰撞（ProjectilePool 固定 5 米阈值对大型舰船不适用）。
+   */
+  hitTest(point: THREE.Vector3, padding = 0): UnitInstance | null {
+    if (!point || !isFiniteVector(point)) return null;
+    let best: UnitEntity | null = null;
+    let bestSq = Infinity;
+    for (const unit of this.units) {
+      if (!unit.isTargetable()) continue;
+      unit.getAimCenter(this.tmpB);
+      const radius = unit.hitRadius + Math.max(0, padding);
+      const distanceSq = this.tmpB.distanceToSquared(point);
+      if (distanceSq <= radius * radius && distanceSq < bestSq) {
+        bestSq = distanceSq;
+        best = unit;
+      }
+    }
+    return best;
+  }
+
   /** 存活的敌方单位数（含潜航潜艇）——波次清场判定 */
   getAliveHostileCount(): number {
     let count = 0;

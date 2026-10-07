@@ -109,6 +109,8 @@ export class UnitEntity implements UnitInstance, CombatTarget {
   surfaceSampleZ = Number.NaN;
   /** 平滑后的基准高度（浮动起伏叠加在其上，避免累积漂移） */
   baseY = Number.NaN;
+  /** 瞄准点相对原点的高度（米，已含显示缩放） */
+  aimHeight = 0;
   /** 命中火花节流 */
   hitFxCooldown = 0;
   /** 前方可通行探测节流 */
@@ -168,6 +170,10 @@ export class UnitEntity implements UnitInstance, CombatTarget {
     this.health = this.maxHealth;
     this.seed = Math.random();
     mesh.userData.unitId = this.id;
+    const aimPoint: unknown = mesh.userData.aimPoint;
+    if (aimPoint instanceof THREE.Object3D) {
+      this.aimHeight = aimPoint.position.y * (Number.isFinite(mesh.scale.y) ? mesh.scale.y : 1);
+    }
     mesh.traverse((object) => {
       const candidate = object as THREE.Mesh;
       if (!candidate.isMesh || candidate.userData.noFlash) return;
@@ -191,6 +197,11 @@ export class UnitEntity implements UnitInstance, CombatTarget {
   getPosition(out?: THREE.Vector3): THREE.Vector3 {
     const target = out ?? new THREE.Vector3();
     return target.copy(this.mesh.position);
+  }
+
+  /** 瞄准中心（世界坐标）：原点 + 瞄准点高度 */
+  getAimCenter(out: THREE.Vector3): THREE.Vector3 {
+    return out.copy(this.mesh.position).setY(this.mesh.position.y + this.aimHeight);
   }
 
   /** 生命比例 0..1 */
