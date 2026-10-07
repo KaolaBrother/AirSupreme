@@ -972,3 +972,28 @@ export class ArcShellPool {
     this.slots.length = 0;
   }
 }
+
+/**
+ * BossMissileSystem 直接调用 createBossMissileTrail / createBossMissileExplosion / createHit；
+ * 粒子系统缺失或是不完整的测试替身时，给它一个空实现，保证导弹逻辑照常运行。
+ */
+export function resolveMissileParticles(
+  particles: ParticleSystem | null | undefined
+): ParticleSystem {
+  const candidate = particles as unknown as Record<string, unknown> | null | undefined;
+  if (
+    particles &&
+    candidate &&
+    typeof candidate.createBossMissileTrail === 'function' &&
+    typeof candidate.createBossMissileExplosion === 'function' &&
+    typeof candidate.createHit === 'function'
+  ) {
+    return particles;
+  }
+  const noop = (): void => undefined;
+  return {
+    createBossMissileTrail: noop,
+    createBossMissileExplosion: noop,
+    createHit: noop,
+  } as unknown as ParticleSystem;
+}
