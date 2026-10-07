@@ -90,6 +90,8 @@ export interface WeaponRuntime {
 
 /** 推算载机速度时的上限：超过视为瞬移（复活 / 读档） */
 const MAX_CARRY_SPEED = 400;
+/** 计时比较的容差（秒），吸收逐帧累加的浮点误差 */
+const TIME_EPSILON = 1e-6;
 
 export class WeaponSystem {
   private readonly particleSystem: ParticleSystem | null;
@@ -398,7 +400,8 @@ export class WeaponSystem {
 
     // 1) 弹药装填与冷却（所有已解锁武器后台进行）
     for (const runtime of this.runtimes.values()) {
-      runtime.cooldownTimer = Math.max(0, runtime.cooldownTimer - dt);
+      runtime.cooldownTimer =
+        runtime.cooldownTimer - dt <= TIME_EPSILON ? 0 : runtime.cooldownTimer - dt;
       const { maxAmmo, reloadTime } = runtime.stats;
       if (!Number.isFinite(maxAmmo)) continue;
       if (runtime.ammo >= maxAmmo) {
@@ -412,8 +415,9 @@ export class WeaponSystem {
         runtime.reloadTimer = 0;
         continue;
       }
-      while (runtime.reloadTimer >= reloadTime && runtime.ammo < maxAmmo) {
-        runtime.reloadTimer -= reloadTime;
+      // 允许浮点累积误差：按 0.1 秒步进 60 次也能在第 6 秒整补满
+      while (runtime.reloadTimer >= reloadTime - TIME_EPSILON && runtime.ammo < maxAmmo) {
+        runtime.reloadTimer = Math.max(0, runtime.reloadTimer - reloadTime);
         runtime.ammo = Math.min(maxAmmo, runtime.ammo + 1);
       }
       if (runtime.ammo >= maxAmmo) runtime.reloadTimer = 0;

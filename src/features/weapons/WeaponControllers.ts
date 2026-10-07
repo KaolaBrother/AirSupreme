@@ -814,6 +814,7 @@ export class LaserController {
     }
 
     runtime.heat = Math.min(1, runtime.heat + stats.heatPerSecond * deltaTime);
+    if (runtime.heat > 1 - 1e-6) runtime.heat = 1;
 
     // 射线：地形裁剪后取第一个可伤害目标
     const dir = frame.forward;
@@ -868,7 +869,6 @@ export class LaserController {
     }
 
     if (runtime.heat >= 1) {
-      runtime.heat = 1;
       runtime.overheated = true;
       this.stop(runtime.id);
       // 过热：枪口喷出一团蒸汽
@@ -937,6 +937,7 @@ export class RailgunController {
     if (!runtime.charging) return;
     const chargeTime = Math.max(0.05, runtime.stats.chargeTime);
     runtime.charge = Math.min(1, runtime.charge + deltaTime / chargeTime);
+    if (runtime.charge > 1 - 1e-6) runtime.charge = 1;
     if (frame.valid) {
       this.point.copy(frame.position).addScaledVector(frame.forward, 1.2);
       this.ctx.fx?.emitRailCharge(
