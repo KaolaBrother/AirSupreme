@@ -378,10 +378,8 @@ export class VolcanoEnvironment extends EnvironmentBase {
       const dirZ = Math.sin(theta);
       let shoreR = -1;
       for (let r = 500; r <= 1800; r += 8) {
-        const h = field.groundHeight(
-          field.coast.centerX + dirX * r,
-          field.coast.centerZ + dirZ * r
-        );
+        // 用未下切的基础高度判断海岸，避免把内陆熔岩河道 / 熔岩湖盆误认作海岸
+        const h = field.baseHeight(field.coast.centerX + dirX * r, field.coast.centerZ + dirZ * r);
         if (h < 0.5) {
           shoreR = r;
           break;
@@ -389,7 +387,7 @@ export class VolcanoEnvironment extends EnvironmentBase {
       }
       const cx = field.coast.centerX + dirX * (shoreR - 12);
       const cz = field.coast.centerZ + dirZ * (shoreR - 12);
-      if (shoreR < 0 || field.groundHeight(cx, cz) > 8) continue;
+      if (shoreR < 0 || field.baseHeight(cx, cz) > 8) continue;
       const perCluster = Math.floor(columnCount / clusterCount);
       for (let i = 0; i < perCluster && placed < columnCount; i++) {
         const angle = rng() * Math.PI * 2;
@@ -397,7 +395,7 @@ export class VolcanoEnvironment extends EnvironmentBase {
         const x = cx + Math.cos(angle) * radius;
         const z = cz + Math.sin(angle) * radius;
         const ground = this.waterY + field.groundHeight(x, z);
-        if (ground > this.waterY + 10) continue;
+        if (ground > this.waterY + 10 || field.lavaSurface(x, z) !== null) continue;
         const height = 6 + rng() * 26 * (1 - radius / 70);
         const base = Math.min(ground, this.waterY) - 4;
         const top = Math.max(ground, this.waterY) + height;
