@@ -4620,6 +4620,15 @@ export class TerrainGenerator {
   }
 
   /**
+   * 当前关卡的环境模块（第 6-10 关；其余关卡为 null）。
+   * 供集成方读取环境的可选扩展，例如 CANYON 的 getConvoyRoute()、
+   * CITADEL 的 getCoreArena() / getAssaultRoute() / setCoreState()。
+   */
+  public getEnvironment(): TerrainEnvironment | null {
+    return this.environment;
+  }
+
+  /**
    * 返回 (worldX, worldZ) 处地形/水面的世界 Y。
    * 高度场局部 0 为水面；未生成高度场时回落到 WORLDSCAPE_WATER_Y。
    * 第 6-10 关委托环境模块：可航行水面返回水位，其余返回固体表面（地面/冰面/结构顶）。
@@ -4641,8 +4650,8 @@ export class TerrainGenerator {
    * 地表采样（地面单位 / 舰船 / Boss 落脚用）：
    * - y：世界表面高度；可航行水域返回水面高度 WORLDSCAPE_WATER_Y
    * - water：船只是否可在此航行
-   * 规则：LAKE 仅湖内（水深 ≥ 2m）、OCEAN 除岛屿外全域、VOLCANO 岛外海域、ARCTIC 冰间开阔海面为水；
-   * DESERT / MOUNTAINS / CITY / CANYON / STRATOSPHERE / CITADEL 全域 water = false。
+   * 规则：LAKE 仅湖内（水深 ≥ 2m）、OCEAN 除岛屿外全域、VOLCANO 岛外海域、ARCTIC 冰间开阔海面、
+   * CANYON 主峡谷河道为水；DESERT / MOUNTAINS / CITY / STRATOSPHERE / CITADEL 全域 water = false。
    * 非有限输入或地形未生成时返回 { y: WORLDSCAPE_WATER_Y, water: false }。
    */
   public sampleSurface(worldX: number, worldZ: number): TerrainSurfaceSample {

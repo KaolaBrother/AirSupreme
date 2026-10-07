@@ -59,14 +59,28 @@ export interface PolarFootprint {
   apronBottom: number;
 }
 
-/** 椭球穹顶：中心高 base + height，边缘回落到 base */
+/** 椭球穹顶：中心高 base + height，边缘回落到 base；可为椭圆底（局部 X 半径 radius、Z 半径 radiusZ） */
 export interface DomeFootprint {
   kind: 'dome';
   x: number;
   z: number;
   radius: number;
+  radiusZ: number;
+  yaw: number;
   base: number;
   height: number;
+}
+
+/** 环形台：外缘为正多边形（或圆），中心挖去圆孔（如中央井口的台基） */
+export interface AnnulusFootprint {
+  kind: 'annulus';
+  x: number;
+  z: number;
+  sides: number;
+  yaw: number;
+  outer: number;
+  inner: number;
+  top: number;
 }
 
 export type StructureFootprint =
@@ -74,7 +88,8 @@ export type StructureFootprint =
   | BoxFootprint
   | RampFootprint
   | PolarFootprint
-  | DomeFootprint;
+  | DomeFootprint
+  | AnnulusFootprint;
 
 const CELL = 48;
 const KEY_OFFSET = 4096;
@@ -229,12 +244,59 @@ export class StructureField {
     );
   }
 
-  addDome(options: { x: number; z: number; radius: number; base: number; height: number }): void {
+  addAnnulus(options: {
+    x: number;
+    z: number;
+    outer: number;
+    inner: number;
+    top: number;
+    sides?: number;
+    yaw?: number;
+  }): void {
     this.register(
-      { kind: 'dome', ...options },
+      {
+        kind: 'annulus',
+        x: options.x,
+        z: options.z,
+        sides: options.sides ?? 0,
+        yaw: options.yaw ?? 0,
+        outer: Math.max(0.1, options.outer),
+        inner: Math.max(0, options.inner),
+        top: options.top,
+      },
       options.x,
       options.z,
-      options.radius,
+      options.outer,
+      options.top
+    );
+  }
+
+  addDome(options: {
+    x: number;
+    z: number;
+    radius: number;
+    /** 椭圆底的局部 Z 半径（缺省 = radius） */
+    radiusZ?: number;
+    /** 椭圆底朝向（rotation.y 约定） */
+    yaw?: number;
+    base: number;
+    height: number;
+  }): void {
+    const radiusZ = options.radiusZ ?? options.radius;
+    this.register(
+      {
+        kind: 'dome',
+        x: options.x,
+        z: options.z,
+        radius: options.radius,
+        radiusZ,
+        yaw: options.yaw ?? 0,
+        base: options.base,
+        height: options.height,
+      },
+      options.x,
+      options.z,
+      Math.max(options.radius, radiusZ),
       options.base + options.height
     );
   }
@@ -318,8 +380,21 @@ export class StructureField {
           ((item.top - item.apronBottom) * (item.apronScale - n)) / (item.apronScale - 1)
         );
       }
+      case 'annulus': {
+        const dx = x - item.x;
+        const dz = z - item.z;
+        if (Math.hypot(dx, dz) < item.inner) return -Infinity;
+        toLocal(dx, dz, item.yaw, _local);
+        return polygonNorm(_local.x, _local.z, item.sides) <= item.outer ? item.top : -Infinity;
+      }
       case 'dome': {
-        const d = Math.hypot(x - item.x, z - item.z) / item.radius;
+        let d: number;
+        if (item.radiusZ === item.radius) {
+          d = Math.hypot(x - item.x, z - item.z) / item.radius;
+        } else {
+          toLocal(x - item.x, z - item.z, item.yaw, _local);
+          d = Math.hypot(_local.x / item.radius, _local.z / item.radiusZ);
+        }
         if (d >= 1) return -Infinity;
         return item.base + item.height * Math.sqrt(1 - d * d);
       }
