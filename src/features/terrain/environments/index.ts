@@ -8,10 +8,12 @@ import type { TerrainEnvironment, TerrainEnvironmentFactory } from './TerrainEnv
 import { CanyonEnvironment } from './CanyonEnvironment';
 import { CitadelEnvironment } from './CitadelEnvironment';
 import { StratosphereEnvironment } from './StratosphereEnvironment';
+import { VolcanoEnvironment } from './VolcanoEnvironment';
 
 export const TERRAIN_ENVIRONMENT_FACTORIES: Readonly<
   Partial<Record<TerrainType, TerrainEnvironmentFactory>>
 > = {
+  [TerrainType.VOLCANO]: () => new VolcanoEnvironment(),
   [TerrainType.CANYON]: () => new CanyonEnvironment(),
   [TerrainType.STRATOSPHERE]: () => new StratosphereEnvironment(),
   [TerrainType.CITADEL]: () => new CitadelEnvironment(),
