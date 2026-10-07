@@ -967,18 +967,12 @@ export class GameCoordinator {
     if (this.combatSystem) {
       this.units.applyPlayerBulletHits(
         this.combatSystem.getPlayerProjectilePool(),
-        (position, hostile) => {
-          if (hostile) this.requestPlayerHitMarker(position);
-        }
+        this.handleUnitBulletHit
       );
       this.units.applyPlayerMissileHits(
         this.combatSystem.getMissileSystem(),
         GAME_CONSTANTS.MISSILE.DAMAGE * this.combatSystem.getDamageMultiplier(),
-        (position) => {
-          this.audioManager.playMissileExplosion();
-          this.requestPlayerHitMarker(position);
-          this.view.addExplosionShake(position, 1.2);
-        }
+        this.handleUnitMissileHit
       );
     }
 
@@ -1005,6 +999,17 @@ export class GameCoordinator {
     this.currentCameraTargetPosition.copy(this.playerAircraft.position);
     this.currentCameraTargetQuaternion.copy(this.playerAircraft.quaternion);
   }
+
+  /** 玩家机炮命中单位（预先绑定的回调，避免每帧创建闭包） */
+  private readonly handleUnitBulletHit = (position: THREE.Vector3, hostile: boolean): void => {
+    if (hostile) this.requestPlayerHitMarker(position);
+  };
+
+  private readonly handleUnitMissileHit = (position: THREE.Vector3): void => {
+    this.audioManager.playMissileExplosion();
+    this.requestPlayerHitMarker(position);
+    this.view.addExplosionShake(position, 1.2);
+  };
 
   /** 存活敌机网格（复用数组） */
   private collectEnemyMeshes(): THREE.Object3D[] {

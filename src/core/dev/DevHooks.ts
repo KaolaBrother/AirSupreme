@@ -186,6 +186,19 @@ export function installDevHooks(access: DevHookAccess): void {
     return hits;
   };
 
+  /** 高级 Boss 的子目标（护盾塔 / 气囊 / 散热口……）：位置、血量与当前伤害倍率 */
+  const bossSubTargets = (): Array<Record<string, unknown>> => {
+    const boss = access.getBossController()?.getCurrentBoss() ?? null;
+    if (!isAdvancedBoss(boss) || !boss.getSubTargets) return [];
+    return boss.getSubTargets().map((target) => ({
+      name: target.mesh.name,
+      current: Math.round(target.current),
+      max: Math.round(target.max),
+      multiplier: round(boss.getDamageMultiplier(target.mesh)),
+      position: toPlain(target.mesh.getWorldPosition(new THREE.Vector3())),
+    }));
+  };
+
   /** 把玩家摆到目标前方 distance 米处并朝向目标（测试特殊武器命中） */
   const placePlayerFacing = (
     target: Vec3Like,
@@ -274,6 +287,7 @@ export function installDevHooks(access: DevHookAccess): void {
   const hooks = {
     getState,
     listUnits,
+    bossSubTargets,
     setGodMode: (on: boolean) => {
       godMode = on === true;
       return godMode;

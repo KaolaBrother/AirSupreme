@@ -95,6 +95,9 @@ export class UnitController {
   private readonly muzzleDirection = new THREE.Vector3();
   private readonly playerPosition = new THREE.Vector3();
   private readonly hitPoint = new THREE.Vector3();
+  private bulletHitCallback: ((position: THREE.Vector3, hostile: boolean) => void) | null = null;
+  private missileHitCallback: ((position: THREE.Vector3) => void) | null = null;
+  private missileHitDamage = 0;
   private bossDroneCount = 0;
 
   constructor(private readonly deps: UnitControllerDeps) {}
@@ -344,17 +347,21 @@ export class UnitController {
     pool: ProjectilePool,
     onHit: (position: THREE.Vector3, hostile: boolean) => void
   ): void {
-    const system = this.system;
-    if (!system || !pool.hasActiveProjectiles()) return;
-    pool.consumeHits((position, damage) => {
-      const unit = system.hitTest(position, 1);
-      if (!unit || unit.faction === Faction.FRIENDLY) return false;
-      this.hitPoint.copy(position);
-      unit.applyDamage(damage, 'cannon', this.hitPoint);
-      onHit(this.hitPoint, unit.faction === Faction.ENEMY);
-      return true;
-    });
+    if (!this.system || !pool.hasActiveProjectiles()) return;
+    this.bulletHitCallback = onHit;
+    pool.consumeHits(this.bulletHitTest);
+    this.bulletHitCallback = null;
   }
+
+  /** consumeHits 的判定函数（预先绑定，避免每帧创建闭包） */
+  private readonly bulletHitTest = (position: THREE.Vector3, damage: number): boolean => {
+    const unit = this.system?.hitTest(position, 1);
+    if (!unit || unit.faction === Faction.FRIENDLY) return false;
+    this.hitPoint.copy(position);
+    unit.applyDamage(damage, 'cannon', this.hitPoint);
+    this.bulletHitCallback?.(this.hitPoint, unit.faction === Faction.ENEMY);
+    return true;
+  };
 
   /** 玩家锁定导弹：对敌方单位的瞄准点做命中判定 */
   public applyPlayerMissileHits(
@@ -370,13 +377,18 @@ export class UnitController {
       targets.push(this.getAimObject(mesh));
     }
     if (targets.length === 0) return;
-    missileSystem.checkCollisions(targets, (target, impact) => {
-      const unit = system.findByMesh(target);
-      if (!unit) return;
-      unit.applyDamage(damage, 'missile', impact);
-      onHit(impact);
-    });
+    this.missileHitDamage = damage;
+    this.missileHitCallback = onHit;
+    missileSystem.checkCollisions(targets, this.missileHitHandler);
+    this.missileHitCallback = null;
   }
+
+  private readonly missileHitHandler = (target: THREE.Object3D, impact: THREE.Vector3): void => {
+    const unit = this.system?.findByMesh(target);
+    if (!unit) return;
+    unit.applyDamage(this.missileHitDamage, 'missile', impact);
+    this.missileHitCallback?.(impact);
+  };
 
   /** 锁定候选：敌方单位的瞄准点（雷达站优先） */
   public collectLockTargets(out: THREE.Object3D[]): void {
