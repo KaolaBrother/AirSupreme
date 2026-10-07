@@ -4,6 +4,7 @@
  * 所有函数在导入时不访问 document / window。
  */
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { mulberry32 } from '../worldscape/noise';
 
 export { mulberry32 };
@@ -502,6 +503,120 @@ export function buildHeightGridGeometry(options: HeightGridOptions): THREE.Buffe
   geometry.computeBoundingSphere();
   geometry.computeBoundingBox();
   return geometry;
+}
+
+/* ------------------------------------------------------------------ */
+/* 静态网格合批                                                        */
+/* ------------------------------------------------------------------ */
+
+/**
+ * 把 group 子树中的静态不透明网格按材质合并为少量网格（大幅降低绘制调用）。
+ * 跳过：InstancedMesh、实例化几何、透明材质、多材质网格，以及 userData.dynamic === true 的子树
+ * （例如需要逐帧旋转的雷达天线）。返回合并后减少的网格数。
+ */
+export function mergeStaticMeshes(group: THREE.Group): number {
+  group.updateMatrixWorld(true);
+  const inverse = new THREE.Matrix4().copy(group.matrixWorld).invert();
+  const buckets = new Map<
+    THREE.Material,
+    { geometries: THREE.BufferGeometry[]; cast: boolean; receive: boolean }
+  >();
+  const merged: THREE.Mesh[] = [];
+
+  const visit = (object: THREE.Object3D): void => {
+    if (object.userData.dynamic === true) {
+      return;
+    }
+    for (const child of object.children) {
+      visit(child);
+    }
+    if (!(object instanceof THREE.Mesh) || object instanceof THREE.InstancedMesh) {
+      return;
+    }
+    const material = object.material;
+    if (Array.isArray(material) || material.transparent) {
+      return;
+    }
+    const source = object.geometry as THREE.BufferGeometry;
+    if (source instanceof THREE.InstancedBufferGeometry || !source.getAttribute('position')) {
+      return;
+    }
+    const useColor = (material as THREE.Material & { vertexColors?: boolean }).vertexColors === true;
+    if (useColor && !source.getAttribute('color')) {
+      return;
+    }
+    const geometry = source.index ? source.toNonIndexed() : source.clone();
+    geometry.applyMatrix4(new THREE.Matrix4().multiplyMatrices(inverse, object.matrixWorld));
+    const keep = new Set(['position', 'normal', 'uv', ...(useColor ? ['color'] : [])]);
+    for (const name of Object.keys(geometry.attributes)) {
+      if (!keep.has(name)) {
+        geometry.deleteAttribute(name);
+      }
+    }
+    if (!geometry.getAttribute('normal')) {
+      geometry.computeVertexNormals();
+    }
+    if (!geometry.getAttribute('uv')) {
+      const count = geometry.getAttribute('position').count;
+      geometry.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(count * 2), 2));
+    }
+    geometry.morphAttributes = {};
+    let bucket = buckets.get(material);
+    if (!bucket) {
+      bucket = { geometries: [], cast: false, receive: false };
+      buckets.set(material, bucket);
+    }
+    bucket.geometries.push(geometry);
+    bucket.cast ||= object.castShadow;
+    bucket.receive ||= object.receiveShadow;
+    merged.push(object);
+  };
+  visit(group);
+
+  const removedGeometries = new Set<THREE.BufferGeometry>();
+  const mergedMaterials = new Set<THREE.Material>();
+  let created = 0;
+  for (const [material, bucket] of buckets) {
+    const combined = bucket.geometries.length > 0 ? mergeGeometries(bucket.geometries, false) : null;
+    bucket.geometries.forEach((geometry) => geometry.dispose());
+    if (!combined) {
+      continue;
+    }
+    combined.computeBoundingSphere();
+    const mesh = new THREE.Mesh(combined, material);
+    mesh.name = `${group.name}Merged${created}`;
+    mesh.castShadow = bucket.cast;
+    mesh.receiveShadow = bucket.receive;
+    group.add(mesh);
+    mergedMaterials.add(material);
+    created++;
+  }
+  // 只移除已成功合并的材质对应的原网格
+  for (const object of merged) {
+    const material = object.material as THREE.Material;
+    if (!mergedMaterials.has(material)) continue;
+    object.parent?.remove(object);
+    removedGeometries.add(object.geometry);
+  }
+  // 仍被其余对象引用的几何不释放
+  group.traverse((object) => {
+    const geometry = (object as THREE.Mesh).geometry;
+    if (geometry) removedGeometries.delete(geometry);
+  });
+  removedGeometries.forEach((geometry) => geometry.dispose());
+  // 清理空分组
+  const empties: THREE.Object3D[] = [];
+  group.traverse((object) => {
+    if (object !== group && object.type === 'Group' && object.children.length === 0) {
+      empties.push(object);
+    }
+  });
+  empties.forEach((object) => object.parent?.remove(object));
+  let removed = 0;
+  for (const object of merged) {
+    if (mergedMaterials.has(object.material as THREE.Material)) removed++;
+  }
+  return removed - created;
 }
 
 /* ------------------------------------------------------------------ */

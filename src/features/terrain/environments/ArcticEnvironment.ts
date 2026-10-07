@@ -90,12 +90,12 @@ export class ArcticEnvironment extends EnvironmentBase {
           x: feature.shape.centerX + Math.cos(theta) * r,
           y: this.waterY + 2,
           z: feature.shape.centerZ + Math.sin(theta) * r,
-          count: Math.round((feature.kind === 'shelf' ? 9 : 5) * ctx.detailScale) + 2,
-          life: 26,
-          rise: 0.8,
-          size: 46,
-          growth: 2.6,
-          spread: 120,
+          count: Math.round((feature.kind === 'shelf' ? 6 : 3) * ctx.detailScale) + 2,
+          life: 30,
+          rise: 0.6,
+          size: 70,
+          growth: 2.2,
+          spread: 140,
           color: 0x7c97ad,
           colorJitter: 0.1,
         });
@@ -105,7 +105,7 @@ export class ArcticEnvironment extends EnvironmentBase {
     const mist = createPuffField({
       emitters: mistEmitters,
       wind: { x: Math.cos(ctx.windAngle) * windSpeed, z: Math.sin(ctx.windAngle) * windSpeed },
-      opacity: 0.2,
+      opacity: 0.13,
       name: 'arcticSeaSmoke',
       seed: 72,
     });
@@ -138,9 +138,9 @@ export class ArcticEnvironment extends EnvironmentBase {
         if (edge < -4) return -1;
         return THREE.MathUtils.clamp(0.4 + Math.max(0, edge) * 0.32, 0.4, 40);
       },
-      deepColor: 0x020e18,
-      shallowColor: 0x0f4c5c,
-      skyTint: 0x1d6670,
+      deepColor: 0x0a2433,
+      shallowColor: 0x1f8a96,
+      skyTint: 0x35a89c,
       sunDir: ctx.sunDirection,
       sunColor: 0xbfd8ff,
       sunIntensity: 0.9,
@@ -193,8 +193,8 @@ export class ArcticEnvironment extends EnvironmentBase {
     });
     extruded.rotateX(-Math.PI / 2);
     extruded.translate(shape.centerX, this.waterY - feature.draft, shape.centerZ);
-    const geometry = extruded.toNonIndexed();
-    extruded.dispose();
+    const geometry = extruded.index ? extruded.toNonIndexed() : extruded;
+    if (geometry !== extruded) extruded.dispose();
     this.paintIce(geometry, this.waterY + feature.top);
     return geometry;
   }
@@ -306,8 +306,8 @@ export class ArcticEnvironment extends EnvironmentBase {
         curveSegments: 1,
       });
       extruded.rotateX(-Math.PI / 2);
-      const geometry = extruded.toNonIndexed();
-      extruded.dispose();
+      const geometry = extruded.index ? extruded.toNonIndexed() : extruded;
+      if (geometry !== extruded) extruded.dispose();
       // 先按单位尺寸着色（顶面雪白 / 侧面冰蓝），实例缩放后保持
       const position = geometry.getAttribute('position');
       const normal = geometry.getAttribute('normal');

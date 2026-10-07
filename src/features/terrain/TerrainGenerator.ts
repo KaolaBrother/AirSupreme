@@ -404,7 +404,7 @@ export class TerrainGenerator {
         height: 620,
         centerAngle: -Math.PI / 2,
         span: Math.PI * 1.15,
-        intensity: 0.9,
+        intensity: 0.6,
         segments: GameConfig.isMobile ? 72 : 120,
         seed: 7007,
       });

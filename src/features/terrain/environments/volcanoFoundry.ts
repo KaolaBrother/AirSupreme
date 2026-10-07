@@ -8,7 +8,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { SceneDesignTokens } from '../LevelConfig';
-import { setInstanceTransform, type PuffEmitter } from './envKit';
+import { mergeStaticMeshes, setInstanceTransform, type PuffEmitter } from './envKit';
 import type { GlowCard } from './lavaMaterials';
 import { VOLCANO_MAIN_CONE } from './VolcanoField';
 
@@ -536,6 +536,8 @@ export function buildVolcanoFoundry(ctx: FoundryContext): FoundryBuildResult {
     beaconMaterial.color.copy(Math.sin(elapsed * 3.1) > 0.25 ? beaconOn : beaconOff);
   };
   animate(0);
+  // 静态结构按材质合批：上百个零件 → 十余次绘制
+  mergeStaticMeshes(group);
 
   return { group, smoke, steam, fire, glows, animate };
 }

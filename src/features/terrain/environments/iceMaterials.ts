@@ -69,8 +69,8 @@ export function createIceMaterial(options: IceMaterialOptions): THREE.MeshStanda
         {
           vec3 iceN = normalize(vIceNormal);
           float wall = 1.0 - smoothstep(0.5, 0.8, iceN.y);
-          float bands = 0.5 + 0.5 * sin(vIceWorld.y * 0.85 + envNoise(vIceWorld.xz * 0.04) * 6.0);
-          diffuseColor.rgb *= mix(1.0, 0.8 + 0.2 * bands, wall);
+          float bands = 0.5 + 0.5 * sin(vIceWorld.y * 0.6 + envNoise(vIceWorld.xz * 0.03 + vIceWorld.y * 0.05) * 9.0);
+          diffuseColor.rgb *= mix(1.0, 0.88 + 0.12 * bands, wall);
           float top = smoothstep(0.82, 0.95, iceN.y);
           float sastrugi = envNoise(vec2(vIceWorld.x * 0.012, vIceWorld.z * 0.07));
           diffuseColor.rgb *= mix(1.0, 0.84 + 0.16 * sastrugi, top);
@@ -86,7 +86,7 @@ export function createIceMaterial(options: IceMaterialOptions): THREE.MeshStanda
           float wall = 1.0 - smoothstep(0.5, 0.8, iceN.y);
           float fresnel = pow(1.0 - abs(dot(iceN, iceV)), 3.0);
           float waterline = 1.0 - smoothstep(uIceWaterY, uIceWaterY + 22.0, vIceWorld.y);
-          float bands = 0.5 + 0.5 * sin(vIceWorld.y * 0.85 + envNoise(vIceWorld.xz * 0.04) * 6.0);
+          float bands = 0.5 + 0.5 * sin(vIceWorld.y * 0.6 + envNoise(vIceWorld.xz * 0.03 + vIceWorld.y * 0.05) * 9.0);
           totalEmissiveRadiance += uIceGlow * wall * (0.12 + 0.3 * waterline + 0.08 * bands);
           totalEmissiveRadiance += uIceRim * fresnel * (0.18 + 0.4 * wall);
         }`

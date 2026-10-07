@@ -5,7 +5,7 @@
  */
 import * as THREE from 'three';
 import type { SceneDesignTokens } from '../LevelConfig';
-import { setInstanceTransform } from './envKit';
+import { mergeStaticMeshes, setInstanceTransform } from './envKit';
 import type { GlowCard } from './lavaMaterials';
 import type { ArcticField, IceFeature } from './ArcticField';
 
@@ -130,6 +130,7 @@ export function buildArcticOutposts(
     mast.position.set(radarX, 12, -10);
     base.add(mast);
     const dishPivot = new THREE.Group();
+    dishPivot.userData.dynamic = true;
     dishPivot.position.set(radarX, 25, -10);
     const dish = new THREE.Mesh(dishGeometry, domeMaterial);
     dish.position.z = 1.5;
@@ -224,6 +225,8 @@ export function buildArcticOutposts(
   beaconMesh.count = beacons.length;
   beaconMesh.instanceMatrix.needsUpdate = true;
   group.add(beaconMesh);
+
+  mergeStaticMeshes(group);
 
   const beaconOn = new THREE.Color(0xff2a1a);
   const beaconOff = new THREE.Color(0x2a0604);

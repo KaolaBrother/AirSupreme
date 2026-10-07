@@ -215,10 +215,13 @@ const AURORA_FRAGMENT = /* glsl */ `
     float streak = envNoise(vec2(along * 46.0 - uTime * 0.12, vPhase));
     float curtain = smoothstep(0.0, 0.1, v) * (1.0 - smoothstep(0.42, 1.0, v));
     curtain *= 0.55 + 0.45 * streak;
+    // 沿弧向的明暗起伏与断裂：帘幕成束、而非均匀光墙
+    float bundles = smoothstep(0.25, 0.75, envNoise(vec2(along * 7.0 + vPhase, uTime * 0.05)));
+    curtain *= 0.15 + 0.85 * bundles;
     float ends = smoothstep(0.0, 0.14, along) * (1.0 - smoothstep(0.86, 1.0, along));
     float pulse = 0.82 + 0.18 * sin(uTime * 0.6 + along * 9.0 + vPhase);
-    vec3 col = mix(uLow, uMid, smoothstep(0.08, 0.45, v));
-    col = mix(col, uHigh, smoothstep(0.5, 0.95, v));
+    vec3 col = mix(uLow, uMid, smoothstep(0.3, 0.6, v));
+    col = mix(col, uHigh, smoothstep(0.62, 0.98, v));
     // 底边亮带（极光下缘最亮）
     float hem = exp(-pow((v - 0.07) * 18.0, 2.0));
     float alpha = curtain * ends * rays * pulse * uIntensity;
