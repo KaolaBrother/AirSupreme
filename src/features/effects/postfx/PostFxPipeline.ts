@@ -161,10 +161,22 @@ export class PostFxPipeline {
     composer.addPass(this.bloomPass);
 
     this.gradePass = new ShaderPass(createGradeMaterial());
+    // ShaderPass 默认 needsSwap = true：末尾 Pass 每帧交换读写缓冲后，下一帧场景会画进
+    // 无深度的 writeBuffer（不透明机体深度测试失效、隔帧消失/半透明）。末尾直出画布，无需交换。
+    this.gradePass.needsSwap = false;
     composer.addPass(this.gradePass);
 
     composer.setPixelRatio(pixelRatio);
     composer.setSize(size.x, size.y);
+    this.shrinkUnusedWriteBuffer();
+  }
+
+  /** composer.setSize 会把未使用的 writeBuffer 也放大到全分辨率；缩回 1×1 以节省显存 */
+  private shrinkUnusedWriteBuffer(): void {
+    const { writeBuffer, readBuffer } = this.composer;
+    if (writeBuffer !== readBuffer) {
+      writeBuffer.setSize(1, 1);
+    }
   }
 
   setGrade(grade: Partial<PostFxGrade>): void {
@@ -184,6 +196,7 @@ export class PostFxPipeline {
   setSize(width: number, height: number, pixelRatio: number): void {
     this.composer.setPixelRatio(pixelRatio);
     this.composer.setSize(width, height);
+    this.shrinkUnusedWriteBuffer();
   }
 
   render(deltaTime: number, effects: ScreenEffectsValues): void {
