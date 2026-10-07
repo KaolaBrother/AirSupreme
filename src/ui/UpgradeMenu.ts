@@ -1,8 +1,31 @@
-import { UpgradeType, PlayerUpgrades, UPGRADE_CONFIGS } from '@/features/upgrade/UpgradeSystem';
+import type { SpecialWeaponId } from '@/core/CombatContracts';
+import { getCampaignChapter, getWeaponUnlockLevel } from '@/features/campaign/CampaignData';
+import {
+  UpgradeType,
+  PlayerUpgrades,
+  UPGRADE_CONFIGS,
+  getWeaponIdForUpgrade,
+} from '@/features/upgrade/UpgradeSystem';
+import { getSpecialWeaponStats, type SpecialWeaponStats } from '@/features/weapons/WeaponTypes';
 import { HUD_COLORS, injectHudTokens } from '@/ui/theme/hudTokens';
+
+/** pause：对局中暂停升级（默认）；hangar：章节之间的机库整备 */
+export type UpgradeMenuMode = 'pause' | 'hangar';
+
+export interface UpgradeMenuShowOptions {
+  mode?: UpgradeMenuMode;
+  title?: string;
+  subtitle?: string;
+  /** 点击底部按钮时调用；缺省回退到构造参数 onResume。hangar 模式会先自行隐藏 */
+  onContinue?: () => void;
+}
 
 interface UpgradeCardElements {
   card: HTMLDivElement;
+  dots: HTMLDivElement[];
+  tierLevel: HTMLSpanElement;
+  tierCap: HTMLSpanElement;
+  badge: HTMLSpanElement;
   currentValue: HTMLSpanElement;
   nextValue: HTMLSpanElement;
   gainValue: HTMLSpanElement;
@@ -10,8 +33,15 @@ interface UpgradeCardElements {
   button: HTMLButtonElement;
 }
 
+interface WeaponMetric {
+  label: string;
+  unit: string;
+  value: (stats: SpecialWeaponStats) => number;
+}
+
 /**
- * 升级菜单 - 显示在暂停菜单中
+ * 升级菜单：对局中暂停升级（pause）与章节之间的机库整备（hangar）共用。
+ * 每条升级线显示等级、本章上限（tier x/满级）、锁定的特殊武器及其解锁章节。
  * Military-aviation aesthetic with dark tones and sharp accents
  */
 export class UpgradeMenu {
@@ -21,28 +51,76 @@ export class UpgradeMenu {
   private onResume: () => void;
   private visible: boolean = false;
   private disposed: boolean = false;
+  private mode: UpgradeMenuMode = 'pause';
+  private continueOverride: (() => void) | null = null;
   private upgradeCards: Map<UpgradeType, UpgradeCardElements> = new Map();
   private pointsDisplay: HTMLDivElement | null = null;
+  private footerPoints: HTMLSpanElement | null = null;
+  private kickerDisplay: HTMLDivElement | null = null;
+  private titleDisplay: HTMLDivElement | null = null;
+  private subtitleDisplay: HTMLDivElement | null = null;
+  private hintDisplay: HTMLDivElement | null = null;
+  private resumeButton: HTMLButtonElement | null = null;
 
-  private static readonly UPGRADE_INFO: Record<UpgradeType, { icon: string; label: string }> = {
-    [UpgradeType.MAX_HEALTH]: { icon: 'HP', label: 'HP' },
-    [UpgradeType.SPEED]: { icon: 'SPD', label: 'SPD' },
-    [UpgradeType.FIRE_RATE]: { icon: 'ROE', label: 'ROE' },
-    [UpgradeType.DAMAGE]: { icon: 'DMG', label: 'DMG' },
-    [UpgradeType.MISSILE_LOCK_RADIUS]: { icon: 'RAD', label: 'RAD' },
-    [UpgradeType.MISSILE_RELOAD_TIME]: { icon: 'RLD', label: 'RLD' },
-    [UpgradeType.MISSILE_LOCK_TIME]: { icon: 'LCK', label: 'LCK' },
+  private static readonly PAUSE_TITLE = '⚙️ Upgrades';
+  private static readonly HANGAR_TITLE = '机库整备';
+
+  /** 卡片短代号（航电风格，不用 emoji） */
+  private static readonly UPGRADE_CODES: Record<UpgradeType, string> = {
+    [UpgradeType.MAX_HEALTH]: 'HP',
+    [UpgradeType.SPEED]: 'SPD',
+    [UpgradeType.FIRE_RATE]: 'ROE',
+    [UpgradeType.DAMAGE]: 'DMG',
+    [UpgradeType.MISSILE_LOCK_RADIUS]: 'RAD',
+    [UpgradeType.MISSILE_RELOAD_TIME]: 'RLD',
+    [UpgradeType.MISSILE_LOCK_TIME]: 'LCK',
+    [UpgradeType.ARMOR]: 'ARM',
+    [UpgradeType.FLARES]: 'FLR',
+    [UpgradeType.WEAPON_ROCKETS]: 'RKT',
+    [UpgradeType.WEAPON_LASER]: 'LSR',
+    [UpgradeType.WEAPON_SWARM]: 'SWM',
+    [UpgradeType.WEAPON_RAILGUN]: 'RLG',
+    [UpgradeType.WEAPON_EMP]: 'EMP',
   };
 
-  private static readonly DISPLAY_ORDER: UpgradeType[] = [
-    UpgradeType.MAX_HEALTH,
-    UpgradeType.SPEED,
-    UpgradeType.FIRE_RATE,
-    UpgradeType.DAMAGE,
-    UpgradeType.MISSILE_LOCK_RADIUS,
-    UpgradeType.MISSILE_RELOAD_TIME,
-    UpgradeType.MISSILE_LOCK_TIME,
+  private static readonly SECTIONS: ReadonlyArray<{ title: string; types: UpgradeType[] }> = [
+    {
+      title: '机体',
+      types: [UpgradeType.MAX_HEALTH, UpgradeType.SPEED, UpgradeType.FIRE_RATE, UpgradeType.DAMAGE],
+    },
+    {
+      title: '导弹',
+      types: [
+        UpgradeType.MISSILE_LOCK_RADIUS,
+        UpgradeType.MISSILE_RELOAD_TIME,
+        UpgradeType.MISSILE_LOCK_TIME,
+      ],
+    },
+    { title: '防护', types: [UpgradeType.ARMOR, UpgradeType.FLARES] },
+    {
+      title: '特殊武器',
+      types: [
+        UpgradeType.WEAPON_ROCKETS,
+        UpgradeType.WEAPON_LASER,
+        UpgradeType.WEAPON_SWARM,
+        UpgradeType.WEAPON_RAILGUN,
+        UpgradeType.WEAPON_EMP,
+      ],
+    },
   ];
+
+  private static readonly DISPLAY_ORDER: UpgradeType[] = UpgradeMenu.SECTIONS.flatMap(
+    (section) => section.types
+  );
+
+  /** 特殊武器卡片的代表数值（来自 getSpecialWeaponStats 的 0..5 级曲线） */
+  private static readonly WEAPON_METRICS: Record<SpecialWeaponId, WeaponMetric> = {
+    rockets: { label: '齐射伤害', unit: '', value: (s) => s.projectileCount * s.damage },
+    laser: { label: '每秒伤害', unit: '', value: (s) => s.damage },
+    swarm: { label: '齐射伤害', unit: '', value: (s) => s.projectileCount * s.damage },
+    railgun: { label: '满蓄伤害', unit: '', value: (s) => s.damage },
+    emp: { label: '瘫痪时长', unit: 's', value: (s) => s.stunSeconds },
+  };
 
   constructor(
     upgrades: PlayerUpgrades,
@@ -55,7 +133,12 @@ export class UpgradeMenu {
     this.onResume = onResume;
   }
 
-  public show(): void {
+  /**
+   * 显示菜单。无参数时保持原有的暂停升级行为（标题、返回战斗按钮 → onResume）；
+   * mode 'hangar' 为章节之间的机库整备：默认标题“机库整备”、副标题为即将进入的章节，
+   * 底部按钮“出击”先隐藏菜单再调用 onContinue（缺省 onResume）。
+   */
+  public show(options?: UpgradeMenuShowOptions): void {
     if (this.disposed) {
       return;
     }
@@ -63,6 +146,7 @@ export class UpgradeMenu {
       this.container = this.createContainer();
       document.body.appendChild(this.container);
     }
+    this.applyMode(options ?? {});
     this.updateDisplay();
     this.container.style.display = 'flex';
     this.visible = true;
@@ -82,6 +166,10 @@ export class UpgradeMenu {
     return this.visible;
   }
 
+  public getMode(): UpgradeMenuMode {
+    return this.mode;
+  }
+
   public updateDisplay(): void {
     if (this.disposed || !this.container) return;
 
@@ -90,10 +178,53 @@ export class UpgradeMenu {
       this.pointsDisplay.textContent = `⭐ 可用升级点: ${points}`;
       this.pointsDisplay.classList.toggle('has-points', points > 0);
     }
+    if (this.footerPoints) {
+      this.footerPoints.textContent = `⭐ ${points} 点可用`;
+    }
 
     UpgradeMenu.DISPLAY_ORDER.forEach((type) => {
       this.updateUpgradeCard(type);
     });
+  }
+
+  private applyMode(options: UpgradeMenuShowOptions): void {
+    const hangar = options.mode === 'hangar';
+    this.mode = hangar ? 'hangar' : 'pause';
+    this.continueOverride = options.onContinue ?? null;
+
+    const subtitle = options.subtitle ?? (hangar ? this.getDefaultHangarSubtitle() : '');
+    if (this.titleDisplay) {
+      this.titleDisplay.textContent =
+        options.title ?? (hangar ? UpgradeMenu.HANGAR_TITLE : UpgradeMenu.PAUSE_TITLE);
+    }
+    if (this.subtitleDisplay) {
+      this.subtitleDisplay.textContent = subtitle;
+      this.subtitleDisplay.style.display = subtitle ? '' : 'none';
+    }
+    if (this.kickerDisplay) {
+      this.kickerDisplay.style.display = hangar ? '' : 'none';
+    }
+    if (this.hintDisplay) {
+      this.hintDisplay.style.display = hangar ? '' : 'none';
+    }
+    if (this.resumeButton) {
+      this.resumeButton.textContent = hangar ? '出击' : '▶ 返回战斗';
+      this.resumeButton.classList.toggle('hangar', hangar);
+    }
+    this.container?.classList.toggle('mode-hangar', hangar);
+  }
+
+  private getDefaultHangarSubtitle(): string {
+    const chapter = getCampaignChapter(this.upgrades.getCampaignLevel());
+    return `下一站：${chapter.chapterLabel} · ${chapter.title}`;
+  }
+
+  private handleContinue(): void {
+    const callback = this.continueOverride ?? this.onResume;
+    if (this.mode === 'hangar') {
+      this.hide();
+    }
+    callback();
   }
 
   private createContainer(): HTMLDivElement {
@@ -112,13 +243,17 @@ export class UpgradeMenu {
         display: flex;
         flex-direction: column;
         align-items: center;
-        padding: 20px;
+        padding: 0 20px;
         z-index: 999;
         font-family: var(--hud-font, 'Arial', sans-serif);
         color: var(--hud-text, ${HUD_COLORS.text});
         box-sizing: border-box;
         overflow-y: auto;
         -webkit-overflow-scrolling: touch;
+      }
+
+      #upgrade-menu.mode-hangar {
+        background: radial-gradient(ellipse at top, rgba(20, 38, 58, 0.98), rgba(6, 10, 18, 0.99) 70%);
       }
 
       #upgrade-menu::-webkit-scrollbar {
@@ -141,8 +276,17 @@ export class UpgradeMenu {
 
       .upgrade-header {
         text-align: center;
-        margin-bottom: 24px;
+        padding: 20px 0 6px;
+        margin-bottom: 10px;
         flex-shrink: 0;
+      }
+
+      .upgrade-kicker {
+        font-family: var(--hud-mono, 'Consolas', monospace);
+        font-size: 12px;
+        letter-spacing: 0.32em;
+        color: var(--hud-sys, ${HUD_COLORS.sys});
+        margin-bottom: 6px;
       }
 
       .upgrade-title {
@@ -154,7 +298,14 @@ export class UpgradeMenu {
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
         background-clip: text;
-        margin-bottom: 12px;
+        margin-bottom: 8px;
+      }
+
+      .upgrade-subtitle {
+        font-size: 16px;
+        letter-spacing: 0.08em;
+        color: var(--hud-muted, ${HUD_COLORS.muted});
+        margin-bottom: 10px;
       }
 
       .upgrade-points {
@@ -166,6 +317,12 @@ export class UpgradeMenu {
 
       .upgrade-points.has-points {
         animation: upgrade-points-pulse 2s ease-in-out infinite;
+      }
+
+      .upgrade-hint {
+        margin-top: 6px;
+        font-size: 13px;
+        color: var(--hud-muted, ${HUD_COLORS.muted});
       }
 
       @keyframes upgrade-points-pulse {
@@ -182,10 +339,17 @@ export class UpgradeMenu {
       .upgrade-grid {
         display: grid;
         grid-template-columns: repeat(2, 1fr);
-        gap: 16px;
+        gap: 14px 16px;
         max-width: 760px;
         width: 100%;
-        margin-bottom: 24px;
+        margin-bottom: 16px;
+      }
+
+      @media (min-width: 1100px) {
+        .upgrade-grid {
+          grid-template-columns: repeat(3, 1fr);
+          max-width: 1120px;
+        }
       }
 
       @media (max-width: 600px) {
@@ -204,11 +368,30 @@ export class UpgradeMenu {
         }
       }
 
+      .upgrade-section-title {
+        grid-column: 1 / -1;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-top: 6px;
+        font-size: 13px;
+        font-weight: 700;
+        letter-spacing: 0.3em;
+        color: var(--hud-sys, ${HUD_COLORS.sys});
+      }
+
+      .upgrade-section-title::after {
+        content: '';
+        flex: 1;
+        height: 1px;
+        background: var(--hud-edge, ${HUD_COLORS.edge});
+      }
+
       .upgrade-card {
         background: linear-gradient(145deg, rgba(30, 40, 55, 0.9), rgba(20, 25, 35, 0.95));
         border: 2px solid rgba(100, 120, 140, 0.3);
         border-radius: 12px;
-        padding: 14px;
+        padding: 12px 14px;
         transition: all 0.25s ease;
         position: relative;
         overflow: hidden;
@@ -242,11 +425,21 @@ export class UpgradeMenu {
         background: linear-gradient(90deg, transparent, #ffd700, transparent);
       }
 
+      .upgrade-card.capped {
+        border-color: rgba(143, 228, 255, 0.4);
+        border-style: dashed;
+      }
+
+      .upgrade-card.weapon-locked {
+        opacity: 0.58;
+        filter: grayscale(0.5);
+      }
+
       .card-header {
         display: flex;
         align-items: center;
         gap: 10px;
-        margin-bottom: 10px;
+        margin-bottom: 8px;
       }
 
       .card-icon {
@@ -264,11 +457,30 @@ export class UpgradeMenu {
         letter-spacing: 0.08em;
         color: var(--hud-text, ${HUD_COLORS.text});
         flex: 1;
+        min-width: 0;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .card-badge {
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.1em;
+        padding: 2px 6px;
+        border-radius: 4px;
+        color: #1a1a2e;
+        background: var(--hud-ally, ${HUD_COLORS.ally});
       }
 
       .level-dots {
         display: flex;
         gap: 5px;
+        flex-shrink: 0;
+      }
+
+      .level-dots.dense {
+        gap: 3px;
       }
 
       .level-dot {
@@ -277,7 +489,13 @@ export class UpgradeMenu {
         border-radius: 50%;
         background: rgba(100, 120, 140, 0.3);
         border: 1px solid rgba(100, 120, 140, 0.5);
+        box-sizing: border-box;
         transition: all 0.25s ease;
+      }
+
+      .level-dots.dense .level-dot {
+        width: 8px;
+        height: 8px;
       }
 
       .level-dot.filled {
@@ -286,19 +504,59 @@ export class UpgradeMenu {
         box-shadow: 0 0 6px rgba(0, 255, 136, 0.5);
       }
 
+      .level-dot.over-cap {
+        background: transparent;
+        border: 1px dashed rgba(143, 228, 255, 0.3);
+      }
+
       .card-desc {
         font-size: 13px;
         color: #9db0c2;
-        margin-bottom: 10px;
-        min-height: 20px;
+        margin-bottom: 8px;
+        min-height: 18px;
+      }
+
+      .card-tier {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        gap: 8px;
+        font-size: 12px;
+        margin-bottom: 8px;
+        padding: 4px 8px;
+        border-radius: 6px;
+        background: rgba(143, 228, 255, 0.06);
+      }
+
+      .tier-level {
+        font-family: var(--hud-mono, 'Consolas', monospace);
+        font-weight: 700;
+        color: var(--hud-sys, ${HUD_COLORS.sys});
+        white-space: nowrap;
+      }
+
+      .tier-cap {
+        color: var(--hud-muted, ${HUD_COLORS.muted});
+        text-align: right;
+      }
+
+      .upgrade-card.capped .tier-cap,
+      .upgrade-card.weapon-locked .tier-cap {
+        color: var(--hud-ally, ${HUD_COLORS.ally});
       }
 
       .card-stats {
         display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 8px 10px;
-        margin-bottom: 12px;
+        grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
+        gap: 6px 10px;
+        margin-bottom: 10px;
         padding: 0 2px;
+      }
+
+      @media (max-width: 360px) {
+        .card-stats {
+          grid-template-columns: 1fr 1fr;
+        }
       }
 
       .stat-item {
@@ -381,9 +639,26 @@ export class UpgradeMenu {
       }
 
       .resume-container {
-        margin-top: 8px;
+        position: sticky;
+        bottom: 0;
+        z-index: 2;
+        align-self: stretch;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 10px 22px;
+        margin: auto -20px 0;
+        padding: 18px 20px 18px;
         flex-shrink: 0;
-        padding-bottom: 20px;
+        background: linear-gradient(rgba(8, 14, 24, 0), rgba(8, 14, 24, 0.95) 35%);
+      }
+
+      .footer-points {
+        font-size: 15px;
+        font-weight: 600;
+        color: #ffd700;
+        white-space: nowrap;
       }
 
       .resume-btn {
@@ -409,6 +684,18 @@ export class UpgradeMenu {
         box-shadow: inset 0 3px 10px rgba(0, 0, 0, 0.45);
       }
 
+      .resume-btn.hangar {
+        min-width: 220px;
+        letter-spacing: 0.4em;
+        border-color: var(--hud-sys, ${HUD_COLORS.sys});
+        box-shadow: 0 0 18px rgba(143, 228, 255, 0.25), var(--hud-shadow, ${HUD_COLORS.shadow});
+      }
+
+      .resume-btn.hangar::after {
+        content: ' ▶';
+        letter-spacing: 0;
+      }
+
       @media (max-width: 600px) {
         .upgrade-card {
           padding: 12px;
@@ -423,15 +710,6 @@ export class UpgradeMenu {
           min-height: 16px;
         }
 
-        .card-stats {
-          grid-template-columns: 1fr;
-          gap: 6px;
-        }
-
-        .upgrade-cost {
-          text-align: left;
-        }
-
         .upgrade-btn {
           padding: 12px 10px;
           font-size: 14px;
@@ -444,25 +722,49 @@ export class UpgradeMenu {
     const header = document.createElement('div');
     header.className = 'upgrade-header';
 
-    const title = document.createElement('div');
-    title.className = 'upgrade-title';
-    title.textContent = '⚙️ Upgrades';
+    this.kickerDisplay = document.createElement('div');
+    this.kickerDisplay.className = 'upgrade-kicker';
+    this.kickerDisplay.textContent = 'HANGAR · 出击准备';
+    this.kickerDisplay.style.display = 'none';
+
+    this.titleDisplay = document.createElement('div');
+    this.titleDisplay.className = 'upgrade-title';
+    this.titleDisplay.textContent = UpgradeMenu.PAUSE_TITLE;
+
+    this.subtitleDisplay = document.createElement('div');
+    this.subtitleDisplay.className = 'upgrade-subtitle';
+    this.subtitleDisplay.style.display = 'none';
 
     this.pointsDisplay = document.createElement('div');
     this.pointsDisplay.className = 'upgrade-points';
     this.pointsDisplay.textContent = `⭐ 可用升级点: ${this.upgrades.getAvailablePoints()}`;
 
-    header.appendChild(title);
+    this.hintDisplay = document.createElement('div');
+    this.hintDisplay.className = 'upgrade-hint';
+    this.hintDisplay.textContent = '强化上限随章节推进逐步开放，未用完的升级点会保留';
+    this.hintDisplay.style.display = 'none';
+
+    header.appendChild(this.kickerDisplay);
+    header.appendChild(this.titleDisplay);
+    header.appendChild(this.subtitleDisplay);
     header.appendChild(this.pointsDisplay);
+    header.appendChild(this.hintDisplay);
     container.appendChild(header);
 
     const grid = document.createElement('div');
     grid.className = 'upgrade-grid';
 
-    UpgradeMenu.DISPLAY_ORDER.forEach((type) => {
-      const card = this.createUpgradeCard(type);
-      this.upgradeCards.set(type, card);
-      grid.appendChild(card.card);
+    UpgradeMenu.SECTIONS.forEach((section) => {
+      const sectionTitle = document.createElement('div');
+      sectionTitle.className = 'upgrade-section-title';
+      sectionTitle.textContent = section.title;
+      grid.appendChild(sectionTitle);
+
+      section.types.forEach((type) => {
+        const card = this.createUpgradeCard(type);
+        this.upgradeCards.set(type, card);
+        grid.appendChild(card.card);
+      });
     });
 
     container.appendChild(grid);
@@ -470,10 +772,16 @@ export class UpgradeMenu {
     const resumeContainer = document.createElement('div');
     resumeContainer.className = 'resume-container';
 
+    // 卡片较多时页头会滚出视野，底栏常驻显示剩余升级点
+    this.footerPoints = document.createElement('span');
+    this.footerPoints.className = 'footer-points';
+    resumeContainer.appendChild(this.footerPoints);
+
     const resumeBtn = document.createElement('button');
     resumeBtn.className = 'resume-btn';
     resumeBtn.textContent = '▶ 返回战斗';
-    resumeBtn.onclick = () => this.onResume();
+    resumeBtn.onclick = () => this.handleContinue();
+    this.resumeButton = resumeBtn;
 
     resumeContainer.appendChild(resumeBtn);
     container.appendChild(resumeContainer);
@@ -485,47 +793,66 @@ export class UpgradeMenu {
     const card = document.createElement('div');
     card.className = 'upgrade-card';
     card.id = `upgrade-card-${type}`;
+    card.dataset.category = UPGRADE_CONFIGS[type].category;
 
-    const info = UpgradeMenu.UPGRADE_INFO[type];
     const config = UPGRADE_CONFIGS[type];
     const level = this.upgrades.getLevel(type);
+    const weaponId = getWeaponIdForUpgrade(type);
 
     const header = document.createElement('div');
     header.className = 'card-header';
 
     const icon = document.createElement('span');
     icon.className = 'card-icon';
-    icon.textContent = info.icon;
+    icon.textContent = UpgradeMenu.UPGRADE_CODES[type];
 
     const name = document.createElement('span');
     name.className = 'card-name';
-    name.textContent = info.label;
+    name.textContent = config.name;
 
-    const dots = document.createElement('div');
-    dots.className = 'level-dots';
+    const badge = document.createElement('span');
+    badge.className = 'card-badge';
+    badge.textContent = '新解锁';
+    badge.style.display = 'none';
+
+    const dotsContainer = document.createElement('div');
+    dotsContainer.className = config.maxLevel > 5 ? 'level-dots dense' : 'level-dots';
+    const dots: HTMLDivElement[] = [];
     for (let i = 0; i < config.maxLevel; i++) {
       const dot = document.createElement('div');
       dot.className = 'level-dot';
       if (i < level) {
         dot.classList.add('filled');
       }
-      dots.appendChild(dot);
+      dots.push(dot);
+      dotsContainer.appendChild(dot);
     }
 
     header.appendChild(icon);
     header.appendChild(name);
-    header.appendChild(dots);
+    header.appendChild(badge);
+    header.appendChild(dotsContainer);
 
     const description = document.createElement('div');
     description.className = 'card-desc';
     description.textContent = config.description;
 
+    const tier = document.createElement('div');
+    tier.className = 'card-tier';
+    const tierLevel = document.createElement('span');
+    tierLevel.className = 'tier-level';
+    const tierCap = document.createElement('span');
+    tierCap.className = 'tier-cap';
+    tier.appendChild(tierLevel);
+    tier.appendChild(tierCap);
+
     const stats = document.createElement('div');
     stats.className = 'card-stats';
 
-    const currentStat = this.createStatItem('当前', 'current');
+    const metric = weaponId ? UpgradeMenu.WEAPON_METRICS[weaponId] : null;
+    const currentStat = this.createStatItem(metric ? metric.label : '当前', 'current');
     const nextStat = this.createStatItem('下一级', 'next');
-    const gainStat = this.createStatItem('每级收益', 'gain');
+    const gainStat = this.createStatItem(metric ? '本级提升' : '每级收益', 'gain');
 
     const costDisplay = document.createElement('div');
     costDisplay.className = 'upgrade-cost';
@@ -546,11 +873,16 @@ export class UpgradeMenu {
 
     card.appendChild(header);
     card.appendChild(description);
+    card.appendChild(tier);
     card.appendChild(stats);
     card.appendChild(action);
 
     return {
       card,
+      dots,
+      tierLevel,
+      tierCap,
+      badge,
       currentValue: currentStat.value,
       nextValue: nextStat.value,
       gainValue: gainStat.value,
@@ -585,29 +917,49 @@ export class UpgradeMenu {
 
     const config = UPGRADE_CONFIGS[type];
     const level = this.upgrades.getLevel(type);
+    const cap = this.upgrades.getCap(type);
+    const isLocked = this.upgrades.isLocked(type);
     const canUpgrade = this.upgrades.canUpgrade(type);
     const isMaxed = level >= config.maxLevel;
+    const isCapped = !isMaxed && !isLocked && level >= cap;
+    const weaponId = getWeaponIdForUpgrade(type);
+    const unlockLevel = weaponId ? getWeaponUnlockLevel(weaponId) : null;
+    const unlockLabel =
+      unlockLevel === null ? '暂未' : getCampaignChapter(unlockLevel).chapterLabel;
+    const nextRaiseLevel = this.upgrades.getNextCapRaiseLevel(type);
 
-    elements.card.classList.remove('upgradeable', 'maxed');
+    elements.card.classList.remove('upgradeable', 'maxed', 'capped', 'weapon-locked');
     if (isMaxed) {
       elements.card.classList.add('maxed');
+    } else if (isLocked) {
+      elements.card.classList.add('weapon-locked');
     } else if (canUpgrade) {
       elements.card.classList.add('upgradeable');
+    } else if (isCapped) {
+      elements.card.classList.add('capped');
     }
 
-    const dots = elements.card.querySelectorAll('.level-dot');
-    dots.forEach((dot, i) => {
+    const isFresh =
+      !isLocked && unlockLevel !== null && unlockLevel === this.upgrades.getCampaignLevel();
+    elements.badge.style.display = isFresh ? '' : 'none';
+
+    const openTiers = isLocked ? 0 : cap;
+    elements.dots.forEach((dot, i) => {
       dot.classList.toggle('filled', i < level);
+      dot.classList.toggle('over-cap', i >= level && i >= openTiers);
     });
 
-    const currentValue = this.upgrades.getValue(type);
-    const nextValue = isMaxed ? currentValue : currentValue + config.valuePerLevel;
+    elements.tierLevel.textContent = `Lv ${level}/${config.maxLevel}`;
+    if (isLocked) {
+      elements.tierCap.textContent = `${unlockLabel}解锁`;
+    } else if (isMaxed) {
+      elements.tierCap.textContent = '已满级';
+    } else {
+      const raise = nextRaiseLevel === null ? '' : ` · 第${nextRaiseLevel}关提升`;
+      elements.tierCap.textContent = `本章上限 ${cap}/${config.maxLevel}${raise}`;
+    }
 
-    elements.currentValue.textContent = this.formatValue(currentValue, config.unit);
-    elements.nextValue.textContent = isMaxed
-      ? 'MAX'
-      : this.formatValue(nextValue, config.unit);
-    elements.gainValue.textContent = this.formatDelta(config.valuePerLevel, config.unit, isMaxed);
+    this.updateCardValues(type, elements, level, isMaxed);
 
     if (!isMaxed) {
       const cost = this.upgrades.getUpgradeCost(type);
@@ -617,7 +969,7 @@ export class UpgradeMenu {
     }
 
     elements.button.classList.remove('available', 'locked', 'maxed');
-    elements.button.onclick = null as unknown as () => void;
+    elements.button.onclick = null;
 
     if (isMaxed) {
       elements.button.classList.add('maxed');
@@ -637,7 +989,42 @@ export class UpgradeMenu {
     }
 
     elements.button.classList.add('locked');
-    elements.button.textContent = `升级点不足 (${this.upgrades.getUpgradeCost(type)}点)`;
+    if (isLocked) {
+      elements.button.textContent = `${unlockLabel}解锁`;
+    } else if (isCapped) {
+      elements.button.textContent =
+        nextRaiseLevel === null ? '已达本章上限' : `已达本章上限 · 第${nextRaiseLevel}关开放`;
+    } else {
+      elements.button.textContent = `升级点不足 (${this.upgrades.getUpgradeCost(type)}点)`;
+    }
+  }
+
+  /** 当前 / 下一级 / 收益：普通升级线取线性数值，特殊武器取代表性能数值 */
+  private updateCardValues(
+    type: UpgradeType,
+    elements: UpgradeCardElements,
+    level: number,
+    isMaxed: boolean
+  ): void {
+    const config = UPGRADE_CONFIGS[type];
+    const weaponId = getWeaponIdForUpgrade(type);
+
+    if (weaponId) {
+      const metric = UpgradeMenu.WEAPON_METRICS[weaponId];
+      const current = metric.value(getSpecialWeaponStats(weaponId, level));
+      const next = metric.value(getSpecialWeaponStats(weaponId, level + 1));
+      elements.currentValue.textContent = this.formatValue(current, metric.unit);
+      elements.nextValue.textContent = isMaxed ? 'MAX' : this.formatValue(next, metric.unit);
+      elements.gainValue.textContent = this.formatDelta(next - current, metric.unit, isMaxed);
+      return;
+    }
+
+    const currentValue = this.upgrades.getValue(type);
+    const nextValue = isMaxed ? currentValue : currentValue + config.valuePerLevel;
+
+    elements.currentValue.textContent = this.formatValue(currentValue, config.unit);
+    elements.nextValue.textContent = isMaxed ? 'MAX' : this.formatValue(nextValue, config.unit);
+    elements.gainValue.textContent = this.formatDelta(config.valuePerLevel, config.unit, isMaxed);
   }
 
   private getUpgradeButtonLabel(cost: number): string {
@@ -669,5 +1056,12 @@ export class UpgradeMenu {
     this.container = null;
     this.upgradeCards.clear();
     this.pointsDisplay = null;
+    this.footerPoints = null;
+    this.kickerDisplay = null;
+    this.titleDisplay = null;
+    this.subtitleDisplay = null;
+    this.hintDisplay = null;
+    this.resumeButton = null;
+    this.continueOverride = null;
   }
 }
