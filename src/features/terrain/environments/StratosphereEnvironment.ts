@@ -11,7 +11,7 @@
 import * as THREE from 'three';
 import { TerrainType } from '../LevelConfig';
 import { Noise2D, smoothstep } from '../worldscape/noise';
-import type { TerrainEnvironmentContext } from './TerrainEnvironment';
+import type { TerrainEnvironmentContext, TerrainSurfaceKind } from './TerrainEnvironment';
 import { EnvironmentBase } from './EnvironmentBase';
 import { buildHeightGridGeometry, setInstanceTransform } from './envKit';
 
@@ -119,5 +119,9 @@ export class StratosphereEnvironment extends EnvironmentBase {
 
   isWater(): boolean {
     return false;
+  }
+
+  surfaceKindAt(worldX: number, worldZ: number): TerrainSurfaceKind {
+    return Math.hypot(worldX - TETHER_X, worldZ - TETHER_Z) <= TETHER_RADIUS + 2 ? 'rock' : 'cloud';
   }
 }

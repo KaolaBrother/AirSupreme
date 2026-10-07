@@ -39,8 +39,10 @@ import { injectWindSway } from './worldscape/shadermods';
 import { CloudField } from './worldscape/clouds';
 import {
   createTerrainEnvironment,
+  environmentSurfaceKind,
   sampleEnvironmentSurface,
   type TerrainEnvironment,
+  type TerrainSurfaceKind,
   type TerrainSurfaceSample,
 } from './environments';
 import { createAuroraBand, createEmberField } from './environments/weatherLayers';
@@ -4679,6 +4681,31 @@ export class TerrainGenerator {
       }
       default:
         return { y: WORLDSCAPE_WATER_Y, water: false };
+    }
+  }
+
+  /**
+   * 地表材质（命中特效 / 音效选型）：'water' 或 SurfaceImpactType 之一。
+   * 第 1-5 关：LAKE/OCEAN 按 sampleSurface 区分水面与 'ground'，DESERT 'desert'、
+   * MOUNTAINS 'snow'、CITY 'city'；第 6-10 关委托环境模块（熔岩 'lava'、冰面 'ice'、
+   * 岩石 'rock'、云海 'cloud'）。
+   */
+  public getSurfaceKind(worldX: number, worldZ: number): TerrainSurfaceKind {
+    if (this.environment) {
+      return environmentSurfaceKind(this.environment, worldX, worldZ);
+    }
+    switch (this.activeTerrain) {
+      case TerrainType.DESERT:
+        return 'desert';
+      case TerrainType.MOUNTAINS:
+        return 'snow';
+      case TerrainType.CITY:
+        return 'city';
+      case TerrainType.LAKE:
+      case TerrainType.OCEAN:
+        return this.sampleSurface(worldX, worldZ).water ? 'water' : 'ground';
+      default:
+        return 'ground';
     }
   }
 

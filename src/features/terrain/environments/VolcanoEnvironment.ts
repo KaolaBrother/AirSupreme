@@ -14,7 +14,7 @@ import * as THREE from 'three';
 import { TerrainType } from '../LevelConfig';
 import { smoothstep } from '../worldscape/noise';
 import { buildWorldscapeWater, type WorldscapeWater } from '../worldscape/water';
-import type { TerrainEnvironmentContext } from './TerrainEnvironment';
+import type { TerrainEnvironmentContext, TerrainSurfaceKind } from './TerrainEnvironment';
 import { EnvironmentBase } from './EnvironmentBase';
 import {
   buildHeightGridGeometry,
@@ -66,6 +66,17 @@ export class VolcanoEnvironment extends EnvironmentBase {
       return false;
     }
     return this.field.groundHeight(worldX, worldZ) < -SAILABLE_DEPTH;
+  }
+
+  /** 熔岩（河 / 湖 / 火山口）→ 'lava'；低于水位（含浅滩）→ 'water'；其余玄武岩 → 'rock' */
+  surfaceKindAt(worldX: number, worldZ: number): TerrainSurfaceKind {
+    if (!Number.isFinite(worldX) || !Number.isFinite(worldZ)) {
+      return 'rock';
+    }
+    if (this.field.lavaSurface(worldX, worldZ) !== null) {
+      return 'lava';
+    }
+    return this.field.groundHeight(worldX, worldZ) < 0 ? 'water' : 'rock';
   }
 
   override dispose(): void {

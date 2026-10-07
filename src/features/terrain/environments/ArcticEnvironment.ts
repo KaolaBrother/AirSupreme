@@ -16,7 +16,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import { TerrainType } from '../LevelConfig';
 import { smoothstep } from '../worldscape/noise';
 import { buildWorldscapeWater, sampleWaveHeight, type WorldscapeWater } from '../worldscape/water';
-import type { TerrainEnvironmentContext } from './TerrainEnvironment';
+import type { TerrainEnvironmentContext, TerrainSurfaceKind } from './TerrainEnvironment';
 import { EnvironmentBase } from './EnvironmentBase';
 import {
   createPuffField,
@@ -56,6 +56,10 @@ export class ArcticEnvironment extends EnvironmentBase {
       return false;
     }
     return this.field.isOpenWater(worldX, worldZ);
+  }
+
+  surfaceKindAt(worldX: number, worldZ: number): TerrainSurfaceKind {
+    return this.isWater(worldX, worldZ) ? 'water' : 'ice';
   }
 
   override dispose(): void {

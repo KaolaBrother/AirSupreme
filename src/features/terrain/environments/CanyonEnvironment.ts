@@ -11,7 +11,7 @@
 import * as THREE from 'three';
 import { TerrainType } from '../LevelConfig';
 import { Noise2D, smoothstep } from '../worldscape/noise';
-import type { TerrainEnvironmentContext } from './TerrainEnvironment';
+import type { TerrainEnvironmentContext, TerrainSurfaceKind } from './TerrainEnvironment';
 import { EnvironmentBase } from './EnvironmentBase';
 import { buildHeightGridGeometry } from './envKit';
 
@@ -110,5 +110,9 @@ export class CanyonEnvironment extends EnvironmentBase {
 
   isWater(): boolean {
     return false;
+  }
+
+  surfaceKindAt(): TerrainSurfaceKind {
+    return 'rock';
   }
 }

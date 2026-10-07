@@ -36,6 +36,7 @@ export type {
   TerrainEnvironment,
   TerrainEnvironmentContext,
   TerrainEnvironmentFactory,
+  TerrainSurfaceKind,
   TerrainSurfaceSample,
 } from './TerrainEnvironment';
-export { sampleEnvironmentSurface } from './TerrainEnvironment';
+export { environmentSurfaceKind, sampleEnvironmentSurface } from './TerrainEnvironment';

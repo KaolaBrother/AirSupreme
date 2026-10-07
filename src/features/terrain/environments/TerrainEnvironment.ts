@@ -27,6 +27,21 @@ export interface TerrainSurfaceSample {
   water: boolean;
 }
 
+/**
+ * 地表材质（命中特效 / 音效选型用）：与 ParticleSystem 的 SurfaceImpactType
+ * （'ground' | 'desert' | 'snow' | 'city' | 'lava' | 'ice' | 'rock' | 'cloud'）一致，另加 'water'。
+ */
+export type TerrainSurfaceKind =
+  | 'water'
+  | 'ground'
+  | 'desert'
+  | 'snow'
+  | 'city'
+  | 'lava'
+  | 'ice'
+  | 'rock'
+  | 'cloud';
+
 /** build() 时由 TerrainGenerator 注入的关卡上下文 */
 export interface TerrainEnvironmentContext {
   readonly config: LevelConfig;
@@ -58,6 +73,8 @@ export interface TerrainEnvironment {
   sampleHeight(worldX: number, worldZ: number): number;
   /** (x, z) 处是否为船只可航行的开阔水面 */
   isWater(worldX: number, worldZ: number): boolean;
+  /** (x, z) 处地表材质（可选；缺省时水面为 'water'，其余为 'rock'） */
+  surfaceKindAt?(worldX: number, worldZ: number): TerrainSurfaceKind;
   /** 每帧动画（可选）：elapsed 为关卡累计时间，focus 为玩家最近位置 */
   update?(deltaTime: number, elapsed: number, focus: THREE.Vector3): void;
   /** 移除 root 并释放全部 GPU 资源 */
@@ -88,4 +105,19 @@ export function sampleEnvironmentSurface(
   const ground = environment.sampleHeight(worldX, worldZ);
   const y = Number.isFinite(ground) ? ground : waterY;
   return { y: environment.hasWater ? Math.max(y, waterY) : y, water: false };
+}
+
+/** 环境地表材质：优先环境自身的 surfaceKindAt，否则按可航行水面 / 岩石区分 */
+export function environmentSurfaceKind(
+  environment: TerrainEnvironment,
+  worldX: number,
+  worldZ: number
+): TerrainSurfaceKind {
+  if (!Number.isFinite(worldX) || !Number.isFinite(worldZ)) {
+    return 'ground';
+  }
+  if (environment.surfaceKindAt) {
+    return environment.surfaceKindAt(worldX, worldZ);
+  }
+  return environment.hasWater && environment.isWater(worldX, worldZ) ? 'water' : 'rock';
 }
