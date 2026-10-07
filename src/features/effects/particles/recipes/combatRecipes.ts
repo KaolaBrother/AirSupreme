@@ -125,16 +125,16 @@ export function emitLayeredExplosion(
   // 1) 白热闪光核心 + 星芒
   fx.emit(ParticleType.EXPLOSION, position, {
     speed: 0,
-    life: 0.13 + 0.04 * s,
-    size: 4.4 * s,
+    life: 0.12 + 0.04 * s,
+    size: 3.6 * s,
     sizeEnd: 0.7,
     color: scratchColor.set(palette.flash),
-    intensity: 6,
+    intensity: 4.5,
   });
   fx.emit(ParticleType.GLOW, position, {
     speed: 0,
     life: 0.09 + 0.02 * s,
-    size: 8 * s,
+    size: 6.5 * s,
     sizeEnd: 1.35,
     color: scratchColor.set(palette.flash),
     cell: VfxCell.FLARE,
