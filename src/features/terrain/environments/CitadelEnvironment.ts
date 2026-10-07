@@ -76,6 +76,8 @@ export class CitadelEnvironment extends EnvironmentBase {
         flatShading: true,
         roughness: 0.42,
         metalness: 0.25,
+        // 熔火映照：抬起黑曜石暗部，避免整片死黑
+        emissive: new THREE.Color(tokens.glow).multiplyScalar(0.08),
       })
     );
     ground.name = 'citadelCraterGround';
@@ -118,13 +120,13 @@ export class CitadelEnvironment extends EnvironmentBase {
     const fissureMaterial = new THREE.MeshBasicMaterial({ color: 0xff5a2a, toneMapped: false });
     const fissures = new THREE.Group();
     fissures.name = 'citadelFissures';
-    for (let i = 0; i < 9; i++) {
-      const angle = (i / 9) * Math.PI * 2 + 0.3;
+    for (let i = 0; i < 14; i++) {
+      const angle = (i / 14) * Math.PI * 2 + 0.3;
       const length = 260 + (i % 3) * 120;
       const midR = 380 + (i % 4) * 140;
       const x = Math.cos(angle) * midR;
       const z = Math.sin(angle) * midR;
-      const strip = new THREE.Mesh(new THREE.BoxGeometry(length, 0.6, 3.5), fissureMaterial);
+      const strip = new THREE.Mesh(new THREE.BoxGeometry(length, 0.6, 6), fissureMaterial);
       strip.position.set(x, this.sampleHeight(x, z) + 0.6, z);
       strip.rotation.y = -angle + Math.PI / 2;
       fissures.add(strip);
