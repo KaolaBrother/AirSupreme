@@ -189,8 +189,8 @@ const ROCKET_PROXIMITY = 3.5;
 /** 蜂群发射间隔（秒） */
 const SWARM_RIPPLE = 0.065;
 const SWARM_LAUNCH_SPEED = 55;
-const SWARM_MAX_SPEED = 150;
-const SWARM_ACCELERATION = 240;
+const SWARM_MAX_SPEED = 170;
+const SWARM_ACCELERATION = 280;
 /** 弹出阶段（秒）：只做侧向弹射与点火，不制导 */
 const SWARM_BOOST_TIME = 0.2;
 const SWARM_CONE_COS = Math.cos(THREE.MathUtils.degToRad(42));

@@ -443,13 +443,13 @@ export class WeaponFx {
       spec.delay = 0;
       spec.life = 0.06;
       const ignition = Math.min(1, age * 8);
-      spec.size0 = (isRocket ? 2.2 : 1.5) * (0.85 + Math.random() * 0.3) * (0.6 + ignition * 0.4);
+      spec.size0 = (isRocket ? 2.2 : 1.0) * (0.85 + Math.random() * 0.3) * (0.6 + ignition * 0.4);
       spec.size1 = spec.size0 * 0.7;
       spec.color.copy(isRocket ? COLORS.rocketExhaust : COLORS.swarmExhaust);
       spec.alpha = 0.95;
       spec.drag = 0;
       spec.gravity = 0;
-      spec.stretch = 0.012;
+      spec.stretch = isRocket ? 0.012 : 0.006;
       spec.fade = 1;
       spec.heat = 0.6;
       this.glow.emit(spec);
@@ -604,6 +604,28 @@ export class WeaponFx {
         smoke.emit(spec);
       }
     } else if (surface === 'water') {
+      // 白色水柱（普通混合，蓝色海面上清晰可见）
+      const column = smoke.scaledCount(9 * s, 4);
+      for (let i = 0; i < column; i++) {
+        spec.position.copy(position);
+        spec.velocity.set(
+          (Math.random() - 0.5) * 5 * s,
+          (10 + Math.random() * 18) * s,
+          (Math.random() - 0.5) * 5 * s
+        );
+        spec.life = 1.1 + Math.random() * 0.6;
+        spec.size0 = 1.6 * s;
+        spec.size1 = (4.5 + Math.random() * 2) * s;
+        spec.color.copy(COLORS.spray);
+        spec.alpha = 0.75;
+        spec.drag = 1.1;
+        spec.gravity = -14;
+        spec.stretch = 0;
+        spec.fade = 1.6;
+        spec.heat = 0;
+        spec.delay = Math.random() * 0.05;
+        smoke.emit(spec);
+      }
       const spray = glow.scaledCount(10 * s, 3);
       for (let i = 0; i < spray; i++) {
         spec.position.copy(position);
@@ -783,8 +805,8 @@ export class WeaponFx {
     surface: FxSurface
   ): void {
     this.tmpB.copy(beamDirection).multiplyScalar(-1);
-    this.emitFlash(position, null, 4.2 + Math.random() * 1.8, 0.05, COLORS.laserCore, 1);
-    this.emitFlash(position, null, 9 + Math.random() * 3, 0.06, COLORS.laser, 0.3);
+    this.emitFlash(position, null, 2.6 + Math.random() * 1.2, 0.05, COLORS.laserCore, 1);
+    this.emitFlash(position, null, 6.5 + Math.random() * 2, 0.06, COLORS.laser, 0.3);
     const sparkRate = surface === 'water' ? 30 : 90;
     const sparks = randomCount(sparkRate * deltaTime);
     if (sparks > 0) {
@@ -1013,22 +1035,25 @@ export class WeaponFx {
     this.tmpA.set(0.35, 1, 0.2).normalize();
     this.spawnRing(center, this.tmpA, 1, radius * 0.82, 0.8, COLORS.empCore, 0.35, 0.035);
 
-    this.emitFlash(center, null, 16, 0.22, COLORS.empCore, 1);
-    this.emitFlash(center, null, 34, 0.35, COLORS.emp, 0.2);
+    // 中心闪光克制一些：玩家就在球心，过大的光团会糊住整个屏幕
+    this.emitFlash(center, null, 6, 0.16, COLORS.empCore, 1);
+    this.emitFlash(center, null, 13, 0.3, COLORS.emp, 0.2);
     const spec = this.spec;
-    const arcs = this.glow.scaledCount(70, 20);
+    const arcs = this.glow.scaledCount(56, 16);
     for (let i = 0; i < arcs; i++) {
-      randomUnit(spec.velocity).multiplyScalar(radius * (0.7 + Math.random() * 0.6));
-      spec.position.copy(center);
+      randomUnit(this.tmpB);
+      // 电火花从 18 米外起跳，沿冲击波向外飞散，不会贴着镜头划过
+      spec.position.copy(center).addScaledVector(this.tmpB, 18 + Math.random() * 10);
+      spec.velocity.copy(this.tmpB).multiplyScalar(radius * (0.7 + Math.random() * 0.6));
       spec.delay = Math.random() * 0.08;
       spec.life = 0.65 + Math.random() * 0.35;
-      spec.size0 = 0.6;
-      spec.size1 = 0.25;
+      spec.size0 = 0.55;
+      spec.size1 = 0.22;
       spec.color.copy(i % 3 === 0 ? COLORS.empCore : COLORS.emp);
       spec.alpha = 1;
       spec.drag = 2.4;
       spec.gravity = 0;
-      spec.stretch = 0.03;
+      spec.stretch = 0.012;
       spec.fade = 0.9;
       spec.heat = 0.35;
       this.glow.emit(spec);
@@ -1044,8 +1069,8 @@ export class WeaponFx {
     spec.velocity.set(0, 0, 0);
     spec.delay = delay;
     spec.life = 0.22;
-    spec.size0 = r * 2.4;
-    spec.size1 = r * 1.6;
+    spec.size0 = r * 1.5;
+    spec.size1 = r * 1.1;
     spec.color.copy(COLORS.emp);
     spec.alpha = 1;
     spec.drag = 0;

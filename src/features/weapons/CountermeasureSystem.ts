@@ -23,7 +23,7 @@ const FLARE_POOL_SIZE = 48;
 const FLARE_BURN_TIME = 3.6;
 /** 未提供载机速度时假定的前飞速度（米/秒，与玩家基础速度一致） */
 const ASSUMED_CARRY_SPEED = 45;
-const FLARE_DRAG = 1.1;
+const FLARE_DRAG = 0.35;
 const FLARE_GRAVITY = 9.8;
 /** 每枚热焰弹的烟迹间距（米） */
 const SMOKE_SPACING = 1.25;
@@ -173,14 +173,16 @@ export class CountermeasureSystem implements IDecoyProvider {
       if (flare.active) continue;
       const side = spawned % 2 === 0 ? 1 : -1;
       const rank = Math.floor(spawned / 2);
-      // 扇形：左右对称，越往外越向侧下方
-      const spread = 0.35 + rank * 0.42 + Math.random() * 0.12;
+      // 扇形：左右对称弹出，第一对略向上，越往后排越向侧下方；
+      // 侧向速度适中，保证追尾视角下约 1 秒内都能看到热焰弹划过
+      const lateral = side * (6 + rank * 3 + Math.random() * 2);
+      const lift = 2 - rank * 3 + Math.random() * 1.5;
+      const back = -(1 + Math.random() * 2);
       this.tmpA
         .copy(this.tmpRight)
-        .multiplyScalar(side * Math.sin(spread))
-        .addScaledVector(this.tmpUp, -0.55 - rank * 0.12)
-        .addScaledVector(this.tmpForward, -0.75)
-        .normalize();
+        .multiplyScalar(lateral)
+        .addScaledVector(this.tmpUp, lift)
+        .addScaledVector(this.tmpForward, back);
 
       flare.active = true;
       flare.age = 0;
@@ -193,10 +195,7 @@ export class CountermeasureSystem implements IDecoyProvider {
         .addScaledVector(this.tmpUp, -0.6)
         .addScaledVector(this.tmpForward, -2.2);
       flare.prevPosition.copy(flare.position);
-      flare.velocity
-        .copy(carry)
-        .multiplyScalar(0.92)
-        .addScaledVector(this.tmpA, 20 + Math.random() * 7);
+      flare.velocity.copy(carry).multiplyScalar(0.97).add(this.tmpA);
       spawned++;
     }
 
@@ -350,12 +349,12 @@ export class CountermeasureSystem implements IDecoyProvider {
     spec.stretch = 0;
     spec.fade = 0.5;
     spec.heat = 1;
-    spec.size0 = (1.5 + flicker * 1.1) * (0.6 + strength * 0.4);
+    spec.size0 = (1.1 + flicker * 0.7) * (0.6 + strength * 0.4);
     spec.size1 = spec.size0;
     spec.color.copy(FLARE_CORE);
     spec.alpha = 0.6 + strength * 0.4;
     glow.emit(spec);
-    spec.size0 = (8 + flicker * 3.5) * strength;
+    spec.size0 = (5.5 + flicker * 2) * strength;
     spec.size1 = spec.size0;
     spec.color.copy(FLARE_HALO);
     spec.alpha = 0.2 * strength;
