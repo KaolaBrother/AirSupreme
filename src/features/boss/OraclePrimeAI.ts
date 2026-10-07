@@ -1784,6 +1784,7 @@ export class OraclePrimeAI implements IAdvancedBoss {
   private updateMinions(dt: number, stunned: boolean): void {
     const tuning = this.tuning();
     if (tuning.minionInterval <= 0 || tuning.minions.length === 0 || stunned) return;
+    if (!this.hasPlayer) return;
     this.minionTimer -= dt;
     if (this.minionTimer > 0) return;
     this.minionTimer = tuning.minionInterval;
