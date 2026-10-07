@@ -12,7 +12,7 @@ export const LAKE_TRACK: Composition = {
   bpm: 112,
   key: 9,
   tempoRamp: 0.05,
-  mix: 0.5,
+  mix: 0.45,
   defaultIntensity: 0.5,
   delay: { beats: 0.75, feedback: 0.3, wet: 0.25, tone: 2400 },
   tracks: {
@@ -149,7 +149,7 @@ export const DESERT_TRACK: Composition = {
   key: 2,
   swing: 0.06,
   tempoRamp: 0.05,
-  mix: 0.5,
+  mix: 0.387,
   defaultIntensity: 0.5,
   delay: { beats: 0.5, feedback: 0.25, wet: 0.2, tone: 2000 },
   tracks: {
@@ -248,7 +248,7 @@ export const SNOW_TRACK: Composition = {
   bpm: 92,
   key: 4,
   tempoRamp: 0.04,
-  mix: 0.52,
+  mix: 0.394,
   defaultIntensity: 0.5,
   delay: { beats: 0.75, feedback: 0.4, wet: 0.3, tone: 3000 },
   tracks: {
@@ -348,7 +348,7 @@ export const OCEAN_TRACK: Composition = {
   bpm: 118,
   key: 0,
   tempoRamp: 0.05,
-  mix: 0.5,
+  mix: 0.488,
   defaultIntensity: 0.5,
   tracks: {
     strings: track('pluck', 0.22, {
@@ -423,7 +423,7 @@ export const CITY_TRACK: Composition = {
   bpm: 132,
   key: 6,
   tempoRamp: 0.05,
-  mix: 0.48,
+  mix: 0.474,
   defaultIntensity: 0.5,
   delay: { beats: 0.75, feedback: 0.35, wet: 0.25, tone: 3200 },
   tracks: {
@@ -515,7 +515,7 @@ export const VOLCANO_TRACK: Composition = {
   bpm: 100,
   key: 1,
   tempoRamp: 0.06,
-  mix: 0.5,
+  mix: 0.322,
   defaultIntensity: 0.5,
   tracks: {
     pad: track('pad', 0.24, { params: P.darkPad, reverb: 0.3 }),
@@ -597,7 +597,7 @@ export const ARCTIC_TRACK: Composition = {
   bpm: 84,
   key: 11,
   tempoRamp: 0.05,
-  mix: 0.54,
+  mix: 0.399,
   defaultIntensity: 0.5,
   delay: { beats: 1.5, feedback: 0.45, wet: 0.35, tone: 1800 },
   tracks: {
@@ -675,7 +675,7 @@ export const CANYON_TRACK: Composition = {
   bpm: 150,
   key: 4,
   tempoRamp: 0.05,
-  mix: 0.46,
+  mix: 0.386,
   defaultIntensity: 0.5,
   tracks: {
     gtr: track('brass', 0.22, { params: P.powerChord, input: 'chords' }),
@@ -761,7 +761,7 @@ export const STRATOSPHERE_TRACK: Composition = {
   bpm: 128,
   key: 2,
   tempoRamp: 0.04,
-  mix: 0.48,
+  mix: 0.654,
   defaultIntensity: 0.5,
   delay: { beats: 0.75, feedback: 0.4, wet: 0.3, tone: 3600 },
   tracks: {
@@ -863,7 +863,7 @@ export const CITADEL_TRACK: Composition = {
   bpm: 100,
   key: 0,
   tempoRamp: 0.06,
-  mix: 0.5,
+  mix: 0.529,
   defaultIntensity: 0.5,
   delay: { beats: 0.75, feedback: 0.4, wet: 0.3, tone: 2200 },
   tracks: {

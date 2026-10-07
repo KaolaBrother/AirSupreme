@@ -17,9 +17,10 @@ import {
 
 export const MENU_TRACK: Composition = {
   id: 'MENU',
+  dynamicRange: 0,
   bpm: 96,
   key: 9,
-  mix: 0.5,
+  mix: 0.73,
   defaultIntensity: 0.5,
   delay: { beats: 0.75, feedback: 0.3, wet: 0.22, tone: 2600 },
   tracks: {
@@ -91,10 +92,11 @@ export const MENU_TRACK: Composition = {
 
 export const STORY_TRACK: Composition = {
   id: 'STORY',
+  dynamicRange: 0,
   bpm: 70,
   key: 9,
   filterFloor: 20000,
-  mix: 0.56,
+  mix: 0.592,
   defaultIntensity: 0.5,
   delay: { beats: 1, feedback: 0.35, wet: 0.25, tone: 2200 },
   tracks: {
@@ -135,9 +137,10 @@ export const STORY_TRACK: Composition = {
 
 export const VICTORY_TRACK: Composition = {
   id: 'VICTORY',
+  dynamicRange: 0,
   bpm: 104,
   key: 0,
-  mix: 0.46,
+  mix: 0.664,
   defaultIntensity: 0.6,
   tracks: {
     strings: track('pad', 0.26, { params: { ...P.warmPad, cutoff: 1900, voices: 3 }, reverb: 0.4 }),

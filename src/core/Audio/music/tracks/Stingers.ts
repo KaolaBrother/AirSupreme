@@ -57,7 +57,8 @@ export const CHAPTER_START_STINGER: StingerDef = {
       roll: '........xxxxXXXX X...............',
       crash: '................ X...............',
       motif: '-:16 C5:4 G5:4 Eb5:4 D5:2 Eb5:2',
-    }
+    },
+    0.549
   ),
   duckTo: 0.3,
   tail: 2,
@@ -101,7 +102,8 @@ export const BOSS_DEFEATED_STINGER: StingerDef = {
       choir: '-:16 C:16',
       timpani: 'X...X...X..xX.xx X...............',
       sparkle: '-:16 C:16',
-    }
+    },
+    0.575
   ),
   duckTo: 0,
   tail: 2.4,
@@ -130,7 +132,8 @@ export const LEVEL_COMPLETE_STINGER: StingerDef = {
       bell: '-:16 C6:8 G6:8',
       kick: '................ X...............',
       crash: '................ X...............',
-    }
+    },
+    0.965
   ),
   duckTo: 0.15,
   tail: 2,
@@ -159,7 +162,8 @@ export const GAME_OVER_STINGER: StingerDef = {
       lead: 'G4:6 F4:2 Eb4:4 D4:4 C4:16',
       choir: 'Cm:16 Fm:8 Cm:8',
       toll: 'C3:16 C3:16',
-    }
+    },
+    0.581
   ),
   duckTo: 0,
   tail: 3,
@@ -207,7 +211,7 @@ export const CAMPAIGN_COMPLETE_STINGER: StingerDef = {
       timpani: 'X.......X....... X.......X....... X...X...X.xxXXXX X...............',
       sparkle: '-:48 C:16',
     },
-    0.5
+    0.65
   ),
   duckTo: 0,
   tail: 3,
@@ -231,7 +235,7 @@ export const CHECKPOINT_STINGER: StingerDef = {
       bell: 'G5:4 C6:12',
       shimmer: '-:4 E6:1 G6:1 C7:2 -:8',
     },
-    0.5
+    1.019
   ),
   duckTo: 0.7,
   tail: 1.6,
@@ -259,7 +263,8 @@ export const PHASE_CHANGE_STINGER: StingerDef = {
       crash: 'X...............',
       riser: '-:4 C4:12',
       toms: '............xxXX',
-    }
+    },
+    0.645
   ),
   duckTo: 0.35,
   tail: 1,

@@ -17,7 +17,8 @@ export const BOSS_TRACK: Composition = {
   bpm: 140,
   key: 9,
   tempoRamp: 0.07,
-  mix: 0.46,
+  dynamicRange: 6,
+  mix: 0.481,
   defaultIntensity: BOSS_INTENSITY,
   tracks: {
     pad: track('pad', 0.22, { params: P.warmPad, reverb: 0.3 }),
@@ -141,7 +142,8 @@ export const DESERT_BOSS_TRACK: Composition = {
   bpm: 140,
   key: 2,
   tempoRamp: 0.06,
-  mix: 0.46,
+  dynamicRange: 6,
+  mix: 0.492,
   defaultIntensity: BOSS_INTENSITY,
   tracks: {
     drone: track('pad', 0.2, { params: { ...P.darkPad, cutoff: 900 }, reverb: 0.3 }),
@@ -248,7 +250,8 @@ export const OCTOPUS_BOSS_TRACK: Composition = {
   bpm: 128,
   key: 5,
   tempoRamp: 0.06,
-  mix: 0.48,
+  dynamicRange: 6,
+  mix: 0.55,
   defaultIntensity: BOSS_INTENSITY,
   delay: { beats: 0.75, feedback: 0.4, wet: 0.3, tone: 2200 },
   tracks: {
@@ -362,7 +365,8 @@ export const OCEAN_BOSS_TRACK: Composition = {
   bpm: 146,
   key: 7,
   tempoRamp: 0.06,
-  mix: 0.46,
+  dynamicRange: 6,
+  mix: 0.509,
   defaultIntensity: BOSS_INTENSITY,
   tracks: {
     pad: track('pad', 0.2, { params: P.warmPad, reverb: 0.3 }),
@@ -482,7 +486,8 @@ export const SKY_CARRIER_BOSS_TRACK: Composition = {
   bpm: 136,
   key: 3,
   tempoRamp: 0.06,
-  mix: 0.46,
+  dynamicRange: 6,
+  mix: 0.498,
   defaultIntensity: BOSS_INTENSITY,
   tracks: {
     pad: track('pad', 0.24, { params: { ...P.warmPad, voices: 3 }, reverb: 0.4 }),
@@ -602,7 +607,8 @@ export const MAGMA_BOSS_TRACK: Composition = {
   bpm: 116,
   key: 1,
   tempoRamp: 0.07,
-  mix: 0.48,
+  dynamicRange: 6,
+  mix: 0.376,
   defaultIntensity: BOSS_INTENSITY,
   tracks: {
     pad: track('pad', 0.22, { params: P.darkPad, reverb: 0.35 }),
@@ -711,7 +717,8 @@ export const LEVIATHAN_BOSS_TRACK: Composition = {
   bpm: 108,
   key: 10,
   tempoRamp: 0.08,
-  mix: 0.5,
+  dynamicRange: 6,
+  mix: 0.56,
   defaultIntensity: BOSS_INTENSITY,
   delay: { beats: 1.5, feedback: 0.45, wet: 0.35, tone: 1800 },
   tracks: {
@@ -825,7 +832,8 @@ export const TEMPEST_BOSS_TRACK: Composition = {
   bpm: 160,
   key: 4,
   tempoRamp: 0.05,
-  mix: 0.44,
+  dynamicRange: 6,
+  mix: 0.504,
   defaultIntensity: BOSS_INTENSITY,
   tracks: {
     gtr: track('brass', 0.2, { params: P.powerChord, input: 'chords', maxIntensity: 0.6 }),
@@ -944,7 +952,8 @@ export const PHANTOM_BOSS_TRACK: Composition = {
   bpm: 132,
   key: 6,
   tempoRamp: 0.06,
-  mix: 0.48,
+  dynamicRange: 6,
+  mix: 0.617,
   defaultIntensity: BOSS_INTENSITY,
   delay: { beats: 0.75, feedback: 0.5, wet: 0.35, tone: 2800 },
   tracks: {
@@ -1060,7 +1069,8 @@ export const ORACLE_BOSS_TRACK: Composition = {
   bpm: 132,
   key: 0,
   tempoRamp: 0.06,
-  mix: 0.46,
+  dynamicRange: 6,
+  mix: 0.449,
   defaultIntensity: 0.6,
   delay: { beats: 0.75, feedback: 0.4, wet: 0.3, tone: 2400 },
   tracks: {

@@ -250,6 +250,44 @@ const RAILGUN_CHARGE_MAX_SECONDS = 4;
 const TALLY_STREAK_MS = 450;
 
 /**
+ * 新音效的电平微调（dB），按离线测量与既有音效对齐：
+ * 爆炸 / 冲击类峰值约 -18 dBFS，武器发射约 -25 dBFS，警报 / 界面音更轻（默认音量设置下）。
+ */
+const SFX_TRIM_DB: Partial<Record<SoundType, number>> = {
+  [SoundType.ROCKET_SALVO]: 3,
+  [SoundType.LASER_BEAM]: 4,
+  [SoundType.LASER_STOP]: 4,
+  [SoundType.LASER_OVERHEAT]: 2,
+  [SoundType.RAILGUN_CHARGE]: 2,
+  [SoundType.RAILGUN_CANCEL]: 6,
+  [SoundType.RAILGUN_FIRE]: 4.5,
+  [SoundType.SWARM_LAUNCH]: 7,
+  [SoundType.EMP_PULSE]: 4,
+  [SoundType.FLARE_DEPLOY]: 3,
+  [SoundType.SAM_LOCK]: 9,
+  [SoundType.SAM_LAUNCH]: 4.5,
+  [SoundType.BOMB_DROP]: 5,
+  [SoundType.TANK_CANNON]: 3,
+  [SoundType.HELICOPTER]: 3,
+  [SoundType.SHIP_HORN]: 4.5,
+  [SoundType.SONAR]: 5.5,
+  [SoundType.CAMERA_SWITCH]: 5,
+  [SoundType.AUTOSAVE]: 6.5,
+  [SoundType.RADIO]: 10,
+  [SoundType.TYPEWRITER]: 6,
+  [SoundType.WEAPON_SWITCH]: 6.5,
+  [SoundType.WEAPON_UNLOCK]: 8,
+  [SoundType.CIVILIAN_WARNING]: 10,
+  [SoundType.CHAPTER_IMPACT]: 3.5,
+  [SoundType.LIGHTNING]: 8,
+  [SoundType.LAVA_ERUPTION]: 6,
+  [SoundType.SHIELD_HIT]: 6,
+  [SoundType.PHASE_ALARM]: 10,
+  [SoundType.DEBRIEF_TALLY]: 8,
+  [SoundType.UNIT_DESTROYED]: 7,
+};
+
+/**
  * 音效管理器
  * 使用 Web Audio API 生成音效（无需外部音频文件）
  */
@@ -2853,16 +2891,15 @@ export class AudioManager {
 
   // ==================== 新增音效：特殊武器 / 单位 / 环境 / 界面 ====================
 
-  private makeSfxTarget(sound: {
-    now: number;
-    context: AudioContext;
-    sfxGain: GainNode;
-  }): SfxTarget {
+  private makeSfxTarget(
+    sound: { now: number; context: AudioContext; sfxGain: GainNode },
+    soundType: SoundType
+  ): SfxTarget {
     return {
       ctx: sound.context,
       out: sound.sfxGain,
       t: sound.now,
-      level: this.sfxVolume,
+      level: this.sfxVolume * dbToGain(SFX_TRIM_DB[soundType] ?? 0),
       random: Math.random,
     };
   }
@@ -2876,7 +2913,7 @@ export class AudioManager {
     const sound = this.beginSound(soundType, durationMs);
     if (!sound) return;
     try {
-      render(this.makeSfxTarget(sound));
+      render(this.makeSfxTarget(sound, soundType));
     } catch {
       // Ignore
     }
@@ -2923,7 +2960,7 @@ export class AudioManager {
     const sound = this.beginSound(SoundType.LASER_BEAM, 300);
     if (!sound) return;
     try {
-      this.laserBeam = startLaserBeam(this.makeSfxTarget(sound));
+      this.laserBeam = startLaserBeam(this.makeSfxTarget(sound, SoundType.LASER_BEAM));
       this.laserSafetyTimeout = window.setTimeout(() => {
         this.laserSafetyTimeout = null;
         this.stopLaserBeam(0.3);
@@ -2953,7 +2990,10 @@ export class AudioManager {
       ? Math.max(0.3, Math.min(3, chargeSeconds))
       : 1.2;
     try {
-      this.railgunCharge = startRailgunCharge(this.makeSfxTarget(sound), seconds);
+      this.railgunCharge = startRailgunCharge(
+        this.makeSfxTarget(sound, SoundType.RAILGUN_CHARGE),
+        seconds
+      );
       this.railgunSafetyTimeout = window.setTimeout(() => {
         this.railgunSafetyTimeout = null;
         this.stopRailgunCharge(0.2);
