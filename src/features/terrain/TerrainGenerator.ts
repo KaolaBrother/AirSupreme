@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import {
   TerrainType,
+  LEVELS,
   LevelConfig,
   LevelSurfaceProfile,
   LevelWeatherConfig,
@@ -36,6 +37,15 @@ import {
 } from './worldscape/vegetation';
 import { injectWindSway } from './worldscape/shadermods';
 import { CloudField } from './worldscape/clouds';
+import {
+  createTerrainEnvironment,
+  environmentSurfaceKind,
+  sampleEnvironmentSurface,
+  type TerrainEnvironment,
+  type TerrainSurfaceKind,
+  type TerrainSurfaceSample,
+} from './environments';
+import { createAuroraBand, createEmberField } from './environments/weatherLayers';
 
 const log = getLogger('TerrainGenerator');
 
@@ -51,7 +61,16 @@ const TRANSPARENT_LAYER_RENDER_ORDER = {
   weather: 0,
 } as const;
 
-type WeatherType = 'clear' | 'rain' | 'snow' | 'dust' | 'mist' | 'storm' | 'smog';
+type WeatherType =
+  | 'clear'
+  | 'rain'
+  | 'snow'
+  | 'dust'
+  | 'mist'
+  | 'storm'
+  | 'smog'
+  | 'ash'
+  | 'aurora';
 type SurfacePattern = 'grass' | 'sand' | 'snow' | 'rock' | 'asphalt' | 'water' | 'beach';
 const WEATHER_PRESET_OVERLAYS: Record<
   WeatherType,
@@ -69,6 +88,8 @@ const WEATHER_PRESET_OVERLAYS: Record<
   storm: { overlayColor: 0x8aa7c4, overlayAlpha: 0.14, horizonAlpha: 0.22, streakBoost: 16 },
   smog: { overlayColor: 0xa9afba, overlayAlpha: 0.12, horizonAlpha: 0.24, streakBoost: 14 },
   rain: { overlayColor: 0xb8cbe2, overlayAlpha: 0.1, horizonAlpha: 0.18, streakBoost: 12 },
+  ash: { overlayColor: 0x6a3a2a, overlayAlpha: 0.1, horizonAlpha: 0.22, streakBoost: 10 },
+  aurora: { overlayColor: 0x2f9a86, overlayAlpha: 0.03, horizonAlpha: 0.1, streakBoost: 4 },
 };
 
 interface WeatherProfile {
@@ -98,23 +119,38 @@ interface WeatherProfile {
   skyGlow: THREE.ColorRepresentation;
 }
 
+/** 湖畔调色板：所有兜底的最终回落 */
+const LAKE_FALLBACK_DESIGN_TOKENS: SceneDesignTokens = {
+  terrainPrimary: 0x8ecf60,
+  terrainSecondary: 0x67a34f,
+  terrainAccent: 0xa8dc7c,
+  vegetation: 0x3e8a3c,
+  vegetationAccent: 0x77c95e,
+  water: 0x5eb7de,
+  waterDeep: 0x2a6e96,
+  waterSparkle: 0xbdf0ff,
+  structure: 0x9c6b4a,
+  structureAccent: 0xf3e6c8,
+  glow: 0xffe9b0,
+  horizonHaze: 0xdceff8,
+  distantSilhouette: 0x7da3c0,
+};
+
+/**
+ * 地形兜底调色板：第 1-5 关地形用下表；第 6-10 关地形取 LEVELS 中首个使用该地形的
+ * 关卡的 designTokens（单一来源，避免重复维护），最终回落到湖畔调色板。
+ */
+function getFallbackDesignTokens(terrain: TerrainType): SceneDesignTokens {
+  return (
+    FALLBACK_DESIGN_TOKENS[terrain] ??
+    LEVELS.find((level) => level.terrain === terrain)?.environment.designTokens ??
+    LAKE_FALLBACK_DESIGN_TOKENS
+  );
+}
+
 /** 各地形的设计令牌兜底值（关卡未配置 designTokens 时使用） */
-const FALLBACK_DESIGN_TOKENS: Record<TerrainType, SceneDesignTokens> = {
-  [TerrainType.LAKE]: {
-    terrainPrimary: 0x8ecf60,
-    terrainSecondary: 0x67a34f,
-    terrainAccent: 0xa8dc7c,
-    vegetation: 0x3e8a3c,
-    vegetationAccent: 0x77c95e,
-    water: 0x5eb7de,
-    waterDeep: 0x2a6e96,
-    waterSparkle: 0xbdf0ff,
-    structure: 0x9c6b4a,
-    structureAccent: 0xf3e6c8,
-    glow: 0xffe9b0,
-    horizonHaze: 0xdceff8,
-    distantSilhouette: 0x7da3c0,
-  },
+const FALLBACK_DESIGN_TOKENS: Partial<Record<TerrainType, SceneDesignTokens>> = {
+  [TerrainType.LAKE]: LAKE_FALLBACK_DESIGN_TOKENS,
   [TerrainType.DESERT]: {
     terrainPrimary: 0xd9b178,
     terrainSecondary: 0xa6752d,
@@ -211,7 +247,13 @@ export class TerrainGenerator {
   /** 玩家最近位置（updateLOD 时更新），天气粒子/雨幕重生时以此为中心，保证天气始终跟随玩家 */
   private lastPlayerPosition = new THREE.Vector3(0, 80, 0);
   /** 当前关卡的设计令牌调色板 */
-  private designTokens: SceneDesignTokens = FALLBACK_DESIGN_TOKENS[TerrainType.LAKE];
+  private designTokens: SceneDesignTokens = LAKE_FALLBACK_DESIGN_TOKENS;
+  /** 当前关卡地形类型（generateTerrain 之前为 null） */
+  private activeTerrain: TerrainType | null = null;
+  /** 第 6-10 关环境模块（VOLCANO / ARCTIC / CANYON / STRATOSPHERE / CITADEL） */
+  private environment: TerrainEnvironment | null = null;
+  /** 海洋关岛屿浅滩（sampleSurface 用：岛上不可航行） */
+  private oceanIslandMounds: Array<{ x: number; z: number; radius: number; height: number }> = [];
 
   constructor(scene: THREE.Scene) {
     this.scene = scene;
@@ -227,8 +269,9 @@ export class TerrainGenerator {
     log.debug('Generating terrain:', { terrain: config.terrain });
 
     this.clearTerrain();
+    this.activeTerrain = config.terrain;
     this.weatherProfile = this.resolveWeatherProfile(config);
-    this.designTokens = config.environment.designTokens ?? FALLBACK_DESIGN_TOKENS[config.terrain];
+    this.designTokens = config.environment.designTokens ?? getFallbackDesignTokens(config.terrain);
     // worldscape 着色器 uniform：风力驱动草木摇曳，雪覆盖只在雪山关激活
     this.worldscapeWind.value = 0.25 + this.weatherProfile.windStrength * 1.1;
     this.worldscapeSnow.value = config.terrain === TerrainType.MOUNTAINS ? 1 : 0;
@@ -258,14 +301,22 @@ export class TerrainGenerator {
       case TerrainType.CITY:
         this.generateCityTerrain(config);
         break;
+      case TerrainType.VOLCANO:
+      case TerrainType.ARCTIC:
+      case TerrainType.CANYON:
+      case TerrainType.STRATOSPHERE:
+      case TerrainType.CITADEL:
+        this.generateEnvironmentTerrain(config);
+        break;
     }
 
     // 添加云朵（含高空卷云层）
     this.createClouds(this.weatherProfile);
     this.createCirrusLayer(this.weatherProfile);
 
-    // 添加轻量天气表现
+    // 添加轻量天气表现（ash 预设追加余烬，aurora 预设追加极光帘幕）
     this.createWeatherEffect(this.weatherProfile);
+    this.createPresetSkyLayers(this.weatherProfile);
 
     // 天体层（太阳/月亮/星空）与强天气层（雨幕/雷暴）
     this.createCelestialLayer(config, this.weatherProfile);
@@ -277,6 +328,79 @@ export class TerrainGenerator {
 
     // 设置雾（优先使用环境雾色，保持与 GameScene 环境配置一致）
     this.scene.fog = new THREE.FogExp2(config.environment.fogColor ?? config.fogColor, this.weatherProfile.fogDensity);
+  }
+
+  /**
+   * 第 6-10 关：通过环境模块（environments/*）构建地形。
+   * 环境实例负责自己的网格、动画与资源释放；采样（sampleSurface / getCrashSurfaceY）委托给它。
+   */
+  private generateEnvironmentTerrain(config: LevelConfig): void {
+    const environment = createTerrainEnvironment(config.terrain);
+    if (!environment) {
+      log.warn('No terrain environment registered', { terrain: config.terrain });
+      return;
+    }
+    this.stageField = null;
+    environment.build({
+      config,
+      tokens: this.designTokens,
+      waterY: WORLDSCAPE_WATER_Y,
+      halfExtent: this.halfExtent,
+      detailScale: this.detailScale,
+      isMobile: GameConfig.isMobile,
+      sunDirection: this.getSunDirection(config),
+      windAngle: this.weatherProfile.windAngle,
+      windStrength: this.weatherProfile.windStrength,
+    });
+    this.terrainGroup.add(environment.root);
+    this.environment = environment;
+  }
+
+  /**
+   * 新天气预设的天空/大气层：
+   * - ash：跟随玩家的上升余烬（常规灰烬粒子由 createWeatherEffect 负责）
+   * - aurora：横跨天空的动态极光帘幕（轻雪由 createWeatherEffect 负责）
+   */
+  private createPresetSkyLayers(profile: WeatherProfile): void {
+    if (profile.type === 'ash') {
+      const windX = Math.cos(profile.windAngle) * (2 + profile.windStrength * 6);
+      const windZ = Math.sin(profile.windAngle) * (2 + profile.windStrength * 6);
+      const embers = createEmberField({
+        count: this.scaleCount(Math.round(180 + profile.intensity * 260)),
+        extent: 900,
+        floorY: WORLDSCAPE_WATER_Y,
+        ceilingY: 260,
+        color: 0xff5a1a,
+        hotColor: 0xffd27a,
+        rise: 5 + profile.intensity * 4,
+        wind: { x: windX, z: windZ },
+        size: 0.7,
+        seed: 6061,
+      });
+      this.terrainGroup.add(embers.object);
+      this.animatedProps.push((_deltaTime, time) => {
+        embers.update(time, this.lastPlayerPosition);
+      });
+      return;
+    }
+
+    if (profile.type === 'aurora') {
+      const aurora = createAuroraBand({
+        ribbons: GameConfig.isMobile ? 3 : 4,
+        radius: 2300,
+        baseY: 520,
+        height: 620,
+        centerAngle: -Math.PI / 2,
+        span: Math.PI * 1.15,
+        intensity: 0.6,
+        segments: GameConfig.isMobile ? 72 : 120,
+        seed: 7007,
+      });
+      this.terrainGroup.add(aurora.object);
+      this.animatedProps.push((_deltaTime, time) => {
+        aurora.update(time, this.lastPlayerPosition);
+      });
+    }
   }
 
   /**
@@ -1282,6 +1406,7 @@ export class TerrainGenerator {
 
     // 添加岛屿群（先放置，以便把岛屿浅滩烘焙进水深 → 岛缘绿松石浅水 + 浪沫环）
     const islandMounds = this.createOceanIslands();
+    this.oceanIslandMounds = islandMounds;
 
     // worldshowcase 波浪着色器海面：明亮远洋晴昼调色板（深钴蓝 → 绿松石浅滩）
     this.worldWater = buildWorldscapeWater({
@@ -4488,19 +4613,100 @@ export class TerrainGenerator {
     for (const animate of this.animatedProps) {
       animate(deltaTime, this.time);
     }
+
+    // 第 6-10 关环境模块的每帧动画（熔岩流动、浮冰漂移、烟柱等）
+    this.environment?.update?.(deltaTime, this.time, this.lastPlayerPosition);
   }
 
   /**
    * 返回 (worldX, worldZ) 处地形/水面的世界 Y。
    * 高度场局部 0 为水面；未生成高度场时回落到 WORLDSCAPE_WATER_Y。
+   * 第 6-10 关委托环境模块：可航行水面返回水位，其余返回固体表面（地面/冰面/结构顶）。
    */
   public getCrashSurfaceY(worldX: number, worldZ: number): number {
+    if (this.environment) {
+      return sampleEnvironmentSurface(this.environment, worldX, worldZ, WORLDSCAPE_WATER_Y).y;
+    }
+
     if (!this.stageField) {
       return WORLDSCAPE_WATER_Y;
     }
 
     const worldY = WORLDSCAPE_WATER_Y + this.stageField.heightAt(worldX, worldZ);
     return Number.isFinite(worldY) ? worldY : WORLDSCAPE_WATER_Y;
+  }
+
+  /**
+   * 地表采样（地面单位 / 舰船 / Boss 落脚用）：
+   * - y：世界表面高度；可航行水域返回水面高度 WORLDSCAPE_WATER_Y
+   * - water：船只是否可在此航行
+   * 规则：LAKE 仅湖内（水深 ≥ 2m）、OCEAN 除岛屿外全域、VOLCANO 岛外海域、ARCTIC 冰间开阔海面为水；
+   * DESERT / MOUNTAINS / CITY / CANYON / STRATOSPHERE / CITADEL 全域 water = false。
+   * 非有限输入或地形未生成时返回 { y: WORLDSCAPE_WATER_Y, water: false }。
+   */
+  public sampleSurface(worldX: number, worldZ: number): TerrainSurfaceSample {
+    if (!Number.isFinite(worldX) || !Number.isFinite(worldZ)) {
+      return { y: WORLDSCAPE_WATER_Y, water: false };
+    }
+    if (this.environment) {
+      return sampleEnvironmentSurface(this.environment, worldX, worldZ, WORLDSCAPE_WATER_Y);
+    }
+
+    const fieldHeight = this.stageField ? this.stageField.heightAt(worldX, worldZ) : 0;
+    const safeFieldHeight = Number.isFinite(fieldHeight) ? fieldHeight : 0;
+    switch (this.activeTerrain) {
+      case TerrainType.LAKE: {
+        if (safeFieldHeight < -2) {
+          return { y: WORLDSCAPE_WATER_Y, water: true };
+        }
+        return { y: WORLDSCAPE_WATER_Y + Math.max(0, safeFieldHeight), water: false };
+      }
+      case TerrainType.MOUNTAINS:
+        return { y: WORLDSCAPE_WATER_Y + Math.max(0, safeFieldHeight), water: false };
+      case TerrainType.DESERT:
+        // 沙漠网格放在 -50 基准（见 generateDesertTerrain）
+        return { y: -50 + safeFieldHeight, water: false };
+      case TerrainType.CITY:
+        // 城市地面网格位于 y = -50
+        return { y: -50, water: false };
+      case TerrainType.OCEAN: {
+        for (const mound of this.oceanIslandMounds) {
+          const distance = Math.hypot(worldX - mound.x, worldZ - mound.z);
+          if (distance < mound.radius * 0.8) {
+            const rise = 1 - distance / (mound.radius * 0.8);
+            return { y: WORLDSCAPE_WATER_Y + 2 + rise * 8, water: false };
+          }
+        }
+        return { y: WORLDSCAPE_WATER_Y, water: true };
+      }
+      default:
+        return { y: WORLDSCAPE_WATER_Y, water: false };
+    }
+  }
+
+  /**
+   * 地表材质（命中特效 / 音效选型）：'water' 或 SurfaceImpactType 之一。
+   * 第 1-5 关：LAKE/OCEAN 按 sampleSurface 区分水面与 'ground'，DESERT 'desert'、
+   * MOUNTAINS 'snow'、CITY 'city'；第 6-10 关委托环境模块（熔岩 'lava'、冰面 'ice'、
+   * 岩石 'rock'、云海 'cloud'）。
+   */
+  public getSurfaceKind(worldX: number, worldZ: number): TerrainSurfaceKind {
+    if (this.environment) {
+      return environmentSurfaceKind(this.environment, worldX, worldZ);
+    }
+    switch (this.activeTerrain) {
+      case TerrainType.DESERT:
+        return 'desert';
+      case TerrainType.MOUNTAINS:
+        return 'snow';
+      case TerrainType.CITY:
+        return 'city';
+      case TerrainType.LAKE:
+      case TerrainType.OCEAN:
+        return this.sampleSurface(worldX, worldZ).water ? 'water' : 'ground';
+      default:
+        return 'ground';
+    }
   }
 
   /**
@@ -4532,6 +4738,14 @@ export class TerrainGenerator {
 
     // 立即清空 waterMesh 引用（避免 update() 访问旧对象）
     this.waterMesh = undefined;
+
+    // 第 6-10 关环境模块：先由模块自己移除并释放其子树
+    if (this.environment) {
+      this.environment.dispose();
+      this.environment = null;
+    }
+    this.activeTerrain = null;
+    this.oceanIslandMounds = [];
 
     // worldscape 世界系统：显式释放实例化云场/波浪水面/植被的几何与材质
     if (this.cloudField) {
@@ -4747,6 +4961,11 @@ export class TerrainGenerator {
 
     const skyLuminance = this.getSkyLuminance(config);
     const isNight = skyLuminance < 0.1;
+
+    // 雷暴云顶与火山灰幕之下看不到日月星辰
+    if (profile.type === 'storm' || profile.type === 'ash') {
+      return;
+    }
 
     if (isNight) {
       const moonMaterial = new THREE.SpriteMaterial({
@@ -5814,6 +6033,8 @@ export class TerrainGenerator {
       snow: 'snow',
       storm: 'storm',
       smog: 'smog',
+      ash: 'ash',
+      aurora: 'aurora',
     };
     /** 云色调（1 = 晴日亮白 → 0 = 风暴铅灰），按天气类型推导 */
     const cloudToneByType: Record<WeatherType, number> = {
@@ -5824,6 +6045,8 @@ export class TerrainGenerator {
       storm: 0.34,
       smog: 0.72,
       rain: 0.55,
+      ash: 0.6,
+      aurora: 0.62,
     };
     const weatherConfig = config.weather;
     const environmentConfig = config.environment;
@@ -5919,6 +6142,20 @@ export class TerrainGenerator {
       case 'snow':
         resolvedProfile.particleSize = Math.max(2.8, resolvedProfile.particleSize * 0.95);
         resolvedProfile.cloudSpeed *= 0.92;
+        break;
+      case 'ash':
+        // 火山灰：云层更厚重、雾略浓
+        resolvedProfile.cloudOpacity = THREE.MathUtils.clamp(
+          resolvedProfile.cloudOpacity + 0.05,
+          0.3,
+          0.9
+        );
+        resolvedProfile.fogDensity *= 1.04;
+        break;
+      case 'aurora':
+        // 晴冷极夜：稀疏细雪，云层轻薄
+        resolvedProfile.particleSize = Math.max(2.2, resolvedProfile.particleSize);
+        resolvedProfile.cloudOpacity = Math.min(resolvedProfile.cloudOpacity, 0.6);
         break;
     }
 
@@ -6024,6 +6261,99 @@ export class TerrainGenerator {
           skyGlow: 0xb5c4ff,
           windAngle: 0.18, // 城市烟霾：近乎水平的微风
         };
+      case TerrainType.VOLCANO:
+      case TerrainType.CITADEL:
+        return {
+          type: 'ash',
+          intensity: 0.55,
+          cloudCoverage: 0.5,
+          cloudTone: 0.46,
+          windStrength: 0.35,
+          fogDensity: 0.0005,
+          cloudCount: 22,
+          cloudOpacity: 0.7,
+          cloudTint: 0x5a4642,
+          cloudSpeed: 2.4,
+          cloudHeightMin: 260,
+          cloudHeightMax: 460,
+          particleCount: 360,
+          particleSize: 3.2,
+          particleSpeed: 6,
+          particleDrift: 4,
+          particleColor: 0x8e8580,
+          waterWaveScale: 1.3,
+          skyGlow: 0xff8a4a,
+          windAngle: 1.1, // 火山灰：信风把灰柱吹向东北
+        };
+      case TerrainType.ARCTIC:
+        return {
+          type: 'aurora',
+          intensity: 0.32,
+          cloudCoverage: 0.2,
+          cloudTone: 0.62,
+          windStrength: 0.28,
+          fogDensity: 0.0004,
+          cloudCount: 14,
+          cloudOpacity: 0.5,
+          cloudTint: 0x8a9fb8,
+          cloudSpeed: 1.6,
+          cloudHeightMin: 300,
+          cloudHeightMax: 480,
+          particleCount: 220,
+          particleSize: 2.6,
+          particleSpeed: 5,
+          particleDrift: 1.5,
+          particleColor: 0xe6f2ff,
+          waterWaveScale: 0.9,
+          skyGlow: 0x5ff0c0,
+          windAngle: 2.8, // 极地下降风
+        };
+      case TerrainType.CANYON:
+        return {
+          type: 'storm',
+          intensity: 0.8,
+          cloudCoverage: 0.88,
+          cloudTone: 0.34,
+          windStrength: 0.78,
+          fogDensity: 0.00058,
+          cloudCount: 30,
+          cloudOpacity: 0.86,
+          cloudTint: 0x4a505c,
+          cloudSpeed: 4.2,
+          cloudHeightMin: 210,
+          cloudHeightMax: 370,
+          particleCount: 260,
+          particleSize: 2.2,
+          particleSpeed: 38,
+          particleDrift: 9,
+          particleColor: 0x9fb0c2,
+          waterWaveScale: 0.6,
+          skyGlow: 0x9ab4ff,
+          windAngle: 0.4, // 峡谷风：顺谷而下
+        };
+      case TerrainType.STRATOSPHERE:
+        return {
+          type: 'clear',
+          intensity: 0.18,
+          cloudCoverage: 0.22,
+          cloudTone: 1.0,
+          windStrength: 0.55,
+          fogDensity: 0.00024,
+          cloudCount: 14,
+          cloudOpacity: 0.86,
+          cloudTint: 0xffe2cc,
+          cloudSpeed: 3.2,
+          cloudHeightMin: -24,
+          cloudHeightMax: 70,
+          particleCount: 90,
+          particleSize: 2,
+          particleSpeed: 1.6,
+          particleDrift: 2.4,
+          particleColor: 0xfff0e0,
+          waterWaveScale: 0.4,
+          skyGlow: 0xffc890,
+          windAngle: -0.4, // 平流层急流
+        };
       case TerrainType.LAKE:
       default:
         return {
@@ -6086,6 +6416,10 @@ export class TerrainGenerator {
         return 0.24 + profile.intensity * 0.12;
       case 'rain':
         return 0.36 + profile.intensity * 0.18;
+      case 'ash':
+        return 0.34 + profile.intensity * 0.16;
+      case 'aurora':
+        return 0.42 + profile.intensity * 0.1;
       case 'clear':
       default:
         return 0.18 + profile.intensity * 0.08;
@@ -6120,6 +6454,7 @@ export class TerrainGenerator {
           metalness: 0.28,
         };
       case 'snow':
+      case 'aurora':
         return {
           baseEmissive: 0.12,
           emissiveAmplitude: 0.02,
@@ -6130,6 +6465,7 @@ export class TerrainGenerator {
         };
       case 'dust':
       case 'smog':
+      case 'ash':
         return {
           baseEmissive: 0.09,
           emissiveAmplitude: 0.018,
