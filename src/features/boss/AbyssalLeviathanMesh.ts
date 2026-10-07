@@ -140,25 +140,25 @@ function createHullSection(
 export function createAbyssalLeviathanMaterials(): AbyssalLeviathanMaterials {
   return {
     hull: new THREE.MeshStandardMaterial({
-      color: 0x2a3945,
-      roughness: 0.42,
-      metalness: 0.62,
-      emissive: 0x06141c,
-      emissiveIntensity: 0.6,
+      color: 0x41535f,
+      roughness: 0.5,
+      metalness: 0.32,
+      emissive: 0x0b2230,
+      emissiveIntensity: 0.55,
     }),
     deck: new THREE.MeshStandardMaterial({
-      color: 0x1d2830,
-      roughness: 0.6,
-      metalness: 0.5,
-      emissive: 0x041016,
+      color: 0x2f3d47,
+      roughness: 0.62,
+      metalness: 0.28,
+      emissive: 0x081a24,
       emissiveIntensity: 0.5,
     }),
     fin: new THREE.MeshStandardMaterial({
-      color: 0x223038,
-      roughness: 0.5,
-      metalness: 0.55,
-      emissive: 0x041016,
-      emissiveIntensity: 0.4,
+      color: 0x384954,
+      roughness: 0.55,
+      metalness: 0.3,
+      emissive: 0x081a24,
+      emissiveIntensity: 0.45,
     }),
     ice: new THREE.MeshStandardMaterial({
       color: 0xe2f5ff,
@@ -357,26 +357,44 @@ export function createAbyssalLeviathanMesh(config: BossConfig): THREE.Group {
   };
   const iceBow: THREE.BufferGeometry[] = [];
   const iceStern: THREE.BufferGeometry[] = [];
-  for (let i = 0; i < 16; i++) {
-    const z = 11 - i * 1.45 + (rand() - 0.5) * 0.6;
-    const x = (rand() - 0.5) * 4.6;
-    const surface = Math.sqrt(Math.max(0, 1 - (x / 3.4) ** 2)) * 2.75 + HULL_CENTER_Y;
-    const taper = Math.abs(z) > 12 ? 0.6 : 1;
+  // 冰壳：沿甲板两侧与艇肩铺开的扁平冰板（只绕竖轴旋转，贴合艇体）
+  for (let i = 0; i < 30; i++) {
+    const z = 12.5 - (i % 15) * 1.75 + (rand() - 0.5) * 0.7;
+    const side = i < 15 ? 1 : -1;
+    const x = side * (1.55 + rand() * 1.5);
+    const surface = Math.sqrt(Math.max(0, 1 - (x / 3.36) ** 2)) * 2.75 + HULL_CENTER_Y;
+    const taper = Math.abs(z) > 11 ? 0.65 : 1;
+    const tilt = -side * Math.asin(Math.min(0.9, Math.abs(x) / 3.36)) * 0.8;
     const geometry = placed(
-      new THREE.DodecahedronGeometry((0.6 + rand() * 0.55) * s * taper, 0),
+      new THREE.DodecahedronGeometry((0.65 + rand() * 0.6) * s * taper, 0),
       x * s,
-      Math.max(surface, Math.abs(x) < 1.7 && Math.abs(z) < 10 ? DECK_Y + 0.15 : surface) * s,
+      (surface + 0.05) * s,
       z * s,
-      rand() * 2,
-      rand() * 2,
-      rand() * 2,
-      1.4,
-      0.42,
-      1.2
+      (rand() - 0.5) * 0.25,
+      rand() * 3,
+      tilt,
+      1.5,
+      0.32,
+      1.3
     );
     if (z > BREAK_Z) iceBow.push(geometry);
     else iceStern.push(geometry);
   }
+  // 指挥塔顶积冰
+  iceBow.push(
+    placed(
+      new THREE.DodecahedronGeometry(1.0 * s, 0),
+      0.1 * s,
+      (DECK_Y + 6.9) * s,
+      5.6 * s,
+      0,
+      0.5,
+      0,
+      1.35,
+      0.35,
+      3.2
+    )
+  );
   const ice = mergeInto(iceBow, materials.ice, 'leviathan_ice_crust');
   ice.castShadow = true;
   bow.add(ice);
@@ -419,14 +437,28 @@ export function createAbyssalLeviathanMesh(config: BossConfig): THREE.Group {
   );
   add(
     sail,
-    box(2.2, 0.36, 2.4),
+    box(2.25, 0.55, 3.0),
     materials.bridge,
     'leviathan_bridge_windows',
     0,
-    2.35,
-    2.2
+    2.5,
+    2.0
   ).castShadow = false;
   add(sail, box(6.2, 0.24, 1.7), materials.fin, 'leviathan_sail_planes', 0, 0.9, 1.8);
+  // 指挥塔前缘与顶部的生物光带（极夜里勾勒轮廓）
+  const sailStripGeometries: THREE.BufferGeometry[] = [];
+  for (const side of [1, -1]) {
+    sailStripGeometries.push(placed(box(0.08, 4.4, 0.16), side * 1.18 * s, -0.5 * s, 2.7 * s));
+    sailStripGeometries.push(placed(box(0.08, 0.16, 5.2), side * 1.18 * s, 2.75 * s, 0.1 * s));
+    for (let i = 0; i < 3; i++) {
+      sailStripGeometries.push(
+        placed(box(0.06, 0.22, 0.22), side * 1.2 * s, (0.4 + i * 0.75) * s, (-1.2 - i * 0.4) * s)
+      );
+    }
+  }
+  const sailStrips = mergeInto(sailStripGeometries, materials.glowStrip, 'leviathan_sail_strips');
+  sailStrips.castShadow = false;
+  sail.add(sailStrips);
   for (const [x, h] of [
     [0.45, 2.6],
     [-0.4, 3.4],
@@ -518,6 +550,15 @@ export function createAbyssalLeviathanMesh(config: BossConfig): THREE.Group {
         0,
         0
       );
+      add(
+        pivot,
+        box(1.2, 0.06, 0.14),
+        materials.danger,
+        `leviathan_hatch_light_${index}`,
+        -side * 0.76,
+        0.12,
+        0.62
+      ).castShadow = false;
       const launchPoint = new THREE.Object3D();
       launchPoint.name = `leviathan_silo_launch_${index}`;
       launchPoint.position.set(side * 0.86 * s, (DECK_Y + 1.6) * s, z * s);

@@ -386,6 +386,11 @@ export interface HazardColumnPalette {
   outerTop: number;
   core: number;
   cap: number;
+  /** 整体不透明度系数 */
+  opacity: number;
+  /** 柱体顶 / 底半径系数（水柱上宽下窄像浪花，熔岩柱下宽上窄像喷泉） */
+  topRadius: number;
+  bottomRadius: number;
 }
 
 export const LAVA_COLUMN_PALETTE: HazardColumnPalette = {
@@ -394,14 +399,20 @@ export const LAVA_COLUMN_PALETTE: HazardColumnPalette = {
   outerTop: 0x6a0a00,
   core: 0xfff0b8,
   cap: 0xff8a2a,
+  opacity: 1,
+  topRadius: 0.82,
+  bottomRadius: 1.18,
 };
 
 export const WATER_COLUMN_PALETTE: HazardColumnPalette = {
   warn: 0x6fe8ff,
-  outerBottom: 0xe8fbff,
-  outerTop: 0x0c2a3a,
-  core: 0xffffff,
-  cap: 0xcff6ff,
+  outerBottom: 0x9fd6e8,
+  outerTop: 0x061a24,
+  core: 0xc8eeff,
+  cap: 0xb8e6ff,
+  opacity: 0.5,
+  topRadius: 1.45,
+  bottomRadius: 0.85,
 };
 
 export interface HazardColumnSpec {
@@ -450,6 +461,7 @@ export class HazardColumnPool {
   private readonly ringGeometry: THREE.RingGeometry;
   private readonly outerGeometry: THREE.CylinderGeometry;
   private readonly coreGeometry: THREE.CylinderGeometry;
+  private readonly opacityScale: number;
 
   constructor(
     parent: THREE.Object3D,
@@ -457,6 +469,7 @@ export class HazardColumnPool {
     name: string,
     palette: HazardColumnPalette
   ) {
+    this.opacityScale = THREE.MathUtils.clamp(palette.opacity, 0.05, 1);
     this.root = new THREE.Group();
     this.root.name = name;
     parent.add(this.root);
@@ -465,7 +478,14 @@ export class HazardColumnPool {
     this.discGeometry.rotateX(-Math.PI / 2);
     this.ringGeometry = new THREE.RingGeometry(0.9, 1, 48, 1);
     this.ringGeometry.rotateX(-Math.PI / 2);
-    this.outerGeometry = new THREE.CylinderGeometry(0.82, 1.18, 1, 22, 8, true);
+    this.outerGeometry = new THREE.CylinderGeometry(
+      palette.topRadius,
+      palette.bottomRadius,
+      1,
+      22,
+      8,
+      true
+    );
     this.outerGeometry.translate(0, 0.5, 0);
     applyVerticalGradient(this.outerGeometry, palette.outerBottom, palette.outerTop, 0.9);
     this.coreGeometry = new THREE.CylinderGeometry(0.4, 0.62, 1, 14, 4, true);
@@ -599,14 +619,14 @@ export class HazardColumnPool {
         slot.outer.rotation.y = t * 1.7 + slot.seed;
         slot.core.rotation.y = -t * 2.3;
         const fade = 1 - tail;
-        slot.outerMaterial.opacity = 0.82 * fade;
-        slot.coreMaterial.opacity = 0.95 * fade;
-        slot.discMaterial.opacity = 0.65 * fade;
+        slot.outerMaterial.opacity = 0.82 * fade * this.opacityScale;
+        slot.coreMaterial.opacity = 0.95 * fade * this.opacityScale;
+        slot.discMaterial.opacity = 0.65 * fade * this.opacityScale;
         slot.disc.scale.set(slot.radius * 1.35, 1, slot.radius * 1.35);
         slot.cap.position.y = slot.currentHeight;
         const capSize = slot.radius * (3.4 + 0.6 * Math.sin(t * 17 + slot.seed));
         slot.cap.scale.set(capSize, capSize, 1);
-        slot.capMaterial.opacity = 0.85 * fade;
+        slot.capMaterial.opacity = 0.85 * fade * Math.sqrt(this.opacityScale);
         slot.damageActive = rise > 0.3 && tail < 0.55;
         continue;
       }

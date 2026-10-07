@@ -971,10 +971,10 @@ export class AbyssalLeviathanAI implements IAdvancedBoss {
       this.tmpB.x += Math.cos(this.yaw) * side * 22 * sf;
       this.tmpB.z -= Math.sin(this.yaw) * side * 22 * sf;
       this.spouts.spawn(this.tmpB, {
-        radius: (9 + Math.random() * 6) * sf,
-        height: (70 + Math.random() * 55) * sf,
-        warnTime: 0.2 + i * 0.05,
-        eruptTime: 1.3 + Math.random() * 0.5,
+        radius: (11 + Math.random() * 7) * sf,
+        height: (42 + Math.random() * 38) * sf,
+        warnTime: 0.12 + i * 0.05,
+        eruptTime: 1.1 + Math.random() * 0.5,
         damage: 0,
         profile: 'boss-armor',
       });

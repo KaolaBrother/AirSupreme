@@ -457,6 +457,25 @@ export function createMagmaColossusMesh(config: BossConfig): THREE.Group {
       );
     }
   }
+  // 髋部巨岩护甲：盖住四个髋关节，让躯干在远处显得更宽更重
+  for (const side of [1, -1]) {
+    for (const zSign of [1, -1]) {
+      scaleGeometries.push(
+        placed(
+          new THREE.DodecahedronGeometry(1.6 * s, 0),
+          side * 4.4 * s,
+          0.55 * s,
+          zSign * 4.5 * s,
+          0.2 * zSign,
+          side * 0.5,
+          -side * 0.35,
+          1.45,
+          1.05,
+          1.5
+        )
+      );
+    }
+  }
   const basaltScales = mergeInto(scaleGeometries, materials.plate, 'colossus_basalt_scales');
   basaltScales.castShadow = true;
   body.add(basaltScales);
