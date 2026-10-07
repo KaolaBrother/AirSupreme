@@ -8,6 +8,7 @@ import {
   cyl,
   cylX,
   cylZ,
+  invertFaces,
   sphere,
   torus,
   type PaletteKey,
@@ -184,6 +185,9 @@ export function buildRadarStation(): NodeBuilder {
     root.add('hRed', box(6.24, 0.22, 0.06), [0, 2.6, side * 3.11]);
     root.add('hRed', box(0.06, 0.22, 6.24), [side * 3.11, 2.6, 0]);
   }
+  for (let i = 0; i < 3; i++) {
+    root.add('hGlow', box(0.9, 0.35, 0.06), [-2.0 + i * 2.0, 2.05, -3.12]);
+  }
   // 发电机与天线杆
   root.add('hOlive', box(2.4, 1.4, 1.6), [4.4, 0.7, -1.8]);
   root.add('metal', cyl(0.15, 0.15, 1.2, 8), [4.9, 1.9, -2.2]);
@@ -228,10 +232,10 @@ export function buildRadarStation(): NodeBuilder {
   const reflector = new THREE.SphereGeometry(4.2, 18, 6, 0, Math.PI * 2, 0, 0.62);
   reflector.scale(1, 0.55, 1);
   reflector.translate(0, -4.2 * 0.55, 0);
-  const reflectorInner = reflector.clone();
+  const reflectorInner = invertFaces(reflector.clone());
   dish.add('hHull', reflector, [0, 2.9, -0.2], [-Math.PI / 2 - 0.35, 0, 0]);
-  // 镜像副本翻转绕序 → 凹面同样可见
-  dish.add('fWhite', reflectorInner, [0, 2.9, -0.2], [-Math.PI / 2 - 0.35, 0, 0], [-1, 1, 1]);
+  // 翻转绕序的副本 → 凹面（反射面）同样可见
+  dish.add('fGrey', reflectorInner, [0, 2.9, -0.2], [-Math.PI / 2 - 0.35, 0, 0]);
   dish.add('hRed', torus(2.45, 0.12, 20), [0, 3.05, 0.2], [-0.35, 0, 0]);
   dish.add('metal', cylZ(0.08, 0.08, 3.4, 6), [0, 3.48, 1.4], [-0.35, 0, 0]);
   dish.add('hGlow', sphere(0.28, 8, 6), [0, 4.06, 3.0]);

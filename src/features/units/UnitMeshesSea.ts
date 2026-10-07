@@ -6,6 +6,7 @@ import {
   coneZ,
   cyl,
   cylZ,
+  foamStrip,
   fuselage,
   hull,
   sphere,
@@ -19,26 +20,26 @@ import {
  */
 
 function addWake(root: NodeBuilder, sternZ: number, length: number, width: number): void {
-  const wake = root.child('wake', [0, 0.06, sternZ]);
-  wake.add('foam', box(width * 0.55, 0.04, length), [0, 0, -length / 2]);
-  wake.add(
-    'foam',
-    box(0.9, 0.05, length * 0.9),
-    [width * 0.55, 0.01, -length * 0.45],
-    [0, -0.16, 0]
-  );
-  wake.add(
-    'foam',
-    box(0.9, 0.05, length * 0.9),
-    [-width * 0.55, 0.01, -length * 0.45],
-    [0, 0.16, 0]
-  );
+  const wake = root.child('wake', [0, 0.08, sternZ]);
+  // 中央湍流尾迹
+  wake.add('foam', foamStrip(0, 0.5, 0, -length, width * 0.55, width * 1.5, 0.78));
+  // 开尔文波臂（约 19.5°）
+  const arm = 0.34;
+  const armLen = length * 0.85;
+  for (const side of [1, -1]) {
+    const x0 = side * width * 0.4;
+    wake.add(
+      'foam',
+      foamStrip(x0, 0, x0 + side * Math.sin(arm) * armLen, -Math.cos(arm) * armLen, 1.2, 3.4, 0.62)
+    );
+  }
 }
 
 function addBowSpray(root: NodeBuilder, bowZ: number, width: number): void {
-  const spray = root.child('bowWake', [0, 0.08, bowZ]);
-  spray.add('foam', box(0.7, 0.05, width * 2.2), [width * 0.45, 0, -width * 0.8], [0, 0.55, 0]);
-  spray.add('foam', box(0.7, 0.05, width * 2.2), [-width * 0.45, 0, -width * 0.8], [0, -0.55, 0]);
+  const spray = root.child('bowWake', [0, 0.1, bowZ]);
+  for (const side of [1, -1]) {
+    spray.add('foam', foamStrip(0, 0, side * width * 1.05, -width * 3.2, 0.7, 2.2, 0.85, 4));
+  }
 }
 
 /** 船舷色带：略宽于船体、位于甲板沿下方的薄船壳，露出部分形成一圈色带 */

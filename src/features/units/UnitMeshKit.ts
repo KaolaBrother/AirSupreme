@@ -65,6 +65,8 @@ interface BasicSpec {
   color: number;
   transparent?: boolean;
   opacity?: number;
+  /** 使用顶点颜色（含 alpha 渐隐，例如尾流） */
+  vertexColors?: boolean;
 }
 
 const PALETTE: Record<PaletteKey, StandardSpec | BasicSpec> = {
@@ -113,8 +115,8 @@ const PALETTE: Record<PaletteKey, StandardSpec | BasicSpec> = {
   navWhite: { kind: 'basic', color: 0xffffff },
   engineGlow: { kind: 'basic', color: 0xffa64a },
   beacon: { kind: 'basic', color: 0xff3020, transparent: true, opacity: 1 },
-  foam: { kind: 'basic', color: 0xf2fbff, transparent: true, opacity: 0.55 },
-  rotorBlur: { kind: 'basic', color: 0x1c1e22, transparent: true, opacity: 0.28 },
+  foam: { kind: 'basic', color: 0xf2fbff, transparent: true, opacity: 0.9, vertexColors: true },
+  rotorBlur: { kind: 'basic', color: 0x1c1e22, transparent: true, opacity: 0.2 },
 };
 
 const materialCache = new Map<PaletteKey, THREE.Material>();
@@ -140,6 +142,7 @@ export function getUnitMaterial(key: PaletteKey): THREE.Material {
     });
   } else {
     const basic = new THREE.MeshBasicMaterial({ color: spec.color });
+    if (spec.vertexColors) basic.vertexColors = true;
     if (spec.transparent) {
       basic.transparent = true;
       basic.opacity = spec.opacity ?? 1;
@@ -513,6 +516,67 @@ export class NodeBuilder {
   }
 }
 
+/** 翻转三角面朝向（用于需要从内侧观看的开口曲面，例如雷达抛物面的凹面） */
+export function invertFaces(geometry: THREE.BufferGeometry): THREE.BufferGeometry {
+  flipWinding(geometry);
+  return geometry;
+}
+
+/**
+ * 渐隐泡沫带（水面尾流 / 船首浪）：位于 XZ 平面、法线朝上，
+ * 宽度从 width0 线性变为 width1，顶点 alpha 从 alpha0 衰减到 0。
+ * 只能配合 'foam'（vertexColors）材质使用。
+ */
+export function foamStrip(
+  fromX: number,
+  fromZ: number,
+  toX: number,
+  toZ: number,
+  width0: number,
+  width1: number,
+  alpha0: number,
+  segments = 6
+): THREE.BufferGeometry {
+  const dx = toX - fromX;
+  const dz = toZ - fromZ;
+  const len = Math.hypot(dx, dz) || 1;
+  const sx = dz / len;
+  const sz = -dx / len;
+  const positions: number[] = [];
+  const colors: number[] = [];
+  const ring: Array<[number, number, number, number, number]> = [];
+  for (let i = 0; i <= segments; i++) {
+    const t = i / segments;
+    const cx = fromX + dx * t;
+    const cz = fromZ + dz * t;
+    const hw = (width0 + (width1 - width0) * t) / 2;
+    const alpha = alpha0 * Math.pow(1 - t, 1.3);
+    ring.push([cx + sx * hw, cz + sz * hw, cx - sx * hw, cz - sz * hw, alpha]);
+  }
+  const push = (x: number, z: number, a: number): void => {
+    positions.push(x, 0, z);
+    colors.push(1, 1, 1, a);
+  };
+  for (let i = 0; i < segments; i++) {
+    const [lx0, lz0, rx0, rz0, a0] = ring[i];
+    const [lx1, lz1, rx1, rz1, a1] = ring[i + 1];
+    push(lx0, lz0, a0);
+    push(rx0, rz0, a0);
+    push(lx1, lz1, a1);
+    push(rx0, rz0, a0);
+    push(rx1, rz1, a1);
+    push(lx1, lz1, a1);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  g.setAttribute('color', new THREE.Float32BufferAttribute(colors, 4));
+  g.computeVertexNormals();
+  // 统一朝上：若第一面法线朝下则整体翻转
+  const normal = g.getAttribute('normal');
+  if (normal.count > 0 && normal.getY(0) < 0) flipWinding(g);
+  return g;
+}
+
 function flipWinding(geometry: THREE.BufferGeometry): void {
   if (geometry.index) {
     const index = geometry.index;
@@ -526,7 +590,7 @@ function flipWinding(geometry: THREE.BufferGeometry): void {
     const pos = geometry.getAttribute('position');
     const nor = geometry.getAttribute('normal');
     for (let i = 0; i < pos.count; i += 3) {
-      for (const attr of [pos, nor]) {
+      for (const attr of [pos, nor, geometry.getAttribute('color')]) {
         if (!attr) continue;
         const x = attr.getX(i + 1);
         const y = attr.getY(i + 1);
@@ -560,7 +624,7 @@ function normalizeForMerge(geometry: THREE.BufferGeometry): THREE.BufferGeometry
   if (g !== geometry) geometry.dispose();
   if (!g.getAttribute('normal')) g.computeVertexNormals();
   for (const name of Object.keys(g.attributes)) {
-    if (name !== 'position' && name !== 'normal') g.deleteAttribute(name);
+    if (name !== 'position' && name !== 'normal' && name !== 'color') g.deleteAttribute(name);
   }
   g.clearGroups();
   return g;
