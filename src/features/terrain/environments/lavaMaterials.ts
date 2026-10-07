@@ -222,7 +222,7 @@ export function createGlowCards(
   cards: readonly GlowCard[],
   name: string,
   intensity = 1
-): { mesh: THREE.Mesh; update(elapsed: number): void } {
+): { mesh: THREE.Mesh; update(elapsed: number): void; setIntensity(value: number): void } {
   const base = new THREE.PlaneGeometry(1, 1);
   const geometry = new THREE.InstancedBufferGeometry();
   geometry.index = base.index;
@@ -270,6 +270,10 @@ export function createGlowCards(
     mesh,
     update(elapsed: number) {
       uniforms.uTime.value = elapsed;
+    },
+    setIntensity(value: number) {
+      uniforms.uIntensity.value = Number.isFinite(value) ? Math.max(0, value) : 0;
+      mesh.visible = uniforms.uIntensity.value > 0.001;
     },
   };
 }

@@ -18,7 +18,13 @@ import { smoothstep } from '../worldscape/noise';
 import { buildWorldscapeWater, sampleWaveHeight, type WorldscapeWater } from '../worldscape/water';
 import type { TerrainEnvironmentContext } from './TerrainEnvironment';
 import { EnvironmentBase } from './EnvironmentBase';
-import { createPuffField, mulberry32, PolarShape, type PuffEmitter } from './envKit';
+import {
+  createPuffField,
+  mulberry32,
+  PolarShape,
+  setInstanceTransform,
+  type PuffEmitter,
+} from './envKit';
 import { createGlowCards } from './lavaMaterials';
 import { ArcticField, FLOE_FREEBOARD, type IceFeature } from './ArcticField';
 import { createIceMaterial } from './iceMaterials';
@@ -69,6 +75,7 @@ export class ArcticEnvironment extends EnvironmentBase {
 
     this.buildSea(ctx);
     this.buildStaticIce(ctx);
+    this.buildIceRubble(ctx);
     const floes = this.buildFloes(ctx);
 
     const outposts = buildArcticOutposts(this.field, tokens, this.waterY);
@@ -296,6 +303,73 @@ export class ArcticEnvironment extends EnvironmentBase {
       colors[i * 3 + 2] = color.b;
     }
     geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* 冰崖碎冰与冰架压力脊：打破平整轮廓的近景细节                          */
+  /* ------------------------------------------------------------------ */
+
+  private buildIceRubble(ctx: TerrainEnvironmentContext): void {
+    const rng = mulberry32(7373);
+    const base = new THREE.DodecahedronGeometry(1, 0);
+    const geometry = base.index ? base.toNonIndexed() : base;
+    if (geometry !== base) base.dispose();
+    // 顶点色：朝上面雪白，其余冰蓝
+    const normal = geometry.getAttribute('normal');
+    const colors = new Float32Array(normal.count * 3);
+    const snow = new THREE.Color(0xe8f2f8);
+    const ice = new THREE.Color(0x7cc2e2);
+    const c = new THREE.Color();
+    for (let i = 0; i < normal.count; i++) {
+      c.copy(ice).lerp(snow, smoothstep(0.2, 0.7, normal.getY(i)));
+      colors[i * 3] = c.r;
+      colors[i * 3 + 1] = c.g;
+      colors[i * 3 + 2] = c.b;
+    }
+    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+    const placements: Array<[number, number, number, number, number, number]> = [];
+    for (const feature of this.field.features) {
+      if (feature.kind === 'pinnacle') continue;
+      const shape = feature.shape;
+      const isShelf = feature.kind === 'shelf';
+      const toCenter = Math.atan2(-shape.centerZ, -shape.centerX);
+      const count = Math.round((isShelf ? 150 : 22) * ctx.detailScale);
+      for (let i = 0; i < count; i++) {
+        const theta = isShelf ? toCenter + (rng() - 0.5) * 1.3 : rng() * Math.PI * 2;
+        const edgeR = shape.radiusAt(theta);
+        const floating = rng() < 0.55;
+        // 漂浮碎冰：冰崖外 3~30 米、贴水面；压力脊：冰架内 4~40 米、顶面之上
+        const r = floating ? edgeR + 3 + rng() * 27 : edgeR - 4 - rng() * 36;
+        const x = shape.centerX + Math.cos(theta) * r;
+        const z = shape.centerZ + Math.sin(theta) * r;
+        const size = floating ? 1.5 + rng() * 4.5 : 2 + rng() * 5;
+        const y = floating ? this.waterY + size * 0.15 : this.waterY + feature.top + size * 0.25;
+        placements.push([x, y, z, size, rng() * Math.PI * 2, rng()]);
+      }
+    }
+    const material = createIceMaterial({ waterY: this.waterY, cacheKey: 'rubble' });
+    const mesh = new THREE.InstancedMesh(geometry, material, Math.max(1, placements.length));
+    mesh.name = 'arcticIceRubble';
+    placements.forEach(([x, y, z, size, yaw, squash], i) => {
+      setInstanceTransform(
+        mesh,
+        i,
+        x,
+        y,
+        z,
+        yaw,
+        size * 1.3,
+        size * (0.45 + squash * 0.4),
+        size,
+        squash * 0.5,
+        (squash - 0.5) * 0.6
+      );
+    });
+    mesh.count = placements.length;
+    mesh.instanceMatrix.needsUpdate = true;
+    mesh.receiveShadow = true;
+    this.root.add(mesh);
   }
 
   /* ------------------------------------------------------------------ */

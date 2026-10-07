@@ -95,9 +95,11 @@ export class VolcanoEnvironment extends EnvironmentBase {
     this.root.add(foundry.group);
 
     const atmosphere = this.buildAtmosphere(ctx, foundry);
+    const plumeLightning = this.buildPlumeLightning(ctx, rng);
 
-    this.animate((_dt, elapsed) => {
+    this.animate((dt, elapsed) => {
       lavaTime.value = elapsed;
+      plumeLightning(dt, elapsed);
       for (const material of lavaMaterials) {
         material.uniforms.uTime.value = elapsed;
       }
@@ -428,6 +430,123 @@ export class VolcanoEnvironment extends EnvironmentBase {
     boulders.count = boulderIndex;
     boulders.instanceMatrix.needsUpdate = true;
     this.root.add(boulders);
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* 火山灰柱中的火山闪电（dirty thunderstorm）                             */
+  /* ------------------------------------------------------------------ */
+
+  private buildPlumeLightning(
+    ctx: TerrainEnvironmentContext,
+    rng: () => number
+  ): (dt: number, elapsed: number) => void {
+    const cone = VOLCANO_MAIN_CONE;
+    const craterTop = this.waterY + this.field.groundHeight(cone.x + cone.craterRadius, cone.z);
+    const windSpeed = 3 + ctx.windStrength * 7;
+    const windX = Math.cos(ctx.windAngle) * windSpeed;
+    const windZ = Math.sin(ctx.windAngle) * windSpeed;
+    const maxSegments = 28;
+    const positions = new Float32Array(maxSegments * 2 * 3);
+    const attribute = new THREE.BufferAttribute(positions, 3);
+    attribute.setUsage(THREE.DynamicDrawUsage);
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', attribute);
+    geometry.setDrawRange(0, 0);
+    const material = new THREE.LineBasicMaterial({
+      color: 0xe2d6ff,
+      transparent: true,
+      opacity: 0,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      depthTest: true,
+      fog: false,
+    });
+    const bolt = new THREE.LineSegments(geometry, material);
+    bolt.name = 'volcanoPlumeLightning';
+    bolt.frustumCulled = false;
+    bolt.renderOrder = 0;
+    bolt.visible = false;
+    this.root.add(bolt);
+    const flash = createGlowCards(
+      [{ x: cone.x, y: craterTop + 160, z: cone.z, size: 420, color: 0xb8a4ff, flicker: 0 }],
+      'volcanoPlumeFlash',
+      0
+    );
+    flash.setIntensity(0);
+    this.root.add(flash.mesh);
+    const flashCard = flash.mesh.geometry.getAttribute('aCard') as THREE.InstancedBufferAttribute;
+
+    const duration = 0.34;
+    let cooldown = 2 + rng() * 3;
+    let remaining = 0;
+
+    const strike = (): void => {
+      // 灰柱轴线随风偏移：高度 h 处偏移 ≈ 风速 × 上升时间
+      const height = 110 + rng() * 240;
+      const drift = height / 16;
+      let x = cone.x + windX * drift + (rng() - 0.5) * 90;
+      let y = craterTop + height;
+      let z = cone.z + windZ * drift + (rng() - 0.5) * 90;
+      let segment = 0;
+      const push = (nx: number, ny: number, nz: number): void => {
+        if (segment >= maxSegments) return;
+        positions.set([x, y, z, nx, ny, nz], segment * 6);
+        segment++;
+      };
+      const mainSteps = 9 + Math.floor(rng() * 6);
+      const branchAt = 3 + Math.floor(rng() * 4);
+      let branchFrom: [number, number, number] | null = null;
+      for (let s = 0; s < mainSteps; s++) {
+        const nx = x + (rng() - 0.5) * 46;
+        const ny = y - 10 - rng() * 22;
+        const nz = z + (rng() - 0.5) * 46;
+        push(nx, ny, nz);
+        x = nx;
+        y = ny;
+        z = nz;
+        if (s === branchAt) branchFrom = [x, y, z];
+      }
+      if (branchFrom) {
+        [x, y, z] = branchFrom;
+        for (let s = 0; s < 6; s++) {
+          const nx = x + (rng() - 0.3) * 40;
+          const ny = y - 6 - rng() * 14;
+          const nz = z + (rng() - 0.3) * 40;
+          push(nx, ny, nz);
+          x = nx;
+          y = ny;
+          z = nz;
+        }
+      }
+      geometry.setDrawRange(0, segment * 2);
+      attribute.needsUpdate = true;
+      bolt.visible = true;
+      flashCard.setXYZ(0, positions[0], positions[1] - 40, positions[2]);
+      flashCard.needsUpdate = true;
+      remaining = duration;
+    };
+
+    return (dt: number, elapsed: number) => {
+      if (remaining > 0) {
+        remaining -= dt;
+        const fade = Math.max(0, remaining / duration);
+        const flicker = fade * (0.45 + 0.55 * Math.abs(Math.sin(elapsed * 61)));
+        material.opacity = flicker;
+        flash.setIntensity(flicker * 0.8);
+        flash.update(elapsed);
+        if (remaining <= 0) {
+          bolt.visible = false;
+          flash.setIntensity(0);
+          // 偶发连闪
+          cooldown = rng() < 0.3 ? 0.12 + rng() * 0.2 : 2.5 + rng() * 6;
+        }
+        return;
+      }
+      cooldown -= dt;
+      if (cooldown <= 0) {
+        strike();
+      }
+    };
   }
 
   /* ------------------------------------------------------------------ */
