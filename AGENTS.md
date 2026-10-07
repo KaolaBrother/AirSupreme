@@ -1,34 +1,42 @@
-# AGENTS.md
-
-> **MANDATORY — READ CLAUDE.md BEFORE ANY ACTION THIS SESSION.**
->
-> `CLAUDE.md` in this repository root is the **single canonical source** for all
-> non-negotiable rules, project conventions, workflow constraints, and agent
-> behavior. AGENTS.md exists **only** to direct you there.
->
-> **Required at session start, before any tool call, edit, or response:**
->
-> 1. Read `CLAUDE.md` in full.
-> 2. Treat its `## Non-Negotiable Rules` section as binding for every action you take in this repo.
-> 3. If `CLAUDE.md` is missing, **stop and ask the user** — do not proceed on assumptions.
->
-> Do not skip this step because the task looks small. Do not rely on prior
-> session memory. Re-read on every new session.
-
----
-
-*All other guidance — the workflow, scripts, conventions, gotchas — lives in `CLAUDE.md`. This file intentionally contains nothing else.*
-
----
-> Note: the content below is the AGENTS.md contract.
 # AirSupreme Agent Guide
 
-## Project
-- Stack: `Three.js + TypeScript + Vite`
-- Architecture: modular, event-driven
-- Do not assume a fixed branch; check `git branch --show-current` when branch context matters
-- Do not merge to `main` unless explicitly asked
-- Use `src/core/GameCoordinator.ts`, not `src/Game.legacy.ts`
+`AGENTS.md` is the single authority for project facts and owner rules. Read it at session start.
+
+## Project Snapshot
+
+- Purpose: AirSupreme is a 3D aerial combat game for desktop and mobile.
+- Stack: Three.js + TypeScript + Vite
+- Architecture:
+  - `GameCoordinator` assembles runtime systems over a typed `EventBus`
+  - Runtime systems implement `IGameSystem`; combat and presentation runtimes load on demand
+  - Do not use `src/Game.legacy.ts`
+
+## Commands
+
+- Install: `npm install`
+- Test: `npm run test:run` (watch: `npm run test`; coverage: `npm run test:coverage`; one file: `npx vitest run path/to/file.test.ts`)
+- Lint/typecheck/build: `npm run lint`, `npm run lint:fix`, `npm run format`, `npm run format:check`, `npx tsc --noEmit`, `npm run build`
+- Dev server: `npm run dev` (http://localhost:3000); preview: `npm run preview`
+
+## Non-Negotiable Rules
+
+- Think before coding: state assumptions, surface ambiguity, and ask when unclear.
+- Read before writing: inspect the target file and relevant surrounding conventions immediately before editing or creating files.
+- Keep it simple: solve the requested problem without speculative abstractions.
+- Make surgical changes: touch only what the task requires.
+- Goal-driven execution: Define verifiable success criteria before starting. Keep the tests in separate custody from the code they judge — whoever implements a behavior does not author its tests. Loop until criteria pass; don't declare done on weak signals.
+- Verify facts, don't fabricate: do not guess API/library behavior, interfaces, or signatures — confirm them against documentation, source, or a run before relying on them. Do not claim to understand code, errors, or requirements you have not verified; name what you do not know and find out.
+- Reuse before adding: before writing a new interface, search for an existing equivalent and extend it rather than duplicate functionality.
+- Escalate irreversible changes: do not unilaterally make hard-to-reverse changes or alter a user-owned contract (public API, schema or data migration, dependency or build-tooling swap, deletion of working capability); state the decision and its evidence, then get confirmation before proceeding.
+- Check `git branch --show-current` before assuming a branch. Do not merge to `main` unless explicitly asked.
+- Orchestrate as PM by default: split work, assign disjoint file ownership, integrate, and validate. Do not implement production code in the main session unless the user asked for a single-file or last-mile change.
+
+## Validation Policy
+
+- Treat background hooks, CI status, and editor diagnostics as advisory. They do not decide done.
+- Do not re-run a full validation suite that just completed unless the tree changed.
+- After meaningful code changes, run `npx tsc --noEmit`, `npm run lint`, `npm run test:run`, and `npm run build`.
+- Narrow local fixes may use targeted checks first; final handoff still runs the full set unless blocked.
 
 ## Execution Plan
 - The live project plan is `IMPLEMENTATION_PLAN.md` at the repository root.
@@ -64,58 +72,18 @@
   - acceptance checks
   - final integration by the main agent
 
-## Commands
-```bash
-# Dev
-npm run dev
+## Project Conventions
 
-# Type / build
-npx tsc --noEmit
-npm run build
-
-# Lint / format
-npm run lint
-npm run lint:fix
-npm run format
-
-# Test
-npm run test:run
-npx vitest run path/to/file.test.ts
-```
-
-## Code Rules
-- Use strict TypeScript. Avoid `any` unless there is no practical alternative.
-- `Three.js` imports: `import * as THREE from 'three';`
-- Local imports: prefer alias `@/`
-- Same-feature imports: prefer relative paths
-- Naming:
-  - classes / enums: `PascalCase`
-  - methods / variables: `camelCase`
-  - constants: `UPPER_SNAKE_CASE`
-  - interfaces: `IPascalCase`
-- Comments:
-  - code comments / JSDoc: Chinese when useful
-  - identifiers: English
-- Formatting:
-  - semicolons
-  - single quotes
-  - trailing commas where valid
-  - print width about 100
-
-## Architecture Rules
-- Use `EventBus` for decoupled communication.
-- All runtime systems should implement `IGameSystem`.
-- Reuse objects for hot paths: projectiles, enemies, particles, indicators.
-- Aircraft rotation should use quaternions, not Euler rotations.
-- Validate positions before use; guard against `NaN` / `Infinity`.
-
-## Game-Specific Rules
-- Healing / respawn flow:
-  - call `playerSystem.syncMaxHealth()` before healing to full
-- Powerup flow:
-  - powerups must not be collectible during respawn
-- Runtime settings shown in menus must be wired to actual gameplay/runtime behavior
-- Prefer config-driven behavior over hardcoded balance values when config already exists
+- Live plan: `IMPLEMENTATION_PLAN.md`. Align non-trivial work with it; update it when a completed or redirected task changes plan state. The user's latest explicit instruction wins.
+- Parallel batches for medium/large work: Batch A visuals/models, Batch B combat/feedback, Batch C runtime/performance/tests. Declare owned files and acceptance checks; serialize any shared file.
+- TypeScript strict. Avoid `any` unless there is no practical alternative.
+- Three.js: `import * as THREE from 'three';`. App imports: prefer `@/`. Same-feature imports: relative paths.
+- Naming: classes/enums `PascalCase`, methods/variables `camelCase`, constants `UPPER_SNAKE_CASE`, interfaces `IPascalCase`.
+- Comments/JSDoc: Chinese when useful; identifiers English. Semicolons, single quotes, trailing commas, ~100 print width.
+- Use `EventBus` for decoupled communication. Runtime systems implement `IGameSystem`. Hot paths reuse pools (projectiles, enemies, particles, indicators). Aircraft rotation uses quaternions, not Euler. Guard positions against `NaN` / `Infinity`.
+- Healing/respawn: call `playerSystem.syncMaxHealth()` before healing to full. Powerups must not be collectible during respawn.
+- Runtime settings shown in menus must be wired to actual gameplay. Prefer config-driven balance when config already exists (`public/config/game-config.json`, `src/config.ts`).
+- Priority: correctness, then performance/lifecycle, then visual/audio polish. Prefer low-risk testable changes over broad rewrites.
 
 ## Key Files
 - Core orchestration: `src/core/GameCoordinator.ts`
@@ -135,16 +103,37 @@ npx vitest run path/to/file.test.ts
 - UI: `src/ui/StartMenu.ts`, `src/ui/HUD.ts`
 - Audio: `src/core/Audio/AudioManager.ts`, `src/core/Audio/MusicSystem.ts`
 
-## Validation
-- For any meaningful code change, finish with:
-  - `npx tsc --noEmit`
-  - `npm run lint`
-  - `npm run test:run`
-  - `npm run build`
-- If doing a narrow local fix, targeted checks are fine first, but final handoff should still run the full set unless blocked.
+## Known Gotchas
 
-## Implementation Priorities
-- Fix correctness first
-- Then performance / memory / lifecycle cleanup
-- Then visuals / audio polish
-- Prefer low-risk, testable changes over broad rewrites
+- `src/Game.legacy.ts` is deprecated; `src/Game.ts` re-exports `GameCoordinator`.
+- `EnemyFSM.ts` is a leftover state machine; do not extend it.
+- Presentation HUD and related runtime may not exist at construct time — they load through `PresentationRuntimeLoader`.
+- On macOS the working tree is case-insensitive: `CLAUDE.md`/`Claude.md` and `AGENTS.md`/`Agents.md` are the same files.
+
+## Documentation Map
+
+- `README.md` — player-facing overview and usage.
+- `CHANGELOG.md` — user-visible changes.
+- `IMPLEMENTATION_PLAN.md` — live implementation plan and batch ownership.
+- `TECHNICAL_DOCUMENTATION.md` — long-form systems reference.
+- `docs/README.md` — documentation index.
+- `docs/architecture.md` — system structure and data flow.
+- `docs/api.md` — EventBus, config, logger, and contracts.
+- `docs/conventions.md` — coding, testing, Git, and review rules.
+- `docs/decisions/` — architecture decision records.
+
+## Documentation Update Checklist
+
+When behavior, contracts, or plan status change, update the matching map entry or record a no-impact reason: `CHANGELOG.md` (player-visible), `docs/architecture.md` / `docs/api.md` (structure and contracts), `IMPLEMENTATION_PLAN.md` (phase status).
+
+## Workflow Setup
+
+- `kaola-workflow-init` refreshes repository setup and project guidance; it does not start a run.
+- The preserved legacy `kaola-workflow/ROADMAP.md` is frozen and inert, not a backlog mirror.
+
+## Maintenance
+
+- Keep this file under 200 lines — a recommendation, not a limit; move detail to docs or skills.
+- Add rules only after repeated mistakes, review feedback, or stable project conventions.
+- Do not use `@path` imports for optional reference material.
+- Do not paste changelogs, API dumps, how-to tutorials, or source files here.
