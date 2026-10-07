@@ -247,6 +247,7 @@ export function installDevHooks(access: DevHookAccess): void {
       faction: unit.faction,
       health: unit.getHealth(),
       targetable: unit.isTargetable(),
+      stunned: unit.isStunned(),
       position: toPlain(unit.getPosition(new THREE.Vector3())),
     }));
 
