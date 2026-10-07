@@ -118,6 +118,8 @@ export class AbyssalLeviathanMineField {
       const body = new THREE.Mesh(this.bodyGeometry, this.bodyMaterial);
       body.name = `leviathan_mine_body_${i}`;
       body.userData.hitRadius = size * 2.4;
+      // 供控制器在导弹锁定时过滤（水雷可被击毁，但不应抢走对 Boss 本体的锁定）
+      body.userData.bossHazardTarget = true;
       const capMaterial = new THREE.MeshStandardMaterial({
         color: 0x330608,
         roughness: 0.3,
