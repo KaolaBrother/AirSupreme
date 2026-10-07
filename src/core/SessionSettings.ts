@@ -1,6 +1,10 @@
 import { type QualityPreset } from '@/config';
+import { TOTAL_LEVELS } from '@/features/campaign/CampaignData';
 
 export type GameMode = 'normal' | 'boss';
+
+/** 视角偏好（与 CameraRig 的 CameraMode 取值一致） */
+export type CameraModeSetting = 'third-person' | 'first-person';
 
 export interface AudioSettings {
   sfxVolume: number;
@@ -22,6 +26,7 @@ export interface StartFlowSettings {
   startLevel: number;
   gameMode: GameMode;
   testScore: number;
+  cameraMode: CameraModeSetting;
 }
 
 export interface SessionSettingsSnapshot {
@@ -43,6 +48,7 @@ export const DEFAULT_START_FLOW_SETTINGS: StartFlowSettings = {
   startLevel: 1,
   gameMode: 'normal',
   testScore: 0,
+  cameraMode: 'third-person',
 };
 
 /** 开始菜单与暂停设置共用的 localStorage 键 */
@@ -83,6 +89,14 @@ function normalizeQualityPreset(
 
 function normalizeGameMode(value: unknown, fallback: GameMode = 'normal'): GameMode {
   return value === 'boss' ? 'boss' : fallback;
+}
+
+/** 非法值回退到 fallback（默认第三人称） */
+export function normalizeCameraModeSetting(
+  value: unknown,
+  fallback: CameraModeSetting = 'third-person'
+): CameraModeSetting {
+  return value === 'first-person' || value === 'third-person' ? value : fallback;
 }
 
 function normalizeTestScore(
@@ -130,15 +144,23 @@ export function normalizeStartFlowSettings(raw?: Partial<StartFlowSettings>): St
     startLevel: clampInt(
       source.startLevel,
       1,
-      5,
+      TOTAL_LEVELS,
       DEFAULT_START_FLOW_SETTINGS.startLevel
     ),
     gameMode: normalizeGameMode(source.gameMode, DEFAULT_START_FLOW_SETTINGS.gameMode),
     testScore: normalizeTestScore(source.testScore),
+    cameraMode: normalizeCameraModeSetting(
+      source.cameraMode,
+      DEFAULT_START_FLOW_SETTINGS.cameraMode
+    ),
   };
 }
 
-function getLocalStorage(): Storage | null {
+/**
+ * 调用时才访问 window.localStorage；不可用（无 DOM、隐私模式、权限拒绝）时返回 null。
+ * 存档系统复用同一入口，保证所有持久化都“读写失败不抛出”。
+ */
+export function getLocalStorage(): Storage | null {
   try {
     const storage = window.localStorage;
     if (
