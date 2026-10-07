@@ -78,59 +78,14 @@ export function injectHudTokens(): void {
   document.head.appendChild(style);
 }
 
-/** 视口坐标下的包围盒（像素） */
-export interface HudRect {
-  left: number;
-  top: number;
-  right: number;
-  bottom: number;
-  width: number;
-  height: number;
-}
-
-/** 右下“挂载物”面板（特殊武器 + 热焰弹）的宽度，按布局密度 */
-export const HUD_STORES_WIDTH: Readonly<Record<HudLayoutDensity, number>> = {
-  desktop: 228,
-  'touch-landscape': 172,
-  'touch-portrait': 148,
-};
-
-/** 与 HUD 布局协同的元素 ID（无线电面板据此避让） */
-export const HUD_STORES_ID = 'hud-stores';
-
-function toHudRect(element: Element | null): HudRect | null {
-  if (!element) {
-    return null;
-  }
-  const rect = element.getBoundingClientRect();
-  if (rect.width <= 0 || rect.height <= 0) {
-    return null;
-  }
-  return {
-    left: rect.left,
-    top: rect.top,
-    right: rect.right,
-    bottom: rect.bottom,
-    width: rect.width,
-    height: rect.height,
-  };
-}
-
-/** 读取元素包围盒；缺失或不可见（零尺寸）时返回 null。仅在布局变化时调用，勿每帧调用。 */
-export function measureHudElement(id: string): HudRect | null {
-  if (typeof document === 'undefined') {
-    return null;
-  }
-  return toHudRect(document.getElementById(id));
-}
-
-/** 触控按钮区（#mobile-controls 内的 .button-container）包围盒；桌面端返回 null */
-export function measureTouchDeck(): HudRect | null {
-  if (typeof document === 'undefined') {
-    return null;
-  }
-  return toHudRect(document.querySelector('#mobile-controls .button-container'));
-}
+/**
+ * 覆盖层叠放顺序：HUD 50 < 无线电 55 < 移动端控件 100 < 结算 120 < 剧情卡片 150 < 暂停菜单 200
+ */
+export const HUD_LAYERS = {
+  hud: 50,
+  radio: 55,
+  story: 150,
+} as const;
 
 /** 用户是否请求减少动态效果 */
 export function prefersReducedMotion(): boolean {
