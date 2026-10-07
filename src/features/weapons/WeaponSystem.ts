@@ -12,16 +12,14 @@ import {
 } from './WeaponTypes';
 import { TargetSnapshotBuffer, isFiniteVector } from './WeaponTargeting';
 import { WeaponFx } from './WeaponFx';
+import { EmpController, LaserController, RailgunController } from './EnergyWeaponControllers';
+import { ProjectileController } from './ProjectileController';
 import {
-  EmpController,
-  LaserController,
-  ProjectileController,
-  RailgunController,
   createFireFrame,
   type FireFrame,
   type SurfaceSampler,
   type WeaponContext,
-} from './WeaponControllers';
+} from './WeaponContext';
 
 /**
  * 特殊武器系统
