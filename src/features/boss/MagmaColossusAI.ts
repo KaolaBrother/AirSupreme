@@ -288,7 +288,7 @@ export class MagmaColossusAI implements IAdvancedBoss {
   private collapseAmount = 0;
   private gaitCursor = 0;
 
-  private cannonTimer = 2.2;
+  private cannonTimer = 0.9;
   private cannonIndex = 0;
   private cannonFlash = 0;
   private mortarTimer = 4.5;

@@ -308,7 +308,7 @@ export class AbyssalLeviathanAI implements IAdvancedBoss {
   private torpedoTimer = 2;
   private sonarTimer = 0.5;
   private sonarFlash = 0;
-  private turretTimer = 2;
+  private turretTimer = 0.8;
   private turretIndex = 0;
   private ramState: RamState = 'idle';
   private ramTimer = 0;
@@ -436,6 +436,7 @@ export class AbyssalLeviathanAI implements IAdvancedBoss {
     for (const silo of silos) this.partRoles.set(silo, 'hatch');
     for (const turret of this.rig.turrets) this.partRoles.set(turret.housing, 'turret');
 
+    this.speed = Number.isFinite(config.speed) ? Math.max(0, config.speed) * 0.6 : 0;
     this.applyHullPose();
     this.mesh.quaternion.setFromAxisAngle(UP, this.yaw);
     this.mesh.updateMatrixWorld(true);
@@ -1067,6 +1068,10 @@ export class AbyssalLeviathanAI implements IAdvancedBoss {
           targetSpeed = speed * 0.55 * tuning.speedFactor;
         }
       }
+    } else if (this.diveState === 'breaching') {
+      // 带着航速冲出水面：上浮过程中继续向前滑行
+      targetSpeed = speed * 0.5 * tuning.speedFactor;
+      response = 0.5;
     } else if (this.diveState === 'diving' || this.diveState === 'submerged') {
       const holding = this.diveState === 'submerged' && this.telegraphShown;
       if (this.hasBreachTarget && !holding) {
@@ -1133,7 +1138,11 @@ export class AbyssalLeviathanAI implements IAdvancedBoss {
       if (this.diveState === 'submerged' && !this.telegraphShown) this.updateTorpedoes(dt, tuning);
       return;
     }
-    if (this.diveState === 'breaching') return;
+    if (this.diveState === 'breaching') {
+      // 跃出水面的后半段炮塔已经露出水面，可以开火
+      this.updateTurrets(dt, tuning);
+      return;
+    }
 
     this.updateTurrets(dt, tuning);
     if (this.phase >= 3) {
