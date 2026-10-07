@@ -1,6 +1,10 @@
 import { type QualityPreset } from '@/config';
+import { TOTAL_LEVELS } from '@/features/campaign/CampaignData';
 
 export type GameMode = 'normal' | 'boss';
+
+/** 视角偏好（与 CameraRig 的 CameraMode 取值一致） */
+export type CameraModeSetting = 'third-person' | 'first-person';
 
 export interface AudioSettings {
   sfxVolume: number;
@@ -22,6 +26,7 @@ export interface StartFlowSettings {
   startLevel: number;
   gameMode: GameMode;
   testScore: number;
+  cameraMode: CameraModeSetting;
 }
 
 export interface SessionSettingsSnapshot {
@@ -43,6 +48,7 @@ export const DEFAULT_START_FLOW_SETTINGS: StartFlowSettings = {
   startLevel: 1,
   gameMode: 'normal',
   testScore: 0,
+  cameraMode: 'third-person',
 };
 
 /** 开始菜单与暂停设置共用的 localStorage 键 */
@@ -85,10 +91,15 @@ function normalizeGameMode(value: unknown, fallback: GameMode = 'normal'): GameM
   return value === 'boss' ? 'boss' : fallback;
 }
 
-function normalizeTestScore(
+/** 非法值回退到 fallback（默认第三人称） */
+export function normalizeCameraModeSetting(
   value: unknown,
-  fallback: TestScoreOption = 0
-): TestScoreOption {
+  fallback: CameraModeSetting = 'third-person'
+): CameraModeSetting {
+  return value === 'first-person' || value === 'third-person' ? value : fallback;
+}
+
+function normalizeTestScore(value: unknown, fallback: TestScoreOption = 0): TestScoreOption {
   const clamped = clampInt(value, 0, MAX_TEST_SCORE, fallback);
   let closest: TestScoreOption = TEST_SCORE_OPTIONS[0];
   let closestDistance = Math.abs(clamped - closest);
@@ -108,12 +119,7 @@ export function normalizeStartFlowSettings(raw?: Partial<StartFlowSettings>): St
   const source = raw ?? {};
 
   return {
-    difficulty: clampInt(
-      source.difficulty,
-      1,
-      5,
-      DEFAULT_START_FLOW_SETTINGS.difficulty
-    ),
+    difficulty: clampInt(source.difficulty, 1, 5, DEFAULT_START_FLOW_SETTINGS.difficulty),
     sfxVolume: clampUnit(source.sfxVolume, DEFAULT_START_FLOW_SETTINGS.sfxVolume),
     musicVolume: clampUnit(source.musicVolume, DEFAULT_START_FLOW_SETTINGS.musicVolume),
     qualityPreset: normalizeQualityPreset(source.qualityPreset),
@@ -121,24 +127,27 @@ export function normalizeStartFlowSettings(raw?: Partial<StartFlowSettings>): St
       typeof source.tutorialEnabled === 'boolean'
         ? source.tutorialEnabled
         : DEFAULT_START_FLOW_SETTINGS.tutorialEnabled,
-    playerLives: clampInt(
-      source.playerLives,
-      1,
-      9,
-      DEFAULT_START_FLOW_SETTINGS.playerLives
-    ),
+    playerLives: clampInt(source.playerLives, 1, 9, DEFAULT_START_FLOW_SETTINGS.playerLives),
     startLevel: clampInt(
       source.startLevel,
       1,
-      5,
+      TOTAL_LEVELS,
       DEFAULT_START_FLOW_SETTINGS.startLevel
     ),
     gameMode: normalizeGameMode(source.gameMode, DEFAULT_START_FLOW_SETTINGS.gameMode),
     testScore: normalizeTestScore(source.testScore),
+    cameraMode: normalizeCameraModeSetting(
+      source.cameraMode,
+      DEFAULT_START_FLOW_SETTINGS.cameraMode
+    ),
   };
 }
 
-function getLocalStorage(): Storage | null {
+/**
+ * 调用时才访问 window.localStorage；不可用（无 DOM、隐私模式、权限拒绝）时返回 null。
+ * 存档系统复用同一入口，保证所有持久化都“读写失败不抛出”。
+ */
+export function getLocalStorage(): Storage | null {
   try {
     const storage = window.localStorage;
     if (
@@ -208,7 +217,9 @@ export function saveStartFlowSettings(settings?: Partial<StartFlowSettings>): vo
   }
 }
 
-export function getAudioSettings(settings: Pick<StartFlowSettings, 'sfxVolume' | 'musicVolume'>): AudioSettings {
+export function getAudioSettings(
+  settings: Pick<StartFlowSettings, 'sfxVolume' | 'musicVolume'>
+): AudioSettings {
   return {
     sfxVolume: clampUnit(settings.sfxVolume, DEFAULT_START_FLOW_SETTINGS.sfxVolume),
     musicVolume: clampUnit(settings.musicVolume, DEFAULT_START_FLOW_SETTINGS.musicVolume),
