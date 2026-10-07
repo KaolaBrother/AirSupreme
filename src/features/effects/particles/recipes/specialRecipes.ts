@@ -278,19 +278,19 @@ export function emitEmpBurst(fx: ParticleEmitter, center: THREE.Vector3, radius:
   fx.emit(ParticleType.EXPLOSION, origin, {
     speed: 0,
     life: 0.22,
-    size: 10,
+    size: 9,
     sizeEnd: 0.8,
     color: scratchColor.set(0xd8f8ff),
-    intensity: 6,
+    intensity: 3.2,
   });
   fx.emit(ParticleType.GLOW, origin, {
     speed: 0,
     life: 0.18,
-    size: 18,
+    size: 16,
     sizeEnd: 1.4,
     color: scratchColor.set(EMP_CYAN),
     cell: VfxCell.FLARE,
-    intensity: 3,
+    intensity: 1.8,
   });
 
   // 扩散电环：环在格内 0.8 半径处 → 末尺寸使可见半径 ≈ r
@@ -302,8 +302,8 @@ export function emitEmpBurst(fx: ParticleEmitter, center: THREE.Vector3, radius:
     sizeEnd: 1 / 0.06,
     color: scratchColor.set(EMP_CYAN),
     cell: VfxCell.THIN_RING,
-    alpha: 1,
-    intensity: 3.2,
+    alpha: 0.95,
+    intensity: 1.7,
     rotation: 0,
   });
   fx.emit(ParticleType.RING, origin, {
@@ -313,8 +313,8 @@ export function emitEmpBurst(fx: ParticleEmitter, center: THREE.Vector3, radius:
     sizeEnd: 1 / 0.05,
     color: scratchColor.set(0x3fa8ff),
     cell: VfxCell.THIN_RING,
-    alpha: 0.75,
-    intensity: 2.2,
+    alpha: 0.7,
+    intensity: 1.3,
     planar: true,
     rotation: 0,
   });
@@ -324,8 +324,8 @@ export function emitEmpBurst(fx: ParticleEmitter, center: THREE.Vector3, radius:
     size: ringEnd * 0.04,
     sizeEnd: 0.6 / 0.04,
     color: scratchColor.set(0xbff4ff),
-    alpha: 0.5,
-    intensity: 2,
+    alpha: 0.4,
+    intensity: 1.1,
     rotation: 0,
   });
 
@@ -349,7 +349,7 @@ export function emitEmpBurst(fx: ParticleEmitter, center: THREE.Vector3, radius:
           size: rand(0.14, 0.24) * r,
           sizeEnd: 1.15,
           color: scratchColor.set(EMP_CYAN),
-          intensity: 3.4,
+          intensity: 2,
         });
       }
       const sparks = fx.count(8, 3);
@@ -373,10 +373,10 @@ export function emitEmpBurst(fx: ParticleEmitter, center: THREE.Vector3, radius:
     fx.emit(ParticleType.ELECTRIC, origin, {
       speed: 0,
       life: rand(0.3, 0.5),
-      size: rand(6, 10),
+      size: rand(4, 7),
       sizeEnd: 1.3,
       color: scratchColor.set(0x9feeff),
-      intensity: 3,
+      intensity: 1.5,
     });
   }
 }

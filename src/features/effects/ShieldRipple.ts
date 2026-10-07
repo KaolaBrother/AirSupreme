@@ -71,12 +71,12 @@ void main() {
   }
 
   float idle = (0.012 + 0.13 * fresnel) * lines + fresnel * 0.035;
-  float energy = lines * ripple * 2.2 + ripple * 0.3 + flash * (0.8 + lines * 1.2);
+  float energy = lines * ripple * 1.1 + ripple * 0.14 + flash * (0.32 + lines * 0.55);
   float intensity = (idle + energy) * uFade;
   if (intensity < 0.003) discard;
 
   vec3 rgb = mix(uColor, vec3(1.0), clamp(flash * 0.65 + ripple * 0.25, 0.0, 1.0));
-  rgb *= intensity * (1.0 + flash * 1.6);
+  rgb *= intensity * (1.0 + flash * 0.5);
   gl_FragColor = vec4(rgb, 1.0);
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
