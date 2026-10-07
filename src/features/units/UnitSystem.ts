@@ -601,6 +601,8 @@ export class UnitSystem implements IGameSystem {
     this.onExplosion?.(position, scale, unit.domain);
     this.onUnitDestroyed?.(unit, position, byPlayer);
     if (unit.config.isEscort) this.onEscortResult?.(false, unit);
+    // 小型无人机在空中直接炸成碎片，不播放坠落
+    if (unit.type === UnitType.DRONE) unit.removable = true;
   }
 
   /** 非伤害途径的死亡（自杀撞击 / 坠地） */
@@ -643,8 +645,15 @@ export class UnitSystem implements IGameSystem {
         unit.deathVelocity.x *= 1 - Math.min(1, dt * 0.3);
         unit.deathVelocity.z *= 1 - Math.min(1, dt * 0.3);
         p.addScaledVector(unit.deathVelocity, dt);
-        unit.roll += unit.deathSpin * dt;
-        unit.pitch = Math.max(-1.1, unit.pitch - dt * 0.35);
+        if (unit.type === UnitType.ATTACK_HELICOPTER) {
+          // 直升机失去尾桨：绕竖轴打转下坠
+          unit.heading += unit.deathSpin * 2.6 * dt;
+          unit.roll = Math.sin(this.time * 3 + unit.seed * 6) * 0.25;
+          unit.pitch = Math.max(-0.35, unit.pitch - dt * 0.1);
+        } else {
+          unit.roll += unit.deathSpin * dt;
+          unit.pitch = Math.max(-1.1, unit.pitch - dt * 0.35);
+        }
         applyAttitude(unit);
         if (particles && unit.smokeTimer <= 0) {
           unit.smokeTimer = 0.06;
