@@ -369,14 +369,27 @@ export class VolcanoEnvironment extends EnvironmentBase {
     );
     columns.name = 'basaltColumns';
     columns.castShadow = true;
-    // 沿海岸线挑选若干簇
+    // 沿真实海岸线（自岛心向外步进，地面首次低于水位处）挑选若干簇；火山锥入海处跳过
     let placed = 0;
     const clusterCount = 11;
     for (let c = 0; c < clusterCount && placed < columnCount; c++) {
       const theta = (c / clusterCount) * Math.PI * 2 + rng() * 0.3;
-      const coastR = field.coast.radiusAt(theta);
-      const cx = field.coast.centerX + Math.cos(theta) * (coastR - 10);
-      const cz = field.coast.centerZ + Math.sin(theta) * (coastR - 10);
+      const dirX = Math.cos(theta);
+      const dirZ = Math.sin(theta);
+      let shoreR = -1;
+      for (let r = 500; r <= 1800; r += 8) {
+        const h = field.groundHeight(
+          field.coast.centerX + dirX * r,
+          field.coast.centerZ + dirZ * r
+        );
+        if (h < 0.5) {
+          shoreR = r;
+          break;
+        }
+      }
+      const cx = field.coast.centerX + dirX * (shoreR - 12);
+      const cz = field.coast.centerZ + dirZ * (shoreR - 12);
+      if (shoreR < 0 || field.groundHeight(cx, cz) > 8) continue;
       const perCluster = Math.floor(columnCount / clusterCount);
       for (let i = 0; i < perCluster && placed < columnCount; i++) {
         const angle = rng() * Math.PI * 2;
@@ -384,6 +397,7 @@ export class VolcanoEnvironment extends EnvironmentBase {
         const x = cx + Math.cos(angle) * radius;
         const z = cz + Math.sin(angle) * radius;
         const ground = this.waterY + field.groundHeight(x, z);
+        if (ground > this.waterY + 10) continue;
         const height = 6 + rng() * 26 * (1 - radius / 70);
         const base = Math.min(ground, this.waterY) - 4;
         const top = Math.max(ground, this.waterY) + height;

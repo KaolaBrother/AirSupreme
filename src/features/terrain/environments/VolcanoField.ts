@@ -236,7 +236,21 @@ export class VolcanoField {
     this.riverDepth = new Float32Array(SDF_RES * SDF_RES);
     this.rasterizeRivers();
 
-    this.lakeLevels = VOLCANO_LAVA_LAKES.map((lake) => this.baseHeight(lake.x, lake.z) - 2.5);
+    // 湖面取湖缘一圈基础高度的最低点再下沉 1 米：坡地上的熔岩湖下沉成坑，湖盘边缘永不悬空
+    this.lakeLevels = VOLCANO_LAVA_LAKES.map((lake) => {
+      let rimMin = Infinity;
+      for (let i = 0; i < 24; i++) {
+        const angle = (i / 24) * Math.PI * 2;
+        rimMin = Math.min(
+          rimMin,
+          this.baseHeight(
+            lake.x + Math.cos(angle) * lake.radius,
+            lake.z + Math.sin(angle) * lake.radius
+          )
+        );
+      }
+      return Math.min(rimMin, this.baseHeight(lake.x, lake.z)) - 1;
+    });
     this.craterLavaLevels = VOLCANO_CONES.map((cone) =>
       cone.lavaCrater ? this.coneRimHeight(cone) + 4 - cone.craterDepth * 0.8 : null
     );
