@@ -111,6 +111,8 @@ interface TrackState {
   params: InstrumentParams;
   input: PatternInput;
   bus: GainNode;
+  /** 上一次设定的图层开关（1 / 0），避免重复写自动化 */
+  layer: number;
   host: VoiceHost;
   priority: boolean;
   isDrum: boolean;
@@ -189,6 +191,8 @@ export class Sequencer {
   private globalStep = 0;
   private sectionIndex = 0;
   private sectionStep = 0;
+  /** 强度跨过段落门槛后，下一小节要跳去的段落 */
+  private pendingSection: number | null = null;
   private scheduledSources = 0;
   private droppedVoices = 0;
   private lastEventEnd = 0;
@@ -286,6 +290,7 @@ export class Sequencer {
       params: { ...INSTRUMENT_DEFAULTS[def.inst], ...def.params },
       input: def.input ?? defaultInput(def.inst, def.arp),
       bus,
+      layer: layerFactor(def, this.intensity),
       host: { ctx: this.ctx, output: bus, random: this.random, live: this.live },
       priority: PRIORITY_KINDS.has(def.inst),
       isDrum: DRUM_KINDS.has(def.inst),
@@ -315,6 +320,39 @@ export class Sequencer {
       candidate += 1;
     }
     return advance ? Math.min(count - 1, Math.max(loopFrom, index)) : index;
+  }
+
+  /**
+   * 强度升高并跨过某段的 minIntensity 时，返回该段（门槛最高者），下一小节跳入；
+   * 当前段因强度变化不再适用时，返回下一个可播放的段；否则返回 null。
+   */
+  private findIntensityJump(previous: number, next: number): number | null {
+    const sections = this.composition.sections;
+    if (next > previous) {
+      let target = -1;
+      let best = Number.NEGATIVE_INFINITY;
+      sections.forEach((section, index) => {
+        const min = section.minIntensity;
+        if (
+          min !== undefined &&
+          min > previous + 1e-6 &&
+          min > best &&
+          inIntensityRange(min, section.maxIntensity, next)
+        ) {
+          best = min;
+          target = index;
+        }
+      });
+      if (target >= 0 && target !== this.sectionIndex) {
+        return target;
+      }
+    }
+    const current = sections[this.sectionIndex];
+    if (current && !inIntensityRange(current.minIntensity, current.maxIntensity, next)) {
+      const fallback = this.findPlayableSection(this.sectionIndex, true);
+      return fallback < sections.length ? fallback : null;
+    }
+    return null;
   }
 
   private getSection(): SectionDef | null {
@@ -463,6 +501,13 @@ export class Sequencer {
     this.tempoFactor += (this.tempoTarget - this.tempoFactor) * TEMPO_SMOOTHING;
     this.globalStep += 1;
     this.sectionStep += 1;
+    if (this.pendingSection !== null && this.sectionStep % STEPS_PER_BAR === 0) {
+      // 强度跨过门槛：在小节线上直接进入新解锁 / 仍然合适的段落
+      this.sectionIndex = this.pendingSection;
+      this.sectionStep = 0;
+      this.pendingSection = null;
+      return;
+    }
     const section = this.getSection();
     const sectionSteps = Math.max(1, Math.round((section?.bars ?? 1) * STEPS_PER_BAR));
     if (this.sectionStep >= sectionSteps) {
@@ -518,10 +563,26 @@ export class Sequencer {
 
   public setIntensity(value: number, when: number = this.ctx.currentTime): void {
     const next = clamp01(value);
+    const previous = this.intensity;
     this.intensity = next;
     this.tempoTarget = 1 + this.tempoRamp * next;
+    const jump = this.findIntensityJump(previous, next);
+    if (jump !== null) {
+      this.pendingSection = jump;
+    } else if (this.pendingSection !== null) {
+      // 尚未执行的跳转若已不再适合新强度，则取消
+      const pending = this.composition.sections[this.pendingSection];
+      if (!pending || !inIntensityRange(pending.minIntensity, pending.maxIntensity, next)) {
+        this.pendingSection = null;
+      }
+    }
     for (const track of this.tracks) {
-      const target = clamp01(track.def.gain) * layerFactor(track.def, next);
+      const layer = layerFactor(track.def, next);
+      if (layer === track.layer) {
+        continue;
+      }
+      track.layer = layer;
+      const target = clamp01(track.def.gain) * layer;
       try {
         track.bus.gain.cancelScheduledValues(when);
         track.bus.gain.setTargetAtTime(target, when, LAYER_FADE_SECONDS / 3);

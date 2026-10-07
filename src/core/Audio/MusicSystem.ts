@@ -15,7 +15,13 @@ import {
   releaseSharedAudioContext,
   resumeSharedAudioContext,
 } from '@/core/Audio/AudioContextHost';
-import { MIN_GAIN, clamp01, createReverbBus, disconnectNodes } from '@/core/Audio/AudioKit';
+import {
+  MIN_GAIN,
+  clamp01,
+  createReverbBus,
+  dbToGain,
+  disconnectNodes,
+} from '@/core/Audio/AudioKit';
 import type { Composition, StingerDef } from '@/core/Audio/music/MusicTypes';
 import { Sequencer } from '@/core/Audio/music/Sequencer';
 import {
@@ -207,11 +213,13 @@ export interface MusicCrossfadeOptions {
 }
 
 /** 音乐总线电平（会话 mix × 该值 × 用户音量），按离线测得的响度校准 */
-const MUSIC_BUS_LEVEL = 0.8;
+const MUSIC_BUS_LEVEL = 0.5;
 /** 共享混响回送量 */
 const REVERB_RETURN = 0.55;
 /** 会话低通在强度 0 时的缺省截止频率（Hz） */
 const DEFAULT_FILTER_FLOOR = 4200;
+/** 强度 0 相对强度 1 的缺省电平差（dB） */
+const DEFAULT_DYNAMIC_RANGE_DB = 4;
 /** 低通完全打开所需的强度 */
 const FILTER_OPEN_INTENSITY = 0.85;
 const SCHEDULER_INTERVAL_MS = 40;
@@ -233,6 +241,8 @@ interface MusicSession {
   composition: Composition;
   sequencer: Sequencer;
   gain: GainNode;
+  /** 随强度变化的整体电平 */
+  dynamics: GainNode;
   filter: BiquadFilterNode | null;
   /** 淡出完成、可以释放的上下文时间 */
   releaseAt: number | null;
@@ -282,6 +292,12 @@ function holdParam(param: AudioParam, time: number): void {
   const current = param.value;
   param.cancelScheduledValues(time);
   param.setValueAtTime(current, time);
+}
+
+/** 强度 → 整体电平：强度 0 比强度 1 低 dynamicRange dB */
+function dynamicsGain(composition: Composition, intensity: number): number {
+  const range = Math.max(0, composition.dynamicRange ?? DEFAULT_DYNAMIC_RANGE_DB);
+  return dbToGain(-range * (1 - clamp01(intensity)));
 }
 
 function filterCutoff(floor: number, intensity: number): number {
@@ -427,6 +443,9 @@ export class MusicSystem {
     }
     const gain = context.createGain();
     gain.gain.value = 0;
+    const dynamics = context.createGain();
+    dynamics.gain.value = dynamicsGain(composition, composition.defaultIntensity);
+    gain.connect(dynamics);
     const floor = composition.filterFloor ?? DEFAULT_FILTER_FLOOR;
     let filter: BiquadFilterNode | null = null;
     if (floor < 19000) {
@@ -434,10 +453,10 @@ export class MusicSystem {
       filter.type = 'lowpass';
       filter.frequency.value = filterCutoff(floor, composition.defaultIntensity);
       filter.Q.value = 0.5;
-      gain.connect(filter);
+      dynamics.connect(filter);
       filter.connect(bed);
     } else {
-      gain.connect(bed);
+      dynamics.connect(bed);
     }
     const sequencer = new Sequencer(context, composition, gain, {
       loop: true,
@@ -453,6 +472,7 @@ export class MusicSystem {
       composition,
       sequencer,
       gain,
+      dynamics,
       filter,
       releaseAt: null,
       releaseAtMs: null,
@@ -467,7 +487,11 @@ export class MusicSystem {
     } catch {
       // 已释放
     }
-    disconnectNodes(session.filter ? [session.gain, session.filter] : [session.gain]);
+    disconnectNodes(
+      session.filter
+        ? [session.gain, session.dynamics, session.filter]
+        : [session.gain, session.dynamics]
+    );
     this.sessions = this.sessions.filter((entry) => entry !== session);
     if (this.currentSession === session) {
       this.currentSession = null;
@@ -586,6 +610,12 @@ export class MusicSystem {
   // ==================== 强度 ====================
 
   private applySessionFilter(session: MusicSession, intensity: number, now: number): void {
+    try {
+      session.dynamics.gain.cancelScheduledValues(now);
+      session.dynamics.gain.setTargetAtTime(dynamicsGain(session.composition, intensity), now, 0.5);
+    } catch {
+      session.dynamics.gain.value = dynamicsGain(session.composition, intensity);
+    }
     if (!session.filter) {
       return;
     }
@@ -611,6 +641,10 @@ export class MusicSystem {
     const context = this.getLiveContext();
     const session = this.currentSession;
     if (!context || !session || session.releaseAt !== null) {
+      return;
+    }
+    if (Math.abs(session.sequencer.getIntensity() - next) < 0.001) {
+      // 每帧重复设定同一强度时不重写自动化
       return;
     }
     const now = context.currentTime;

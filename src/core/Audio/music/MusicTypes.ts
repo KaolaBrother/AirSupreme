@@ -139,6 +139,8 @@ export interface Composition {
   tempoRamp?: number;
   /** 强度 0 时会话低通的截止频率（Hz）；强度升高时逐渐全开 */
   filterFloor?: number;
+  /** 强度 0 相对强度 1 的整体电平差（dB，缺省 4）；0 表示不随强度变化 */
+  dynamicRange?: number;
   /** 曲目整体电平（会话增益） */
   mix: number;
   /** 开始播放时的强度 */
