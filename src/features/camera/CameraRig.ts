@@ -1,5 +1,4 @@
 import * as THREE from 'three';
-import { GAME_CONSTANTS } from '@/config';
 import { CameraShake } from './CameraShake';
 import type { ShakeOffsets, ShakeProfile } from './CameraShake';
 import { CockpitModel } from './CockpitModel';
@@ -29,8 +28,10 @@ export interface CameraRigFlightState {
 
 export interface CameraRigOptions {
   mode?: CameraMode;
-  /** 第三人称机体局部偏移，默认 GAME_CONSTANTS.CAMERA.OFFSET（0, 5, 15） */
+  /** 第三人称机体局部偏移，默认 (0, 5, 15)（= GAME_CONSTANTS.CAMERA.OFFSET） */
   thirdPersonOffset?: Readonly<{ x: number; y: number; z: number }>;
+  /** 第三人称平滑系数（每 60 Hz 帧的插值比例 0..1），默认 0.1（= GAME_CONSTANTS.CAMERA.SMOOTH_FACTOR） */
+  smoothFactor?: number;
   /** 第一人称眼点（机体局部），默认 FIRST_PERSON_EYE_OFFSET */
   eyeOffset?: Readonly<{ x: number; y: number; z: number }>;
   /** 模式切换混合时长（秒），默认 0.55 */
@@ -90,6 +91,17 @@ export function computeExplosionShake(
   return Math.min(1, 0.45 * size * falloff * falloff);
 }
 
+/**
+ * 默认值与 GAME_CONSTANTS.CAMERA 一致（ThirdPersonCamera 的调校）。此处不 import '@/config'：
+ * 其 GameConfig 在导入时访问 window，会让本模块无法在无 DOM 的运行器中加载。
+ */
+const DEFAULT_CHASE_OFFSET: Readonly<{ x: number; y: number; z: number }> = Object.freeze({
+  x: 0,
+  y: 5,
+  z: 15,
+});
+const DEFAULT_CHASE_SMOOTH_FACTOR = 0.1;
+const DEFAULT_FOV = 75;
 const REFERENCE_FPS = 60;
 const MAX_DELTA_SECONDS = 0.1;
 /** 目标单次更新移动超过此距离视为传送（复活/读档），追尾相机直接就位 */
@@ -189,6 +201,7 @@ export class CameraRig {
   /** 线性混合进度：0 = 第三人称，1 = 第一人称 */
   private blend: number;
   private readonly blendDuration: number;
+  private readonly chaseSmoothFactor: number;
   private readonly manageTargetLayers: boolean;
   private initialized = false;
   private snapPending = true;
@@ -241,11 +254,16 @@ export class CameraRig {
         ? (options.blendDuration as number)
         : CAMERA_BLEND_SECONDS;
     this.manageTargetLayers = options.manageTargetLayers ?? true;
-    readOffset(options.thirdPersonOffset, GAME_CONSTANTS.CAMERA.OFFSET, this.thirdPersonOffset);
+    readOffset(options.thirdPersonOffset, DEFAULT_CHASE_OFFSET, this.thirdPersonOffset);
+    this.chaseSmoothFactor =
+      Number.isFinite(options.smoothFactor) &&
+      (options.smoothFactor as number) > 0 &&
+      (options.smoothFactor as number) <= 1
+        ? (options.smoothFactor as number)
+        : DEFAULT_CHASE_SMOOTH_FACTOR;
     readOffset(options.eyeOffset, FIRST_PERSON_EYE_OFFSET, this.eyeOffset);
 
-    this.baseFov =
-      Number.isFinite(camera.fov) && camera.fov > 1 ? camera.fov : GAME_CONSTANTS.CAMERA.FOV;
+    this.baseFov = Number.isFinite(camera.fov) && camera.fov > 1 ? camera.fov : DEFAULT_FOV;
     this.fov = this.baseFov;
 
     this.cockpit = options.cockpit === false ? null : new CockpitModel(this.eyeOffset);
@@ -460,7 +478,7 @@ export class CameraRig {
       this.chaseLook.copy(this.targetPosition);
     } else {
       // 与帧率无关：60 Hz 时每帧恰为 SMOOTH_FACTOR
-      const alpha = 1 - Math.pow(1 - GAME_CONSTANTS.CAMERA.SMOOTH_FACTOR, dt * REFERENCE_FPS);
+      const alpha = 1 - Math.pow(1 - this.chaseSmoothFactor, dt * REFERENCE_FPS);
       this.chasePosition.lerp(this.tmpA, alpha);
       this.chaseLook.lerp(this.targetPosition, alpha);
     }
