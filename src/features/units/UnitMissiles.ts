@@ -67,9 +67,17 @@ export const UNIT_MISSILE_SEEKER_HALF_ANGLE_DEG = 50;
 /** 导引头对诱饵的最大探测距离（米） */
 export const UNIT_MISSILE_SEEKER_RANGE = 650;
 /** 对玩家近炸半径（米） */
-export const UNIT_MISSILE_PROXIMITY = 6.5;
+export const UNIT_MISSILE_PROXIMITY = 5.5;
 /** 擦肩破片半径（米） */
-export const UNIT_MISSILE_FRAGMENT_RADIUS = 13;
+export const UNIT_MISSILE_FRAGMENT_RADIUS = 9;
+/** 助推段时长（秒，之后滑翔减速） */
+export const UNIT_MISSILE_BOOST_TIME = 2.8;
+/** 滑翔段阻力减速（米/秒²） */
+export const UNIT_MISSILE_DRAG = 5;
+/** 每转过 1 弧度损失的速度（米/秒） */
+export const UNIT_MISSILE_TURN_BLEED = 16;
+/** 低于该速度即失速脱靶（略高于玩家巡航速度 45） */
+export const UNIT_MISSILE_STALL_SPEED = 52;
 
 const SEEKER_COS = Math.cos(THREE.MathUtils.degToRad(UNIT_MISSILE_SEEKER_HALF_ANGLE_DEG));
 const FORWARD = new THREE.Vector3(0, 0, 1);
@@ -227,16 +235,32 @@ export class UnitMissilePool {
       }
       this.updateSeeker(missile, env);
       const hasAim = this.resolveAim(missile, env);
-      missile.speed = Math.min(missile.maxSpeed, missile.speed + 70 * deltaTime);
+      // 能量模型：助推段加速；之后滑翔减速，急转弯额外损失速度。
+      // 被拖入长距离追逐或被急转甩开的导弹会失速脱靶——机动规避与热焰弹都是有效对策。
+      if (missile.age < UNIT_MISSILE_BOOST_TIME + missile.boostUpTime) {
+        // 助推段：加速并抵消转弯损失
+        missile.speed = Math.min(missile.maxSpeed, missile.speed + 70 * deltaTime);
+      } else {
+        missile.speed -= UNIT_MISSILE_DRAG * deltaTime;
+      }
 
       if (missile.age > missile.boostUpTime && hasAim) {
         this.desired.subVectors(this.aim, missile.position);
         const distance = this.desired.length();
         if (distance > 1e-4) {
           this.desired.multiplyScalar(1 / distance);
-          this.steer(missile, this.desired, missile.turnRate * deltaTime);
+          const turned = this.steer(missile, this.desired, missile.turnRate * deltaTime);
+          missile.speed -= turned * UNIT_MISSILE_TURN_BLEED;
         }
       }
+      const boosting = missile.age < UNIT_MISSILE_BOOST_TIME + missile.boostUpTime;
+      if (!boosting && missile.speed < UNIT_MISSILE_STALL_SPEED && missile.targetKind !== 'none') {
+        // 失速：丢失目标，短暂惯性飞行后自毁
+        missile.targetKind = 'none';
+        missile.targetUnit = null;
+        missile.life = Math.min(missile.life, 0.8);
+      }
+      missile.speed = Math.max(20, missile.speed);
       missile.position.addScaledVector(missile.direction, missile.speed * deltaTime);
       if (!isFiniteVector(missile.position)) {
         this.deactivate(missile);
@@ -318,12 +342,9 @@ export class UnitMissilePool {
 
   private resolveAim(missile: UnitMissile, env: UnitMissileEnv): boolean {
     switch (missile.targetKind) {
-      case 'player': {
-        const distance = missile.position.distanceTo(env.playerPosition);
-        const lead = Math.min(2, distance / Math.max(1, missile.speed)) * 0.85;
-        this.aim.copy(env.playerPosition).addScaledVector(env.playerVelocity, lead);
+      case 'player':
+        this.predictIntercept(missile, env.playerPosition, env.playerVelocity);
         return isFiniteVector(this.aim);
-      }
       case 'unit': {
         const target = missile.targetUnit;
         if (!target || !target.isAlive()) {
@@ -332,9 +353,7 @@ export class UnitMissilePool {
           missile.life = Math.min(missile.life, 1.2);
           return false;
         }
-        const distance = missile.position.distanceTo(target.mesh.position);
-        const lead = Math.min(2, distance / Math.max(1, missile.speed)) * 0.8;
-        this.aim.copy(target.mesh.position).addScaledVector(target.velocity, lead);
+        this.predictIntercept(missile, target.mesh.position, target.velocity);
         return isFiniteVector(this.aim);
       }
       case 'decoy':
@@ -345,12 +364,28 @@ export class UnitMissilePool {
     }
   }
 
-  private steer(missile: UnitMissile, desired: THREE.Vector3, maxTurn: number): void {
+  /** 拦截点：迭代求解 |P + V·t − M| = s·t（两次迭代足够），t 上限 4 秒 */
+  private predictIntercept(
+    missile: UnitMissile,
+    target: THREE.Vector3,
+    velocity: THREE.Vector3
+  ): void {
+    const speed = Math.max(60, missile.speed, missile.maxSpeed * 0.85);
+    let time = missile.position.distanceTo(target) / speed;
+    for (let i = 0; i < 2; i++) {
+      this.aim.copy(target).addScaledVector(velocity, time);
+      time = Math.min(4, missile.position.distanceTo(this.aim) / speed);
+    }
+    this.aim.copy(target).addScaledVector(velocity, time);
+  }
+
+  /** 限速转向，返回本帧实际转过的角度（弧度） */
+  private steer(missile: UnitMissile, desired: THREE.Vector3, maxTurn: number): number {
     const dot = THREE.MathUtils.clamp(missile.direction.dot(desired), -1, 1);
     const angle = Math.acos(dot);
     if (angle <= maxTurn) {
       missile.direction.copy(desired);
-      return;
+      return angle;
     }
     this.axis.crossVectors(missile.direction, desired);
     if (this.axis.lengthSq() < 1e-10) {
@@ -361,6 +396,7 @@ export class UnitMissilePool {
     this.axis.normalize();
     this.rotation.setFromAxisAngle(this.axis, maxTurn);
     missile.direction.applyQuaternion(this.rotation).normalize();
+    return maxTurn;
   }
 
   /** 引信判定；返回 true 表示已起爆 */

@@ -353,7 +353,7 @@ function updateSamLauncher(unit: UnitEntity, world: UnitWorld, deltaTime: number
         36 * world.damageMultiplier,
         {
           maxSpeed: 92,
-          turnRate: 1.9,
+          turnRate: 1.7,
           life: 9,
           launchSpeed: 42,
         }
@@ -804,7 +804,7 @@ function updateFrigate(unit: UnitEntity, world: UnitWorld, deltaTime: number): v
         32 * world.damageMultiplier,
         {
           maxSpeed: 88,
-          turnRate: 1.75,
+          turnRate: 1.6,
           life: 10,
           launchSpeed: 30,
           boostUpTime: 0.45,
@@ -934,7 +934,7 @@ function updateSubmarine(unit: UnitEntity, world: UnitWorld, deltaTime: number):
           30 * world.damageMultiplier,
           {
             maxSpeed: 84,
-            turnRate: 1.6,
+            turnRate: 1.55,
             life: 9,
             launchSpeed: 26,
             boostUpTime: 0.55,
