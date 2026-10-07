@@ -419,6 +419,12 @@ export class CameraRig {
       this.cockpit = null;
     }
     setPlayerExteriorVisible(this.camera, true);
+    if (this.manageTargetLayers) {
+      // 撤销自动标记：外观回到默认层 0，任何相机都能看到
+      this.target.traverse((object) => {
+        object.layers.set(0);
+      });
+    }
     if (this.camera.fov !== this.baseFov) {
       this.camera.fov = this.baseFov;
       this.camera.updateProjectionMatrix();

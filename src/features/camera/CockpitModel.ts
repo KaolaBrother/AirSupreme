@@ -15,7 +15,7 @@ import type { DisplayRegion } from './CockpitDisplays';
  * 坐标系：content 以飞行员眼点为原点（机头 -Z、上 +Y、右 +X），尺寸按真实座舱比例，
  * 所有几何距眼点 ≥ 0.3 m（相机 near = 0.1 时不会被近裁剪面切掉）；
  * 遮光罩上沿位于视线下方约 16°，组合玻璃上沿约 5°，屏幕中心（准星/HUD）保持通透。
- * 静态部件按材质合并为 6 个网格；动态部件（扫描线、地平线、油门条、指针、告警灯）单独驱动。
+ * 静态部件按材质合并为 7 个网格；动态部件（扫描线、地平线、油门条、指针、告警灯）单独驱动。
  */
 
 type StaticBucket = 'glare' | 'panel' | 'frame' | 'bezel' | 'marking' | 'indicator' | 'screen';
