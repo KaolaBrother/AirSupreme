@@ -141,12 +141,12 @@ export class WeaponSystem {
       this.levels.set(id, 0);
     }
 
-    const system = this;
+    const readSurfaceSampler = (): SurfaceSampler | null => this.surfaceSampler;
     this.context = {
       fx: this.fx,
       particleSystem: this.particleSystem,
       get surfaceSampler(): SurfaceSampler | null {
-        return system.surfaceSampler;
+        return readSurfaceSampler();
       },
       getSnapshot: () => this.ensureSnapshot(),
       emitFired: (id, position, direction) => this.onFired?.(id, position, direction),
