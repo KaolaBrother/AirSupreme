@@ -17,6 +17,7 @@ import { setUnitBeaconPhase } from './UnitMeshKit';
 import { UnitMissilePool, isFiniteVector, type UnitMissileEnv } from './UnitMissiles';
 import {
   UNIT_GUN_PROJECTILE_SPEED,
+  UNIT_SUB_PERISCOPE_DEPTH,
   UNIT_WATER_Y,
   applyAttitude,
   predictIntercept,
@@ -331,6 +332,7 @@ export class UnitSystem implements IGameSystem {
       mesh.position.y = Math.max(position.y, unit.surfaceY + 20);
     } else {
       mesh.position.y = unit.surfaceY;
+      if (type === UnitType.SUBMARINE) mesh.position.y += UNIT_SUB_PERISCOPE_DEPTH;
     }
     unit.anchor.copy(mesh.position);
 

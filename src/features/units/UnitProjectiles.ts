@@ -179,7 +179,11 @@ export class UnitShotPool {
         stretch: new THREE.Vector3(1, 1, 1),
       });
     }
-    this.scene.add(this.root);
+  }
+
+  /** 首次使用时才挂到场景；clear() 时摘下 */
+  private ensureAttached(): void {
+    if (this.root.parent !== this.scene) this.scene.add(this.root);
   }
 
   /**
@@ -229,6 +233,7 @@ export class UnitShotPool {
     this.tmp.subVectors(to, from);
     const distance = this.tmp.length();
     if (distance < 0.5 || !Number.isFinite(distance)) return false;
+    this.ensureAttached();
     shot.active = true;
     shot.kind = kind;
     shot.mesh.geometry = this.shotGeometries[kind];
@@ -250,6 +255,7 @@ export class UnitShotPool {
     if (!isFiniteVector(from) || !isFiniteVector(velocity)) return false;
     const bomb = this.bombs.find((entry) => !entry.active);
     if (!bomb) return false;
+    this.ensureAttached();
     bomb.active = true;
     bomb.mesh.position.copy(from);
     bomb.velocity.copy(velocity);
@@ -266,6 +272,7 @@ export class UnitShotPool {
     if (!isFiniteVector(position)) return;
     const puff = this.puffs.find((entry) => !entry.active);
     if (!puff) return;
+    this.ensureAttached();
     puff.active = true;
     puff.maxLife = 1.3 + Math.random() * 0.5;
     puff.life = puff.maxLife;
@@ -398,6 +405,7 @@ export class UnitShotPool {
       puff.active = false;
       puff.mesh.visible = false;
     }
+    this.scene.remove(this.root);
   }
 
   dispose(): void {

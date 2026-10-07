@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { UnitEntity } from './UnitEntity';
 import {
   UNIT_GUN_PROJECTILE_SPEED,
+  UNIT_SUB_PERISCOPE_DEPTH,
   aimAngles,
   applyAttitude,
   driveToward,
@@ -43,8 +44,7 @@ const UP = new THREE.Vector3(0, 1, 0);
 const SAM_LOCK_TIME = 2.4;
 const FRIGATE_LOCK_TIME = 2.8;
 const SUB_LOCK_TIME = 1.7;
-/** 潜望深度：指挥台围壳刚好没入水面，潜望镜露出水面约 1.3 米 */
-const SUB_DEPTH = -6.8;
+const SUB_DEPTH = UNIT_SUB_PERISCOPE_DEPTH;
 const SUB_TARGETABLE_DEPTH = -3.5;
 
 export function updateUnitBehavior(unit: UnitEntity, world: UnitWorld, deltaTime: number): void {

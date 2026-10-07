@@ -24,6 +24,9 @@ export type UnitEventKind =
 
 /** 敌方子弹池（ProjectilePool）的固定弹速，用于计算提前量 */
 export const UNIT_GUN_PROJECTILE_SPEED = 100;
+/** 潜艇潜望深度：指挥台围壳刚好没入水面，潜望镜露出水面约 1.3 米 */
+export const UNIT_SUB_PERISCOPE_DEPTH = -6.8;
+
 /** 水面高度（与 TerrainGenerator.WORLDSCAPE_WATER_Y 一致） */
 export const UNIT_WATER_Y = -48;
 

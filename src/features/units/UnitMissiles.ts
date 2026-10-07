@@ -179,7 +179,11 @@ export class UnitMissilePool {
         incoming: { position: new THREE.Vector3(), targetIsPlayer: false },
       });
     }
-    this.scene.add(this.root);
+  }
+
+  /** 首次使用时才挂到场景；clear() 时摘下（clear 之后场景中不残留任何对象） */
+  private ensureAttached(): void {
+    if (this.root.parent !== this.scene) this.scene.add(this.root);
   }
 
   getActiveCount(): number {
@@ -199,6 +203,7 @@ export class UnitMissilePool {
     if (!isFiniteVector(from) || !isFiniteVector(direction)) return false;
     const missile = this.missiles.find((entry) => !entry.active);
     if (!missile) return false;
+    this.ensureAttached();
     missile.active = true;
     missile.position.copy(from);
     missile.direction.copy(direction);
@@ -525,6 +530,7 @@ export class UnitMissilePool {
 
   clear(): void {
     for (const missile of this.missiles) this.deactivate(missile);
+    this.scene.remove(this.root);
   }
 
   dispose(): void {

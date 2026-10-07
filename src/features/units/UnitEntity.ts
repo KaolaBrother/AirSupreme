@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import type { CombatTarget, CombatTargetKind, DamageSource } from '@/core/CombatContracts';
 import type { Faction } from '@/core/Faction';
 import { getUnitCharredMaterial, getUnitFlashMaterial } from './UnitMeshKit';
-import type { UnitConfig, UnitDomain, UnitType } from './UnitTypes';
+import { UnitType, type UnitConfig, type UnitDomain } from './UnitTypes';
 
 /**
  * 单位实例：UnitSystem 驱动的单个地面 / 海上 / 空中单位。
@@ -169,6 +169,8 @@ export class UnitEntity implements UnitInstance, CombatTarget {
     this.maxHealth = config.health * multiplier;
     this.health = this.maxHealth;
     this.seed = Math.random();
+    // 潜艇出生即处于潜航（不可命中）状态
+    this.targetable = type !== UnitType.SUBMARINE;
     mesh.userData.unitId = this.id;
     const aimPoint: unknown = mesh.userData.aimPoint;
     if (aimPoint instanceof THREE.Object3D) {
