@@ -224,3 +224,93 @@ real GPU in a real browser.
 
 Still unverified/unwired: `setScreenEffects` / `setPostFxEnabled` call sites and quality mapping, contrail
 attachment to aircraft, callers of the new particle methods, `getBudget` per quality preset.
+
+===================================================================================================
+# Integration notes — round 2 batches (session 3)
+
+Merged on `workflow/ten-level-campaign`: terrain-b 01e0ad8 · bosses-b b0dea6b · boss-final 3177a5a ·
+camera 1362060 · progression 9ad535b · coordinator UPGRADE_FEEDBACK fix 1316d5d. Every batch passed
+tsc/lint/vitest/real build on its own; none is wired into the running game yet.
+
+---------------------------------------------------------------------------------------------------
+## Terrain B — levels 8-10 (src/features/terrain/**)
+
+- `TerrainGenerator.getEnvironment()` returns the level's environment module.
+- L8 CANYON: river is water=true (bed below local −0.5; spawn (0,0) is over the river); storm ceiling y≈640;
+  `CanyonEnvironment.getConvoyRoute()` for the 'route' placement; storm lightning strikes real ground.
+- L9 STRATOSPHERE: crash surface = visible cloud top (y≈−25 at spawn) + vertical columns (trunk, pylons,
+  anchors, relays); overhangs above y 640 are excluded (soft ceiling 540). No water.
+- L10 CITADEL: true crater surface (lava level inside rifts) max'ed with structures/rocks; kinds city/lava/rock.
+  `getCoreArena()` → (0, 160, −700): anchor Oracle Prime there (the spec's (px, 160, pz+280) would spawn it
+  behind the player). `setCoreState('online'|'exposed'|'overload'|'offline')` mirrors boss phases;
+  `getAssaultRoute()` for the L10 convoy. The four scenery obelisks (r≈165, crystals y 190-206) are not
+  destructible — keep the boss's shield pylons visually distinct.
+- `LevelWeatherConfig.cloudTone` optional override; clouds render smooth under dark weather (L5-7 softer).
+- Sampling accuracy: worst ~3-4 m on near-vertical walls/rock edges, erring high.
+
+---------------------------------------------------------------------------------------------------
+## Bosses 8-10 (new TempestZeppelin*/PhantomWing*/OraclePrime* files)
+
+Common: construct after the controller adds the positioned mesh; `setGroundSampler((x,z) =>
+terrain.sampleSurface(x,z).y)`; `setDeathSequenceEnabled(true)` and wait for `onDestroy`; route every hit through
+`takeDamageAt(part, raw)` with radius-aware hit tests (`getDeclaredHitRadius`) — the 5 m projectile threshold
+misses big parts; `checkHazard(pos, ~6)` every frame for the player and each friendly with a ~0.6 s per-target
+cooldown kept in the controller; HUD `setBossStatus(getStatusLabel(), { current: getPhase(), total: 3 })`,
+sub-target bars from `getSubTargets()`, `onHazardWarning` → `hud.flashWarning`; audio via `onEffectCue`.
+- Tempest Zeppelin (L8): spawn (px, 170, pz+300); minion kind 'drone' only (map to units DRONE or SCOUT);
+  7 sub-targets (6 gas cells + hangar); cues = TempestZeppelinCue union.
+- Phantom Wing (L9): spawn (px+120, py+40, pz+320); no minions (holo decoys instead — decoy roots are in
+  `getCollisionParts()` with `userData.phantomDecoy`/`bossDecoy`); hide its radar/lock blip while `isCloaked()`;
+  while cloaked it has no hittable parts, so EMP must call `applyEmpPulse(center, radius, seconds)`; 2 sub-targets.
+- Oracle Prime (L10): spawn at the citadel core arena (see terrain); minion kinds 'drone' and 'fighter';
+  `getCollisionParts()` includes a shield proxy with multiplier 0 and `userData.bossDeflector` — skip parts with
+  multiplier 0 for lock-on; pylons take damage while the core is invulnerable (own HP, never boss HP);
+  `getSubTargets()` swaps pylons → emitters at shield collapse (same array object); `MusicSystem.setIntensity(
+  getMusicIntensity())`; cues: shield-hit → playShieldHit, lance-lock/judgement-lock → lock tone,
+  pinwheel-*/shockwave-charge → laser warning/sweep, arc-strike/orbital-strike → playLightningStrike,
+  shield-collapse/overload/last-light → playBossPhaseAlarm + 'phase-change' stinger. Finale: 6.4 s death —
+  Oracle's last line on 'death-freeze', `setScreenEffects({ flash: 1 })` + big shake on 'death-flash' (4.6 s),
+  then 'boss-defeated' stinger, remaining lines, `StoryOverlay.showEnding`; `getDeathProgress()` for fades.
+  Also drive `citadel.setCoreState(...)` from its phases.
+
+---------------------------------------------------------------------------------------------------
+## Camera (src/features/camera/**, AircraftMeshFactory)
+
+1. Replace `new ThirdPersonCamera(...)` (GameCoordinator ~l.344) with `new CameraRig(gameScene.camera,
+   playerAircraft, { mode: settings.cameraMode })`; the rig tags the player mesh with PLAYER_EXTERIOR_LAYER and
+   re-tags added children.
+2. In render(), before `gameScene.render()`: preallocated `flight = { speedRatio: clamp01((speed − 0.5·max) /
+   (0.5·max)), boosting: input.throttle }`; `updatePlayerAfterburner(playerAircraft, flight, renderDt)`;
+   `cameraRig.update(interpolatedPos, interpolatedQuat, renderDt, flight)`.
+3. Delete the `getObjectByName('engineGlow')` scaling block in update() (~l.860) — no longer applies.
+4. `spawnFriendlyAI()`: `createEnemyMesh(config)` → `createFriendlyMesh(config)`.
+5. V key and mobile `#camera-button` → `toggleMode()`; on start/checkpoint load `setMode(saved, true)` +
+   `snapToTarget()`.
+6. `onModeChanged = (m) => { weapons.setViewMode(m); hud.setCameraMode(m); audio.playCameraSwitch();
+   persist settings.cameraMode }`.
+7. Shake: PLAYER_HIT `min(0.6, 0.15 + damage/120)` · PLAYER_DEATH 1 · explosions (enemy death, unit onExplosion,
+   boss blasts, weapon onImpact, lightning) `computeExplosionShake(distance, scale)` · own missile 0.05 · rocket
+   salvo 0.1 · railgun 0.35 · EMP 0.25 · boss hazard hit 0.4.
+Recommended: shrink the PlayerController flame sprite to ~1.4 (cruise) / 2.3 (boost) at opacity 0.5; in first
+person hide the shield hex (tag it with PLAYER_EXTERIOR_LAYER) or fade it by `1 − 0.7·getBlend()`.
+
+---------------------------------------------------------------------------------------------------
+## Progression, save, menus
+
+1. New game / boss mode at level L: `upgrades.reset()`, `setCampaignLevel(L)`,
+   `setUnlockedWeapons(getUnlockedWeaponsThrough(L))`; if L > 1 `awardBonusPoints(getStartingUpgradePoints(L))`
+   and open the hangar. Starting a new game should `clearCampaignCheckpoint()` (not done yet).
+2. Every level start: `recordLevelReached(L)`; `weapons.setUpgradeLevel(id, stats.getWeaponUpgradeLevel(id))`;
+   `flares.setCapacity(stats.getFlareCapacity())`; damage taken × (1 − `getArmorReduction()`); re-sync weapon
+   levels/flare capacity after each purchase; scores × scoreMultiplier before `addScore`.
+3. Checkpoints (normal mode only): 'level-start' wave 0 after the intro; 'wave' with wave = k+1 after wave k;
+   'boss' with wave = totalWaves just before the boss. Payload: `upgrades.export()`, `weapons.exportState()`,
+   flare charges, camera mode, score/lives/missiles/difficulty/stats. `hud.showAutosave()` when it returns true.
+4. Restore (`StartMenu.setOnContinue` in main.ts and the settlement's 从检查点继续): reset → `import(save.upgrades)`
+   → setCampaignLevel → setUnlockedWeapons → setUpgradeLevel → `weapons.importState` → `flares.importState` →
+   resume at `save.wave`.
+5. Between chapters: set next level's caps/unlocks, then `upgradeMenu.show({ mode: 'hangar', onContinue })`
+   (hides itself before calling onContinue). Pause path `show()` unchanged.
+6. After level 10: `markCampaignCompleted(score)` + `clearCampaignCheckpoint()`. Pass `GameSettings.cameraMode`
+   to CameraRig as its starting mode.
+Known: caps stay at level-1 values until setCampaignLevel is called; CampaignData now sits in the entry chunk.
