@@ -133,17 +133,17 @@ void main() {
 
   // 低血量去饱和
   luma = dot(color, vec3(0.2126, 0.7152, 0.0722));
-  color = mix(color, vec3(luma) * vec3(1.06, 0.94, 0.94), uLowHealth * 0.45);
+  color = mix(color, vec3(luma) * vec3(1.06, 0.94, 0.94), uLowHealth * 0.4);
 
   // 暗角（含心跳）
   vec2 vc = centered * uAspect;
-  float vig = smoothstep(0.42, 1.05, length(vc) * 1.2);
+  float vig = smoothstep(0.55, 1.15, length(vc) * 1.1);
   float vignette = uVignette + uLowHealth * (0.18 + 0.32 * uHeartbeat) + uSpeed * 0.12;
   color *= 1.0 - vig * clamp(vignette, 0.0, 0.95);
 
   // 受击红边 + 低血量心跳红边
-  color = mix(color, vec3(0.78, 0.05, 0.03), clamp(vig * uDamage * 0.7, 0.0, 1.0));
-  color = mix(color, vec3(0.5, 0.0, 0.0), clamp(vig * uLowHealth * uHeartbeat * 0.4, 0.0, 1.0));
+  color = mix(color, vec3(0.78, 0.05, 0.03), clamp(vig * uDamage * 0.65, 0.0, 1.0));
+  color = mix(color, vec3(0.5, 0.0, 0.0), clamp(vig * uLowHealth * uHeartbeat * 0.32, 0.0, 1.0));
 
   // EMP 青色闪 + 白闪
   color += vec3(0.22, 0.8, 1.0) * uEmp * (0.3 + 0.7 * vig) * 0.75;

@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { ParticleType } from '../ParticleTypes';
 import type { ParticleEmitter, SurfaceImpactType } from '../ParticleTypes';
-import { VfxCell } from '../VfxAtlas';
+import { SMOKE_CELLS, VfxCell } from '../VfxAtlas';
 
 /**
  * 环境命中配方：按地表类型的地面命中、水面命中、大型水花。
@@ -318,9 +318,10 @@ export function emitWaterImpact(
       size: rand(0.9, 1.5) * k,
       sizeEnd: 2.2,
       color: scratchColor.setRGB(0.82, 0.9, 0.95),
-      alpha: 0.85,
+      alpha: 0.75,
       gravityScale: 1.05,
       drag: 0.4,
+      cell: i % 2 === 0 ? VfxCell.SPRAY : SMOKE_CELLS[i % SMOKE_CELLS.length],
     });
   }
 
@@ -377,20 +378,22 @@ export function emitSplash(fx: ParticleEmitter, position: THREE.Vector3, scale: 
   const s = THREE.MathUtils.clamp(Number.isFinite(scale) ? scale : 1, 0.4, 4);
   const root = Math.sqrt(s);
 
-  // 主水柱
+  // 主水柱：柔和水体（烟团格）+ 少量飞沫簇
   const columnCount = fx.count(12 * s, 5);
   for (let i = 0; i < columnCount; i++) {
     scratchVelocity.set(rand(-1, 1) * 3 * root, rand(16, 32) * root, rand(-1, 1) * 3 * root);
+    const sprayCell = i % 3 === 0;
     fx.emit(ParticleType.SPRAY, position, {
       speed: 0,
       velocity: scratchVelocity,
       life: rand(1.4, 2.2) * (0.8 + 0.2 * root),
-      size: rand(2.2, 3.4) * s,
-      sizeEnd: 2.4,
-      color: scratchColor.setRGB(0.85, 0.92, 0.96),
-      alpha: 0.9,
+      size: (sprayCell ? rand(2.4, 3.4) : rand(2.8, 4.2)) * s,
+      sizeEnd: 2.3,
+      color: scratchColor.setRGB(0.86, 0.92, 0.96),
+      alpha: sprayCell ? 0.75 : 0.62,
       gravityScale: 1,
       drag: 0.3,
+      cell: sprayCell ? VfxCell.SPRAY : SMOKE_CELLS[i % SMOKE_CELLS.length],
     });
   }
 
@@ -405,12 +408,14 @@ export function emitSplash(fx: ParticleEmitter, position: THREE.Vector3, scale: 
       speed: 0,
       velocity: scratchVelocity,
       life: rand(0.9, 1.4),
-      size: 0.45 * root,
+      size: 0.7 * root,
       color: scratchColor.setRGB(0.88, 0.95, 1),
-      intensity: 1.3,
+      intensity: 1,
+      alpha: 0.7,
       gravityScale: 1,
-      stretch: 0.05,
-      additive: 0.4,
+      stretch: 0.06,
+      additive: 0,
+      cell: VfxCell.GLOW,
     });
   }
 

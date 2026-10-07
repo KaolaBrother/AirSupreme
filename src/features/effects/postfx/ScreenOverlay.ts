@@ -21,7 +21,7 @@ varying vec2 vUv;
 
 void main() {
   vec2 centered = (vUv - 0.5) * uAspect;
-  float vig = smoothstep(0.42, 1.05, length(centered) * 1.2);
+  float vig = smoothstep(0.55, 1.15, length(centered) * 1.1);
   vec3 color = vec3(0.0);
   float alpha = 0.0;
 

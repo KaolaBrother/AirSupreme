@@ -201,7 +201,11 @@ export class GameScene {
     const quality = this.getPostFxQuality();
     const key = `${quality.samples}:${quality.bloomResolution}`;
     if (this.postFxPipeline && key === this.postFxQualityKey) {
-      this.postFxPipeline.setSize(window.innerWidth, window.innerHeight, this.renderer.getPixelRatio());
+      this.postFxPipeline.setSize(
+        window.innerWidth,
+        window.innerHeight,
+        this.renderer.getPixelRatio()
+      );
       return;
     }
 
@@ -294,7 +298,8 @@ export class GameScene {
    */
   public render(): void {
     const now = performance.now();
-    const deltaTime = this.lastRenderTime > 0 ? Math.min((now - this.lastRenderTime) / 1000, 0.1) : 0;
+    const deltaTime =
+      this.lastRenderTime > 0 ? Math.min((now - this.lastRenderTime) / 1000, 0.1) : 0;
     this.lastRenderTime = now;
     const effects = this.screenEffects.update(deltaTime);
 
