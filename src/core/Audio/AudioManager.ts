@@ -1,9 +1,53 @@
 import {
   acquireSharedAudioContext,
+  getSharedOutputNode,
   releaseSharedAudioContext,
   resumeSharedAudioContext,
 } from '@/core/Audio/AudioContextHost';
+import {
+  createCompressor,
+  createNoiseSource,
+  dbToGain,
+  estimateCompressorMakeupDb,
+  type CompressorSettings,
+} from '@/core/Audio/AudioKit';
 import { musicDuckingBridge } from '@/core/Audio/MusicSystem';
+import type { SfxTarget, SustainedSfx } from '@/core/Audio/sfx/SfxKit';
+import {
+  renderAutosave,
+  renderBombDrop,
+  renderBossPhaseAlarm,
+  renderCameraSwitch,
+  renderChapterImpact,
+  renderCivilianWarning,
+  renderDebriefTally,
+  renderEmpPulse,
+  renderFlareDeploy,
+  renderHelicopterPass,
+  renderLaserOverheat,
+  renderLaserStop,
+  renderLavaEruption,
+  renderLightningStrike,
+  renderRadioOpen,
+  renderRailgunChargeCancel,
+  renderRailgunFire,
+  renderRocketSalvo,
+  renderSamLaunch,
+  renderSamLockWarning,
+  renderShieldHit,
+  renderShipHorn,
+  renderSonarPing,
+  renderSurfaceImpact,
+  renderSwarmLaunch,
+  renderTankCannon,
+  renderTypewriterTick,
+  renderUnitDestroyed,
+  renderWeaponSwitch,
+  renderWeaponUnlock,
+  startLaserBeam,
+  startRailgunCharge,
+  type UnitDomain,
+} from '@/core/Audio/sfx/SfxLibrary';
 import { getLogger } from '@/core/utils/Logger';
 
 const log = getLogger('AudioManager');
@@ -42,6 +86,37 @@ export enum SoundType {
   TENTACLE_DESTROY = 'TENTACLE_DESTROY',
   LOW_HEALTH = 'LOW_HEALTH',
   BOSS_EXPLOSION = 'BOSS_EXPLOSION',
+  ROCKET_SALVO = 'ROCKET_SALVO',
+  LASER_BEAM = 'LASER_BEAM',
+  LASER_STOP = 'LASER_STOP',
+  LASER_OVERHEAT = 'LASER_OVERHEAT',
+  RAILGUN_CHARGE = 'RAILGUN_CHARGE',
+  RAILGUN_CANCEL = 'RAILGUN_CANCEL',
+  RAILGUN_FIRE = 'RAILGUN_FIRE',
+  SWARM_LAUNCH = 'SWARM_LAUNCH',
+  EMP_PULSE = 'EMP_PULSE',
+  FLARE_DEPLOY = 'FLARE_DEPLOY',
+  SAM_LOCK = 'SAM_LOCK',
+  SAM_LAUNCH = 'SAM_LAUNCH',
+  BOMB_DROP = 'BOMB_DROP',
+  TANK_CANNON = 'TANK_CANNON',
+  HELICOPTER = 'HELICOPTER',
+  SHIP_HORN = 'SHIP_HORN',
+  SONAR = 'SONAR',
+  CAMERA_SWITCH = 'CAMERA_SWITCH',
+  AUTOSAVE = 'AUTOSAVE',
+  RADIO = 'RADIO',
+  TYPEWRITER = 'TYPEWRITER',
+  WEAPON_SWITCH = 'WEAPON_SWITCH',
+  WEAPON_UNLOCK = 'WEAPON_UNLOCK',
+  CIVILIAN_WARNING = 'CIVILIAN_WARNING',
+  CHAPTER_IMPACT = 'CHAPTER_IMPACT',
+  LIGHTNING = 'LIGHTNING',
+  LAVA_ERUPTION = 'LAVA_ERUPTION',
+  SHIELD_HIT = 'SHIELD_HIT',
+  PHASE_ALARM = 'PHASE_ALARM',
+  DEBRIEF_TALLY = 'DEBRIEF_TALLY',
+  UNIT_DESTROYED = 'UNIT_DESTROYED',
 }
 
 type HitProfile = 'player' | 'enemy' | 'boss' | 'environment';
@@ -53,6 +128,126 @@ interface SoundPolicy {
   duckAmount?: number;
   duckDurationMs?: number;
 }
+
+/** 新增音效的节流 / 并发 / 闪避策略 */
+const NEW_SOUND_POLICIES: Partial<Record<SoundType, SoundPolicy>> = {
+  [SoundType.ROCKET_SALVO]: {
+    minIntervalMs: 200,
+    maxConcurrent: 2,
+    duckAmount: 0.14,
+    duckDurationMs: 240,
+  },
+  [SoundType.LASER_BEAM]: { minIntervalMs: 150, maxConcurrent: 1 },
+  [SoundType.LASER_STOP]: { minIntervalMs: 120, maxConcurrent: 1 },
+  [SoundType.LASER_OVERHEAT]: {
+    minIntervalMs: 600,
+    maxConcurrent: 1,
+    duckAmount: 0.1,
+    duckDurationMs: 300,
+  },
+  [SoundType.RAILGUN_CHARGE]: { minIntervalMs: 150, maxConcurrent: 1 },
+  [SoundType.RAILGUN_CANCEL]: { minIntervalMs: 150, maxConcurrent: 1 },
+  [SoundType.RAILGUN_FIRE]: {
+    minIntervalMs: 250,
+    maxConcurrent: 1,
+    duckAmount: 0.32,
+    duckDurationMs: 420,
+  },
+  [SoundType.SWARM_LAUNCH]: {
+    minIntervalMs: 200,
+    maxConcurrent: 2,
+    duckAmount: 0.12,
+    duckDurationMs: 220,
+  },
+  [SoundType.EMP_PULSE]: {
+    minIntervalMs: 400,
+    maxConcurrent: 1,
+    duckAmount: 0.4,
+    duckDurationMs: 700,
+  },
+  [SoundType.FLARE_DEPLOY]: { minIntervalMs: 250, maxConcurrent: 1 },
+  [SoundType.SAM_LOCK]: { minIntervalMs: 700, maxConcurrent: 1 },
+  [SoundType.SAM_LAUNCH]: {
+    minIntervalMs: 280,
+    maxConcurrent: 2,
+    duckAmount: 0.1,
+    duckDurationMs: 250,
+  },
+  [SoundType.BOMB_DROP]: { minIntervalMs: 220, maxConcurrent: 2 },
+  [SoundType.TANK_CANNON]: {
+    minIntervalMs: 140,
+    maxConcurrent: 2,
+    duckAmount: 0.12,
+    duckDurationMs: 220,
+  },
+  [SoundType.HELICOPTER]: { minIntervalMs: 900, maxConcurrent: 2 },
+  [SoundType.SHIP_HORN]: {
+    minIntervalMs: 1800,
+    maxConcurrent: 1,
+    duckAmount: 0.2,
+    duckDurationMs: 1200,
+  },
+  [SoundType.SONAR]: { minIntervalMs: 600, maxConcurrent: 1 },
+  [SoundType.CAMERA_SWITCH]: { minIntervalMs: 150, maxConcurrent: 1 },
+  [SoundType.AUTOSAVE]: { minIntervalMs: 1200, maxConcurrent: 1 },
+  [SoundType.RADIO]: { minIntervalMs: 180, maxConcurrent: 1 },
+  [SoundType.TYPEWRITER]: { minIntervalMs: 30, maxConcurrent: 3 },
+  [SoundType.WEAPON_SWITCH]: { minIntervalMs: 90, maxConcurrent: 1 },
+  [SoundType.WEAPON_UNLOCK]: {
+    minIntervalMs: 1200,
+    maxConcurrent: 1,
+    duckAmount: 0.25,
+    duckDurationMs: 900,
+  },
+  [SoundType.CIVILIAN_WARNING]: { minIntervalMs: 1200, maxConcurrent: 1 },
+  [SoundType.CHAPTER_IMPACT]: {
+    minIntervalMs: 1500,
+    maxConcurrent: 1,
+    duckAmount: 0.5,
+    duckDurationMs: 1400,
+  },
+  [SoundType.LIGHTNING]: {
+    minIntervalMs: 220,
+    maxConcurrent: 2,
+    duckAmount: 0.3,
+    duckDurationMs: 600,
+  },
+  [SoundType.LAVA_ERUPTION]: {
+    minIntervalMs: 400,
+    maxConcurrent: 2,
+    duckAmount: 0.2,
+    duckDurationMs: 500,
+  },
+  [SoundType.SHIELD_HIT]: { minIntervalMs: 70, maxConcurrent: 3 },
+  [SoundType.PHASE_ALARM]: {
+    minIntervalMs: 1400,
+    maxConcurrent: 1,
+    duckAmount: 0.25,
+    duckDurationMs: 900,
+  },
+  [SoundType.DEBRIEF_TALLY]: { minIntervalMs: 35, maxConcurrent: 3 },
+  [SoundType.UNIT_DESTROYED]: {
+    minIntervalMs: 100,
+    maxConcurrent: 3,
+    duckAmount: 0.22,
+    duckDurationMs: 320,
+  },
+};
+
+/** 音效总线的粘合压缩：密集战斗时压住叠加峰值，阈值以下保持单位增益 */
+const SFX_BUS_COMPRESSOR: CompressorSettings = {
+  threshold: -20,
+  knee: 8,
+  ratio: 3.5,
+  attack: 0.003,
+  release: 0.2,
+};
+
+/** 持续音效的安全上限（秒）：集成漏掉 stop 时也不会一直响 */
+const LASER_MAX_SECONDS = 8;
+const RAILGUN_CHARGE_MAX_SECONDS = 4;
+/** 结算计分音的连击窗口（毫秒）：窗口内音高逐级升高 */
+const TALLY_STREAK_MS = 450;
 
 /**
  * 音效管理器
@@ -94,6 +289,16 @@ export class AudioManager {
   private readonly engineBoostStartBlend = 0.62;
   private readonly engineBoostStopBlend = 0.55;
   private readonly engineBoostPulseMs = 220;
+  /** 音效总线压缩器与其补偿增益（不支持时为 null） */
+  private sfxCompressor: DynamicsCompressorNode | null = null;
+  private sfxCompressorTrim: GainNode | null = null;
+  /** 持续音效：激光束 / 电磁炮蓄力 */
+  private laserBeam: SustainedSfx | null = null;
+  private laserSafetyTimeout: number | null = null;
+  private railgunCharge: SustainedSfx | null = null;
+  private railgunSafetyTimeout: number | null = null;
+  private tallyStep: number = 0;
+  private lastTallyMs: number = Number.NEGATIVE_INFINITY;
 
   // 音量设置
   private masterVolumeValue: number = 0.5;
@@ -202,6 +407,7 @@ export class AudioManager {
     [SoundType.MISSILE_LOCK]: { minIntervalMs: 180, maxConcurrent: 1 },
     [SoundType.MISSILE_LOCK_BREAK]: { minIntervalMs: 220, maxConcurrent: 1 },
     [SoundType.MISSILE_DRY]: { minIntervalMs: 400, maxConcurrent: 1 },
+    ...NEW_SOUND_POLICIES,
   };
 
   constructor() {
@@ -239,9 +445,21 @@ export class AudioManager {
       this.sfxGain.gain.value = this.sfxVolume;
       this.musicGain.gain.value = this.musicVolumeValue;
 
-      this.sfxGain.connect(this.masterGain);
+      // 音效 → 粘合压缩（补偿自动增益）→ 主音量 → 共享限幅输出
+      this.sfxCompressor = createCompressor(this.context, SFX_BUS_COMPRESSOR);
+      if (this.sfxCompressor) {
+        this.sfxCompressorTrim = this.context.createGain();
+        this.sfxCompressorTrim.gain.value = dbToGain(
+          -estimateCompressorMakeupDb(SFX_BUS_COMPRESSOR)
+        );
+        this.sfxGain.connect(this.sfxCompressorTrim);
+        this.sfxCompressorTrim.connect(this.sfxCompressor);
+        this.sfxCompressor.connect(this.masterGain);
+      } else {
+        this.sfxGain.connect(this.masterGain);
+      }
       this.musicGain.connect(this.masterGain);
-      this.masterGain.connect(this.context.destination);
+      this.masterGain.connect(getSharedOutputNode(this.context));
     } catch {
       log.warn('Web Audio API not supported');
     }
@@ -1422,6 +1640,14 @@ export class AudioManager {
         1.2
       );
       return;
+    case 'lava':
+    case 'ice':
+    case 'rock':
+    case 'cloud':
+      this.playLibrarySound(SoundType.ENVIRONMENT_HIT, 160, (target) =>
+        renderSurfaceImpact(target, surface, Number.isFinite(intensity) ? intensity : 1)
+      );
+      return;
     default:
       this.playHit(Math.max(0.8, intensity), 'environment', 'environment');
     }
@@ -1622,16 +1848,8 @@ export class AudioManager {
       const sfxGain = this.sfxGain;
       if (!context || !sfxGain) return;
 
-      const bufferSize = context.sampleRate * duration;
-      const buffer = context.createBuffer(1, bufferSize, context.sampleRate);
-      const data = buffer.getChannelData(0);
-
-      for (let i = 0; i < bufferSize; i++) {
-        data[i] = Math.random() * 2 - 1;
-      }
-
-      const source = context.createBufferSource();
-      source.buffer = buffer;
+      // 复用缓存的可循环噪声（随机起点），不再每次分配缓冲区
+      const { source, offset } = createNoiseSource(context);
 
       const gain = context.createGain();
       const now = context.currentTime;
@@ -1643,7 +1861,8 @@ export class AudioManager {
       source.connect(gain);
       gain.connect(sfxGain);
 
-      source.start(now);
+      source.start(now, offset);
+      source.stop(now + duration);
     } catch {
       // Ignore
     }
@@ -1664,15 +1883,8 @@ export class AudioManager {
       const sfxGain = this.sfxGain;
       if (!context || !sfxGain) return;
 
-      const bufferSize = context.sampleRate * duration;
-      const buffer = context.createBuffer(1, bufferSize, context.sampleRate);
-      const data = buffer.getChannelData(0);
-      for (let i = 0; i < bufferSize; i++) {
-        data[i] = Math.random() * 2 - 1;
-      }
-
-      const source = context.createBufferSource();
-      source.buffer = buffer;
+      // 复用缓存的可循环噪声（随机起点），不再每次分配缓冲区
+      const { source, offset } = createNoiseSource(context);
 
       const filter = context.createBiquadFilter();
       filter.type = filterType;
@@ -1688,7 +1900,8 @@ export class AudioManager {
       source.connect(filter);
       filter.connect(gain);
       gain.connect(sfxGain);
-      source.start(now);
+      source.start(now, offset);
+      source.stop(now + duration);
     } catch {
       // Ignore
     }
@@ -2638,6 +2851,244 @@ export class AudioManager {
     }
   }
 
+  // ==================== 新增音效：特殊武器 / 单位 / 环境 / 界面 ====================
+
+  private makeSfxTarget(sound: {
+    now: number;
+    context: AudioContext;
+    sfxGain: GainNode;
+  }): SfxTarget {
+    return {
+      ctx: sound.context,
+      out: sound.sfxGain,
+      t: sound.now,
+      level: this.sfxVolume,
+      random: Math.random,
+    };
+  }
+
+  /** 经 beginSound 的节流 / 并发 / 闪避策略门控后，用音效库渲染一次性音效（不抛错） */
+  private playLibrarySound(
+    soundType: SoundType,
+    durationMs: number,
+    render: (target: SfxTarget) => number
+  ): void {
+    const sound = this.beginSound(soundType, durationMs);
+    if (!sound) return;
+    try {
+      render(this.makeSfxTarget(sound));
+    } catch {
+      // Ignore
+    }
+  }
+
+  private clearTimer(timeoutId: number | null): null {
+    if (timeoutId !== null) {
+      clearTimeout(timeoutId);
+    }
+    return null;
+  }
+
+  private stopLaserBeam(fadeSeconds: number): void {
+    this.laserSafetyTimeout = this.clearTimer(this.laserSafetyTimeout);
+    const beam = this.laserBeam;
+    this.laserBeam = null;
+    try {
+      beam?.stop(fadeSeconds);
+    } catch {
+      // Ignore
+    }
+  }
+
+  private stopRailgunCharge(fadeSeconds: number): void {
+    this.railgunSafetyTimeout = this.clearTimer(this.railgunSafetyTimeout);
+    const charge = this.railgunCharge;
+    this.railgunCharge = null;
+    try {
+      charge?.stop(fadeSeconds);
+    } catch {
+      // Ignore
+    }
+  }
+
+  public playRocketSalvo(): void {
+    this.playLibrarySound(SoundType.ROCKET_SALVO, 900, renderRocketSalvo);
+  }
+
+  /** 激光束开始：点火 + 持续嗡鸣，直到 playLaserStop / playLaserOverheat（最长 8 秒自动收束） */
+  public playLaserStart(): void {
+    if (this.laserBeam) {
+      return;
+    }
+    const sound = this.beginSound(SoundType.LASER_BEAM, 300);
+    if (!sound) return;
+    try {
+      this.laserBeam = startLaserBeam(this.makeSfxTarget(sound));
+      this.laserSafetyTimeout = window.setTimeout(() => {
+        this.laserSafetyTimeout = null;
+        this.stopLaserBeam(0.3);
+      }, LASER_MAX_SECONDS * 1000);
+    } catch {
+      this.laserBeam = null;
+    }
+  }
+
+  public playLaserStop(): void {
+    if (!this.laserBeam) return;
+    this.stopLaserBeam(0.22);
+    this.playLibrarySound(SoundType.LASER_STOP, 320, renderLaserStop);
+  }
+
+  public playLaserOverheat(): void {
+    this.stopLaserBeam(0.12);
+    this.playLibrarySound(SoundType.LASER_OVERHEAT, 1100, renderLaserOverheat);
+  }
+
+  /** 电磁炮蓄力：啸叫在 chargeSeconds 内升到顶点并保持，直到发射 / 取消（最长 4 秒） */
+  public playRailgunCharge(chargeSeconds: number = 1.2): void {
+    this.stopRailgunCharge(0.04);
+    const sound = this.beginSound(SoundType.RAILGUN_CHARGE, 300);
+    if (!sound) return;
+    const seconds = Number.isFinite(chargeSeconds)
+      ? Math.max(0.3, Math.min(3, chargeSeconds))
+      : 1.2;
+    try {
+      this.railgunCharge = startRailgunCharge(this.makeSfxTarget(sound), seconds);
+      this.railgunSafetyTimeout = window.setTimeout(() => {
+        this.railgunSafetyTimeout = null;
+        this.stopRailgunCharge(0.2);
+      }, RAILGUN_CHARGE_MAX_SECONDS * 1000);
+    } catch {
+      this.railgunCharge = null;
+    }
+  }
+
+  public playRailgunChargeCancel(): void {
+    this.stopRailgunCharge(0.05);
+    this.playLibrarySound(SoundType.RAILGUN_CANCEL, 450, renderRailgunChargeCancel);
+  }
+
+  public playRailgunFire(): void {
+    this.stopRailgunCharge(0.03);
+    this.playLibrarySound(SoundType.RAILGUN_FIRE, 900, renderRailgunFire);
+  }
+
+  public playSwarmLaunch(): void {
+    this.playLibrarySound(SoundType.SWARM_LAUNCH, 800, renderSwarmLaunch);
+  }
+
+  public playEmpPulse(): void {
+    this.playLibrarySound(SoundType.EMP_PULSE, 1200, renderEmpPulse);
+  }
+
+  public playFlareDeploy(): void {
+    this.playLibrarySound(SoundType.FLARE_DEPLOY, 1100, renderFlareDeploy);
+  }
+
+  public playSamLockWarning(): void {
+    this.playLibrarySound(SoundType.SAM_LOCK, 600, renderSamLockWarning);
+  }
+
+  public playSamLaunch(): void {
+    this.playLibrarySound(SoundType.SAM_LAUNCH, 1200, renderSamLaunch);
+  }
+
+  public playBombDrop(): void {
+    this.playLibrarySound(SoundType.BOMB_DROP, 1200, renderBombDrop);
+  }
+
+  public playTankCannon(): void {
+    this.playLibrarySound(SoundType.TANK_CANNON, 850, renderTankCannon);
+  }
+
+  /** 直升机掠过；intensity 0..1+ 按距离缩放音量 */
+  public playHelicopterPass(intensity: number = 1): void {
+    const level = Number.isFinite(intensity) ? intensity : 1;
+    this.playLibrarySound(SoundType.HELICOPTER, 2000, (target) =>
+      renderHelicopterPass(target, level)
+    );
+  }
+
+  public playShipHorn(): void {
+    this.playLibrarySound(SoundType.SHIP_HORN, 2300, renderShipHorn);
+  }
+
+  public playSonarPing(): void {
+    this.playLibrarySound(SoundType.SONAR, 1900, renderSonarPing);
+  }
+
+  public playCameraSwitch(): void {
+    this.playLibrarySound(SoundType.CAMERA_SWITCH, 200, renderCameraSwitch);
+  }
+
+  public playAutosave(): void {
+    this.playLibrarySound(SoundType.AUTOSAVE, 900, renderAutosave);
+  }
+
+  public playRadioOpen(): void {
+    this.playLibrarySound(SoundType.RADIO, 200, renderRadioOpen);
+  }
+
+  public playTypewriterTick(): void {
+    this.playLibrarySound(SoundType.TYPEWRITER, 40, renderTypewriterTick);
+  }
+
+  public playWeaponSwitch(): void {
+    this.playLibrarySound(SoundType.WEAPON_SWITCH, 140, renderWeaponSwitch);
+  }
+
+  public playWeaponUnlock(): void {
+    this.playLibrarySound(SoundType.WEAPON_UNLOCK, 1300, renderWeaponUnlock);
+  }
+
+  public playCivilianWarning(): void {
+    this.playLibrarySound(SoundType.CIVILIAN_WARNING, 800, renderCivilianWarning);
+  }
+
+  public playChapterImpact(): void {
+    this.playLibrarySound(SoundType.CHAPTER_IMPACT, 2400, renderChapterImpact);
+  }
+
+  public playLightningStrike(): void {
+    this.playLibrarySound(SoundType.LIGHTNING, 2300, renderLightningStrike);
+  }
+
+  public playLavaEruption(): void {
+    this.playLibrarySound(SoundType.LAVA_ERUPTION, 1800, renderLavaEruption);
+  }
+
+  public playShieldHit(): void {
+    this.playLibrarySound(SoundType.SHIELD_HIT, 380, renderShieldHit);
+  }
+
+  public playBossPhaseAlarm(): void {
+    this.playLibrarySound(SoundType.PHASE_ALARM, 1100, renderBossPhaseAlarm);
+  }
+
+  /** 结算计分音：连续调用时音高逐级升高 */
+  public playDebriefTally(): void {
+    const stamp = performance.now();
+    this.tallyStep = stamp - this.lastTallyMs <= TALLY_STREAK_MS ? this.tallyStep + 1 : 0;
+    this.lastTallyMs = stamp;
+    const step = this.tallyStep;
+    this.playLibrarySound(SoundType.DEBRIEF_TALLY, 60, (target) =>
+      renderDebriefTally(target, step)
+    );
+  }
+
+  public playUnitDestroyed(domain: 'ground' | 'sea' | 'air'): void {
+    const safeDomain: UnitDomain = domain === 'sea' || domain === 'air' ? domain : 'ground';
+    this.playLibrarySound(SoundType.UNIT_DESTROYED, 900, (target) =>
+      renderUnitDestroyed(target, safeDomain)
+    );
+  }
+
+  /** 立即收束激光束与电磁炮蓄力等持续音效（暂停 / 死亡 / 退出战斗时调用） */
+  public stopSustainedSounds(): void {
+    this.stopLaserBeam(0.08);
+    this.stopRailgunCharge(0.05);
+  }
+
   /**
    * 静音
    */
@@ -2661,6 +3112,7 @@ export class AudioManager {
   }
 
   public dispose(): void {
+    this.stopSustainedSounds();
     this.isDisposed = true;
     this.stopEngine();
     for (const timeoutId of this.soundReleaseTimeouts) {
@@ -2673,6 +3125,8 @@ export class AudioManager {
       this.masterGain?.disconnect();
       this.sfxGain?.disconnect();
       this.musicGain?.disconnect();
+      this.sfxCompressorTrim?.disconnect();
+      this.sfxCompressor?.disconnect();
     } catch {
       // Ignore
     }
@@ -2681,6 +3135,8 @@ export class AudioManager {
     this.masterGain = null;
     this.sfxGain = null;
     this.musicGain = null;
+    this.sfxCompressor = null;
+    this.sfxCompressorTrim = null;
     this.engineGain = null;
     this.engineSubGain = null;
     this.engineLayerGain = null;
