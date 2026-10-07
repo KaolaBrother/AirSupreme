@@ -21,6 +21,7 @@ import {
   applyAttitude,
   predictIntercept,
   refreshSurface,
+  type UnitEventKind,
   type UnitWorld,
 } from './UnitMotion';
 import {
@@ -45,6 +46,7 @@ import {
 } from './UnitTypes';
 
 export type { UnitInstance } from './UnitEntity';
+export type { UnitEventKind } from './UnitMotion';
 
 /**
  * 地面 / 海上 / 空中作战单位系统（api-spec §3）
@@ -130,6 +132,11 @@ export class UnitSystem implements IGameSystem {
   onUnitDamaged?: (unit: UnitInstance, amount: number, byPlayer: boolean) => void;
   /** 护送目标抵达 / 平民驶出战场后离场 */
   onUnitDeparted?: (unit: UnitInstance, reason: 'arrived' | 'exited') => void;
+  /**
+   * 单位行为事件（音效 / 无线电挂钩）：'cannon' 坦克 / 舰炮开火、'missile-launch'、'flak-burst'、
+   * 'rocket-salvo'、'ciws'、'bomb-drop'、'sub-surface'、'sub-dive'。position 为单位当前位置（勿保存引用）。
+   */
+  onUnitEvent?: (unit: UnitInstance, kind: UnitEventKind, position: THREE.Vector3) => void;
 
   private readonly scene: THREE.Scene;
   private readonly particleSystem: ParticleSystem | null;
@@ -1083,6 +1090,9 @@ export class UnitSystem implements IGameSystem {
           unit.deathVelocity.set(0, -5, 0);
           unit.deathTimer = 0;
         }
+      },
+      emitEvent: (unit, kind) => {
+        system.onUnitEvent?.(unit, kind, unit.mesh.position);
       },
       depart: (unit, reason) => {
         if (unit.departed || !unit.alive) return;

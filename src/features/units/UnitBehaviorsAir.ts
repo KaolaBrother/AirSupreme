@@ -155,6 +155,7 @@ export function updateAttackHelicopter(
   unit.fireTimer -= deltaTime;
   if (unit.fireTimer <= 0 && unit.burstLeft <= 0 && (engagePlayer || engageAlly) && facing) {
     unit.burstLeft = 4;
+    world.emitEvent(unit, 'rocket-salvo');
     unit.burstTimer = 0;
     unit.fireTimer = 3.8 * world.cooldownMultiplier;
   }
@@ -273,6 +274,7 @@ export function updateBomber(unit: UnitEntity, world: UnitWorld, deltaTime: numb
     unit.secondaryTimer -= deltaTime;
     if (unit.secondaryTimer <= 0 && shouldDropBombs(unit, world)) {
       unit.burstLeft = 4;
+      world.emitEvent(unit, 'bomb-drop');
       unit.burstTimer = 0;
       unit.secondaryTimer = 6 * world.cooldownMultiplier;
     }

@@ -11,6 +11,17 @@ import type { UnitDomain } from './UnitTypes';
  * 行为函数只通过 UnitWorld 开火 / 发射 / 投弹 / 告警，不直接触碰回调或场景。
  */
 
+/** 单位行为事件：主炮开火、导弹发射、高炮齐射、火箭齐射、近防炮、投弹、潜艇上浮 / 下潜 */
+export type UnitEventKind =
+  | 'cannon'
+  | 'missile-launch'
+  | 'flak-burst'
+  | 'rocket-salvo'
+  | 'ciws'
+  | 'bomb-drop'
+  | 'sub-surface'
+  | 'sub-dive';
+
 /** 敌方子弹池（ProjectilePool）的固定弹速，用于计算提前量 */
 export const UNIT_GUN_PROJECTILE_SPEED = 100;
 /** 水面高度（与 TerrainGenerator.WORLDSCAPE_WATER_Y 一致） */
@@ -79,6 +90,8 @@ export interface UnitWorld {
   findNearestMissile(center: THREE.Vector3, radius: number, out: THREE.Vector3): boolean;
   /** 坠毁（例如被 EMP 瘫痪的无人机落地） */
   crash(unit: UnitEntity, byPlayer: boolean): void;
+  /** 单位行为事件（音效 / 无线电挂钩） */
+  emitEvent(unit: UnitEntity, kind: UnitEventKind): void;
   /** 离场：护送抵达或平民驶出战场 */
   depart(unit: UnitEntity, reason: 'arrived' | 'exited'): void;
 }

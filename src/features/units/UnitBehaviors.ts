@@ -276,6 +276,7 @@ function updateTank(unit: UnitEntity, world: UnitWorld, deltaTime: number): void
       );
     }
     world.muzzleFlash(muzzlePos, 1.3);
+    world.emitEvent(unit, 'cannon');
     unit.recoil = 1;
     unit.fireTimer = (3.2 + unit.seed * 0.8) * world.cooldownMultiplier;
   }
@@ -363,6 +364,7 @@ function updateSamLauncher(unit: UnitEntity, world: UnitWorld, deltaTime: number
         if (rack[index]) rack[index].visible = false;
         unit.missilesLoaded--;
         world.muzzleFlash(muzzlePos, 1.4);
+        world.emitEvent(unit, 'missile-launch');
       }
       return launched;
     },
@@ -501,6 +503,7 @@ function updateAaGun(unit: UnitEntity, world: UnitWorld, deltaTime: number): voi
   unit.fireTimer -= deltaTime;
   if (unit.fireTimer <= 0 && unit.burstLeft <= 0 && (engagePlayer || target) && yawError < 0.16) {
     unit.burstLeft = 6;
+    world.emitEvent(unit, 'flak-burst');
     unit.burstTimer = 0;
     unit.fireTimer = 2.1 * world.cooldownMultiplier;
     if (engagePlayer) {
@@ -752,6 +755,7 @@ function updateFrigate(unit: UnitEntity, world: UnitWorld, deltaTime: number): v
       );
     }
     world.muzzleFlash(muzzlePos, 1.4);
+    world.emitEvent(unit, 'cannon');
   }
 
   // 近防炮：近距离高射速弹幕
@@ -769,6 +773,7 @@ function updateFrigate(unit: UnitEntity, world: UnitWorld, deltaTime: number): v
     unit.secondaryTimer -= deltaTime;
     if (unit.secondaryTimer <= 0 && unit.burstLeft <= 0) {
       unit.burstLeft = 10;
+      world.emitEvent(unit, 'ciws');
       unit.burstTimer = 0;
       unit.secondaryTimer = 1.5 * world.cooldownMultiplier;
     }
@@ -811,7 +816,10 @@ function updateFrigate(unit: UnitEntity, world: UnitWorld, deltaTime: number): v
           boostUpTime: 0.45,
         }
       );
-      if (launched) world.muzzleFlash(muzzlePos, 1.6);
+      if (launched) {
+        world.muzzleFlash(muzzlePos, 1.6);
+        world.emitEvent(unit, 'missile-launch');
+      }
       return launched;
     },
   });
@@ -852,6 +860,7 @@ function updateSubmarine(unit: UnitEntity, world: UnitWorld, deltaTime: number):
       const allyNear = nearestAlly(unit, world, 900, ['sea']) !== null;
       if (unit.phaseTimer <= 0 && ((world.playerActive && distance < 1000) || allyNear)) {
         unit.phase = 'surfacing';
+        world.emitEvent(unit, 'sub-surface');
         unit.phaseTimer = 2.2;
         unit.secondaryTimer = 0;
       }
@@ -880,6 +889,7 @@ function updateSubmarine(unit: UnitEntity, world: UnitWorld, deltaTime: number):
       unit.altitude = 0;
       if (unit.phaseTimer <= 0 && unit.lockPhase !== 'locking') {
         unit.phase = 'diving';
+        world.emitEvent(unit, 'sub-dive');
         unit.phaseTimer = 2.2;
         unit.secondaryTimer = 0;
       }
@@ -944,6 +954,7 @@ function updateSubmarine(unit: UnitEntity, world: UnitWorld, deltaTime: number):
         if (launched) {
           unit.missilesLoaded--;
           world.splash(muzzlePos, 1.2);
+          world.emitEvent(unit, 'missile-launch');
         }
         return launched;
       },
