@@ -658,6 +658,47 @@ export function createMagmaColossusMesh(config: BossConfig): THREE.Group {
       }
     );
   }
+  // 獠牙与熔岩涎：上下颚交错的玄武岩齿 + 齿间垂落的熔流；两对后掠角
+  const teethGeometries: THREE.BufferGeometry[] = [];
+  for (let i = 0; i < 6; i++) {
+    const x = (i - 2.5) * 0.62;
+    teethGeometries.push(
+      placed(new THREE.ConeGeometry(0.2 * s, 0.85 * s, 4), x * s, -0.42 * s, 3.18 * s, Math.PI)
+    );
+    teethGeometries.push(
+      placed(
+        new THREE.ConeGeometry(0.18 * s, 0.7 * s, 4),
+        (x + 0.31) * s,
+        -1.0 * s,
+        3.05 * s,
+        -0.25
+      )
+    );
+  }
+  for (const side of [1, -1]) {
+    teethGeometries.push(
+      placed(
+        new THREE.ConeGeometry(0.38 * s, 3.2 * s, 5),
+        side * 2.0 * s,
+        1.0 * s,
+        -0.3 * s,
+        -1.25,
+        0,
+        -side * 0.55
+      )
+    );
+  }
+  const teeth = mergeInto(teethGeometries, materials.plate, 'colossus_teeth');
+  teeth.castShadow = true;
+  head.add(teeth);
+  const droolGeometries: THREE.BufferGeometry[] = [];
+  for (const x of [-0.95, 0.15, 1.05]) {
+    droolGeometries.push(placed(box(0.14, 0.75, 0.14), x * s, -0.7 * s, 3.0 * s));
+  }
+  const drool = mergeInto(droolGeometries, materials.crack, 'colossus_magma_drool');
+  drool.castShadow = false;
+  head.add(drool);
+
   const cannonMuzzles: THREE.Object3D[] = [];
   for (const side of [1, -1]) {
     add(
