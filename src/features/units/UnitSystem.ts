@@ -29,6 +29,8 @@ import {
   clampToBattlefield,
   pickClusterCenter,
   pickUnitPosition,
+  pointAlongRoute,
+  routeLength,
   type PlacementContext,
   type SurfaceSample,
 } from './UnitPlacement';
@@ -270,25 +272,28 @@ export class UnitSystem implements IGameSystem {
     out: UnitInstance[]
   ): void {
     const config = UNIT_CONFIGS[type];
-    // 平民空中 / 海上单位各走各的航线；车队、卡车与运输机排成纵列
+    // 平民空中 / 海上单位各走各的航线；车队、卡车与运输机沿同一航线排成纵列
     const separateRoutes = !config.isEscort && domain !== 'ground';
+    const spacing = domain === 'ground' ? 26 : domain === 'sea' ? 150 : 140;
     let route: THREE.Vector3[] = [];
+    let columnStart = 0;
     for (let i = 0; i < count; i++) {
-      if (i === 0 || separateRoutes) route = buildRoute(ctx, type, domain);
+      if (i === 0 || separateRoutes) {
+        route = buildRoute(ctx, type, domain);
+        // 纵列：头车在前，后车沿航线依次排开（全部位于已校验的航线上）
+        columnStart = separateRoutes
+          ? 0
+          : Math.min((count - 1) * spacing, routeLength(route) * 0.4);
+      }
       if (route.length < 2) continue;
-      const start = route[0];
-      const next = route[1];
-      this.tmpDir.subVectors(start, next).setY(0);
-      if (this.tmpDir.lengthSq() < 1e-6) this.tmpDir.set(1, 0, 0);
-      this.tmpDir.normalize();
-      const spacing = domain === 'ground' ? 26 : domain === 'sea' ? 150 : 140;
-      const offset = separateRoutes ? 0 : i * spacing;
-      const position = new THREE.Vector3(
-        clampToBattlefield(start.x + this.tmpDir.x * offset),
-        start.y,
-        clampToBattlefield(start.z + this.tmpDir.z * offset)
+      const along = separateRoutes ? 0 : Math.max(0, columnStart - i * spacing);
+      const position = pointAlongRoute(route, along, new THREE.Vector3());
+      const remaining = route.filter(
+        (_point, index) => index > 0 && routeDistanceTo(route, index) > along
       );
-      const unit = this.spawnUnit(type, position, { route: route.map((p) => p.clone()) });
+      const unit = this.spawnUnit(type, position, {
+        route: (remaining.length > 0 ? remaining : [route[route.length - 1]]).map((p) => p.clone()),
+      });
       if (unit) out.push(unit);
     }
   }
@@ -1130,6 +1135,14 @@ export class UnitSystem implements IGameSystem {
       },
     };
   }
+}
+
+/** 从航线起点到第 index 个航点的折线距离 */
+function routeDistanceTo(route: readonly THREE.Vector3[], index: number): number {
+  let total = 0;
+  for (let i = 0; i < index && i < route.length - 1; i++)
+    total += route[i].distanceTo(route[i + 1]);
+  return total;
 }
 
 /** 释放单位对象树中非共享的几何 / 材质（模板共享资源跳过） */

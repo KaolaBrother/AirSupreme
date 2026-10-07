@@ -251,7 +251,27 @@ export function buildRoute(
     const y = domain === 'air' ? Math.max(cruise, surface.y + 60) : surface.y;
     route.push(new THREE.Vector3(x, y, z));
   }
+  if (domain !== 'air' && ctx.hasSampler && route.length >= 2) {
+    // 航段中点落在错误地形（例如穿湖）时插入绕行点
+    for (let i = route.length - 2; i >= 0; i--) {
+      const a = route[i];
+      const b = route[i + 1];
+      const mx = (a.x + b.x) / 2;
+      const mz = (a.z + b.z) / 2;
+      if (domainMatches(ctx, domain, mx, mz)) continue;
+      const detour = findNear(ctx, domain, mx, mz, 40, 320, 20);
+      if (detour) {
+        route.splice(
+          i + 1,
+          0,
+          new THREE.Vector3(detour[0], ctx.surface(detour[0], detour[1], domain).y, detour[1])
+        );
+      }
+    }
+  }
   if (route.length < 2) {
+    // 海上航线找不到足够的水面点：放弃（调用方跳过生成）
+    if (domain === 'sea' && ctx.hasSampler) return [];
     // 兜底：至少两个点，保证护送 / 平民有终点
     const a = new THREE.Vector3(
       clampToBattlefield(cx - dx * 300),
@@ -268,4 +288,33 @@ export function buildRoute(
     return [a, b];
   }
   return route;
+}
+
+/**
+ * 沿航线折线从起点前进 distance 米处的点（超出终点则取终点）。
+ */
+export function pointAlongRoute(
+  route: readonly THREE.Vector3[],
+  distance: number,
+  out: THREE.Vector3
+): THREE.Vector3 {
+  if (route.length === 0) return out.set(0, 0, 0);
+  let remaining = Math.max(0, distance);
+  for (let i = 0; i < route.length - 1; i++) {
+    const a = route[i];
+    const b = route[i + 1];
+    const length = a.distanceTo(b);
+    if (remaining <= length && length > 1e-6) {
+      return out.copy(a).lerp(b, remaining / length);
+    }
+    remaining -= length;
+  }
+  return out.copy(route[route.length - 1]);
+}
+
+/** 航线总长（米） */
+export function routeLength(route: readonly THREE.Vector3[]): number {
+  let total = 0;
+  for (let i = 0; i < route.length - 1; i++) total += route[i].distanceTo(route[i + 1]);
+  return total;
 }
