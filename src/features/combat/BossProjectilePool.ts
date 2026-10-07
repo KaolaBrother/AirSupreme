@@ -12,6 +12,7 @@ import {
 } from 'three';
 import { GameConfig, GAME_CONSTANTS } from '@/config';
 import { getVfxTextures } from '@/features/effects/ParticleSystem';
+import { isBelowImpactSurface, type ProjectileImpactSurface } from './ProjectilePool';
 
 /**
  * Boss炮弹数据
@@ -187,7 +188,7 @@ export class BossProjectilePool {
    */
   public update(
     deltaTime: number,
-    impactHeight?: number,
+    impactHeight?: ProjectileImpactSurface,
     onEnvironmentHit?: (position: Vector3) => void
   ): void {
     for (const projectile of this.pool) {
@@ -197,10 +198,7 @@ export class BossProjectilePool {
       projectile.mesh.position.addScaledVector(projectile.direction, projectile.speed * deltaTime);
       this.updateProjectileVisual(projectile);
 
-      if (
-        typeof impactHeight === 'number'
-        && projectile.mesh.position.y <= impactHeight
-      ) {
+      if (isBelowImpactSurface(projectile.mesh.position, impactHeight)) {
         onEnvironmentHit?.(projectile.mesh.position.clone());
         this.deactivate(projectile);
         continue;

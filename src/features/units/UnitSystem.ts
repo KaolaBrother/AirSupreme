@@ -71,6 +71,15 @@ export interface UnitUpdateContext {
 
 export type UnitSurfaceSampler = (x: number, z: number) => { y: number; water: boolean };
 
+/**
+ * 可选的外部航线（地形环境提供，例如峡谷车队土路 / 城堡突击路线，世界坐标）；
+ * 返回 null 或少于 2 个点时使用默认的随机航线。
+ */
+export type UnitRouteProvider = (
+  type: UnitType,
+  domain: UnitDomain
+) => readonly THREE.Vector3[] | null;
+
 export type PlayerLockState = 'none' | 'locking' | 'incoming';
 
 /**
@@ -148,6 +157,7 @@ export class UnitSystem implements IGameSystem {
   private sampler: UnitSurfaceSampler | null = null;
   private effects: UnitEffectOverrides = {};
   private decoyProvider: IDecoyProvider | null = null;
+  private routeProvider: UnitRouteProvider | null = null;
   private scaling: LevelScaling = getLevelScaling(1);
   private readonly seenTypes = new Set<UnitType>();
   private time = 0;
@@ -224,6 +234,11 @@ export class UnitSystem implements IGameSystem {
     this.decoyProvider = provider;
   }
 
+  /** 'route' 放置的外部航线（见 UnitRouteProvider） */
+  setRouteProvider(provider: UnitRouteProvider | null): void {
+    this.routeProvider = typeof provider === 'function' ? provider : null;
+  }
+
   setLevelScaling(scaling: LevelScaling): void {
     if (!scaling) return;
     this.scaling = scaling;
@@ -287,7 +302,7 @@ export class UnitSystem implements IGameSystem {
     let columnStart = 0;
     for (let i = 0; i < count; i++) {
       if (i === 0 || separateRoutes) {
-        route = buildRoute(ctx, type, domain);
+        route = this.buildProvidedRoute(ctx, type, domain) ?? buildRoute(ctx, type, domain);
         // 纵列：头车在前，后车沿航线依次排开（全部位于已校验的航线上）
         columnStart = separateRoutes
           ? 0
@@ -304,6 +319,42 @@ export class UnitSystem implements IGameSystem {
       });
       if (unit) out.push(unit);
     }
+  }
+
+  /**
+   * 外部航线：从离玩家前方 260 米最近的航点开始（车队出现在视野里），沿航线方向行进，
+   * 航点高度重新贴合地表。
+   */
+  private buildProvidedRoute(
+    ctx: PlacementContext,
+    type: UnitType,
+    domain: UnitDomain
+  ): THREE.Vector3[] | null {
+    const path = this.routeProvider?.(type, domain);
+    if (!path || path.length < 2) return null;
+    const aheadX = ctx.playerPosition.x + ctx.forwardX * 260;
+    const aheadZ = ctx.playerPosition.z + ctx.forwardZ * 260;
+    let start = 0;
+    let bestDistance = Infinity;
+    for (let i = 0; i < path.length; i++) {
+      const point = path[i];
+      if (!isFiniteVector(point)) continue;
+      const distance = (point.x - aheadX) ** 2 + (point.z - aheadZ) ** 2;
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        start = i;
+      }
+    }
+    start = Math.min(start, path.length - 2);
+    const route: THREE.Vector3[] = [];
+    for (let i = start; i < path.length; i++) {
+      const point = path[i];
+      if (!isFiniteVector(point)) continue;
+      const x = clampToBattlefield(point.x);
+      const z = clampToBattlefield(point.z);
+      route.push(new THREE.Vector3(x, ctx.surface(x, z, domain).y, z));
+    }
+    return route.length >= 2 ? route : null;
   }
 
   spawnUnit(

@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { ParticleSystem, getVfxTextures } from '@/features/effects/ParticleSystem';
 import { GAME_CONSTANTS } from '@/config';
 import { getLogger } from '@/core/utils/Logger';
+import { getDeclaredHitRadius } from '@/core/CombatContracts';
 
 const log = getLogger('MissileSystem');
 // 稍微加密尾迹步进，让烟线更连续
@@ -773,6 +774,7 @@ export class MissileSystem {
   private scene: THREE.Scene;
   private particleSystem: ParticleSystem;
   private missiles: Missile[] = [];
+  private readonly collisionTargetPosition = new THREE.Vector3();
   private enemies: THREE.Object3D[] = []; // 存储敌人列表，用于重新锁定
 
   constructor(scene: THREE.Scene, particleSystem?: ParticleSystem) {
@@ -831,11 +833,11 @@ export class MissileSystem {
     targetMeshes: THREE.Object3D[],
     onHit: (target: THREE.Object3D, impactPosition: THREE.Vector3) => void
   ): void {
+    const targetWorldPos = this.collisionTargetPosition;
     for (const missile of this.missiles) {
       if (!missile.active) continue;
 
       for (const targetMesh of targetMeshes) {
-        const targetWorldPos = new THREE.Vector3();
         targetMesh.getWorldPosition(targetWorldPos);
 
         if (
@@ -847,7 +849,8 @@ export class MissileSystem {
         }
 
         const distance = missile.mesh.position.distanceTo(targetWorldPos);
-        const hitDistance = 2;
+        // 大型目标（Boss 部件 / 舰船）按声明的命中半径判定；未声明时沿用 2 米
+        const hitDistance = Math.max(2, getDeclaredHitRadius(targetMesh, 2));
 
         if (distance < hitDistance) {
           missile.active = false;

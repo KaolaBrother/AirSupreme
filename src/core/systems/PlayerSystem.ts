@@ -12,6 +12,8 @@ import { ShieldRipple } from '@/features/effects/ShieldRipple';
 export class PlayerSystem implements IGameSystem {
   readonly name = 'PlayerSystem';
   private static readonly RESPAWN_ALTITUDE_BUFFER = 10;
+  /** 复活点离地高度（米）：峡谷 / 火山等高耸地形上留出改出空间 */
+  private static readonly RESPAWN_CLEARANCE = 40;
 
   private controller: PlayerController;
   private health: HealthSystem;
@@ -30,9 +32,13 @@ export class PlayerSystem implements IGameSystem {
   private readonly shieldMaterials: THREE.MeshBasicMaterial[] = [];
   private shieldRipple?: ShieldRipple;
   private readonly shieldHitDirection = new THREE.Vector3();
+  private readonly respawnForward = new THREE.Vector3();
+  private static readonly UP_AXIS = new THREE.Vector3(0, 1, 0);
   private shieldTime: number = 0;
   private shieldFade: number = 0;
   private shieldFadingOut: boolean = false;
+  /** 视角淡化系数：第一人称时护盾半透明，不挡住座舱视野（1 = 正常） */
+  private shieldViewFade: number = 1;
   private static readonly SHIELD_FADE_MS = 200;
   private static readonly SHIELD_INNER_OPACITY = 0.16;
   private static readonly SHIELD_OUTER_OPACITY = 0.08;
@@ -147,6 +153,14 @@ export class PlayerSystem implements IGameSystem {
     const safeRespawnPosition = this.getSafeRespawnPosition();
 
     this.mesh.position.copy(safeRespawnPosition);
+    // 改平姿态（保留航向）：坠毁时多为俯冲，原姿态复活会立刻再次撞地
+    this.respawnForward.set(0, 0, -1).applyQuaternion(this.mesh.quaternion);
+    const heading = Math.atan2(-this.respawnForward.x, -this.respawnForward.z);
+    const safeHeading = this.pickRespawnHeading(
+      safeRespawnPosition,
+      Number.isFinite(heading) ? heading : 0
+    );
+    this.mesh.quaternion.setFromAxisAngle(PlayerSystem.UP_AXIS, safeHeading);
 
     this.mesh.visible = true;
     this.syncVisualState();
@@ -155,6 +169,40 @@ export class PlayerSystem implements IGameSystem {
     EventBus.emit(GameEventType.PLAYER_RESPAWN, {
       position: this.mesh.position.clone(),
     });
+  }
+
+  /**
+   * 复活航向：原航向前方 400 米内地表高于复活高度（火山坡 / 崖壁）时，
+   * 改为 8 个方向里净空最大的一个，避免复活后几秒内再次撞上同一面山坡。
+   */
+  private pickRespawnHeading(position: THREE.Vector3, heading: number): number {
+    const clearance = (candidate: number): number => {
+      const dirX = -Math.sin(candidate);
+      const dirZ = -Math.cos(candidate);
+      let highest = -Infinity;
+      for (let distance = 50; distance <= 400; distance += 50) {
+        const ground = this.sampleCrashSurfaceY(
+          position.x + dirX * distance,
+          position.z + dirZ * distance
+        );
+        if (Number.isFinite(ground) && ground > highest) highest = ground;
+      }
+      return Number.isFinite(highest) ? position.y - highest : Infinity;
+    };
+    let best = heading;
+    let bestClearance = clearance(heading);
+    if (bestClearance >= PlayerSystem.RESPAWN_CLEARANCE * 0.5) {
+      return heading;
+    }
+    for (let i = 1; i < 8; i++) {
+      const candidate = heading + (i * Math.PI) / 4;
+      const value = clearance(candidate);
+      if (value > bestClearance) {
+        bestClearance = value;
+        best = candidate;
+      }
+    }
+    return best;
   }
 
   private updateShield(deltaTime: number): void {
@@ -187,12 +235,28 @@ export class PlayerSystem implements IGameSystem {
   }
 
   private applyShieldOpacity(fade: number): void {
-    this.shieldRipple?.setFade(fade);
+    const visibleFade = fade * this.shieldViewFade;
+    this.shieldRipple?.setFade(visibleFade);
     if (this.shieldMaterials[0]) {
-      this.shieldMaterials[0].opacity = PlayerSystem.SHIELD_INNER_OPACITY * fade;
+      this.shieldMaterials[0].opacity = PlayerSystem.SHIELD_INNER_OPACITY * visibleFade;
     }
     if (this.shieldMaterials[1]) {
-      this.shieldMaterials[1].opacity = PlayerSystem.SHIELD_OUTER_OPACITY * fade;
+      this.shieldMaterials[1].opacity = PlayerSystem.SHIELD_OUTER_OPACITY * visibleFade;
+    }
+  }
+
+  /**
+   * 护盾在视角中的淡化（CameraRig 混合值驱动：1 - 0.7 × blend），第一人称时护盾球
+   * 包住座舱，降低不透明度避免遮挡视野。
+   */
+  setShieldViewFade(fade: number): void {
+    const next = Number.isFinite(fade) ? Math.max(0, Math.min(1, fade)) : 1;
+    if (Math.abs(next - this.shieldViewFade) < 0.005) {
+      return;
+    }
+    this.shieldViewFade = next;
+    if (this.shieldGroup && this.shieldGroup.visible) {
+      this.applyShieldOpacity(this.shieldFadingOut ? this.shieldFade : 1);
     }
   }
 
@@ -264,7 +328,7 @@ export class PlayerSystem implements IGameSystem {
   private getSafeRespawnPosition(): THREE.Vector3 {
     const safeRespawnPosition = this.lastSafeRespawnPosition.clone();
     const surfaceY = this.sampleCrashSurfaceY(safeRespawnPosition.x, safeRespawnPosition.z);
-    const minSafeY = surfaceY + PlayerSystem.RESPAWN_ALTITUDE_BUFFER;
+    const minSafeY = surfaceY + PlayerSystem.RESPAWN_CLEARANCE;
     const currentY = Number.isFinite(safeRespawnPosition.y) ? safeRespawnPosition.y : minSafeY;
     safeRespawnPosition.y = Math.max(currentY, minSafeY);
 
@@ -276,6 +340,23 @@ export class PlayerSystem implements IGameSystem {
     this.crashSurfaceSampler = sampler;
   }
 
+  /**
+   * 换关 / 读档：把玩家放到新位置与朝向（四元数），同步插值状态与安全复活点。
+   */
+  placeAt(position: THREE.Vector3, quaternion: THREE.Quaternion): void {
+    const { x, y, z } = position;
+    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
+      return;
+    }
+    this.mesh.position.copy(position);
+    this.mesh.quaternion.copy(quaternion);
+    this.lastSafeRespawnPosition.copy(position);
+    this.syncVisualState();
+    if (this.shieldGroup) {
+      this.shieldGroup.position.copy(position);
+    }
+  }
+
   getController(): PlayerController {
     return this.controller;
   }
@@ -284,10 +365,16 @@ export class PlayerSystem implements IGameSystem {
     return this.health;
   }
 
+  /** 战斗伤害：先按复合装甲升级减伤（0..40%），再结算血量 */
   takeCombatDamage(amount: number, feedback?: PlayerHitFeedbackMetadata): void {
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return;
+    }
+    const reduction = this.stats.getArmorReduction();
+    const dealt = amount * (1 - (Number.isFinite(reduction) ? reduction : 0));
     this.pendingDamageOptions = feedback ?? null;
     try {
-      this.health.takeDamage(amount);
+      this.health.takeDamage(dealt);
     } finally {
       this.pendingDamageOptions = null;
     }
