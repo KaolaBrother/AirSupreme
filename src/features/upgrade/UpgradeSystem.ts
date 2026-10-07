@@ -1,5 +1,6 @@
 import { SPECIAL_WEAPON_IDS, type SpecialWeaponId } from '@/core/CombatContracts';
 import { TOTAL_LEVELS, getWeaponUnlockLevel } from '@/features/campaign/CampaignData';
+import { SPECIAL_WEAPON_CONFIGS, isSpecialWeaponId } from '@/features/weapons/WeaponTypes';
 
 export enum UpgradeType {
   MAX_HEALTH = 'MAX_HEALTH',
@@ -19,10 +20,10 @@ export enum UpgradeType {
 }
 
 /**
- * 升级线分类（决定随战役推进的上限曲线）：
+ * 升级线分类，决定随战役推进的上限曲线：
  * - core：机体与导弹核心属性，每进入新的一关上限 +1
  * - defense：装甲 / 热焰弹，每两关上限 +1
- * - weapon：特殊武器强化，解锁后逐关开放
+ * - weapon：特殊武器强化，解锁当关开放 2 级，之后每关 +1
  */
 export type UpgradeCategory = 'core' | 'defense' | 'weapon';
 
@@ -40,25 +41,45 @@ export interface UpgradeConfig {
   weaponId?: SpecialWeaponId;
 }
 
-/** 核心属性：10 级，终值与旧版 5 级满级一致（步长减半），花费平缓递增 */
-const CORE_COSTS: readonly number[] = [1, 1, 1, 2, 2, 2, 3, 3, 4, 4];
-const ARMOR_COSTS: readonly number[] = [2, 2, 3, 3, 4];
-const FLARE_COSTS: readonly number[] = [1, 2, 2, 3];
-const WEAPON_COSTS: readonly number[] = [1, 2, 2, 3, 3];
+/**
+ * 花费曲线（按“层级”递增）：
+ * 第 n 关新开放的层级，单级花费约为该关全清得分折算升级点的 10%-15%，
+ * 让每一次购买在难度攀升时依然是有分量的取舍；第 10 关前不足以买满所有可用层级。
+ * 核心属性 10 级，终值与旧版 5 级满级一致（步长减半）。
+ */
+const CORE_COSTS: readonly number[] = [1, 1, 2, 3, 4, 5, 7, 9, 11, 13];
+const ARMOR_COSTS: readonly number[] = [2, 3, 5, 7, 9];
+const FLARE_COSTS: readonly number[] = [2, 3, 5, 7];
+/** 武器越晚解锁、战场收益越高，起步花费随之提高 */
+const WEAPON_COSTS: Readonly<Record<SpecialWeaponId, readonly number[]>> = {
+  rockets: [2, 4, 6, 8, 10],
+  laser: [3, 5, 7, 9, 11],
+  swarm: [4, 6, 8, 10, 12],
+  railgun: [4, 6, 8, 10, 12],
+  emp: [5, 7, 9, 11, 13],
+};
+
+const WEAPON_UPGRADE_DESCRIPTIONS: Readonly<Record<SpecialWeaponId, string>> = {
+  rockets: '增加每轮齐射的火箭数量与弹头伤害，缩短装填',
+  laser: '提高照射伤害与射程，减缓积热、加快散热',
+  swarm: '增加每轮微型导弹数量与伤害，缩短装填',
+  railgun: '提高穿甲伤害与射程，缩短蓄力与装填',
+  emp: '延长瘫痪时间、扩大脉冲半径，缩短冷却',
+};
 
 /** 核心属性的层级上限：min(10, 关卡 + 1) */
 const CORE_TIER_LIMIT = 10;
 /** 特殊武器强化的层级上限：min(5, 关卡 - 解锁关卡 + 2) */
 const WEAPON_TIER_LIMIT = 5;
-/** 武器在当前关卡之前被显式解锁时，至少开放到解锁当关的上限 */
-const WEAPON_ENTRY_CAP = 2;
 /** 装甲满级减伤（getArmorReduction 的上限） */
 const MAX_ARMOR_REDUCTION = 0.4;
 const BASE_FLARE_CAPACITY = 2;
 const MAX_FLARE_CAPACITY = 6;
-
-/** 跳关开局补偿：之前每一章折算的升级点 */
-const STARTING_POINTS_PER_CHAPTER = 6;
+/**
+ * 跳关开局补偿：按“上一关全部升级线买到上限的总花费”的 75% 发放，
+ * 约等于正常推进的玩家进入该关时的升级点存量（他们也没能买满）。
+ */
+const STARTING_POINTS_SHARE = 0.75;
 
 function coreConfig(
   type: UpgradeType,
@@ -81,18 +102,14 @@ function coreConfig(
   };
 }
 
-function weaponConfig(
-  type: UpgradeType,
-  weaponId: SpecialWeaponId,
-  name: string,
-  description: string
-): UpgradeConfig {
+function weaponConfig(type: UpgradeType, weaponId: SpecialWeaponId): UpgradeConfig {
   return {
     type,
-    name,
-    description,
-    maxLevel: WEAPON_COSTS.length,
-    costs: [...WEAPON_COSTS],
+    name: SPECIAL_WEAPON_CONFIGS[weaponId].name,
+    description: WEAPON_UPGRADE_DESCRIPTIONS[weaponId],
+    maxLevel: WEAPON_COSTS[weaponId].length,
+    costs: [...WEAPON_COSTS[weaponId]],
+    // 数值即强化等级 0..5，实际性能见 getSpecialWeaponStats
     valuePerLevel: 1,
     baseValue: 0,
     unit: '',
@@ -110,14 +127,7 @@ export const UPGRADE_CONFIGS: Record<UpgradeType, UpgradeConfig> = {
     20,
     ''
   ),
-  [UpgradeType.DAMAGE]: coreConfig(
-    UpgradeType.DAMAGE,
-    '武器伤害',
-    '增加子弹伤害',
-    12.5,
-    1.75,
-    ''
-  ),
+  [UpgradeType.DAMAGE]: coreConfig(UpgradeType.DAMAGE, '武器伤害', '增加子弹伤害', 12.5, 1.75, ''),
   [UpgradeType.FIRE_RATE]: coreConfig(
     UpgradeType.FIRE_RATE,
     '射速',
@@ -157,7 +167,7 @@ export const UPGRADE_CONFIGS: Record<UpgradeType, UpgradeConfig> = {
     description: '降低受到的伤害，满级减伤 40%',
     maxLevel: ARMOR_COSTS.length,
     costs: [...ARMOR_COSTS],
-    // 以百分点存储，便于菜单显示；PlayerStats.getArmorReduction() 换算为 0-1
+    // 以百分点存储便于菜单显示；PlayerStats.getArmorReduction() 换算为 0-1
     valuePerLevel: 8,
     baseValue: 0,
     unit: '%',
@@ -174,36 +184,11 @@ export const UPGRADE_CONFIGS: Record<UpgradeType, UpgradeConfig> = {
     unit: '发',
     category: 'defense',
   },
-  [UpgradeType.WEAPON_ROCKETS]: weaponConfig(
-    UpgradeType.WEAPON_ROCKETS,
-    'rockets',
-    '集束火箭',
-    '强化集束火箭的整体性能'
-  ),
-  [UpgradeType.WEAPON_LASER]: weaponConfig(
-    UpgradeType.WEAPON_LASER,
-    'laser',
-    '脉冲激光',
-    '强化脉冲激光的整体性能'
-  ),
-  [UpgradeType.WEAPON_SWARM]: weaponConfig(
-    UpgradeType.WEAPON_SWARM,
-    'swarm',
-    '蜂群导弹',
-    '强化蜂群导弹的整体性能'
-  ),
-  [UpgradeType.WEAPON_RAILGUN]: weaponConfig(
-    UpgradeType.WEAPON_RAILGUN,
-    'railgun',
-    '电磁轨道炮',
-    '强化电磁轨道炮的整体性能'
-  ),
-  [UpgradeType.WEAPON_EMP]: weaponConfig(
-    UpgradeType.WEAPON_EMP,
-    'emp',
-    '电磁脉冲',
-    '强化电磁脉冲的整体性能'
-  ),
+  [UpgradeType.WEAPON_ROCKETS]: weaponConfig(UpgradeType.WEAPON_ROCKETS, 'rockets'),
+  [UpgradeType.WEAPON_LASER]: weaponConfig(UpgradeType.WEAPON_LASER, 'laser'),
+  [UpgradeType.WEAPON_SWARM]: weaponConfig(UpgradeType.WEAPON_SWARM, 'swarm'),
+  [UpgradeType.WEAPON_RAILGUN]: weaponConfig(UpgradeType.WEAPON_RAILGUN, 'railgun'),
+  [UpgradeType.WEAPON_EMP]: weaponConfig(UpgradeType.WEAPON_EMP, 'emp'),
 };
 
 /** 特殊武器 → 对应强化线 */
@@ -222,17 +207,13 @@ export function getWeaponIdForUpgrade(type: UpgradeType): SpecialWeaponId | null
   return UPGRADE_CONFIGS[type]?.weaponId ?? null;
 }
 
-function isSpecialWeaponId(value: unknown): value is SpecialWeaponId {
-  return typeof value === 'string' && (SPECIAL_WEAPON_IDS as readonly string[]).includes(value);
-}
-
 function isUpgradeType(value: unknown): value is UpgradeType {
   return typeof value === 'string' && (UPGRADE_TYPE_VALUES as readonly string[]).includes(value);
 }
 
 /** 关卡号规范化到 1..TOTAL_LEVELS；非有限值视为第 1 关 */
 function normalizeCampaignLevel(level: number): number {
-  if (!Number.isFinite(level)) {
+  if (typeof level !== 'number' || !Number.isFinite(level)) {
     return 1;
   }
   return Math.max(1, Math.min(TOTAL_LEVELS, Math.round(level)));
@@ -255,10 +236,10 @@ function roundValue(value: number): number {
 }
 
 /**
- * 某条升级线在指定战役关卡的层级上限（不含显式解锁的修正）。
+ * 某条升级线在指定战役关卡的层级上限（关卡越界时钳制到 1..TOTAL_LEVELS）：
  * - 核心属性：min(10, 关卡 + 1)
  * - 装甲 / 热焰弹：min(满级, ceil(关卡 / 2) + 1)
- * - 特殊武器：解锁前为 0；之后 min(5, 关卡 - 解锁关卡 + 2)
+ * - 特殊武器：解锁关卡之前为 0（锁定）；之后 min(5, 关卡 - 解锁关卡 + 2)
  */
 export function getUpgradeCapForLevel(type: UpgradeType, campaignLevel: number): number {
   const config = UPGRADE_CONFIGS[type];
@@ -284,13 +265,35 @@ export function getUpgradeCapForLevel(type: UpgradeType, campaignLevel: number):
   }
 }
 
+/** min(满级, 层级上限)：该关能升到的最高等级 */
+function getEffectiveCap(type: UpgradeType, campaignLevel: number): number {
+  return Math.min(UPGRADE_CONFIGS[type].maxLevel, getUpgradeCapForLevel(type, campaignLevel));
+}
+
+/** 把所有升级线（含截至该关已解锁的武器）买到该关上限的总花费 */
+function getCostToReachCaps(campaignLevel: number): number {
+  let total = 0;
+  for (const type of UPGRADE_TYPE_VALUES) {
+    const cap = getEffectiveCap(type, campaignLevel);
+    const costs = UPGRADE_CONFIGS[type].costs;
+    for (let tier = 0; tier < cap; tier++) {
+      total += costs[tier];
+    }
+  }
+  return total;
+}
+
 /**
- * 从第 1 关以外的关卡直接开局（选关 / Boss 模式）时的补偿升级点：
- * 第 1 关为 0，之前每一章折算 6 点（第 10 关 = 54 点）。
+ * 从第 1 关以外的关卡直接开局（选关 / Boss 模式）时补发的升级点：
+ * 第 1 关为 0；第 N 关 = 第 N-1 关全部上限总花费 × 75%（向下取整），随关卡单调递增。
  * 本关的层级上限仍然生效，补偿点不会让机体越级。
  */
 export function getStartingUpgradePoints(level: number): number {
-  return (normalizeCampaignLevel(level) - 1) * STARTING_POINTS_PER_CHAPTER;
+  const normalized = normalizeCampaignLevel(level);
+  if (normalized <= 1) {
+    return 0;
+  }
+  return Math.floor(getCostToReachCaps(normalized - 1) * STARTING_POINTS_SHARE);
 }
 
 export class PlayerUpgrades {
@@ -300,23 +303,23 @@ export class PlayerUpgrades {
   /** 已按分数发放过的升级点数量（分数高水位），扣分后再涨分不会重复发放 */
   private scorePointsAwarded: number = 0;
   private campaignLevel: number = 1;
-  /** 通过 setUnlockedWeapons 显式解锁的武器；与战役关卡解锁取并集 */
+  /** 已解锁的特殊武器（与 WeaponSystem.setUnlocked 同步）；未解锁的武器强化线锁定 */
   private unlockedWeapons: Set<SpecialWeaponId> = new Set();
 
   private static readonly POINTS_THRESHOLD = 400;
 
   constructor() {
-    Object.values(UpgradeType).forEach((type) => {
+    UPGRADE_TYPE_VALUES.forEach((type) => {
       this.upgradeLevels.set(type, 0);
     });
   }
 
   /**
    * 累加分数，每 400 分发放 1 个升级点；返回本次新获得的点数。
-   * 关卡得分倍率由调用方先行乘入。负分（扣分）只降低总分，不收回已发放的点数。
+   * 关卡得分倍率由调用方先行乘入。负分（扣分）只降低总分（不低于 0），不收回已发放的点数。
    */
   public addScore(score: number): number {
-    if (!Number.isFinite(score)) {
+    if (typeof score !== 'number' || !Number.isFinite(score)) {
       return 0;
     }
     this.totalScore = Math.max(0, this.totalScore + score);
@@ -327,9 +330,9 @@ export class PlayerUpgrades {
     return earnedPoints;
   }
 
-  /** 章节奖励等额外升级点（非正数 / 非有限值忽略，小数向下取整） */
+  /** 章节奖励 / 跳关补偿等额外升级点（非正数、非有限值忽略，小数向下取整） */
   public awardBonusPoints(points: number): void {
-    if (!Number.isFinite(points) || points <= 0) {
+    if (typeof points !== 'number' || !Number.isFinite(points) || points <= 0) {
       return;
     }
     this.availablePoints += Math.floor(points);
@@ -345,7 +348,7 @@ export class PlayerUpgrades {
     return roundValue(config.baseValue + level * config.valuePerLevel);
   }
 
-  /** 下一级的花费（只看满级，不看本关上限）；已满级返回 Infinity */
+  /** 下一级的花费（只看满级，不看本关上限，便于菜单预告）；已满级返回 Infinity */
   public getUpgradeCost(type: UpgradeType): number {
     const config = UPGRADE_CONFIGS[type];
     const currentLevel = this.getLevel(type);
@@ -355,6 +358,7 @@ export class PlayerUpgrades {
     return config.costs[currentLevel];
   }
 
+  /** 未锁定、未满级、未达本关上限，且升级点足够 */
   public canUpgrade(type: UpgradeType): boolean {
     const config = UPGRADE_CONFIGS[type];
     const currentLevel = this.getLevel(type);
@@ -380,6 +384,7 @@ export class PlayerUpgrades {
     return true;
   }
 
+  /** 当前战役关卡（决定各升级线的层级上限）；钳制到 1..TOTAL_LEVELS */
   public setCampaignLevel(level: number): void {
     this.campaignLevel = normalizeCampaignLevel(level);
   }
@@ -388,39 +393,46 @@ export class PlayerUpgrades {
     return this.campaignLevel;
   }
 
-  /** 替换显式解锁列表（非法 id 忽略）；按战役关卡已解锁的武器始终可用 */
+  /** 替换已解锁武器列表（非法 id 忽略）；建议传 getUnlockedWeaponsThrough(关卡) */
   public setUnlockedWeapons(ids: readonly SpecialWeaponId[]): void {
-    this.unlockedWeapons = new Set(ids.filter((id) => isSpecialWeaponId(id)));
+    const next = new Set<SpecialWeaponId>();
+    if (Array.isArray(ids)) {
+      for (const id of ids as readonly unknown[]) {
+        if (isSpecialWeaponId(id)) {
+          next.add(id);
+        }
+      }
+    }
+    this.unlockedWeapons = next;
   }
 
-  /** 当前可强化的特殊武器（显式解锁 ∪ 关卡解锁），按 SPECIAL_WEAPON_IDS 顺序 */
+  /** 已解锁的特殊武器，按 SPECIAL_WEAPON_IDS 顺序 */
   public getUnlockedWeapons(): SpecialWeaponId[] {
-    return SPECIAL_WEAPON_IDS.filter((id) => this.isWeaponUnlocked(id));
+    return SPECIAL_WEAPON_IDS.filter((id) => this.unlockedWeapons.has(id));
   }
 
-  /** 武器强化线在武器解锁前锁定；其他升级线永不锁定 */
+  /** 武器强化线在对应武器解锁前锁定；其他升级线永不锁定 */
   public isLocked(type: UpgradeType): boolean {
     const weaponId = getWeaponIdForUpgrade(type);
-    return weaponId !== null && !this.isWeaponUnlocked(weaponId);
+    return weaponId !== null && !this.unlockedWeapons.has(weaponId);
   }
 
-  /** 本关可升到的最高等级：min(满级, 层级上限)；锁定时为 0 */
+  /** 本关可升到的最高等级：min(满级, 层级上限) */
   public getCap(type: UpgradeType): number {
-    return this.computeCap(type, this.campaignLevel);
+    return getEffectiveCap(type, this.campaignLevel);
   }
 
   /**
-   * 上限下一次提升发生在第几关；已满级或本战役内不再提升时返回 null。
-   * 菜单据此提示“下一关提升上限 / 第 N 关提升上限”。
+   * 上限下一次提升发生在第几关；已到满级上限或本战役内不再提升时返回 null。
+   * 菜单据此提示“第 N 关提升上限”。
    */
   public getNextCapRaiseLevel(type: UpgradeType): number | null {
-    const config = UPGRADE_CONFIGS[type];
     const currentCap = this.getCap(type);
-    if (currentCap >= config.maxLevel) {
+    if (currentCap >= UPGRADE_CONFIGS[type].maxLevel) {
       return null;
     }
     for (let level = this.campaignLevel + 1; level <= TOTAL_LEVELS; level++) {
-      if (this.computeCap(type, level) > currentCap) {
+      if (getEffectiveCap(type, level) > currentCap) {
         return level;
       }
     }
@@ -439,39 +451,39 @@ export class PlayerUpgrades {
     return UPGRADE_CONFIGS[type];
   }
 
-  /** 新游戏：清空等级、分数、升级点、显式解锁，并回到第 1 关 */
+  /** 新游戏：清空等级、分数、升级点、已解锁武器，并回到第 1 关 */
   public reset(): void {
-    Object.values(UpgradeType).forEach((type) => {
+    UPGRADE_TYPE_VALUES.forEach((type) => {
       this.upgradeLevels.set(type, 0);
     });
     this.totalScore = 0;
     this.availablePoints = 0;
     this.scorePointsAwarded = 0;
     this.campaignLevel = 1;
-    this.unlockedWeapons.clear();
+    this.unlockedWeapons = new Set();
   }
 
   public export(): Record<string, unknown> {
-    const data: Record<string, unknown> = {
-      totalScore: this.totalScore,
-      availablePoints: this.availablePoints,
-      upgrades: {},
-      campaignLevel: this.campaignLevel,
-      unlockedWeapons: SPECIAL_WEAPON_IDS.filter((id) => this.unlockedWeapons.has(id)),
-      scorePointsAwarded: this.scorePointsAwarded,
-    };
-
+    const upgrades: Record<string, number> = {};
     this.upgradeLevels.forEach((level, type) => {
-      (data.upgrades as Record<string, number>)[type] = level;
+      upgrades[type] = level;
     });
 
-    return data;
+    return {
+      totalScore: this.totalScore,
+      availablePoints: this.availablePoints,
+      upgrades,
+      campaignLevel: this.campaignLevel,
+      unlockedWeapons: this.getUnlockedWeapons(),
+      scorePointsAwarded: this.scorePointsAwarded,
+    };
   }
 
   /**
-   * 读取 export() 的数据（整体替换当前等级）。
+   * 读取 export() 的数据（整体替换等级、分数与升级点）。
    * 兼容旧格式（只有 7 条升级线、没有 campaignLevel / unlockedWeapons 字段）：
-   * 缺失的升级线视为 0 级，缺失的关卡 / 解锁字段保留当前值；未知键与非法值被忽略。
+   * 缺失的升级线视为 0 级，缺失的关卡 / 解锁字段保留当前值；未知键与非法值被忽略，
+   * 等级钳制到 0..满级（不受本关上限约束，上限只限制购买）。
    */
   public import(data: Record<string, unknown>): void {
     const source: Record<string, unknown> =
@@ -503,30 +515,8 @@ export class PlayerUpgrades {
       this.setCampaignLevel(source.campaignLevel);
     }
     if (Array.isArray(source.unlockedWeapons)) {
-      const ids: unknown[] = source.unlockedWeapons;
-      this.unlockedWeapons = new Set(ids.filter(isSpecialWeaponId));
+      this.setUnlockedWeapons(source.unlockedWeapons as SpecialWeaponId[]);
     }
-  }
-
-  private isWeaponUnlocked(id: SpecialWeaponId): boolean {
-    if (this.unlockedWeapons.has(id)) {
-      return true;
-    }
-    const unlockLevel = getWeaponUnlockLevel(id);
-    return unlockLevel !== null && this.campaignLevel >= unlockLevel;
-  }
-
-  private computeCap(type: UpgradeType, campaignLevel: number): number {
-    const config = UPGRADE_CONFIGS[type];
-    if (this.isLocked(type)) {
-      return 0;
-    }
-    let tierCap = getUpgradeCapForLevel(type, campaignLevel);
-    if (config.category === 'weapon') {
-      // 显式提前解锁的武器至少开放到“解锁当关”的上限
-      tierCap = Math.max(WEAPON_ENTRY_CAP, tierCap);
-    }
-    return Math.min(config.maxLevel, tierCap);
   }
 }
 
@@ -589,13 +579,13 @@ export class PlayerStats {
     return this.upgrades.getValue(UpgradeType.MISSILE_LOCK_RADIUS);
   }
 
-  /** 装甲减伤比例 0..0.4：受到的伤害 × (1 - 减伤) */
+  /** 装甲减伤比例 0..0.4：实际受到的伤害 = 原伤害 × (1 - 减伤) */
   public getArmorReduction(): number {
     const percent = this.upgrades.getValue(UpgradeType.ARMOR);
     return Math.max(0, Math.min(MAX_ARMOR_REDUCTION, percent / 100));
   }
 
-  /** 热焰弹携带上限 2..6 */
+  /** 热焰弹携带上限 2..6（传给 CountermeasureSystem.setCapacity） */
   public getFlareCapacity(): number {
     const capacity = Math.round(this.upgrades.getValue(UpgradeType.FLARES));
     return Math.max(BASE_FLARE_CAPACITY, Math.min(MAX_FLARE_CAPACITY, capacity));
@@ -603,8 +593,11 @@ export class PlayerStats {
 
   /** 特殊武器强化等级 0..5（传给 WeaponSystem.setUpgradeLevel） */
   public getWeaponUpgradeLevel(id: SpecialWeaponId): number {
-    const type = WEAPON_UPGRADE_TYPES[id];
-    return type ? this.upgrades.getLevel(type) : 0;
+    const type = isSpecialWeaponId(id) ? WEAPON_UPGRADE_TYPES[id] : undefined;
+    if (!type) {
+      return 0;
+    }
+    return Math.max(0, Math.min(WEAPON_TIER_LIMIT, this.upgrades.getLevel(type)));
   }
 
   public getAccuracy(): number {
