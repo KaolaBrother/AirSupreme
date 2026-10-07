@@ -455,6 +455,15 @@ function buildHoodoos(
       const z = seed.z + (rng() - 0.5) * 34;
       if (slopeAt(field, x, z) > 0.32) continue;
       if (insideFormation(formations, x, z, 8)) continue;
+      // 基座不得悬出崖边：足迹四周地面与中心高差 < 2 米
+      const centerGround = field.sampleGround(x, z);
+      let level = true;
+      for (let q = 0; q < 4 && level; q++) {
+        const angle = (q / 4) * Math.PI * 2 + 0.4;
+        const g = field.sampleGround(x + Math.cos(angle) * 9, z + Math.sin(angle) * 9);
+        level = Math.abs(g - centerGround) < 2;
+      }
+      if (!level) continue;
       if (placements.some((p) => Math.hypot(p.x - x, p.z - z) < p.radius + 6)) continue;
       const height = 12 + rng() * rng() * 36;
       const radius = 2.6 + height * (0.1 + rng() * 0.06);
@@ -478,14 +487,25 @@ function buildHoodoos(
     mesh.name = `canyonHoodoos${v}`;
     list.forEach((p, i) => {
       setInstanceTransform(mesh, i, p.x, p.y, p.z, p.yaw, p.radius, p.height + 1.5, p.radius);
-      // 足迹：基座 85% → 颈部，略宽容（不在空隙处误判坠毁）
+      // 足迹：底部外扩的锥台 + 略小于盖岩轮廓（7 边形边中点）直到盖岩顶的柱体；
+      // 盖岩下方的细颈处按柱体处理（自上而下先碰到盖岩），盖岩外缘一圈略宽容
+      const scaleY = p.height + 1.5;
+      const capRadius = p.radius * (v === 0 ? 0.85 : 0.69);
       structures.addFrustum({
         x: p.x,
         z: p.z,
-        r0: p.radius * 0.85,
-        r1: p.radius * 0.5,
+        r0: p.radius * 0.9,
+        r1: capRadius,
         y0: p.y,
-        y1: p.y + p.height + 1.5,
+        y1: p.y + scaleY * (v === 0 ? 0.13 : 0.28),
+      });
+      structures.addFrustum({
+        x: p.x,
+        z: p.z,
+        r0: capRadius,
+        y0: p.y,
+        y1: p.y + scaleY * 0.96,
+        apex: scaleY * 0.04,
       });
     });
     mesh.count = list.length;
