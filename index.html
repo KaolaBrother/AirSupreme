@@ -26,6 +26,18 @@
         --hud-radius: 12px;
         --hud-font: 'Arial', sans-serif;
         --hud-mono: 'Consolas', 'Arial Black', monospace;
+        /* 触控布局尺寸：HUD 无线电面板据此避开摇杆与按键簇 */
+        --touch-stick-size: 108px;
+        --touch-deck-w: 248px;
+        --touch-deck-h: 228px;
+      }
+
+      @media (orientation: portrait) {
+        :root {
+          --touch-stick-size: 96px;
+          --touch-deck-w: 210px;
+          --touch-deck-h: 240px;
+        }
       }
 
       * {
@@ -78,6 +90,17 @@
         color: var(--hud-muted);
       }
 
+      #loading-screen .loading-sub {
+        margin: -8px 0 22px;
+        font-family: 'Noto Serif SC', 'Noto Serif CJK SC', 'Source Han Serif SC', 'Songti SC',
+          'STSong', 'SimSun', serif;
+        font-size: 20px;
+        font-weight: 700;
+        letter-spacing: 0.6em;
+        text-indent: 0.6em;
+        color: var(--hud-text);
+      }
+
       .loading-bar {
         width: min(280px, 70vw);
         height: 4px;
@@ -127,16 +150,16 @@
       }
 
       /*
-       * Mobile control sizes (landscape / portrait)
+       * 右手按键簇：以右下角为圆心的拇指弧（--x / --y 为按键中心到簇右下角的距离，--s 为直径）
+       * 内圈：开火；中圈：导弹 / 特武 / 热焰；外圈：加速 / 切换；最外：视角 / 暂停（低频，远离拇指落点）
+       * landscape: fire 72 · special 60 · missile 58 · throttle 54 · flare 54 · cycle 44 · pause 42 · camera 40
+       * portrait:  fire 66 · special 58 · missile 56 · throttle 52 · flare 52 · cycle 44 · pause 42 · camera 40
        * joystick 108 / 96
-       * fire     68 / 64
-       * missile  60 / 56
-       * boost    56 / 52
-       * pause    48
        */
       #joystick {
-        width: 108px;
-        height: 108px;
+        width: var(--touch-stick-size);
+        height: var(--touch-stick-size);
+        flex: none;
         background: var(--hud-glass);
         border-radius: 50%;
         border: 2px solid var(--hud-edge);
@@ -158,105 +181,286 @@
       }
 
       .button-container {
-        display: flex;
-        flex-direction: column;
-        gap: 12px;
-        pointer-events: auto;
-        align-items: center;
+        position: relative;
+        flex: none;
+        width: var(--touch-deck-w);
+        height: var(--touch-deck-h);
+        pointer-events: none;
       }
 
-      #fire-button,
-      #throttle-button,
-      #missile-button,
-      #upgrade-button {
+      .touch-btn {
+        --s: 56px;
+        --x: 40px;
+        --y: 40px;
+        --ring: var(--hud-edge);
+        --glow: rgba(0, 0, 0, 0.25);
+        position: absolute;
+        right: calc(var(--x) - var(--s) / 2);
+        bottom: calc(var(--y) - var(--s) / 2);
+        width: var(--s);
+        height: var(--s);
+        padding: 0;
         border-radius: 50%;
+        border: 2px solid var(--ring);
+        background: var(--hud-glass);
+        box-shadow: 0 4px 15px var(--glow);
         color: var(--hud-text);
+        font-family: var(--hud-font);
+        font-size: 12px;
         font-weight: 700;
+        line-height: 1.1;
         display: flex;
+        flex-direction: column;
         align-items: center;
         justify-content: center;
+        gap: 1px;
         pointer-events: auto;
-        background: var(--hud-glass);
+        touch-action: none;
         text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.5);
+        -webkit-user-select: none;
+        user-select: none;
+      }
+
+      .touch-btn:active {
+        box-shadow: inset 0 3px 10px rgba(0, 0, 0, 0.45);
+      }
+
+      .touch-btn .tc-sub {
+        font-family: var(--hud-mono);
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        color: var(--hud-muted);
+      }
+
+      .touch-btn .tc-sub:empty {
+        display: none;
       }
 
       #fire-button {
-        width: 68px;
-        height: 68px;
+        --s: 72px;
+        --x: 44px;
+        --y: 44px;
+        --ring: var(--hud-threat);
+        --glow: rgba(255, 77, 77, 0.28);
         font-size: 14px;
-        border: 2px solid var(--hud-threat);
-        box-shadow: 0 4px 15px rgba(255, 77, 77, 0.28);
-      }
-
-      #throttle-button {
-        width: 56px;
-        height: 56px;
-        font-size: 12px;
-        border: 2px solid var(--hud-lock);
-        box-shadow: 0 4px 15px rgba(92, 255, 176, 0.22);
       }
 
       #missile-button {
-        width: 60px;
-        height: 60px;
+        --s: 58px;
+        --x: 132px;
+        --y: 36px;
+        --ring: var(--hud-weapon);
+        --glow: rgba(255, 179, 71, 0.28);
+      }
+
+      #special-button {
+        --s: 60px;
+        --x: 116px;
+        --y: 112px;
+        --ring: var(--hud-weapon);
+        --glow: rgba(255, 179, 71, 0.22);
+        --meter: var(--hud-weapon);
+      }
+
+      #flare-button {
+        --s: 54px;
+        --x: 40px;
+        --y: 130px;
+        --ring: var(--hud-ally);
+        --glow: rgba(244, 211, 94, 0.22);
+        --meter: var(--hud-ally);
+      }
+
+      #throttle-button {
+        --s: 54px;
+        --x: 216px;
+        --y: 34px;
+        --ring: var(--hud-lock);
+        --glow: rgba(92, 255, 176, 0.22);
+      }
+
+      #cycle-button {
+        --s: 44px;
+        --x: 196px;
+        --y: 108px;
+        --ring: var(--hud-sys);
+        --glow: rgba(143, 228, 255, 0.18);
+        font-size: 11px;
+      }
+
+      #camera-button {
+        --s: 40px;
+        --x: 120px;
+        --y: 186px;
+        --ring: rgba(143, 228, 255, 0.55);
+        --glow: rgba(143, 228, 255, 0.14);
+        font-size: 11px;
+      }
+
+      #upgrade-button {
+        --s: 42px;
+        --x: 40px;
+        --y: 204px;
+        --ring: var(--hud-sys);
+        --glow: rgba(143, 228, 255, 0.22);
+      }
+
+      /* 特武 / 热焰：外圈进度环（装填 / 热量 / 蓄能 / 回复），由 HUD 写入 --tc-meter（0..1） */
+      #special-button::before,
+      #flare-button::before {
+        content: '';
+        position: absolute;
+        inset: -6px;
+        border-radius: 50%;
+        background: conic-gradient(
+          var(--meter) calc(var(--tc-meter, 0) * 1turn),
+          rgba(143, 228, 255, 0.12) 0
+        );
+        -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 3px));
+        mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 3px));
+        pointer-events: none;
+      }
+
+      #special-button .tc-main {
+        font-family: var(--hud-mono);
+        font-size: 13px;
+        letter-spacing: 0.04em;
+        color: var(--hud-weapon);
+      }
+
+      #special-button:not([data-weapon]),
+      #special-button[data-weapon=''] {
+        opacity: 0.45;
+      }
+
+      #special-button:not([data-weapon]) .tc-main,
+      #special-button[data-weapon=''] .tc-main {
+        font-family: var(--hud-font);
         font-size: 12px;
-        border: 2px solid var(--hud-weapon);
-        box-shadow: 0 4px 15px rgba(255, 179, 71, 0.28);
+        color: var(--hud-text);
+      }
+
+      #special-button[data-ready='false'] .tc-main {
+        opacity: 0.65;
+      }
+
+      #special-button[data-overheated='true'] {
+        --ring: var(--hud-threat);
+        --meter: var(--hud-threat);
+      }
+
+      #cycle-button:not([data-count]),
+      #cycle-button[data-count='0'],
+      #cycle-button[data-count='1'] {
+        opacity: 0.45;
+      }
+
+      #cycle-button .tc-sub {
+        letter-spacing: 0.12em;
+        color: var(--hud-weapon);
+      }
+
+      #flare-button .tc-sub {
+        font-size: 11px;
+        color: var(--hud-ally);
+      }
+
+      #flare-button[data-empty='true'] {
+        opacity: 0.6;
+      }
+
+      #flare-button[data-alert='locking'] {
+        --ring: var(--hud-weapon);
+        --glow: rgba(255, 179, 71, 0.5);
+      }
+
+      #flare-button[data-alert='incoming'] {
+        --ring: var(--hud-threat);
+        --glow: rgba(255, 77, 77, 0.7);
+        animation: flare-urgent 0.5s steps(2) infinite;
+      }
+
+      @keyframes flare-urgent {
+        50% {
+          box-shadow: 0 0 0 4px rgba(255, 77, 77, 0.45), 0 4px 18px rgba(255, 77, 77, 0.7);
+        }
+      }
+
+      #camera-button[data-camera-mode='first-person'] {
+        --ring: var(--hud-lock);
       }
 
       #missile-button.is-search {
-        border-color: var(--hud-weapon);
+        --ring: var(--hud-weapon);
       }
 
       #missile-button.is-lock {
-        border-color: var(--hud-lock);
+        --ring: var(--hud-lock);
         box-shadow: 0 0 12px rgba(92, 255, 176, 0.5);
       }
 
       #missile-button.is-dry {
-        border-color: var(--hud-threat);
+        --ring: var(--hud-threat);
         opacity: 0.55;
       }
 
-      #upgrade-button {
-        width: 48px;
-        height: 48px;
-        font-size: 12px;
-        border: 2px solid var(--hud-sys);
-        box-shadow: 0 4px 15px rgba(143, 228, 255, 0.22);
-      }
-
-      #fire-button:active,
-      #throttle-button:active,
-      #missile-button:active,
-      #upgrade-button:active {
-        box-shadow: inset 0 3px 10px rgba(0, 0, 0, 0.45);
-      }
-
       @media (orientation: portrait) {
-        #joystick {
-          width: 96px;
-          height: 96px;
-        }
-
         #joystick-knob {
           width: 40px;
           height: 40px;
         }
 
         #fire-button {
-          width: 64px;
-          height: 64px;
+          --s: 66px;
+          --x: 40px;
+          --y: 44px;
         }
 
         #missile-button {
-          width: 56px;
-          height: 56px;
+          --s: 56px;
+          --x: 124px;
+          --y: 34px;
+        }
+
+        #special-button {
+          --s: 58px;
+          --x: 112px;
+          --y: 112px;
+        }
+
+        #flare-button {
+          --s: 52px;
+          --x: 36px;
+          --y: 132px;
         }
 
         #throttle-button {
-          width: 52px;
-          height: 52px;
+          --s: 52px;
+          --x: 40px;
+          --y: 212px;
+        }
+
+        #cycle-button {
+          --x: 182px;
+          --y: 100px;
+        }
+
+        #camera-button {
+          --x: 120px;
+          --y: 192px;
+        }
+
+        #upgrade-button {
+          --x: 186px;
+          --y: 176px;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        #flare-button[data-alert='incoming'] {
+          animation: none;
+          box-shadow: 0 0 0 4px rgba(255, 77, 77, 0.45);
         }
       }
 
@@ -269,6 +473,7 @@
     <!-- 加载画面 -->
     <div id="loading-screen">
       <h1>AIR SUPREME</h1>
+      <div class="loading-sub">天穹之战</div>
       <p>加载中...</p>
       <div class="loading-bar">
         <div class="loading-bar-fill"></div>
@@ -282,12 +487,24 @@
         <div id="joystick-knob"></div>
       </div>
 
-      <!-- 右侧：按钮 -->
+      <!-- 右侧：按键簇（拇指弧，见上方样式说明） -->
       <div class="button-container">
-        <button id="throttle-button">加速</button>
-        <button id="fire-button">开火</button>
-        <button id="missile-button">导弹</button>
-        <button id="upgrade-button">暂停</button>
+        <button id="fire-button" class="touch-btn" type="button">开火</button>
+        <button id="missile-button" class="touch-btn" type="button">导弹</button>
+        <button id="special-button" class="touch-btn" type="button" aria-label="特殊武器">
+          <span class="tc-main">特武</span><span class="tc-sub" aria-hidden="true"></span>
+        </button>
+        <button id="flare-button" class="touch-btn" type="button" aria-label="热焰弹">
+          <span class="tc-main">热焰</span><span class="tc-sub" aria-hidden="true"></span>
+        </button>
+        <button id="throttle-button" class="touch-btn" type="button">加速</button>
+        <button id="cycle-button" class="touch-btn" type="button" aria-label="切换特殊武器">
+          <span class="tc-main">切换</span><span class="tc-sub" aria-hidden="true"></span>
+        </button>
+        <button id="camera-button" class="touch-btn" type="button" aria-label="切换视角">
+          <span class="tc-main">视角</span><span class="tc-sub" aria-hidden="true"></span>
+        </button>
+        <button id="upgrade-button" class="touch-btn" type="button">暂停</button>
       </div>
     </div>
 
