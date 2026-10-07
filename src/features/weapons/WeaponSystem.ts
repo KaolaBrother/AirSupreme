@@ -288,6 +288,11 @@ export class WeaponSystem {
     this.surfaceSampler = typeof sampler === 'function' ? sampler : null;
   }
 
+  /** 扩展：视角模式。第一人称时缩小枪口特效、光束起点前移（与 CameraRig 的模式同步） */
+  public setViewMode(mode: 'third-person' | 'first-person'): void {
+    this.fx?.setFirstPerson(mode === 'first-person');
+  }
+
   /** 扩展：特效密度（低画质 0.4 左右，默认 1） */
   public setEffectDensity(density: number): void {
     this.fx?.setDensity(density);

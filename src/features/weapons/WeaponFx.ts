@@ -142,6 +142,9 @@ export class WeaponFx {
   private readonly basisU = new THREE.Vector3();
   private readonly basisW = new THREE.Vector3();
   private railRingTimer = 0;
+  private muzzleScale = 1;
+  private beamStartOffset = 0;
+  private readonly beamStart = new THREE.Vector3();
 
   constructor(scene: THREE.Scene) {
     this.scene = scene;
@@ -268,6 +271,31 @@ export class WeaponFx {
 
   public isAttached(): boolean {
     return this.attached;
+  }
+
+  /**
+   * 第一人称时枪口就在镜头前：缩小枪口特效，并把光束起点前移，避免糊屏。
+   */
+  public setFirstPerson(enabled: boolean): void {
+    this.muzzleScale = enabled ? 0.35 : 1;
+    this.beamStartOffset = enabled ? 4 : 0;
+  }
+
+  /** 光束可见起点：第一人称时沿光束方向前移 */
+  private offsetBeamStart(
+    start: THREE.Vector3,
+    end: THREE.Vector3,
+    out: THREE.Vector3
+  ): THREE.Vector3 {
+    out.copy(start);
+    if (this.beamStartOffset > 0) {
+      this.tmpC.subVectors(end, start);
+      const length = this.tmpC.length();
+      if (length > this.beamStartOffset * 2) {
+        out.addScaledVector(this.tmpC, this.beamStartOffset / length);
+      }
+    }
+    return out;
   }
 
   public setDensity(density: number): void {
@@ -466,6 +494,7 @@ export class WeaponFx {
     scale: number
   ): void {
     const spec = this.spec;
+    scale *= this.muzzleScale;
     spec.position.copy(position);
     spec.velocity.copy(carry).addScaledVector(direction, 6);
     spec.delay = 0;
@@ -778,7 +807,7 @@ export class WeaponFx {
       this.laser.setVisible(false);
       return;
     }
-    this.laser.setEndpoints(start, end);
+    this.laser.setEndpoints(this.offsetBeamStart(start, end, this.beamStart), end);
     const strain = THREE.MathUtils.clamp(heat, 0, 1);
     const flicker = 0.88 + Math.random() * 0.12 - strain * strain * Math.random() * 0.35;
     this.laser.coreUniforms.uIntensity.value = 1.15 * flicker;
@@ -795,7 +824,16 @@ export class WeaponFx {
 
   /** 激光枪口辉光（跟随载机） */
   public emitLaserMuzzle(position: THREE.Vector3, carry: THREE.Vector3): void {
-    this.emitFlash(position, carry, 2 + Math.random() * 0.8, 0.05, COLORS.laser, 0.9);
+    // 第一人称：枪口辉光就在镜头下方，直接省略
+    if (this.beamStartOffset > 0) return;
+    this.emitFlash(
+      position,
+      carry,
+      (2 + Math.random() * 0.8) * this.muzzleScale,
+      0.05,
+      COLORS.laser,
+      0.9
+    );
   }
 
   /** 激光灼烧点：白热光斑 + 熔融火花 + 灼烧烟（按帧调用，内部按时间节流烟团） */
@@ -840,12 +878,17 @@ export class WeaponFx {
     deltaTime: number
   ): void {
     const c = THREE.MathUtils.clamp(charge, 0, 1);
+    const firstPerson = this.beamStartOffset > 0;
+    if (firstPerson) {
+      // 第一人称：能量球挪到机头前方，不再让粒子从镜头旁掠过
+      position = this.tmpC.copy(position).addScaledVector(forward, this.beamStartOffset);
+    }
     // 枪口能量球：白热小核 + 电紫光晕，随蓄力增大并脉动
-    const pulse = 0.85 + 0.15 * Math.sin(this.time * (18 + c * 24));
+    const pulse = (0.85 + 0.15 * Math.sin(this.time * (18 + c * 24))) * this.muzzleScale;
     this.emitFlash(position, carry, (0.5 + c * 1.3) * pulse, 0.05, COLORS.railCore, 0.6 + c * 0.4);
     this.emitFlash(position, carry, (1.6 + c * 3) * pulse, 0.05, COLORS.railRing, 0.1);
     const spec = this.spec;
-    const count = randomCount((30 + c * 70) * deltaTime * this.glow.getDensity());
+    const count = firstPerson ? 0 : randomCount((30 + c * 70) * deltaTime * this.glow.getDensity());
     for (let i = 0; i < count; i++) {
       // 电离粒子从四周被吸向枪口（流光细线）
       const distance = 2.5 + Math.random() * 4.5;
@@ -890,7 +933,7 @@ export class WeaponFx {
   public fireRailTracer(start: THREE.Vector3, end: THREE.Vector3, charge: number): void {
     const c = THREE.MathUtils.clamp(charge, 0, 1);
     const tracer = this.tracers.find((entry) => entry.life <= 0) ?? this.tracers[0];
-    tracer.beam.setEndpoints(start, end);
+    tracer.beam.setEndpoints(this.offsetBeamStart(start, end, this.beamStart), end);
     tracer.width = 0.32 + c * 0.38;
     tracer.maxLife = 0.38 + c * 0.22;
     tracer.life = tracer.maxLife;
@@ -955,8 +998,9 @@ export class WeaponFx {
     }
 
     // 炮口：强闪光 + 两道垂直于弹道的冲击环 + 余烟
-    this.emitFlash(start, null, 2.6 + c * 1.6, 0.1, COLORS.railCore, 1);
-    this.emitFlash(start, null, 4.5 + c * 2, 0.14, COLORS.railRing, 0.2);
+    const m = this.muzzleScale;
+    this.emitFlash(start, null, (2.6 + c * 1.6) * m, 0.1, COLORS.railCore, 1);
+    this.emitFlash(start, null, (4.5 + c * 2) * m, 0.14, COLORS.railRing, 0.2);
     // 冲击环用普通混合的电紫色：亮天空下也能看出颜色
     this.spawnRing(start, this.tmpDir, 0.6, 4.5 + c * 3.5, 0.34, RAIL_RING_TINT, 0.85, 0.1, false);
     this.tmpB.copy(start).addScaledVector(this.tmpDir, 7 + c * 3);
