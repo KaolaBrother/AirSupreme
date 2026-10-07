@@ -1,14 +1,21 @@
 import { type QualityPreset } from '@/config';
 import { unlockAudioFromUserGesture } from '@/core/Audio/AudioContextHost';
 import {
+  describeCheckpoint,
+  loadCampaignCheckpoint,
+  type CampaignSaveData,
+} from '@/core/save/SaveSystem';
+import {
   DEFAULT_START_FLOW_SETTINGS,
   getAudioSettings,
   getPresentationSettings,
   loadStartFlowSettings,
   saveStartFlowSettings,
   TEST_SCORE_OPTIONS,
+  type CameraModeSetting,
   type StartFlowSettings,
 } from '@/core/SessionSettings';
+import { TOTAL_LEVELS, getCampaignChapter } from '@/features/campaign/CampaignData';
 import { HUD_COLORS, injectHudTokens } from '@/ui/theme/hudTokens';
 import type { ModelPreview } from './ModelPreview';
 type ModelPreviewModule = typeof import('./ModelPreview');
@@ -17,6 +24,8 @@ export class StartMenu {
   private container: HTMLDivElement;
   private settingsContainer: HTMLDivElement;
   private onStart?: (settings: GameSettings) => void;
+  private onContinue?: (save: CampaignSaveData) => void;
+  private continueButton: HTMLButtonElement | null = null;
   private modelPreview: ModelPreview | null = null;
   private modelPreviewPromise: Promise<ModelPreview> | null = null;
   private modelPreviewModulePromise: Promise<ModelPreviewModule> | null = null;
@@ -31,6 +40,7 @@ export class StartMenu {
     this.settingsContainer = this.createSettingsPanel();
     this.container.appendChild(this.settingsContainer);
     document.body.appendChild(this.container);
+    this.refreshContinueButton();
     this.scheduleModelPreviewPreload();
   }
 
@@ -244,6 +254,7 @@ export class StartMenu {
         .control-row {
           display: flex;
           justify-content: space-between;
+          gap: 12px;
           margin: 8px 0;
           font-size: 16px;
         }
@@ -259,6 +270,60 @@ export class StartMenu {
           margin-top: 15px;
           padding-top: 15px;
           border-top: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .continue-btn {
+          display: flex;
+          flex-direction: column;
+          align-items: flex-start;
+          gap: 4px;
+          width: 100%;
+          box-sizing: border-box;
+          margin: 0 0 18px;
+          padding: 14px 18px;
+          border: 1px solid var(--hud-sys, ${HUD_COLORS.sys});
+          border-left: 3px solid var(--hud-ally, ${HUD_COLORS.ally});
+          border-radius: var(--hud-radius, 12px);
+          background: var(--hud-glass, ${HUD_COLORS.glass});
+          color: var(--hud-text, ${HUD_COLORS.text});
+          font-family: inherit;
+          text-align: left;
+          cursor: pointer;
+          transition: border-color 0.2s, box-shadow 0.2s;
+          box-shadow: var(--hud-shadow, ${HUD_COLORS.shadow});
+        }
+
+        .continue-btn:hover {
+          box-shadow: 0 0 16px rgba(143, 228, 255, 0.28);
+        }
+
+        .continue-title {
+          font-size: 20px;
+          font-weight: 700;
+          letter-spacing: 0.08em;
+        }
+
+        .continue-detail {
+          font-size: 15px;
+          color: var(--hud-sys, ${HUD_COLORS.sys});
+        }
+
+        .continue-meta {
+          font-size: 13px;
+          color: var(--hud-muted, ${HUD_COLORS.muted});
+        }
+
+        .setting-label-group {
+          display: flex;
+          flex-direction: column;
+          gap: 3px;
+          min-width: 0;
+        }
+
+        .setting-caption {
+          font-size: 12px;
+          letter-spacing: 0.04em;
+          color: var(--hud-muted, ${HUD_COLORS.muted});
         }
 
         #start-menu::-webkit-scrollbar {
@@ -289,6 +354,9 @@ export class StartMenu {
   private createSettingsPanel(): HTMLDivElement {
     const panel = document.createElement('div');
     panel.className = 'settings-panel';
+
+    // 继续战役（存在有效检查点时显示）
+    panel.appendChild(this.createContinueButton());
 
     // 难度设置
     const difficultyRow = this.createSettingRow(
@@ -354,6 +422,20 @@ export class StartMenu {
     );
     qualityRow.id = 'quality-row';
 
+    // 视角：第三人称（默认）/ 第一人称，对局中按 V 切换
+    const toggleCameraMode = (): void => {
+      this.settings.cameraMode =
+        this.settings.cameraMode === 'first-person' ? 'third-person' : 'first-person';
+      this.updateDisplay();
+    };
+    const cameraRow = this.createSettingRow(
+      '视角',
+      this.getCameraModeText(this.settings.cameraMode),
+      toggleCameraMode,
+      toggleCameraMode
+    );
+    cameraRow.id = 'camera-row';
+
     const tutorialRow = this.createSettingRow(
       '试玩关卡',
       this.settings.tutorialEnabled ? '开启' : '关闭',
@@ -383,7 +465,7 @@ export class StartMenu {
     );
     livesRow.id = 'lives-row';
 
-    // 选关设置
+    // 选关设置（1..TOTAL_LEVELS，下方显示章节标题）
     const levelRow = this.createSettingRow(
       '起始关卡',
       `第${this.settings.startLevel}关`,
@@ -392,16 +474,22 @@ export class StartMenu {
         this.updateDisplay();
       },
       () => {
-        this.settings.startLevel = Math.min(5, this.settings.startLevel + 1);
+        this.settings.startLevel = Math.min(TOTAL_LEVELS, this.settings.startLevel + 1);
         this.updateDisplay();
-      }
+      },
+      this.getChapterCaption(this.settings.startLevel)
     );
     levelRow.id = 'level-row';
+    const levelCaption = levelRow.querySelector('.setting-caption');
+    if (levelCaption) {
+      levelCaption.id = 'level-chapter';
+    }
 
     panel.appendChild(difficultyRow);
     panel.appendChild(sfxRow);
     panel.appendChild(musicRow);
     panel.appendChild(qualityRow);
+    panel.appendChild(cameraRow);
     panel.appendChild(tutorialRow);
     panel.appendChild(livesRow);
     panel.appendChild(levelRow);
@@ -511,6 +599,30 @@ export class StartMenu {
         <span><span class="key">Shift</span></span>
         <span>加速</span>
       </div>
+      <div class="control-row">
+        <span><span class="key">M</span></span>
+        <span>发射导弹</span>
+      </div>
+      <div class="control-row">
+        <span><span class="key">F</span></span>
+        <span>特殊武器（可长按）</span>
+      </div>
+      <div class="control-row">
+        <span><span class="key">Tab</span> / <span class="key">X</span></span>
+        <span>切换特殊武器</span>
+      </div>
+      <div class="control-row">
+        <span><span class="key">1</span> – <span class="key">5</span></span>
+        <span>选择特殊武器</span>
+      </div>
+      <div class="control-row">
+        <span><span class="key">G</span></span>
+        <span>投放热焰弹</span>
+      </div>
+      <div class="control-row">
+        <span><span class="key">V</span></span>
+        <span>切换第一 / 第三人称</span>
+      </div>
       <div class="mobile-controls-info">
         📱 移动端：使用虚拟摇杆和按钮控制
       </div>
@@ -520,11 +632,79 @@ export class StartMenu {
     return panel;
   }
 
+  private createContinueButton(): HTMLButtonElement {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.id = 'continue-btn';
+    button.className = 'continue-btn';
+    button.style.display = 'none';
+
+    const title = document.createElement('span');
+    title.className = 'continue-title';
+    title.textContent = '继续战役';
+
+    const detail = document.createElement('span');
+    detail.className = 'continue-detail';
+    detail.id = 'continue-detail';
+
+    const meta = document.createElement('span');
+    meta.className = 'continue-meta';
+    meta.id = 'continue-meta';
+
+    button.appendChild(title);
+    button.appendChild(detail);
+    button.appendChild(meta);
+    button.onclick = () => this.continueCampaign();
+
+    this.continueButton = button;
+    return button;
+  }
+
+  /** 按当前存档刷新“继续战役”按钮；损坏的存档会在读取时被清理 */
+  private refreshContinueButton(): void {
+    const button = this.continueButton;
+    if (!button) {
+      return;
+    }
+
+    const save = loadCampaignCheckpoint();
+    if (!save) {
+      button.style.display = 'none';
+      return;
+    }
+
+    const detail = button.querySelector('.continue-detail');
+    const meta = button.querySelector('.continue-meta');
+    if (detail) {
+      detail.textContent = describeCheckpoint(save);
+    }
+    if (meta) {
+      meta.textContent = `得分 ${save.score} · ${this.getDifficultyText(save.difficulty)} · 生命 ${save.lives}`;
+    }
+    button.style.display = '';
+  }
+
+  private continueCampaign(): void {
+    const save = loadCampaignCheckpoint();
+    if (!save) {
+      this.refreshContinueButton();
+      return;
+    }
+    if (!this.onContinue) {
+      return;
+    }
+
+    unlockAudioFromUserGesture();
+    this.container.style.display = 'none';
+    this.onContinue(save);
+  }
+
   private createSettingRow(
     label: string,
     initialValue: string,
     onDecrease: () => void,
-    onIncrease: () => void
+    onIncrease: () => void,
+    caption?: string
   ): HTMLDivElement {
     const row = document.createElement('div');
     row.className = 'setting-row';
@@ -555,7 +735,18 @@ export class StartMenu {
     control.appendChild(valueEl);
     control.appendChild(increaseBtn);
 
-    row.appendChild(labelEl);
+    if (caption === undefined) {
+      row.appendChild(labelEl);
+    } else {
+      const labelGroup = document.createElement('div');
+      labelGroup.className = 'setting-label-group';
+      const captionEl = document.createElement('span');
+      captionEl.className = 'setting-caption';
+      captionEl.textContent = caption;
+      labelGroup.appendChild(labelEl);
+      labelGroup.appendChild(captionEl);
+      row.appendChild(labelGroup);
+    }
     row.appendChild(control);
 
     return row;
@@ -564,6 +755,16 @@ export class StartMenu {
   private getDifficultyText(level: number): string {
     const texts = ['简单', '普通', '标准', '困难', '专家'];
     return texts[level - 1];
+  }
+
+  /** 如“第六章 · 熔炉之心” */
+  private getChapterCaption(level: number): string {
+    const chapter = getCampaignChapter(level);
+    return `${chapter.chapterLabel} · ${chapter.title}`;
+  }
+
+  private getCameraModeText(mode: CameraModeSetting): string {
+    return mode === 'first-person' ? '第一人称' : '第三人称';
   }
 
   private getQualityPresetText(preset: QualityPreset): string {
@@ -607,6 +808,9 @@ export class StartMenu {
     const testScoreValue =
       document.getElementById('测试分数-value') ||
       document.querySelector('#testscore-row .setting-value');
+    const cameraValue =
+      document.getElementById('视角-value') || document.querySelector('#camera-row .setting-value');
+    const levelCaption = document.getElementById('level-chapter');
     const startBtn = document.getElementById('start-btn');
 
     if (difficultyValue)
@@ -624,6 +828,8 @@ export class StartMenu {
     if (testScoreValue)
       testScoreValue.textContent =
         this.settings.testScore === 0 ? '关闭' : `${this.settings.testScore}`;
+    if (cameraValue) cameraValue.textContent = this.getCameraModeText(this.settings.cameraMode);
+    if (levelCaption) levelCaption.textContent = this.getChapterCaption(this.settings.startLevel);
     if (startBtn)
       startBtn.textContent = this.settings.gameMode === 'normal' ? '开始游戏' : 'Boss 挑战';
 
@@ -640,9 +846,15 @@ export class StartMenu {
     this.onStart = callback;
   }
 
+  /** 点击“继续战役”时回调（传入刚读取并校验过的检查点）；菜单会先隐藏 */
+  public setOnContinue(callback: (save: CampaignSaveData) => void): void {
+    this.onContinue = callback;
+  }
+
   public reloadFromStorage(): void {
     this.loadSettings();
     this.updateDisplay();
+    this.refreshContinueButton();
   }
 
   public show(): void {
@@ -671,4 +883,5 @@ export interface GameSettings {
   startLevel: StartFlowSettings['startLevel'];
   gameMode: StartFlowSettings['gameMode'];
   testScore: StartFlowSettings['testScore'];
+  cameraMode: StartFlowSettings['cameraMode'];
 }
