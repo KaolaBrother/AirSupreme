@@ -1,4 +1,3 @@
-import { getLogger } from '@/core/utils/Logger';
 import {
   CAMPAIGN_CREDITS,
   CAMPAIGN_EPILOGUE,
@@ -8,14 +7,8 @@ import {
   type CampaignChapter,
 } from '@/features/campaign/CampaignData';
 import { GLYPH_PIN } from '@/ui/theme/hudGlyphs';
-import {
-  detectHudLayoutDensity,
-  injectHudTokens,
-  prefersReducedMotion,
-} from '@/ui/theme/hudTokens';
+import { prefersReducedMotion, readHudLayoutDensity } from '@/ui/theme/hudPalette';
 import { injectStoryStyles } from '@/ui/theme/storyStyles';
-
-const log = getLogger('StoryOverlay');
 
 export interface DebriefData {
   chapter: CampaignChapter;
@@ -218,9 +211,10 @@ export class StoryOverlay {
   };
 
   private readonly handleResize = (): void => {
-    if (this.root) {
-      this.root.setAttribute('data-density', detectHudLayoutDensity());
-    }
+    // 等 HUD 自己的 resize 处理先更新布局密度
+    window.setTimeout(() => {
+      this.root?.setAttribute('data-density', readHudLayoutDensity());
+    }, 0);
   };
 
   private readonly handleSkipClick = (event: MouseEvent): void => {
@@ -340,7 +334,7 @@ export class StoryOverlay {
     }
     root.classList.remove('is-leaving', 'is-instant');
     root.setAttribute('data-kind', session.kind);
-    root.setAttribute('data-density', detectHudLayoutDensity());
+    root.setAttribute('data-density', readHudLayoutDensity());
     root.style.display = 'block';
     document.documentElement.setAttribute(ACTIVE_ATTRIBUTE, session.kind);
     this.attachListeners();
@@ -978,7 +972,6 @@ export class StoryOverlay {
       }
       return;
     }
-    injectHudTokens();
     injectStoryStyles();
 
     const root = el('div');
@@ -1099,7 +1092,7 @@ export class StoryOverlay {
     try {
       callback();
     } catch (error) {
-      log.error('Story overlay callback failed', error);
+      console.error('[StoryOverlay] callback failed', error);
     }
   }
 }

@@ -1,4 +1,4 @@
-import { HUD_COLORS } from './hudTokens';
+import { HUD_COLORS } from './hudPalette';
 
 /**
  * HUD 新增元件样式：挂载物面板（特殊武器 + 热焰弹）、自动存档提示、视角标签、Boss 阶段条、

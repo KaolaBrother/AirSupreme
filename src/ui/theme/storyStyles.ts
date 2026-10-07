@@ -1,4 +1,4 @@
-import { HUD_COLORS, HUD_LAYERS, HUD_SERIF_STACK } from './hudTokens';
+import { HUD_COLORS, HUD_LAYERS, HUD_SERIF_STACK } from './hudPalette';
 
 /**
  * 剧情覆盖层（章节卡 / 结算 / 结局字幕）样式。

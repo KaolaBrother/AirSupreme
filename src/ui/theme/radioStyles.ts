@@ -1,4 +1,4 @@
-import { HUD_COLORS, HUD_LAYERS, HUD_TONE_COLORS } from './hudTokens';
+import { HUD_COLORS, HUD_LAYERS, HUD_TONE_COLORS } from './hudPalette';
 
 /**
  * 无线电通讯面板样式。

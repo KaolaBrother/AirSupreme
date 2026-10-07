@@ -6,11 +6,10 @@ import {
 } from '@/features/campaign/CampaignData';
 import { getSpeakerGlyph } from '@/ui/theme/hudGlyphs';
 import {
-  detectHudLayoutDensity,
-  injectHudTokens,
   prefersReducedMotion,
+  readHudLayoutDensity,
   type HudLayoutDensity,
-} from '@/ui/theme/hudTokens';
+} from '@/ui/theme/hudPalette';
 import { injectRadioStyles } from '@/ui/theme/radioStyles';
 
 export type RadioPriority = 'normal' | 'high';
@@ -97,7 +96,8 @@ export class RadioComms {
   private lastGlyphSpeaker: string = '';
 
   private readonly handleResize = (): void => {
-    this.applyDensity();
+    // 等 HUD 自己的 resize 处理先更新布局密度
+    window.setTimeout(() => this.applyDensity(), 0);
   };
 
   public enqueue(line: RadioLine, options?: RadioEnqueueOptions): void {
@@ -321,7 +321,6 @@ export class RadioComms {
     if (typeof document === 'undefined' || !document.body) {
       return false;
     }
-    injectHudTokens();
     injectRadioStyles();
 
     const root = document.createElement('div');
@@ -384,8 +383,10 @@ export class RadioComms {
     if (!this.root) {
       return;
     }
-    this.density = detectHudLayoutDensity();
-    this.root.setAttribute('data-density', this.density);
+    this.density = readHudLayoutDensity();
+    if (this.root.getAttribute('data-density') !== this.density) {
+      this.root.setAttribute('data-density', this.density);
+    }
   }
 
   private renderLine(line: ActiveLine): void {
@@ -394,6 +395,7 @@ export class RadioComms {
     }
     const root = this.root;
     const speaker = line.speaker;
+    this.applyDensity();
     root.setAttribute('data-speaker', String(line.line.speaker));
     root.setAttribute('data-tone', speaker.tone);
     root.setAttribute('data-priority', line.priority);
