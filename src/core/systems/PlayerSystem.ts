@@ -156,7 +156,11 @@ export class PlayerSystem implements IGameSystem {
     // 改平姿态（保留航向）：坠毁时多为俯冲，原姿态复活会立刻再次撞地
     this.respawnForward.set(0, 0, -1).applyQuaternion(this.mesh.quaternion);
     const heading = Math.atan2(-this.respawnForward.x, -this.respawnForward.z);
-    this.mesh.quaternion.setFromAxisAngle(PlayerSystem.UP_AXIS, Number.isFinite(heading) ? heading : 0);
+    const safeHeading = this.pickRespawnHeading(
+      safeRespawnPosition,
+      Number.isFinite(heading) ? heading : 0
+    );
+    this.mesh.quaternion.setFromAxisAngle(PlayerSystem.UP_AXIS, safeHeading);
 
     this.mesh.visible = true;
     this.syncVisualState();
@@ -165,6 +169,40 @@ export class PlayerSystem implements IGameSystem {
     EventBus.emit(GameEventType.PLAYER_RESPAWN, {
       position: this.mesh.position.clone(),
     });
+  }
+
+  /**
+   * 复活航向：原航向前方 400 米内地表高于复活高度（火山坡 / 崖壁）时，
+   * 改为 8 个方向里净空最大的一个，避免复活后几秒内再次撞上同一面山坡。
+   */
+  private pickRespawnHeading(position: THREE.Vector3, heading: number): number {
+    const clearance = (candidate: number): number => {
+      const dirX = -Math.sin(candidate);
+      const dirZ = -Math.cos(candidate);
+      let highest = -Infinity;
+      for (let distance = 50; distance <= 400; distance += 50) {
+        const ground = this.sampleCrashSurfaceY(
+          position.x + dirX * distance,
+          position.z + dirZ * distance
+        );
+        if (Number.isFinite(ground) && ground > highest) highest = ground;
+      }
+      return Number.isFinite(highest) ? position.y - highest : Infinity;
+    };
+    let best = heading;
+    let bestClearance = clearance(heading);
+    if (bestClearance >= PlayerSystem.RESPAWN_CLEARANCE * 0.5) {
+      return heading;
+    }
+    for (let i = 1; i < 8; i++) {
+      const candidate = heading + (i * Math.PI) / 4;
+      const value = clearance(candidate);
+      if (value > bestClearance) {
+        bestClearance = value;
+        best = candidate;
+      }
+    }
+    return best;
   }
 
   private updateShield(deltaTime: number): void {
