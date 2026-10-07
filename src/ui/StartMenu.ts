@@ -259,6 +259,11 @@ export class StartMenu {
           font-size: 16px;
         }
 
+        .control-row > span:first-child {
+          flex-shrink: 0;
+          white-space: nowrap;
+        }
+
         .key {
           background: rgba(255, 255, 255, 0.2);
           padding: 3px 10px;
