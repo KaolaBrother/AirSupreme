@@ -13,6 +13,7 @@
  */
 
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { EnemyType, ENEMY_CONFIGS } from '@/features/enemy/EnemyTypes';
 
 type EnemyConfig = (typeof ENEMY_CONFIGS)[EnemyType];
@@ -188,6 +189,11 @@ const signalLightMaterials = {
   strobe: new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.85 }),
   beacon: new THREE.MeshBasicMaterial({ color: 0xff3b30, transparent: true, opacity: 0.55 }),
 };
+// 友军敌我识别灯：金色频闪 + 金色呼吸信标（与 HUD 友军色一致），替换友军机上的白频闪/红信标
+const alliedSignalMaterials = {
+  strobe: new THREE.MeshBasicMaterial({ color: 0xffd24a, transparent: true, opacity: 0.85 }),
+  beacon: new THREE.MeshBasicMaterial({ color: 0xffc23a, transparent: true, opacity: 0.55 }),
+};
 const signalLightGeometry = new THREE.SphereGeometry(0.09, 6, 6);
 const engineGlowMaterials: Array<THREE.Material & { opacity: number }> = [];
 let signalClock = 0;
@@ -197,20 +203,6 @@ function registerEngineGlowMaterial(material: THREE.Material & { opacity: number
     material.userData.baseOpacity = material.opacity;
     engineGlowMaterials.push(material);
   }
-}
-
-// 玩家引擎尾焰共享材质：跨多次建机复用，只注册一次即持续受 updateAircraftSignals 驱动
-let playerEngineGlowMaterial: THREE.MeshBasicMaterial | null = null;
-function getPlayerEngineGlowMaterial(): THREE.MeshBasicMaterial {
-  if (!playerEngineGlowMaterial) {
-    playerEngineGlowMaterial = new THREE.MeshBasicMaterial({
-      color: 0xff4400,
-      transparent: true,
-      opacity: 0.6,
-    });
-    registerEngineGlowMaterial(playerEngineGlowMaterial);
-  }
-  return playerEngineGlowMaterial;
 }
 
 /**
@@ -223,9 +215,14 @@ export function updateAircraftSignals(deltaTime: number): void {
   const strobePhase = signalClock % 1.2;
   const strobeOn = strobePhase < 0.06 || (strobePhase >= 0.16 && strobePhase < 0.22);
   signalLightMaterials.strobe.opacity = strobeOn ? 0.95 : 0.05;
+  // 友军金色识别频闪：与白频闪错相，保证同屏两种闪光可区分
+  const alliedPhase = (signalClock + 0.6) % 1.2;
+  const alliedOn = alliedPhase < 0.08 || (alliedPhase >= 0.18 && alliedPhase < 0.26);
+  alliedSignalMaterials.strobe.opacity = alliedOn ? 1 : 0.12;
 
   // 防撞灯呼吸式脉冲
   signalLightMaterials.beacon.opacity = 0.2 + (Math.sin(signalClock * 4.6) * 0.5 + 0.5) * 0.6;
+  alliedSignalMaterials.beacon.opacity = 0.35 + (Math.sin(signalClock * 3.2) * 0.5 + 0.5) * 0.6;
 
   // 引擎尾焰高频轻微抖动
   const flicker =
@@ -705,6 +702,275 @@ function addLeadingEdgeStripPair(
 }
 
 // ---------------------------------------------------------------------------
+// 玩家加力尾焰：核心亮盘 + 内焰 + 外焰 + 马赫环。顶点色沿焰长渐隐、叠加混合，
+// 两个喷口合并进同一几何体（每层 1 次绘制）。updatePlayerAfterburner 每帧只改
+// 缩放/颜色/不透明度，无分配。资源随玩家机实例创建，不标记 sharedResource。
+// ---------------------------------------------------------------------------
+
+/** 与 CameraRigFlightState 结构一致：speedRatio 0..1（最低→最高速度），boosting = 加力键按下 */
+export interface AfterburnerFlightState {
+  speedRatio: number;
+  boosting: boolean;
+}
+
+/** 喷口出口平面（机尾 +Z），两喷口横向偏移 */
+const PLAYER_NOZZLE_Z = 2.25;
+const PLAYER_NOZZLE_OFFSETS: ReadonlyArray<readonly [number, number]> = [
+  [0.32, -0.03],
+  [-0.32, -0.03],
+];
+/** 二元矢量喷口为扁矩形：尾焰截面按此比例压扁 */
+const PLAYER_PLUME_FLATTEN = 0.72;
+
+type PlumeProfile = ReadonlyArray<readonly [radius: number, t: number]>;
+
+const INNER_PLUME_PROFILE: PlumeProfile = [
+  [1, 0],
+  [1.06, 0.06],
+  [0.96, 0.2],
+  [0.74, 0.45],
+  [0.46, 0.7],
+  [0.18, 0.9],
+  [0.02, 1],
+];
+const OUTER_PLUME_PROFILE: PlumeProfile = [
+  [1, 0],
+  [1.22, 0.1],
+  [1.28, 0.3],
+  [1.04, 0.55],
+  [0.66, 0.8],
+  [0.26, 0.95],
+  [0.02, 1],
+];
+/** 尾焰配色（sRGB 十六进制，Color 内部转线性；每帧只做 copy + lerp） */
+const AFTERBURNER_COLORS = {
+  coreDry: new THREE.Color(0xffb27a),
+  coreBoost: new THREE.Color(0xfff0c8),
+  innerDry: new THREE.Color(0xff9a6a),
+  innerBoost: new THREE.Color(0xffc45c),
+  outerDry: new THREE.Color(0xff5a1f),
+  outerBoost: new THREE.Color(0xff7a22),
+} as const;
+
+/** 马赫环：沿归一化焰长的位置、半径与亮度 */
+const SHOCK_DIAMONDS: ReadonlyArray<{ t: number; radius: number; intensity: number }> = [
+  { t: 0.13, radius: 0.085, intensity: 1 },
+  { t: 0.28, radius: 0.076, intensity: 0.85 },
+  { t: 0.43, radius: 0.064, intensity: 0.66 },
+  { t: 0.57, radius: 0.05, intensity: 0.46 },
+];
+
+function setGrayVertexColors(
+  geometry: THREE.BufferGeometry,
+  shade: (index: number, x: number, y: number, z: number) => number
+): void {
+  const position = geometry.getAttribute('position');
+  const colors = new Float32Array(position.count * 3);
+  for (let i = 0; i < position.count; i += 1) {
+    const value = Math.max(
+      0,
+      Math.min(1, shade(i, position.getX(i), position.getY(i), position.getZ(i)))
+    );
+    colors[i * 3] = value;
+    colors[i * 3 + 1] = value;
+    colors[i * 3 + 2] = value;
+  }
+  geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+}
+
+/** 各喷口复制一份并合并；输入几何体随后释放 */
+function mergeAcrossNozzles(base: THREE.BufferGeometry): THREE.BufferGeometry {
+  const copies = PLAYER_NOZZLE_OFFSETS.map(([x, y]) => base.clone().translate(x, y, 0));
+  base.dispose();
+  const merged = mergeGeometries(copies, false);
+  copies.forEach((copy) => copy.dispose());
+  if (!merged) {
+    throw new Error('AircraftMeshFactory: failed to merge afterburner geometry');
+  }
+  return merged;
+}
+
+/** 旋成体焰锥：沿 +Z 从 0 延伸到 1（由 mesh.scale.z 拉伸到实际长度），底部亮、尖端透明 */
+function createPlumeGeometry(
+  profile: PlumeProfile,
+  radius: number,
+  fade: (t: number) => number
+): THREE.BufferGeometry {
+  const points = profile.map(([r, t]) => new THREE.Vector2(Math.max(r * radius, 0.0005), t));
+  const geometry = new THREE.LatheGeometry(points, 14);
+  setGrayVertexColors(geometry, (_index, _x, y) => fade(y));
+  geometry.rotateX(Math.PI / 2);
+  geometry.scale(1, PLAYER_PLUME_FLATTEN, 1);
+  return mergeAcrossNozzles(geometry);
+}
+
+/** 喷口核心亮盘（面向机尾），中心亮、边缘透明 */
+function createCoreDiscGeometry(radius: number): THREE.BufferGeometry {
+  const geometry = new THREE.CircleGeometry(radius, 20);
+  setGrayVertexColors(geometry, (index) => (index === 0 ? 1 : 0));
+  geometry.scale(1, PLAYER_PLUME_FLATTEN, 1);
+  geometry.translate(0, 0, 0.012);
+  return mergeAcrossNozzles(geometry);
+}
+
+/** 马赫环：沿焰轴排列的双锥（侧看为菱形），赤道亮、两端暗 */
+function createShockDiamondGeometry(): THREE.BufferGeometry {
+  const parts = SHOCK_DIAMONDS.map(({ t, radius, intensity }) => {
+    const bicone = new THREE.LatheGeometry(
+      [new THREE.Vector2(0.0005, -1), new THREE.Vector2(1, 0), new THREE.Vector2(0.0005, 1)],
+      10
+    );
+    setGrayVertexColors(bicone, (_index, _x, y) => intensity * (1 - 0.85 * Math.abs(y)));
+    bicone.rotateX(Math.PI / 2);
+    // 半长取归一化焰长的 0.045：随 mesh.scale.z 一起拉伸，长焰中呈细长菱形
+    bicone.scale(radius, radius * PLAYER_PLUME_FLATTEN, 0.045);
+    bicone.translate(0, 0, t);
+    return bicone;
+  });
+  const merged = mergeGeometries(parts, false);
+  parts.forEach((part) => part.dispose());
+  if (!merged) {
+    throw new Error('AircraftMeshFactory: failed to merge shock diamond geometry');
+  }
+  return mergeAcrossNozzles(merged);
+}
+
+function createPlumeMaterial(color: number, opacity: number): THREE.MeshBasicMaterial {
+  return new THREE.MeshBasicMaterial({
+    color,
+    vertexColors: true,
+    transparent: true,
+    opacity,
+    blending: THREE.AdditiveBlending,
+    depthTest: true,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+    fog: false,
+  });
+}
+
+class PlayerAfterburner {
+  private throttle = 0.35;
+  private boost = 0;
+  private time = 0;
+
+  constructor(
+    private readonly core: THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>,
+    private readonly inner: THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>,
+    private readonly outer: THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>,
+    private readonly diamonds: THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>
+  ) {
+    this.apply();
+  }
+
+  public update(speedRatio: number, boosting: boolean, deltaTime: number): void {
+    const dt = Number.isFinite(deltaTime) && deltaTime > 0 ? Math.min(deltaTime, 0.1) : 0;
+    this.time = (this.time + dt) % 3600;
+    const throttleTarget = Number.isFinite(speedRatio) ? Math.max(0, Math.min(1, speedRatio)) : 0;
+    this.throttle += (throttleTarget - this.throttle) * (1 - Math.exp(-dt * 4));
+    // 点燃加力快（约 0.1 s），熄火稍慢
+    const boostTarget = boosting ? 1 : 0;
+    const boostRate = boostTarget > this.boost ? 10 : 3.5;
+    this.boost += (boostTarget - this.boost) * (1 - Math.exp(-dt * boostRate));
+    this.apply();
+  }
+
+  private apply(): void {
+    const t = this.time;
+    const b = this.boost;
+    const th = this.throttle;
+    const flicker =
+      1 + 0.06 * Math.sin(t * 37) + 0.045 * Math.sin(t * 61 + 1.3) + 0.03 * Math.sin(t * 97 + 0.4);
+    const surge = 1 + 0.06 * Math.sin(t * 13 + 0.6) * (0.4 + b);
+
+    this.inner.scale.z = (0.4 + 0.3 * th + 0.55 * b) * surge;
+    const outerLength = (0.62 + 0.5 * th + 1.45 * b) * surge;
+    this.outer.scale.z = outerLength;
+    this.diamonds.scale.z = outerLength;
+
+    // 干推力：短、橙粉焰心；加力：长、金黄，喷口处叠加饱和（泛光），尾段渐变为橙色，带马赫环
+    this.core.material.color.copy(AFTERBURNER_COLORS.coreDry).lerp(AFTERBURNER_COLORS.coreBoost, b);
+    this.core.material.opacity = Math.min(1, (0.55 + 0.15 * th + 0.3 * b) * flicker);
+    this.inner.material.color
+      .copy(AFTERBURNER_COLORS.innerDry)
+      .lerp(AFTERBURNER_COLORS.innerBoost, b);
+    this.inner.material.opacity = Math.min(1, (0.3 + 0.12 * th + 0.3 * b) * flicker);
+    this.outer.material.color
+      .copy(AFTERBURNER_COLORS.outerDry)
+      .lerp(AFTERBURNER_COLORS.outerBoost, b);
+    this.outer.material.opacity = Math.min(1, (0.16 + 0.1 * th + 0.32 * b) * flicker);
+    this.diamonds.visible = b > 0.02;
+    this.diamonds.material.opacity = Math.min(1, b * (0.78 + 0.18 * Math.sin(t * 45)));
+  }
+}
+
+const playerAfterburners = new WeakMap<THREE.Object3D, PlayerAfterburner>();
+
+function addPlumeMesh(
+  group: THREE.Group,
+  geometry: THREE.BufferGeometry,
+  material: THREE.MeshBasicMaterial,
+  name: string
+): THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial> {
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.name = name;
+  mesh.position.set(0, 0, PLAYER_NOZZLE_Z);
+  mesh.castShadow = false;
+  mesh.receiveShadow = false;
+  mesh.renderOrder = 0;
+  group.add(mesh);
+  return mesh;
+}
+
+function addPlayerAfterburner(group: THREE.Group): void {
+  const core = addPlumeMesh(
+    group,
+    createCoreDiscGeometry(0.15),
+    createPlumeMaterial(0xffd2a0, 0.7),
+    'afterburnerCore'
+  );
+  const inner = addPlumeMesh(
+    group,
+    createPlumeGeometry(INNER_PLUME_PROFILE, 0.085, (t) => Math.pow(1 - t, 1.7)),
+    createPlumeMaterial(0xffe0b0, 0.5),
+    'afterburnerInner'
+  );
+  const outer = addPlumeMesh(
+    group,
+    createPlumeGeometry(
+      OUTER_PLUME_PROFILE,
+      0.13,
+      (t) => Math.pow(1 - t, 1.6) * Math.min(1, t / 0.08 + 0.15)
+    ),
+    createPlumeMaterial(0xff6a26, 0.3),
+    'afterburnerOuter'
+  );
+  const diamonds = addPlumeMesh(
+    group,
+    createShockDiamondGeometry(),
+    createPlumeMaterial(0xfff1c8, 0),
+    'afterburnerDiamonds'
+  );
+  playerAfterburners.set(group, new PlayerAfterburner(core, inner, outer, diamonds));
+}
+
+/**
+ * 每帧驱动玩家机加力尾焰（长度/亮度/颜色随 speedRatio 与 boosting 平滑变化，带闪烁）。
+ * aircraft 必须是 createPlayerMesh() 返回的根节点；其他对象静默忽略。无分配。
+ */
+export function updatePlayerAfterburner(
+  aircraft: THREE.Object3D,
+  flight: AfterburnerFlightState | null | undefined,
+  deltaTime: number
+): void {
+  const afterburner = playerAfterburners.get(aircraft);
+  if (!afterburner) {
+    return;
+  }
+  afterburner.update(flight?.speedRatio ?? 0, flight?.boosting === true, deltaTime);
+}
+
+// ---------------------------------------------------------------------------
 // 玩家机：F-22 风格五代空优战斗机
 // ---------------------------------------------------------------------------
 
@@ -888,7 +1154,6 @@ export function createPlayerMesh(): THREE.Group {
   addMeshPart(group, new THREE.BoxGeometry(0.3, 0.2, 1.05), wingMaterial, [0.76, 0, 1.55]);
 
   // === 二元矢量喷口（矩形）+ 调节片 ===
-  const glowMaterial = getPlayerEngineGlowMaterial();
   for (const side of [1, -1] as const) {
     addMeshPart(group, new THREE.BoxGeometry(0.42, 0.3, 0.55), engineMaterial, [
       side * 0.32,
@@ -914,31 +1179,26 @@ export function createPlayerMesh(): THREE.Group {
       }
     );
   }
-  const leftGlow = new THREE.Mesh(new THREE.ConeGeometry(0.13, 0.35, 8), glowMaterial);
-  leftGlow.rotation.x = Math.PI / 2;
-  leftGlow.position.set(-0.32, -0.03, 2.25);
-  leftGlow.name = 'engineGlow';
-  leftGlow.userData.sharedResource = true;
-  group.add(leftGlow);
-
-  const rightGlow = new THREE.Mesh(new THREE.ConeGeometry(0.13, 0.35, 8), glowMaterial);
-  rightGlow.rotation.x = Math.PI / 2;
-  rightGlow.position.set(0.32, -0.03, 2.25);
-  rightGlow.name = 'engineGlow2';
-  rightGlow.userData.sharedResource = true;
-  group.add(rightGlow);
-
-  // 矩形喷口深色内喉 + 分层加力辉光（与矢量喷口配合，随引擎闪烁驱动抖动）
+  // 矩形喷口深色内喉（加力尾焰见 addPlayerAfterburner，随油门/加力驱动）
   for (const side of [1, -1] as const) {
     addMeshPart(group, sharedGeometries.unitBox, intakeCavityMaterial, [side * 0.32, -0.03, 2.2], {
       scale: [0.34, 0.22, 0.12],
       castShadow: false,
     });
-    addExhaustDetail(group, [side * 0.32, -0.03, 2.26], 0.16, 1, {
-      nozzle: false,
-      flameLength: 0.6,
-    });
+    addMeshPart(
+      group,
+      sharedGeometries.nozzleThroat,
+      nozzleThroatMaterial,
+      [side * 0.32, -0.03, 2.29],
+      {
+        rotation: [-Math.PI / 2, 0, 0],
+        scale: [0.157, 0.134, 0.157],
+        castShadow: false,
+        shared: true,
+      }
+    );
   }
+  addPlayerAfterburner(group);
 
   // === 腹鳍 ===
   addMeshPart(group, new THREE.BoxGeometry(0.04, 0.3, 0.6), detailMaterial, [-0.4, -0.32, 1.2], {
@@ -2225,9 +2485,101 @@ export function createEnemyMesh(config: EnemyConfig): THREE.Group {
   return group;
 }
 
+// ---------------------------------------------------------------------------
+// 友军涂装：与敌机同一机体（几何、缩放、命名、命中半径完全一致），仅替换材质——
+// 钢蓝机身 + 金色识别饰条（前缘、机鼻/尾部识别带、背脊条，与 HUD 友军色一致）
+// + 金色镀膜座舱 + 金色识别频闪/信标。敌机为浅灰机身 + 深灰饰条 + 白频闪/红信标。
+// ---------------------------------------------------------------------------
+
+const ALLIED_LIVERY = {
+  body: 0x5c7fa6,
+  wing: 0x4a6b90,
+  accent: 0xf2c94c,
+  accentEmissive: 0.2,
+  detail: 0x34414f,
+  weapon: 0x98a2ad,
+  canopy: 0x3a3218,
+  canopyEmissive: 0xd9a933,
+  light: 0xffd36a,
+  engine: 0xff8a2a,
+} as const;
+
+const friendlyMaterialsCache: Map<EnemyType, CachedMaterials> = new Map();
+
+function getOrCreateFriendlyMaterials(type: EnemyType): CachedMaterials {
+  const cached = friendlyMaterialsCache.get(type);
+  if (cached) return cached;
+  const tuning = getEnemyMaterialTuning(type);
+
+  const engine = new THREE.MeshBasicMaterial({
+    color: ALLIED_LIVERY.engine,
+    transparent: true,
+    opacity: tuning.engineOpacity,
+  });
+  registerEngineGlowMaterial(engine);
+
+  const materials: CachedMaterials = {
+    body: createAircraftMaterial(
+      ALLIED_LIVERY.body,
+      tuning.body.metalness * 0.85,
+      tuning.body.roughness + 0.06,
+      0.02
+    ),
+    wing: createAircraftMaterial(
+      ALLIED_LIVERY.wing,
+      tuning.wing.metalness * 0.85,
+      tuning.wing.roughness + 0.06,
+      0.015
+    ),
+    cockpit: new THREE.MeshStandardMaterial({
+      color: ALLIED_LIVERY.canopy,
+      metalness: tuning.cockpit.metalness,
+      roughness: tuning.cockpit.roughness,
+      transparent: true,
+      opacity: 0.9,
+      emissive: ALLIED_LIVERY.canopyEmissive,
+      emissiveIntensity: 0.14,
+    }),
+    engine,
+    accent: createAircraftMaterial(ALLIED_LIVERY.accent, 0.55, 0.32, ALLIED_LIVERY.accentEmissive),
+    detail: createAircraftMaterial(ALLIED_LIVERY.detail, 0.45, 0.6, 0),
+    light: new THREE.MeshBasicMaterial({
+      color: ALLIED_LIVERY.light,
+      transparent: true,
+      opacity: 0.85,
+    }),
+    weapon: createAircraftMaterial(ALLIED_LIVERY.weapon, 0.86, 0.26, 0.01),
+  };
+
+  friendlyMaterialsCache.set(type, materials);
+  return materials;
+}
+
 /**
- * 创建友军飞机模型 - 与敌机相同但标记为友军
+ * 创建友军飞机模型：与 createEnemyMesh 相同的机体，换成友军涂装与金色识别灯，
+ * 并标记 userData.livery = 'allied'。
  */
 export function createFriendlyMesh(config: EnemyConfig): THREE.Group {
-  return createEnemyMesh(config);
+  const group = createEnemyMesh(config);
+  const enemyMaterials = materialsCache.get(config.type);
+  const alliedMaterials = getOrCreateFriendlyMaterials(config.type);
+  const replacements = new Map<THREE.Material, THREE.Material>([
+    [signalLightMaterials.strobe, alliedSignalMaterials.strobe],
+    [signalLightMaterials.beacon, alliedSignalMaterials.beacon],
+  ]);
+  if (enemyMaterials) {
+    for (const key of Object.keys(enemyMaterials) as Array<keyof CachedMaterials>) {
+      replacements.set(enemyMaterials[key], alliedMaterials[key]);
+    }
+  }
+  group.traverse((object) => {
+    if (object instanceof THREE.Mesh && !Array.isArray(object.material)) {
+      const replacement = replacements.get(object.material);
+      if (replacement) {
+        object.material = replacement;
+      }
+    }
+  });
+  group.userData.livery = 'allied';
+  return group;
 }
