@@ -222,12 +222,27 @@ export function updateBomber(unit: UnitEntity, world: UnitWorld, deltaTime: numb
     desiredHeading = Math.atan2(-p.x, -p.z);
     turnRate = 0.3;
   } else {
-    const tx = target ? target.mesh.position.x : world.playerPosition.x;
-    const tz = target ? target.mesh.position.z : world.playerPosition.z;
+    let tx = world.playerPosition.x;
+    let tz = world.playerPosition.z;
+    if (target) {
+      // 对地 / 对海目标做提前量：飞向“炸弹落地时目标所在位置”
+      const distance = Math.hypot(target.mesh.position.x - p.x, target.mesh.position.z - p.z);
+      const fall =
+        target.domain === 'air'
+          ? 0
+          : Math.sqrt((2 * Math.max(1, p.y - target.mesh.position.y)) / 9.8);
+      const lead = Math.min(25, fall + distance / Math.max(1, unit.config.speed));
+      tx = target.mesh.position.x + target.velocity.x * lead;
+      tz = target.mesh.position.z + target.velocity.z * lead;
+    }
     const bearing = Math.atan2(tx - p.x, tz - p.z);
+    const bearingError = Math.abs(wrapAngle(bearing - unit.heading));
     // 已越过目标：保持直线飞到边界再掉头，形成往复航线
-    if (Math.hypot(tx - p.x, tz - p.z) > 150 && Math.abs(wrapAngle(bearing - unit.heading)) < 1.4) {
+    const toLead = Math.hypot(tx - p.x, tz - p.z);
+    if (toLead > 150 && bearingError < 1.4) {
       desiredHeading = bearing;
+      // 投弹航路末段：小角度修正更积极
+      if (bearingError < 0.6) turnRate = toLead < 700 ? 0.38 : 0.25;
     }
   }
   flyToward(
@@ -252,7 +267,7 @@ export function updateBomber(unit: UnitEntity, world: UnitWorld, deltaTime: numb
       unit.burstTimer = 0.24;
       unit.burstLeft--;
       partWorldPosition(unit, bombBay, muzzlePos, -2.5);
-      world.dropBomb(unit, muzzlePos, unit.velocity, 55 * world.damageMultiplier, 24);
+      world.dropBomb(unit, muzzlePos, unit.velocity, 55 * world.damageMultiplier, 28);
     }
   } else {
     unit.secondaryTimer -= deltaTime;
@@ -302,12 +317,13 @@ function shouldDropBombs(unit: UnitEntity, world: UnitWorld): boolean {
   for (const ally of world.allies) {
     if (!ally.isTargetable() || ally.domain === 'air') continue;
     const drop = Math.max(1, p.y - ally.mesh.position.y);
-    const fall = Math.sqrt((2 * drop) / 9.8);
+    // 以一串 4 枚炸弹的中点计算落点（投弹间隔 0.24 秒）
+    const fall = Math.sqrt((2 * drop) / 9.8) + 0.36;
     const ix = p.x + unit.velocity.x * fall;
     const iz = p.z + unit.velocity.z * fall;
     const ax = ally.mesh.position.x + ally.velocity.x * fall;
     const az = ally.mesh.position.z + ally.velocity.z * fall;
-    if (Math.hypot(ix - ax, iz - az) < 40 + ally.hitRadius) return true;
+    if (Math.hypot(ix - ax, iz - az) < 30 + ally.hitRadius * 0.6) return true;
   }
   // 玩家在机腹下方
   if (world.playerActive) {

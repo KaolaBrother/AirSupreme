@@ -1053,10 +1053,13 @@ export class UnitSystem implements IGameSystem {
       kamikazePlayer: (unit, damage) => {
         system.onPlayerDamaged?.(damage, 'kamikaze', unit.mesh.position.clone());
         system.killDirect(unit, false);
+        // 自爆：爆炸即消失，不再播放坠落
+        unit.removable = true;
       },
       kamikazeUnit: (unit, target, damage) => {
         target.applyDamage(damage, 'unit-fire', unit.mesh.position);
         system.killDirect(unit, false);
+        unit.removable = true;
       },
       flakPuff: (position, scale) => system.shots.spawnPuff(position, scale),
       muzzleFlash: (position, intensity) => {
