@@ -57,6 +57,8 @@ interface UnitMissile {
   minDistance: number;
   lastDistance: number;
   trailTimer: number;
+  surfaceTimer: number;
+  surfaceY: number;
   readonly incoming: { position: THREE.Vector3; targetIsPlayer: boolean };
 }
 
@@ -164,6 +166,8 @@ export class UnitMissilePool {
         minDistance: Infinity,
         lastDistance: Infinity,
         trailTimer: 0,
+        surfaceTimer: 0,
+        surfaceY: -Infinity,
         incoming: { position: new THREE.Vector3(), targetIsPlayer: false },
       });
     }
@@ -205,6 +209,8 @@ export class UnitMissilePool {
     missile.minDistance = Infinity;
     missile.lastDistance = Infinity;
     missile.trailTimer = 0;
+    missile.surfaceTimer = 0;
+    missile.surfaceY = -Infinity;
     missile.mesh.visible = true;
     missile.mesh.quaternion.setFromUnitVectors(FORWARD, missile.direction);
     return true;
@@ -251,7 +257,13 @@ export class UnitMissilePool {
       if (this.checkFuze(missile, env)) continue;
 
       // 撞地
-      const surfaceY = env.sampleSurfaceY(missile.position.x, missile.position.z);
+      // 地表采样 10 Hz；贴近地面时每帧采样
+      missile.surfaceTimer -= deltaTime;
+      if (missile.surfaceTimer <= 0 || missile.position.y < missile.surfaceY + 25) {
+        missile.surfaceTimer = 0.1;
+        missile.surfaceY = env.sampleSurfaceY(missile.position.x, missile.position.z);
+      }
+      const surfaceY = missile.surfaceY;
       if (missile.age > 0.6 && missile.position.y <= surfaceY + 0.5) {
         missile.position.y = surfaceY + 0.5;
         this.detonate(missile, env, true, 0.9);

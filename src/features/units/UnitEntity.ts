@@ -111,6 +111,9 @@ export class UnitEntity implements UnitInstance, CombatTarget {
   baseY = Number.NaN;
   /** 命中火花节流 */
   hitFxCooldown = 0;
+  /** 前方可通行探测节流 */
+  traverseTimer = 0;
+  traverseBlocked = false;
   orbitAngle = 0;
   orbitDirection = 1;
   orbitRadius = 0;

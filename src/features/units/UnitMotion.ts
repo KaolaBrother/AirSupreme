@@ -201,10 +201,18 @@ export function driveToward(
   // 急转弯减速
   const headingError = Math.abs(wrapAngle(Math.atan2(dx, dz) - unit.heading));
   if (headingError > 1.2) targetSpeed *= 0.35;
-  if (
-    targetSpeed > 0 &&
-    !canTraverse(unit, world, unit.heading, Math.max(12, unit.hitRadius * 1.6))
-  ) {
+  // 前方探测每 0.2 秒一次（地形采样较贵），结果在两次探测之间沿用
+  unit.traverseTimer -= deltaTime;
+  if (targetSpeed > 0 && unit.traverseTimer <= 0) {
+    unit.traverseTimer = 0.2;
+    unit.traverseBlocked = !canTraverse(
+      unit,
+      world,
+      unit.heading,
+      Math.max(12, unit.hitRadius * 1.6)
+    );
+  }
+  if (targetSpeed > 0 && unit.traverseBlocked) {
     // 前方是水 / 陆地边缘：转向绕行
     unit.heading = wrapAngle(unit.heading + unit.orbitDirection * 1.6 * deltaTime);
     targetSpeed = 0;
