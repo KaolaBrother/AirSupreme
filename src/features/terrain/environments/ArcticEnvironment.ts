@@ -8,7 +8,8 @@
  * - 海面低雾（sea smoke）贴水漂移；冰封前哨站：雷达罩、旋转雷达、营房、探照灯、障碍灯；
  * - 极光帘幕与轻雪由 'aurora' 天气预设提供（weatherLayers.createAuroraBand）。
  *
- * 采样：sampleHeight = 冰面（静态冰体 / 浮冰）或海床；isWater = 冰间开阔海面。
+ * 采样：sampleHeight = 冰架 / 冰山顶面或海床；isWater = 冰架与冰山之外的海面
+ * （漂移浮冰可破冰穿行，不阻挡航行，也不参与采样，保证结果与时间无关）。
  */
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';

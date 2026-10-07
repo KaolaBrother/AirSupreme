@@ -148,21 +148,7 @@ function getFallbackDesignTokens(terrain: TerrainType): SceneDesignTokens {
 
 /** 各地形的设计令牌兜底值（关卡未配置 designTokens 时使用） */
 const FALLBACK_DESIGN_TOKENS: Partial<Record<TerrainType, SceneDesignTokens>> = {
-  [TerrainType.LAKE]: {
-    terrainPrimary: 0x8ecf60,
-    terrainSecondary: 0x67a34f,
-    terrainAccent: 0xa8dc7c,
-    vegetation: 0x3e8a3c,
-    vegetationAccent: 0x77c95e,
-    water: 0x5eb7de,
-    waterDeep: 0x2a6e96,
-    waterSparkle: 0xbdf0ff,
-    structure: 0x9c6b4a,
-    structureAccent: 0xf3e6c8,
-    glow: 0xffe9b0,
-    horizonHaze: 0xdceff8,
-    distantSilhouette: 0x7da3c0,
-  },
+  [TerrainType.LAKE]: LAKE_FALLBACK_DESIGN_TOKENS,
   [TerrainType.DESERT]: {
     terrainPrimary: 0xd9b178,
     terrainSecondary: 0xa6752d,

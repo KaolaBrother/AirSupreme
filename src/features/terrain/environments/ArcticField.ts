@@ -2,7 +2,9 @@
  * 极夜冰海解析场（纯数学，无渲染依赖）：
  * - 北侧 / 东侧冰架（星形轮廓、平顶、垂直冰崖）
  * - 平顶冰山（tabular）与尖顶冰山（pinnacle，径向剖面 + 角向噪声）
- * - 漂移浮冰（位置由 ArcticEnvironment 每帧推进，采样时读取当前位置）
+ * - 漂移浮冰（位置由 ArcticEnvironment 每帧推进）。浮冰薄而小、随时间移动，
+ *   船只可破冰穿行，因此不参与 surfaceHeight / isOpenWater（采样结果与时间无关、可复现）；
+ *   需要时可用 floeTop() 单独查询。
  *
  * 所有高度为相对水位的局部高度（世界 Y = 水位 + 局部高度）。
  */
@@ -156,19 +158,14 @@ export class ArcticField {
     return null;
   }
 
-  /** 固体冰面局部高度；开阔水域返回海床（SEABED） */
+  /** 固体冰面局部高度（冰架 / 冰山）；开阔水域返回海床（SEABED）。浮冰不计入 */
   surfaceHeight(x: number, z: number): number {
-    const ice = this.staticIceTop(x, z);
-    const floe = this.floeTop(x, z);
-    if (ice === null && floe === null) {
-      return SEABED;
-    }
-    return Math.max(ice ?? -Infinity, floe ?? -Infinity);
+    return this.staticIceTop(x, z) ?? SEABED;
   }
 
-  /** 是否为开阔水面（无静态冰体、无浮冰） */
+  /** 是否为可航行海面（无冰架 / 冰山；漂移浮冰可破冰穿行） */
   isOpenWater(x: number, z: number): boolean {
-    return this.staticIceTop(x, z) === null && this.floeTop(x, z) === null;
+    return this.staticIceTop(x, z) === null;
   }
 
   /** 到最近静态冰体边缘的距离（米，负 = 冰内）——水面浅滩/浪沫烘焙用 */
