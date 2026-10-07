@@ -29,6 +29,8 @@ export class GameLoop {
 
   private targetFps: number = this.DEFAULT_FPS;
   private minFps: number = this.MIN_FPS;
+  /** 模拟时间倍率（固定步长不变，每帧多跑几步）；只供开发调试使用，默认 1 */
+  private timeScale: number = 1;
 
   private get targetFrameTime(): number {
     return 1000 / this.targetFps;
@@ -92,7 +94,7 @@ export class GameLoop {
       this.evaluateAutoQuality(rawDeltaTime);
 
       // 防止"死亡螺旋"（切换标签页后的大延迟）
-      const deltaTime = Math.min(rawDeltaTime, this.maxDeltaTime);
+      const deltaTime = Math.min(rawDeltaTime, this.maxDeltaTime) * this.timeScale;
 
       // 固定时间步长更新
       this.accumulator += deltaTime;
@@ -109,6 +111,15 @@ export class GameLoop {
     };
 
     requestAnimationFrame(loop);
+  }
+
+  /** 模拟时间倍率（1..16）：开发构建的调试钩子用于在软件渲染下加速推进游戏时间 */
+  public setTimeScale(scale: number): void {
+    this.timeScale = Number.isFinite(scale) ? Math.max(1, Math.min(16, scale)) : 1;
+  }
+
+  public getTimeScale(): number {
+    return this.timeScale;
   }
 
   /**

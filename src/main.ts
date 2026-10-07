@@ -2,6 +2,8 @@ import { unlockAudioFromUserGesture } from './core/Audio/AudioContextHost';
 import { getLogger } from './core/utils/Logger';
 import { configLoader } from './core/utils/ConfigLoader';
 import type { GameCoordinator } from './core/GameCoordinator';
+import { loadStartFlowSettings } from './core/SessionSettings';
+import type { CampaignSaveData } from './core/save/SaveSystem';
 import { StartMenu, type GameSettings } from './ui/StartMenu';
 
 const log = getLogger('Main');
@@ -103,7 +105,29 @@ async function main(): Promise<void> {
       void bootGame(lastSettings);
     }
 
-    async function bootGame(settings: GameSettings): Promise<void> {
+    /** 检查点续玩：沿用本机音画设置，难度 / 关卡 / 生命 / 视角取自存档（正常模式） */
+    function settingsFromCheckpoint(save: CampaignSaveData): GameSettings {
+      const stored = loadStartFlowSettings();
+      return {
+        ...stored,
+        difficulty: save.difficulty,
+        gameMode: 'normal',
+        startLevel: save.level,
+        playerLives: save.lives,
+        cameraMode: save.cameraMode,
+        testScore: 0,
+      };
+    }
+
+    function continueFromCheckpoint(save: CampaignSaveData): void {
+      startMenu.hide();
+      void bootGame(settingsFromCheckpoint(save), save);
+    }
+
+    async function bootGame(
+      settings: GameSettings,
+      resume: CampaignSaveData | null = null
+    ): Promise<void> {
       showEnteringBattlefield();
       disposeGame();
       unlockAudioFromUserGesture();
@@ -115,6 +139,8 @@ async function main(): Promise<void> {
           showStartMenu: false,
           onRetry,
           onExitToMenu,
+          resume,
+          onContinueFromCheckpoint: continueFromCheckpoint,
         });
         coordinator.boot(settings);
         game = coordinator;
@@ -130,6 +156,9 @@ async function main(): Promise<void> {
       startMenu.hide();
       await bootGame(settings);
     });
+
+    // 开始菜单“继续战役”：读取并校验过的检查点
+    startMenu.setOnContinue((save) => continueFromCheckpoint(save));
 
     hideLoadingScreen();
     warmGameCoordinatorChunk();

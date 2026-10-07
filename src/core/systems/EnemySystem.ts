@@ -162,8 +162,9 @@ export class EnemySystem implements IGameSystem {
     return this.levelManager.getSpawnedEnemyCount();
   }
 
-  loadLevel(levelId: number): void {
-    this.levelManager.loadLevel(levelId);
+  /** 加载关卡；startWave > 0 时从第 N 波继续（读档） */
+  loadLevel(levelId: number, startWave: number = 0): void {
+    this.levelManager.loadLevel(levelId, startWave);
   }
 
   setDifficultyProfile(profile: DifficultyProfile): void {

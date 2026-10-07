@@ -68,6 +68,7 @@ export class LevelManager {
   private spawnPortalModulePromise: Promise<typeof import('@/features/effects/SpawnPortal')> | null =
     null;
   private terrainLoadSequence: number = 0;
+  private terrainReadyPromise: Promise<void> = Promise.resolve();
 
   // 战斗区域边界
   private combatBounds: {
@@ -150,7 +151,7 @@ export class LevelManager {
 
   private initializeTerrain(config: LevelConfig): void {
     const loadSequence = ++this.terrainLoadSequence;
-    void this.ensureTerrainGenerator()
+    this.terrainReadyPromise = this.ensureTerrainGenerator()
       .then((terrainGenerator) => {
         if (this.currentLevel?.id !== config.id || loadSequence !== this.terrainLoadSequence) {
           return;
@@ -161,6 +162,18 @@ export class LevelManager {
       .catch((error: unknown) => {
         log.error('Terrain generator load failed', { error, levelId: config.id });
       });
+  }
+
+  /**
+   * 当前关卡地形生成完毕（地形分块按需加载，换关后在下一个微任务才生成）。
+   * 期间又切换了关卡时继续等待最新一次加载，保证返回时采样对应当前关卡。
+   */
+  public async whenTerrainReady(): Promise<void> {
+    let pending: Promise<void>;
+    do {
+      pending = this.terrainReadyPromise;
+      await pending;
+    } while (pending !== this.terrainReadyPromise);
   }
 
   private ensureSpawnPortalModule(): Promise<typeof import('@/features/effects/SpawnPortal')> {
@@ -613,6 +626,22 @@ export class LevelManager {
 
   public getCurrentWaveOnboardingBeat(): OnboardingWaveBeatProfile {
     return { ...this.currentWaveBeatProfile };
+  }
+
+  /**
+   * 换关 / 读档：销毁所有在场敌机（含 Boss 召唤的残余）与传送门，重置本波计数。
+   * 与 clear() 不同，这里会把网格移出场景并释放尾迹。
+   */
+  public despawnAllEnemies(): void {
+    for (const enemy of this.enemies) {
+      enemy.dispose();
+    }
+    this.enemies = [];
+    for (const portal of this.activePortals) {
+      portal.dispose();
+    }
+    this.activePortals = [];
+    this.enemiesSpawnedThisWave = 0;
   }
 
   /**

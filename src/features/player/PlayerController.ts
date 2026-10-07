@@ -19,11 +19,13 @@ export class PlayerController {
   // 自动回中速度（弧度/秒）
   private readonly autoLevelSpeed: number = 2.0;
 
-  // 发动机火焰效果（使用Sprite）
+  // 发动机火焰效果（使用Sprite）：主尾焰由 AircraftMeshFactory 的加力尾焰负责，
+  // 这里只保留一层柔和的喷口辉光（第一人称时随机体外观层一起隐藏）
   private flameSprite: Sprite;
-  private readonly normalFlameSize: number = 3.0;  // 正常火焰大小
-  private readonly boostFlameSize: number = 5.0;    // 加速火焰大小
-  private currentFlameSize: number = 3.0;
+  private readonly normalFlameSize: number = 1.4; // 巡航辉光大小
+  private readonly boostFlameSize: number = 2.3; // 加力辉光大小
+  private currentFlameSize: number = 1.4;
+  private readonly rightVector = new Vector3();
   private readonly normalFlameColor = new Color(0xff8844);  // 正常火焰颜色（橙黄）
   private readonly boostFlameColor = new Color(0xffaa00);    // 加速火焰颜色（金黄）
   private readonly flameColor = new Color();
@@ -40,7 +42,7 @@ export class PlayerController {
       map: flameTexture,
       color: 0xff8844,              // 橙黄色
       transparent: true,
-      opacity: 0.8,
+      opacity: 0.5,
       blending: AdditiveBlending,  // 加性混合实现发光效果
       depthWrite: false,                // 不写入深度缓冲
     });
@@ -174,7 +176,7 @@ export class PlayerController {
     // 只修正滚转（Roll），保持机翼水平，不修正俯仰和偏航
     if (!hasInput) {
       // 获取飞机的本地右向量（X轴方向）
-      const rightVector = new Vector3(1, 0, 0);
+      const rightVector = this.rightVector.set(1, 0, 0);
       rightVector.applyQuaternion(this.aircraft.quaternion);
 
       // 右向量的Y分量代表机翼的倾斜程度

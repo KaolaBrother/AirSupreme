@@ -33,6 +33,8 @@ export class PlayerSystem implements IGameSystem {
   private shieldTime: number = 0;
   private shieldFade: number = 0;
   private shieldFadingOut: boolean = false;
+  /** 视角淡化系数：第一人称时护盾半透明，不挡住座舱视野（1 = 正常） */
+  private shieldViewFade: number = 1;
   private static readonly SHIELD_FADE_MS = 200;
   private static readonly SHIELD_INNER_OPACITY = 0.16;
   private static readonly SHIELD_OUTER_OPACITY = 0.08;
@@ -187,12 +189,28 @@ export class PlayerSystem implements IGameSystem {
   }
 
   private applyShieldOpacity(fade: number): void {
-    this.shieldRipple?.setFade(fade);
+    const visibleFade = fade * this.shieldViewFade;
+    this.shieldRipple?.setFade(visibleFade);
     if (this.shieldMaterials[0]) {
-      this.shieldMaterials[0].opacity = PlayerSystem.SHIELD_INNER_OPACITY * fade;
+      this.shieldMaterials[0].opacity = PlayerSystem.SHIELD_INNER_OPACITY * visibleFade;
     }
     if (this.shieldMaterials[1]) {
-      this.shieldMaterials[1].opacity = PlayerSystem.SHIELD_OUTER_OPACITY * fade;
+      this.shieldMaterials[1].opacity = PlayerSystem.SHIELD_OUTER_OPACITY * visibleFade;
+    }
+  }
+
+  /**
+   * 护盾在视角中的淡化（CameraRig 混合值驱动：1 - 0.7 × blend），第一人称时护盾球
+   * 包住座舱，降低不透明度避免遮挡视野。
+   */
+  setShieldViewFade(fade: number): void {
+    const next = Number.isFinite(fade) ? Math.max(0, Math.min(1, fade)) : 1;
+    if (Math.abs(next - this.shieldViewFade) < 0.005) {
+      return;
+    }
+    this.shieldViewFade = next;
+    if (this.shieldGroup && this.shieldGroup.visible) {
+      this.applyShieldOpacity(this.shieldFadingOut ? this.shieldFade : 1);
     }
   }
 
@@ -276,6 +294,23 @@ export class PlayerSystem implements IGameSystem {
     this.crashSurfaceSampler = sampler;
   }
 
+  /**
+   * 换关 / 读档：把玩家放到新位置与朝向（四元数），同步插值状态与安全复活点。
+   */
+  placeAt(position: THREE.Vector3, quaternion: THREE.Quaternion): void {
+    const { x, y, z } = position;
+    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
+      return;
+    }
+    this.mesh.position.copy(position);
+    this.mesh.quaternion.copy(quaternion);
+    this.lastSafeRespawnPosition.copy(position);
+    this.syncVisualState();
+    if (this.shieldGroup) {
+      this.shieldGroup.position.copy(position);
+    }
+  }
+
   getController(): PlayerController {
     return this.controller;
   }
@@ -284,10 +319,16 @@ export class PlayerSystem implements IGameSystem {
     return this.health;
   }
 
+  /** 战斗伤害：先按复合装甲升级减伤（0..40%），再结算血量 */
   takeCombatDamage(amount: number, feedback?: PlayerHitFeedbackMetadata): void {
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return;
+    }
+    const reduction = this.stats.getArmorReduction();
+    const dealt = amount * (1 - (Number.isFinite(reduction) ? reduction : 0));
     this.pendingDamageOptions = feedback ?? null;
     try {
-      this.health.takeDamage(amount);
+      this.health.takeDamage(dealt);
     } finally {
       this.pendingDamageOptions = null;
     }
