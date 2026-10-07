@@ -13,8 +13,13 @@ baseline 320 pass / 79 env-fail recorded), esbuild bundle, Prettier, and headles
 Harness: /tmp/claude-0/-home-claude/a4310de8-0318-594d-9aae-8abaedc5bdca/scratchpad/harness (README inside).
 
 Run log: session 2 (12:34 UTC) found the container had been reclaimed ~10:20 UTC; all 11 first-wave dispatches
-were dead (no commits; 3 left partial files). Width 12 on a 2-core/7.8 GB box was too wide. Re-dispatching in
+were dead (no commits; 3 left partial files). Width 12 on a 2-core/7.8 GB box was too wide. Re-dispatched in
 rounds of ~5 with commit-as-you-go so a reclaim can no longer lose work.
+Session 2, 14:06 UTC: round 1 landed (terrain, units, weapons, bosses-a; VFX partial — its worker was stopped
+by the user's interrupt). The user moved the run to their own computer (Claude desktop app) so real npm
+tooling (eslint, vitest, vite build, real GPU browser) can run, with their local clone as the git home.
+Integration branch pushed to origin; WIP branches batch/audio, batch/progression, batch/story-ui pushed too.
+Per-batch wiring instructions and known gaps: integration-notes.md (read it before integrating).
 
 - item: Survey the codebase and build a sandbox verification harness (esbuild bundle + static server + Playwright smoke + bun test baseline + vitest type shim)
   status: done
@@ -32,52 +37,57 @@ rounds of ~5 with commit-as-you-go so a reclaim can no longer lose work.
   result: WIP committed on batch branches (audio 607469a, progression cffadff, story-ui efe9a90); other 9 worktrees had nothing; harness verified alive (tsc 5.5 s, esbuild bundle OK)
 
 - item: Terrain core — TerrainType 6-10, LevelConfig 6-10, postFx for all levels, sampleSurface, ash/aurora weather, environment-module dispatch, full VOLCANO (L6) + ARCTIC (L7) environments, working placeholders for CANYON/STRATOSPHERE/CITADEL
-  status: in-flight
+  status: done
   dispatched: round 1 · implementer (reasoning tier) in /home/claude/wt/terrain on batch/terrain; output = commits on batch/terrain + final report
+  result: 16 commits merged as 248bacc; tsc/bun/esbuild/prettier clean (bun failing set = baseline); VOLCANO 32 draws, ARCTIC 29; wiring + EnvironmentBase contract for terrain B in integration-notes.md; gap: enemy jets fly through tall terrain
 
 - item: Terrain B — full CANYON (L8), STRATOSPHERE (L9), CITADEL (L10) environment modules replacing terrain-core placeholders
   status: todo
   hint: needs terrain core merged first (same dispatch hook); prior first-wave terrain dispatch died with no output
 
 - item: Build bosses 6-7 (Magma Colossus walker with vents/mortars/geysers; Abyssal Leviathan submarine with dive cycle/mines)
-  status: in-flight
+  status: done
   dispatched: round 1 · implementer (reasoning tier) in /home/claude/wt/bosses-a on batch/bosses-a; output = commits on batch/bosses-a + final report
+  result: 15 commits merged as c58678e; 7 files; tsc/prettier/bundle clean; sims pass; open integration decision: enable setDeathSequenceEnabled(true) (delays onDestroy by 3.6-4.5 s); stale pins BossTypes.test.ts:171 + Boss.integration.test.ts:223
 
 - item: Build bosses 8-9 (Tempest Zeppelin gas cells/chain lightning/drones; Phantom Wing cloak/laser lance/holo decoys)
   status: todo
-  hint: round 2; first-wave dispatch died with no output; worktree /home/claude/wt/bosses-b
+  hint: round 2; first-wave dispatch died with no output; branch fresh from the integration branch; follow the bosses-a pattern (MagmaColossusHazards.ts has reusable hazard blocks)
 
 - item: Build final boss Oracle Prime (3 phases: shield pylons, exposed core + laser arrays, overload shockwaves)
   status: todo
-  hint: round 2; first-wave dispatch died with no output; worktree /home/claude/wt/boss-final
+  hint: round 2; first-wave dispatch died with no output; branch fresh from the integration branch
 
 - item: Add 17 ground/sea/air units across hostile/friendly/civilian factions with behaviours, SAM missiles + decoys, per-level deployments
-  status: in-flight
+  status: done
   dispatched: round 1 · implementer (reasoning tier) in /home/claude/wt/units on batch/units; output = commits on batch/units + final report
+  result: 15 commits merged as 61d01a6; tsc/bun/bundle/prettier clean; 60 s all-type sim passes, 80 units ≈0.9 ms/frame; player bullets need radius-aware hits for big ships (see integration-notes.md)
 
 - item: Add special weapons (rockets, laser, swarm, railgun, EMP) + flare countermeasures with logic core and pooled visuals
-  status: in-flight
+  status: done
   dispatched: round 1 · implementer (reasoning tier) in /home/claude/wt/weapons on batch/weapons; output = commits on batch/weapons + final report
+  result: 13 commits merged as 8995456; 11 files; logic script 92/92; tsc/bun/bundle/prettier clean; visuals tuned under SwiftShader only — re-check glow through post-fx on a real GPU
 
 - item: VFX overhaul — instanced particle backend, upgraded recipes, contrails, post-processing (bloom/grade/vignette/screen effects), hex shield
-  status: in-flight
+  status: todo
   dispatched: round 1 · implementer (reasoning tier) in /home/claude/wt/vfx on batch/vfx; output = commits on batch/vfx + final report
+  result (partial): worker stopped by the user's interrupt after 70d039f with no report; 9 commits merged as 310cd42 + typecheck fix c11ee94 so the work is preserved; REGRESSION under the composer (quality preset): player jet body not drawn, enemy jets translucent — performance preset and pre-VFX tree are fine. Next: fix forward on the integration branch, then verify (real vitest/eslint/build + real-GPU look) — details in integration-notes.md
 
 - item: CameraRig first/third-person with cockpit model, shake, FOV kick; friendly livery; afterburner polish
   status: todo
-  hint: round 2; first-wave dispatch died with no output; worktree /home/claude/wt/camera
+  hint: round 2; first-wave dispatch died with no output; branch fresh from the integration branch; weapons already expose setViewMode(cameraMode)
 
 - item: Music sequencer + 23 tracks/stingers and new SFX set with compressor
   status: todo
-  hint: WIP music engine at batch/audio 607469a (unverified) — resume from it
+  hint: WIP music engine on origin/batch/audio 607469a (based on 59ad537, unverified) — merge the integration branch into it, then resume; AudioManager.playGroundImpact already widened (c11ee94)
 
 - item: Progressive tiered upgrades, SaveSystem checkpoints, StartMenu continue/level 1-10/camera setting, hangar-mode UpgradeMenu
   status: todo
-  hint: WIP at batch/progression cffadff (UpgradeSystem +SessionSettings + SaveSystem draft, unverified) — resume from it
+  hint: WIP on origin/batch/progression cffadff (UpgradeSystem + SessionSettings + SaveSystem draft, based on 59ad537, unverified) — merge the integration branch into it, then resume; SessionSettings still clamps startLevel to 1..5
 
 - item: StoryOverlay (chapter intro/debrief/ending), RadioComms, HUD weapon/flare/boss/missile/autosave/camera panels, radar kinds, mobile buttons
   status: todo
-  hint: WIP at batch/story-ui efe9a90 (hudTokens only) — resume from it
+  hint: WIP on origin/batch/story-ui efe9a90 (hudTokens only, based on 59ad537) — merge the integration branch into it, then resume
 
 - item: Separate-custody tests pinning api-spec (campaign, scaling, factions, bosses 6-10, save, upgrades, weapons, flares, units, camera, music catalog, settings) + refresh stale boss pins
   status: todo
