@@ -107,6 +107,10 @@ export class UnitEntity implements UnitInstance, CombatTarget {
   surfaceWater = false;
   surfaceSampleX = Number.NaN;
   surfaceSampleZ = Number.NaN;
+  /** 平滑后的基准高度（浮动起伏叠加在其上，避免累积漂移） */
+  baseY = Number.NaN;
+  /** 命中火花节流 */
+  hitFxCooldown = 0;
   orbitAngle = 0;
   orbitDirection = 1;
   orbitRadius = 0;
@@ -225,6 +229,7 @@ export class UnitEntity implements UnitInstance, CombatTarget {
 
   /** 受击闪白：只交换材质引用，不克隆材质 */
   updateFlash(deltaTime: number): void {
+    if (this.hitFxCooldown > 0) this.hitFxCooldown -= deltaTime;
     if (this.flashTimer > 0) {
       this.flashTimer -= deltaTime;
       if (!this.flashing && !this.charred) this.setFlash(true);

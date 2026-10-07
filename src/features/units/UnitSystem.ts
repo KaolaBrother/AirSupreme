@@ -539,7 +539,8 @@ export class UnitSystem implements IGameSystem {
     byPlayer: boolean,
     hitPoint?: THREE.Vector3
   ): void {
-    if (this.particleSystem && unit.smokeTimer > -0.5) {
+    if (this.particleSystem && unit.hitFxCooldown <= 0) {
+      unit.hitFxCooldown = 0.06;
       const point =
         hitPoint && isFiniteVector(hitPoint)
           ? hitPoint
@@ -602,7 +603,8 @@ export class UnitSystem implements IGameSystem {
     unit.smokeTimer -= dt;
     switch (unit.deathKind) {
       case 'wreck': {
-        if (unit.deathTimer < 1.6) p.y -= dt * 2;
+        // 最后 1.6 秒沉入地面（高大建筑下沉更快，避免移除时“跳变”）
+        if (unit.deathTimer < 1.6) p.y -= dt * (2 + unit.hitRadius * 0.6);
         if (particles && unit.smokeTimer <= 0 && unit.deathTimer > 1.5) {
           unit.smokeTimer = 0.16;
           this.tmpA.copy(p).setY(p.y + unit.hitRadius * 0.35);
@@ -611,7 +613,7 @@ export class UnitSystem implements IGameSystem {
         break;
       }
       case 'sink': {
-        p.y -= dt * (1 + unit.hitRadius * 0.03);
+        p.y -= dt * (1.5 + unit.hitRadius * 0.06);
         unit.pitch = Math.min(0.3, unit.pitch + dt * 0.04);
         unit.roll += unit.deathSpin * dt * 0.05;
         applyAttitude(unit);

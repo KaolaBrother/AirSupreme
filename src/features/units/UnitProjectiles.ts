@@ -51,6 +51,8 @@ interface FlakPuff {
   life: number;
   maxLife: number;
   scale: number;
+  /** 不规则拉伸，打破完美球形轮廓 */
+  readonly stretch: THREE.Vector3;
 }
 
 const FORWARD = new THREE.Vector3(0, 0, 1);
@@ -167,7 +169,15 @@ export class UnitShotPool {
       mesh.renderOrder = 0;
       mesh.name = 'UNIT_FLAK_PUFF';
       this.root.add(mesh);
-      this.puffs.push({ active: false, mesh, material, life: 0, maxLife: 1, scale: 1 });
+      this.puffs.push({
+        active: false,
+        mesh,
+        material,
+        life: 0,
+        maxLife: 1,
+        scale: 1,
+        stretch: new THREE.Vector3(1, 1, 1),
+      });
     }
     this.scene.add(this.root);
   }
@@ -262,7 +272,12 @@ export class UnitShotPool {
     puff.scale = (2.2 + Math.random() * 1.2) * scale;
     puff.mesh.position.copy(position);
     puff.mesh.rotation.set(Math.random() * 3, Math.random() * 3, 0);
-    puff.mesh.scale.setScalar(puff.scale * 0.4);
+    puff.stretch.set(
+      0.75 + Math.random() * 0.5,
+      0.65 + Math.random() * 0.4,
+      0.75 + Math.random() * 0.5
+    );
+    puff.mesh.scale.copy(puff.stretch).multiplyScalar(puff.scale * 0.4);
     puff.material.color.copy(PUFF_HOT);
     puff.material.opacity = 0.95;
     puff.mesh.visible = true;
@@ -329,7 +344,7 @@ export class UnitShotPool {
         continue;
       }
       const t = 1 - puff.life / puff.maxLife;
-      puff.mesh.scale.setScalar(puff.scale * (0.4 + 0.6 * Math.sqrt(t)));
+      puff.mesh.scale.copy(puff.stretch).multiplyScalar(puff.scale * (0.4 + 0.6 * Math.sqrt(t)));
       if (t < 0.12) {
         puff.material.color.copy(PUFF_HOT).lerp(PUFF_SMOKE, t / 0.12);
       } else {

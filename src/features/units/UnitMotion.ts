@@ -320,12 +320,14 @@ export function settleOnSurface(
   refreshSurface(unit, world);
   const p = unit.mesh.position;
   const target = unit.surfaceY + depthOffset;
-  if (!Number.isFinite(p.y) || Math.abs(target - p.y) > 25) {
-    p.y = target;
+  if (!Number.isFinite(unit.baseY) || Math.abs(target - unit.baseY) > 25) {
+    unit.baseY = target;
   } else {
-    p.y += (target - p.y) * Math.min(1, deltaTime * 6);
+    unit.baseY += (target - unit.baseY) * Math.min(1, deltaTime * 6);
   }
+  p.y = unit.baseY;
   if (unit.domain === 'sea') {
+    // 浮动起伏叠加在平滑基准高度上（不累积）
     const t = world.time + unit.seed * 10;
     const scale = Math.min(1, 12 / Math.max(6, unit.hitRadius));
     p.y += Math.sin(t * 1.3) * 0.18 * scale;
