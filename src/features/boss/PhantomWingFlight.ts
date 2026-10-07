@@ -10,6 +10,8 @@ import * as THREE from 'three';
 
 const WORLD_UP = new THREE.Vector3(0, 1, 0);
 const GRAVITY_LIFT = 9.8 * 1.25;
+/** 协调转弯的最大滚转角（约 60°）：再陡飞翼从侧面看只剩一条线，不利于辨认 */
+const MAX_LATERAL = GRAVITY_LIFT * Math.tan(THREE.MathUtils.degToRad(60));
 
 function isFiniteVector(v: THREE.Vector3): boolean {
   return Number.isFinite(v.x) && Number.isFinite(v.y) && Number.isFinite(v.z);
@@ -109,7 +111,7 @@ export class WingFlight {
       .multiplyScalar(this.speed / Math.max(dt, 1e-4));
     this.lastForward.copy(this.forward);
     if (!isFiniteVector(this.lateral)) this.lateral.set(0, 0, 0);
-    this.lateral.clampLength(0, GRAVITY_LIFT * 3.2);
+    this.lateral.clampLength(0, MAX_LATERAL);
     this.targetUp.set(0, GRAVITY_LIFT, 0).add(this.lateral);
     this.up.lerp(this.targetUp.normalize(), Math.min(1, dt * 3.5));
     this.reorthogonalizeUp(this.up);

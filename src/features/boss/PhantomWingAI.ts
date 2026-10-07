@@ -1946,12 +1946,12 @@ export class PhantomWingAI implements IAdvancedBoss {
     if (this.maneuver === 'lance-telegraph') {
       const c = Math.min(1, this.maneuverTimer / Math.max(0.1, this.tuning().lanceTelegraph));
       prism = 2 + 6 * c + 1.5 * Math.sin(t * (20 + 30 * c));
-      prismGlow = 0.5 + 0.45 * c;
-      prismSize = 3 + 6 * c;
+      prismGlow = 0.5 + 0.35 * c;
+      prismSize = 3 + 4 * c;
     } else if (this.maneuver === 'lance-fire') {
       prism = 8 + 2 * Math.sin(t * 40);
-      prismGlow = 0.95;
-      prismSize = 8;
+      prismGlow = 0.7;
+      prismSize = 4.5;
     }
     materials.prism.emissiveIntensity = prism;
     const prismScale = prismSize * this.rig.scale;
@@ -1961,12 +1961,14 @@ export class PhantomWingAI implements IAdvancedBoss {
     // 尾焰：真身为红色；隐形时仍残留一丝红色闪烁（细心的玩家能追踪）
     const thrust = 0.75 + 0.25 * Math.sin(t * 29) + strafing * 0.6 + overdrive * 0.4;
     materials.nozzle.emissiveIntensity = 1.8 + thrust;
-    materials.flame.opacity = Math.max(0.12, visibility) * 0.75;
+    materials.flame.opacity = Math.max(0.08, visibility) * 0.75;
     for (const engine of this.rig.engines) {
       engine.flame.scale.set(1.3 * thrust, 0.45, 0.8 + 0.6 * thrust);
       const size = (3.6 + 1.6 * thrust) * this.rig.scale;
       engine.glow.scale.set(size, size, 1);
-      engine.glow.material.opacity = Math.max(0.14, visibility) * (0.55 + 0.2 * thrust);
+      // 隐形时尾焰只剩一丝随机闪烁
+      const residual = 0.04 + 0.06 * Math.max(0, Math.sin(t * 17 + engine.flame.id));
+      engine.glow.material.opacity = Math.max(residual, visibility) * (0.55 + 0.2 * thrust);
     }
 
     // 相位发射器：投射诱饵时闪光；被毁后冒火花
@@ -1978,7 +1980,7 @@ export class PhantomWingAI implements IAdvancedBoss {
           2 + 0.6 * Math.sin(t * 6 + emitter.rig.index) + flare * 5 + this.cloakLevel * 1.5;
         const size = (3.2 + flare * 4) * this.rig.scale;
         emitter.rig.glow.scale.set(size, size, 1);
-        emitter.rig.glow.material.opacity = (0.55 + flare * 0.4) * Math.max(0.2, visibility);
+        emitter.rig.glow.material.opacity = (0.55 + flare * 0.4) * Math.max(0.08, visibility);
       } else {
         emitter.rig.lensMaterial.emissiveIntensity = 0.6 + 0.5 * Math.abs(Math.sin(t * 13));
         emitter.rig.glow.material.opacity = 0.25 * visibility;

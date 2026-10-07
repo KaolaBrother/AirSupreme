@@ -72,8 +72,9 @@ void main() {
   vec2 cell = floor(vLocal.xz / (uCellSize * 1.6));
   float flick = hash(cell + floor(uTime * 7.0));
   float peel = uPeel * step(0.8, hash(cell + floor(uTime * 1.4))) * (0.55 + 0.45 * flick);
-  float lattice = uSweepGain * band * 2.4 + uFlash * 1.3 + uRim * (0.12 + 0.12 * flick) + peel * 1.8;
-  float intensity = edge * lattice + fres * uRim * 0.85 + band * uSweepGain * 0.4;
+  // 隐形时只剩稀疏闪烁的格子与极淡的轮廓光（细心才能追踪）；扫描带是醒目但不过曝的预警
+  float lattice = uSweepGain * band * 1.5 + uFlash * 1.3 + uRim * (0.03 + 0.07 * flick * flick) + peel * 1.8;
+  float intensity = edge * lattice + fres * uRim * 0.45 + band * uSweepGain * 0.22;
   vec3 color = mix(uColor, uRimColor, clamp(fres * 1.4, 0.0, 1.0)) * intensity;
   gl_FragColor = vec4(color, 1.0);
 }
@@ -256,11 +257,8 @@ export class PhantomLance {
     this.beamGeometry.translate(0, 0.5, 0);
     applyVerticalGradient(this.beamGeometry, 0xffffff, 0x300610, 0.55);
     this.beamGeometry.rotateX(Math.PI / 2);
-    this.outerMaterial = createGlowMaterial(color, 0, {
-      side: THREE.DoubleSide,
-      vertexColors: true,
-      fog: false,
-    });
+    // 外层只画正面：双面叠加会在侧视时过曝成一堵白墙
+    this.outerMaterial = createGlowMaterial(color, 0, { vertexColors: true, fog: false });
     this.innerMaterial = createGlowMaterial(0xffe0ea, 0, { vertexColors: true, fog: false });
     this.outer = new THREE.Mesh(this.beamGeometry, this.outerMaterial);
     this.inner = new THREE.Mesh(this.beamGeometry, this.innerMaterial);
@@ -362,13 +360,13 @@ export class PhantomLance {
     this.beamRoot.position.copy(this.origin);
     this.beamRoot.quaternion.setFromUnitVectors(Z_AXIS, this.direction);
     const flicker = 1 + 0.14 * Math.sin(t * 53) + 0.08 * Math.sin(t * 91);
-    this.outer.scale.set(radius * 1.15 * flicker, radius * 1.15 * flicker, length);
-    this.inner.scale.set(radius * 0.38, radius * 0.38, length);
-    this.outerMaterial.opacity = 0.8 * strength;
-    this.innerMaterial.opacity = 0.95 * strength;
-    const emitter = radius * 5 * flicker;
+    this.outer.scale.set(radius * flicker, radius * flicker, length);
+    this.inner.scale.set(radius * 0.3, radius * 0.3, length);
+    this.outerMaterial.opacity = 0.5 * strength;
+    this.innerMaterial.opacity = 0.85 * strength;
+    const emitter = radius * 3.2 * flicker;
     this.emitterGlow.scale.set(emitter, emitter, 1);
-    this.emitterGlow.material.opacity = 0.95 * strength;
+    this.emitterGlow.material.opacity = 0.75 * strength;
     this.endGlow.position.set(0, 0, length);
     const endSize = radius * 6 * flicker;
     this.endGlow.scale.set(endSize, endSize, 1);
