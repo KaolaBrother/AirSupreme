@@ -72,6 +72,8 @@ export interface AbyssalLeviathanRig {
   propulsorRotor: THREE.Object3D;
   dangerGlows: THREE.Sprite[];
   bowTip: THREE.Object3D;
+  /** 导弹舱子目标锚点（8 个发射井的中心，用于血条定位） */
+  missileBay: THREE.Object3D;
   /** 潜航深度（米）：完全下潜时 hullRig 的下沉量 */
   diveDepth: number;
   /** 艇长的一半（米） */
@@ -803,6 +805,10 @@ export function createAbyssalLeviathanMesh(config: BossConfig): THREE.Group {
   );
   sonarDome.scale.set(1.1, 0.7, 1.6);
   sonarDome.castShadow = false;
+  const missileBay = new THREE.Object3D();
+  missileBay.name = 'leviathan_missile_bay';
+  missileBay.position.set(0, (DECK_Y + 0.4) * s, -2.8 * s);
+  stern.add(missileBay);
   const bowTip = new THREE.Object3D();
   bowTip.name = 'leviathan_bow_tip';
   bowTip.position.set(0, -0.4 * s, 18.6 * s);
@@ -827,6 +833,7 @@ export function createAbyssalLeviathanMesh(config: BossConfig): THREE.Group {
     propulsorRotor,
     dangerGlows,
     bowTip,
+    missileBay,
     diveDepth: 11.5 * s,
     halfLength: 17.3 * s,
     materials,

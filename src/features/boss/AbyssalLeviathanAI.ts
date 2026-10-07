@@ -67,6 +67,7 @@ export type AbyssalLeviathanCue =
   | 'ram'
   | 'tank-destroyed'
   | 'sail-destroyed'
+  | 'bay-destroyed'
   | 'phase'
   | 'hull-break';
 
@@ -156,6 +157,7 @@ const PHASE2_RATIO = 0.66;
 const PHASE3_RATIO = 0.33;
 const SAIL_HEALTH_RATIO = 0.08;
 const TANK_HEALTH_RATIO = 0.05;
+const BAY_HEALTH_RATIO = 0.07;
 const DIVE_TIME = 2.6;
 const BREACH_TIME = 3.2;
 const BREACH_TELEGRAPH = 2.2;
@@ -201,9 +203,10 @@ function smoothstep(t: number): number {
 }
 
 interface StructureTarget {
-  kind: 'sail' | 'tank';
+  kind: 'sail' | 'tank' | 'bay';
   index: number;
-  mesh: THREE.Mesh;
+  /** 子目标锚点（血条定位）；指挥塔 / 压载舱即其网格本身 */
+  mesh: THREE.Object3D;
   hp: number;
   max: number;
   alive: boolean;
@@ -415,16 +418,22 @@ export class AbyssalLeviathanAI implements IAdvancedBoss {
 
     // 子目标：指挥塔 + 4 个压载舱
     const sailMax = Math.max(1, Math.round(maxHealth * SAIL_HEALTH_RATIO));
-    this.addStructure('sail', 0, this.rig.sail, sailMax, null);
+    this.addStructure('sail', 0, this.rig.sail, [this.rig.sail], sailMax, null);
     const tankMax = Math.max(1, Math.round(maxHealth * TANK_HEALTH_RATIO));
-    for (const tank of this.rig.tanks)
-      this.addStructure('tank', tank.index, tank.mesh, tankMax, tank);
+    for (const tank of this.rig.tanks) {
+      this.addStructure('tank', tank.index, tank.mesh, [tank.mesh], tankMax, tank);
+    }
+    const silos: THREE.Object3D[] = [];
     for (const hatch of this.rig.hatches) {
       const state: HatchState = { rig: hatch, open: 0 };
       this.hatches.push(state);
       this.hatchByPart.set(hatch.silo, state);
-      this.partRoles.set(hatch.silo, 'hatch');
+      silos.push(hatch.silo);
     }
+    // 8 个发射井共用一个“导弹舱”血池：打爆后不再齐射导弹
+    const bayMax = Math.max(1, Math.round(maxHealth * BAY_HEALTH_RATIO));
+    this.addStructure('bay', 0, this.rig.missileBay, silos, bayMax, null);
+    for (const silo of silos) this.partRoles.set(silo, 'hatch');
     for (const turret of this.rig.turrets) this.partRoles.set(turret.housing, 'turret');
 
     this.applyHullPose();
@@ -548,12 +557,13 @@ export class AbyssalLeviathanAI implements IAdvancedBoss {
     if (this.mines.isMine(part)) return 1;
     if (this.isInvulnerable()) return 0;
     const structure = this.structureByPart.get(part);
-    if (structure) {
+    if (structure && structure.kind !== 'bay') {
       if (!structure.alive) return this.getHullMultiplier();
       return structure.kind === 'sail' ? 1.8 : 2.0;
     }
     const role = this.partRoles.get(part) ?? 'hull';
     if (role === 'hatch') {
+      if (!structure || !structure.alive) return this.getHullMultiplier();
       const hatch = this.hatchByPart.get(part);
       return hatch && hatch.open >= 0.5 ? 2.4 : 0.5;
     }
@@ -579,7 +589,8 @@ export class AbyssalLeviathanAI implements IAdvancedBoss {
 
   public getStatusLabel(): string | null {
     const aliveTanks = this.getAliveTankCount();
-    const hatchesOpen = this.salvoState !== 'idle' && this.salvoState !== 'closing' ? 1 : 0;
+    const hatchesOpen =
+      this.isBayAlive() && this.salvoState !== 'idle' && this.salvoState !== 'closing' ? 1 : 0;
     const stateCode =
       this.dying || this.deathHandled
         ? 9
@@ -707,9 +718,10 @@ export class AbyssalLeviathanAI implements IAdvancedBoss {
   }
 
   private addStructure(
-    kind: 'sail' | 'tank',
+    kind: 'sail' | 'tank' | 'bay',
     index: number,
-    mesh: THREE.Mesh,
+    mesh: THREE.Object3D,
+    parts: readonly THREE.Object3D[],
     max: number,
     tank: LeviathanTankRig | null
   ): void {
@@ -725,9 +737,9 @@ export class AbyssalLeviathanAI implements IAdvancedBoss {
       tank,
     };
     this.structures.push(structure);
-    this.structureByPart.set(mesh, structure);
+    for (const part of parts) this.structureByPart.set(part, structure);
     this.subTargets.push(subTarget);
-    this.partRoles.set(mesh, kind);
+    if (kind !== 'bay') this.partRoles.set(mesh, kind);
   }
 
   private rebuildCollisionParts(): void {
@@ -736,9 +748,16 @@ export class AbyssalLeviathanAI implements IAdvancedBoss {
     if (this.deathHandled || this.disposed) return;
     this.mines.collectTargets(parts);
     if (this.isInvulnerable()) return;
-    for (const hatch of this.hatches) if (hatch.open >= 0.5) parts.push(hatch.rig.silo);
-    for (const structure of this.structures) if (structure.alive) parts.push(structure.mesh);
-    for (const hatch of this.hatches) if (hatch.open < 0.5) parts.push(hatch.rig.silo);
+    const bayAlive = this.isBayAlive();
+    if (bayAlive) {
+      for (const hatch of this.hatches) if (hatch.open >= 0.5) parts.push(hatch.rig.silo);
+    }
+    for (const structure of this.structures) {
+      if (structure.alive && structure.kind !== 'bay') parts.push(structure.mesh);
+    }
+    if (bayAlive) {
+      for (const hatch of this.hatches) if (hatch.open < 0.5) parts.push(hatch.rig.silo);
+    }
     for (const turret of this.rig.turrets) parts.push(turret.housing);
     parts.push(this.rig.hullBow, this.rig.deck, this.rig.hullStern, this.rig.propulsor);
   }
@@ -757,6 +776,13 @@ export class AbyssalLeviathanAI implements IAdvancedBoss {
 
   private isSailAlive(): boolean {
     return this.structures[0]?.alive ?? false;
+  }
+
+  private isBayAlive(): boolean {
+    for (const structure of this.structures) {
+      if (structure.kind === 'bay') return structure.alive;
+    }
+    return false;
   }
 
   private getHullMultiplier(): number {
@@ -1187,7 +1213,7 @@ export class AbyssalLeviathanAI implements IAdvancedBoss {
   }
 
   private startSalvo(): void {
-    if (this.salvoState !== 'idle') return;
+    if (this.salvoState !== 'idle' || !this.isBayAlive()) return;
     this.salvoState = 'opening';
     this.salvoTimer = 0;
     this.onHazardWarning?.('垂发导弹齐射');
@@ -1244,12 +1270,16 @@ export class AbyssalLeviathanAI implements IAdvancedBoss {
       default:
         break;
     }
+    const bayAlive = this.isBayAlive();
+    // 导弹舱被毁：舱门被炸开卡死，发射井持续燃烧
+    if (!bayAlive) target = 1;
     for (const hatch of this.hatches) {
       const rate = target > hatch.open ? dt / (HATCH_OPEN_TIME * 0.8) : dt / HATCH_CLOSE_TIME;
       hatch.open += THREE.MathUtils.clamp(target - hatch.open, -rate, rate);
-      hatch.rig.pivot.rotation.z = -hatch.rig.side * hatch.open * 1.95;
-      hatch.rig.siloMaterial.emissiveIntensity =
-        0.25 + hatch.open * (2.6 + 0.8 * Math.sin(this.time * 12 + hatch.rig.index));
+      hatch.rig.pivot.rotation.z = -hatch.rig.side * hatch.open * (bayAlive ? 1.95 : 2.4);
+      hatch.rig.siloMaterial.emissiveIntensity = bayAlive
+        ? 0.25 + hatch.open * (2.6 + 0.8 * Math.sin(this.time * 12 + hatch.rig.index))
+        : 1.6 + 1.4 * Math.abs(Math.sin(this.time * 9 + hatch.rig.index * 1.7));
     }
   }
 
@@ -1509,6 +1539,14 @@ export class AbyssalLeviathanAI implements IAdvancedBoss {
     if (structure.kind === 'sail') {
       this.rig.materials.bridge.emissiveIntensity = 0.08;
       this.emitCue('sail-destroyed', this.tmpA, 1);
+    } else if (structure.kind === 'bay') {
+      for (const hatch of this.hatches) hatch.rig.siloMaterial.emissive.set(0xff6a20);
+      if (this.salvoState === 'opening' || this.salvoState === 'firing') {
+        this.salvoState = 'holding';
+        this.salvoTimer = 0;
+        this.salvoQueue = 0;
+      }
+      this.emitCue('bay-destroyed', this.tmpA, 1);
     } else {
       this.fx.emit('createWaterImpact', this.tmpA, 2);
       if (structure.tank) structure.tank.valveMaterial.emissive.set(0xff3020);
@@ -1717,8 +1755,8 @@ export class AbyssalLeviathanAI implements IAdvancedBoss {
       (this.submergeLevel > 0.9 ? 0.75 : 1);
     this.wake.update(this.tmpA, this.yaw, wakeIntensity);
 
-    // 阶段 3：甲板起火冒烟
-    if (this.phase >= 3) {
+    // 阶段 3 / 导弹舱被毁：甲板起火冒烟
+    if (this.phase >= 3 || !this.isBayAlive()) {
       this.fireTimer -= dt;
       if (this.fireTimer <= 0) {
         this.fireTimer = 0.45 + Math.random() * 0.3;
