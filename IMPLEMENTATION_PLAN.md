@@ -1,6 +1,6 @@
 # AirSupreme - 持续实施计划
 
-最后更新: `2026-08-20`
+最后更新: `2026-10-08`
 状态: `进行中`
 用途: 这是当前项目后续开发的单一计划源。后续非 trivial 改动，应优先对齐这份文件，并在完成重要阶段后更新状态。
 
@@ -116,6 +116,18 @@
 - `npm run build`
 - 更新本计划状态
 - 推送当前远端分支
+
+### 十关战役轮次（`workflow/ten-level-campaign`，运行记录见 `kaola-workflow/ten-level-campaign/`）
+- [done] 第 1 轮：地形核心（6-10 关配置、火山/极地环境）、17 种地/海/空单位、5 种特殊武器 + 干扰弹、Boss 6-7、VFX 粒子与后处理（后处理隔帧丢深度的回归已修复，`0db18f2`）
+- [active] 第 2 轮（每批独立 worktree，文件互不重叠，主代理串行集成）：
+  - `Batch A - 地形 B`：峡谷 / 平流层 / 神谕要塞环境 — owned：`src/features/terrain/**`
+  - `Batch A - Boss 8-9`：风暴飞艇、幻影之翼 — owned：新建 `src/features/boss/TempestZeppelin*.ts`、`PhantomWing*.ts`
+  - `Batch A - Boss 10`：神谕主宰（三阶段） — owned：新建 `src/features/boss/OraclePrime*.ts`
+  - `Batch B - 视角`：第一/第三人称 `CameraRig`、座舱、友军涂装、加力 — owned：`src/features/camera/**`、`src/features/aircraft/AircraftMeshFactory.ts`
+  - `Batch C - 成长与存档`：分级升级、检查点自动存档、开始菜单继续 / 1-10 关 / 视角设置、机库升级菜单 — owned：`src/features/upgrade/**`、`src/core/save/**`、`src/core/SessionSettings.ts`、`src/ui/StartMenu.ts`、`src/ui/UpgradeMenu.ts`
+  - 验收：各批 `tsc` / `lint` / `test:run` / `build` 不回退，接口与 `kaola-workflow/ten-level-campaign/api-spec.md` 一致
+- [next] 第 3 轮：音乐 / 音效、剧情 / HUD、独立测试作者按规格补测
+- [next] 集成进运行时（GameCoordinator、BossBattleController、LevelManager、InputHandler、HUD、菜单）→ 文档 → 按 R1-R12 终验 → 合并 `main`
 
 ## 当前概览
 

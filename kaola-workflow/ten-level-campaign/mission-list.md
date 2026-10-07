@@ -34,8 +34,9 @@ Rollup native) · harness reproduces the VFX regression (alternating frames, see
   result: harness in session scratchpad; baseline screenshots render level 1; prod/tests typecheck clean; bun baseline 320 pass
 
 - item: Make the real gates runnable in the sandbox — vitest (esbuild shim) and `vite build` via a pure-JS stand-in for Rollup's missing Linux native binding (acorn → Rollup AST buffer, round-trip-validated)
-  status: in-flight
+  status: done
   dispatched: session 3 · infra engineer (reasoning tier) in /home/claude/harness/rollup-native (no repo changes); output = @rollup/rollup-linux-x64-gnu stand-in under /home/claude/node_modules + validation report
+  result: stand-in validated by decoding with Rollup's own parser: 613 files / 613,898 AST nodes / 0 mismatches (three/src, three postprocessing+utils, all of src/ after TS→JS); XXH3-128 matched libxxhash 291/291; vitest unchanged; real `tsc && vite build` completes (23 chunks, only the stock vendor-three >500 kB warning). Deviations: hashed chunk file names may differ from a native build; the esbuild binary is 0.28.2 behind a version shim (build wrapper sets esbuild.supported.destructuring). Use /home/claude/harness/gates.sh and build.sh.
 
 - item: Lay foundation contracts — CampaignData (10-chapter story), BossTypes 6-10 + BossContracts, CombatContracts, Faction.CIVILIAN, getLevelScaling
   status: done
@@ -53,8 +54,9 @@ Rollup native) · harness reproduces the VFX regression (alternating frames, see
   result: 16 commits merged as 248bacc; tsc/bun/esbuild/prettier clean (bun failing set = baseline); VOLCANO 32 draws, ARCTIC 29; wiring + EnvironmentBase contract for terrain B in integration-notes.md; gap: enemy jets fly through tall terrain
 
 - item: Terrain B — full CANYON (L8), STRATOSPHERE (L9), CITADEL (L10) environment modules replacing terrain-core placeholders
-  status: todo
+  status: in-flight
   hint: needs terrain core merged first (same dispatch hook); prior first-wave terrain dispatch died with no output
+  dispatched: session 3 round 2 · implementer (reasoning tier) in /home/claude/wt/terrain-b on batch/terrain-b (from 0db18f2); owns src/features/terrain/**; output = commits on batch/terrain-b + final report
 
 - item: Build bosses 6-7 (Magma Colossus walker with vents/mortars/geysers; Abyssal Leviathan submarine with dive cycle/mines)
   status: done
@@ -62,12 +64,14 @@ Rollup native) · harness reproduces the VFX regression (alternating frames, see
   result: 15 commits merged as c58678e; 7 files; tsc/prettier/bundle clean; sims pass; open integration decision: enable setDeathSequenceEnabled(true) (delays onDestroy by 3.6-4.5 s); stale pins BossTypes.test.ts:171 + Boss.integration.test.ts:223
 
 - item: Build bosses 8-9 (Tempest Zeppelin gas cells/chain lightning/drones; Phantom Wing cloak/laser lance/holo decoys)
-  status: todo
+  status: in-flight
   hint: round 2; first-wave dispatch died with no output; branch fresh from the integration branch; follow the bosses-a pattern (MagmaColossusHazards.ts has reusable hazard blocks)
+  dispatched: session 3 round 2 · implementer (reasoning tier) in /home/claude/wt/bosses-b on batch/bosses-b (from 0db18f2); owns new src/features/boss/TempestZeppelin*.ts + PhantomWing*.ts; output = commits on batch/bosses-b + final report
 
 - item: Build final boss Oracle Prime (3 phases: shield pylons, exposed core + laser arrays, overload shockwaves)
-  status: todo
+  status: in-flight
   hint: round 2; first-wave dispatch died with no output; branch fresh from the integration branch
+  dispatched: session 3 round 2 · implementer (reasoning tier) in /home/claude/wt/boss-final on batch/boss-final (from 0db18f2); owns new src/features/boss/OraclePrime*.ts; output = commits on batch/boss-final + final report
 
 - item: Add 17 ground/sea/air units across hostile/friendly/civilian factions with behaviours, SAM missiles + decoys, per-level deployments
   status: done
@@ -80,22 +84,25 @@ Rollup native) · harness reproduces the VFX regression (alternating frames, see
   result: 13 commits merged as 8995456; 11 files; logic script 92/92; tsc/bun/bundle/prettier clean; visuals tuned under SwiftShader only — re-check glow through post-fx on a real GPU
 
 - item: VFX overhaul — instanced particle backend, upgraded recipes, contrails, post-processing (bloom/grade/vignette/screen effects), hex shield
-  status: in-flight
+  status: done
   dispatched: session 3 · regression fix = orchestrator single-file change to src/features/effects/postfx/PostFxPipeline.ts on workflow/ten-level-campaign (cause measured by the harness: the final ShaderPass keeps needsSwap=true, so every other frame RenderPass draws into the depthless 1×1-turned-full-size writeBuffer); regression test + stale boss pins = tdd-guide (reasoning tier) in /home/claude/wt/vfx-tests on batch/vfx-tests; lint no-this-alias ×2 = build-error-resolver (standard tier) in /home/claude/wt/lint on batch/lint; output = commits on those branches + reports; real-GPU look = orchestrator via a private artifact in the user's Claude browser pane
+  result: regression fixed in 0db18f2 (grade pass needsSwap=false + unused writeBuffer shrunk back to 1×1); pinned by 7d22089 PostFxPipeline.test.ts (failed on the old tree at frame 1, passes now); stale boss pins refreshed e82a195; lint no-this-alias ×2 fixed 8499654. Gates on 0db18f2: tsc clean · lint 0 errors · vitest 407/407 · real `vite build` OK (Rollup stand-in) · headless Chromium on the real build, quality preset, two consecutive frames: full player jet + solid wingman, no flicker. Session 3 also rebased the branch onto main a72359b (AGENTS.md refresh; CLAUDE.md removed) at the user's request and force-pushed with lease. Real-GPU look still pending: the user's Claude browser pane is not signed in to claude.ai and cannot reach the sandbox (options put to the user). Remaining VFX wiring (setScreenEffects / setPostFxEnabled call sites, contrail attachment, new particle callers, getBudget per preset) moves to the integration mission.
   dispatched: round 1 · implementer (reasoning tier) in /home/claude/wt/vfx on batch/vfx; output = commits on batch/vfx + final report
   result (partial): worker stopped by the user's interrupt after 70d039f with no report; 9 commits merged as 310cd42 + typecheck fix c11ee94 so the work is preserved; REGRESSION under the composer (quality preset): player jet body not drawn, enemy jets translucent — performance preset and pre-VFX tree are fine. Next: fix forward on the integration branch, then verify (real vitest/eslint/build + real-GPU look) — details in integration-notes.md
 
 - item: CameraRig first/third-person with cockpit model, shake, FOV kick; friendly livery; afterburner polish
-  status: todo
+  status: in-flight
   hint: round 2; first-wave dispatch died with no output; branch fresh from the integration branch; weapons already expose setViewMode(cameraMode)
+  dispatched: session 3 round 2 · implementer (reasoning tier) in /home/claude/wt/camera on batch/camera (from 0db18f2); owns src/features/camera/** + src/features/aircraft/AircraftMeshFactory.ts; output = commits on batch/camera + final report
 
 - item: Music sequencer + 23 tracks/stingers and new SFX set with compressor
   status: todo
   hint: WIP music engine on origin/batch/audio 607469a (based on 59ad537, unverified) — merge the integration branch into it, then resume; AudioManager.playGroundImpact already widened (c11ee94)
 
 - item: Progressive tiered upgrades, SaveSystem checkpoints, StartMenu continue/level 1-10/camera setting, hangar-mode UpgradeMenu
-  status: todo
+  status: in-flight
   hint: WIP on origin/batch/progression cffadff (UpgradeSystem + SessionSettings + SaveSystem draft, based on 59ad537, unverified) — merge the integration branch into it, then resume; SessionSettings still clamps startLevel to 1..5
+  dispatched: session 3 round 2 · implementer (reasoning tier) in /home/claude/wt/progression on batch/progression (recreated from 0db18f2 + cherry-pick of the WIP as af399fc, since the old WIP base predates the rebase); owns src/features/upgrade/**, src/core/save/**, src/core/SessionSettings.ts, src/ui/StartMenu.ts, src/ui/UpgradeMenu.ts; output = commits on batch/progression + final report
 
 - item: StoryOverlay (chapter intro/debrief/ending), RadioComms, HUD weapon/flare/boss/missile/autosave/camera panels, radar kinds, mobile buttons
   status: todo
