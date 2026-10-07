@@ -119,15 +119,14 @@
 
 ### 十关战役轮次（`workflow/ten-level-campaign`，运行记录见 `kaola-workflow/ten-level-campaign/`）
 - [done] 第 1 轮：地形核心（6-10 关配置、火山/极地环境）、17 种地/海/空单位、5 种特殊武器 + 干扰弹、Boss 6-7、VFX 粒子与后处理（后处理隔帧丢深度的回归已修复，`0db18f2`）
-- [active] 第 2 轮（每批独立 worktree，文件互不重叠，主代理串行集成）：
-  - `Batch A - 地形 B`：峡谷 / 平流层 / 神谕要塞环境 — owned：`src/features/terrain/**`
-  - `Batch A - Boss 8-9`：风暴飞艇、幻影之翼 — owned：新建 `src/features/boss/TempestZeppelin*.ts`、`PhantomWing*.ts`
-  - `Batch A - Boss 10`：神谕主宰（三阶段） — owned：新建 `src/features/boss/OraclePrime*.ts`
-  - `Batch B - 视角`：第一/第三人称 `CameraRig`、座舱、友军涂装、加力 — owned：`src/features/camera/**`、`src/features/aircraft/AircraftMeshFactory.ts`
-  - `Batch C - 成长与存档`：分级升级、检查点自动存档、开始菜单继续 / 1-10 关 / 视角设置、机库升级菜单 — owned：`src/features/upgrade/**`、`src/core/save/**`、`src/core/SessionSettings.ts`、`src/ui/StartMenu.ts`、`src/ui/UpgradeMenu.ts`
-  - 验收：各批 `tsc` / `lint` / `test:run` / `build` 不回退，接口与 `kaola-workflow/ten-level-campaign/api-spec.md` 一致
-- [next] 第 3 轮：音乐 / 音效、剧情 / HUD、独立测试作者按规格补测
-- [next] 集成进运行时（GameCoordinator、BossBattleController、LevelManager、InputHandler、HUD、菜单）→ 文档 → 按 R1-R12 终验 → 合并 `main`
+- [done] 第 2 轮（`01e0ad8`…`9ad535b`）：地形 B（峡谷 / 平流层 / 神谕要塞）、Boss 8-9（风暴飞艇 / 幻影之翼）、Boss 10（神谕主宰）、第一/第三人称 `CameraRig` + 座舱 + 友军涂装 + 加力、分级升级 + 检查点存档 + 开始/机库菜单；各批 `tsc` / `lint` / `build` 通过（升级旧测试 20 处按规格过期，交测试作者更新）
+- [active] 第 3 轮 + 集成第 1 遍（并行，文件互不重叠）：
+  - `Batch C - 音频`：音乐音序器、关卡/Boss 曲目与提示音、新音效 + 压缩器 — owned：`src/core/Audio/**`
+  - `Batch A - 剧情 / HUD`：`StoryOverlay`、`RadioComms`、HUD 武器/干扰弹/Boss/导弹告警/自动存档/视角面板、雷达类型、移动端按钮 — owned：`src/ui/StoryOverlay.ts`、`src/ui/RadioComms.ts`、`src/ui/HUD.ts`、`src/ui/RadarMinimap.ts`、`src/ui/theme/**`、`index.html`
+  - `Batch C - 测试`（独立测试作者）：先更新过期的升级测试，再按 `api-spec.md` 补规格测试 — owned：`src/__tests__/**`、`*.test.ts`
+  - `Batch B - 集成第 1 遍`：1-10 关流程、地形采样与命中、每波单位、特殊武器/干扰弹输入与目标、视角切换、Boss 6-10 战斗、成长/机库/自动存档/继续、VFX 接线、半径命中、敌机避地形 — owned：`src/core/**`（除 `Audio/`、`save/`）、各功能模块的接线点、`src/main.ts`、`src/ui/PauseMenu.ts`
+  - 验收：`tsc` / `lint` / `test:run` / `build` 全部通过；无头 Chromium 实机冒烟 1-10 关
+- [next] 集成第 2 遍（音乐/音效钩子、剧情卡、无线电、HUD 面板）→ 文档 → 按 R1-R12 终验 → 合并 `main`
 
 ## 当前概览
 

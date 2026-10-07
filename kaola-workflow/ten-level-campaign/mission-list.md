@@ -54,9 +54,10 @@ Rollup native) · harness reproduces the VFX regression (alternating frames, see
   result: 16 commits merged as 248bacc; tsc/bun/esbuild/prettier clean (bun failing set = baseline); VOLCANO 32 draws, ARCTIC 29; wiring + EnvironmentBase contract for terrain B in integration-notes.md; gap: enemy jets fly through tall terrain
 
 - item: Terrain B — full CANYON (L8), STRATOSPHERE (L9), CITADEL (L10) environment modules replacing terrain-core placeholders
-  status: in-flight
+  status: done
   hint: needs terrain core merged first (same dispatch hook); prior first-wave terrain dispatch died with no output
   dispatched: session 3 round 2 · implementer (reasoning tier) in /home/claude/wt/terrain-b on batch/terrain-b (from 0db18f2); owns src/features/terrain/**; output = commits on batch/terrain-b + final report
+  result: merged 01e0ad8 (4 commits, src/features/terrain/** only): L8 storm canyon (walls/mesas/hoodoos, river water=true, Tesla towers, storm lightning strikes real ground), L9 cloud sea + sky-ladder space elevator (crash surface = cloud top + columns), L10 terraced citadel crater (lava rifts, data conduits, obsidian fortress, core beam; setCoreState + getCoreArena (0,160,-700) hooks — anchor Oracle Prime there, the spec spawn would put it behind the player); getEnvironment(), getConvoyRoute()/getAssaultRoute(); smooth clouds under dark weather. Draws 22/16/30, tris 211k/147k/76k, build ≤0.36 s. Gates + real build PASS; levels 1-7 compared side by side, no regressions.
 
 - item: Build bosses 6-7 (Magma Colossus walker with vents/mortars/geysers; Abyssal Leviathan submarine with dive cycle/mines)
   status: done
@@ -64,14 +65,16 @@ Rollup native) · harness reproduces the VFX regression (alternating frames, see
   result: 15 commits merged as c58678e; 7 files; tsc/prettier/bundle clean; sims pass; open integration decision: enable setDeathSequenceEnabled(true) (delays onDestroy by 3.6-4.5 s); stale pins BossTypes.test.ts:171 + Boss.integration.test.ts:223
 
 - item: Build bosses 8-9 (Tempest Zeppelin gas cells/chain lightning/drones; Phantom Wing cloak/laser lance/holo decoys)
-  status: in-flight
+  status: done
   hint: round 2; first-wave dispatch died with no output; branch fresh from the integration branch; follow the bosses-a pattern (MagmaColossusHazards.ts has reusable hazard blocks)
   dispatched: session 3 round 2 · implementer (reasoning tier) in /home/claude/wt/bosses-b on batch/bosses-b (from 0db18f2); owns new src/features/boss/TempestZeppelin*.ts + PhantomWing*.ts; output = commits on batch/bosses-b + final report
+  result: merged b0dea6b (4 commits, new TempestZeppelin*/PhantomWing* files): Zeppelin — 6 gas-cell sub-targets (lose altitude/armour), tesla chain lightning, thunderhead shroud, P2 drone hangar + storm-call strikes, P3 exposed storm core + barrage + fall; Phantom — cloak/decloak ambush cycle, laser-lance lanes with chevrons, 2 phase-emitter sub-targets, P2 holo decoys, P3 overdrive. Extras: setGroundSampler/setDeathSequenceEnabled/isDying/onEffectCue; Phantom applyEmpPulse/isCloaked/getDecoyMeshes; Phantom spawns no minions (decoys instead). Draws 74/108 and 25/44. Gates + build PASS; sims pass.
 
 - item: Build final boss Oracle Prime (3 phases: shield pylons, exposed core + laser arrays, overload shockwaves)
-  status: in-flight
+  status: done
   hint: round 2; first-wave dispatch died with no output; branch fresh from the integration branch
   dispatched: session 3 round 2 · implementer (reasoning tier) in /home/claude/wt/boss-final on batch/boss-final (from 0db18f2); owns new src/features/boss/OraclePrime*.ts; output = commits on batch/boss-final + final report
+  result: merged 3f37bf0..7e0a765 as 3177a5a (8 commits, new OraclePrime*.ts): intro → P1 four orbiting crystal pylons (prism/arc/seeker/lance) feeding the core shield → collapse → P2 exposed core + four halo emitters, pinwheel lasers, judgement lance → overload → P3 gated crown rings, twin rings, orbital strikes, Last Light at 15 % then exhaustion; 6.4 s death sequence; EMP interactions; extras onEffectCue/setGroundSampler/getStage/getDeathProgress/getMusicIntensity. ~45 draws at spawn. Gates + build PASS; 213 s sims + 50 checks pass.
 
 - item: Add 17 ground/sea/air units across hostile/friendly/civilian factions with behaviours, SAM missiles + decoys, per-level deployments
   status: done
@@ -91,29 +94,35 @@ Rollup native) · harness reproduces the VFX regression (alternating frames, see
   result (partial): worker stopped by the user's interrupt after 70d039f with no report; 9 commits merged as 310cd42 + typecheck fix c11ee94 so the work is preserved; REGRESSION under the composer (quality preset): player jet body not drawn, enemy jets translucent — performance preset and pre-VFX tree are fine. Next: fix forward on the integration branch, then verify (real vitest/eslint/build + real-GPU look) — details in integration-notes.md
 
 - item: CameraRig first/third-person with cockpit model, shake, FOV kick; friendly livery; afterburner polish
-  status: in-flight
+  status: done
   hint: round 2; first-wave dispatch died with no output; branch fresh from the integration branch; weapons already expose setViewMode(cameraMode)
   dispatched: session 3 round 2 · implementer (reasoning tier) in /home/claude/wt/camera on batch/camera (from 0db18f2); owns src/features/camera/** + src/features/aircraft/AircraftMeshFactory.ts; output = commits on batch/camera + final report
+  result: merged 1362060 (6 commits): CameraRig per §5 (+ blend/shake/snap extras, death-cam fallback, no @/config import), CockpitModel + CockpitDisplays, CameraShake (computeExplosionShake), assignPlayerExteriorLayer, allied livery via createFriendlyMesh (same airframe/hit radii), updatePlayerAfterburner. Not wired yet — integration steps + shake table in the batch report (also: shrink PlayerController flame sprite; hide/fade the shield hex in first person). Gates + build PASS.
 
 - item: Music sequencer + 23 tracks/stingers and new SFX set with compressor
-  status: todo
+  status: in-flight
   hint: WIP music engine on origin/batch/audio 607469a (based on 59ad537, unverified) — merge the integration branch into it, then resume; AudioManager.playGroundImpact already widened (c11ee94)
+  dispatched: session 3 round 3 · implementer (reasoning tier) in /home/claude/wt/audio on batch/audio-r3 (from 1316d5d + cherry-pick of WIP 607469a as 2403107); owns src/core/Audio/**; output = commits on batch/audio-r3 + final report
 
 - item: Progressive tiered upgrades, SaveSystem checkpoints, StartMenu continue/level 1-10/camera setting, hangar-mode UpgradeMenu
-  status: in-flight
+  status: done
   hint: WIP on origin/batch/progression cffadff (UpgradeSystem + SessionSettings + SaveSystem draft, based on 59ad537, unverified) — merge the integration branch into it, then resume; SessionSettings still clamps startLevel to 1..5
   dispatched: session 3 round 2 · implementer (reasoning tier) in /home/claude/wt/progression on batch/progression (recreated from 0db18f2 + cherry-pick of the WIP as af399fc, since the old WIP base predates the rebase); owns src/features/upgrade/**, src/core/save/**, src/core/SessionSettings.ts, src/ui/StartMenu.ts, src/ui/UpgradeMenu.ts; output = commits on batch/progression + final report
+  result: merged 9ad535b (WIP af399fc + 5 commits): 14 upgrade tracks (core to tier 10 with the same end values), tier caps per spec, costs rising with tier, getStartingUpgradePoints from a score-economy estimate, SaveSystem with validated/normalised checkpoints, SessionSettings startLevel 1..10 + cameraMode, StartMenu continue/chapters/camera row/legend, UpgradeMenu pause|hangar. Orchestrator fix 1316d5d (coordinator UPGRADE_FEEDBACK entries for the new tracks). 20 existing pins in UpgradeSystem.test.ts/UpgradeMenu.test.ts are stale by spec (tier 10, smaller steps, 14 tracks) → tests mission. Not wired yet (integration steps in the report).
 
 - item: StoryOverlay (chapter intro/debrief/ending), RadioComms, HUD weapon/flare/boss/missile/autosave/camera panels, radar kinds, mobile buttons
-  status: todo
+  status: in-flight
   hint: WIP on origin/batch/story-ui efe9a90 (hudTokens only, based on 59ad537) — merge the integration branch into it, then resume
+  dispatched: session 3 round 3 · implementer (reasoning tier) in /home/claude/wt/story-ui on batch/story-ui-r3 (from 1316d5d + cherry-pick of WIP efe9a90 as 2595e91); owns src/ui/StoryOverlay.ts, src/ui/RadioComms.ts, src/ui/HUD.ts, src/ui/RadarMinimap.ts, src/ui/theme/**, index.html; output = commits on batch/story-ui-r3 + final report
 
 - item: Separate-custody tests pinning api-spec (campaign, scaling, factions, bosses 6-10, save, upgrades, weapons, flares, units, camera, music catalog, settings) + refresh stale boss pins
-  status: todo
+  status: in-flight
   hint: run after rounds 1-2 are merged so the tests execute against real code; tests pin the SPEC, not the implementation
+  dispatched: session 3 · tdd-guide (reasoning tier) in /home/claude/wt/tests on batch/tests (from 1316d5d); phase A = refresh the 20 progression pins made stale by §8 (commit first, merged on sight), phase B = spec-pinning tests for everything merged through round 2; owns src/__tests__/** + *.test.ts only; output = commits on batch/tests + final report. Audio/story/integration behaviours get a later test pass.
 
 - item: Integrate every batch into the runtime (GameCoordinator, BossBattleController, LevelManager, InputHandler, HUD, menus) per api-spec §10 — level flow, units per wave, weapons/flares input, camera toggle, autosave, story cards, music/SFX hooks
-  status: todo
+  status: in-flight
+  dispatched: session 3 · pass 1 (gameplay core: level 1-10 flow, terrain sampling/impacts, units per wave, weapons/flares input + targeting + EMP, CameraRig + V toggle, bosses 6-10 in BossBattleController, progression/hangar/autosave/continue, VFX wiring, radius-aware hits, jet terrain avoidance) = integrator (reasoning tier) in /home/claude/wt/integration on batch/integration (from 1316d5d); owns src/core/** except Audio/ and save/, src/features/** wiring points outside the round-2 modules, src/main.ts, src/ui/PauseMenu.ts; output = commits on batch/integration + final report. Pass 2 (music/SFX hooks, story cards, radio, HUD panels) after round 3 merges.
 
 - item: Dock docs against the code (README/README.zh-CN, CHANGELOG, IMPLEMENTATION_PLAN, docs/architecture, docs/api, TECHNICAL_DOCUMENTATION)
   status: todo
