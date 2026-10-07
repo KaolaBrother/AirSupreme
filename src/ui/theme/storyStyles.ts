@@ -4,7 +4,7 @@ import { HUD_COLORS, HUD_LAYERS, HUD_SERIF_STACK } from './hudTokens';
  * 剧情覆盖层（章节卡 / 结算 / 结局字幕）样式。
  *
  * 版式：电影遮幅（上下黑边）+ 左右两栏“任务档案”——左栏是章节身份与十个航路点组成的战役航线，
- * 右栏是打字机正文。竖屏改为单栏，矮横屏（手机横握）压缩字号并把目标清单挪到左栏。
+ * 右栏是打字机正文与目标清单。竖屏改为单栏，矮横屏（手机横握）压缩字号与留白。
  */
 export const STORY_STYLE_ID = 'story-overlay-style';
 
@@ -33,12 +33,16 @@ const STORY_CSS = `
   -webkit-tap-highlight-color: transparent;
   touch-action: manipulation;
   opacity: 1;
-  transition: opacity 0.28s ease;
+  visibility: visible;
+  transition: opacity 0.28s ease, visibility 0s linear 0s;
 }
 
+/* 收起：先淡出，再在淡出结束时切到 visibility: hidden */
 #story-overlay.is-leaving {
   opacity: 0;
+  visibility: hidden;
   pointer-events: none;
+  transition: opacity 0.28s ease, visibility 0s linear 0.28s;
 }
 
 #story-overlay .so-backdrop {
@@ -447,7 +451,7 @@ const STORY_CSS = `
 }
 
 /* ---------------------------------------------------------------- 结算 */
-#story-overlay .so-debrief {
+#story-overlay .so-text.so-debrief {
   font-family: var(--hud-font, 'Arial', sans-serif);
   line-height: 1.35;
 }
@@ -566,8 +570,7 @@ const STORY_CSS = `
 
 #story-overlay.is-instant .so-row,
 #story-overlay.is-instant .so-waypoint,
-#story-overlay.is-instant .so-title,
-#story-overlay.is-instant .so-bar {
+#story-overlay.is-instant .so-title {
   animation: none;
 }
 
@@ -817,15 +820,7 @@ const STORY_CSS = `
   }
 
   #story-overlay .so-card {
-    grid-template-areas:
-      'ident rule text'
-      'extras rule text';
-    grid-template-rows: auto 1fr;
     column-gap: 24px;
-  }
-
-  #story-overlay .so-card.is-debrief {
-    grid-template-areas: 'ident rule text';
   }
 
   #story-overlay .so-kicker {

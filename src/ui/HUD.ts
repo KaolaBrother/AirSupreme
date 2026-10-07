@@ -89,6 +89,7 @@ interface FlareUi {
   pipsHost: HTMLDivElement;
   pips: HTMLSpanElement[];
   fill: HTMLDivElement;
+  count: HTMLSpanElement;
 }
 
 interface BossStatusUi {
@@ -1826,6 +1827,7 @@ export class HUD {
       ui.pips.forEach((pip, index) => pip.classList.toggle('is-on', index < count));
       ui.section.setAttribute('data-charges', String(count));
     }
+    this.setTextContent(ui.count, visible ? `${count}/${maxCount}` : '');
     const fill = count >= maxCount ? 1 : progress;
     this.setStyleValue(ui.fill, 'transform', `scaleX(${HUD.quantize(fill)})`);
     HUD.setAttr(ui.section, 'data-empty', visible && count === 0 ? 'true' : 'false');
@@ -2173,9 +2175,8 @@ export class HUD {
         pip.classList.toggle('is-on', on);
         this.setStyleVar(pip, '--fill', !on && index === filled ? reloadFill : '0%');
       });
-      this.setStyleValue(ui.ammoText, 'display', 'none');
-      return;
     }
+    // pip 之外再给出精确数字；热量武器（无限弹药）不显示
     this.setStyleValue(ui.ammoText, 'display', limited ? 'inline' : 'none');
     this.setTextContent(ui.ammoText, limited ? `${Math.floor(ammo)}/${Math.round(maxAmmo)}` : '');
   }
@@ -2490,9 +2491,12 @@ export class HUD {
     fill.className = 'hx-fl-fill';
     meter.appendChild(fill);
 
-    section.append(label, pipsHost, meter);
+    const count = document.createElement('span');
+    count.className = 'hx-fl-count';
+
+    section.append(label, pipsHost, meter, count);
     stores.appendChild(section);
-    this.flareUi = { section, pipsHost, pips: [], fill };
+    this.flareUi = { section, pipsHost, pips: [], fill, count };
     return this.flareUi;
   }
 
@@ -2787,6 +2791,26 @@ export class HUD {
     }
     HUD.setRootMarker('data-hud-camera', null);
     HUD.setRootMarker('data-hud-boss', null);
+    // 直接收起临时元件（不能调用会触发 init() 的公共方法）
+    if (this.warningUi) {
+      this.warningUi.missile.setAttribute('data-level', 'none');
+      this.warningUi.edge.setAttribute('data-level', 'none');
+      this.setStyleValue(this.warningUi.missile, 'display', 'none');
+      this.setStyleValue(this.warningUi.flash, 'display', 'none');
+    }
+    this.container.removeAttribute('data-missile-warning');
+    if (this.bossUi) {
+      this.bossUi.root.classList.remove('is-phase-up');
+      this.setStyleValue(this.bossUi.root, 'display', 'none');
+    }
+    if (this.autosaveToast) {
+      this.autosaveToast.classList.remove('is-leaving');
+      this.setStyleValue(this.autosaveToast, 'display', 'none');
+    }
+    if (this.cameraChip) {
+      this.cameraChip.classList.remove('is-flash');
+      this.setStyleValue(this.cameraChip, 'display', 'none');
+    }
     this.autosaveTimer = 0;
     this.autosaveLeaving = false;
     this.flashWarningTimer = 0;
@@ -2800,5 +2824,6 @@ export class HUD {
     this.missileWarningLevel = 'none';
     this.cameraMode = null;
     this.deckRefs = null;
+    this.applyTopStackOffset();
   }
 }

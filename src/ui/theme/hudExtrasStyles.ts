@@ -183,6 +183,7 @@ const HUD_EXTRAS_CSS = `
 }
 
 .hx-wp-ammo-text {
+  margin-left: 3px;
   font-family: var(--hud-mono, monospace);
   font-size: 11px;
   color: var(--hud-weapon, ${HUD_COLORS.weapon});
@@ -328,6 +329,17 @@ const HUD_EXTRAS_CSS = `
   transform-origin: left center;
   transform: scaleX(0);
   background: rgba(244, 211, 94, 0.78);
+}
+
+.hx-fl-count {
+  flex: none;
+  font-family: var(--hud-mono, monospace);
+  font-size: 11px;
+  color: var(--hud-ally, ${HUD_COLORS.ally});
+}
+
+#hud-flares[data-empty='true'] .hx-fl-count {
+  color: var(--hud-threat, ${HUD_COLORS.threat});
 }
 
 .hx-key {
