@@ -406,11 +406,11 @@ export const LAVA_COLUMN_PALETTE: HazardColumnPalette = {
 
 export const WATER_COLUMN_PALETTE: HazardColumnPalette = {
   warn: 0x6fe8ff,
-  outerBottom: 0x9fd6e8,
+  outerBottom: 0x8ccbe0,
   outerTop: 0x061a24,
-  core: 0xc8eeff,
-  cap: 0xb8e6ff,
-  opacity: 0.5,
+  core: 0x9fd2e4,
+  cap: 0xa8dcf0,
+  opacity: 0.42,
   topRadius: 1.45,
   bottomRadius: 0.85,
 };
