@@ -131,8 +131,10 @@ export interface DelaySettings {
 export interface Composition {
   id: string;
   bpm: number;
-  /** 主音音级 0..11（C = 0），刺激音据此移调到当前调性 */
+  /** 主音音级 0..11（C = 0，已含 transpose），刺激音据此移调到当前调性 */
   key: number;
+  /** 整体移调（半音），所有音高类样式都会平移 */
+  transpose?: number;
   /** 0..0.5，偶数位 16 分音符后移比例（shuffle） */
   swing?: number;
   /** 强度 1 时的速度提升比例（如 0.06 = 快 6%），随强度平滑变化 */

@@ -755,13 +755,13 @@ export const CANYON_TRACK: Composition = {
   loopFrom: 1,
 };
 
-/** 第九章 天梯之巅：D 利底亚，高空琶音、闪烁长音、轻盈四拍；神谕动机在高强度时隐现 */
+/** 第九章 天梯之巅：D 利底亚，高空琶音、闪烁长音、半速漂浮的律动（高强度转四拍）；神谕动机在高强度时隐现 */
 export const STRATOSPHERE_TRACK: Composition = {
   id: 'STRATOSPHERE',
-  bpm: 128,
+  bpm: 116,
   key: 2,
   tempoRamp: 0.04,
-  mix: 0.654,
+  mix: 0.843,
   defaultIntensity: 0.5,
   delay: { beats: 0.75, feedback: 0.4, wet: 0.3, tone: 3600 },
   tracks: {
@@ -783,8 +783,9 @@ export const STRATOSPHERE_TRACK: Composition = {
       minIntensity: 0.45,
     }),
     bass: track('bass', 0.42, { params: P.bassPluck, minIntensity: 0.2 }),
-    kick: track('kick', 0.74, { params: P.kickPunch, minIntensity: 0.3 }),
-    clap: track('clap', 0.3, { reverb: 0.25, minIntensity: 0.4 }),
+    kick: track('kick', 0.74, { params: P.kickPunch, minIntensity: 0.3, maxIntensity: 0.8 }),
+    kick4: track('kick', 0.7, { params: P.kickPunch, minIntensity: 0.8 }),
+    clap: track('clap', 0.3, { reverb: 0.35, minIntensity: 0.4 }),
     hat: track('hat', 0.16, { params: P.hatClosed, pan: 0.2, minIntensity: 0.6 }),
     hat16: track('hat', 0.1, { params: P.hatSoft, pan: -0.2, minIntensity: 0.75 }),
     lead: track('lead', 0.26, { params: { ...P.leadSaw, cutoff: 3200 }, send: 0.3, reverb: 0.3 }),
@@ -807,8 +808,9 @@ export const STRATOSPHERE_TRACK: Composition = {
       'A5:8 F#5:4 C#6:4 | B5:6 G#5:2 E5:8 | D6:6 C#6:2 B5:8 | C#6:4 E6:4 A5:8 | ' +
       'B5:8 G5:4 D6:4 | C#6:6 A5:2 E5:8 | F#5:4 A5:4 C#6:8 | D6:4 C#6:4 B5:8',
     oracle: ORACLE,
-    kick: DRUM.KICK_FOUR,
-    clap: DRUM.SNARE_BACK,
+    kick: 'X.........x.....',
+    kick4: DRUM.KICK_FOUR,
+    clap: DRUM.SNARE_HALF,
     hat: DRUM.HAT_OPEN_OFF,
     hat16: DRUM.HAT_16,
     riser: '-:48 C4:16',
@@ -824,6 +826,7 @@ export const STRATOSPHERE_TRACK: Composition = {
         sparkle: 'ch',
         bass: 'bass',
         kick: 'kick',
+        kick4: 'kick4',
         clap: 'clap',
         hat: 'hat',
         hat16: 'hat16',
@@ -840,6 +843,7 @@ export const STRATOSPHERE_TRACK: Composition = {
         sparkle: 'ch',
         bass: 'bass',
         kick: 'kick',
+        kick4: 'kick4',
         clap: 'clap',
         hat: 'hat',
         hat16: 'hat16',

@@ -208,7 +208,7 @@ export class Sequencer {
     this.loop = options.loop ?? true;
     this.maxVoices = Math.max(8, options.maxVoices ?? DEFAULT_MAX_VOICES);
     this.random = createRandom(options.seed ?? 1);
-    this.transpose = Math.round(options.transpose ?? 0);
+    this.transpose = Math.round(options.transpose ?? 0) + Math.round(composition.transpose ?? 0);
     this.intensity = clamp01(options.intensity ?? composition.defaultIntensity);
     const bpm = Math.max(20, Math.min(300, composition.bpm));
     this.baseStepDuration = 60 / bpm / 4;

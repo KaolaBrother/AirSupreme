@@ -14,7 +14,7 @@ const CALM = 0.55;
 /** 第一关 Boss「雷云」：A 小调，猎鹰动机的激进变奏 */
 export const BOSS_TRACK: Composition = {
   id: 'BOSS',
-  bpm: 140,
+  bpm: 150,
   key: 9,
   tempoRamp: 0.07,
   dynamicRange: 6,
@@ -359,14 +359,14 @@ export const OCTOPUS_BOSS_TRACK: Composition = {
   loopFrom: 1,
 };
 
-/** 第四关 Boss「三叉戟」：G 小调，军鼓滚奏、奔马节奏与铜管号角 */
+/** 第四关 Boss「三叉戟」：G 小调，沉重的海军进行曲：军鼓滚奏、奔马节奏与铜管号角 */
 export const OCEAN_BOSS_TRACK: Composition = {
   id: 'OCEAN_BOSS',
-  bpm: 146,
+  bpm: 120,
   key: 7,
   tempoRamp: 0.06,
   dynamicRange: 6,
-  mix: 0.509,
+  mix: 0.545,
   defaultIntensity: BOSS_INTENSITY,
   tracks: {
     pad: track('pad', 0.2, { params: P.warmPad, reverb: 0.3 }),
@@ -601,11 +601,12 @@ export const SKY_CARRIER_BOSS_TRACK: Composition = {
   loopFrom: 1,
 };
 
-/** 第六关 Boss「熔岩巨像」：升 C 小调半速重拍，巨鼓踏步、失真低音与锻炉合唱 */
+/** 第六关 Boss「熔岩巨像」：C 弗里几亚（素材按升 C 记谱、整体下移半音）半速重拍，巨鼓踏步、失真低音与锻炉合唱 */
 export const MAGMA_BOSS_TRACK: Composition = {
   id: 'MAGMA_BOSS',
+  transpose: -1,
   bpm: 116,
-  key: 1,
+  key: 0,
   tempoRamp: 0.07,
   dynamicRange: 6,
   mix: 0.376,
@@ -826,11 +827,12 @@ export const LEVIATHAN_BOSS_TRACK: Composition = {
   loopFrom: 1,
 };
 
-/** 第八关 Boss「雷霆」：E 弗里几亚金属，双踩、颤音扫弦、闪电般的琶音与雷鸣 */
+/** 第八关 Boss「雷霆」：F 弗里几亚金属（素材按 E 记谱、整体上移半音），双踩、颤音扫弦、闪电般的琶音与雷鸣 */
 export const TEMPEST_BOSS_TRACK: Composition = {
   id: 'TEMPEST_BOSS',
+  transpose: 1,
   bpm: 160,
-  key: 4,
+  key: 5,
   tempoRamp: 0.05,
   dynamicRange: 6,
   mix: 0.504,
