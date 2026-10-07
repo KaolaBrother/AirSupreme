@@ -206,8 +206,8 @@ describe('Boss System Integration', () => {
   });
 
   describe('Boss Level Progression', () => {
-    it('should have boss for each level 1-5', () => {
-      for (let level = 1; level <= 5; level++) {
+    it('should have boss for each level 1-10', () => {
+      for (let level = 1; level <= 10; level++) {
         const bossType = getBossForLevel(level);
         expect(bossType).not.toBeNull();
 
@@ -220,8 +220,9 @@ describe('Boss System Integration', () => {
 
     it('should return null for invalid levels', () => {
       expect(getBossForLevel(0)).toBeNull();
-      expect(getBossForLevel(6)).toBeNull();
+      expect(getBossForLevel(11)).toBeNull();
       expect(getBossForLevel(-1)).toBeNull();
+      expect(getBossForLevel(100)).toBeNull();
     });
   });
 

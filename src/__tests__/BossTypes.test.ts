@@ -166,9 +166,29 @@ describe('BossTypes', () => {
       expect(getBossForLevel(5)).toBe(BossType.SKY_CARRIER);
     });
 
+    it('should return MAGMA_COLOSSUS for level 6', () => {
+      expect(getBossForLevel(6)).toBe(BossType.MAGMA_COLOSSUS);
+    });
+
+    it('should return ABYSSAL_LEVIATHAN for level 7', () => {
+      expect(getBossForLevel(7)).toBe(BossType.ABYSSAL_LEVIATHAN);
+    });
+
+    it('should return TEMPEST_ZEPPELIN for level 8', () => {
+      expect(getBossForLevel(8)).toBe(BossType.TEMPEST_ZEPPELIN);
+    });
+
+    it('should return PHANTOM_WING for level 9', () => {
+      expect(getBossForLevel(9)).toBe(BossType.PHANTOM_WING);
+    });
+
+    it('should return ORACLE_PRIME for level 10', () => {
+      expect(getBossForLevel(10)).toBe(BossType.ORACLE_PRIME);
+    });
+
     it('should return null for invalid levels', () => {
       expect(getBossForLevel(0)).toBeNull();
-      expect(getBossForLevel(6)).toBeNull();
+      expect(getBossForLevel(11)).toBeNull();
       expect(getBossForLevel(-1)).toBeNull();
       expect(getBossForLevel(100)).toBeNull();
     });
