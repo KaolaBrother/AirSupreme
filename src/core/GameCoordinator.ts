@@ -211,6 +211,13 @@ export class GameCoordinator {
     [UpgradeType.MISSILE_LOCK_RADIUS]: { icon: '📡', label: '锁定范围升级' },
     [UpgradeType.MISSILE_RELOAD_TIME]: { icon: '🚀', label: '导弹装填升级' },
     [UpgradeType.MISSILE_LOCK_TIME]: { icon: '🎯', label: '导弹锁定升级' },
+    [UpgradeType.ARMOR]: { icon: '🛡️', label: '复合装甲升级' },
+    [UpgradeType.FLARES]: { icon: '🎆', label: '热焰弹挂架升级' },
+    [UpgradeType.WEAPON_ROCKETS]: { icon: '🚀', label: '集束火箭升级' },
+    [UpgradeType.WEAPON_LASER]: { icon: '🔆', label: '脉冲激光升级' },
+    [UpgradeType.WEAPON_SWARM]: { icon: '🐝', label: '蜂群导弹升级' },
+    [UpgradeType.WEAPON_RAILGUN]: { icon: '☄️', label: '电磁轨道炮升级' },
+    [UpgradeType.WEAPON_EMP]: { icon: '🌀', label: '电磁脉冲升级' },
   };
   private static runtimeWarmupPromise: Promise<void> | null = null;
 
