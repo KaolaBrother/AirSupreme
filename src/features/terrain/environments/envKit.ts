@@ -460,7 +460,7 @@ export interface HeightGridOptions {
 
 /**
  * 由高度函数构建世界坐标网格几何（顶点直接写世界 XZ/Y，网格放在原点即可）。
- * 坡度用中心差分估计，供顶点着色区分崖壁与平台。
+ * 坡度用网格邻点中心差分估计（不额外采样），供顶点着色区分崖壁与平台。
  */
 export function buildHeightGridGeometry(options: HeightGridOptions): THREE.BufferGeometry {
   const centerX = options.centerX ?? 0;
@@ -477,17 +477,34 @@ export function buildHeightGridGeometry(options: HeightGridOptions): THREE.Buffe
   const scalarNames = Object.keys(options.scalarAttributes ?? {});
   const scalars = scalarNames.map(() => new Float32Array(position.count));
   const color = new THREE.Color();
-  const eps = Math.max(1.5, options.sizeX / options.segmentsX / 2);
+  const columns = options.segmentsX + 1;
+  const rows = options.segmentsZ + 1;
+  const cellX = options.sizeX / options.segmentsX;
+  const cellZ = options.sizeZ / options.segmentsZ;
 
+  // 第一遍：顶点高度（每个顶点只调用一次 heightAt）
   for (let i = 0; i < position.count; i++) {
     const x = position.getX(i) + centerX;
     const z = position.getZ(i) + centerZ;
-    const y = options.heightAt(x, z);
-    position.setXYZ(i, x, y, z);
+    position.setXYZ(i, x, options.heightAt(x, z), z);
+  }
+  // 第二遍：坡度取网格邻点中心差分，避免额外的高度采样
+  for (let i = 0; i < position.count; i++) {
+    const x = position.getX(i);
+    const y = position.getY(i);
+    const z = position.getZ(i);
     if (colors && options.colorAt) {
-      const dx = options.heightAt(x + eps, z) - options.heightAt(x - eps, z);
-      const dz = options.heightAt(x, z + eps) - options.heightAt(x, z - eps);
-      const normalY = (2 * eps) / Math.hypot(dx, 2 * eps, dz);
+      const column = i % columns;
+      const row = Math.floor(i / columns);
+      const left = row * columns + Math.max(0, column - 1);
+      const right = row * columns + Math.min(columns - 1, column + 1);
+      const up = Math.max(0, row - 1) * columns + column;
+      const down = Math.min(rows - 1, row + 1) * columns + column;
+      const spanX = (Math.min(columns - 1, column + 1) - Math.max(0, column - 1)) * cellX;
+      const spanZ = (Math.min(rows - 1, row + 1) - Math.max(0, row - 1)) * cellZ;
+      const gradX = (position.getY(right) - position.getY(left)) / Math.max(1e-3, spanX);
+      const gradZ = (position.getY(down) - position.getY(up)) / Math.max(1e-3, spanZ);
+      const normalY = 1 / Math.hypot(gradX, 1, gradZ);
       options.colorAt(x, z, y, 1 - normalY, color);
       colors[i * 3] = color.r;
       colors[i * 3 + 1] = color.g;
