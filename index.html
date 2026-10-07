@@ -180,9 +180,21 @@
         box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
       }
 
+      /* 通用按钮容器（开始菜单等也在用），保持原样 */
       .button-container {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        pointer-events: auto;
+        align-items: center;
+      }
+
+      /* 触控按键簇：只作用于 #mobile-controls 内的容器 */
+      #mobile-controls .button-container {
+        display: block;
         position: relative;
         flex: none;
+        margin: 0;
         width: var(--touch-deck-w);
         height: var(--touch-deck-h);
         pointer-events: none;
