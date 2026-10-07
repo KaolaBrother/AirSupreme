@@ -119,7 +119,7 @@ export function buildSamLauncher(): NodeBuilder {
 
   // 发射架（俯仰：rotation.x 取负值抬起）
   const launcher = turret.child('launcher', [0, 0.85, -0.6]);
-  launcher.add('hDark', box(3.0, 0.22, 4.6), [0, 0, 1.4]);
+  launcher.add('hHull', box(2.7, 0.16, 4.4), [0, 0, 1.4]);
   launcher.add('metal', box(0.24, 0.5, 0.5), [1.3, -0.2, 0]);
   launcher.add('metal', box(0.24, 0.5, 0.5), [-1.3, -0.2, 0]);
   const railX = [-1.05, -0.35, 0.35, 1.05];
@@ -191,7 +191,9 @@ export function buildRadarStation(): NodeBuilder {
   // 发电机与天线杆
   root.add('hOlive', box(2.4, 1.4, 1.6), [4.4, 0.7, -1.8]);
   root.add('metal', cyl(0.15, 0.15, 1.2, 8), [4.9, 1.9, -2.2]);
-  root.add('fWhite', sphere(1.1, 14, 8), [-2.2, 3.6, -2.2], [0, 0, 0], [1, 0.8, 1]);
+  // 侧屋 + 天线罩（避开格构塔脚）
+  root.add('hHull', box(2.2, 2.0, 2.2), [-4.5, 1.0, 2.0]);
+  root.add('fWhite', sphere(1.1, 14, 8), [-4.5, 2.3, 2.0], [0, 0, 0], [1, 0.85, 1]);
   root.add('metal', cyl(0.05, 0.05, 4.5, 5), [2.6, 5.4, 2.6]);
   // 格构塔
   const towerBottom = 3.3;
