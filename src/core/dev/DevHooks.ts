@@ -11,6 +11,7 @@ import type { UnitController } from '@/core/units/UnitController';
 import type { PlayerStats } from '@/features/upgrade/UpgradeSystem';
 import { CAMPAIGN_SAVE_KEY } from '@/core/save/SaveSystem';
 import { Faction } from '@/core/Faction';
+import { EventBus, GameEventType } from '@/core/EventBus';
 
 /**
  * 开发构建专用调试钩子（window.__AIR_SUPREME_DEV__）。
@@ -54,6 +55,11 @@ function toPlain(vector: THREE.Vector3): Vec3Like {
 export function installDevHooks(access: DevHookAccess): void {
   const tmp = new THREE.Vector3();
   const lookHelper = new THREE.Object3D();
+  const playerHits = { count: 0, damage: 0 };
+  EventBus.on(GameEventType.PLAYER_HIT, ({ payload }) => {
+    playerHits.count++;
+    playerHits.damage += payload.damage;
+  });
 
   const getState = (): Record<string, unknown> => {
     const session = access.getSession();
@@ -136,6 +142,9 @@ export function installDevHooks(access: DevHookAccess): void {
         decoys: weapons.getActiveDecoys().length,
       },
       timeScale: access.gameLoop.getTimeScale(),
+      playerHits: { ...playerHits },
+      blockedHits: { ...blockedHits },
+      hazardHits: access.getBossController()?.getHazardHitCount() ?? 0,
       checkpoint,
     };
   };
@@ -215,8 +224,57 @@ export function installDevHooks(access: DevHookAccess): void {
     return best ? toPlain(best) : null;
   };
 
+  /** 存活单位明细（类型 / 阵营 / 血量 / 位置 / 可否命中） */
+  const listUnits = (): Array<Record<string, unknown>> =>
+    (access.getUnits().getSystem()?.getUnits() ?? []).map((unit) => ({
+      type: unit.type,
+      faction: unit.faction,
+      health: unit.getHealth(),
+      targetable: unit.isTargetable(),
+      position: toPlain(unit.getPosition(new THREE.Vector3())),
+    }));
+
+  /**
+   * 无敌模式（只在开发构建里通过补丁实现，生产代码不含任何作弊开关）：
+   * 屏蔽玩家受到的伤害，并在每个渲染帧把玩家抬到地表上方 60 米以上，便于长时间自动化流程测试。
+   */
+  let godMode = false;
+  const blockedHits = { count: 0, damage: 0 };
+  const health = access.getPlayerSystem().getHealth();
+  const originalTakeDamage = health.takeDamage.bind(health);
+  health.takeDamage = (amount: number): void => {
+    if (godMode) {
+      // 记录被屏蔽的伤害（验证 Boss 武器 / 特殊武器确实命中了玩家）
+      if (amount < 1000) {
+        blockedHits.count++;
+        blockedHits.damage += amount;
+      }
+      return;
+    }
+    originalTakeDamage(amount);
+  };
+  const liftPlayer = (): void => {
+    if (godMode) {
+      const player = access.getPlayerAircraft();
+      const levelManager = access.getEnemySystem()?.getLevelManager();
+      if (levelManager && player.visible) {
+        const ground = levelManager.getCrashSurfaceY(player.position.x, player.position.z);
+        if (Number.isFinite(ground) && player.position.y < ground + 60) {
+          player.position.y = ground + 60;
+        }
+      }
+    }
+    requestAnimationFrame(liftPlayer);
+  };
+  requestAnimationFrame(liftPlayer);
+
   const hooks = {
     getState,
+    listUnits,
+    setGodMode: (on: boolean) => {
+      godMode = on === true;
+      return godMode;
+    },
     killWave,
     hitBoss,
     placePlayerFacing,

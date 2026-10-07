@@ -181,6 +181,8 @@ export class BossBattleController {
   private lastCoreState: CitadelCoreVisualState | null = null;
   private stunFrame = -1;
   private frameCounter = 0;
+  /** Boss 特殊武器命中玩家 / 友军的累计次数（调试与验证用） */
+  private hazardHitCount = 0;
 
   constructor(private readonly deps: BossBattleControllerDeps) {}
 
@@ -196,6 +198,10 @@ export class BossBattleController {
   /** Boss 正在播放死亡演出（期间仍需逐帧更新） */
   public isBossDying(): boolean {
     return this.advancedBoss?.isDying() ?? false;
+  }
+
+  public getHazardHitCount(): number {
+    return this.hazardHitCount;
   }
 
   /** 隐形中的 Boss 不出现在雷达 / 锁定中（幻影之翼） */
@@ -909,6 +915,7 @@ export class BossBattleController {
       const hit = boss.checkHazard(player.position, PLAYER_HAZARD_RADIUS);
       if (hit) {
         this.hazardCooldowns.trigger(player);
+        this.hazardHitCount++;
         if (playerSystem.isShieldActive()) {
           playerSystem.notifyShieldHit(hit.position);
         } else {
@@ -932,6 +939,7 @@ export class BossBattleController {
       const hit = boss.checkHazard(mesh.position, FRIENDLY_HAZARD_RADIUS);
       if (!hit) continue;
       this.hazardCooldowns.trigger(mesh);
+      this.hazardHitCount++;
       friendly.takeDamage(hit.damage);
       this.createWeaponHitFeedback(hit.position, 0.95, hit.profile, 0.85, 'enemy');
     }

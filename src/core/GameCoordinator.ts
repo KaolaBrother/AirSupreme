@@ -48,7 +48,7 @@ import type { TerrainSurfaceKind } from '@/features/terrain/environments/Terrain
 import { PlayerViewController } from '@/core/camera/PlayerViewController';
 import { UnitController } from '@/core/units/UnitController';
 import { SpecialWeaponsController } from '@/core/combat/SpecialWeaponsController';
-import { ContrailController } from '@/core/vfx/ContrailController';
+import { CombatVfxController } from '@/core/vfx/CombatVfxController';
 import { CampaignFlowController } from '@/core/campaign/CampaignFlowController';
 import {
   DefaultCampaignPresentation,
@@ -183,6 +183,7 @@ export class GameCoordinator {
     ace: EnemyType.ACE,
   };
   /** 特殊武器开火的镜头震动（integration-notes 震动表） */
+  private static readonly NO_ENEMIES: readonly EnemyAI[] = [];
   private static readonly WEAPON_FIRE_SHAKE: Record<SpecialWeaponId, number> = {
     rockets: 0.1,
     laser: 0,
@@ -190,7 +191,6 @@ export class GameCoordinator {
     railgun: 0.35,
     emp: 0,
   };
-  private static readonly DAMAGE_SMOKE_INTERVAL = 0.14;
 
   private gameLoop: GameLoop;
   private gameScene: GameScene;
@@ -205,7 +205,7 @@ export class GameCoordinator {
   private readonly presentation: ICampaignPresentation;
   private readonly units: UnitController;
   private readonly weapons: SpecialWeaponsController;
-  private readonly contrails = new ContrailController();
+  private readonly vfx: CombatVfxController;
   private readonly campaign: CampaignFlowController;
   private readonly checkpointResumeButton = new CheckpointResumeButton();
   private readonly options: GameCoordinatorOptions;
@@ -295,14 +295,10 @@ export class GameCoordinator {
   private readonly enemyMeshBuffer: THREE.Object3D[] = [];
   private readonly friendlyMeshBuffer: THREE.Object3D[] = [];
   private readonly friendlyTargetBuffer: THREE.Object3D[] = [];
-  private readonly contrailMeshBuffer: THREE.Object3D[] = [];
   private readonly radarUnitBlips: RadarBlip[] = [];
   private readonly levelStartPosition = new THREE.Vector3();
   private readonly levelStartQuaternion = new THREE.Quaternion();
-  private readonly smokePosition = new THREE.Vector3();
-  private readonly muzzleDirection = new THREE.Vector3();
-  private damageSmokeTimer: number = 0;
-  private qualityPollTimer: number = 0;
+  private readonly hitPosition = new THREE.Vector3();
   private lastImpactSoundAt: number = 0;
   /** 读档后的第一次 prepareLevel 保留存档里的弹药 / 热焰弹（不补满） */
   private keepRestoredAmmo: boolean = false;
@@ -372,6 +368,14 @@ export class GameCoordinator {
     });
     this.units = this.createUnitController();
     this.weapons = this.createSpecialWeaponsController();
+    this.vfx = new CombatVfxController({
+      scene: this.gameScene.scene,
+      setScreenEffects: (effects) => this.gameScene.setScreenEffects(effects),
+      view: this.view,
+      weapons: this.weapons,
+      getParticleSystem: () => this.particleSystem,
+      playerAircraft: this.playerAircraft,
+    });
     this.campaign = this.createCampaignFlow();
 
     this.initSystems();
@@ -555,14 +559,14 @@ export class GameCoordinator {
     this.resourceRegistry.addUnsubscriber(
       EventBus.on(GameEventType.ENEMY_FIRED, ({ payload }) => {
         this.audioManager.playShoot('enemy');
-        this.createRemoteMuzzleFlash(payload.position, payload.direction);
+        this.vfx.muzzleFlashNear(payload.position, payload.direction);
       })
     );
 
     this.resourceRegistry.addUnsubscriber(
       EventBus.on(GameEventType.FRIENDLY_FIRED, ({ payload }) => {
         this.audioManager.playShoot('friendly');
-        this.createRemoteMuzzleFlash(payload.position, payload.direction);
+        this.vfx.muzzleFlashNear(payload.position, payload.direction);
       })
     );
 
@@ -944,8 +948,8 @@ export class GameCoordinator {
       },
       (target, damage, source) => {
         this.createCombatHitFeedback(target, damage, source);
-        target.getWorldPosition(this.smokePosition);
-        if (this.units.applyHostileFireToUnit(target, damage, this.smokePosition)) {
+        target.getWorldPosition(this.hitPosition);
+        if (this.units.applyHostileFireToUnit(target, damage, this.hitPosition)) {
           return;
         }
         const friendly = this.enemySystem?.getFriendlyAIs().find((f) => f.getMesh() === target);
@@ -982,7 +986,13 @@ export class GameCoordinator {
     this.updateUI(deltaTime);
     this.updateMissileRespawn(deltaTime);
     this.updateLowHealthWarning(deltaTime);
-    this.updateCombatVfx(deltaTime, enemyMeshes);
+    this.vfx.update(
+      deltaTime,
+      this.playerSystem.getHealth().getHealthPercent(),
+      this.enemySystem?.getEnemies() ?? GameCoordinator.NO_ENEMIES,
+      enemyMeshes,
+      friendlyMeshes
+    );
     this.campaign.tick(deltaTime);
     this.presentation.update(deltaTime);
     this.playerSystem.captureCurrentVisualState();
@@ -1163,7 +1173,7 @@ export class GameCoordinator {
     powerUpSystem.checkProjectileCollisions(projectilePositions, (balloon, type) => {
       const config = POWER_UP_CONFIGS[type];
       this.audioManager.playBalloonPop();
-      this.createPickupBurstAt(balloon);
+      this.vfx.pickupBurstAt(balloon);
       this.hud.showPowerUpBig(config.icon, config.name, 1, false, 'powerup');
 
       if (config.duration > 0) {
@@ -1638,7 +1648,7 @@ export class GameCoordinator {
         this.interpolatedCameraTargetQuaternion,
         renderDeltaTime
       );
-      this.contrails.update(renderDeltaTime);
+      this.vfx.renderUpdate(renderDeltaTime);
       this.playerSystem.setShieldViewFade(1 - 0.7 * this.view.getBlend());
       this.gameScene.render();
     } finally {
@@ -1742,17 +1752,14 @@ export class GameCoordinator {
     await Promise.all([
       optional('unit system', this.units.ensureLoaded(runtimeSystems.particleSystem)),
       optional('special weapons', this.weapons.ensureLoaded(runtimeSystems.particleSystem)),
-      optional(
-        'contrails',
-        this.contrails.ensureLoaded(this.gameScene.scene, GameConfig.isMobile ? 16 : 40)
-      ),
+      optional('contrails', this.vfx.ensureLoaded(GameConfig.isMobile ? 16 : 40)),
     ]);
-    this.configureCombatRuntime(enemySystem, runtimeSystems.particleSystem);
+    this.configureCombatRuntime(enemySystem);
     return { runtimeSystems, enemySystem };
   }
 
   /** 一次性接线：地表采样、诱饵、波次门控、精度加成、特效密度、视角 */
-  private configureCombatRuntime(enemySystem: EnemySystem, particleSystem: ParticleSystem): void {
+  private configureCombatRuntime(enemySystem: EnemySystem): void {
     if (this.combatRuntimeConfigured) {
       return;
     }
@@ -1766,13 +1773,7 @@ export class GameCoordinator {
     levelManager.setAccuracyBonusProvider(() => this.units.getHostileRadarBonus());
     this.weapons.setSurfaceSampler(sampleSurface);
     this.weapons.setViewMode(this.view.getMode());
-    this.weapons.setEffectDensity(this.computeEffectDensity(particleSystem));
-    this.contrails.attachPlayer(this.playerAircraft);
-  }
-
-  /** 特效密度 ← 粒子预算（随画质预设）：性能档约 0.45，平衡 0.65，画质 1 */
-  private computeEffectDensity(particleSystem: ParticleSystem): number {
-    return THREE.MathUtils.clamp(particleSystem.getBudget() / 3000, 0.35, 1);
+    this.weapons.setEffectDensity(this.vfx.computeEffectDensity());
   }
 
   private resetWaveEventPresentation(): void {
@@ -1838,7 +1839,7 @@ export class GameCoordinator {
     this.units.clear();
     this.units.setLevel(level, this.getCurrentDifficultyProfile());
     this.weapons.clearInFlight();
-    this.contrails.detachAll();
+    this.vfx.detachAllTrails();
     this.combatSystem?.getPlayerProjectilePool().clear();
     this.combatSystem?.getEnemyProjectilePool().clear();
     this.combatSystem?.getBossProjectilePool().clear();
@@ -1873,6 +1874,8 @@ export class GameCoordinator {
     this.playerSystem.placeAt(this.levelStartPosition, this.levelStartQuaternion);
     this.syncCameraInterpolationState();
     this.view.snapToTarget();
+    // 瞬移：清掉上一关残留的拖尾，否则会从旧位置拉出一条长线
+    this.vfx.clearTrails();
   }
 
   /** 地形高度采样（敌机 / 僚机避让、出生点）；地形未加载时回落到水面 */
@@ -2229,71 +2232,6 @@ export class GameCoordinator {
       `误伤${civilian ? '平民' : '友军'} · 扣除 ${Math.round(points)} 分`,
       'threat'
     );
-  }
-
-  /** 敌方 / 友军开火的枪口焰（只在玩家附近绘制，节省粒子预算） */
-  private createRemoteMuzzleFlash(position: THREE.Vector3, direction: THREE.Vector3): void {
-    const particles = this.particleSystem;
-    if (!particles || position.distanceToSquared(this.playerAircraft.position) > 450 * 450) {
-      return;
-    }
-    this.muzzleDirection.copy(direction);
-    if (this.muzzleDirection.lengthSq() < 1e-6) return;
-    this.muzzleDirection.normalize();
-    particles.createMuzzleFlash(position, this.muzzleDirection, 0.45);
-  }
-
-  private createPickupBurstAt(balloon: unknown): void {
-    const candidate = balloon as { getMesh?: () => THREE.Object3D } | null;
-    if (!candidate || typeof candidate.getMesh !== 'function') return;
-    this.particleSystem?.createPickupBurst(candidate.getMesh().position);
-  }
-
-  /**
-   * 视觉反馈：低血量 / 速度线屏幕效果、受损冒烟（玩家与残血敌机，约 7 Hz）、
-   * 尾迹挂载对账与加力增强、特效密度随画质刷新。
-   */
-  private updateCombatVfx(deltaTime: number, enemyMeshes: THREE.Object3D[]): void {
-    const healthPercent = this.playerSystem.getHealth().getHealthPercent();
-    const flight = this.view.getFlightState();
-    this.gameScene.setScreenEffects({
-      lowHealth:
-        this.playerAircraft.visible && healthPercent < 0.35 ? (0.35 - healthPercent) / 0.35 : 0,
-      speed: flight.boosting ? 0.35 + 0.65 * flight.speedRatio : 0,
-    });
-
-    const particles = this.particleSystem;
-    this.damageSmokeTimer -= deltaTime;
-    if (particles && this.damageSmokeTimer <= 0) {
-      this.damageSmokeTimer = GameCoordinator.DAMAGE_SMOKE_INTERVAL;
-      if (this.playerAircraft.visible && healthPercent < 0.4) {
-        this.smokePosition.set(0, 0.2, 1.6).applyQuaternion(this.playerAircraft.quaternion);
-        this.smokePosition.add(this.playerAircraft.position);
-        particles.createDamageSmoke(this.smokePosition, 1 - healthPercent / 0.4);
-      }
-      for (const enemy of this.enemySystem?.getEnemies() ?? []) {
-        if (!enemy.isAlive()) continue;
-        const health = enemy.getHealth();
-        if (health.max > 0 && health.current / health.max < 0.4) {
-          particles.createDamageSmoke(enemy.getMesh().position, 0.6);
-        }
-      }
-    }
-
-    const contrailTargets = this.contrailMeshBuffer;
-    contrailTargets.length = 0;
-    for (const mesh of enemyMeshes) contrailTargets.push(mesh);
-    for (const friendly of this.enemySystem?.getFriendlyAIs() ?? []) {
-      if (friendly.isAlive()) contrailTargets.push(friendly.getMesh());
-    }
-    this.contrails.sync(contrailTargets, deltaTime);
-    this.contrails.setPlayerBoost(flight.boosting ? 0.6 + 0.4 * flight.speedRatio : 0);
-
-    this.qualityPollTimer -= deltaTime;
-    if (particles && this.qualityPollTimer <= 0) {
-      this.qualityPollTimer = 2;
-      this.weapons.setEffectDensity(this.computeEffectDensity(particles));
-    }
   }
 
   /** 视角切换：武器特效视角、HUD（第 2 轮）、持久化到设置 */
@@ -3271,7 +3209,7 @@ export class GameCoordinator {
     this.bossBattleController?.clear();
     this.units.dispose();
     this.weapons.dispose();
-    this.contrails.dispose();
+    this.vfx.dispose();
     this.view.dispose();
     this.presentation.dispose();
     this.checkpointResumeButton.dispose();

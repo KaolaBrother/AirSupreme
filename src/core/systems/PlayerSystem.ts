@@ -12,6 +12,8 @@ import { ShieldRipple } from '@/features/effects/ShieldRipple';
 export class PlayerSystem implements IGameSystem {
   readonly name = 'PlayerSystem';
   private static readonly RESPAWN_ALTITUDE_BUFFER = 10;
+  /** 复活点离地高度（米）：峡谷 / 火山等高耸地形上留出改出空间 */
+  private static readonly RESPAWN_CLEARANCE = 40;
 
   private controller: PlayerController;
   private health: HealthSystem;
@@ -30,6 +32,8 @@ export class PlayerSystem implements IGameSystem {
   private readonly shieldMaterials: THREE.MeshBasicMaterial[] = [];
   private shieldRipple?: ShieldRipple;
   private readonly shieldHitDirection = new THREE.Vector3();
+  private readonly respawnForward = new THREE.Vector3();
+  private static readonly UP_AXIS = new THREE.Vector3(0, 1, 0);
   private shieldTime: number = 0;
   private shieldFade: number = 0;
   private shieldFadingOut: boolean = false;
@@ -149,6 +153,10 @@ export class PlayerSystem implements IGameSystem {
     const safeRespawnPosition = this.getSafeRespawnPosition();
 
     this.mesh.position.copy(safeRespawnPosition);
+    // 改平姿态（保留航向）：坠毁时多为俯冲，原姿态复活会立刻再次撞地
+    this.respawnForward.set(0, 0, -1).applyQuaternion(this.mesh.quaternion);
+    const heading = Math.atan2(-this.respawnForward.x, -this.respawnForward.z);
+    this.mesh.quaternion.setFromAxisAngle(PlayerSystem.UP_AXIS, Number.isFinite(heading) ? heading : 0);
 
     this.mesh.visible = true;
     this.syncVisualState();
@@ -282,7 +290,7 @@ export class PlayerSystem implements IGameSystem {
   private getSafeRespawnPosition(): THREE.Vector3 {
     const safeRespawnPosition = this.lastSafeRespawnPosition.clone();
     const surfaceY = this.sampleCrashSurfaceY(safeRespawnPosition.x, safeRespawnPosition.z);
-    const minSafeY = surfaceY + PlayerSystem.RESPAWN_ALTITUDE_BUFFER;
+    const minSafeY = surfaceY + PlayerSystem.RESPAWN_CLEARANCE;
     const currentY = Number.isFinite(safeRespawnPosition.y) ? safeRespawnPosition.y : minSafeY;
     safeRespawnPosition.y = Math.max(currentY, minSafeY);
 

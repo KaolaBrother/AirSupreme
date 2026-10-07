@@ -83,6 +83,11 @@ export class ContrailController {
     this.system?.update(deltaTime);
   }
 
+  /** 瞬移（换关 / 读档）后立即清空所有拖尾，保留挂载关系（避免从旧位置拉出长线） */
+  public clearTrails(): void {
+    this.system?.clear();
+  }
+
   /** 换关：解除所有非玩家拖尾 */
   public detachAll(): void {
     const system = this.system;
