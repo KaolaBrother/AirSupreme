@@ -118,7 +118,7 @@ void main() {
     for (int i = 1; i <= 6; i++) {
       float t = float(i) / 6.0;
       float w = 1.0 - t * 0.75;
-      accum += texture2D(tDiffuse, uv - centered * (t * 0.07 * strength)).rgb * w;
+      accum += texture2D(tDiffuse, uv - centered * (t * 0.05 * strength)).rgb * w;
       weight += w;
     }
     hdr = accum / weight;
