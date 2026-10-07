@@ -297,6 +297,11 @@ export function installDevHooks(access: DevHookAccess): void {
     hitBoss,
     placePlayerFacing,
     nearestUnit,
+    /** 地表采样（验证出生点 / 地形） */
+    sampleSurface: (x: number, z: number) => {
+      const sample = access.getEnemySystem()?.getLevelManager().getSurfaceSample(x, z);
+      return sample ? { y: round(sample.y), water: sample.water } : null;
+    },
     setTimeScale: (scale: number) => access.gameLoop.setTimeScale(scale),
     continueHangar: () => access.clickHangarContinue(),
     /** 直接扣血（无视无敌模式，测试阵亡 / 结算 / 检查点继续） */

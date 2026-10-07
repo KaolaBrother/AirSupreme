@@ -1886,7 +1886,14 @@ export class GameCoordinator {
   /** 关卡出生点：原点上空（至少离地 45 米），机头朝 -Z；相机与插值状态同步就位 */
   private placePlayerAtLevelStart(): void {
     const groundY = this.terrainHeightSampler(0, 0);
-    const y = Math.max(0, Number.isFinite(groundY) ? groundY + 45 : 0);
+    let y = Math.max(0, Number.isFinite(groundY) ? groundY + 45 : 0);
+    // 前方航道（机头 -Z，约 400 米、左右各 40 米）里最高的地表 + 35 米：开局不操作也不会立刻撞上沙丘 / 山脊
+    for (let z = -50; z >= -400; z -= 50) {
+      for (let x = -40; x <= 40; x += 40) {
+        const ahead = this.terrainHeightSampler(x, z);
+        if (Number.isFinite(ahead)) y = Math.max(y, ahead + 35);
+      }
+    }
     this.levelStartPosition.set(0, y, 0);
     this.levelStartQuaternion.identity();
     this.playerSystem.placeAt(this.levelStartPosition, this.levelStartQuaternion);
