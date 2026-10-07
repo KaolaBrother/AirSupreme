@@ -613,6 +613,110 @@ function buildRoot(
   return { root, ports };
 }
 
+/**
+ * 护盾塔的职能轮廓（合并进卡箍 / 光环网格，不增加绘制调用）：
+ * 棱镜塔顶端三枚扇形棱晶；电弧塔特斯拉线圈 + 放电球；追猎塔两侧导弹巢；光矛塔长炮管。
+ */
+function buildPylonAccents(
+  role: OraclePylonRole,
+  s: number
+): { armor: THREE.BufferGeometry[]; glow: THREE.BufferGeometry[] } {
+  const armor: THREE.BufferGeometry[] = [];
+  const glow: THREE.BufferGeometry[] = [];
+  const identity = new THREE.Quaternion();
+  const flat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI / 2);
+  switch (role) {
+    case 'prism':
+      for (let k = 0; k < 3; k++) {
+        const angle = (k * Math.PI * 2) / 3;
+        const tilt = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, -angle, 0.55, 'YXZ'));
+        const center = new THREE.Vector3(0, 0.95 * s, 0)
+          .applyQuaternion(tilt)
+          .add(new THREE.Vector3(Math.cos(angle) * 0.45 * s, 2.75 * s, Math.sin(angle) * 0.45 * s));
+        glow.push(
+          placed(
+            new THREE.OctahedronGeometry(1, 0),
+            center,
+            tilt,
+            new THREE.Vector3(0.2 * s, 0.95 * s, 0.09 * s)
+          )
+        );
+      }
+      break;
+    case 'arc': {
+      const coils: ReadonlyArray<readonly [number, number]> = [
+        [1.25, 1.18],
+        [1.8, 0.98],
+        [2.35, 0.78],
+      ];
+      for (const [y, radius] of coils) {
+        glow.push(
+          placed(
+            new THREE.TorusGeometry(radius * s, 0.08 * s, 5, 28),
+            new THREE.Vector3(0, y * s, 0),
+            flat
+          )
+        );
+      }
+      glow.push(
+        placed(
+          new THREE.IcosahedronGeometry(0.42 * s, 1),
+          new THREE.Vector3(0, 3.35 * s, 0),
+          identity
+        )
+      );
+      break;
+    }
+    case 'seeker':
+      for (const side of [1, -1]) {
+        armor.push(
+          placed(
+            new THREE.BoxGeometry(0.62 * s, 1.7 * s, 0.62 * s),
+            new THREE.Vector3(side * 1.5 * s, 0.35 * s, 0),
+            identity
+          )
+        );
+        for (const dz of [-0.16, 0.16]) {
+          glow.push(
+            placed(
+              new THREE.CylinderGeometry(0.13 * s, 0.13 * s, 0.34 * s, 8),
+              new THREE.Vector3(side * 1.5 * s, 1.32 * s, dz * s),
+              identity
+            )
+          );
+        }
+      }
+      break;
+    case 'lance':
+      armor.push(
+        placed(
+          new THREE.CylinderGeometry(0.16 * s, 0.26 * s, 3.4 * s, 8),
+          new THREE.Vector3(0, 4.25 * s, 0),
+          identity
+        )
+      );
+      for (const y of [3.3, 4.2, 5.1]) {
+        glow.push(
+          placed(
+            new THREE.TorusGeometry(0.34 * s, 0.07 * s, 5, 20),
+            new THREE.Vector3(0, y * s, 0),
+            flat
+          )
+        );
+      }
+      glow.push(
+        placed(
+          new THREE.OctahedronGeometry(0.22 * s, 0),
+          new THREE.Vector3(0, 6.05 * s, 0),
+          identity,
+          new THREE.Vector3(1, 1.8, 1)
+        )
+      );
+      break;
+  }
+  return { armor, glow };
+}
+
 function buildPylon(
   index: number,
   role: OraclePylonRole,
@@ -643,8 +747,10 @@ function buildPylon(
   spinner.add(crystal);
   parts.push(crystal);
 
-  // 卡箍：腰部六角箍 + 三片短夹翼 + 下垂尖刺（晶体上下大部分外露）
+  const accents = buildPylonAccents(role, s);
+  // 卡箍：腰部六角箍 + 三片短夹翼 + 下垂尖刺（晶体上下大部分外露）+ 职能轮廓
   const collarParts: THREE.BufferGeometry[] = [
+    ...accents.armor,
     prepare(new THREE.CylinderGeometry(1.0 * s, 1.18 * s, 0.42 * s, 6, 1, true)),
     placed(
       new THREE.ConeGeometry(0.55 * s, 2.6 * s, 6),
@@ -676,6 +782,7 @@ function buildPylon(
   });
   const rings = new THREE.Mesh(
     merged([
+      ...accents.glow,
       placed(
         new THREE.TorusGeometry(1.95 * s, 0.07 * s, 5, 56),
         new THREE.Vector3(),
@@ -694,7 +801,8 @@ function buildPylon(
 
   const tip = new THREE.Object3D();
   tip.name = `oracle_pylon_tip_${index}`;
-  tip.position.set(0, 2.85 * s, 0);
+  // 光矛塔从炮管口发射；其余塔从晶体尖端
+  tip.position.set(0, (role === 'lance' ? 6.2 : 2.85) * s, 0);
   group.add(tip);
   const tipGlow = createGlowSprite(color.getHex(), 2.6 * s, 0.75);
   tipGlow.name = `oracle_pylon_tip_glow_${index}`;
