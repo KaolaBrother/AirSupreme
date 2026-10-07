@@ -227,6 +227,7 @@ const RING_FRAGMENT_SHADER = /* glsl */ `
 uniform vec3 uColor;
 uniform float uOpacity;
 uniform float uThickness;
+uniform float uAdditive;
 varying vec2 vLocal;
 void main() {
   float r = length(vLocal);
@@ -234,7 +235,8 @@ void main() {
   float band = smoothstep(inner, 0.965, r) * (1.0 - smoothstep(0.965, 1.0, r));
   float alpha = pow(band, 1.4) * uOpacity;
   if (alpha < 0.003) discard;
-  gl_FragColor = vec4(uColor * alpha, 1.0);
+  // 加色：亮度即颜色；普通混合：亮天空下保留色相
+  gl_FragColor = uAdditive > 0.5 ? vec4(uColor * alpha, 1.0) : vec4(uColor, min(alpha, 1.0));
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
 }
@@ -258,6 +260,7 @@ export function createShockRing(geometry: THREE.BufferGeometry): ShockRing {
       uColor: { value: new THREE.Color(1, 1, 1) },
       uOpacity: { value: 0 },
       uThickness: { value: 0.2 },
+      uAdditive: { value: 1 },
     },
     vertexShader: RING_VERTEX_SHADER,
     fragmentShader: RING_FRAGMENT_SHADER,
@@ -303,13 +306,37 @@ uniform float uTime;
 varying vec3 vNormalView;
 varying vec3 vViewPosition;
 varying vec3 vLocal;
+float hash31(vec3 p) {
+  p = fract(p * 0.1031);
+  p += dot(p, p.zyx + 31.32);
+  return fract((p.x + p.y) * p.z);
+}
+float noise3(vec3 p) {
+  vec3 i = floor(p);
+  vec3 f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  float n000 = hash31(i);
+  float n100 = hash31(i + vec3(1.0, 0.0, 0.0));
+  float n010 = hash31(i + vec3(0.0, 1.0, 0.0));
+  float n110 = hash31(i + vec3(1.0, 1.0, 0.0));
+  float n001 = hash31(i + vec3(0.0, 0.0, 1.0));
+  float n101 = hash31(i + vec3(1.0, 0.0, 1.0));
+  float n011 = hash31(i + vec3(0.0, 1.0, 1.0));
+  float n111 = hash31(i + vec3(1.0, 1.0, 1.0));
+  return mix(
+    mix(mix(n000, n100, f.x), mix(n010, n110, f.x), f.y),
+    mix(mix(n001, n101, f.x), mix(n011, n111, f.x), f.y),
+    f.z
+  );
+}
 void main() {
   float facing = abs(dot(normalize(vNormalView), normalize(-vViewPosition)));
-  float rim = pow(1.0 - facing, 2.2);
-  float arcs = sin(vLocal.y * 23.0 + uTime * 26.0 + sin(vLocal.x * 11.0 - uTime * 9.0) * 2.4);
-  float crackle = smoothstep(0.82, 1.0, arcs) * 1.6;
-  float bands = 0.55 + 0.45 * sin(vLocal.y * 9.0 - uTime * 14.0);
-  float alpha = (rim * (1.1 + crackle) + 0.04 + crackle * 0.12) * bands * uOpacity;
+  float rim = pow(1.0 - facing, 3.0);
+  // 电弧网：噪声等值线形成细丝，随时间流动
+  vec3 q = vLocal * 11.0 + vec3(0.0, uTime * 2.6, uTime * 1.3);
+  float n = noise3(q) * 0.65 + noise3(q * 2.3 + 7.31) * 0.35;
+  float filament = 1.0 - smoothstep(0.0, 0.028, abs(n - 0.5));
+  float alpha = (rim * 0.85 + filament * (0.015 + rim * 1.3)) * uOpacity;
   if (alpha < 0.003) discard;
   gl_FragColor = vec4(uColor * alpha, 1.0);
   #include <tonemapping_fragment>

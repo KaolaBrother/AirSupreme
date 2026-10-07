@@ -109,7 +109,8 @@ void main() {
     float angle = aSize.w * 6.2831853 + age * (aSize.w - 0.5) * 1.8;
     axis = vec2(cos(angle), sin(angle));
   }
-  vec2 perp = vec2(-axis.y, axis.x);
+  // (perp, axis) 构成右手基，保持面片正面朝向相机
+  vec2 perp = vec2(axis.y, -axis.x);
   mvPosition.xy += axis * position.y * len + perp * position.x * size;
   gl_Position = projectionMatrix * mvPosition;
 
@@ -148,7 +149,7 @@ void main() {
   if (r >= 1.0) discard;
   vec2 offset = vec2(vSeed * 37.0, vSeed * 91.0);
   float n = valueNoise(p * 2.4 + offset) * 0.62 + valueNoise(p * 5.1 - offset) * 0.38;
-  float shape = 1.0 - smoothstep(0.28, 1.0, r + (n - 0.5) * 0.6);
+  float shape = (1.0 - smoothstep(0.28, 1.0, r + (n - 0.5) * 0.6)) * (1.0 - smoothstep(0.78, 1.0, r));
   float alpha = vColor.a * shape * clamp(vAge * 30.0, 0.0, 1.0);
   if (alpha < 0.003) discard;
   float shade = 0.72 + 0.42 * n + 0.12 * p.y;
@@ -204,6 +205,8 @@ export class WeaponParticleField {
   private dirtyStart = -1;
   private dirtyEnd = -1;
   private dirtyWrapped = false;
+  /** 已请求整体上传、渲染器尚未上传：期间不能再添加局部区间 */
+  private fullUploadPending = false;
   private latestBirth = -1e9;
   /** 尾迹 / 火花密度系数（低画质时降低） */
   private density = 1;
@@ -237,6 +240,10 @@ export class WeaponParticleField {
     this.geometry.setAttribute('aSize', this.sizeSeed);
     this.geometry.setAttribute('aPhys', this.physics);
     this.attributes = [this.posBirth, this.velLife, this.colorAlpha, this.sizeSeed, this.physics];
+    // 五个属性总是一起标记、一起上传：以第一个属性的上传回调为准
+    this.posBirth.onUpload(() => {
+      this.fullUploadPending = false;
+    });
 
     const isSmoke = blend === 'smoke';
     this.material = new THREE.ShaderMaterial({
@@ -250,6 +257,7 @@ export class WeaponParticleField {
       depthTest: true,
       depthWrite: false,
       blending: isSmoke ? THREE.NormalBlending : THREE.AdditiveBlending,
+      side: THREE.DoubleSide,
       fog: isSmoke,
     });
 
@@ -347,27 +355,47 @@ export class WeaponParticleField {
     }
   }
 
-  /** 推进时间并上传本帧写入的区间 */
-  public update(deltaTime: number): void {
+  /** 推进粒子时钟（每帧发射之前调用） */
+  public advance(deltaTime: number): void {
     if (Number.isFinite(deltaTime) && deltaTime > 0) {
       this.time += deltaTime;
     }
     this.material.uniforms.uTime.value = this.time;
+  }
 
+  /**
+   * 把上次 flush 之后写入的区间标记为待上传（每帧发射之后调用）。
+   * 渲染器上传后会自行清空区间；若在两次渲染之间多次 flush，区间会累积，
+   * 超过上限或环形回绕时退化为整体上传，并保持整体上传直到真正上传完成。
+   */
+  public flush(): void {
     if (this.dirtyStart < 0) {
       return;
     }
+    const full =
+      this.fullUploadPending ||
+      this.dirtyWrapped ||
+      this.posBirth.updateRanges.length >= MAX_UPDATE_RANGES;
     for (const attribute of this.attributes) {
-      if (this.dirtyWrapped || attribute.updateRanges.length >= MAX_UPDATE_RANGES) {
+      if (full) {
         attribute.clearUpdateRanges();
       } else {
         attribute.addUpdateRange(this.dirtyStart * 4, (this.dirtyEnd - this.dirtyStart + 1) * 4);
       }
       attribute.needsUpdate = true;
     }
+    if (full) {
+      this.fullUploadPending = true;
+    }
     this.dirtyStart = -1;
     this.dirtyEnd = -1;
     this.dirtyWrapped = false;
+  }
+
+  /** advance + flush（单独使用粒子场时的便捷方法） */
+  public update(deltaTime: number): void {
+    this.advance(deltaTime);
+    this.flush();
   }
 
   /** 立即隐藏所有存活 / 待出生粒子（无需重新上传缓冲） */

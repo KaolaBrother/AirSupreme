@@ -213,6 +213,7 @@ export class CountermeasureSystem implements IDecoyProvider {
       } catch {
         // 特效失败不影响诱饵逻辑
       }
+      this.glow.flush();
     }
     this.onDeployed?.();
     return true;
@@ -225,8 +226,8 @@ export class CountermeasureSystem implements IDecoyProvider {
   public update(deltaTime: number): void {
     const dt = Number.isFinite(deltaTime) && deltaTime > 0 ? deltaTime : 0;
     this.time += dt;
-    this.smoke?.update(dt);
-    this.glow?.update(dt);
+    this.smoke?.advance(dt);
+    this.glow?.advance(dt);
 
     // 充能恢复
     if (this.charges < this.maxCharges) {
@@ -251,6 +252,8 @@ export class CountermeasureSystem implements IDecoyProvider {
       }
     }
     this.rebuildDecoys();
+    this.smoke?.flush();
+    this.glow?.flush();
   }
 
   private stepFlare(flare: Flare, step: number): void {
@@ -316,8 +319,8 @@ export class CountermeasureSystem implements IDecoyProvider {
     spec.velocity.copy(flare.velocity);
     spec.delay = 0;
     spec.life = 0.12;
-    spec.size0 = 7;
-    spec.size1 = 3;
+    spec.size0 = 5;
+    spec.size1 = 2.5;
     spec.color.copy(FLARE_CORE);
     spec.alpha = 1;
     spec.drag = FLARE_DRAG;
@@ -347,15 +350,15 @@ export class CountermeasureSystem implements IDecoyProvider {
     spec.stretch = 0;
     spec.fade = 0.5;
     spec.heat = 1;
-    spec.size0 = (2.6 + flicker * 1.6) * (0.5 + strength * 0.5);
+    spec.size0 = (1.5 + flicker * 1.1) * (0.6 + strength * 0.4);
     spec.size1 = spec.size0;
     spec.color.copy(FLARE_CORE);
-    spec.alpha = 0.55 + strength * 0.45;
+    spec.alpha = 0.6 + strength * 0.4;
     glow.emit(spec);
-    spec.size0 = (7 + flicker * 3) * strength;
+    spec.size0 = (8 + flicker * 3.5) * strength;
     spec.size1 = spec.size0;
     spec.color.copy(FLARE_HALO);
-    spec.alpha = 0.32 * strength;
+    spec.alpha = 0.2 * strength;
     spec.heat = 0;
     glow.emit(spec);
 

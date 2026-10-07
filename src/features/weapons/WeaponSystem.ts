@@ -467,6 +467,7 @@ export class WeaponSystem {
 
     // 3) 在途弹体
     this.projectiles.update(dt, this.fireFrame);
+    this.fx?.endFrame();
   }
 
   /** 校验枪口、推算前向与载机速度 */

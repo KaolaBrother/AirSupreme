@@ -52,12 +52,16 @@ const COLORS = {
   laserSpark: new THREE.Color(2.8, 1.2, 0.6),
   rail: new THREE.Color(1.1, 0.75, 2.8),
   railCore: new THREE.Color(2.6, 2.6, 3.4),
-  railSpiral: new THREE.Color(1.3, 0.95, 3.0),
+  railSpiral: new THREE.Color(0.85, 0.55, 2.5),
+  railRing: new THREE.Color(0.62, 0.42, 1.7),
+  railIon: new THREE.Color(0.42, 0.24, 1.05),
   emp: new THREE.Color(0.45, 1.6, 2.6),
   empCore: new THREE.Color(1.6, 2.6, 3.2),
 } as const;
 
 const LASER_SHEATH_COLOR = 0xff2a55;
+/** 轨道炮冲击环（普通混合，线性色） */
+const RAIL_RING_TINT = new THREE.Color(0.32, 0.16, 0.95);
 const RAIL_SHEATH_COLOR = 0x7a5cff;
 
 /** 火箭弹体剖面：[半径, 轴向, 颜色] —— 喷管 → 弹体 → 黄色战斗部带 → 弹头 */
@@ -143,8 +147,8 @@ export class WeaponFx {
     this.root = new THREE.Group();
     this.root.name = 'special-weapons-fx';
 
-    this.smoke = new WeaponParticleField(2600, 'smoke');
-    this.glow = new WeaponParticleField(2200, 'glow');
+    this.smoke = new WeaponParticleField(4096, 'smoke');
+    this.glow = new WeaponParticleField(3072, 'glow');
     this.root.add(this.smoke.mesh, this.glow.mesh);
 
     // 弹体：实例化车削体 + 加色尾焰锥
@@ -274,11 +278,12 @@ export class WeaponFx {
   // 每帧更新
   // ---------------------------------------------------------------------------
 
+  /** 帧开始：推进时钟与各类动画（之后才发射本帧粒子） */
   public update(deltaTime: number): void {
     const dt = Number.isFinite(deltaTime) && deltaTime > 0 ? deltaTime : 0;
     this.time += dt;
-    this.smoke.update(dt);
-    this.glow.update(dt);
+    this.smoke.advance(dt);
+    this.glow.advance(dt);
     this.laser.coreUniforms.uTime.value = this.time;
 
     for (const tracer of this.tracers) {
@@ -323,9 +328,15 @@ export class WeaponFx {
       const progress = 1 - shell.life / shell.maxLife;
       const eased = 1 - Math.pow(1 - progress, 2.6);
       shell.mesh.scale.setScalar(Math.max(0.5, shell.radius * eased));
-      shell.material.uniforms.uOpacity.value = 1.15 * Math.pow(1 - progress, 1.3);
+      shell.material.uniforms.uOpacity.value = 1.15 * Math.pow(1 - progress, 1.6);
       shell.material.uniforms.uTime.value = this.time;
     }
+  }
+
+  /** 帧结束：提交本帧发射的粒子 */
+  public endFrame(): void {
+    this.smoke.flush();
+    this.glow.flush();
   }
 
   /** 把逻辑层的弹体同步到实例化网格 */
@@ -382,7 +393,7 @@ export class WeaponFx {
     age: number
   ): void {
     const isRocket = kind === 'rocket';
-    const spacing = (isRocket ? 2.1 : 1.5) / this.smoke.getDensity();
+    const spacing = (isRocket ? 1.5 : 0.95) / this.smoke.getDensity();
     const distance = from.distanceTo(to);
     const spec = this.spec;
     if (distance > 1e-4 && Number.isFinite(distance)) {
@@ -399,17 +410,17 @@ export class WeaponFx {
         spec.delay = -(1 - f) * deltaTime;
         if (isRocket) {
           spec.life = 1.3 + Math.random() * 0.7;
-          spec.size0 = 0.55;
-          spec.size1 = 3.1 + Math.random() * 1.2;
+          spec.size0 = 1.5;
+          spec.size1 = 3.6 + Math.random() * 1.4;
           spec.color.copy(COLORS.rocketSmoke).multiplyScalar(0.88 + Math.random() * 0.2);
-          spec.alpha = 0.5;
+          spec.alpha = 0.34;
           spec.heat = 0.14;
         } else {
           spec.life = 0.85 + Math.random() * 0.45;
-          spec.size0 = 0.3;
-          spec.size1 = 1.5 + Math.random() * 0.6;
+          spec.size0 = 0.95;
+          spec.size1 = 2 + Math.random() * 0.8;
           spec.color.copy(COLORS.swarmSmoke).multiplyScalar(0.92 + Math.random() * 0.12);
-          spec.alpha = 0.42;
+          spec.alpha = 0.3;
           spec.heat = 0.1;
         }
         spec.drag = 1.6;
@@ -502,9 +513,9 @@ export class WeaponFx {
     spec.position.copy(position);
     spec.velocity.set(0, 0, 0);
     spec.delay = 0;
-    spec.life = 0.13;
-    spec.size0 = 5.5 * s;
-    spec.size1 = 9 * s;
+    spec.life = 0.14;
+    spec.size0 = 7 * s;
+    spec.size1 = 11 * s;
     spec.color.copy(COLORS.fireFlash);
     spec.alpha = 1;
     spec.drag = 0;
@@ -517,15 +528,16 @@ export class WeaponFx {
     // 火球
     const fireballs = glow.scaledCount((palette === 'rocket' ? 6 : 4) * s, 2);
     for (let i = 0; i < fireballs; i++) {
-      randomUnit(spec.velocity).multiplyScalar((5 + Math.random() * 9) * s);
-      spec.life = 0.32 + Math.random() * 0.26;
-      spec.size0 = (2.2 + Math.random() * 1.4) * s;
-      spec.size1 = (4 + Math.random() * 2.5) * s;
+      randomUnit(spec.velocity).multiplyScalar((6 + Math.random() * 10) * s);
+      if (surface !== 'air') spec.velocity.y = Math.abs(spec.velocity.y) + 3 * s;
+      spec.life = 0.38 + Math.random() * 0.3;
+      spec.size0 = (3 + Math.random() * 1.8) * s;
+      spec.size1 = (5.5 + Math.random() * 3.5) * s;
       spec.color.copy(COLORS.fireball).multiplyScalar(0.8 + Math.random() * 0.4);
       spec.alpha = 0.9;
       spec.drag = 4.5;
-      spec.gravity = 2;
-      spec.fade = 1.4;
+      spec.gravity = 2.5;
+      spec.fade = 1.35;
       spec.heat = 0.35;
       spec.delay = Math.random() * 0.04;
       glow.emit(spec);
@@ -641,7 +653,8 @@ export class WeaponFx {
     count: number,
     color: THREE.Color,
     speed: number,
-    life: number
+    life: number,
+    size = 0.3
   ): void {
     const spec = this.spec;
     const total = this.glow.scaledCount(count, 1);
@@ -654,8 +667,8 @@ export class WeaponFx {
       spec.position.copy(position);
       spec.delay = 0;
       spec.life = life * (0.6 + Math.random() * 0.7);
-      spec.size0 = 0.26;
-      spec.size1 = 0.12;
+      spec.size0 = size;
+      spec.size1 = size * 0.45;
       spec.color.copy(color);
       spec.alpha = 1;
       spec.drag = 1.2;
@@ -770,12 +783,12 @@ export class WeaponFx {
     surface: FxSurface
   ): void {
     this.tmpB.copy(beamDirection).multiplyScalar(-1);
-    this.emitFlash(position, null, 3.2 + Math.random() * 1.4, 0.05, COLORS.laserCore, 1);
-    this.emitFlash(position, null, 6 + Math.random() * 2, 0.06, COLORS.laser, 0.3);
-    const sparkRate = surface === 'water' ? 30 : 75;
+    this.emitFlash(position, null, 4.2 + Math.random() * 1.8, 0.05, COLORS.laserCore, 1);
+    this.emitFlash(position, null, 9 + Math.random() * 3, 0.06, COLORS.laser, 0.3);
+    const sparkRate = surface === 'water' ? 30 : 90;
     const sparks = randomCount(sparkRate * deltaTime);
     if (sparks > 0) {
-      this.emitSparks(position, this.tmpB, sparks, COLORS.laserSpark, 34, 0.55);
+      this.emitSparks(position, this.tmpB, sparks, COLORS.laserSpark, 38, 0.6, 0.5);
     }
     if (Math.random() < deltaTime * 14) {
       this.tmpC.set(
@@ -876,27 +889,64 @@ export class WeaponFx {
         .addScaledVector(this.tmpA, helixRadius);
       spec.velocity.copy(this.tmpA).multiplyScalar(1.6 + Math.random() * 0.8);
       spec.delay = s / 2600;
-      spec.life = 0.55 + Math.random() * 0.35 + c * 0.25;
-      spec.size0 = 0.42;
-      spec.size1 = 0.95;
-      spec.color.copy(COLORS.railSpiral).multiplyScalar(0.75 + Math.random() * 0.4);
-      spec.alpha = 0.85;
-      spec.drag = 1.5;
-      spec.gravity = 0;
       spec.stretch = 0;
-      spec.fade = 1.3;
-      spec.heat = 0.25;
-      this.glow.emit(spec);
+      spec.gravity = 0;
+      // 电离紫色螺旋（普通混合，任何背景下都保留色相）
+      spec.life = 0.6 + Math.random() * 0.35 + c * 0.25;
+      spec.size0 = 0.75;
+      spec.size1 = 1.7;
+      spec.color.copy(COLORS.railIon).multiplyScalar(0.9 + Math.random() * 0.25);
+      spec.alpha = 0.62;
+      spec.drag = 1.5;
+      spec.fade = 1.2;
+      spec.heat = 0;
+      this.smoke.emit(spec);
+      // 白热电火花点缀
+      if (emitted % 3 === 0) {
+        spec.life = 0.35 + Math.random() * 0.25;
+        spec.size0 = 0.6;
+        spec.size1 = 0.9;
+        spec.color.copy(COLORS.railSpiral);
+        spec.alpha = 0.9;
+        spec.drag = 1.5;
+        spec.fade = 1.3;
+        spec.heat = 0.3;
+        this.glow.emit(spec);
+      }
       emitted++;
       // 近处密、远处疏：远处在屏幕上很小，不必逐米补点
       s += 0.55 + s * 0.006;
     }
 
     // 炮口：强闪光 + 两道垂直于弹道的冲击环 + 余烟
-    this.emitFlash(start, null, 6 + c * 4, 0.14, COLORS.railCore, 1);
-    this.spawnRing(start, this.tmpDir, 0.6, 5 + c * 4, 0.32, COLORS.rail, 1, 0.22);
+    this.emitFlash(start, null, 2.6 + c * 1.6, 0.1, COLORS.railCore, 1);
+    this.emitFlash(start, null, 4.5 + c * 2, 0.14, COLORS.railRing, 0.2);
+    // 冲击环用普通混合的电紫色：亮天空下也能看出颜色
+    this.spawnRing(start, this.tmpDir, 0.6, 4.5 + c * 3.5, 0.34, RAIL_RING_TINT, 0.85, 0.1, false);
     this.tmpB.copy(start).addScaledVector(this.tmpDir, 7 + c * 3);
-    this.spawnRing(this.tmpB, this.tmpDir, 0.5, 3.5 + c * 3, 0.42, COLORS.railSpiral, 0.8, 0.3);
+    this.spawnRing(
+      this.tmpB,
+      this.tmpDir,
+      0.5,
+      3 + c * 2.5,
+      0.42,
+      RAIL_RING_TINT,
+      0.7,
+      0.14,
+      false
+    );
+    this.tmpB.copy(start).addScaledVector(this.tmpDir, 16 + c * 6);
+    this.spawnRing(
+      this.tmpB,
+      this.tmpDir,
+      0.4,
+      2.2 + c * 1.8,
+      0.48,
+      RAIL_RING_TINT,
+      0.55,
+      0.18,
+      false
+    );
     this.tmpC.copy(this.tmpDir).multiplyScalar(3);
     this.emitPuff(start, this.tmpC, 1, 4.5, 1, COLORS.swarmSmoke, 0.28);
   }
@@ -906,8 +956,8 @@ export class WeaponFx {
     this.emitFlash(position, null, 7, 0.12, COLORS.railCore, 1);
     this.emitFlash(position, null, 11, 0.18, COLORS.rail, 0.2);
     this.tmpB.copy(direction).multiplyScalar(-1);
-    this.emitSparks(position, this.tmpB, 10, COLORS.railSpiral, 40, 0.45);
-    this.emitSparks(position, direction, 8, COLORS.spark, 48, 0.6);
+    this.emitSparks(position, this.tmpB, 10, COLORS.railSpiral, 40, 0.45, 0.5);
+    this.emitSparks(position, direction, 10, COLORS.spark, 52, 0.6, 0.55);
   }
 
   // ---------------------------------------------------------------------------
@@ -923,10 +973,13 @@ export class WeaponFx {
     life: number,
     color: THREE.Color,
     opacity: number,
-    thickness: number
+    thickness: number,
+    additive = true
   ): void {
     const ring = this.rings.find((entry) => !entry.active);
     if (!ring || !(life > 0)) return;
+    ring.material.blending = additive ? THREE.AdditiveBlending : THREE.NormalBlending;
+    ring.material.uniforms.uAdditive.value = additive ? 1 : 0;
     ring.active = true;
     ring.life = life;
     ring.maxLife = life;
@@ -956,11 +1009,9 @@ export class WeaponFx {
     shell.mesh.visible = true;
 
     this.tmpA.set(0, 1, 0);
-    this.spawnRing(center, this.tmpA, 2, radius, 0.95, COLORS.emp, 1.1, 0.08);
+    this.spawnRing(center, this.tmpA, 2, radius, 0.95, COLORS.emp, 0.75, 0.06);
     this.tmpA.set(0.35, 1, 0.2).normalize();
-    this.spawnRing(center, this.tmpA, 1, radius * 0.82, 0.8, COLORS.empCore, 0.7, 0.05);
-    this.tmpA.set(-0.5, 0.4, 0.75).normalize();
-    this.spawnRing(center, this.tmpA, 1, radius * 0.6, 0.7, COLORS.emp, 0.55, 0.05);
+    this.spawnRing(center, this.tmpA, 1, radius * 0.82, 0.8, COLORS.empCore, 0.35, 0.035);
 
     this.emitFlash(center, null, 16, 0.22, COLORS.empCore, 1);
     this.emitFlash(center, null, 34, 0.35, COLORS.emp, 0.2);
