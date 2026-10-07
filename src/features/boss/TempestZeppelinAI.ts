@@ -190,6 +190,7 @@ const DEATH_SEQUENCE_DURATION = 5;
 const MAX_STEP_DT = 0.1;
 const WARNING_THROTTLE = 4;
 const BOLT_COLOR = 0x8fd8ff;
+const HALO_COLOR = 0x3c9cff;
 
 const NO_TARGETS: readonly THREE.Object3D[] = [];
 const X_AXIS = new THREE.Vector3(1, 0, 0);
@@ -231,7 +232,10 @@ interface CoilState {
   crackleTimer: number;
   leaderTimer: number;
   flash: number;
+  /** 射程光环（朝向镜头的圆环，直径 = 2 × 射程） */
   halo: THREE.Sprite;
+  /** 充能波前：从放电球向外扩张，抵达外环时放电 */
+  front: THREE.Sprite;
 }
 
 export class TempestZeppelinAI implements IAdvancedBoss {
@@ -414,10 +418,13 @@ export class TempestZeppelinAI implements IAdvancedBoss {
     this.partRoles.set(this.rig.gondola, 'gondola');
     for (const engine of this.rig.engines) this.partRoles.set(engine.nacelle, 'engine');
     for (const coilRig of this.rig.coils) {
-      const halo = createGlowSprite(BOLT_COLOR, 1, 0, 'ring', false);
+      const halo = createGlowSprite(HALO_COLOR, 1, 0, 'ring', false);
       halo.name = `zeppelin_coil_${coilRig.index}_range`;
       halo.visible = false;
-      this.hazardRoot.add(halo);
+      const front = createGlowSprite(0xd8f0ff, 1, 0, 'ring', false);
+      front.name = `zeppelin_coil_${coilRig.index}_front`;
+      front.visible = false;
+      this.hazardRoot.add(halo, front);
       const state: CoilState = {
         rig: coilRig,
         phase: 'idle',
@@ -433,6 +440,7 @@ export class TempestZeppelinAI implements IAdvancedBoss {
         leaderTimer: 0,
         flash: 0,
         halo,
+        front,
       };
       this.coils.push(state);
       this.coilByPart.set(coilRig.cap, state);
@@ -713,6 +721,8 @@ export class TempestZeppelinAI implements IAdvancedBoss {
     for (const coil of this.coils) {
       coil.halo.parent?.remove(coil.halo);
       coil.halo.material.dispose();
+      coil.front.parent?.remove(coil.front);
+      coil.front.material.dispose();
     }
     this.hazardRoot.parent?.remove(this.hazardRoot);
     this.mesh.visible = false;
@@ -1199,6 +1209,7 @@ export class TempestZeppelinAI implements IAdvancedBoss {
     coil.shortDamage = 0;
     coil.crackleTimer = 0;
     coil.leaderTimer = 0.3;
+    coil.halo.visible = true;
     coil.rig.tip.getWorldPosition(this.tmpA);
     if (!barrage) {
       this.warn('线圈充能');
@@ -1213,6 +1224,7 @@ export class TempestZeppelinAI implements IAdvancedBoss {
     coil.target = null;
     coil.barrage = false;
     coil.halo.visible = false;
+    coil.front.visible = false;
     this.statusKey = -1;
   }
 
@@ -1232,7 +1244,7 @@ export class TempestZeppelinAI implements IAdvancedBoss {
           if (coil.timer >= coil.hum) {
             coil.phase = 'charge';
             coil.timer = 0;
-            coil.halo.visible = true;
+            coil.front.visible = true;
           }
           break;
         case 'charge': {
@@ -1282,7 +1294,7 @@ export class TempestZeppelinAI implements IAdvancedBoss {
         ring.getWorldPosition(this.tmpA);
         coil.rig.cap.getWorldPosition(this.tmpB);
         this.bolts.strike(this.tmpA, this.tmpB, {
-          width: (charging ? 0.45 : 0.3) * sf,
+          width: (charging ? 1.0 : 0.6) * sf,
           color: BOLT_COLOR,
           life: 0.12,
           jitter: 0.18,
@@ -1310,7 +1322,7 @@ export class TempestZeppelinAI implements IAdvancedBoss {
     const reach = Math.min(distance, coil.range) * (0.2 + 0.45 * progress);
     this.tmpB.multiplyScalar(reach / distance).add(this.tmpA);
     this.bolts.strike(this.tmpA, this.tmpB, {
-      width: 0.55 * sf,
+      width: 1.7 * sf,
       color: BOLT_COLOR,
       life: 0.16,
       jitter: 0.16,
@@ -1323,13 +1335,14 @@ export class TempestZeppelinAI implements IAdvancedBoss {
     const sf = this.sizeFactor;
     coil.rig.tip.getWorldPosition(this.tmpA);
     coil.halo.visible = false;
+    coil.front.visible = false;
     coil.flash = 1;
     this.struck.length = 0;
     const first = this.nearestTargetTo(this.tmpA, coil.range, this.struck);
     const damage = this.config.damage * (coil.barrage ? 1.1 : 1.25);
     if (first) {
       this.bolts.strike(this.tmpA, first.position, {
-        width: 1.5 * sf,
+        width: 3.4 * sf,
         color: BOLT_COLOR,
         life: 0.38,
         hitWindow: 0.22,
@@ -1348,7 +1361,7 @@ export class TempestZeppelinAI implements IAdvancedBoss {
         const next = this.nearestTargetTo(from.position, CHAIN_RANGE * sf, this.struck);
         if (!next) break;
         this.bolts.strike(from.position, next.position, {
-          width: 1.1 * sf,
+          width: 2.6 * sf,
           color: BOLT_COLOR,
           life: 0.34,
           hitWindow: 0.22,
@@ -1372,7 +1385,7 @@ export class TempestZeppelinAI implements IAdvancedBoss {
       if (this.tmpB.lengthSq() < 1e-4) this.tmpB.set(0, 1, 0);
       this.tmpB.setLength(coil.range * 0.75).add(this.tmpA);
       this.bolts.strike(this.tmpA, this.tmpB, {
-        width: 1.3 * sf,
+        width: 2.8 * sf,
         color: BOLT_COLOR,
         life: 0.32,
         jitter: 0.1,
@@ -1414,7 +1427,7 @@ export class TempestZeppelinAI implements IAdvancedBoss {
   private cageArc(a: THREE.Object3D, b: THREE.Object3D, localWaypoint: THREE.Vector3 | null): void {
     const sf = this.sizeFactor;
     const options = {
-      width: 1.2 * sf,
+      width: 2.6 * sf,
       color: 0xc8e8ff,
       life: 0.9,
       hitWindow: 0.75,
@@ -1442,6 +1455,7 @@ export class TempestZeppelinAI implements IAdvancedBoss {
     coil.target = null;
     coil.barrage = false;
     coil.halo.visible = false;
+    coil.front.visible = false;
     coil.flash = 1;
     coil.crackleTimer = 0.2;
     this.shortedLabelTimer = 2.5;
@@ -1451,7 +1465,7 @@ export class TempestZeppelinAI implements IAdvancedBoss {
     // 电流倒灌进船体：一道打回艇身的闪电（纯视觉）
     this.mesh.getWorldPosition(this.tmpB);
     this.bolts.strike(this.tmpA, this.tmpB, {
-      width: 1.2 * this.sizeFactor,
+      width: 2.4 * this.sizeFactor,
       color: 0xffffff,
       life: 0.3,
       jitter: 0.12,
@@ -1488,7 +1502,7 @@ export class TempestZeppelinAI implements IAdvancedBoss {
       this.shroud.nearestPuffLocal(this.tmpA, this.tmpB);
       this.mesh.localToWorld(this.tmpB);
       this.bolts.strike(this.tmpB, target.position, {
-        width: 1.0 * sf,
+        width: 2.4 * sf,
         color: 0xbfe2ff,
         life: 0.3,
         hitWindow: 0.2,
@@ -1514,7 +1528,7 @@ export class TempestZeppelinAI implements IAdvancedBoss {
       this.mesh.localToWorld(this.tmpB);
       this.mesh.localToWorld(this.tmpD);
       this.bolts.strike(this.tmpB, this.tmpD, {
-        width: 0.8 * sf,
+        width: 1.6 * sf,
         color: 0xbfe2ff,
         life: 0.22,
         jitter: 0.12,
@@ -1756,7 +1770,7 @@ export class TempestZeppelinAI implements IAdvancedBoss {
       this.tmpC.x += (Math.random() - 0.5) * 60 * sf;
       this.tmpC.z += (Math.random() - 0.5) * 60 * sf;
       this.bolts.strike(this.tmpB, this.tmpC, {
-        width: 1.6 * sf,
+        width: 3.4 * sf,
         color: BOLT_COLOR,
         life: 0.5,
         jitter: 0.08,
@@ -1824,6 +1838,7 @@ export class TempestZeppelinAI implements IAdvancedBoss {
     for (const coil of this.coils) {
       coil.phase = 'idle';
       coil.halo.visible = false;
+      coil.front.visible = false;
       coil.target = null;
     }
   }
@@ -1872,7 +1887,7 @@ export class TempestZeppelinAI implements IAdvancedBoss {
           this.tmpB.copy(this.tmpA);
           this.tmpB.y += 20 * sf;
           this.bolts.strike(this.tmpA, this.tmpB, {
-            width: 0.9 * sf,
+            width: 1.8 * sf,
             color: BOLT_COLOR,
             life: 0.2,
             jitter: 0.2,
@@ -1960,6 +1975,29 @@ export class TempestZeppelinAI implements IAdvancedBoss {
     }
   }
 
+  /**
+   * 射程光环：始终朝向镜头的圆环，直径 = 2 × 射程（即放电球射程球的轮廓）；
+   * 充能波前从放电球向外扩张，抵达外环的瞬间放电。
+   */
+  private placeHalo(coil: CoilState, opacity: number, progress: number): void {
+    coil.rig.cap.getWorldPosition(this.tmpA);
+    const diameter = coil.range * 2;
+    // 齐射时四座线圈的光环叠在一起，单个光环减弱避免泛光糊屏
+    const dim = coil.barrage ? 0.4 : 1;
+    coil.halo.position.copy(this.tmpA);
+    coil.halo.scale.set(diameter, diameter, 1);
+    coil.halo.material.opacity = Math.min(1, opacity * dim);
+    if (coil.phase !== 'charge') {
+      coil.front.visible = false;
+      return;
+    }
+    coil.front.visible = true;
+    coil.front.position.copy(this.tmpA);
+    const front = Math.max(0.04, progress * progress) * diameter;
+    coil.front.scale.set(front, front, 1);
+    coil.front.material.opacity = (0.35 + 0.55 * progress) * dim;
+  }
+
   private updateVisuals(dt: number): void {
     const t = this.time;
     const materials = this.rig.materials;
@@ -1981,6 +2019,8 @@ export class TempestZeppelinAI implements IAdvancedBoss {
         glowSize = 4 + 2 * h;
         glowOpacity = 0.35 + 0.2 * h;
         charging = Math.max(charging, 0.3 * h);
+        // 嗡鸣阶段先淡淡画出射程光环（预警的预警）
+        this.placeHalo(coil, 0.12 + 0.18 * h, 1);
       } else if (coil.phase === 'charge') {
         const c = Math.min(1, coil.timer / coil.chargeTime);
         const fast = 0.5 + 0.5 * Math.sin(t * (18 + 30 * c));
@@ -1989,12 +2029,7 @@ export class TempestZeppelinAI implements IAdvancedBoss {
         glowSize = 6 + 7 * c + fast;
         glowOpacity = 0.55 + 0.4 * c;
         charging = Math.max(charging, 0.4 + 0.6 * c);
-        // 射程光环：始终朝向镜头的圆环，直径 = 2 × 射程
-        rig.cap.getWorldPosition(this.tmpA);
-        coil.halo.position.copy(this.tmpA);
-        const diameter = coil.range * 2 * (1.06 - 0.06 * c);
-        coil.halo.scale.set(diameter, diameter, 1);
-        coil.halo.material.opacity = (0.18 + 0.42 * c) * (0.75 + 0.25 * fast);
+        this.placeHalo(coil, (0.35 + 0.5 * c) * (0.8 + 0.2 * fast), c);
       } else if (coil.phase === 'shorted') {
         const sputter = Math.random() < 0.25 ? 1 : 0;
         ring = 0.15 + sputter * 1.5;
@@ -2051,7 +2086,7 @@ export class TempestZeppelinAI implements IAdvancedBoss {
     const hangar = this.rig.hangar;
     for (let i = 0; i < hangar.doors.length; i++) {
       const side = i === 0 ? 1 : -1;
-      hangar.doors[i].rotation.z = side * this.hangarOpen * 1.85;
+      hangar.doors[i].rotation.z = side * this.hangarOpen * 1.75;
     }
     const busy = this.hangarPhase !== 'closed';
     if (this.hangarAlive) {

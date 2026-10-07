@@ -252,12 +252,12 @@ function createEnvelope(zMin: number, zMax: number, s: number): THREE.BufferGeom
   geometry.computeVertexNormals();
   const position = geometry.getAttribute('position');
   const colors = new Float32Array(position.count * 3);
-  const base = new THREE.Color(0x3c4552);
-  const panelDark = new THREE.Color(0x313945);
-  const walkway = new THREE.Color(0x58606c);
-  const belly = new THREE.Color(0x262b33);
-  const hazard = new THREE.Color(0x5a1e1c);
-  const stripe = new THREE.Color(0xd8c070);
+  const base = new THREE.Color(0x66707e);
+  const panelDark = new THREE.Color(0x535c6a);
+  const walkway = new THREE.Color(0x8a929e);
+  const belly = new THREE.Color(0x3a414b);
+  const hazard = new THREE.Color(0x8a2a24);
+  const stripe = new THREE.Color(0xe8c870);
   const color = new THREE.Color();
   for (let i = 0; i < position.count; i++) {
     const x = position.getX(i) / s;
@@ -291,46 +291,45 @@ export function createTempestZeppelinMaterials(): TempestZeppelinMaterials {
     envelope: new THREE.MeshStandardMaterial({
       color: 0xffffff,
       vertexColors: true,
-      roughness: 0.52,
-      metalness: 0.5,
-      emissive: 0x0a1626,
-      emissiveIntensity: 0.45,
+      roughness: 0.62,
+      metalness: 0.18,
+      emissive: 0x12243a,
+      emissiveIntensity: 0.5,
     }),
     frame: new THREE.MeshStandardMaterial({
-      color: 0x9a6a3e,
-      roughness: 0.34,
-      metalness: 0.85,
-      emissive: 0x2a1406,
-      emissiveIntensity: 0.35,
+      color: 0xc08a52,
+      roughness: 0.42,
+      metalness: 0.45,
+      emissive: 0x4a2208,
+      emissiveIntensity: 0.45,
     }),
     stringer: new THREE.MeshStandardMaterial({
-      color: 0x2b3038,
-      roughness: 0.45,
-      metalness: 0.7,
-      emissive: 0x0a0e14,
-      emissiveIntensity: 0.3,
-    }),
-    metal: new THREE.MeshStandardMaterial({
-      color: 0x4a515c,
-      roughness: 0.4,
-      metalness: 0.78,
+      color: 0x444b56,
+      roughness: 0.5,
+      metalness: 0.35,
       emissive: 0x0c121a,
       emissiveIntensity: 0.35,
     }),
+    metal: new THREE.MeshStandardMaterial({
+      color: 0x5e6672,
+      roughness: 0.45,
+      metalness: 0.45,
+      emissive: 0x101822,
+      emissiveIntensity: 0.4,
+    }),
     dark: new THREE.MeshStandardMaterial({
-      color: 0x1c2026,
+      color: 0x2a2f37,
       roughness: 0.55,
-      metalness: 0.6,
-      emissive: 0x06080c,
+      metalness: 0.35,
+      emissive: 0x080b10,
       emissiveIntensity: 0.3,
     }),
     gondola: new THREE.MeshStandardMaterial({
-      color: 0x353c47,
-      roughness: 0.42,
-      metalness: 0.62,
-      emissive: 0x0a1420,
-      emissiveIntensity: 0.4,
-      flatShading: false,
+      color: 0x56606c,
+      roughness: 0.48,
+      metalness: 0.32,
+      emissive: 0x101c2c,
+      emissiveIntensity: 0.45,
     }),
     window: new THREE.MeshStandardMaterial({
       color: 0x2a1a08,
@@ -347,23 +346,23 @@ export function createTempestZeppelinMaterials(): TempestZeppelinMaterials {
       emissiveIntensity: 2.0,
     }),
     cage: new THREE.MeshStandardMaterial({
-      color: 0x6a4a2c,
-      roughness: 0.38,
-      metalness: 0.85,
+      color: 0x8a6038,
+      roughness: 0.42,
+      metalness: 0.5,
       emissive: 0x1a0e04,
       emissiveIntensity: 0.3,
     }),
     coilBody: new THREE.MeshStandardMaterial({
-      color: 0xb87a46,
-      roughness: 0.3,
-      metalness: 0.9,
+      color: 0xc88a52,
+      roughness: 0.36,
+      metalness: 0.5,
       emissive: 0x24120a,
       emissiveIntensity: 0.35,
     }),
     fin: new THREE.MeshStandardMaterial({
-      color: 0x353d49,
-      roughness: 0.5,
-      metalness: 0.55,
+      color: 0x5a6472,
+      roughness: 0.55,
+      metalness: 0.28,
       emissive: 0x0a1220,
       emissiveIntensity: 0.4,
     }),
@@ -396,9 +395,9 @@ export function createTempestZeppelinMaterials(): TempestZeppelinMaterials {
       emissiveIntensity: 1.2,
     }),
     keelPlate: new THREE.MeshStandardMaterial({
-      color: 0x3a414c,
-      roughness: 0.48,
-      metalness: 0.7,
+      color: 0x5a636f,
+      roughness: 0.5,
+      metalness: 0.4,
       emissive: 0x0a1018,
       emissiveIntensity: 0.35,
     }),
@@ -684,9 +683,12 @@ export function createTempestZeppelinMesh(config: BossConfig): THREE.Group {
     turrets.push({ index, yaw, muzzles, outward: new THREE.Vector3(0, def.up, 0) });
   });
 
-  // ===== 无人机舱（吊舱尾部腹面）=====
+  // ===== 无人机舱：吊舱尾部下方的开底舱（四面舱壁 + 两扇下翻舱门）=====
   const hangarZ = GONDOLA_Z - 4.7;
-  const hangarBottom = GONDOLA_Y - GONDOLA_HALF_HEIGHT + 0.12;
+  const hangarTop = GONDOLA_Y - GONDOLA_HALF_HEIGHT + 0.2;
+  const hangarBottom = GONDOLA_Y - GONDOLA_HALF_HEIGHT - 0.42;
+  const hangarHeight = hangarTop - hangarBottom;
+  const hangarMid = (hangarTop + hangarBottom) / 2;
   const interiorMaterial = new THREE.MeshStandardMaterial({
     color: 0x2a1404,
     roughness: 0.5,
@@ -695,7 +697,8 @@ export function createTempestZeppelinMesh(config: BossConfig): THREE.Group {
     emissiveIntensity: 0.25,
     side: THREE.DoubleSide,
   });
-  const interiorGeometry = new THREE.PlaneGeometry(1.5 * s, 3.4 * s);
+  // 舱顶发光甲板（开舱后从下方可见；弱点 / 子目标）
+  const interiorGeometry = new THREE.PlaneGeometry(1.86 * s, 3.86 * s);
   interiorGeometry.rotateX(Math.PI / 2);
   const interior = add(
     bow,
@@ -703,31 +706,54 @@ export function createTempestZeppelinMesh(config: BossConfig): THREE.Group {
     interiorMaterial,
     'zeppelin_hangar_interior',
     0,
-    hangarBottom + 0.28,
+    hangarBottom + 0.16,
     hangarZ,
     2.3
   );
   interior.castShadow = false;
-  bucket('bow', 'dark').push(
-    placed(
-      new THREE.BoxGeometry(1.7 * s, 0.32 * s, 3.7 * s),
-      0,
-      (hangarBottom + 0.46) * s,
-      hangarZ * s
-    )
-  );
+  const bayWalls = bucket('bow', 'metal');
+  for (const side of [1, -1]) {
+    bayWalls.push(
+      placed(
+        new THREE.BoxGeometry(0.12 * s, hangarHeight * s, 4.0 * s),
+        side * 1.0 * s,
+        hangarMid * s,
+        hangarZ * s
+      )
+    );
+    bayWalls.push(
+      placed(
+        new THREE.BoxGeometry(2.12 * s, hangarHeight * s, 0.12 * s),
+        0,
+        hangarMid * s,
+        (hangarZ + side * 2.0) * s
+      )
+    );
+  }
+  // 舱内两道琥珀色引导灯带（开舱时与甲板一起亮起）
+  const bayStrips = bucket('bow', 'window');
+  for (const side of [1, -1]) {
+    bayStrips.push(
+      placed(
+        new THREE.BoxGeometry(0.06 * s, 0.1 * s, 3.7 * s),
+        side * 0.92 * s,
+        (hangarBottom + 0.12) * s,
+        hangarZ * s
+      )
+    );
+  }
   const doors: THREE.Group[] = [];
   for (const side of [1, -1]) {
     const pivot = new THREE.Group();
     pivot.name = `zeppelin_hangar_door_${side > 0 ? 'L' : 'R'}`;
-    pivot.position.set(side * 0.8 * s, (hangarBottom - 0.02) * s, hangarZ * s);
+    pivot.position.set(side * 1.0 * s, (hangarBottom - 0.06) * s, hangarZ * s);
     bow.add(pivot);
     const door = new THREE.Mesh(
-      new THREE.BoxGeometry(0.8 * s, 0.12 * s, 3.6 * s),
+      new THREE.BoxGeometry(1.0 * s, 0.12 * s, 3.96 * s),
       materials.keelPlate
     );
     door.name = `zeppelin_hangar_door_plate_${side > 0 ? 'L' : 'R'}`;
-    door.position.set(-side * 0.4 * s, 0, 0);
+    door.position.set(-side * 0.5 * s, 0, 0);
     door.castShadow = true;
     pivot.add(door);
     doors.push(pivot);
@@ -741,18 +767,18 @@ export function createTempestZeppelinMesh(config: BossConfig): THREE.Group {
   });
   const beaconGeometries: THREE.BufferGeometry[] = [];
   const beacons: THREE.Sprite[] = [];
-  for (const dz of [-2.0, 2.0]) {
+  for (const dz of [-2.1, 2.1]) {
     beaconGeometries.push(
       placed(
-        new THREE.SphereGeometry(0.16 * s, 8, 6),
+        new THREE.SphereGeometry(0.18 * s, 8, 6),
         0,
-        (hangarBottom - 0.12) * s,
+        (hangarBottom - 0.05) * s,
         (hangarZ + dz) * s
       )
     );
-    const glow = createGlowSprite(0xffb040, 2.2 * s, 0);
+    const glow = createGlowSprite(0xffb040, 2.6 * s, 0);
     glow.name = 'zeppelin_hangar_beacon_glow';
-    glow.position.set(0, (hangarBottom - 0.2) * s, (hangarZ + dz) * s);
+    glow.position.set(0, (hangarBottom - 0.15) * s, (hangarZ + dz) * s);
     bow.add(glow);
     beacons.push(glow);
   }
@@ -761,7 +787,7 @@ export function createTempestZeppelinMesh(config: BossConfig): THREE.Group {
   bow.add(beaconMesh);
   const launchPoint = new THREE.Object3D();
   launchPoint.name = 'zeppelin_hangar_launch';
-  launchPoint.position.set(0, (hangarBottom - 2.2) * s, hangarZ * s);
+  launchPoint.position.set(0, (hangarBottom - 1.8) * s, hangarZ * s);
   bow.add(launchPoint);
 
   // ===== 特斯拉线圈 =====
@@ -1022,16 +1048,20 @@ export function createTempestZeppelinMesh(config: BossConfig): THREE.Group {
   stern.add(coreGlow);
   const keelPlates: THREE.Mesh[] = [];
   for (const side of [1, -1]) {
+    // 蚌壳式龙骨装甲：两片半球壳从左右包住核心，阶段 3 被炸飞
+    const shell = new THREE.SphereGeometry(1.75 * s, 16, 10, 0, Math.PI, 0, Math.PI);
     const plate = add(
       stern,
-      new THREE.BoxGeometry(1.8 * s, 0.42 * s, 3.8 * s),
+      shell,
       materials.keelPlate,
       `zeppelin_keel_plate_${side > 0 ? 'L' : 'R'}`,
-      side * 0.88,
-      coreY - 1.35,
+      0,
+      coreY - 0.15,
       coreZ
     );
-    plate.rotation.z = side * 0.32;
+    // 半球 phi∈[0,π] 位于 +Z 一侧：绕 Y 转 ±90° 变成左右两半，本地 X 拉长对应船体轴向
+    plate.rotation.y = (side * Math.PI) / 2;
+    plate.scale.set(1.25, 0.95, 1);
     keelPlates.push(plate);
   }
 
@@ -1119,7 +1149,7 @@ export function createTempestZeppelinMesh(config: BossConfig): THREE.Group {
     hullAnchors,
     halfLength: 16.4 * s,
     hullRadius: 4.62 * s,
-    bottomOffset: (-GONDOLA_Y + GONDOLA_HALF_HEIGHT + 0.4) * s,
+    bottomOffset: (-GONDOLA_Y + GONDOLA_HALF_HEIGHT + 1.1) * s,
     breakZ: BREAK_Z * s,
     materials,
   };

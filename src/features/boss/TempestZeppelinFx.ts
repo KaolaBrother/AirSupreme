@@ -551,7 +551,7 @@ export class StormStrikePool {
     parent.add(this.root);
     this.columnGeometry = new THREE.CylinderGeometry(1, 1, 1, 20, 1, true);
     this.columnGeometry.translate(0, 0.5, 0);
-    applyVerticalGradient(this.columnGeometry, 0x2a4660, 0xffffff, 1.6);
+    applyVerticalGradient(this.columnGeometry, 0x1a3450, 0xa8d4ff, 1.6);
     this.ringGeometry = new THREE.RingGeometry(0.88, 1, 48, 1);
     this.ringGeometry.rotateX(-Math.PI / 2);
     this.discGeometry = new THREE.CircleGeometry(1, 40);
@@ -688,7 +688,7 @@ export class StormStrikePool {
   private animateTelegraph(slot: StrikeSlot): void {
     const w = Math.min(1, slot.age / slot.spec.warnTime);
     const pulse = 0.5 + 0.5 * Math.sin(slot.age * (8 + 28 * w) + slot.seed);
-    slot.columnMaterial.opacity = 0.05 + 0.13 * w + 0.06 * pulse * w;
+    slot.columnMaterial.opacity = 0.04 + 0.1 * w + 0.05 * pulse * w;
     slot.markerMaterial.opacity = 0.35 + 0.5 * pulse;
     slot.discMaterial.opacity = 0.04 + 0.14 * w;
     // 内圈从中心扩到外圈边缘：直观显示倒计时
@@ -713,7 +713,7 @@ export class StormStrikePool {
     this.bottom.set(x, bottomY, z);
     this.marker.set(x, slot.marker.position.y, z);
     this.bolts.strike(this.top, this.bottom, {
-      width: Math.max(1.6, radius * 0.16),
+      width: Math.max(3, radius * 0.24),
       color: this.color,
       life: 0.42,
       hitWindow: 0.24,
@@ -755,6 +755,12 @@ interface PuffSlot {
   seed: number;
 }
 
+interface GlowSlot {
+  sprite: THREE.Sprite;
+  material: THREE.SpriteMaterial;
+  seed: number;
+}
+
 interface FlashSlot {
   sprite: THREE.Sprite;
   material: THREE.SpriteMaterial;
@@ -773,6 +779,7 @@ export class ThunderheadShroud {
   public readonly root: THREE.Group;
   private readonly puffs: PuffSlot[] = [];
   private readonly flashes: FlashSlot[] = [];
+  private readonly glows: GlowSlot[] = [];
   private readonly halfLength: number;
   private readonly radius: number;
   private state: ShroudState = 'idle';
@@ -781,7 +788,7 @@ export class ThunderheadShroud {
   private coverage = 0;
   private time = 0;
 
-  constructor(parent: THREE.Object3D, halfLength: number, radius: number, puffCount: number = 14) {
+  constructor(parent: THREE.Object3D, halfLength: number, radius: number, puffCount: number = 20) {
     this.halfLength = Math.max(1, halfLength);
     this.radius = Math.max(1, radius);
     this.root = new THREE.Group();
@@ -794,19 +801,24 @@ export class ThunderheadShroud {
       seed = (seed * 16807) % 2147483647;
       return (seed - 1) / 2147483646;
     };
+    const rows = 6;
+    const perRow = Math.max(1, Math.ceil(puffCount / rows));
     for (let i = 0; i < puffCount; i++) {
-      // 沿船体轴向分布在一个拉长的环面上，上半部更厚（雷暴云顶）
-      const along = ((i % 7) / 6) * 2 - 1;
-      const angle = (i < 7 ? 0.35 : -0.35) * Math.PI + (rand() - 0.5) * 1.6 + (i % 2) * Math.PI;
-      const ring = this.radius * (1.05 + rand() * 0.45);
+      // 沿船体轴向分 6 排，每排的云团绕船体一周（上方更厚 = 雷暴云顶），把船身整个裹住
+      const row = i % rows;
+      const k = Math.floor(i / rows);
+      const along = (row / (rows - 1)) * 2 - 1;
+      const taper = 1 - 0.35 * Math.abs(along);
+      const angle = (k / perRow) * Math.PI * 2 + row * 0.9 + (rand() - 0.5) * 0.7;
+      const ring = this.radius * (1.35 + rand() * 0.7) * taper;
       const base = new THREE.Vector3(
-        Math.cos(angle) * ring,
-        Math.sin(angle) * ring * 0.8 + this.radius * 0.35,
-        along * this.halfLength * 0.92
+        Math.cos(angle) * ring * 1.15,
+        Math.sin(angle) * ring * 0.85 + this.radius * 0.45,
+        along * this.halfLength * 0.9
       );
       const material = new THREE.SpriteMaterial({
         map: smoke,
-        color: new THREE.Color(0x353c4a).lerp(new THREE.Color(0x5a6478), rand() * 0.6),
+        color: new THREE.Color(0x56648a).lerp(new THREE.Color(0x9aa8cc), rand()),
         transparent: true,
         opacity: 0,
         depthWrite: false,
@@ -822,13 +834,21 @@ export class ThunderheadShroud {
         sprite,
         material,
         base,
-        size: this.radius * (1.6 + rand() * 0.9),
+        size: this.radius * (2.7 + rand() * 1.3) * (0.75 + 0.25 * taper),
         spin: (rand() - 0.5) * 0.3,
         seed: rand() * 10,
       });
     }
-    for (let i = 0; i < 4; i++) {
-      const sprite = createGlowSprite(0xbfe2ff, 1, 0, 'glow', true);
+    // 云层内部常亮的电光底色：让整团云看起来“带电”
+    for (let i = 0; i < 3; i++) {
+      const sprite = createGlowSprite(0x3a7cff, 1, 0, 'glow', true);
+      sprite.name = `zeppelin_thunderhead_glow_${i}`;
+      sprite.position.set(0, this.radius * 1.6, (i - 1) * this.halfLength * 0.6);
+      this.root.add(sprite);
+      this.glows.push({ sprite, material: sprite.material, seed: i * 2.1 });
+    }
+    for (let i = 0; i < 5; i++) {
+      const sprite = createGlowSprite(0xcfe6ff, 1, 0, 'glow', true);
       sprite.name = `zeppelin_thunderhead_flash_${i}`;
       this.root.add(sprite);
       this.flashes.push({ sprite, material: sprite.material, timer: rand() * 0.6, life: 0 });
@@ -898,20 +918,25 @@ export class ThunderheadShroud {
         puff.base.z
       );
       puff.material.rotation += puff.spin * deltaTime;
-      puff.material.opacity = 0.78 * this.coverage;
+      puff.material.opacity = 0.92 * this.coverage;
+    }
+    for (const glow of this.glows) {
+      const size = this.radius * (5.2 + 0.6 * Math.sin(t * 1.3 + glow.seed)) * grow;
+      glow.sprite.scale.set(size, size * 0.8, 1);
+      glow.material.opacity = (0.13 + 0.06 * Math.sin(t * 3.1 + glow.seed)) * this.coverage;
     }
     // 云内闪光：随机点亮某个云团的内部
     for (const flash of this.flashes) {
       flash.timer -= deltaTime;
-      if (flash.timer <= 0 && this.coverage > 0.4) {
+      if (flash.timer <= 0 && this.coverage > 0.3) {
         const puff = this.puffs[Math.floor(Math.random() * this.puffs.length)];
         if (puff) flash.sprite.position.copy(puff.sprite.position);
-        flash.life = 0.12 + Math.random() * 0.12;
-        flash.timer = 0.25 + Math.random() * 0.9;
+        flash.life = 0.1 + Math.random() * 0.14;
+        flash.timer = 0.18 + Math.random() * 0.6;
       }
       flash.life = Math.max(0, flash.life - deltaTime);
       const on = flash.life > 0 ? 1 : 0;
-      const size = this.radius * (1.8 + Math.random() * 0.8);
+      const size = this.radius * (3 + Math.random() * 1.6);
       flash.sprite.scale.set(size, size, 1);
       flash.material.opacity = on * 0.85 * this.coverage;
     }
@@ -937,8 +962,8 @@ export class ThunderheadShroud {
   /** 局部坐标点是否位于云层椭球内（含目标半径） */
   public containsLocal(local: THREE.Vector3, targetRadius: number = 0): boolean {
     if (!isFiniteVector(local)) return false;
-    const a = this.radius * 2.3 + targetRadius;
-    const b = this.radius * 2.1 + targetRadius;
+    const a = this.radius * 2.6 + targetRadius;
+    const b = this.radius * 2.4 + targetRadius;
     const c = this.halfLength * 1.15 + targetRadius;
     const x = local.x / a;
     const y = (local.y - this.radius * 0.25) / b;
@@ -967,6 +992,7 @@ export class ThunderheadShroud {
     this.root.visible = false;
     for (const puff of this.puffs) puff.material.opacity = 0;
     for (const flash of this.flashes) flash.material.opacity = 0;
+    for (const glow of this.glows) glow.material.opacity = 0;
   }
 
   public dispose(): void {
@@ -974,7 +1000,9 @@ export class ThunderheadShroud {
     this.root.parent?.remove(this.root);
     for (const puff of this.puffs) puff.material.dispose();
     for (const flash of this.flashes) flash.material.dispose();
+    for (const glow of this.glows) glow.material.dispose();
     this.puffs.length = 0;
     this.flashes.length = 0;
+    this.glows.length = 0;
   }
 }
