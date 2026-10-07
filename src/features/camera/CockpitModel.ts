@@ -493,8 +493,12 @@ export class CockpitModel {
       builder.add('frame', new THREE.BoxGeometry(0.05, 0.03, 0.06), [side * 0.322, -0.142, -0.6]);
       // 座舱沿（舱盖导轨）
       builder.add('frame', new THREE.BoxGeometry(0.05, 0.034, 1.12), [side * 0.372, -0.128, -0.1]);
-      // 侧壁：填满视野下角
+      // 侧壁：填满视野下角；两条横向分缝 + 一道竖向加强筋打破大面积平面
       builder.add('panel', new THREE.BoxGeometry(0.012, 0.64, 1.25), [side * 0.392, -0.45, -0.11]);
+      for (const y of [-0.2, -0.29]) {
+        builder.add('bezel', new THREE.BoxGeometry(0.006, 0.01, 1.0), [side * 0.384, y, -0.12]);
+      }
+      builder.add('frame', new THREE.BoxGeometry(0.008, 0.2, 0.022), [side * 0.383, -0.25, -0.5]);
       // 侧操纵台 + 旋钮 + 指示灯
       builder.add('bezel', new THREE.BoxGeometry(0.16, 0.035, 0.9), [side * 0.305, -0.37, -0.08]);
       for (let i = 0; i < 4; i += 1) {
