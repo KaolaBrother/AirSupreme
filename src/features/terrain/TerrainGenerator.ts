@@ -46,6 +46,7 @@ import {
   type TerrainSurfaceSample,
 } from './environments';
 import { createAuroraBand, createEmberField } from './environments/weatherLayers';
+import { BoltRibbons, createPath, jaggedPath } from './environments/lightning';
 
 const log = getLogger('TerrainGenerator');
 
@@ -85,7 +86,7 @@ const WEATHER_PRESET_OVERLAYS: Record<
   mist: { overlayColor: 0xf2fbff, overlayAlpha: 0.08, horizonAlpha: 0.18, streakBoost: 8 },
   snow: { overlayColor: 0xe4f4ff, overlayAlpha: 0.07, horizonAlpha: 0.16, streakBoost: 10 },
   dust: { overlayColor: 0xffd39a, overlayAlpha: 0.12, horizonAlpha: 0.2, streakBoost: 12 },
-  storm: { overlayColor: 0x8aa7c4, overlayAlpha: 0.14, horizonAlpha: 0.22, streakBoost: 16 },
+  storm: { overlayColor: 0x6e737e, overlayAlpha: 0.14, horizonAlpha: 0.22, streakBoost: 16 },
   smog: { overlayColor: 0xa9afba, overlayAlpha: 0.12, horizonAlpha: 0.24, streakBoost: 14 },
   rain: { overlayColor: 0xb8cbe2, overlayAlpha: 0.1, horizonAlpha: 0.18, streakBoost: 12 },
   ash: { overlayColor: 0x6a3a2a, overlayAlpha: 0.1, horizonAlpha: 0.22, streakBoost: 10 },
@@ -5109,7 +5110,8 @@ export class TerrainGenerator {
   }
 
   /**
-   * 雷暴系统：随机间隔生成锯齿状闪电主干，配合点光源照亮海面与云层。
+   * 雷暴系统：随机间隔在玩家周围 300~1400 米处落雷——带状分叉闪电自云底劈到真实地表
+   * （sampleSurface：峡谷台地 / 谷底 / 水面），点光源照亮地表与云层，偶发同一通道复燃。
    */
   private setupLightningStorm(profile: WeatherProfile): void {
     if (profile.type !== 'storm') {
@@ -5117,43 +5119,39 @@ export class TerrainGenerator {
     }
 
     const flashLight = new THREE.PointLight(0xd9e8ff, 0, 4800, 2);
+    flashLight.name = 'stormFlashLight';
     flashLight.position.set(0, 300, 0);
     this.terrainGroup.add(flashLight);
 
-    const maxPoints = 26;
-    const boltGeometry = new THREE.BufferGeometry();
-    const boltAttribute = new THREE.BufferAttribute(new Float32Array(maxPoints * 3), 3);
-    boltAttribute.setUsage(THREE.DynamicDrawUsage);
-    boltGeometry.setAttribute('position', boltAttribute);
-    boltGeometry.setDrawRange(0, 0);
-    const boltMaterial = new THREE.LineBasicMaterial({
-      color: 0xeaf4ff,
-      transparent: true,
-      opacity: 0,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-      fog: false,
-    });
-    const bolt = new THREE.Line(boltGeometry, boltMaterial);
-    bolt.visible = false;
-    bolt.frustumCulled = false;
-    this.terrainGroup.add(bolt);
+    const ribbons = new BoltRibbons(48, 'stormLightning');
+    this.terrainGroup.add(ribbons.mesh);
+    const mainPath = createPath(5);
+    const branchPath = createPath(3);
+    const top = new THREE.Vector3();
+    const ground = new THREE.Vector3();
+    const branchEnd = new THREE.Vector3();
+    const random = Math.random;
 
     const flashDuration = 0.34;
-    let cooldown = 3.5 + Math.random() * 6;
+    let cooldown = 3.5 + random() * 6;
     let flashRemaining = 0;
+    let slots = 0;
+    let restrike = false;
 
     this.animatedProps.push((deltaTime, time) => {
       if (flashRemaining > 0) {
         flashRemaining -= deltaTime;
         const fade = Math.max(flashRemaining, 0) / flashDuration;
         const flicker = fade * (0.55 + Math.abs(Math.sin(time * 47)) * 0.45);
-        boltMaterial.opacity = flicker;
+        ribbons.setIntensity(0, slots, flicker);
+        ribbons.commit();
         flashLight.intensity = 52000 * flicker;
         if (flashRemaining <= 0) {
-          bolt.visible = false;
+          ribbons.clear(0, ribbons.capacity);
+          ribbons.commit();
           flashLight.intensity = 0;
-          cooldown = 4 + Math.random() * 8;
+          restrike = !restrike && random() < 0.25;
+          cooldown = restrike ? 0.1 + random() * 0.15 : 4 + random() * 8;
         }
         return;
       }
@@ -5162,23 +5160,40 @@ export class TerrainGenerator {
       if (cooldown > 0) {
         return;
       }
-
-      const strikeX = (Math.random() - 0.5) * 2600;
-      const strikeZ = (Math.random() - 0.5) * 2600;
-      const cloudTop = 230 + Math.random() * 90;
-      const segments = 12 + Math.floor(Math.random() * 10);
-      let x = strikeX;
-      let z = strikeZ;
-      for (let s = 0; s <= segments; s++) {
-        const y = cloudTop + (-48 - cloudTop) * (s / segments);
-        boltAttribute.setXYZ(s, x, y, z);
-        x += (Math.random() - 0.5) * 30;
-        z += (Math.random() - 0.5) * 30;
+      if (restrike) {
+        // 同一通道复燃：沿用上一道闪电的几何
+        flashRemaining = flashDuration * 0.7;
+        return;
       }
-      boltGeometry.setDrawRange(0, segments + 1);
-      boltAttribute.needsUpdate = true;
-      bolt.visible = true;
-      flashLight.position.set(strikeX, cloudTop * 0.5, strikeZ);
+
+      const angle = random() * Math.PI * 2;
+      const distance = 300 + random() * 1100;
+      const strikeX = this.lastPlayerPosition.x + Math.cos(angle) * distance;
+      const strikeZ = this.lastPlayerPosition.z + Math.sin(angle) * distance;
+      const groundY = this.sampleSurface(strikeX, strikeZ).y;
+      const cloudBase = Math.max(profile.cloudHeightMax + 50, groundY + 220) + random() * 60;
+      top.set(strikeX + (random() - 0.5) * 200, cloudBase, strikeZ + (random() - 0.5) * 200);
+      ground.set(strikeX, groundY, strikeZ);
+      jaggedPath(top, ground, 0.2, random, mainPath);
+      ribbons.clear(0, ribbons.capacity);
+      let slot = 0;
+      for (let i = 0; i < mainPath.length - 1; i++) {
+        const taper = 1 - (i / mainPath.length) * 0.4;
+        ribbons.setSegment(slot++, mainPath[i], mainPath[i + 1], 2.4 * taper, 1);
+      }
+      const from = mainPath[6 + Math.floor(random() * 10)];
+      branchEnd.set(
+        from.x + (random() - 0.5) * 180,
+        from.y - 80 - random() * 100,
+        from.z + (random() - 0.5) * 180
+      );
+      jaggedPath(from, branchEnd, 0.3, random, branchPath);
+      for (let i = 0; i < branchPath.length - 1; i++) {
+        ribbons.setSegment(slot++, branchPath[i], branchPath[i + 1], 1.2, 0.7);
+      }
+      slots = slot;
+      ribbons.commit();
+      flashLight.position.set(strikeX, (cloudBase + groundY) * 0.5, strikeZ);
       flashRemaining = flashDuration;
     });
   }
