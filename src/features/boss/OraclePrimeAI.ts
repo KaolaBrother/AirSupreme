@@ -918,6 +918,11 @@ export class OraclePrimeAI implements IAdvancedBoss {
     return count;
   }
 
+  private isAnyEmitterVenting(): boolean {
+    for (const emitter of this.emitters) if (emitter.alive && emitter.vent > 0) return true;
+    return false;
+  }
+
   private getAliveEmitterCount(): number {
     let count = 0;
     for (const emitter of this.emitters) if (emitter.alive) count++;
@@ -962,7 +967,7 @@ export class OraclePrimeAI implements IAdvancedBoss {
     if (this.major === 'last-light') return 8;
     if (this.exhaustTimer > 0) return 9;
     if (this.apertureTimer > 0) return 10;
-    if (this.emitters.some((emitter) => emitter.alive && emitter.vent > 0)) return 11;
+    if (this.isAnyEmitterVenting()) return 11;
     if (this.pinwheel.getState() !== 'idle') return 12;
     if (this.judgement.isBusy()) return 13;
     if (this.shockwaves.isCharging()) return 14;
@@ -1889,7 +1894,8 @@ export class OraclePrimeAI implements IAdvancedBoss {
         break;
       case 'crown':
       case 'twin':
-        if (!this.shockwaves.isCharging() && this.majorTimer > 0.5) this.finishMajor(1.4);
+        // 冲击环释放后多留一些空档，让玩家先处理这道环
+        if (!this.shockwaves.isCharging() && this.majorTimer > 0.5) this.finishMajor(1.8);
         break;
       case 'orbital':
         if (this.majorTimer > 1.6) this.finishMajor();
@@ -2540,6 +2546,9 @@ export class OraclePrimeAI implements IAdvancedBoss {
     materials.spine.opacity = 0.45 + 0.2 * Math.sin(t * 3) + this.coreCharge * 0.35;
     materials.spine.color.copy(LATTICE_COLOR).lerp(OVERLOAD_COLOR, mix);
 
+    // 蓄力时核心收缩、释放瞬间外胀（冲击环 / 审判之矛的读招提示）
+    const coreScale = 1 - 0.14 * this.coreCharge + 0.12 * this.coreFlare;
+    rig.core.scale.setScalar(Math.max(0.6, coreScale));
     const glowSize =
       (7.2 + 2.2 * this.coreCharge + 3 * this.coreFlare + 0.5 * Math.sin(t * 4)) * rig.scale;
     rig.coreGlow.scale.set(glowSize, glowSize, 1);
