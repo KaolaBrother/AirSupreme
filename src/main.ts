@@ -66,8 +66,9 @@ function warmGameCoordinatorChunk(): void {
   }
 
   if ('requestIdleCallback' in window) {
-    (window as Window & { requestIdleCallback: (cb: IdleRequestCallback) => number })
-      .requestIdleCallback(() => preload());
+    (
+      window as Window & { requestIdleCallback: (cb: IdleRequestCallback) => number }
+    ).requestIdleCallback(() => preload());
     return;
   }
 

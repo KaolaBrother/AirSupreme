@@ -175,11 +175,7 @@ export class PresentationController {
     this.bossIndicator.clear();
   }
 
-  public updateRadar(
-    playerPos: Vector3,
-    blips: RadarBlip[],
-    playerRotation: Quaternion
-  ): void {
+  public updateRadar(playerPos: Vector3, blips: RadarBlip[], playerRotation: Quaternion): void {
     this.ensureRadar();
     this.radar?.updateBlips(playerPos, blips, playerRotation);
   }
@@ -287,7 +283,11 @@ export class PresentationController {
       return;
     }
 
-    if (!titleChanged && now - this.lastEventObjectiveStatusUpdatedAt < PresentationController.EVENT_OBJECTIVE_STATUS_THROTTLE_MS) {
+    if (
+      !titleChanged &&
+      now - this.lastEventObjectiveStatusUpdatedAt <
+        PresentationController.EVENT_OBJECTIVE_STATUS_THROTTLE_MS
+    ) {
       return;
     }
 

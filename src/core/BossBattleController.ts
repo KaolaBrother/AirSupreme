@@ -256,23 +256,27 @@ export class BossBattleController {
       return;
     }
 
-    const friendlyMeshes = this.deps.enemySystem.getFriendlyAIs().map((friendly) => friendly.getMesh());
+    const friendlyMeshes = this.deps.enemySystem
+      .getFriendlyAIs()
+      .map((friendly) => friendly.getMesh());
     const bossMissileSystem = this.currentBoss.getMissileSystem();
     const bossParts = this.currentBoss.getCollisionParts();
     const missileMeshes = bossMissileSystem ? bossMissileSystem.getMissileMeshes() : [];
     const bossTargets = [...bossParts, ...missileMeshes];
 
-    this.deps.enemySystem.updateWithPlayer(
-      deltaTime,
-      this.deps.playerSystem.getPosition(),
-      [this.currentBoss.getMesh(), ...bossTargets]
-    );
+    this.deps.enemySystem.updateWithPlayer(deltaTime, this.deps.playerSystem.getPosition(), [
+      this.currentBoss.getMesh(),
+      ...bossTargets,
+    ]);
 
     this.currentBoss.update(deltaTime, this.deps.playerSystem.getMesh(), friendlyMeshes);
     this.updateBossMissileCollisions(bossMissileSystem, friendlyMeshes);
     this.updatePlayerWeaponBossCollisions(bossParts, missileMeshes, bossMissileSystem);
 
-    if (this.currentBossType === BossType.OCTOPUS_WARSHIP && this.isOctopusWarshipBoss(this.currentBoss)) {
+    if (
+      this.currentBossType === BossType.OCTOPUS_WARSHIP &&
+      this.isOctopusWarshipBoss(this.currentBoss)
+    ) {
       this.updateOctopusSpecials(deltaTime, this.currentBoss);
     }
 
@@ -284,9 +288,7 @@ export class BossBattleController {
     }
 
     this.bossIndicatorUpdateTimer += deltaTime;
-    if (
-      this.bossIndicatorUpdateTimer >= BossBattleController.BOSS_INDICATOR_UPDATE_INTERVAL
-    ) {
+    if (this.bossIndicatorUpdateTimer >= BossBattleController.BOSS_INDICATOR_UPDATE_INTERVAL) {
       this.bossIndicatorUpdateTimer %= BossBattleController.BOSS_INDICATOR_UPDATE_INTERVAL;
       this.updateBossIndicators();
     }
@@ -411,9 +413,8 @@ export class BossBattleController {
     config: BossConfig,
     isBossMode: boolean
   ): Promise<DesertFortressAI> {
-    const { DesertFortressAI, createDesertFortressMesh } = await import(
-      '@/features/boss/DesertFortressAI'
-    );
+    const { DesertFortressAI, createDesertFortressMesh } =
+      await import('@/features/boss/DesertFortressAI');
     const mesh = createDesertFortressMesh(config);
     const playerPos = this.deps.playerSystem.getPosition();
     mesh.position.set(playerPos.x, -50, playerPos.z + 200);
@@ -446,7 +447,9 @@ export class BossBattleController {
           return;
         }
 
-        const friendly = this.deps.enemySystem.getFriendlyAIs().find((candidate) => candidate.getMesh() === target);
+        const friendly = this.deps.enemySystem
+          .getFriendlyAIs()
+          .find((candidate) => candidate.getMesh() === target);
         friendly?.takeDamage(damage);
       });
     };
@@ -463,9 +466,8 @@ export class BossBattleController {
     config: BossConfig,
     isBossMode: boolean
   ): Promise<OctopusWarshipAI> {
-    const { OctopusWarshipAI, createOctopusWarshipMesh } = await import(
-      '@/features/boss/OctopusWarshipAI'
-    );
+    const { OctopusWarshipAI, createOctopusWarshipMesh } =
+      await import('@/features/boss/OctopusWarshipAI');
     const mesh = createOctopusWarshipMesh(config);
     const playerPos = this.deps.playerSystem.getPosition();
     mesh.position.set(playerPos.x + (Math.random() - 0.5) * 100, 150, playerPos.z + 200);
@@ -510,9 +512,8 @@ export class BossBattleController {
     config: BossConfig,
     isBossMode: boolean
   ): Promise<MissileDestroyerAI> {
-    const { MissileDestroyerAI, createMissileDestroyerMesh } = await import(
-      '@/features/boss/MissileDestroyerAI'
-    );
+    const { MissileDestroyerAI, createMissileDestroyerMesh } =
+      await import('@/features/boss/MissileDestroyerAI');
     const mesh = createMissileDestroyerMesh(config);
     const playerPos = this.deps.playerSystem.getPosition();
     mesh.position.set(playerPos.x, -50, playerPos.z + 200);
@@ -547,7 +548,9 @@ export class BossBattleController {
           return;
         }
 
-        const friendly = this.deps.enemySystem.getFriendlyAIs().find((candidate) => candidate.getMesh() === target);
+        const friendly = this.deps.enemySystem
+          .getFriendlyAIs()
+          .find((candidate) => candidate.getMesh() === target);
         friendly?.takeDamage(damage);
       });
     };
@@ -801,7 +804,12 @@ export class BossBattleController {
     }
     this.updateAdvancedHazards(deltaTime, boss);
     this.decoyRedirector ??= new BossFlareDecoyRedirector(this.deps.scene);
-    this.decoyRedirector.update(deltaTime, this.deps.getDecoys(), missileSystem, playerMesh.position);
+    this.decoyRedirector.update(
+      deltaTime,
+      this.deps.getDecoys(),
+      missileSystem,
+      playerMesh.position
+    );
     this.updateAdvancedPresentation(deltaTime, boss);
 
     this.bossFriendlySpawnTimer += deltaTime;
@@ -1012,7 +1020,11 @@ export class BossBattleController {
         if (part.userData.bossDeflector === true || part.userData.bossHazardTarget === true) {
           continue;
         }
-        if (advanced && advanced.getDamageMultiplier(part) <= 0 && part.userData.bossDecoy !== true) {
+        if (
+          advanced &&
+          advanced.getDamageMultiplier(part) <= 0 &&
+          part.userData.bossDecoy !== true
+        ) {
           continue;
         }
         out.push(part);
@@ -1164,7 +1176,9 @@ export class BossBattleController {
           return;
         }
 
-        const friendly = this.deps.enemySystem.getFriendlyAIs().find((candidate) => candidate.getMesh() === target);
+        const friendly = this.deps.enemySystem
+          .getFriendlyAIs()
+          .find((candidate) => candidate.getMesh() === target);
         friendly?.takeDamage(BOSS_MISSILE_CONFIG.DAMAGE);
       }
     );
@@ -1179,22 +1193,27 @@ export class BossBattleController {
       return;
     }
 
-    if (this.currentBossType === BossType.OCTOPUS_WARSHIP && this.isOctopusWarshipBoss(this.currentBoss)) {
+    if (
+      this.currentBossType === BossType.OCTOPUS_WARSHIP &&
+      this.isOctopusWarshipBoss(this.currentBoss)
+    ) {
       const octopusBoss = this.currentBoss;
       const eyeParts = octopusBoss.getEyeCollisionParts();
       const eyeMeshes = eyeParts.map((part) => part.mesh);
 
-      this.deps.combatSystem.getMissileSystem().checkCollisions(eyeMeshes, (target, impactPosition) => {
-        const part = eyeParts.find((candidate) => candidate.mesh === target);
-        if (!part) {
-          return;
-        }
+      this.deps.combatSystem
+        .getMissileSystem()
+        .checkCollisions(eyeMeshes, (target, impactPosition) => {
+          const part = eyeParts.find((candidate) => candidate.mesh === target);
+          if (!part) {
+            return;
+          }
 
-        octopusBoss.takeEyeDamage(part.index, GAME_CONSTANTS.MISSILE.DAMAGE);
-        this.createArmorHitFeedback(impactPosition, 1.14, true);
-        this.deps.particleSystem.createMissileImpact(impactPosition, 1.25);
-        this.deps.audioManager.playMissileExplosion('enemy');
-      });
+          octopusBoss.takeEyeDamage(part.index, GAME_CONSTANTS.MISSILE.DAMAGE);
+          this.createArmorHitFeedback(impactPosition, 1.14, true);
+          this.deps.particleSystem.createMissileImpact(impactPosition, 1.25);
+          this.deps.audioManager.playMissileExplosion('enemy');
+        });
 
       this.deps.combatSystem.getPlayerProjectilePool().checkCollisions(eyeMeshes, (target) => {
         const part = eyeParts.find((candidate) => candidate.mesh === target);
@@ -1202,10 +1221,7 @@ export class BossBattleController {
           return;
         }
 
-        octopusBoss.takeEyeDamage(
-          part.index,
-          this.deps.combatSystem.getDamageMultiplier() * 12.5
-        );
+        octopusBoss.takeEyeDamage(part.index, this.deps.combatSystem.getDamageMultiplier() * 12.5);
         const hitWorldPos = new Vector3();
         target.getWorldPosition(hitWorldPos);
         this.createArmorHitFeedback(hitWorldPos, 0.98);
@@ -1213,24 +1229,28 @@ export class BossBattleController {
     }
 
     const missileTargets = [this.currentBoss.getMesh(), ...bossParts, ...missileMeshes];
-    this.deps.combatSystem.getMissileSystem().checkCollisions(missileTargets, (target, impactPosition) => {
-      const hitWorldPos = impactPosition.clone();
-      const isBossPart = bossParts.includes(target);
+    this.deps.combatSystem
+      .getMissileSystem()
+      .checkCollisions(missileTargets, (target, impactPosition) => {
+        const hitWorldPos = impactPosition.clone();
+        const isBossPart = bossParts.includes(target);
 
-      if (target === this.currentBoss?.getMesh() || isBossPart) {
-        this.currentBoss?.takeDamage(GAME_CONSTANTS.MISSILE.DAMAGE);
-        this.createArmorHitFeedback(hitWorldPos, 1.18, true);
-        this.deps.particleSystem.createMissileImpact(hitWorldPos, 1.55);
-        this.deps.audioManager.playMissileExplosion('enemy');
-        return;
-      }
+        if (target === this.currentBoss?.getMesh() || isBossPart) {
+          this.currentBoss?.takeDamage(GAME_CONSTANTS.MISSILE.DAMAGE);
+          this.createArmorHitFeedback(hitWorldPos, 1.18, true);
+          this.deps.particleSystem.createMissileImpact(hitWorldPos, 1.55);
+          this.deps.audioManager.playMissileExplosion('enemy');
+          return;
+        }
 
-      const missile = bossMissileSystem?.getMissiles().find((candidate) => candidate.getMesh() === target);
-      if (missile) {
-        missile.takeDamage(GAME_CONSTANTS.MISSILE.DAMAGE);
-        this.createBossMissileDestroyedFeedback(hitWorldPos, 0.92, 'enemy');
-      }
-    });
+        const missile = bossMissileSystem
+          ?.getMissiles()
+          .find((candidate) => candidate.getMesh() === target);
+        if (missile) {
+          missile.takeDamage(GAME_CONSTANTS.MISSILE.DAMAGE);
+          this.createBossMissileDestroyedFeedback(hitWorldPos, 0.92, 'enemy');
+        }
+      });
 
     const bossTargets = [...bossParts, ...missileMeshes];
     this.deps.combatSystem.getPlayerProjectilePool().checkCollisions(bossTargets, (target) => {
@@ -1243,7 +1263,9 @@ export class BossBattleController {
         return;
       }
 
-      const missile = bossMissileSystem?.getMissiles().find((candidate) => candidate.getMesh() === target);
+      const missile = bossMissileSystem
+        ?.getMissiles()
+        .find((candidate) => candidate.getMesh() === target);
       missile?.takeDamage(this.deps.combatSystem.getDamageMultiplier() * 12.5);
     });
 
@@ -1259,7 +1281,9 @@ export class BossBattleController {
           return;
         }
 
-        const missile = bossMissileSystem?.getMissiles().find((candidate) => candidate.getMesh() === target);
+        const missile = bossMissileSystem
+          ?.getMissiles()
+          .find((candidate) => candidate.getMesh() === target);
         if (missile) {
           missile.takeDamage(damage);
           this.createBossMissileDestroyedFeedback(target.position, 0.72, 'enemy');
@@ -1469,7 +1493,8 @@ export class BossBattleController {
     hitProfile: 'player' | 'enemy' | 'boss'
   ): void {
     this.createHeavyDamageFeedback(position, heavyIntensity, weaponProfile);
-    const hitTone = weaponProfile === 'flak-hit' ? 'flak' : weaponProfile === 'laser' ? 'bullet' : 'heavy';
+    const hitTone =
+      weaponProfile === 'flak-hit' ? 'flak' : weaponProfile === 'laser' ? 'bullet' : 'heavy';
     this.createDamageFeedback(position, hitIntensity, hitProfile, hitTone);
   }
 
@@ -1480,12 +1505,7 @@ export class BossBattleController {
   ): void {
     this.createHeavyDamageFeedback(position, heavyIntensity, 'boss-armor');
     if (withHitLayer) {
-      this.createDamageFeedback(
-        position,
-        Math.max(0.9, heavyIntensity * 0.86),
-        'boss',
-        'heavy'
-      );
+      this.createDamageFeedback(position, Math.max(0.9, heavyIntensity * 0.86), 'boss', 'heavy');
     }
   }
 
@@ -1533,9 +1553,7 @@ export class BossBattleController {
     }
   }
 
-  private hasFlakCannonSystem(
-    boss: ActiveBoss
-  ): boss is DesertFortressAI | MissileDestroyerAI {
+  private hasFlakCannonSystem(boss: ActiveBoss): boss is DesertFortressAI | MissileDestroyerAI {
     return 'getFlakCannonSystem' in boss;
   }
 

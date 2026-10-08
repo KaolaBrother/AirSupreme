@@ -182,12 +182,13 @@ export class GameCoordinator {
   };
   private static runtimeWarmupPromise: Promise<void> | null = null;
   /** 第 1 轮默认的 Boss 小兵映射（无人机优先使用单位系统的自杀无人机） */
-  private static readonly MINION_ENEMY_TYPES: Record<Exclude<BossMinionKind, 'drone'>, EnemyType> = {
-    scout: EnemyType.SCOUT,
-    fighter: EnemyType.FIGHTER,
-    heavy: EnemyType.HEAVY,
-    ace: EnemyType.ACE,
-  };
+  private static readonly MINION_ENEMY_TYPES: Record<Exclude<BossMinionKind, 'drone'>, EnemyType> =
+    {
+      scout: EnemyType.SCOUT,
+      fighter: EnemyType.FIGHTER,
+      heavy: EnemyType.HEAVY,
+      ace: EnemyType.ACE,
+    };
   /** 特殊武器开火的镜头震动（integration-notes 震动表） */
   private static readonly NO_ENEMIES: readonly EnemyAI[] = [];
   private static readonly WEAPON_FIRE_SHAKE: Record<SpecialWeaponId, number> = {
@@ -361,9 +362,13 @@ export class GameCoordinator {
     );
     this.view.onModeChanged = (mode) => this.handleCameraModeChanged(mode);
 
-    this.playerSystem = new PlayerSystem(this.gameScene.scene, this.playerAircraft, this.playerStats);
+    this.playerSystem = new PlayerSystem(
+      this.gameScene.scene,
+      this.playerAircraft,
+      this.playerStats
+    );
     this.playerSystem.setCrashSurfaceSampler(
-      (x, z) => this.enemySystem?.getLevelManager().getCrashSurfaceY(x, z) ?? WORLDSCAPE_WATER_Y,
+      (x, z) => this.enemySystem?.getLevelManager().getCrashSurfaceY(x, z) ?? WORLDSCAPE_WATER_Y
     );
 
     // 战役表现层（第 2 轮挂剧情卡片 / 无线电 / 新 HUD 面板 / 新音效的唯一入口）
@@ -777,9 +782,7 @@ export class GameCoordinator {
     }
     this.hud.updateScore(this.gameState.getScore());
     this.lockOnIndicator.setLockTime(this.playerStats.getMissileLockTime());
-    this.lockOnIndicator.setLockCircleScale(
-      this.playerStats.getMissileLockRadiusMultiplier()
-    );
+    this.lockOnIndicator.setLockCircleScale(this.playerStats.getMissileLockRadiusMultiplier());
 
     if (settings.testScore > 0 && !this.options.resume) {
       this.gameState.addScore(settings.testScore);
@@ -817,7 +820,10 @@ export class GameCoordinator {
     return friendly;
   }
 
-  private spawnEnemyFromBoss(position: THREE.Vector3, enemyType: EnemyType = EnemyType.FIGHTER): void {
+  private spawnEnemyFromBoss(
+    position: THREE.Vector3,
+    enemyType: EnemyType = EnemyType.FIGHTER
+  ): void {
     const MAX_ENEMIES = 8;
     if (!this.enemySystem) {
       return;
@@ -1041,10 +1047,7 @@ export class GameCoordinator {
     this.view.setFlightState(speedRatio, boosting);
   }
 
-  private handleMissileInput(
-    input: ReturnType<InputHandler['getState']>,
-    deltaTime: number
-  ): void {
+  private handleMissileInput(input: ReturnType<InputHandler['getState']>, deltaTime: number): void {
     // 锁定候选：Boss 可受伤部件（隐形 / 护盾偏转体除外）→ 敌机 → 敌方单位瞄准点 → Boss 导弹
     const targetMeshes = this.lockTargets;
     targetMeshes.length = 0;
@@ -1308,7 +1311,10 @@ export class GameCoordinator {
       };
     }
 
-    if (!this.tutorialCombatState.lockCompleteHintShown && !this.tutorialCombatState.missileHintShown) {
+    if (
+      !this.tutorialCombatState.lockCompleteHintShown &&
+      !this.tutorialCombatState.missileHintShown
+    ) {
       return {
         title: '试玩引导 · 导弹锁定',
         objective: '目标稳定入准星，锁定圈闭合后发射。',
@@ -1316,7 +1322,10 @@ export class GameCoordinator {
       };
     }
 
-    if (this.tutorialCombatState.lockCompleteHintShown && !this.tutorialCombatState.missileHintShown) {
+    if (
+      this.tutorialCombatState.lockCompleteHintShown &&
+      !this.tutorialCombatState.missileHintShown
+    ) {
       return {
         title: '试玩引导 · 导弹发射',
         objective: '锁定达成后立刻发射，观察命中反馈。',
@@ -1338,7 +1347,9 @@ export class GameCoordinator {
     const aliveEnemies = enemies.filter((enemy) => enemy.isAlive());
     const spawnedEnemies = waveProgress?.spawnedInWave ?? aliveEnemies.length;
     const totalEnemies = waveProgress?.maxEnemies ?? Math.max(spawnedEnemies, aliveEnemies.length);
-    const remainingEnemies = waveProgress?.remainingInWave ?? Math.max(0, totalEnemies - (spawnedEnemies - aliveEnemies.length));
+    const remainingEnemies =
+      waveProgress?.remainingInWave ??
+      Math.max(0, totalEnemies - (spawnedEnemies - aliveEnemies.length));
     const aliveInWave = waveProgress?.aliveInWave ?? aliveEnemies.length;
 
     switch (this.waveEventState.type) {
@@ -1399,10 +1410,7 @@ export class GameCoordinator {
     return {
       title: `第 ${waveProgress.wave + 1} 波 · 阶段完成`,
       objective: '本波已清空，整姿态，准备下一波。',
-      status:
-        nextWaveDelay > 0
-          ? `重整中：${nextWaveDelay}s 后接续`
-          : '重整中：准备下一波',
+      status: nextWaveDelay > 0 ? `重整中：${nextWaveDelay}s 后接续` : '重整中：准备下一波',
     };
   }
 
@@ -1566,8 +1574,7 @@ export class GameCoordinator {
 
   private shouldSpawnPowerUp(): boolean {
     const currentLevel =
-      this.enemySystem?.getCurrentLevelConfig() ||
-      getLevelConfig(this.sessionState.getLevel());
+      this.enemySystem?.getCurrentLevelConfig() || getLevelConfig(this.sessionState.getLevel());
     const baseChance = currentLevel?.powerUpFrequency ?? GAME_CONSTANTS.POWERUP.SPAWN_CHANCE;
     const difficultyProfile = this.getCurrentDifficultyProfile();
     const finalChance = Math.max(
@@ -1580,8 +1587,7 @@ export class GameCoordinator {
 
   private spawnPowerUpForCurrentLevel(position: THREE.Vector3): void {
     const currentLevel =
-      this.enemySystem?.getCurrentLevelConfig() ||
-      getLevelConfig(this.sessionState.getLevel());
+      this.enemySystem?.getCurrentLevelConfig() || getLevelConfig(this.sessionState.getLevel());
     const allowedTypes = currentLevel?.powerUpTypes ?? Object.values(PowerUpType);
     const filteredTypes = Object.values(PowerUpType).filter((type) => allowedTypes.includes(type));
     const availableTypes = filteredTypes.length > 0 ? filteredTypes : Object.values(PowerUpType);
@@ -1644,9 +1650,10 @@ export class GameCoordinator {
 
     const now = performance.now();
     // 乘模拟时间倍率（只有开发构建的调试钩子会改动，正式版恒为 1），相机跟随与加速后的模拟同步
-    const renderDeltaTime = this.lastRenderTimestamp > 0
-      ? Math.min((now - this.lastRenderTimestamp) / 1000, 0.05) * this.gameLoop.getTimeScale()
-      : 0;
+    const renderDeltaTime =
+      this.lastRenderTimestamp > 0
+        ? Math.min((now - this.lastRenderTimestamp) / 1000, 0.05) * this.gameLoop.getTimeScale()
+        : 0;
     this.lastRenderTimestamp = now;
 
     if (this.sessionState.isPlaying() && !this.sessionState.isPaused()) {
@@ -1923,12 +1930,15 @@ export class GameCoordinator {
       this.startTutorialCombatSequence(tutorialWaveDelayMs);
     }
 
-    this.scheduleTimeout(() => {
-      if (this.sessionState.getLevel() !== level || this.sessionState.isInBossBattle()) {
-        return;
-      }
-      this.enemySystem?.startWave(this.playerSystem.getPosition());
-    }, GAME_CONSTANTS.LEVEL.START_DELAY * 1000 + tutorialWaveDelayMs);
+    this.scheduleTimeout(
+      () => {
+        if (this.sessionState.getLevel() !== level || this.sessionState.isInBossBattle()) {
+          return;
+        }
+        this.enemySystem?.startWave(this.playerSystem.getPosition());
+      },
+      GAME_CONSTANTS.LEVEL.START_DELAY * 1000 + tutorialWaveDelayMs
+    );
 
     this.presentation.playLevelMusic(level);
 
@@ -2059,7 +2069,11 @@ export class GameCoordinator {
   }
 
   /** 检查点所需的运行时快照（统计由流程控制器补上） */
-  private captureCheckpoint(kind: CheckpointKind, level: number, wave: number): CampaignCheckpointInput {
+  private captureCheckpoint(
+    kind: CheckpointKind,
+    level: number,
+    wave: number
+  ): CampaignCheckpointInput {
     return {
       checkpoint: kind,
       level,
@@ -2199,7 +2213,10 @@ export class GameCoordinator {
       this.spawnEnemyFromBoss(position, EnemyType.SCOUT);
       return;
     }
-    this.spawnEnemyFromBoss(position, GameCoordinator.MINION_ENEMY_TYPES[kind] ?? EnemyType.FIGHTER);
+    this.spawnEnemyFromBoss(
+      position,
+      GameCoordinator.MINION_ENEMY_TYPES[kind] ?? EnemyType.FIGHTER
+    );
   }
 
   private createUnitController(): UnitController {
@@ -2210,7 +2227,8 @@ export class GameCoordinator {
         this.awardScore(scoreValue);
         this.campaign.recordKill();
       },
-      applyPenalty: (points, unitName, civilian) => this.applyScorePenalty(points, unitName, civilian),
+      applyPenalty: (points, unitName, civilian) =>
+        this.applyScorePenalty(points, unitName, civilian),
       onAssetLost: (civilian) => this.campaign.recordAssetLost(civilian),
       damagePlayer: (damage, position) => {
         if (this.playerSystem.isPlayerRespawning() || !this.playerAircraft.visible) return;
@@ -2286,9 +2304,7 @@ export class GameCoordinator {
           isStoryHold: () => this.storyHold,
           getUpgradeMenuVisible: () => this.upgradeMenu?.isVisible() ?? false,
           clickHangarContinue: () => {
-            const button = document.querySelector<HTMLButtonElement>(
-              '#upgrade-menu button.hangar'
-            );
+            const button = document.querySelector<HTMLButtonElement>('#upgrade-menu button.hangar');
             button?.click();
           },
           onPlayerTeleported: () => {
@@ -2315,8 +2331,10 @@ export class GameCoordinator {
 
   private getTutorialIntroDurationMs(): number {
     const stageCount = this.getTutorialStages().length;
-    return stageCount * GameCoordinator.TUTORIAL_STAGE_DURATION_MS
-      + Math.max(0, stageCount - 1) * GameCoordinator.TUTORIAL_STAGE_GAP_MS;
+    return (
+      stageCount * GameCoordinator.TUTORIAL_STAGE_DURATION_MS +
+      Math.max(0, stageCount - 1) * GameCoordinator.TUTORIAL_STAGE_GAP_MS
+    );
   }
 
   private getTutorialWaveDelayMs(): number {
@@ -2339,7 +2357,8 @@ export class GameCoordinator {
 
     tutorialStages.forEach((stage, index) => {
       const delay =
-        index * (GameCoordinator.TUTORIAL_STAGE_DURATION_MS + GameCoordinator.TUTORIAL_STAGE_GAP_MS);
+        index *
+        (GameCoordinator.TUTORIAL_STAGE_DURATION_MS + GameCoordinator.TUTORIAL_STAGE_GAP_MS);
 
       this.scheduleTimeout(() => {
         this.hud.showPowerUpBig(
@@ -2354,16 +2373,20 @@ export class GameCoordinator {
 
   private startTutorialCombatSequence(tutorialWaveDelayMs: number): void {
     const onboardingBeat = this.getCurrentWaveOnboardingBeat();
-    const combatStartDelayMs =
-      GAME_CONSTANTS.LEVEL.START_DELAY * 1000 + tutorialWaveDelayMs;
-    const waveReadyLeadMs = onboardingBeat.firstWaveLeadInMs > 0
-      ? onboardingBeat.firstWaveLeadInMs
-      : GameCoordinator.TUTORIAL_PRE_WAVE_WARNING_LEAD_MS;
+    const combatStartDelayMs = GAME_CONSTANTS.LEVEL.START_DELAY * 1000 + tutorialWaveDelayMs;
+    const waveReadyLeadMs =
+      onboardingBeat.firstWaveLeadInMs > 0
+        ? onboardingBeat.firstWaveLeadInMs
+        : GameCoordinator.TUTORIAL_PRE_WAVE_WARNING_LEAD_MS;
     const waveReadyDelayMs = Math.max(0, combatStartDelayMs - waveReadyLeadMs);
     const firstWaveAnnouncement = this.getWaveAnnouncementDisplay(null, 1, false, onboardingBeat);
 
     this.scheduleTimeout(() => {
-      this.hud.showPowerUpBig('📡', '前方有敌，准备接敌', GameCoordinator.TUTORIAL_HINT_MED_MS / 1000);
+      this.hud.showPowerUpBig(
+        '📡',
+        '前方有敌，准备接敌',
+        GameCoordinator.TUTORIAL_HINT_MED_MS / 1000
+      );
     }, waveReadyDelayMs);
 
     this.scheduleTimeout(() => {
@@ -2392,11 +2415,12 @@ export class GameCoordinator {
     onboardingBeat: OnboardingWaveBeatProfile = this.getCurrentWaveOnboardingBeat()
   ): WaveAnnouncementDisplay {
     const textProfile = getWaveOnboardingText(eventType, isComplete);
-    const fallbackDurationMs = eventType === null
-      ? onboardingBeat.firstWaveHintDurationMs
-      : isComplete
-        ? onboardingBeat.eventCompletionHoldMs
-        : onboardingBeat.eventPromptHoldMs;
+    const fallbackDurationMs =
+      eventType === null
+        ? onboardingBeat.firstWaveHintDurationMs
+        : isComplete
+          ? onboardingBeat.eventCompletionHoldMs
+          : onboardingBeat.eventPromptHoldMs;
     const durationMs = Math.max(
       200,
       fallbackDurationMs > 0 ? fallbackDurationMs : textProfile.durationMs
@@ -2455,7 +2479,11 @@ export class GameCoordinator {
       const movedDistance = this.playerSystem.getPosition().distanceTo(startPosition);
       if (movedDistance >= GameCoordinator.TUTORIAL_MOVE_DISTANCE) {
         this.tutorialCombatState.movementHintShown = true;
-        this.hud.showPowerUpBig('🕹️', '机动确认，继续提速拉距', GameCoordinator.TUTORIAL_HINT_MED_MS / 1000);
+        this.hud.showPowerUpBig(
+          '🕹️',
+          '机动确认，继续提速拉距',
+          GameCoordinator.TUTORIAL_HINT_MED_MS / 1000
+        );
         this.updatePlayerFacingObjective();
       }
     }
@@ -2463,11 +2491,15 @@ export class GameCoordinator {
     if (
       this.tutorialCombatState.movementHintShown &&
       !this.tutorialCombatState.speedHintShown &&
-      this.playerSystem.getSpeed()
-        >= this.playerStats.getMaxSpeed() * GameCoordinator.TUTORIAL_SPEED_THRESHOLD_RATIO
+      this.playerSystem.getSpeed() >=
+        this.playerStats.getMaxSpeed() * GameCoordinator.TUTORIAL_SPEED_THRESHOLD_RATIO
     ) {
       this.tutorialCombatState.speedHintShown = true;
-      this.hud.showPowerUpBig('⚡', '速度到位，按住开火压制', GameCoordinator.TUTORIAL_HINT_MED_MS / 1000);
+      this.hud.showPowerUpBig(
+        '⚡',
+        '速度到位，按住开火压制',
+        GameCoordinator.TUTORIAL_HINT_MED_MS / 1000
+      );
       this.updatePlayerFacingObjective();
     }
   }
@@ -2478,7 +2510,11 @@ export class GameCoordinator {
     }
 
     this.tutorialCombatState.fireHintShown = true;
-    this.hud.showPowerUpBig('🔥', '火力确认，准备导弹锁定', GameCoordinator.TUTORIAL_HINT_MED_MS / 1000);
+    this.hud.showPowerUpBig(
+      '🔥',
+      '火力确认，准备导弹锁定',
+      GameCoordinator.TUTORIAL_HINT_MED_MS / 1000
+    );
     this.updatePlayerFacingObjective();
   }
 
@@ -2488,7 +2524,11 @@ export class GameCoordinator {
     }
 
     this.tutorialCombatState.lockHintShown = true;
-    this.hud.showPowerUpBig('🎯', '稳住准星，等待锁定圈闭合', GameCoordinator.TUTORIAL_HINT_MED_MS / 1000);
+    this.hud.showPowerUpBig(
+      '🎯',
+      '稳住准星，等待锁定圈闭合',
+      GameCoordinator.TUTORIAL_HINT_MED_MS / 1000
+    );
     this.updatePlayerFacingObjective();
   }
 
@@ -2498,7 +2538,11 @@ export class GameCoordinator {
     }
 
     this.tutorialCombatState.missileHintShown = true;
-    this.hud.showPowerUpBig('🚀', '导弹已发射，优先点杀高威胁', GameCoordinator.TUTORIAL_HINT_MED_MS / 1000);
+    this.hud.showPowerUpBig(
+      '🚀',
+      '导弹已发射，优先点杀高威胁',
+      GameCoordinator.TUTORIAL_HINT_MED_MS / 1000
+    );
     this.updatePlayerFacingObjective();
   }
 
@@ -2508,7 +2552,11 @@ export class GameCoordinator {
     }
 
     this.tutorialCombatState.lockCompleteHintShown = true;
-    this.hud.showPowerUpBig('✅', '锁定完成，立刻发射', GameCoordinator.TUTORIAL_HINT_SHORT_MS / 1000);
+    this.hud.showPowerUpBig(
+      '✅',
+      '锁定完成，立刻发射',
+      GameCoordinator.TUTORIAL_HINT_SHORT_MS / 1000
+    );
     this.updatePlayerFacingObjective();
   }
 
@@ -2518,7 +2566,11 @@ export class GameCoordinator {
     }
 
     this.tutorialCombatState.killHintShown = true;
-    this.hud.showPowerUpBig('🎯', '首杀确认，继续清空本波后正式', GameCoordinator.TUTORIAL_HINT_LONG_MS / 1000);
+    this.hud.showPowerUpBig(
+      '🎯',
+      '首杀确认，继续清空本波后正式',
+      GameCoordinator.TUTORIAL_HINT_LONG_MS / 1000
+    );
     this.tutorialCombatState.active = false;
     this.showTransientObjective(
       {
@@ -2536,7 +2588,11 @@ export class GameCoordinator {
     }
 
     this.tutorialCombatState.hitHintShown = true;
-    this.hud.showPowerUpBig('↪️', '被命中后立刻横移或加速脱离', GameCoordinator.TUTORIAL_HINT_SHORT_MS / 1000);
+    this.hud.showPowerUpBig(
+      '↪️',
+      '被命中后立刻横移或加速脱离',
+      GameCoordinator.TUTORIAL_HINT_SHORT_MS / 1000
+    );
     this.updatePlayerFacingObjective();
   }
 
@@ -2546,7 +2602,11 @@ export class GameCoordinator {
     }
 
     this.tutorialCombatState.friendlySupportHintShown = true;
-    this.hud.showPowerUpBig('🤝', '友军到位，先护航再压制', GameCoordinator.TUTORIAL_HINT_MED_MS / 1000);
+    this.hud.showPowerUpBig(
+      '🤝',
+      '友军到位，先护航再压制',
+      GameCoordinator.TUTORIAL_HINT_MED_MS / 1000
+    );
     this.updatePlayerFacingObjective();
   }
 
@@ -2569,8 +2629,8 @@ export class GameCoordinator {
     const now = Date.now();
     const promptSignature = `${wave}|${eventType}`;
     const shouldShowPrompt =
-      promptSignature !== this.lastWaveEventPromptSignature
-      || now - this.lastWaveEventPromptAt >= GameCoordinator.WAVE_EVENT_START_COOLDOWN_MS;
+      promptSignature !== this.lastWaveEventPromptSignature ||
+      now - this.lastWaveEventPromptAt >= GameCoordinator.WAVE_EVENT_START_COOLDOWN_MS;
     const objectiveDisplay = this.getWaveObjectiveDisplay(eventType, waveNumber);
     this.presentationController.showEventObjective(
       objectiveDisplay.title,
@@ -2594,22 +2654,25 @@ export class GameCoordinator {
       this.escortWaveState.friendlyId = escortFriendly.getMesh().uuid;
     }
 
-    this.scheduleTimeout(() => {
-      if (this.waveEventState.type !== eventType || this.waveEventState.wave !== wave) {
-        return;
-      }
+    this.scheduleTimeout(
+      () => {
+        if (this.waveEventState.type !== eventType || this.waveEventState.wave !== wave) {
+          return;
+        }
 
-      if (this.lastWaveEventPromptSignature !== promptSignature) {
-        return;
-      }
+        if (this.lastWaveEventPromptSignature !== promptSignature) {
+          return;
+        }
 
-      this.hud.showPowerUpBig(
-        promptAnnouncement.icon,
-        promptAnnouncement.text,
-        promptAnnouncement.durationSeconds,
-        true
-      );
-    }, Math.max(0, onboardingBeat.eventPromptDelayMs));
+        this.hud.showPowerUpBig(
+          promptAnnouncement.icon,
+          promptAnnouncement.text,
+          promptAnnouncement.durationSeconds,
+          true
+        );
+      },
+      Math.max(0, onboardingBeat.eventPromptDelayMs)
+    );
   }
 
   private handleEscortWaveComplete(wave: number): boolean {
@@ -2617,20 +2680,29 @@ export class GameCoordinator {
       return false;
     }
 
-    const escortFriendlyAlive = (this.enemySystem?.getFriendlyAIs() ?? [])
-      .some(
-        (friendly) =>
-          friendly.isAlive() && friendly.getMesh().uuid === this.escortWaveState.friendlyId
-      );
+    const escortFriendlyAlive = (this.enemySystem?.getFriendlyAIs() ?? []).some(
+      (friendly) =>
+        friendly.isAlive() && friendly.getMesh().uuid === this.escortWaveState.friendlyId
+    );
 
     if (escortFriendlyAlive) {
       this.gameState.addScore(GameCoordinator.ESCORT_WAVE_SCORE_BONUS);
       const earnedPoints = this.playerStats.addScore(GameCoordinator.ESCORT_WAVE_SCORE_BONUS);
       this.hud.updateUpgradePoints(this.playerStats.getUpgrades().getAvailablePoints());
       this.notifyEarnedUpgradePoints(earnedPoints);
-      this.hud.showPowerUpBig('✅', '护送完成，奖励到位', GameCoordinator.TUTORIAL_HINT_MED_MS / 1000, true);
+      this.hud.showPowerUpBig(
+        '✅',
+        '护送完成，奖励到位',
+        GameCoordinator.TUTORIAL_HINT_MED_MS / 1000,
+        true
+      );
     } else {
-      this.hud.showPowerUpBig('⚠️', '护送失利，继续压制', GameCoordinator.TUTORIAL_HINT_MED_MS / 1000, true);
+      this.hud.showPowerUpBig(
+        '⚠️',
+        '护送失利，继续压制',
+        GameCoordinator.TUTORIAL_HINT_MED_MS / 1000,
+        true
+      );
     }
 
     this.escortWaveState.active = false;
@@ -2688,15 +2760,10 @@ export class GameCoordinator {
 
     const completionSignature = `${wave}|${completionObjective?.title ?? 'unknown'}`;
     const shouldShowCompletion =
-      completionSignature !== this.lastWaveEventCompleteSignature
-      || now - this.lastWaveEventCompleteAt >= GameCoordinator.WAVE_EVENT_COMPLETE_COOLDOWN_MS;
+      completionSignature !== this.lastWaveEventCompleteSignature ||
+      now - this.lastWaveEventCompleteAt >= GameCoordinator.WAVE_EVENT_COMPLETE_COOLDOWN_MS;
     const completionAnnouncement = completionObjective
-      ? this.getWaveAnnouncementDisplay(
-          completedEventType,
-          wave + 1,
-          true,
-          onboardingBeat
-        )
+      ? this.getWaveAnnouncementDisplay(completedEventType, wave + 1, true, onboardingBeat)
       : null;
     const completionDelayMs = Math.max(0, onboardingBeat.eventCompletionDelayMs);
     const objectiveHoldMs = Math.max(
@@ -3192,9 +3259,7 @@ export class GameCoordinator {
         this.lockOnIndicator.setLockTime(this.playerStats.getMissileLockTime());
       }
       if (type === UpgradeType.MISSILE_LOCK_RADIUS) {
-        this.lockOnIndicator.setLockCircleScale(
-          this.playerStats.getMissileLockRadiusMultiplier()
-        );
+        this.lockOnIndicator.setLockCircleScale(this.playerStats.getMissileLockRadiusMultiplier());
       }
       // 武器强化 / 热焰弹挂架：立即同步到武器系统（弹药上限、容量）
       this.weapons.syncProgression(

@@ -67,10 +67,7 @@ export class GameLoop {
   /**
    * 启动游戏循环
    */
-  public start(
-    update: (deltaTime: number) => void,
-    render: (alpha: number) => void
-  ): void {
+  public start(update: (deltaTime: number) => void, render: (alpha: number) => void): void {
     if (this.isRunning) return;
 
     this.isRunning = true;
@@ -104,9 +101,10 @@ export class GameLoop {
       }
 
       // 将剩余累积时间作为插值系数传给渲染层，降低固定步长下的视觉跳变
-      const alpha = this.targetFrameTime > 0
-        ? Math.max(0, Math.min(1, this.accumulator / this.targetFrameTime))
-        : 1;
+      const alpha =
+        this.targetFrameTime > 0
+          ? Math.max(0, Math.min(1, this.accumulator / this.targetFrameTime))
+          : 1;
       render(alpha);
     };
 
@@ -158,9 +156,10 @@ export class GameLoop {
     const targetFPS = GameConfig.getTargetFPSForPreset(preset);
 
     this.targetFps = Math.min(Math.max(targetFPS, this.MIN_FPS), this.MAX_FPS);
-    this.minFps = preset === 'quality'
-      ? Math.max(Math.round(this.targetFps * 0.6), this.MIN_FPS)
-      : this.MIN_FPS;
+    this.minFps =
+      preset === 'quality'
+        ? Math.max(Math.round(this.targetFps * 0.6), this.MIN_FPS)
+        : this.MIN_FPS;
   }
 
   private resetFrameStats(): void {
@@ -202,8 +201,8 @@ export class GameLoop {
 
     this.autoQualityCheckTimer += frameTimeMs;
     if (
-      this.frameTimeSamples.length < Math.min(30, this.FRAME_STATS_SAMPLE_LIMIT)
-      || this.autoQualityCheckTimer < this.AUTO_QUALITY_CHECK_INTERVAL
+      this.frameTimeSamples.length < Math.min(30, this.FRAME_STATS_SAMPLE_LIMIT) ||
+      this.autoQualityCheckTimer < this.AUTO_QUALITY_CHECK_INTERVAL
     ) {
       return;
     }
@@ -252,10 +251,7 @@ export class GameLoop {
   }
 
   private getTargetFPSForPreset(preset: Exclude<QualityPreset, 'auto'>): number {
-    return Math.min(
-      Math.max(GameConfig.getTargetFPSForPreset(preset), this.MIN_FPS),
-      this.MAX_FPS
-    );
+    return Math.min(Math.max(GameConfig.getTargetFPSForPreset(preset), this.MIN_FPS), this.MAX_FPS);
   }
 
   private getAdjacentPreset(
