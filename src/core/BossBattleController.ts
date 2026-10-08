@@ -18,7 +18,8 @@ import {
   type DecoyPoint,
 } from '@/core/CombatContracts';
 import type { ICampaignPresentation } from '@/core/campaign/CampaignPresentation';
-import type { BossSurfaceSampler } from '@/core/boss/AdvancedBossSupport';
+import { resolveLegacyBossSpawn, type BossSurfaceSampler } from '@/core/boss/AdvancedBossSupport';
+import { LegacyBossHitVolumes } from '@/core/boss/LegacyBossHitVolumes';
 import {
   ADVANCED_BOSS_TYPES,
   AdvancedBossController,
@@ -121,6 +122,11 @@ export class BossBattleController {
   private defeatAnnounced = false;
   private stunFrame = -1;
   private frameCounter = 0;
+
+  // ── 第 1-5 关 Boss：前方出生 + 半径命中 ──
+  private readonly legacyHits = new LegacyBossHitVolumes();
+  private readonly spawnForward = new Vector3();
+  private readonly legacyHitPosition = new Vector3();
 
   constructor(private readonly deps: BossBattleControllerDeps) {
     this.feedback = new BossHitFeedback({
@@ -333,9 +339,13 @@ export class BossBattleController {
 
     this.currentBoss = boss;
     this.currentBossType = bossType;
-    this.advanced.activate(
-      ADVANCED_BOSS_TYPES.has(bossType) ? (boss as AdvancedBossInstance) : null
-    );
+    const advancedBoss = ADVANCED_BOSS_TYPES.has(bossType) ? (boss as AdvancedBossInstance) : null;
+    this.advanced.activate(advancedBoss);
+    if (advancedBoss) {
+      this.legacyHits.clear();
+    } else {
+      this.legacyHits.build(boss.getMesh(), this.getLegacyBodyParts(boss));
+    }
     this.defeatAnnounced = false;
     // Boss 登场无线电（Boss 模式下也播放：只有登场台词，没有剧情卡片）
     this.deps.presentation.radio('boss-spawn', this.currentLevel);
@@ -365,16 +375,31 @@ export class BossBattleController {
     }
   }
 
+  /** 第 1-5 关 Boss 出生点：玩家水平朝向前方（地表 / 水面采样） */
+  private resolveLegacySpawn(type: BossType): Vector3 {
+    const player = this.deps.playerAircraft;
+    const forward = this.spawnForward.set(0, 0, -1).applyQuaternion(player.quaternion);
+    return resolveLegacyBossSpawn({
+      type,
+      playerPosition: player.position,
+      forwardX: forward.x,
+      forwardZ: forward.z,
+      sample: this.deps.getSurfaceSample,
+    });
+  }
+
+  /** 机身命中部件（章鱼战舰的眼睛另有判定，不计入机身） */
+  private getLegacyBodyParts(boss: ActiveBoss): readonly Object3D[] {
+    if (this.isOctopusWarshipBoss(boss)) {
+      return boss.getCollisionPartMeshes();
+    }
+    return boss.getCollisionParts();
+  }
+
   private async createHeavyBomberBoss(config: BossConfig, isBossMode: boolean): Promise<BossAI> {
     const { BossAI, createBossMesh } = await import('@/features/boss/BossAI');
     const mesh = createBossMesh(config);
-    const playerPos = this.deps.playerSystem.getPosition();
-    const spawnOffset = new Vector3(
-      (Math.random() - 0.5) * 200,
-      50 + Math.random() * 50,
-      (Math.random() - 0.5) * 200
-    );
-    mesh.position.copy(playerPos).add(spawnOffset);
+    mesh.position.copy(this.resolveLegacySpawn(BossType.HEAVY_BOMBER));
     this.deps.scene.add(mesh);
 
     const boss = new BossAI(mesh, config, this.deps.scene, this.deps.particleSystem);
@@ -400,8 +425,7 @@ export class BossBattleController {
     const { DesertFortressAI, createDesertFortressMesh } =
       await import('@/features/boss/DesertFortressAI');
     const mesh = createDesertFortressMesh(config);
-    const playerPos = this.deps.playerSystem.getPosition();
-    mesh.position.set(playerPos.x, -50, playerPos.z + 200);
+    mesh.position.copy(this.resolveLegacySpawn(BossType.DESERT_FORTRESS));
     this.deps.scene.add(mesh);
 
     const boss = new DesertFortressAI(mesh, config, this.deps.scene, this.deps.particleSystem);
@@ -453,8 +477,7 @@ export class BossBattleController {
     const { OctopusWarshipAI, createOctopusWarshipMesh } =
       await import('@/features/boss/OctopusWarshipAI');
     const mesh = createOctopusWarshipMesh(config);
-    const playerPos = this.deps.playerSystem.getPosition();
-    mesh.position.set(playerPos.x + (Math.random() - 0.5) * 100, 150, playerPos.z + 200);
+    mesh.position.copy(this.resolveLegacySpawn(BossType.OCTOPUS_WARSHIP));
     this.deps.scene.add(mesh);
 
     const boss = new OctopusWarshipAI(mesh, config, this.deps.particleSystem);
@@ -499,8 +522,7 @@ export class BossBattleController {
     const { MissileDestroyerAI, createMissileDestroyerMesh } =
       await import('@/features/boss/MissileDestroyerAI');
     const mesh = createMissileDestroyerMesh(config);
-    const playerPos = this.deps.playerSystem.getPosition();
-    mesh.position.set(playerPos.x, -50, playerPos.z + 200);
+    mesh.position.copy(this.resolveLegacySpawn(BossType.MISSILE_DESTROYER));
     this.deps.scene.add(mesh);
 
     const boss = new MissileDestroyerAI(mesh, config, this.deps.scene, this.deps.particleSystem);
@@ -556,8 +578,7 @@ export class BossBattleController {
   ): Promise<SkyCarrierAI> {
     const { SkyCarrierAI, createSkyCarrierMesh } = await import('@/features/boss/SkyCarrierAI');
     const mesh = createSkyCarrierMesh(config);
-    const playerPos = this.deps.playerSystem.getPosition();
-    mesh.position.set(playerPos.x, 200, playerPos.z + 200);
+    mesh.position.copy(this.resolveLegacySpawn(BossType.SKY_CARRIER));
     this.deps.scene.add(mesh);
 
     const boss = new SkyCarrierAI(mesh, config, this.deps.scene, this.deps.particleSystem);
@@ -583,6 +604,7 @@ export class BossBattleController {
   private resetAdvancedState(): void {
     this.advanced.reset();
     this.partTargets.clear();
+    this.legacyHits.clear();
   }
 
   /** 击破收尾台词：每场 Boss 战只播一次（神谕在死亡冻结瞬间提前说出遗言） */
@@ -816,44 +838,69 @@ export class BossBattleController {
         }
       });
 
-    const bossTargets = [...bossParts, ...missileMeshes];
-    this.deps.combatSystem.getPlayerProjectilePool().checkCollisions(bossTargets, (target) => {
-      const isBossPart = bossParts.includes(target);
-      if (isBossPart || target === this.currentBoss?.getMesh()) {
-        this.currentBoss?.takeDamage(this.deps.combatSystem.getDamageMultiplier() * 12.5);
-        const hitWorldPos = new Vector3();
-        target.getWorldPosition(hitWorldPos);
-        this.feedback.createArmorHitFeedback(hitWorldPos, 0.92);
-        return;
+    // 机炮 / 友军子弹：按部件命中球判定（与第 6-10 关一致的半径命中），子弹打在哪就在哪出火花
+    this.legacyHits.refresh();
+    const playerPool = this.deps.combatSystem.getPlayerProjectilePool();
+    if (playerPool.hasActiveProjectiles()) {
+      playerPool.consumeHits(this.legacyPlayerBulletHit);
+      if (missileMeshes.length > 0) {
+        playerPool.checkCollisions(missileMeshes, (target) => {
+          const missile = bossMissileSystem
+            ?.getMissiles()
+            .find((candidate) => candidate.getMesh() === target);
+          missile?.takeDamage(this.deps.combatSystem.getDamageMultiplier() * 12.5);
+        });
       }
+    }
 
-      const missile = bossMissileSystem
-        ?.getMissiles()
-        .find((candidate) => candidate.getMesh() === target);
-      missile?.takeDamage(this.deps.combatSystem.getDamageMultiplier() * 12.5);
-    });
-
-    this.deps.combatSystem
-      .getEnemyProjectilePool()
-      .checkCollisions(bossTargets, (target: Object3D, _projectile, damage: number) => {
-        const isBossPart = bossParts.includes(target);
-        if (isBossPart || target === this.currentBoss?.getMesh()) {
-          this.currentBoss?.takeDamage(damage);
-          const hitWorldPos = new Vector3();
-          target.getWorldPosition(hitWorldPos);
-          this.feedback.createArmorHitFeedback(hitWorldPos, Math.max(0.88, damage / 16));
-          return;
-        }
-
-        const missile = bossMissileSystem
-          ?.getMissiles()
-          .find((candidate) => candidate.getMesh() === target);
-        if (missile) {
-          missile.takeDamage(damage);
-          this.feedback.createBossMissileDestroyedFeedback(target.position, 0.72, 'enemy');
-        }
-      });
+    const enemyPool = this.deps.combatSystem.getEnemyProjectilePool();
+    if (enemyPool.hasActiveProjectiles()) {
+      // 只认友军僚机的子弹（敌机子弹穿过 Boss，不再误伤 Boss）
+      enemyPool.consumeHits(this.legacyFriendlyBulletHit);
+      if (missileMeshes.length > 0) {
+        enemyPool.checkCollisions(
+          missileMeshes,
+          (target: Object3D, _projectile, damage: number) => {
+            const missile = bossMissileSystem
+              ?.getMissiles()
+              .find((candidate) => candidate.getMesh() === target);
+            if (missile) {
+              missile.takeDamage(damage);
+              this.feedback.createBossMissileDestroyedFeedback(target.position, 0.72, 'enemy');
+            }
+          }
+        );
+      }
+    }
   }
+
+  /** 玩家机炮命中第 1-5 关 Boss 机身（预先绑定，避免每帧创建闭包） */
+  private readonly legacyPlayerBulletHit = (position: Vector3): boolean => {
+    const boss = this.currentBoss;
+    if (!boss || !boss.isAlive()) return false;
+    if (!this.legacyHits.findHit(position)) return false;
+    boss.takeDamage(this.deps.combatSystem.getDamageMultiplier() * 12.5);
+    this.feedback.createArmorHitFeedback(this.legacyHitPosition.copy(position), 0.92);
+    return true;
+  };
+
+  /** 友军僚机子弹命中第 1-5 关 Boss 机身 */
+  private readonly legacyFriendlyBulletHit = (
+    position: Vector3,
+    damage: number,
+    faction: string | undefined
+  ): boolean => {
+    if (faction !== Faction.FRIENDLY) return false;
+    const boss = this.currentBoss;
+    if (!boss || !boss.isAlive()) return false;
+    if (!this.legacyHits.findHit(position)) return false;
+    boss.takeDamage(damage);
+    this.feedback.createArmorHitFeedback(
+      this.legacyHitPosition.copy(position),
+      Math.max(0.88, damage / 16)
+    );
+    return true;
+  };
 
   private updateOctopusSpecials(deltaTime: number, boss: OctopusWarshipAI): void {
     const playerPosition = this.deps.playerAircraft.position;

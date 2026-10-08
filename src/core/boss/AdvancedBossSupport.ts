@@ -146,6 +146,99 @@ export function resolveAdvancedBossSpawn(request: BossSpawnRequest): BossSpawnPl
   return { position, yaw: Number.isFinite(yaw) ? yaw : 0 };
 }
 
+export interface LegacyBossSpawnRequest {
+  type: BossType;
+  playerPosition: THREE.Vector3;
+  /** 玩家水平前向（XZ，不必归一化）；Boss 出现在玩家前方 */
+  forwardX: number;
+  forwardZ: number;
+  sample: BossSurfaceSampler;
+  /** 0..1 随机数（测试可注入） */
+  random?: () => number;
+}
+
+/**
+ * 第 1-5 关 Boss 出生点：沿玩家水平朝向前方约 200 米（原先固定在 +Z，玩家朝 -Z 飞时会出现在
+ * 身后 200 米）。高度沿用各 Boss 的设计值；导弹驱逐舰在附近找开阔水面，空中 Boss 高于地表。
+ * - 重型轰炸机：前方 200 米、左右 ±60 米、玩家高度 +50~100
+ * - 移动堡垒：前方 200 米，y = -50（沙漠网格基准面）
+ * - 章鱼战舰：前方 200 米、左右 ±50 米，y = 150
+ * - 导弹驱逐舰：前方 200 米附近的水面，y = -50
+ * - 天空母舰：前方 200 米，y = 200（且高于地表 120 米）
+ */
+export function resolveLegacyBossSpawn(request: LegacyBossSpawnRequest): THREE.Vector3 {
+  const { playerPosition: p, sample } = request;
+  const random = request.random ?? Math.random;
+  let fx = request.forwardX;
+  let fz = request.forwardZ;
+  const length = Math.hypot(fx, fz);
+  if (!Number.isFinite(length) || length < 1e-3) {
+    fx = 0;
+    fz = -1;
+  } else {
+    fx /= length;
+    fz /= length;
+  }
+  const rx = -fz;
+  const rz = fx;
+  const ahead = (distance: number, lateral: number): { x: number; z: number } => ({
+    x: clampToArena(p.x + fx * distance + rx * lateral),
+    z: clampToArena(p.z + fz * distance + rz * lateral),
+  });
+  const playerY = Number.isFinite(p.y) ? p.y : 60;
+
+  const position = new THREE.Vector3();
+  switch (request.type) {
+    case BossType.DESERT_FORTRESS: {
+      const spot = ahead(200, 0);
+      position.set(spot.x, -50, spot.z);
+      break;
+    }
+    case BossType.OCTOPUS_WARSHIP: {
+      const spot = ahead(200, (random() - 0.5) * 100);
+      position.set(spot.x, 150, spot.z);
+      break;
+    }
+    case BossType.MISSILE_DESTROYER: {
+      const target = ahead(200, 0);
+      const spot = searchSurface(sample, target.x, target.z, (surface) => surface.water, 600);
+      position.set(spot.x, -50, spot.z);
+      break;
+    }
+    case BossType.SKY_CARRIER: {
+      const spot = ahead(200, 0);
+      const ground = sample(spot.x, spot.z).y;
+      position.set(
+        spot.x,
+        Math.max(200, (Number.isFinite(ground) ? ground : WATER_Y) + 120),
+        spot.z
+      );
+      break;
+    }
+    case BossType.HEAVY_BOMBER:
+    default: {
+      const spot = ahead(200, (random() - 0.5) * 120);
+      const ground = sample(spot.x, spot.z).y;
+      const desired = playerY + 50 + random() * 50;
+      position.set(
+        spot.x,
+        Math.max(desired, (Number.isFinite(ground) ? ground : WATER_Y) + 60),
+        spot.z
+      );
+      break;
+    }
+  }
+
+  if (
+    !Number.isFinite(position.x) ||
+    !Number.isFinite(position.y) ||
+    !Number.isFinite(position.z)
+  ) {
+    position.set(0, 150, -200);
+  }
+  return position;
+}
+
 /**
  * Boss 特殊武器命中冷却（每个目标约 0.6 秒），checkHazard 本身不做冷却。
  */
