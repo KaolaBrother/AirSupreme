@@ -642,7 +642,14 @@ export class AudioManager {
     };
   }
 
+  /**
+   * 设置总线音量（setMasterVolume / setSFXVolume / setMusicVolume 都走这里）：
+   * NaN / ±Infinity 直接忽略并保留原值（写进 AudioParam 会抛 TypeError），其余钳制到 0..1
+   */
   public setVolumeByBus(bus: AudioBus, volume: number): void {
+    if (!Number.isFinite(volume)) {
+      return;
+    }
     const normalized = clamp01(volume);
     if (bus === 'master') {
       this.masterVolumeValue = normalized;
