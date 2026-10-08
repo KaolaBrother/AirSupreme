@@ -77,6 +77,8 @@ interface WaveRecord {
   forced: boolean;
   /** 伤害来源（按敌方子弹匹配：jet:TYPE / unit:TYPE；其余为 other） */
   sources: Record<string, number>;
+  /** 复活后 4 秒内又坠毁的次数（复活点 / 航向不安全的信号） */
+  respawnCrashes: number;
 }
 
 interface BossRecord {
@@ -92,6 +94,9 @@ interface BossRecord {
   crashes: number;
   forced: boolean;
   sources: Record<string, number>;
+  respawnCrashes: number;
+  endReason?: string;
+  healthAtEnd?: number;
 }
 
 interface HangarRecord {
@@ -133,6 +138,8 @@ interface RunState {
   totalDamage: number;
   totalDeaths: number;
   passiveSurvival: number | null;
+  /** 连续坠毁后被测量框架抬升到安全高度的次数（只为让测量继续，单独报告） */
+  rescues: number;
 }
 
 const DEFAULT_OPTIONS: Required<BalanceRunOptions> = {
@@ -247,7 +254,12 @@ export function installBalanceHarness(access: DevHookAccess): BalanceHarnessApi 
   let pendingWeaponSelect = false;
   let lastHitDamage = 0;
   let lastHitTime = -1e9;
+  let lastRespawnTime = -1e9;
+  const recentCrashes: number[] = [];
+  let rescuePending = false;
   let bossActive = false;
+  /** 已建档的 Boss 对象（死亡演出期间仍是 currentBoss，避免重复建档） */
+  let trackedBoss: unknown = null;
   const trace: Array<Record<string, unknown>> = [];
   let nextTraceAt = 0;
   const shots: ShotRecord[] = [];
@@ -387,8 +399,15 @@ export function installBalanceHarness(access: DevHookAccess): BalanceHarnessApi 
     if (!run || run.done) return;
     const record = ensureLevelRecord(payload.level);
     if (record.waves.length === 0) {
+      // 第一波开始时刷新关卡起点（机库购买之后的机体状态）
+      const stats = access.getStats();
+      const upgrades = stats.getUpgrades();
       record.start = gameTime;
       record.scoreStart = access.getScore();
+      record.pointsStart = upgrades.getAvailablePoints();
+      record.maxHealth = stats.getMaxHealth();
+      record.armor = stats.getArmorReduction();
+      record.upgrades = snapshotUpgrades(upgrades);
     }
     pilot?.takeStats();
     record.waves.push({
@@ -404,6 +423,7 @@ export function installBalanceHarness(access: DevHookAccess): BalanceHarnessApi 
       crashes: 0,
       forced: false,
       sources: {},
+      respawnCrashes: 0,
     });
   });
 
@@ -468,22 +488,42 @@ export function installBalanceHarness(access: DevHookAccess): BalanceHarnessApi 
     }
   });
 
+  EventBus.on(GameEventType.PLAYER_RESPAWN, () => {
+    lastRespawnTime = gameTime;
+    if (rescuePending) {
+      rescuePending = false;
+      rescuePlayer();
+    }
+  });
+
   EventBus.on(GameEventType.PLAYER_DEATH, () => {
     if (!run || run.done) return;
     run.totalDeaths++;
     const crash = lastHitDamage >= 1000;
+    const respawnCrash = crash && gameTime - lastRespawnTime < 4;
     const record = currentLevelRecord();
     if (record) {
       if (record.firstDeathAt === null) record.firstDeathAt = gameTime - record.start;
       if (record.boss && record.boss.end === null) {
         record.boss.deaths++;
         if (crash) record.boss.crashes++;
+        if (respawnCrash) record.boss.respawnCrashes++;
       } else {
         const wave = currentWaveRecord();
         if (wave) {
           wave.deaths++;
           if (crash) wave.crashes++;
+          if (respawnCrash) wave.respawnCrashes++;
         }
+      }
+    }
+    if (crash) {
+      recentCrashes.push(gameTime);
+      while (recentCrashes.length > 0 && gameTime - recentCrashes[0] > 20) recentCrashes.shift();
+      // 连续坠毁（20 秒内 3 次）：下次复活时抬到安全高度，避免测量陷入死循环
+      if (recentCrashes.length >= 3) {
+        rescuePending = true;
+        recentCrashes.length = 0;
       }
     }
     if (run.options.pilot === 'passive' && record) {
@@ -583,7 +623,15 @@ export function installBalanceHarness(access: DevHookAccess): BalanceHarnessApi 
     const controller = access.getBossController();
     const boss = controller?.getCurrentBoss() ?? null;
     const active = Boolean(boss && access.getSession().isInBossBattle());
-    if (active && boss && record && !bossActive) {
+    // 只为“新出现且存活”的 Boss 建档：死亡演出期间 Boss 仍挂在控制器上，不能重复建档覆盖
+    const fresh =
+      active &&
+      boss !== null &&
+      boss !== trackedBoss &&
+      boss.isAlive() &&
+      !(controller?.isBossDying() ?? false);
+    if (fresh && boss && record && !bossActive) {
+      trackedBoss = boss;
       bossActive = true;
       const health = boss.getHealth();
       pilot?.takeStats();
@@ -600,11 +648,14 @@ export function installBalanceHarness(access: DevHookAccess): BalanceHarnessApi 
         crashes: 0,
         forced: false,
         sources: {},
+        respawnCrashes: 0,
       };
     }
     if (bossActive && record?.boss && record.boss.end === null) {
       const dying = controller?.isBossDying() ?? false;
       if (!boss || !boss.isAlive() || dying) {
+        record.boss.endReason = !boss ? 'gone' : dying ? 'dying' : 'dead';
+        record.boss.healthAtEnd = boss ? Math.round(boss.getHealth().current) : -1;
         record.boss.end = gameTime;
         if (pilot) record.boss.pilot = pilot.takeStats();
         record.end = gameTime;
@@ -617,6 +668,27 @@ export function installBalanceHarness(access: DevHookAccess): BalanceHarnessApi 
     } else if (bossActive && !boss) {
       bossActive = false;
     }
+  };
+
+  const rescuePlayer = (): void => {
+    if (!run) return;
+    run.rescues++;
+    const player = access.getPlayerAircraft();
+    let highest = world.groundY(player.position.x, player.position.z);
+    for (let ring = 1; ring <= 3; ring++) {
+      for (let i = 0; i < 8; i++) {
+        const angle = (i / 8) * Math.PI * 2;
+        const ground = world.groundY(
+          player.position.x + Math.cos(angle) * ring * 120,
+          player.position.z + Math.sin(angle) * ring * 120
+        );
+        if (Number.isFinite(ground)) highest = Math.max(highest, ground);
+      }
+    }
+    const position = player.position.clone();
+    position.y = Math.max(position.y, highest + 120);
+    access.getPlayerSystem().placeAt(position, player.quaternion.clone());
+    access.onPlayerTeleported();
   };
 
   const forceClearWave = (): void => {
@@ -938,6 +1010,7 @@ export function installBalanceHarness(access: DevHookAccess): BalanceHarnessApi 
       deaths: wave.deaths,
       crashes: wave.crashes,
       forced: wave.forced || undefined,
+      respawnCrashes: wave.respawnCrashes || undefined,
       sources: roundSources(wave.sources),
     }));
     let waveSeconds = 0;
@@ -982,6 +1055,9 @@ export function installBalanceHarness(access: DevHookAccess): BalanceHarnessApi 
             deaths: boss.deaths,
             crashes: boss.crashes,
             shots: boss.shots,
+            respawnCrashes: boss.respawnCrashes || undefined,
+            endReason: boss.endReason,
+            healthAtEnd: boss.healthAtEnd,
             pilot: roundStats(boss.pilot),
             sources: roundSources(boss.sources),
             forced: boss.forced || undefined,
@@ -1009,6 +1085,7 @@ export function installBalanceHarness(access: DevHookAccess): BalanceHarnessApi 
       lives: access.getPlayerSystem().getLives(),
       totalDamage: Math.round(run.totalDamage),
       totalDeaths: run.totalDeaths,
+      rescues: run.rescues,
       passiveSurvival: run.passiveSurvival,
       hangars: run.hangars,
       levels: run.levels.map(summarizeLevel),
@@ -1030,9 +1107,14 @@ export function installBalanceHarness(access: DevHookAccess): BalanceHarnessApi 
         totalDamage: 0,
         totalDeaths: 0,
         passiveSurvival: null,
+        rescues: 0,
       };
       gameTime = 0;
       lastHitTime = -1e9;
+      lastRespawnTime = -1e9;
+      trackedBoss = null;
+      recentCrashes.length = 0;
+      rescuePending = false;
       shots.length = 0;
       shotCursor = 0;
       trace.length = 0;

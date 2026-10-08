@@ -111,6 +111,9 @@ const JINK_MIN_TARGET_DISTANCE = GAME_CONSTANTS.PROJECTILE.MAX_DISTANCE;
 /** 地形：前瞻时间点（秒）与需要的离地余量（米） */
 const TERRAIN_LOOKAHEAD: readonly number[] = [0, 0.4, 0.8, 1.2, 1.8, 2.6];
 const TERRAIN_MARGIN = 14;
+/** 地形告警时试探的相对航向（弧度）与距离（米） */
+const ESCAPE_OFFSETS: readonly number[] = [0, 0.5, -0.5, 1.0, -1.0, 1.6, -1.6, 2.4, -2.4];
+const ESCAPE_PROBE_DISTANCES: readonly number[] = [30, 60, 100, 150, 220];
 /** 对地攻击时允许的最低离地高度（米）与最大俯冲角（sin） */
 const ATTACK_FLOOR_AGL = 22;
 const MAX_DIVE_SIN = 0.62;
@@ -156,6 +159,17 @@ function clearInput(input: InputState): void {
   input.missile = false;
   input.throttle = false;
   input.special = false;
+}
+
+/** 把单位方向的竖直分量抬到至少 sinClimb（水平分量按比例缩放，保持航向） */
+function setMinimumClimb(direction: THREE.Vector3, sinClimb: number): void {
+  const target = THREE.MathUtils.clamp(sinClimb, -0.95, 0.95);
+  if (direction.y >= target) return;
+  const horizontal = Math.hypot(direction.x, direction.z);
+  const scale = horizontal > 1e-6 ? Math.sqrt(1 - target * target) / horizontal : 0;
+  direction.set(direction.x * scale, target, direction.z * scale);
+  if (direction.lengthSq() < 1e-6) direction.set(0, 1, 0);
+  direction.normalize();
 }
 
 /** 两向量夹角（弧度），零向量视为 π */
@@ -210,6 +224,9 @@ export class ScriptedPilot {
   /** 对地攻击：拉开距离中（掠过目标后先飞远再回头） */
   private extending = false;
   private wasSpecial = false;
+  /** checkTerrain 的附带结果：越过前方地形所需的最小爬升（sin）、是否迎面岩壁 */
+  private terrainRequiredSlope = -1;
+  private terrainWall = false;
   /** 点按调制的累积误差（步数），按方向分别累计 */
   /** 最近一步的瞄准诊断（测量框架的 trace 采样用） */
   public lastAim = { distance: 0, aimDeg: 0, coneDeg: 0, kind: 'none' as PilotTargetKind | 'none' };
@@ -322,12 +339,15 @@ export class ScriptedPilot {
     const terrainAlert = this.checkTerrain(world, forward);
     if (terrainAlert > 0) {
       this.stats.terrainSeconds += dt;
-      // 地形告警：保持航向、拉起（告警越近拉得越陡）
-      tmpDesired.set(forward.x, 0, forward.z);
-      if (tmpDesired.lengthSq() < 1e-6) tmpDesired.set(0, 0, -1);
-      tmpDesired.normalize();
-      tmpDesired.y = terrainAlert >= 2 ? 2.5 : 1.0;
-      tmpDesired.normalize();
+      if (terrainAlert >= 2 || this.terrainWall) {
+        // 紧急 / 迎面岩壁：在扇面里找净空最大的航向（峡谷岩壁 / 天梯立柱要转弯，不能只拉起），并爬升
+        this.findEscapeHeading(world, forward, tmpDesired);
+        tmpDesired.y = terrainAlert >= 2 ? 2.5 : 1.0;
+        tmpDesired.normalize();
+      } else {
+        // 一般告警：保持朝向目标，只把爬升角抬到越过前方地形所需的最小值（扫射时不至于整段放弃）
+        setMinimumClimb(tmpDesired, this.terrainRequiredSlope + 0.04);
+      }
     }
     const radial = Math.hypot(position.x, position.z);
     if (radial > BOUNDARY_TURN_RADIUS && terrainAlert === 0) {
@@ -343,7 +363,7 @@ export class ScriptedPilot {
       tmpDesired.normalize();
     }
 
-    this.steer(dt, world.quaternion, right, up, tmpDesired, terrainAlert > 0, input);
+    this.steer(dt, world.quaternion, right, up, tmpDesired, input);
     input.throttle = true;
 
     // ── 武器 ──
@@ -529,6 +549,8 @@ export class ScriptedPilot {
     const position = world.position;
     const speed = Math.max(10, world.speed);
     let alert = 0;
+    this.terrainRequiredSlope = -1;
+    this.terrainWall = false;
     for (const t of TERRAIN_LOOKAHEAD) {
       const x = position.x + forward.x * speed * t;
       const z = position.z + forward.z * speed * t;
@@ -538,9 +560,44 @@ export class ScriptedPilot {
       const margin = TERRAIN_MARGIN + 4 * t;
       if (y < ground + margin) {
         alert = Math.max(alert, t <= 0.8 ? 2 : 1);
+        if (t > 0) {
+          // 从现在直线飞过去需要的最小爬升（sin）；陡到爬不过去就是“墙”，要转向
+          const slope = (ground + margin - position.y) / (speed * t);
+          this.terrainRequiredSlope = Math.max(this.terrainRequiredSlope, slope);
+          if (slope > 0.7 && t <= 1.8) this.terrainWall = true;
+        }
       }
     }
     return alert;
+  }
+
+  /**
+   * 告警时的避让航向（写入 out 的水平分量）：以当前航向为中心的扇面内逐个试探，
+   * 取“前方各距离上高度余量的最小值”最大的方向；同分时偏向转角小的方向。
+   */
+  private findEscapeHeading(world: PilotWorld, forward: THREE.Vector3, out: THREE.Vector3): void {
+    const position = world.position;
+    const baseHeading = Math.atan2(-forward.x, -forward.z);
+    let bestHeading = baseHeading;
+    let bestScore = -Infinity;
+    for (const offset of ESCAPE_OFFSETS) {
+      const heading = baseHeading + offset;
+      const dirX = -Math.sin(heading);
+      const dirZ = -Math.cos(heading);
+      let worst = Infinity;
+      for (const distance of ESCAPE_PROBE_DISTANCES) {
+        const ground = world.groundY(position.x + dirX * distance, position.z + dirZ * distance);
+        if (!Number.isFinite(ground)) continue;
+        // 每 100 米可以爬升约 45 米：远处的高地扣除可爬升量
+        worst = Math.min(worst, position.y + distance * 0.45 - ground);
+      }
+      const score = (Number.isFinite(worst) ? worst : 500) - Math.abs(offset) * 6;
+      if (score > bestScore) {
+        bestScore = score;
+        bestHeading = heading;
+      }
+    }
+    out.set(-Math.sin(bestHeading), 0, -Math.cos(bestHeading));
   }
 
   /** 机体坐标系下的 bang-bang 控制：偏航 / 俯仰追向期望方向，滚转保持机翼水平 */
@@ -550,7 +607,6 @@ export class ScriptedPilot {
     right: THREE.Vector3,
     up: THREE.Vector3,
     desired: THREE.Vector3,
-    emergency: boolean,
     input: InputState
   ): void {
     tmpInverse.copy(quaternion).invert();
@@ -558,13 +614,9 @@ export class ScriptedPilot {
     // 机头为本地 -Z：偏航左 (+Y 旋转) 把机头转向本地 -X；俯仰上 (+X 旋转) 把机头抬向本地 +Y
     const yawError = Math.atan2(-tmpLocal.x, -tmpLocal.z);
     const pitchError = Math.atan2(tmpLocal.y, Math.hypot(tmpLocal.x, tmpLocal.z));
-    if (!emergency || Math.abs(yawError) > 1.2) {
-      const yaw = this.modulate(yawError / (YAW_RATE * dt), 'yaw');
-      input.yawLeft = yaw > 0;
-      input.yawRight = yaw < 0;
-    } else {
-      this.yawAccumulator = 0;
-    }
+    const yaw = this.modulate(yawError / (YAW_RATE * dt), 'yaw');
+    input.yawLeft = yaw > 0;
+    input.yawRight = yaw < 0;
     const pitch = this.modulate(pitchError / (PITCH_RATE * dt), 'pitch');
     input.pitchUp = pitch > 0;
     input.pitchDown = pitch < 0;
