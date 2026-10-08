@@ -91,15 +91,6 @@ const CASES: readonly BossCase[] = [
   },
 ];
 
-/**
- * 已知与规范不符（见测试报告）：这两个 Boss 只在碰撞部件上声明 userData.hitRadius，
- * 网格根节点没有声明（全局规则：大型网格在 userData.hitRadius 声明命中半径）。
- */
-const ROOT_HIT_RADIUS_GAP: ReadonlySet<BossType> = new Set([
-  BossType.MAGMA_COLOSSUS,
-  BossType.ABYSSAL_LEVIATHAN,
-]);
-
 interface BossRig {
   scene: THREE.Scene;
   mesh: THREE.Group;
@@ -198,12 +189,10 @@ describe.each(CASES)('boss $level · $type', (bossCase) => {
       expect(rig.mesh.name).toBe(`BOSS_${bossCase.type}`);
     });
 
-    (ROOT_HIT_RADIUS_GAP.has(bossCase.type) ? it.fails : it)(
-      'declares userData.hitRadius on the mesh root',
-      () => {
-        expect(getDeclaredHitRadius(rig.mesh, -1)).toBeGreaterThan(0);
-      }
-    );
+    // 全局规则：大型网格在根节点的 userData.hitRadius 声明命中半径（米）
+    it('declares userData.hitRadius on the mesh root', () => {
+      expect(getDeclaredHitRadius(rig.mesh, -1)).toBeGreaterThan(0);
+    });
 
     it('implements IAdvancedBoss and starts at full health in phase 1 of 3', () => {
       const { boss, mesh, config } = rig;
