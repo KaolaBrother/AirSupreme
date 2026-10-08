@@ -247,7 +247,7 @@ export class AdvancedBossController {
   }
 
   /** CITADEL 决战区（神谕主宰锚点）；不是第 10 关地形时为 null */
-  private getCitadelArena(): Vector3 | null {
+  public getCitadelArena(): Vector3 | null {
     const environment = this.deps.getTerrainEnvironment() as
       | (TerrainEnvironment & { getCoreArena?: (target?: Vector3) => Vector3 })
       | null;

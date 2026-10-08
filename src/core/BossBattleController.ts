@@ -18,7 +18,11 @@ import {
   type DecoyPoint,
 } from '@/core/CombatContracts';
 import type { ICampaignPresentation } from '@/core/campaign/CampaignPresentation';
-import { resolveLegacyBossSpawn, type BossSurfaceSampler } from '@/core/boss/AdvancedBossSupport';
+import {
+  hasBossSpawnRoomAhead,
+  resolveLegacyBossSpawn,
+  type BossSurfaceSampler,
+} from '@/core/boss/AdvancedBossSupport';
 import { LegacyBossHitVolumes } from '@/core/boss/LegacyBossHitVolumes';
 import {
   ADVANCED_BOSS_TYPES,
@@ -34,6 +38,7 @@ import type { OctopusWarshipAI } from '@/features/boss/OctopusWarshipAI';
 import type { SkyCarrierAI } from '@/features/boss/SkyCarrierAI';
 import type { BossMinionKind } from '@/features/boss/BossContracts';
 import type { BossMissile } from '@/features/boss/BossMissileSystem';
+import { getCampaignChapter } from '@/features/campaign/CampaignData';
 import {
   BOSS_MISSILE_CONFIG,
   BossConfig,
@@ -46,6 +51,29 @@ export type { AdvancedBossInstance } from '@/core/boss/AdvancedBossController';
 
 /** 没有 Boss 导弹时的空列表（只读使用，从不写入） */
 const NO_OBJECTS: Object3D[] = [];
+
+const DEG = Math.PI / 180;
+
+/** 玩家在战场边缘朝外飞、Boss 前方放不下时的提示 */
+const RETURN_TO_ARENA_PROMPT = '返回作战区域 · Boss 即将现身';
+
+/**
+ * 方位用语：bearing 为水平方位（度，机头为 0、右为正），elevation 为仰角（度）。
+ * 例：正前方 / 右前方 / 左侧 / 右后方 / 正后方，仰俯角大时加“偏上 / 偏下”。
+ */
+function describeDirection(bearing: number, elevation: number): string {
+  const side = bearing >= 0 ? '右' : '左';
+  const off = Math.abs(bearing);
+  let word: string;
+  if (off <= 15) word = '正前方';
+  else if (off <= 60) word = `${side}前方`;
+  else if (off <= 120) word = `${side}侧`;
+  else if (off <= 165) word = `${side}后方`;
+  else word = '正后方';
+  if (elevation > 30) word += '偏上';
+  else if (elevation < -30) word += '偏下';
+  return word;
+}
 
 export type ActiveBoss =
   | BossAI
@@ -105,6 +133,15 @@ interface BossMissileIndicatorSnapshot {
  */
 export class BossBattleController {
   private static readonly BOSS_INDICATOR_UPDATE_INTERVAL = 1 / 24;
+  /** 等玩家掉头：轮询间隔、提示重复间隔、最长等待（只计玩家在飞的时间，暂停不计） */
+  private static readonly SPAWN_ROOM_POLL_MS = 150;
+  private static readonly SPAWN_ROOM_REMIND_MS = 2100;
+  private static readonly SPAWN_ROOM_MAX_WAIT_MS = 9000;
+  /** Boss 方位提示：远于此距离（米）或偏离机头超过 35° 时提示；最多几次、间隔几秒 */
+  private static readonly BEARING_FAR_METERS = 450;
+  private static readonly BEARING_OFF_NOSE_COS = Math.cos(35 * DEG);
+  private static readonly BEARING_ANNOUNCEMENTS = 4;
+  private static readonly BEARING_REPEAT_SECONDS = 3.2;
 
   private currentBoss: ActiveBoss | null = null;
   private currentBossType: BossType | null = null;
@@ -139,6 +176,11 @@ export class BossBattleController {
   private readonly legacyBossTargets: Object3D[] = [];
   private readonly spawnForward = new Vector3();
   private readonly legacyHitPosition = new Vector3();
+
+  // ── 出场方位提示（神谕主宰锚定在城堡核心，可能远在侧后方） ──
+  private bearingGuideRemaining = 0;
+  private bearingGuideTimer = 0;
+  private readonly bearingForward = new Vector3();
 
   constructor(private readonly deps: BossBattleControllerDeps) {
     this.feedback = new BossHitFeedback({
@@ -237,6 +279,7 @@ export class BossBattleController {
     }
 
     this.frameCounter++;
+    this.updateBearingGuide(deltaTime);
     const advancedBoss = this.advanced.getBoss();
     if (advancedBoss) {
       if (!this.advanced.update(deltaTime)) {
@@ -310,6 +353,7 @@ export class BossBattleController {
 
   public clear(): void {
     this.loadSequence++;
+    this.bearingGuideRemaining = 0;
     this.resetBossIndicatorState();
     this.resetAdvancedState();
 
@@ -340,6 +384,10 @@ export class BossBattleController {
       // 出生点需要采样当前关卡地形（换关后地形在下一个微任务才生成）
       await this.deps.whenTerrainReady();
       if (loadSequence !== this.loadSequence) {
+        return;
+      }
+      // Boss 总在玩家前方出现：玩家在战场边缘朝外飞时先提示返回，等机头转回来
+      if (!(await this.waitForSpawnRoomAhead(loadSequence, bossType))) {
         return;
       }
       boss = await this.createBoss(bossType, config, isBossMode);
@@ -378,6 +426,118 @@ export class BossBattleController {
     this.defeatLines = 'none';
     // Boss 登场无线电（Boss 模式下也播放：只有登场台词，没有剧情卡片）
     this.deps.presentation.radio('boss-spawn', this.currentLevel);
+    // 远处或不在机头方向（神谕主宰锚定在城堡核心）：报出方位与距离，直到玩家转向它
+    this.bearingGuideRemaining = BossBattleController.BEARING_ANNOUNCEMENTS;
+    this.bearingGuideTimer = 0;
+  }
+
+  /**
+   * 前方（±60°、出生范围内、地表合适）是否放得下这只 Boss；神谕主宰有城堡锚点时总是放得下
+   */
+  private hasSpawnRoomAhead(bossType: BossType): boolean {
+    const player = this.deps.playerAircraft;
+    const forward = this.spawnForward.set(0, 0, -1).applyQuaternion(player.quaternion);
+    return hasBossSpawnRoomAhead({
+      type: bossType,
+      playerPosition: player.position,
+      forwardX: forward.x,
+      forwardZ: forward.z,
+      sample: this.deps.getSurfaceSample,
+      coreArena: bossType === BossType.ORACLE_PRIME ? this.advanced.getCitadelArena() : null,
+    });
+  }
+
+  /**
+   * 玩家在出生范围外、正朝战场外飞时，前方放不下 Boss（否则只能出生在身后）：提示“返回作战区域”，
+   * 等机头转回来再出生；玩家在飞的累计时间超过上限仍不掉头，就出生在最靠近机头的方向（随后有方位提示）。
+   * 返回 false 表示等待期间 Boss 战被清场 / 重开。
+   */
+  private waitForSpawnRoomAhead(loadSequence: number, bossType: BossType): Promise<boolean> {
+    if (this.hasSpawnRoomAhead(bossType)) {
+      return Promise.resolve(true);
+    }
+    const { presentation, playerAircraft, scheduleTimeout } = this.deps;
+    const pollMs = BossBattleController.SPAWN_ROOM_POLL_MS;
+    presentation.flashWarning(RETURN_TO_ARENA_PROMPT, 'sys');
+    return new Promise<boolean>((resolve) => {
+      let flyingMs = 0;
+      let sinceReminderMs = 0;
+      let lastX = playerAircraft.position.x;
+      let lastZ = playerAircraft.position.z;
+      const poll = (): void => {
+        if (loadSequence !== this.loadSequence) {
+          resolve(false);
+          return;
+        }
+        const { x, z } = playerAircraft.position;
+        // 暂停 / 剧情卡片时玩家不动，不计入等待
+        if (x !== lastX || z !== lastZ) {
+          flyingMs += pollMs;
+          sinceReminderMs += pollMs;
+        }
+        lastX = x;
+        lastZ = z;
+        if (
+          this.hasSpawnRoomAhead(bossType) ||
+          flyingMs >= BossBattleController.SPAWN_ROOM_MAX_WAIT_MS
+        ) {
+          resolve(true);
+          return;
+        }
+        if (sinceReminderMs >= BossBattleController.SPAWN_ROOM_REMIND_MS) {
+          sinceReminderMs = 0;
+          presentation.flashWarning(RETURN_TO_ARENA_PROMPT, 'sys');
+        }
+        scheduleTimeout(poll, pollMs);
+      };
+      scheduleTimeout(poll, pollMs);
+    });
+  }
+
+  /** 出场方位提示：Boss 远或不在机头方向时每隔几秒闪一次“名称：方位 距离”，玩家转向它就停 */
+  private updateBearingGuide(deltaTime: number): void {
+    if (this.bearingGuideRemaining <= 0) return;
+    this.bearingGuideTimer -= deltaTime;
+    if (this.bearingGuideTimer > 0) return;
+    const text = this.describeBossBearing();
+    if (!text) {
+      this.bearingGuideRemaining = 0;
+      return;
+    }
+    this.deps.presentation.flashWarning(text, 'threat');
+    this.bearingGuideRemaining--;
+    this.bearingGuideTimer = BossBattleController.BEARING_REPEAT_SECONDS;
+  }
+
+  /** “名称：方位 距离”；Boss 已在机头 35° 内且不远、隐形中、或坐标非有限时为 null */
+  private describeBossBearing(): string | null {
+    const boss = this.currentBoss;
+    if (!boss || !boss.isAlive() || this.isBossHiddenFromSensors()) return null;
+    const player = this.deps.playerAircraft;
+    const target = boss.getMesh().position;
+    const dx = target.x - player.position.x;
+    const dy = target.y - player.position.y;
+    const dz = target.z - player.position.z;
+    const distance = Math.hypot(dx, dy, dz);
+    if (!Number.isFinite(distance) || distance < 1) return null;
+    const forward = this.bearingForward.set(0, 0, -1).applyQuaternion(player.quaternion);
+    const facing = (forward.x * dx + forward.y * dy + forward.z * dz) / distance;
+    if (
+      facing >= BossBattleController.BEARING_OFF_NOSE_COS &&
+      distance <= BossBattleController.BEARING_FAR_METERS
+    ) {
+      return null;
+    }
+    // 水平方位以机头的水平投影为基准（右为正）；机头竖直时退回 -Z
+    const flat = Math.hypot(forward.x, forward.z);
+    const fx = flat > 1e-3 ? forward.x / flat : 0;
+    const fz = flat > 1e-3 ? forward.z / flat : -1;
+    const bearing = Math.atan2(dz * fx - dx * fz, dx * fx + dz * fz) / DEG;
+    const elevation = Math.atan2(dy, Math.hypot(dx, dz)) / DEG;
+    const chapterBoss = getCampaignChapter(this.currentLevel).boss.name;
+    const name =
+      this.currentBossType === BossType.ORACLE_PRIME ? `${chapterBoss}（城堡核心）` : chapterBoss;
+    return `${name}：${describeDirection(bearing, elevation)} ${Math.round(distance / 10) * 10} 米`;
   }
 
   private async createBoss(
@@ -1130,6 +1290,7 @@ export class BossBattleController {
   }
 
   private handleBossDestroy(position: Vector3, config: BossConfig, isBossMode: boolean): void {
+    this.bearingGuideRemaining = 0;
     this.resetBossIndicatorState();
     this.announceDefeat();
     this.deps.presentation.setBossStatus(null);
