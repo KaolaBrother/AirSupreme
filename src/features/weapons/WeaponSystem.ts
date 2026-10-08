@@ -487,8 +487,9 @@ export class WeaponSystem {
       this.lastMuzzleValid = false;
       return;
     }
+    // 逐分量判断（不构造临时数组：本函数每帧调用）
     const { x, y, z, w } = quaternion;
-    if (![x, y, z, w].every(Number.isFinite)) {
+    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z) || !Number.isFinite(w)) {
       this.lastMuzzleValid = false;
       return;
     }
@@ -507,7 +508,14 @@ export class WeaponSystem {
       if (!isFiniteVector(this.carrySample) || this.carrySample.length() > MAX_CARRY_SPEED) {
         frame.carry.set(0, 0, 0);
       } else {
-        frame.carry.lerp(this.carrySample, Math.min(1, dt * 12));
+        // 与 Vector3.lerp 同一公式，手写展开：update() 内联预算耗尽时 lerp 成为真实调用，
+        // alpha 这个临时 double 每帧会被装箱成一个 HeapNumber
+        const alpha = Math.min(1, dt * 12);
+        const carry = frame.carry;
+        const sample = this.carrySample;
+        carry.x += (sample.x - carry.x) * alpha;
+        carry.y += (sample.y - carry.y) * alpha;
+        carry.z += (sample.z - carry.z) * alpha;
       }
     } else if (!this.lastMuzzleValid) {
       frame.carry.set(0, 0, 0);
