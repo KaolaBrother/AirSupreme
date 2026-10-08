@@ -314,3 +314,99 @@ person hide the shield hex (tag it with PLAYER_EXTERIOR_LAYER) or fade it by `1 
 6. After level 10: `markCampaignCompleted(score)` + `clearCampaignCheckpoint()`. Pass `GameSettings.cameraMode`
    to CameraRig as its starting mode.
 Known: caps stay at level-1 values until setCampaignLevel is called; CampaignData now sits in the entry chunk.
+
+===================================================================================================
+# Integration notes — round 3 batches + integration pass 1 (session 3)
+
+Merged: tests 2726d1a · story-ui 6deda8f · audio ef4c5f4 · integration pass 1 6368511 (records 10d1820).
+Gates on the merged tree: tsc clean · lint 0 errors · vitest 838 pass / 2 skipped · real vite build OK.
+
+---------------------------------------------------------------------------------------------------
+## Integration pass 1 — what exists now
+
+New controllers: src/core/campaign/{CampaignFlowController,CampaignPresentation}, units/UnitController,
+combat/SpecialWeaponsController, camera/PlayerViewController, vfx/{CombatVfxController,ContrailController},
+boss/AdvancedBossSupport, dev/DevHooks (dev builds only: window.__AIR_SUPREME_DEV__ — god mode, time scale);
+src/ui/CheckpointResumeButton. Every presentation call goes through `ICampaignPresentation`
+(src/core/campaign/CampaignPresentation.ts); `DefaultCampaignPresentation` (built in the GameCoordinator
+constructor) only calls pre-existing HUD/Audio/Music methods. Pass 2 swaps the bodies:
+- StoryOverlay: showChapterIntro, showDebrief, showEnding, isStoryActive.
+- RadioComms.enqueue: radio, genericRadio, unitFirstContact.
+- HUD: updateWeaponPanel, updateFlares, showAutosave (+ playAutosave), setCameraMode (+ playCameraSwitch),
+  setBossStatus, setMissileWarning, flashWarning. RadarMinimap.setRangeMultiplier: setRadarRangeMultiplier.
+- MusicSystem: playLevelMusic / playBossMusic (levels 6-10 still use old tracks), playStinger, setMusicIntensity.
+- New AudioManager play* methods: onWeaponEvent, onUnitEvent, onBossCue.
+Known gaps after pass 1: bosses 1-5 keep old spawn points (some ~200 m behind the player) and the old 5 m
+bullet threshold; radar doesn't show neutral/new unit kinds; un-steered player dies in ~10-15 s on standard
+difficulty (balance untuned); L6 starts facing the volcano (must pull up within ~8 s); GameCoordinator 3,267 and
+BossBattleController 1,579 lines (extract bosses 6-10 into their own controller); remaining per-frame
+allocations in WeaponSystem.prepareFrame, InputHandler.getDesktopState, CombatSystem collision closures;
+`GameLoop.setTimeScale` ships but nothing in production calls it. Chunks: GameCoordinator 120.5 → 169 kB,
+total JS 1.55 MB/23 chunks → 2.19 MB/41 chunks (new systems lazy-loaded).
+
+---------------------------------------------------------------------------------------------------
+## Audio (src/core/Audio/**)
+
+API per §6 plus: `playRailgunCharge(chargeSeconds = 1.2)`; `pauseMusic()` fades and remembers, `resumeMusic()`
+restores; `stopMusic` fades 280 ms (state changes immediately); `playBossMusic(level)` covers 1-10;
+`setIntensity` resets to the new track's default on track change; 'boss-defeated', 'level-complete',
+'game-over', 'campaign-complete' stingers end the current music themselves; extras getIntensity,
+MUSIC_STINGERS, AudioManager.stopSustainedSounds(). Existing SFX are quiet (explosion ≈ −29 LUFS); music sits
+under them (≈ −32 LUFS). The output chain needs ~100 ms to settle after the context is created.
+Wiring:
+- Replace getLevelMusic with getLevelMusicForLevel.
+- Chapter card: playStoryMusic(), playChapterImpact(), playTypewriterTick() per character (StoryOverlay
+  onTypeTick ≈ 29/s), playRadioOpen() per radio line; then playLevelMusic(...) followed by
+  playStinger('chapter-start') (stinger after the music so it follows the new key).
+- Waves cleared: playStinger('level-complete').
+- Boss: playBossMusic(level); phases → setIntensity 0.35 / 0.6 / 0.85, 1.0 below 25 % HP, plus
+  playStinger('phase-change') and playBossPhaseAlarm(); Oracle: setIntensity(getMusicIntensity()) every frame.
+- Boss killed: playStinger('boss-defeated'). Debrief: playVictoryMusic() + playDebriefTally() per counted item.
+- Autosave: playAutosave() + playStinger('checkpoint'). Game over: playStinger('game-over'). After level 10:
+  playStinger('campaign-complete') then victory music.
+- Menu: playMenuMusic() after the first user gesture. Pause: pauseMusic() + stopSustainedSounds(); resume:
+  resumeMusic().
+- Weapons/units/camera/flares/surfaces per the round-1/2 notes; playUnitDestroyed(unit.domain).
+
+---------------------------------------------------------------------------------------------------
+## Story UI + HUD (src/ui/StoryOverlay.ts, RadioComms.ts, HUD.ts, RadarMinimap.ts, theme/**, index.html)
+
+Behaviour: unlock line only when `unlockLine` is passed; onCardShown once per card (prologue + chapter →
+'chapter'; epilogue + credits → 'ending'); Space/Enter/tap reveals then advances, Esc / 跳过 / skip() ends the
+whole sequence (callback once), hide() or a new show* cancels silently; debrief waits for 继续; while a card is up
+`<html data-story-overlay>` hides HUD, radar, radio, mobile controls, lock-on/indicator layers, and the overlay
+swallows Space/Enter/Esc (pause blocked during cards). RadioComms: idle → line shows immediately (synchronous
+onLineShown); high priority interrupts and the interrupted line replays; duplicates ignored; queue cap 6; timing
+only from update(dt). HUD: autosave/flashWarning timeouts tick from hud.update(dt) (freeze while paused);
+setBossStatus(null) hides the strip; on touch, weapon/flare/camera/missile state shows on the new buttons.
+Radar adds getRangeMultiplier().
+Wiring:
+1. Construct StoryOverlay + RadioComms in the presentation layer; radio.update(dt) per frame; radio.clear() on
+   level end; dispose both at teardown.
+2. showChapterIntro(getCampaignChapter(L), done, { includePrologue: L === 1 && newGame, unlockLine:
+   ch.unlockLine }); showDebrief({...}, () => upgradeMenu.show({ mode: 'hangar', ... }));
+   showEnding({ finalScore }, () => <mission complete>).
+3. Radio: getChapterRadio lines + UNIT_FIRST_CONTACT_RADIO as normal; civilian-hit, missile-warning, low-health
+   from GENERIC_RADIO with { priority: 'high' }; onLineShown + CAMPAIGN_SPEAKERS[speaker].tone for the radio
+   sound.
+4. HUD per frame: updateWeaponPanel({ ...weapons.getHudState(), visible: state.selected !== null });
+   updateFlares(getCharges(), getMaxCharges(), getRechargeProgress()); setMissileWarning(...);
+   setBossStatus(boss.getStatusLabel() ?? '', { current: getPhase(), total: <phase count> }) then null when
+   the boss is gone.
+5. HUD on events: checkpoint saved → showAutosave('第3波'); camera onModeChanged + level start →
+   setCameraMode(m); boss onHazardWarning → flashWarning(label, 'threat').
+6. Mobile buttons (touchstart + preventDefault, passive: false): #camera-button → toggleMode();
+   #special-button → setTriggerHeld(true) on touchstart / false on touchend; #cycle-button → selectNext();
+   #flare-button → flares.deploy(...). The HUD updates their labels/meter rings/alert state.
+7. Radar kinds: 'enemy-air' → 'enemy', 'ally' → 'ally-unit'; ground/sea/neutral pass through;
+   PresentationController passthrough radar.setRangeMultiplier(units.getRadarRangeMultiplier()).
+
+---------------------------------------------------------------------------------------------------
+## Test findings (tests batch)
+
+- it.fails (spec disagreement): MagmaColossusMesh / AbyssalLeviathanMesh roots lack userData.hitRadius.
+- BossMissileSystem.huntTarget (~l.756) copies playerMesh.position unchecked → a single NaN frame leaves
+  in-flight boss missiles NaN forever (old code).
+- Player-source applyDamage on an ally damages it with byPlayer = true (pinned as the ally-penalty path).
+- Phantom Wing has no collision parts while cloaked at spawn (pinned).
+- Boss-mode smoke showed the enemy-health-bars overlay reading "NaNm".
