@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { getDeclaredHitRadius } from '@/core/CombatContracts';
 import type { BossConfig } from './BossTypes';
 import { createGlowSprite } from './MagmaColossusHazards';
 
@@ -813,6 +814,11 @@ export function createAbyssalLeviathanMesh(config: BossConfig): THREE.Group {
   bowTip.name = 'leviathan_bow_tip';
   bowTip.position.set(0, -0.4 * s, 18.6 * s);
   bow.add(bowTip);
+
+  // 根节点命中半径（米）：与飞艇 / 幻影之翼 / 神谕主宰同一口径——以根节点原点为球心、
+  // 包住中央主体碰撞球的包围球。根节点在海平面，中央主体是甲板中段碰撞锚点
+  // （上浮姿态球心 (0, DECK_Y, 4.6)，半径 6），即约 11.1 × scale；各部件半径不变。
+  group.userData.hitRadius = deck.position.length() + getDeclaredHitRadius(deck, 0);
 
   const rig: AbyssalLeviathanRig = {
     scale: s,
