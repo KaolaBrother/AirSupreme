@@ -35,6 +35,10 @@ export class CombatVfxController {
   private readonly contrailTargets: THREE.Object3D[] = [];
   private readonly smokePosition = new THREE.Vector3();
   private readonly muzzleDirection = new THREE.Vector3();
+  private readonly screenLevels: { lowHealth: number; speed: number } = {
+    lowHealth: 0,
+    speed: 0,
+  };
   private damageSmokeTimer = 0;
   private densityPollTimer = 0;
 
@@ -67,10 +71,11 @@ export class CombatVfxController {
   ): void {
     const player = this.deps.playerAircraft;
     const flight = this.deps.view.getFlightState();
-    this.deps.setScreenEffects({
-      lowHealth: player.visible && healthPercent < 0.35 ? (0.35 - healthPercent) / 0.35 : 0,
-      speed: flight.boosting ? 0.35 + 0.65 * flight.speedRatio : 0,
-    });
+    // 复用同一个输入对象（逐帧调用，不分配）
+    const levels = this.screenLevels;
+    levels.lowHealth = player.visible && healthPercent < 0.35 ? (0.35 - healthPercent) / 0.35 : 0;
+    levels.speed = flight.boosting ? 0.35 + 0.65 * flight.speedRatio : 0;
+    this.deps.setScreenEffects(levels);
 
     const particles = this.deps.getParticleSystem();
     this.damageSmokeTimer -= deltaTime;

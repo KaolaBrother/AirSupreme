@@ -36,6 +36,47 @@ function clampToArena(value: number): number {
   return Math.max(-SPAWN_LIMIT, Math.min(SPAWN_LIMIT, Number.isFinite(value) ? value : 0));
 }
 
+/** 出生方向候选：先正前方，再左右各偏 30° / 60° / 90° */
+const SPAWN_HEADING_OFFSETS = [0, 0.5236, -0.5236, 1.0472, -1.0472, 1.5708, -1.5708];
+
+/**
+ * 出生方向（XZ 单位向量）：玩家前方 distance 米仍在战场内就用正前方；
+ * 玩家贴近战场边缘、正前方会被钳制到身后时，依次尝试偏转 30°/60°/90°，
+ * 都不行就朝战场中心（玩家的软边界也会把机头掉向中心）。
+ */
+function resolveSpawnDirection(
+  p: THREE.Vector3,
+  forwardX: number,
+  forwardZ: number,
+  distance: number
+): { x: number; z: number } {
+  let fx = forwardX;
+  let fz = forwardZ;
+  const length = Math.hypot(fx, fz);
+  if (!Number.isFinite(length) || length < 1e-3) {
+    fx = 0;
+    fz = -1;
+  } else {
+    fx /= length;
+    fz /= length;
+  }
+  const px = Number.isFinite(p.x) ? p.x : 0;
+  const pz = Number.isFinite(p.z) ? p.z : 0;
+  for (const offset of SPAWN_HEADING_OFFSETS) {
+    const cos = Math.cos(offset);
+    const sin = Math.sin(offset);
+    const dx = fx * cos - fz * sin;
+    const dz = fx * sin + fz * cos;
+    const x = px + dx * distance;
+    const z = pz + dz * distance;
+    if (Math.abs(x) <= SPAWN_LIMIT && Math.abs(z) <= SPAWN_LIMIT) {
+      return { x: dx, z: dz };
+    }
+  }
+  const toCenter = Math.hypot(px, pz);
+  return toCenter > 1e-3 ? { x: -px / toCenter, z: -pz / toCenter } : { x: fx, z: fz };
+}
+
 /**
  * 在期望点附近按螺旋搜索满足条件的落点（陆地 / 水面）；找不到时返回期望点。
  */
@@ -71,16 +112,9 @@ function searchSurface(
  */
 export function resolveAdvancedBossSpawn(request: BossSpawnRequest): BossSpawnPlacement {
   const { playerPosition: p, sample } = request;
-  let fx = request.forwardX;
-  let fz = request.forwardZ;
-  const length = Math.hypot(fx, fz);
-  if (!Number.isFinite(length) || length < 1e-3) {
-    fx = 0;
-    fz = -1;
-  } else {
-    fx /= length;
-    fz /= length;
-  }
+  const direction = resolveSpawnDirection(p, request.forwardX, request.forwardZ, 320);
+  const fx = direction.x;
+  const fz = direction.z;
   // 右侧向量（前方为 -Z 时右侧为 +X）
   const rx = -fz;
   const rz = fx;
@@ -144,6 +178,92 @@ export function resolveAdvancedBossSpawn(request: BossSpawnRequest): BossSpawnPl
   }
   const yaw = Math.atan2(p.x - position.x, p.z - position.z);
   return { position, yaw: Number.isFinite(yaw) ? yaw : 0 };
+}
+
+export interface LegacyBossSpawnRequest {
+  type: BossType;
+  playerPosition: THREE.Vector3;
+  /** 玩家水平前向（XZ，不必归一化）；Boss 出现在玩家前方 */
+  forwardX: number;
+  forwardZ: number;
+  sample: BossSurfaceSampler;
+  /** 0..1 随机数（测试可注入） */
+  random?: () => number;
+}
+
+/**
+ * 第 1-5 关 Boss 出生点：沿玩家水平朝向前方约 200 米（原先固定在 +Z，玩家朝 -Z 飞时会出现在
+ * 身后 200 米）。高度沿用各 Boss 的设计值；导弹驱逐舰在附近找开阔水面，空中 Boss 高于地表。
+ * - 重型轰炸机：前方 200 米、左右 ±60 米、玩家高度 +50~100
+ * - 移动堡垒：前方 200 米，y = -50（沙漠网格基准面）
+ * - 章鱼战舰：前方 200 米、左右 ±50 米，y = 150
+ * - 导弹驱逐舰：前方 200 米附近的水面，y = -50
+ * - 天空母舰：前方 200 米，y = 200（且高于地表 120 米）
+ */
+export function resolveLegacyBossSpawn(request: LegacyBossSpawnRequest): THREE.Vector3 {
+  const { playerPosition: p, sample } = request;
+  const random = request.random ?? Math.random;
+  const direction = resolveSpawnDirection(p, request.forwardX, request.forwardZ, 260);
+  const fx = direction.x;
+  const fz = direction.z;
+  const rx = -fz;
+  const rz = fx;
+  const ahead = (distance: number, lateral: number): { x: number; z: number } => ({
+    x: clampToArena(p.x + fx * distance + rx * lateral),
+    z: clampToArena(p.z + fz * distance + rz * lateral),
+  });
+  const playerY = Number.isFinite(p.y) ? p.y : 60;
+
+  const position = new THREE.Vector3();
+  switch (request.type) {
+    case BossType.DESERT_FORTRESS: {
+      const spot = ahead(200, 0);
+      position.set(spot.x, -50, spot.z);
+      break;
+    }
+    case BossType.OCTOPUS_WARSHIP: {
+      const spot = ahead(200, (random() - 0.5) * 100);
+      position.set(spot.x, 150, spot.z);
+      break;
+    }
+    case BossType.MISSILE_DESTROYER: {
+      const target = ahead(200, 0);
+      const spot = searchSurface(sample, target.x, target.z, (surface) => surface.water, 600);
+      position.set(spot.x, -50, spot.z);
+      break;
+    }
+    case BossType.SKY_CARRIER: {
+      const spot = ahead(200, 0);
+      const ground = sample(spot.x, spot.z).y;
+      position.set(
+        spot.x,
+        Math.max(200, (Number.isFinite(ground) ? ground : WATER_Y) + 120),
+        spot.z
+      );
+      break;
+    }
+    case BossType.HEAVY_BOMBER:
+    default: {
+      const spot = ahead(200, (random() - 0.5) * 120);
+      const ground = sample(spot.x, spot.z).y;
+      const desired = playerY + 50 + random() * 50;
+      position.set(
+        spot.x,
+        Math.max(desired, (Number.isFinite(ground) ? ground : WATER_Y) + 60),
+        spot.z
+      );
+      break;
+    }
+  }
+
+  if (
+    !Number.isFinite(position.x) ||
+    !Number.isFinite(position.y) ||
+    !Number.isFinite(position.z)
+  ) {
+    position.set(0, 150, -200);
+  }
+  return position;
 }
 
 /**

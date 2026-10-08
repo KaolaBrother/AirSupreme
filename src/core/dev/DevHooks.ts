@@ -38,6 +38,11 @@ export interface DevHookAccess {
   clickHangarContinue(): void;
   /** 瞬移之后：同步插值状态、相机就位、清掉拖尾 */
   onPlayerTeleported(): void;
+  /** 音乐状态（当前曲目 / 强度 / 是否在播） */
+  getMusicState(): { track: string | null; intensity: number; playing: boolean };
+  /** 战役表现层：剧情卡片 / 无线电是否在显示 */
+  isStoryActive(): boolean;
+  isRadioBusy(): boolean;
 }
 
 interface Vec3Like {
@@ -120,6 +125,7 @@ export function installDevHooks(access: DevHookAccess): void {
         : null,
       player: {
         position: toPlain(player.position),
+        forward: toPlain(tmp.set(0, 0, -1).applyQuaternion(player.quaternion)),
         visible: player.visible,
         health: playerSystem.getHealth().getCurrentHealth(),
         maxHealth: playerSystem.getHealth().getMaxHealth(),
@@ -144,6 +150,8 @@ export function installDevHooks(access: DevHookAccess): void {
         decoys: weapons.getActiveDecoys().length,
       },
       timeScale: access.gameLoop.getTimeScale(),
+      music: access.getMusicState(),
+      story: { active: access.isStoryActive(), radioBusy: access.isRadioBusy() },
       playerHits: { ...playerHits },
       blockedHits: { ...blockedHits },
       hazardHits: access.getBossController()?.getHazardHitCount() ?? 0,

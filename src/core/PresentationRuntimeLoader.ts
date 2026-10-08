@@ -23,6 +23,9 @@ export async function warmPresentationRuntimeChunks(): Promise<void> {
     import('@/ui/LockOnIndicator'),
     import('@/ui/BossMissileIndicator'),
     import('@/core/PresentationController'),
+    // 剧情卡片与无线电（战役表现层开局按需创建）
+    import('@/ui/StoryOverlay'),
+    import('@/ui/RadioComms'),
   ]);
 }
 
