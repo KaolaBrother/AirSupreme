@@ -124,6 +124,8 @@ interface SpawnSpec {
   lateral: number;
   /** 地表约束（陆地 / 水面）；空中 Boss 为 null */
   accept: ((surface: { y: number; water: boolean }) => boolean) | null;
+  /** 出生时比玩家高多少（米）：重型轰炸机 / 天空母舰按它取高度 */
+  rise: number;
 }
 
 /** 玩家前方偏 angle（右为正）、距离 distance 处，再向右侧偏 lateral 的点 */
@@ -246,45 +248,73 @@ function findSpawnSpot(frame: SpawnFrame, spec: SpawnSpec, sample: BossSurfaceSa
 }
 
 /**
- * 天空母舰：SkyCarrierAI 的巡航高度是 200 米（每秒收敛 5% 的高度差）。玩家此时一般在 20~150 米，
- * 若在前方 200 米、200 米高出生，母舰在机头上方 35~42°，而第三人称视野上沿只有约 +19°
- * （垂直视场 75°、追尾相机俯视约 18°），一出场就在画面外。改为前方 500 米、比玩家高约 100 米
- * （160~200 米；160 米时舰底仍高于第五关最高楼顶 135 米）出生：一出场就在画面上部，随后自行爬升到巡航高度。
+ * 空中 Boss 的出场仰角：第三人称追尾相机下画面上沿约在机头上方 +19°（垂直视场 75°、相机俯视约 18°），
+ * 顶部的 Boss 状态条与血条又遮住其下约 7°。比玩家高 rise 米出生时，把出生距离拉到 rise / tan(9°)
+ * （不短于设计距离、不长于上限），Boss 一出场就在画面上部、状态条之下，而不是出画或被遮住。
  */
-const SKY_CARRIER_SPAWN_DISTANCE = 500;
+const AIR_SPAWN_ELEVATION_TAN = Math.tan(9 * DEG);
+
+function framedDistance(designDistance: number, rise: number, maxDistance: number): number {
+  const wanted = rise > 0 ? rise / AIR_SPAWN_ELEVATION_TAN : designDistance;
+  return Math.min(maxDistance, Math.max(designDistance, wanted));
+}
+
+/**
+ * 重型轰炸机：BossAI 巡航在玩家上方 50 米。原先在前方 200 米、比玩家高 50~100 米出生（仰角 14~27°，
+ * 出画）；改为高 40~70 米、前方 250~420 米（仰角约 9°）。
+ */
+const HEAVY_BOMBER_RISE_MIN = 40;
+const HEAVY_BOMBER_RISE_SPAN = 30;
+
+/**
+ * 天空母舰：SkyCarrierAI 的巡航高度是 200 米（每秒收敛 5% 的高度差）。玩家此时一般在 20~150 米
+ * （第五关出生高度 22 米），若在前方 200 米、200 米高出生，母舰在机头上方 35~42°，一出场就在画面外。
+ * 改为比玩家高约 100 米（160~200 米；160 米时舰底仍高于第五关最高楼顶 135 米）、前方 450~800 米
+ * （按上面的仰角规则）出生：一出场就在画面上部，随后自行爬升到巡航高度。
+ */
 const SKY_CARRIER_ABOVE_PLAYER = 100;
 const SKY_CARRIER_MIN_SPAWN_Y = 160;
 const SKY_CARRIER_CRUISE_Y = 200;
 
 /** 各 Boss 的设计距离 / 侧偏 / 地表约束（api-spec §2 与第 1-5 关的原设计值） */
-function getSpawnSpec(type: BossType, random: () => number): SpawnSpec {
+function getSpawnSpec(type: BossType, random: () => number, playerY: number): SpawnSpec {
   switch (type) {
-    case BossType.HEAVY_BOMBER:
-      return { distance: 200, lateral: (random() - 0.5) * 120, accept: null };
+    case BossType.HEAVY_BOMBER: {
+      const lateral = (random() - 0.5) * 120;
+      const rise = HEAVY_BOMBER_RISE_MIN + random() * HEAVY_BOMBER_RISE_SPAN;
+      return { distance: framedDistance(200, rise, 420), lateral, accept: null, rise };
+    }
     case BossType.DESERT_FORTRESS:
-      return { distance: 200, lateral: 0, accept: null };
+      return { distance: 200, lateral: 0, accept: null, rise: 0 };
     case BossType.OCTOPUS_WARSHIP:
-      return { distance: 200, lateral: (random() - 0.5) * 100, accept: null };
+      return { distance: 200, lateral: (random() - 0.5) * 100, accept: null, rise: 0 };
     case BossType.MISSILE_DESTROYER:
-      return { distance: 200, lateral: 0, accept: (surface) => surface.water };
-    case BossType.SKY_CARRIER:
-      return { distance: SKY_CARRIER_SPAWN_DISTANCE, lateral: 0, accept: null };
+      return { distance: 200, lateral: 0, accept: (surface) => surface.water, rise: 0 };
+    case BossType.SKY_CARRIER: {
+      const y = Math.min(
+        SKY_CARRIER_CRUISE_Y,
+        Math.max(SKY_CARRIER_MIN_SPAWN_Y, playerY + SKY_CARRIER_ABOVE_PLAYER)
+      );
+      const rise = y - playerY;
+      return { distance: framedDistance(450, rise, 800), lateral: 0, accept: null, rise };
+    }
     case BossType.MAGMA_COLOSSUS:
       // 陆地，且不在火山锥上
       return {
         distance: 260,
         lateral: 0,
         accept: (surface) => !surface.water && surface.y < WATER_Y + 160,
+        rise: 0,
       };
     case BossType.ABYSSAL_LEVIATHAN:
-      return { distance: 260, lateral: 0, accept: (surface) => surface.water };
+      return { distance: 260, lateral: 0, accept: (surface) => surface.water, rise: 0 };
     case BossType.TEMPEST_ZEPPELIN:
-      return { distance: 300, lateral: 0, accept: null };
+      return { distance: 300, lateral: 0, accept: null, rise: 0 };
     case BossType.PHANTOM_WING:
-      return { distance: 320, lateral: 120, accept: null };
+      return { distance: 320, lateral: 120, accept: null, rise: 0 };
     case BossType.ORACLE_PRIME:
     default:
-      return { distance: 280, lateral: 0, accept: null };
+      return { distance: 280, lateral: 0, accept: null, rise: 0 };
   }
 }
 
@@ -310,8 +340,9 @@ export interface BossSpawnRoomRequest {
  */
 export function hasBossSpawnRoomAhead(request: BossSpawnRoomRequest): boolean {
   if (request.type === BossType.ORACLE_PRIME && request.coreArena) return true;
-  const frame = makeSpawnFrame(request.playerPosition, request.forwardX, request.forwardZ);
-  const spec = getSpawnSpec(request.type, () => 0.5);
+  const p = request.playerPosition;
+  const frame = makeSpawnFrame(p, request.forwardX, request.forwardZ);
+  const spec = getSpawnSpec(request.type, () => 0.5, Number.isFinite(p.y) ? p.y : 60);
   return findAheadSpot(frame, spec, request.sample ?? null) !== null;
 }
 
@@ -332,7 +363,8 @@ export function resolveAdvancedBossSpawn(request: BossSpawnRequest): BossSpawnPl
     position.copy(request.coreArena);
   } else {
     const frame = makeSpawnFrame(p, request.forwardX, request.forwardZ);
-    const spot = findSpawnSpot(frame, getSpawnSpec(request.type, Math.random), sample);
+    const playerY = Number.isFinite(p.y) ? p.y : 60;
+    const spot = findSpawnSpot(frame, getSpawnSpec(request.type, Math.random, playerY), sample);
     switch (request.type) {
       case BossType.MAGMA_COLOSSUS:
         position.set(spot.x, spot.groundY, spot.z);
@@ -381,19 +413,21 @@ export interface LegacyBossSpawnRequest {
  * 第 1-5 关 Boss 出生点：沿玩家水平朝向前方约 200 米、落在出生范围内（原先固定在 +Z，
  * 玩家朝 -Z 飞时会出现在身后 200 米）。高度沿用各 Boss 的设计值；导弹驱逐舰落在前方的水面，
  * 空中 Boss 高于地表、低于软顶界。
- * - 重型轰炸机：前方 200 米、左右 ±60 米、玩家高度 +50~100
+ * - 重型轰炸机：玩家高度 +40~70、左右 ±60 米，前方 250~420 米（仰角约 9°）
  * - 移动堡垒：前方 200 米，y = -50（沙漠网格基准面）
  * - 章鱼战舰：前方 200 米、左右 ±50 米，y = 150（触手下缘离地至少约 15 米）
  * - 导弹驱逐舰：前方 200 米附近的水面，y = -50
- * - 天空母舰：前方 500 米，比玩家高约 100 米（160~200 米，且高于地表 120 米），随后爬升到 200 米巡航
+ * - 天空母舰：比玩家高约 100 米（160~200 米，且高于地表 120 米）、前方 450~800 米（仰角约 9°），
+ *   随后爬升到 200 米巡航
  * 前方放不下时（见 hasBossSpawnRoomAhead）取最靠近机头的方向。
  */
 export function resolveLegacyBossSpawn(request: LegacyBossSpawnRequest): THREE.Vector3 {
   const { playerPosition: p, sample } = request;
   const random = request.random ?? Math.random;
   const frame = makeSpawnFrame(p, request.forwardX, request.forwardZ);
-  const spot = findSpawnSpot(frame, getSpawnSpec(request.type, random), sample);
   const playerY = Number.isFinite(p.y) ? p.y : 60;
+  const spec = getSpawnSpec(request.type, random, playerY);
+  const spot = findSpawnSpot(frame, spec, sample);
 
   const position = new THREE.Vector3();
   switch (request.type) {
@@ -406,20 +440,13 @@ export function resolveLegacyBossSpawn(request: LegacyBossSpawnRequest): THREE.V
     case BossType.MISSILE_DESTROYER:
       position.set(spot.x, -50, spot.z);
       break;
-    case BossType.SKY_CARRIER: {
-      const approachY = Math.min(
-        SKY_CARRIER_CRUISE_Y,
-        Math.max(SKY_CARRIER_MIN_SPAWN_Y, playerY + SKY_CARRIER_ABOVE_PLAYER)
-      );
-      position.set(spot.x, airSpawnY(Math.max(approachY, spot.groundY + 120)), spot.z);
+    case BossType.SKY_CARRIER:
+      position.set(spot.x, airSpawnY(Math.max(playerY + spec.rise, spot.groundY + 120)), spot.z);
       break;
-    }
     case BossType.HEAVY_BOMBER:
-    default: {
-      const desired = playerY + 50 + random() * 50;
-      position.set(spot.x, airSpawnY(Math.max(desired, spot.groundY + 60)), spot.z);
+    default:
+      position.set(spot.x, airSpawnY(Math.max(playerY + spec.rise, spot.groundY + 60)), spot.z);
       break;
-    }
   }
 
   if (
