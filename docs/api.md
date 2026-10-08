@@ -112,7 +112,7 @@ public areWaveJetsCleared(): boolean;
 
 `y` is the world-space surface (the water surface where `water` is true). Water exists on `LAKE`, `OCEAN`, `VOLCANO` (sea around the island), `ARCTIC` (open sea between ice) and the `CANYON` river. Environment modules implement `TerrainEnvironment` (`terrain`, `root`, `hasWater`, `build(ctx)`, `sampleHeight(worldX, worldZ)`, `isWater(worldX, worldZ)`, optional `surfaceKindAt(worldX, worldZ)` and `update(deltaTime, elapsed, focus)`, `dispose()`) on top of `EnvironmentBase`; `sampleEnvironmentSurface(environment, worldX, worldZ, waterY)` turns height + water into the `sampleSurface` result.
 
-`LevelConfig` additions:
+`LevelConfig` (`TerrainType` gains five values, the weather presets gain `ash` / `aurora`, `LEVELS` covers ids 1..10 with names equal to `CampaignChapter.title`):
 
 ```typescript
 export enum TerrainType {
@@ -122,6 +122,7 @@ export enum TerrainType {
 }
 export type LevelWeatherPreset =
   | 'clear' | 'cloudy' | 'mist' | 'windy' | 'sandstorm' | 'snow' | 'storm' | 'smog' | 'ash' | 'aurora';
+// existing; every level now carries tuned values, consumed by the post-processing grade
 export interface LevelPostFxConfig {
   exposure: number;
   contrast: number;
@@ -129,11 +130,10 @@ export interface LevelPostFxConfig {
   bloomStrength: number;
   vignetteStrength: number;
 }
-// LevelConfig gains `postFx: LevelPostFxConfig`; LEVELS covers ids 1..10 (names = CampaignChapter.title)
 export function getLevelConfig(levelId: number): LevelConfig | undefined;
 ```
 
-`CanyonEnvironment.getConvoyRoute()` and `CitadelEnvironment.getAssaultRoute()` feed `UnitSystem.setRouteProvider`; `CitadelEnvironment.getCoreArena()` anchors Oracle Prime and `setCoreState('online' | 'exposed' | 'overload' | 'offline')` mirrors its phases.
+Environment extensions: `CanyonEnvironment.getConvoyRoute(): readonly THREE.Vector3[]` and `CitadelEnvironment.getAssaultRoute(): readonly THREE.Vector3[]` feed `UnitSystem.setRouteProvider`; `CitadelEnvironment.getCoreArena(target?)` anchors Oracle Prime and `setCoreState(state: CitadelCoreState)` (`'online' | 'exposed' | 'overload' | 'offline'`) mirrors its phases.
 
 ## Shared combat contracts
 
@@ -207,7 +207,7 @@ export function getLevelScaling(level: number): LevelScaling;
 export function getDifficultyProfile(level: number): DifficultyProfile; // player difficulty 1..5
 ```
 
-The curve values live in `getLevelScaling` itself; `UnitController.setLevel` multiplies them by the player's `DifficultyProfile`.
+The curve values live in `getLevelScaling` itself; `LevelManager` (enemy jets) and `UnitController.setLevel` (units) multiply them by the player's `DifficultyProfile`, and `GameCoordinator` applies `scoreMultiplier` to every score award.
 
 ## Campaign data
 
