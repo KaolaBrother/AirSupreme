@@ -44,6 +44,9 @@ import {
 
 export type { AdvancedBossInstance } from '@/core/boss/AdvancedBossController';
 
+/** 没有 Boss 导弹时的空列表（只读使用，从不写入） */
+const NO_OBJECTS: Object3D[] = [];
+
 export type ActiveBoss =
   | BossAI
   | DesertFortressAI
@@ -132,6 +135,8 @@ export class BossBattleController {
   private legacyLowHealthAnnounced = false;
   /** Boss 导弹正在追踪玩家（HUD 导弹告警） */
   private bossMissileIncoming = false;
+  private readonly legacyFriendlyMeshes: Object3D[] = [];
+  private readonly legacyBossTargets: Object3D[] = [];
   private readonly spawnForward = new Vector3();
   private readonly legacyHitPosition = new Vector3();
 
@@ -253,18 +258,26 @@ export class BossBattleController {
       return;
     }
 
-    const friendlyMeshes = this.deps.enemySystem
-      .getFriendlyAIs()
-      .map((friendly) => friendly.getMesh());
+    // 逐帧复用的目标数组：僚机网格；Boss 本体 + 部件 + Boss 导弹（僚机索敌与导弹命中共用）
+    const friendlyMeshes = this.legacyFriendlyMeshes;
+    friendlyMeshes.length = 0;
+    for (const friendly of this.deps.enemySystem.getFriendlyAIs()) {
+      friendlyMeshes.push(friendly.getMesh());
+    }
     const bossMissileSystem = this.currentBoss.getMissileSystem();
     const bossParts = this.currentBoss.getCollisionParts();
-    const missileMeshes = bossMissileSystem ? bossMissileSystem.getMissileMeshes() : [];
-    const bossTargets = [...bossParts, ...missileMeshes];
+    const missileMeshes = bossMissileSystem ? bossMissileSystem.getMissileMeshes() : NO_OBJECTS;
+    const bossTargets = this.legacyBossTargets;
+    bossTargets.length = 0;
+    bossTargets.push(this.currentBoss.getMesh());
+    for (const part of bossParts) bossTargets.push(part);
+    for (const mesh of missileMeshes) bossTargets.push(mesh);
 
-    this.deps.enemySystem.updateWithPlayer(deltaTime, this.deps.playerSystem.getPosition(), [
-      this.currentBoss.getMesh(),
-      ...bossTargets,
-    ]);
+    this.deps.enemySystem.updateWithPlayer(
+      deltaTime,
+      this.deps.playerSystem.getPosition(),
+      bossTargets
+    );
 
     this.currentBoss.update(deltaTime, this.deps.playerSystem.getMesh(), friendlyMeshes);
     this.feedback.checkBossMissileHits(bossMissileSystem, friendlyMeshes);
@@ -396,6 +409,10 @@ export class BossBattleController {
    * 播放警报 + phase-change 刺激音并提高音乐强度；HUD 显示阶段菱形；低于 25% 播低血量台词。
    */
   private updateLegacyPresentation(deltaTime: number, boss: ActiveBoss): void {
+    // 4 Hz：getHealth() 每次返回新对象，阶段判定不必逐帧
+    this.legacyStatusTimer -= deltaTime;
+    if (this.legacyStatusTimer > 0) return;
+    this.legacyStatusTimer = 0.25;
     const health = boss.getHealth();
     const fraction = health.max > 0 ? health.current / health.max : 0;
     const phase = fraction > 0.66 ? 1 : fraction > 0.33 ? 2 : 3;
@@ -403,7 +420,6 @@ export class BossBattleController {
     if (phase !== this.legacyPhase) {
       const previous = this.legacyPhase;
       this.legacyPhase = phase;
-      this.legacyStatusTimer = 0;
       if (previous > 0 && phase > previous && boss.isAlive()) {
         presentation.onBossPhaseChange(this.currentLevel, phase, null);
       }
@@ -412,11 +428,7 @@ export class BossBattleController {
       this.legacyLowHealthAnnounced = true;
       presentation.onBossLowHealth(this.currentLevel, true);
     }
-    this.legacyStatusTimer -= deltaTime;
-    if (this.legacyStatusTimer <= 0) {
-      this.legacyStatusTimer = 0.25;
-      presentation.setBossStatus('', { current: phase, total: 3 });
-    }
+    presentation.setBossStatus('', { current: phase, total: 3 });
   }
 
   /** Boss 导弹追踪玩家时 HUD 进入“导弹来袭”告警（与 SAM 告警取最高级） */
@@ -875,10 +887,10 @@ export class BossBattleController {
       });
     }
 
-    const missileTargets = [this.currentBoss.getMesh(), ...bossParts, ...missileMeshes];
+    // 导弹目标：Boss 本体 + 部件 + Boss 导弹（update 中已填好的复用数组）
     this.deps.combatSystem
       .getMissileSystem()
-      .checkCollisions(missileTargets, (target, impactPosition) => {
+      .checkCollisions(this.legacyBossTargets, (target, impactPosition) => {
         const hitWorldPos = impactPosition.clone();
         const isBossPart = bossParts.includes(target);
 

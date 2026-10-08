@@ -125,6 +125,7 @@ export function installDevHooks(access: DevHookAccess): void {
         : null,
       player: {
         position: toPlain(player.position),
+        forward: toPlain(tmp.set(0, 0, -1).applyQuaternion(player.quaternion)),
         visible: player.visible,
         health: playerSystem.getHealth().getCurrentHealth(),
         maxHealth: playerSystem.getHealth().getMaxHealth(),

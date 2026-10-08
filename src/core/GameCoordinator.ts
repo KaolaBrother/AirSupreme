@@ -1959,6 +1959,7 @@ export class GameCoordinator {
       true
     );
     this.view.setMode(save.cameraMode, true);
+    this.presentation.setCameraMode(save.cameraMode, false);
     this.playerSystem.syncMaxHealth();
     this.playerSystem.getHealth().healToMax();
     this.hud.updateUpgradePoints(upgrades.getAvailablePoints());

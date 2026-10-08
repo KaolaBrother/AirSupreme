@@ -36,6 +36,47 @@ function clampToArena(value: number): number {
   return Math.max(-SPAWN_LIMIT, Math.min(SPAWN_LIMIT, Number.isFinite(value) ? value : 0));
 }
 
+/** 出生方向候选：先正前方，再左右各偏 30° / 60° / 90° */
+const SPAWN_HEADING_OFFSETS = [0, 0.5236, -0.5236, 1.0472, -1.0472, 1.5708, -1.5708];
+
+/**
+ * 出生方向（XZ 单位向量）：玩家前方 distance 米仍在战场内就用正前方；
+ * 玩家贴近战场边缘、正前方会被钳制到身后时，依次尝试偏转 30°/60°/90°，
+ * 都不行就朝战场中心（玩家的软边界也会把机头掉向中心）。
+ */
+function resolveSpawnDirection(
+  p: THREE.Vector3,
+  forwardX: number,
+  forwardZ: number,
+  distance: number
+): { x: number; z: number } {
+  let fx = forwardX;
+  let fz = forwardZ;
+  const length = Math.hypot(fx, fz);
+  if (!Number.isFinite(length) || length < 1e-3) {
+    fx = 0;
+    fz = -1;
+  } else {
+    fx /= length;
+    fz /= length;
+  }
+  const px = Number.isFinite(p.x) ? p.x : 0;
+  const pz = Number.isFinite(p.z) ? p.z : 0;
+  for (const offset of SPAWN_HEADING_OFFSETS) {
+    const cos = Math.cos(offset);
+    const sin = Math.sin(offset);
+    const dx = fx * cos - fz * sin;
+    const dz = fx * sin + fz * cos;
+    const x = px + dx * distance;
+    const z = pz + dz * distance;
+    if (Math.abs(x) <= SPAWN_LIMIT && Math.abs(z) <= SPAWN_LIMIT) {
+      return { x: dx, z: dz };
+    }
+  }
+  const toCenter = Math.hypot(px, pz);
+  return toCenter > 1e-3 ? { x: -px / toCenter, z: -pz / toCenter } : { x: fx, z: fz };
+}
+
 /**
  * 在期望点附近按螺旋搜索满足条件的落点（陆地 / 水面）；找不到时返回期望点。
  */
@@ -71,16 +112,9 @@ function searchSurface(
  */
 export function resolveAdvancedBossSpawn(request: BossSpawnRequest): BossSpawnPlacement {
   const { playerPosition: p, sample } = request;
-  let fx = request.forwardX;
-  let fz = request.forwardZ;
-  const length = Math.hypot(fx, fz);
-  if (!Number.isFinite(length) || length < 1e-3) {
-    fx = 0;
-    fz = -1;
-  } else {
-    fx /= length;
-    fz /= length;
-  }
+  const direction = resolveSpawnDirection(p, request.forwardX, request.forwardZ, 320);
+  const fx = direction.x;
+  const fz = direction.z;
   // 右侧向量（前方为 -Z 时右侧为 +X）
   const rx = -fz;
   const rz = fx;
@@ -169,16 +203,9 @@ export interface LegacyBossSpawnRequest {
 export function resolveLegacyBossSpawn(request: LegacyBossSpawnRequest): THREE.Vector3 {
   const { playerPosition: p, sample } = request;
   const random = request.random ?? Math.random;
-  let fx = request.forwardX;
-  let fz = request.forwardZ;
-  const length = Math.hypot(fx, fz);
-  if (!Number.isFinite(length) || length < 1e-3) {
-    fx = 0;
-    fz = -1;
-  } else {
-    fx /= length;
-    fz /= length;
-  }
+  const direction = resolveSpawnDirection(p, request.forwardX, request.forwardZ, 260);
+  const fx = direction.x;
+  const fz = direction.z;
   const rx = -fz;
   const rz = fx;
   const ahead = (distance: number, lateral: number): { x: number; z: number } => ({
