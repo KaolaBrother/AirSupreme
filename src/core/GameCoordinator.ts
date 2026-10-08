@@ -50,6 +50,7 @@ import { UnitController } from '@/core/units/UnitController';
 import { SpecialWeaponsController } from '@/core/combat/SpecialWeaponsController';
 import { CombatVfxController } from '@/core/vfx/CombatVfxController';
 import { CampaignFlowController } from '@/core/campaign/CampaignFlowController';
+import { resolveLevelStartPose } from '@/core/campaign/LevelStartPose';
 import {
   DefaultCampaignPresentation,
   type ICampaignPresentation,
@@ -303,8 +304,10 @@ export class GameCoordinator {
   private readonly friendlyMeshBuffer: THREE.Object3D[] = [];
   private readonly friendlyTargetBuffer: THREE.Object3D[] = [];
   private readonly radarUnitBlips: RadarBlip[] = [];
-  private readonly levelStartPosition = new THREE.Vector3();
-  private readonly levelStartQuaternion = new THREE.Quaternion();
+  private readonly levelStartPose = {
+    position: new THREE.Vector3(),
+    quaternion: new THREE.Quaternion(),
+  };
   private readonly hitPosition = new THREE.Vector3();
   private lastImpactSoundAt: number = 0;
   /** 读档后的第一次 prepareLevel 保留存档里的弹药 / 热焰弹（不补满） */
@@ -1877,7 +1880,7 @@ export class GameCoordinator {
     return levelManager.whenTerrainReady().then(() => {
       if (this.isDisposed) return;
       this.units.prewarmLevel(level);
-      this.placePlayerAtLevelStart();
+      this.placePlayerAtLevelStart(level);
       this.playerSystem.syncMaxHealth();
       this.playerSystem.getHealth().healToMax();
       this.hud.updateHealth(this.playerSystem.getHealth().getHealthPercent());
@@ -1891,19 +1894,10 @@ export class GameCoordinator {
   }
 
   /** 关卡出生点：原点上空（至少离地 45 米），机头朝 -Z；相机与插值状态同步就位 */
-  private placePlayerAtLevelStart(): void {
-    const groundY = this.terrainHeightSampler(0, 0);
-    let y = Math.max(0, Number.isFinite(groundY) ? groundY + 45 : 0);
-    // 前方航道（机头 -Z，约 400 米、机身左右各 12 米）里最高的地表 + 35 米：开局不操作也不会立刻撞上沙丘 / 山脊
-    for (let z = -50; z >= -400; z -= 50) {
-      for (let x = -12; x <= 12; x += 12) {
-        const ahead = this.terrainHeightSampler(x, z);
-        if (Number.isFinite(ahead)) y = Math.max(y, ahead + 35);
-      }
-    }
-    this.levelStartPosition.set(0, y, 0);
-    this.levelStartQuaternion.identity();
-    this.playerSystem.placeAt(this.levelStartPosition, this.levelStartQuaternion);
+  private placePlayerAtLevelStart(level: number): void {
+    // 各关挑选的航向 + 沿航向 1.5 公里航道的净空高度（LevelStartPose）
+    resolveLevelStartPose(level, this.terrainHeightSampler, this.levelStartPose);
+    this.playerSystem.placeAt(this.levelStartPose.position, this.levelStartPose.quaternion);
     this.syncCameraInterpolationState();
     this.view.snapToTarget();
     // 瞬移：清掉上一关残留的拖尾，否则会从旧位置拉出一条长线
