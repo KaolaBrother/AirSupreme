@@ -47,8 +47,10 @@ export interface CampaignFlowDeps {
   getScore(): number;
 }
 
-/** 击破 Boss 到结算 / 下一章之间的停顿（毫秒），让爆炸与台词播完 */
-const BOSS_OUTRO_DELAY_MS = 1600;
+/** 击破 Boss 到结算 / 下一章之间的停顿（毫秒）：至少等爆炸，最多等收尾台词播完 */
+const BOSS_OUTRO_MIN_MS = 1600;
+const BOSS_OUTRO_MAX_MS = 6500;
+const BOSS_OUTRO_POLL_MS = 250;
 
 /**
  * 十关战役流程（api-spec §10）：
@@ -146,17 +148,20 @@ export class CampaignFlowController {
     void this.deps.prepareLevel(level, 0).then(() => {
       if (this.disposed) return;
       const chapter = getCampaignChapter(level);
+      const presentation = this.deps.presentation;
       this.deps.setStoryHold(true);
-      this.deps.presentation.playStinger('chapter-start');
-      this.deps.presentation.showChapterIntro(
+      // 章节卡片（剧情曲 + 打字机）；第一章前先播序章，本章新武器显示解锁台词
+      presentation.showChapterIntro(
         level,
         { includePrologue: level === 1 && firstOfSession, unlockLine: chapter.unlockLine },
         () => {
           if (this.disposed) return;
           this.deps.setStoryHold(false);
           this.writeCheckpoint('level-start', level, 0);
-          this.deps.presentation.radio('level-start', level);
+          presentation.radio('level-start', level);
+          // 入关简报 + 关卡曲；chapter-start 刺激音跟在新曲目之后（按新调性移调）
           this.deps.startLevelCombat(level, 0, firstOfSession);
+          presentation.playStinger('chapter-start');
         }
       );
     });
@@ -215,12 +220,12 @@ export class CampaignFlowController {
         markCampaignCompleted(finalScore);
         clearCampaignCheckpoint();
       }
-      this.deps.scheduleTimeout(() => {
-        if (this.disposed) return;
+      this.afterBossOutro(() => {
         const finish = (): void => {
           if (this.disposed) return;
           this.deps.setStoryHold(false);
-          presentation.playStinger('campaign-complete');
+          // campaign-complete 刺激音，随后胜利曲
+          presentation.onMissionComplete();
           this.deps.showMissionComplete(this.deps.getScore());
         };
         if (isBossMode) {
@@ -231,12 +236,11 @@ export class CampaignFlowController {
         presentation.showDebrief(this.buildDebrief(level), () => {
           presentation.showEnding(this.deps.getScore(), finish);
         });
-      }, BOSS_OUTRO_DELAY_MS);
+      });
       return;
     }
 
-    this.deps.scheduleTimeout(() => {
-      if (this.disposed) return;
+    this.afterBossOutro(() => {
       const advance = (): void => {
         if (this.disposed) return;
         this.deps.setStoryHold(false);
@@ -255,7 +259,25 @@ export class CampaignFlowController {
       }
       this.deps.setStoryHold(true);
       presentation.showDebrief(this.buildDebrief(level), advance);
-    }, BOSS_OUTRO_DELAY_MS);
+    });
+  }
+
+  /**
+   * Boss 击破后的收尾：至少停顿 1.6 秒让爆炸播完，再等收尾台词说完（最多 6.5 秒）；
+   * 期间玩家阵亡 / 退出则放弃（不在失败结算上叠结算卡片）。
+   */
+  private afterBossOutro(then: () => void): void {
+    const startedAt = Date.now();
+    const check = (): void => {
+      if (this.disposed || !this.deps.session.isPlaying()) return;
+      const elapsed = Date.now() - startedAt;
+      if (elapsed < BOSS_OUTRO_MAX_MS && this.deps.presentation.isRadioBusy()) {
+        this.deps.scheduleTimeout(check, BOSS_OUTRO_POLL_MS);
+        return;
+      }
+      then();
+    };
+    this.deps.scheduleTimeout(check, BOSS_OUTRO_MIN_MS);
   }
 
   /** 进入新关卡：升级上限、武器解锁随章节推进（新解锁的武器满弹） */
@@ -331,8 +353,12 @@ export class CampaignFlowController {
     data.stats = this.getRunStats();
     if (saveCampaignCheckpoint(data)) {
       const label = kind === 'boss' ? `第${level}关 · Boss 战前` : `第${level}关 · 第${wave + 1}波`;
+      // 存档提示 + 存档音效；关卡开场与 Boss 战前分别有 chapter-start / level-complete 刺激音，
+      // checkpoint 刺激音只跟在波次检查点后面，避免两段刺激音叠在一起
       this.deps.presentation.showAutosave(label);
-      this.deps.presentation.playStinger('checkpoint');
+      if (kind === 'wave') {
+        this.deps.presentation.playStinger('checkpoint');
+      }
     }
   }
 

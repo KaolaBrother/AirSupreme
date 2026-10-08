@@ -36,7 +36,7 @@ export interface UnitControllerDeps {
   onAssetLost(civilian: boolean): void;
   /** 单位对玩家造成的伤害（SAM / 自杀无人机 / 炸弹） */
   damagePlayer(damage: number, position: THREE.Vector3): void;
-  /** 单位爆炸：镜头震动与爆炸音效（粒子由单位系统自己绘制，避免重复） */
+  /** 单位爆炸：镜头震动（粒子由单位系统自己绘制；爆炸声经表现层播放，单位被毁时换成专属音效） */
   onExplosion(
     position: THREE.Vector3,
     scale: number,
@@ -99,6 +99,14 @@ export class UnitController {
   private missileHitCallback: ((position: THREE.Vector3) => void) | null = null;
   private missileHitDamage = 0;
   private bossDroneCount = 0;
+  /**
+   * 待播放的爆炸声：单位被毁时 UnitSystem 先报 onExplosion 再报 onUnitDestroyed，
+   * 被毁的那一次换成 playUnitDestroyed(domain)（专属音效，避免两声爆炸叠在一起）；
+   * 其余爆炸（导弹引爆、炸弹落地、残骸坠地）在下一个结算点补播。
+   */
+  private explosionSoundPending = false;
+  private readonly explosionSoundPosition = new THREE.Vector3();
+  private explosionSoundScale = 1;
 
   constructor(private readonly deps: UnitControllerDeps) {}
 
@@ -166,6 +174,7 @@ export class UnitController {
     system.onCivilianHit = () => {
       this.deps.presentation.genericRadio('civilian-hit');
       this.deps.presentation.flashWarning('停火！那是平民目标！', 'threat');
+      this.deps.presentation.onUnitEvent('civilian-hit', null);
     };
     system.onEscortResult = (success) => {
       this.deps.presentation.genericRadio(success ? 'escort-success' : 'escort-failed');
@@ -184,9 +193,26 @@ export class UnitController {
     };
     system.onPlayerDamaged = (damage, _cause, position) => this.deps.damagePlayer(damage, position);
     system.onFirstContact = (type) => this.deps.presentation.unitFirstContact(type);
-    system.onExplosion = (position, scale, kind) => this.deps.onExplosion(position, scale, kind);
+    system.onExplosion = (position, scale, kind) => {
+      this.flushExplosionSound();
+      this.explosionSoundPending = true;
+      this.explosionSoundPosition.copy(position);
+      this.explosionSoundScale = kind === 'missile' ? scale * 0.8 : scale;
+      this.deps.onExplosion(position, scale, kind);
+    };
     system.onUnitEvent = (_unit, kind, position) =>
       this.deps.presentation.onUnitEvent(kind as UnitPresentationEvent, position);
+  }
+
+  /** 补播上一声普通爆炸（未被“单位被毁”取代） */
+  private flushExplosionSound(): void {
+    if (!this.explosionSoundPending) return;
+    this.explosionSoundPending = false;
+    this.deps.presentation.onUnitEvent(
+      'explosion',
+      this.explosionSoundPosition,
+      this.explosionSoundScale
+    );
   }
 
   private handleUnitDestroyed(
@@ -194,6 +220,8 @@ export class UnitController {
     position: THREE.Vector3,
     byPlayer: boolean
   ): void {
+    // 被毁的爆炸声由 playUnitDestroyed(domain) 取代
+    this.explosionSoundPending = false;
     const config = unit.config;
     if (unit.faction === Faction.ENEMY) {
       if (byPlayer && config.scoreValue > 0) {
@@ -309,6 +337,7 @@ export class UnitController {
   ): void {
     const system = this.system;
     if (!system) return;
+    this.flushExplosionSound();
     this.playerPosition.copy(playerPosition);
     const ctx = this.updateContext;
     ctx.playerMesh = playerMesh;
@@ -316,6 +345,7 @@ export class UnitController {
     ctx.enemyAirMeshes = enemyAirMeshes;
     ctx.friendlyAirMeshes = friendlyAirMeshes;
     system.updateWithContext(deltaTime, ctx);
+    this.flushExplosionSound();
 
     if (this.missileWarningCooldown > 0) this.missileWarningCooldown -= deltaTime;
 
@@ -465,6 +495,7 @@ export class UnitController {
   /** 换关 / 读档 / Boss 战开始：移除全部单位、导弹与弹道 */
   public clear(): void {
     this.system?.clear();
+    this.explosionSoundPending = false;
     this.bossDroneCount = 0;
     this.waveStallTimer = 0;
     this.waveReleased = false;

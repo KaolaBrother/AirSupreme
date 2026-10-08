@@ -207,6 +207,12 @@ export class PresentationController {
     }, PresentationController.HIT_MARKER_DURATION_MS);
   }
 
+  /** 雷达量程倍率（友军预警机在线时放大）：透传到 RadarMinimap.setRangeMultiplier */
+  public setRadarRangeMultiplier(multiplier: number): void {
+    this.ensureRadar();
+    this.radar?.setRangeMultiplier(multiplier);
+  }
+
   private ensureRadar(): void {
     if (!this.radar) {
       this.radar = new RadarMinimap();

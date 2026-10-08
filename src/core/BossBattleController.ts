@@ -119,12 +119,19 @@ export class BossBattleController {
   private currentLevel = 1;
   private readonly partTargets = new Map<Object3D, CombatTarget>();
   private readonly missileTargets = new WeakMap<BossMissile, CombatTarget>();
-  private defeatAnnounced = false;
+  /** 击破收尾台词：none → oracle（神谕遗言已播）→ all */
+  private defeatLines: 'none' | 'oracle' | 'all' = 'none';
   private stunFrame = -1;
   private frameCounter = 0;
 
   // ── 第 1-5 关 Boss：前方出生 + 半径命中 ──
   private readonly legacyHits = new LegacyBossHitVolumes();
+  /** 按血量划分的阶段（> 66% / > 33% / 其余），驱动 HUD 阶段菱形与音乐强度 */
+  private legacyPhase = 0;
+  private legacyStatusTimer = 0;
+  private legacyLowHealthAnnounced = false;
+  /** Boss 导弹正在追踪玩家（HUD 导弹告警） */
+  private bossMissileIncoming = false;
   private readonly spawnForward = new Vector3();
   private readonly legacyHitPosition = new Vector3();
 
@@ -154,7 +161,7 @@ export class BossBattleController {
       onExplosionShake: deps.onExplosionShake,
       onScreenFlash: deps.onScreenFlash,
       getLevel: () => this.currentLevel,
-      announceDefeat: () => this.announceDefeat(),
+      announceLastWords: () => this.announceLastWords(),
       onBossDestroyed: (position, config, isBossMode) =>
         this.handleBossDestroy(position, config, isBossMode),
     });
@@ -269,6 +276,10 @@ export class BossBattleController {
     ) {
       this.updateOctopusSpecials(deltaTime, this.currentBoss);
     }
+    if (!this.currentBoss) {
+      return;
+    }
+    this.updateLegacyPresentation(deltaTime, this.currentBoss);
 
     this.bossFriendlySpawnTimer += deltaTime;
     if (this.bossFriendlySpawnTimer >= 30) {
@@ -341,12 +352,17 @@ export class BossBattleController {
     this.currentBossType = bossType;
     const advancedBoss = ADVANCED_BOSS_TYPES.has(bossType) ? (boss as AdvancedBossInstance) : null;
     this.advanced.activate(advancedBoss);
+    this.legacyPhase = 0;
+    this.legacyStatusTimer = 0;
+    this.legacyLowHealthAnnounced = false;
+    // 第一阶段的音乐强度（阶段推进 0.35 → 0.6 → 0.85，低于 25% 血量 1.0）
+    this.deps.presentation.setMusicIntensity(0.35);
     if (advancedBoss) {
       this.legacyHits.clear();
     } else {
       this.legacyHits.build(boss.getMesh(), this.getLegacyBodyParts(boss));
     }
-    this.defeatAnnounced = false;
+    this.defeatLines = 'none';
     // Boss 登场无线电（Boss 模式下也播放：只有登场台词，没有剧情卡片）
     this.deps.presentation.radio('boss-spawn', this.currentLevel);
   }
@@ -373,6 +389,41 @@ export class BossBattleController {
       default:
         return this.createHeavyBomberBoss(config, isBossMode);
     }
+  }
+
+  /**
+   * 第 1-5 关 Boss 没有阶段接口：按血量划成三个阶段，阶段推进时与第 6-10 关一样
+   * 播放警报 + phase-change 刺激音并提高音乐强度；HUD 显示阶段菱形；低于 25% 播低血量台词。
+   */
+  private updateLegacyPresentation(deltaTime: number, boss: ActiveBoss): void {
+    const health = boss.getHealth();
+    const fraction = health.max > 0 ? health.current / health.max : 0;
+    const phase = fraction > 0.66 ? 1 : fraction > 0.33 ? 2 : 3;
+    const presentation = this.deps.presentation;
+    if (phase !== this.legacyPhase) {
+      const previous = this.legacyPhase;
+      this.legacyPhase = phase;
+      this.legacyStatusTimer = 0;
+      if (previous > 0 && phase > previous && boss.isAlive()) {
+        presentation.onBossPhaseChange(this.currentLevel, phase, null);
+      }
+    }
+    if (!this.legacyLowHealthAnnounced && boss.isAlive() && fraction < 0.25) {
+      this.legacyLowHealthAnnounced = true;
+      presentation.onBossLowHealth(this.currentLevel, true);
+    }
+    this.legacyStatusTimer -= deltaTime;
+    if (this.legacyStatusTimer <= 0) {
+      this.legacyStatusTimer = 0.25;
+      presentation.setBossStatus('', { current: phase, total: 3 });
+    }
+  }
+
+  /** Boss 导弹追踪玩家时 HUD 进入“导弹来袭”告警（与 SAM 告警取最高级） */
+  private setBossMissileIncoming(incoming: boolean): void {
+    if (incoming === this.bossMissileIncoming) return;
+    this.bossMissileIncoming = incoming;
+    this.deps.presentation.setMissileWarning(incoming ? 'incoming' : 'none', 'boss');
   }
 
   /** 第 1-5 关 Boss 出生点：玩家水平朝向前方（地表 / 水面采样） */
@@ -607,11 +658,21 @@ export class BossBattleController {
     this.legacyHits.clear();
   }
 
-  /** 击破收尾台词：每场 Boss 战只播一次（神谕在死亡冻结瞬间提前说出遗言） */
+  /** 神谕的遗言：死亡冻结瞬间只播神谕自己的收尾台词 */
+  private announceLastWords(): void {
+    if (this.defeatLines !== 'none') return;
+    this.defeatLines = 'oracle';
+    this.deps.presentation.radio('boss-defeated', this.currentLevel, undefined, {
+      only: 'oracle',
+    });
+  }
+
+  /** 击破收尾台词：每场 Boss 战只播一次（遗言已播时只补其余人的台词） */
   private announceDefeat(): void {
-    if (this.defeatAnnounced) return;
-    this.defeatAnnounced = true;
-    this.deps.presentation.radio('boss-defeated', this.currentLevel);
+    if (this.defeatLines === 'all') return;
+    const speakers = this.defeatLines === 'oracle' ? { exclude: 'oracle' as const } : undefined;
+    this.defeatLines = 'all';
+    this.deps.presentation.radio('boss-defeated', this.currentLevel, undefined, speakers);
   }
 
   // ===========================================================================================
@@ -669,11 +730,11 @@ export class BossBattleController {
     }
   }
 
-  /** 子目标血条（护盾塔、气囊、散热口……），已摧毁的不显示 */
-  public appendSubTargetBars(
-    out: Array<{ mesh: Object3D; currentHealth: number; maxHealth: number }>
+  /** 子目标血条（护盾塔、气囊、散热口……），已摧毁的不显示；visit 逐个回调（不分配） */
+  public forEachSubTargetBar(
+    visit: (mesh: Object3D, currentHealth: number, maxHealth: number) => void
   ): void {
-    this.advanced.appendSubTargetBars(out);
+    this.advanced.forEachSubTargetBar(visit);
   }
 
   /**
@@ -1024,6 +1085,7 @@ export class BossBattleController {
     }
 
     this.bossIndicatorSnapshots.length = snapshotCount;
+    this.setBossMissileIncoming(snapshotCount > 0);
     if (snapshotCount === 0) {
       this.resetBossIndicatorState();
       return;
@@ -1135,6 +1197,7 @@ export class BossBattleController {
   private resetBossIndicatorState(): void {
     this.bossIndicatorUpdateTimer = 0;
     this.bossIndicatorSnapshots.length = 0;
+    this.setBossMissileIncoming(false);
 
     if (!this.bossIndicatorHasRenderedData) {
       return;

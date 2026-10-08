@@ -4,6 +4,7 @@ import { configLoader } from './core/utils/ConfigLoader';
 import type { GameCoordinator } from './core/GameCoordinator';
 import { loadStartFlowSettings } from './core/SessionSettings';
 import type { CampaignSaveData } from './core/save/SaveSystem';
+import { MenuMusic } from './core/campaign/MenuMusic';
 import { StartMenu, type GameSettings } from './ui/StartMenu';
 
 const log = getLogger('Main');
@@ -84,6 +85,9 @@ async function main(): Promise<void> {
   try {
     await configLoader.load();
     const startMenu = new StartMenu();
+    // 菜单音乐：第一次用户手势后开始，进入战斗淡出，回到菜单恢复
+    const menuMusic = new MenuMusic();
+    menuMusic.install();
     let game: GameCoordinator | null = null;
     let lastSettings: GameSettings | null = null;
 
@@ -96,6 +100,7 @@ async function main(): Promise<void> {
       disposeGame();
       startMenu.reloadFromStorage();
       startMenu.show();
+      menuMusic.onMenuShown();
     }
 
     function onRetry(): void {
@@ -132,6 +137,7 @@ async function main(): Promise<void> {
       showEnteringBattlefield();
       disposeGame();
       unlockAudioFromUserGesture();
+      menuMusic.onMenuHidden();
 
       try {
         const [{ GameCoordinator }] = await Promise.all([import('./core/GameCoordinator')]);

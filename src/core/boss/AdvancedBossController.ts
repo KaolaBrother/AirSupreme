@@ -93,8 +93,8 @@ export interface AdvancedBossControllerDeps {
   onScreenFlash: (amount: number) => void;
   /** 当前 Boss 战所在关卡（无线电台词 / 音乐） */
   getLevel: () => number;
-  /** 击破收尾台词（每场 Boss 战只播一次，由 Boss 战控制器记录） */
-  announceDefeat: () => void;
+  /** 神谕的遗言（死亡冻结瞬间只播神谕的台词；其余收尾台词在击破后由 Boss 战控制器播放） */
+  announceLastWords: () => void;
   /** Boss 的 onDestroy（死亡演出结束后）→ Boss 战控制器统一收尾 */
   onBossDestroyed: (position: Vector3, config: BossConfig, isBossMode: boolean) => void;
 }
@@ -221,7 +221,7 @@ export class AdvancedBossController {
         oracle.onEffectCue = this.createCueHandler((cue) => {
           if (cue === 'death-freeze') {
             // 神谕的遗言在冻结瞬间响起
-            this.deps.announceDefeat();
+            this.deps.announceLastWords();
           } else if (cue === 'death-flash') {
             this.deps.onScreenFlash(1);
             this.deps.onCameraShake(1);
@@ -289,9 +289,8 @@ export class AdvancedBossController {
       this.deps.audioManager.playMissileLaunch('boss');
     };
     boss.onPhaseChange = (phase, label) => {
-      presentation.radio('boss-phase', this.deps.getLevel(), phase);
-      presentation.playStinger('phase-change');
-      presentation.flashWarning(label, 'threat');
+      // 阶段台词 + 警报 + phase-change 刺激音 + 音乐强度 + HUD 闪烁告警
+      presentation.onBossPhaseChange(this.deps.getLevel(), phase, label);
       this.deps.onCameraShake(0.3);
     };
     boss.onHazardWarning = (label) => {
@@ -520,44 +519,50 @@ export class AdvancedBossController {
 
   /** Boss 状态、低血量台词、音乐强度、城堡核心联动 */
   private updatePresentation(deltaTime: number, boss: AdvancedBossInstance): void {
+    const presentation = this.deps.presentation;
     const stage = boss.getStage?.();
     if (stage !== undefined) {
       this.syncCitadelCore(mapOracleStageToCoreState(stage, boss.isAlive(), boss.isDying()));
     }
 
+    // 神谕主宰：音乐强度逐帧跟随 Boss（MusicSystem 对相同强度不重写自动化）；
+    // 死亡演出期间随进度收束，为击破刺激音让出空间
+    const intensity = boss.getMusicIntensity?.();
+    if (intensity !== undefined) {
+      const fade = boss.isDying() ? 1 - 0.7 * (boss.getDeathProgress?.() ?? 0) : 1;
+      presentation.setMusicIntensity(intensity * fade);
+    }
+
     this.bossStatusTimer -= deltaTime;
     if (this.bossStatusTimer > 0) return;
     this.bossStatusTimer = BOSS_STATUS_INTERVAL;
-    const presentation = this.deps.presentation;
     presentation.setBossStatus(boss.getStatusLabel(), {
       current: boss.getPhase(),
       total: boss.getPhaseCount(),
     });
-    const intensity = boss.getMusicIntensity?.();
-    if (intensity !== undefined) {
-      presentation.setMusicIntensity(intensity);
-    }
     if (!this.lowHealthAnnounced && boss.isAlive()) {
       const health = boss.getHealth();
       if (health.max > 0 && health.current / health.max < 0.25) {
         this.lowHealthAnnounced = true;
-        presentation.radio('boss-low-health', this.deps.getLevel());
+        // 低于 25%：台词；没有自带音乐强度的 Boss 把强度拉满
+        presentation.onBossLowHealth(this.deps.getLevel(), intensity === undefined);
       }
     }
   }
 
   // ───────────────────────────── 协调器查询 ─────────────────────────────
 
-  /** 子目标血条（护盾塔、气囊、散热口……），已摧毁的不显示 */
-  public appendSubTargetBars(
-    out: Array<{ mesh: Object3D; currentHealth: number; maxHealth: number }>
+  /** 子目标血条（护盾塔、气囊、散热口……），已摧毁的不显示；visit 逐个回调（不分配） */
+  public forEachSubTargetBar(
+    visit: (mesh: Object3D, currentHealth: number, maxHealth: number) => void
   ): void {
     const boss = this.boss;
     if (!boss || !boss.isAlive() || (boss.isCloaked?.() ?? false)) return;
-    const subTargets: BossSubTarget[] = boss.getSubTargets?.() ?? [];
+    const subTargets: BossSubTarget[] | undefined = boss.getSubTargets?.();
+    if (!subTargets) return;
     for (const sub of subTargets) {
       if (sub.current <= 0) continue;
-      out.push({ mesh: sub.mesh, currentHealth: sub.current, maxHealth: sub.max });
+      visit(sub.mesh, sub.current, sub.max);
     }
   }
 

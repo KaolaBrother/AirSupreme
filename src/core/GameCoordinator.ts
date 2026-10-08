@@ -41,7 +41,7 @@ import {
   type CameraModeSetting,
 } from '@/core/SessionSettings';
 import { ResourceRegistry } from '@/core/ResourceRegistry';
-import type { PresentationController, RadarBlip } from '@/core/PresentationController';
+import type { PresentationController } from '@/core/PresentationController';
 import type { BossBattleController } from '@/core/BossBattleController';
 import type { PresentationRuntime } from '@/core/PresentationRuntimeLoader';
 import type { TerrainSurfaceKind } from '@/features/terrain/environments/TerrainEnvironment';
@@ -49,6 +49,7 @@ import { PlayerViewController } from '@/core/camera/PlayerViewController';
 import { UnitController } from '@/core/units/UnitController';
 import { SpecialWeaponsController } from '@/core/combat/SpecialWeaponsController';
 import { CombatVfxController } from '@/core/vfx/CombatVfxController';
+import { CombatHudFeed } from '@/core/hud/CombatHudFeed';
 import { CampaignFlowController } from '@/core/campaign/CampaignFlowController';
 import { resolveLevelStartPose } from '@/core/campaign/LevelStartPose';
 import {
@@ -68,21 +69,6 @@ import {
   getWaveOnboardingText,
   type OnboardingWaveBeatProfile,
 } from '@/ui/OnboardingManager';
-
-interface EyeBossHealthData {
-  current: number;
-  max: number;
-}
-
-interface EyeBossSystem {
-  getCollisionParts(): Array<{ index: number; mesh: THREE.Object3D }>;
-  getEyeHealth(index: number): EyeBossHealthData | undefined;
-}
-
-interface EyeBoss {
-  isAlive(): boolean;
-  getEyeSystem(): EyeBossSystem;
-}
 
 /** 地形环境的可选航线扩展（CanyonEnvironment.getConvoyRoute / CitadelEnvironment.getAssaultRoute） */
 interface TerrainRouteSource {
@@ -215,6 +201,7 @@ export class GameCoordinator {
   private readonly weapons: SpecialWeaponsController;
   private readonly vfx: CombatVfxController;
   private readonly campaign: CampaignFlowController;
+  private readonly hudFeed: CombatHudFeed;
   private readonly checkpointResumeButton = new CheckpointResumeButton();
   private readonly options: GameCoordinatorOptions;
   private readonly showStartMenu: boolean;
@@ -262,7 +249,6 @@ export class GameCoordinator {
   private readonly currentCameraTargetQuaternion = new THREE.Quaternion();
   private readonly interpolatedCameraTargetQuaternion = new THREE.Quaternion();
   private readonly hitMarkerNdc = new THREE.Vector3();
-  private readonly radarBlips: RadarBlip[] = [];
   private readonly tutorialCombatState: TutorialCombatState = {
     active: false,
     startPosition: null,
@@ -285,7 +271,6 @@ export class GameCoordinator {
     type: null,
     wave: -1,
   };
-  private lowHealthWarningTimer: number = 0;
   private lastRenderTimestamp: number = 0;
   private upgradeMenuHintShown: boolean = false;
   private waveCompletionObjective: WaveObjectiveDisplay | null = null;
@@ -303,7 +288,6 @@ export class GameCoordinator {
   private readonly enemyMeshBuffer: THREE.Object3D[] = [];
   private readonly friendlyMeshBuffer: THREE.Object3D[] = [];
   private readonly friendlyTargetBuffer: THREE.Object3D[] = [];
-  private readonly radarUnitBlips: RadarBlip[] = [];
   private readonly levelStartPose = {
     position: new THREE.Vector3(),
     quaternion: new THREE.Quaternion(),
@@ -377,10 +361,24 @@ export class GameCoordinator {
     // 战役表现层（第 2 轮挂剧情卡片 / 无线电 / 新 HUD 面板 / 新音效的唯一入口）
     this.presentation = new DefaultCampaignPresentation({
       getHud: () => (this.presentationRuntimeReady ? this.hud : null),
+      getRadar: () => (this.presentationRuntimeReady ? this.presentationController : null),
       audio: this.audioManager,
       music: this.musicSystem,
+      isBossMode: () => this.sessionState.isBossMode(),
+      getListenerPosition: () => this.playerAircraft.position,
     });
     this.units = this.createUnitController();
+    this.hudFeed = new CombatHudFeed({
+      session: this.sessionState,
+      units: this.units,
+      camera: this.gameScene.camera,
+      getEnemySystem: () => this.enemySystem,
+      getBossController: () => this.bossBattleController,
+      getPresentationController: () =>
+        this.presentationRuntimeReady ? this.presentationController : null,
+      getPlayerPosition: () => this.playerSystem.getPosition(),
+      getPlayerQuaternion: () => this.playerSystem.getQuaternion(),
+    });
     this.weapons = this.createSpecialWeaponsController();
     this.vfx = new CombatVfxController({
       scene: this.gameScene.scene,
@@ -529,9 +527,8 @@ export class GameCoordinator {
 
         if (this.playerSystem.getLives() <= 0) {
           this.sessionState.setGameOver();
-          this.audioManager.playGameOver();
-          this.musicSystem.stopMusic();
-          this.presentation.playStinger('game-over');
+          // game-over 刺激音接管并结束当前音乐；无线电与持续音效收起
+          this.presentation.onGameOver();
           this.pauseMenu?.hide();
           this.upgradeMenu?.hide();
           this.hud.hideRespawnOverlay();
@@ -994,7 +991,11 @@ export class GameCoordinator {
 
     this.updateUI(deltaTime);
     this.updateMissileRespawn(deltaTime);
-    this.updateLowHealthWarning(deltaTime);
+    this.presentation.updatePlayerHealth(
+      deltaTime,
+      this.playerSystem.getHealth().getHealthPercent(),
+      this.playerAircraft.visible && !respawning
+    );
     this.vfx.update(
       deltaTime,
       this.playerSystem.getHealth().getHealthPercent(),
@@ -1216,7 +1217,7 @@ export class GameCoordinator {
     const aliveEnemies = aliveJets + aliveUnits;
     const remaining = Math.max(0, totalEnemies - killedEnemies) + aliveUnits;
 
-    this.updateRadar();
+    this.hudFeed.updateRadar(deltaTime);
 
     const didUpdateHud = this.presentationController.updateHud(deltaTime, {
       healthPercent: this.playerSystem.getHealth().getHealthPercent(),
@@ -1233,7 +1234,7 @@ export class GameCoordinator {
     }
 
     this.updatePlayerFacingObjective();
-    this.updateEnemyHealthBars();
+    this.hudFeed.updateHealthBars();
   }
 
   private updatePlayerFacingObjective(): void {
@@ -1417,148 +1418,6 @@ export class GameCoordinator {
     };
   }
 
-  private updateEnemyHealthBars(): void {
-    const enemies = this.enemySystem?.getEnemies() ?? [];
-    const friendlies = this.enemySystem?.getFriendlyAIs() ?? [];
-    const currentBoss = this.bossBattleController?.getCurrentBoss() ?? null;
-
-    const enemyData = enemies
-      .filter((e) => e.isAlive())
-      .map((e) => ({
-        mesh: e.getMesh(),
-        currentHealth: e.getHealth().current,
-        maxHealth: e.getConfig().health,
-      }));
-
-    const friendlyData = friendlies
-      .filter((f) => f.isAlive())
-      .map((f) => ({
-        mesh: f.getMesh(),
-        currentHealth: f.getHealth().current,
-        maxHealth: f.getHealth().max,
-      }));
-
-    // Boss 血条数据
-    const bossData: Array<{ mesh: THREE.Object3D; currentHealth: number; maxHealth: number }> = [];
-    if (
-      (this.sessionState.isBossMode() || this.sessionState.isInBossBattle()) &&
-      currentBoss &&
-      currentBoss.isAlive()
-    ) {
-      bossData.push({
-        mesh: currentBoss.getMesh(),
-        currentHealth: currentBoss.getHealth().current,
-        maxHealth: currentBoss.getHealth().max,
-      });
-    }
-
-    // Boss 眼睛血条数据（第三关 Boss）
-    const eyeData: Array<{ mesh: THREE.Object3D; currentHealth: number; maxHealth: number }> = [];
-    if (
-      (this.sessionState.isBossMode() || this.sessionState.isInBossBattle()) &&
-      this.hasEyeBoss(currentBoss) &&
-      currentBoss.isAlive()
-    ) {
-      const eyeSystem = currentBoss.getEyeSystem();
-      const eyeParts = eyeSystem.getCollisionParts();
-      for (const part of eyeParts) {
-        const health = eyeSystem.getEyeHealth(part.index);
-        if (health) {
-          eyeData.push({
-            mesh: part.mesh,
-            currentHealth: health.current,
-            maxHealth: health.max,
-          });
-        }
-      }
-    }
-
-    // 第 6-10 关 Boss 的子目标血条（护盾塔 / 气囊 / 散热口 / 发射器……）
-    this.bossBattleController?.appendSubTargetBars(eyeData);
-
-    this.presentationController.updateEnemyHealthBars(
-      [...enemyData, ...bossData, ...eyeData],
-      friendlyData,
-      this.gameScene.camera,
-      this.playerSystem.getPosition()
-    );
-  }
-
-  private updateRadar(): void {
-    this.radarBlips.length = 0;
-    const levelManager = this.enemySystem?.getLevelManager();
-    const enemies = this.enemySystem?.getEnemies() ?? [];
-
-    for (const enemy of enemies) {
-      if (!enemy.isAlive()) {
-        continue;
-      }
-      const spawning = levelManager?.isEnemySpawning(enemy) ?? false;
-      this.radarBlips.push({
-        position: enemy.getPosition(),
-        kind: spawning ? 'spawning' : 'enemy',
-      });
-    }
-
-    for (const portalPos of levelManager?.getActivePortalPositions() ?? []) {
-      this.radarBlips.push({
-        position: portalPos,
-        kind: 'spawning',
-      });
-    }
-
-    for (const friendly of this.enemySystem?.getFriendlyAIs() ?? []) {
-      if (!friendly.isAlive()) {
-        continue;
-      }
-      this.radarBlips.push({
-        position: friendly.getMesh().position,
-        kind: 'ally',
-      });
-    }
-
-    // 地面 / 海上 / 空中单位（第 2 轮换成 'enemy-ground' / 'enemy-sea' / 'neutral' / 'ally-unit'）
-    let unitBlipIndex = 0;
-    for (const unitBlip of this.units.getRadarBlips()) {
-      const kind: RadarBlip['kind'] | null =
-        unitBlip.kind === 'ally' ? 'ally' : unitBlip.kind === 'neutral' ? null : 'enemy';
-      if (!kind) continue;
-      let blip = this.radarUnitBlips[unitBlipIndex];
-      if (!blip) {
-        blip = { position: unitBlip.position, kind };
-        this.radarUnitBlips.push(blip);
-      }
-      blip.position = unitBlip.position;
-      blip.kind = kind;
-      this.radarBlips.push(blip);
-      unitBlipIndex++;
-    }
-
-    const currentBoss = this.bossBattleController?.getCurrentBoss() ?? null;
-    // 隐形中的幻影之翼不出现在雷达上
-    if (currentBoss?.isAlive() && !this.bossBattleController?.isBossHiddenFromSensors()) {
-      this.radarBlips.push({
-        position: currentBoss.getMesh().position,
-        kind: 'boss',
-      });
-    }
-
-    this.presentationController.updateRadar(
-      this.playerSystem.getPosition(),
-      this.radarBlips,
-      this.playerSystem.getQuaternion()
-    );
-  }
-
-  private hasEyeBoss(boss: unknown): boss is EyeBoss {
-    if (!boss || typeof boss !== 'object') {
-      return false;
-    }
-
-    const candidate = boss as Partial<EyeBoss>;
-    return typeof candidate.getEyeSystem === 'function' && typeof candidate.isAlive === 'function';
-  }
-
   private updateMissileRespawn(deltaTime: number): void {
     const missileReloadTime = this.playerStats.getMissileReloadTime();
     if (this.missileCount < GAME_CONSTANTS.MISSILE.MAX_RESPAWN_MISSILES) {
@@ -1620,20 +1479,6 @@ export class GameCoordinator {
 
   private getCurrentDifficultyProfile(): ReturnType<typeof getDifficultyProfile> {
     return getDifficultyProfile(this.sessionState.getDifficulty());
-  }
-
-  private updateLowHealthWarning(deltaTime: number): void {
-    const healthPercent = this.playerSystem.getHealth().getHealthPercent();
-    if (healthPercent > 0.25 || !this.sessionState.isPlaying() || this.sessionState.isPaused()) {
-      this.lowHealthWarningTimer = 0;
-      return;
-    }
-
-    this.lowHealthWarningTimer += deltaTime;
-    if (this.lowHealthWarningTimer >= 1.35) {
-      this.lowHealthWarningTimer = 0;
-      this.audioManager.playLowHealthWarning();
-    }
   }
 
   private render(alpha: number): void {
@@ -1713,7 +1558,9 @@ export class GameCoordinator {
     this.musicSystem.resume();
 
     this.missileCount = GAME_CONSTANTS.MISSILE.STARTING_MISSILES;
-    this.lowHealthWarningTimer = 0;
+    // 剧情卡片 / 无线电界面尽早加载；HUD 视角标签与当前视角对齐（不播切换音）
+    void this.presentation.preloadStoryUi();
+    this.presentation.setCameraMode(this.view.getMode(), false);
     this.hud.updateUpgradePoints(this.playerStats.getUpgrades().getAvailablePoints());
     this.presentationController.updateMissileHud(
       0,
@@ -1856,6 +1703,9 @@ export class GameCoordinator {
     this.bossBattleController?.clear();
     this.presentationController.clearBossMissileIndicators();
     this.presentation.setBossStatus(null);
+    this.presentation.setMissileWarning('none', 'boss');
+    this.presentation.clearRadio();
+    this.hudFeed.resetRadarThrottle();
 
     const levelManager = enemySystem.getLevelManager();
     levelManager.despawnAllEnemies();
@@ -2056,7 +1906,6 @@ export class GameCoordinator {
   private showMissionComplete(finalScore: number): void {
     this.sessionState.setGameOver();
     this.audioManager.stopEngine();
-    this.musicSystem.stopMusic();
     this.pauseMenu?.hide();
     this.upgradeMenu?.hide();
     this.hud.showMissionComplete(finalScore);
@@ -2232,10 +2081,7 @@ export class GameCoordinator {
         }
         this.playerSystem.takeCombatDamage(damage);
       },
-      onExplosion: (position, scale, kind) => {
-        this.view.addExplosionShake(position, scale);
-        this.audioManager.playExplosion('enemy', kind === 'missile' ? scale * 0.8 : scale);
-      },
+      onExplosion: (position, scale) => this.view.addExplosionShake(position, scale),
       onEscortResult: (success) => {
         if (!success) {
           this.hud.showPowerUpBig('⚠️', '护送目标被摧毁', 1.2, true);
@@ -2306,6 +2152,13 @@ export class GameCoordinator {
             this.view.snapToTarget();
             this.vfx.clearTrails();
           },
+          getMusicState: () => ({
+            track: this.musicSystem.getCurrentMusic(),
+            intensity: this.musicSystem.getIntensity(),
+            playing: this.musicSystem.getIsPlaying(),
+          }),
+          isStoryActive: () => this.presentation.isStoryActive(),
+          isRadioBusy: () => this.presentation.isRadioBusy(),
         });
       });
     }
@@ -3016,9 +2869,23 @@ export class GameCoordinator {
     this.bossBattleController?.clear();
     this.enemySystem?.clearFriendlies();
     this.weapons.clearInFlight();
+    this.retireBossMinions();
 
     this.hud.showPowerUpBig('', '已击坠');
     this.campaign.handleBossDefeated(level, isBossMode);
+  }
+
+  /** Boss 被击破：残余小兵随之炸毁（只有特效，不计分），收尾台词与结算前不再有威胁 */
+  private retireBossMinions(): void {
+    const enemySystem = this.enemySystem;
+    if (enemySystem) {
+      for (const enemy of enemySystem.getEnemies()) {
+        if (!enemy.isAlive()) continue;
+        this.particleSystem?.createExplosion(enemy.getMesh().position, enemy.getConfig().scale);
+      }
+      enemySystem.getLevelManager().despawnAllEnemies();
+    }
+    this.units.clear();
   }
 
   private createCombatHitFeedback(
@@ -3221,6 +3088,8 @@ export class GameCoordinator {
 
     this.sessionState.pause();
     this.audioManager.stopEngine();
+    // 音乐淡出并记住曲目 / 强度；激光嗡鸣、电磁炮蓄力等持续音效立即收束
+    this.presentation.onPause();
     this.inputHandler.resetPauseState();
     this.inputHandler.resetUpgradeState();
     void this.ensurePauseMenu().then((pauseMenu) => {
@@ -3233,7 +3102,11 @@ export class GameCoordinator {
   }
 
   private resumeGame(): void {
+    const wasPaused = this.sessionState.isPaused();
     this.sessionState.resume();
+    if (wasPaused) {
+      this.presentation.onResume();
+    }
     this.pauseMenu?.hide();
     this.upgradeMenu?.hide();
     this.presentationController.resetHudThrottle();
