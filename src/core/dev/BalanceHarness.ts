@@ -256,6 +256,8 @@ export function installBalanceHarness(access: DevHookAccess): BalanceHarnessApi 
   let lastHitTime = -1e9;
   let lastRespawnTime = -1e9;
   const recentCrashes: number[] = [];
+  /** 最近的坠毁现场（排查地形 / 复活问题） */
+  const crashLog: Array<Record<string, unknown>> = [];
   let rescuePending = false;
   let bossActive = false;
   /** 已建档的 Boss 对象（死亡演出期间仍是 currentBoss，避免重复建档） */
@@ -285,6 +287,7 @@ export function installBalanceHarness(access: DevHookAccess): BalanceHarnessApi 
     special: { mode: null, ready: false, charge: 0, overheated: false, range: 0 },
     flareCharges: 0,
     secondsSinceHit: Infinity,
+    secondsSinceRespawn: Infinity,
   };
 
   /** 开火者标签：敌机按机型，单位按单位类型 */
@@ -325,8 +328,27 @@ export function installBalanceHarness(access: DevHookAccess): BalanceHarnessApi 
     shot.used = false;
   };
 
+  /** 单位的非子弹伤害（SAM / 自杀无人机 / 炸弹）：包一层 onPlayerDamaged 记下原因 */
+  let pendingUnitCause: string | null = null;
+  let wrappedUnitSystem: unknown = null;
+  const wrapUnitDamage = (): void => {
+    const system = access.getUnits().getSystem();
+    if (!system || system === wrappedUnitSystem) return;
+    wrappedUnitSystem = system;
+    const original = system.onPlayerDamaged;
+    system.onPlayerDamaged = (damage, cause, position) => {
+      pendingUnitCause = cause;
+      try {
+        original?.(damage, cause, position);
+      } finally {
+        pendingUnitCause = null;
+      }
+    };
+  };
+
   /** 找出最可能命中玩家的那颗子弹（伤害吻合、预测位置最近） */
   const attributeHit = (damage: number): string => {
+    if (pendingUnitCause) return `unit-${pendingUnitCause}`;
     const armor = access.getStats().getArmorReduction();
     const player = access.getPlayerAircraft().position;
     let best: ShotRecord | null = null;
@@ -499,7 +521,11 @@ export function installBalanceHarness(access: DevHookAccess): BalanceHarnessApi 
   EventBus.on(GameEventType.PLAYER_DEATH, () => {
     if (!run || run.done) return;
     run.totalDeaths++;
-    const crash = lastHitDamage >= 1000;
+    // 坠地：1000 点撞地伤害（护盾期间不发 PLAYER_HIT，所以同时看是否已贴到坠毁面）
+    const deathPosition = access.getPlayerAircraft().position;
+    const crash =
+      lastHitDamage >= 1000 ||
+      deathPosition.y <= world.groundY(deathPosition.x, deathPosition.z) + 0.5;
     const respawnCrash = crash && gameTime - lastRespawnTime < 4;
     const record = currentLevelRecord();
     if (record) {
@@ -518,6 +544,25 @@ export function installBalanceHarness(access: DevHookAccess): BalanceHarnessApi 
       }
     }
     if (crash) {
+      const player = access.getPlayerAircraft();
+      const forwardY = new THREE.Vector3(0, 0, -1).applyQuaternion(player.quaternion).y;
+      if (crashLog.length < 40) {
+        crashLog.push({
+          t: round1(gameTime),
+          level: access.getSession().getLevel(),
+          boss: access.getSession().isInBossBattle(),
+          pos: [
+            Math.round(player.position.x),
+            Math.round(player.position.y),
+            Math.round(player.position.z),
+          ],
+          ground: Math.round(world.groundY(player.position.x, player.position.z)),
+          forwardY: Math.round(forwardY * 100) / 100,
+          sinceRespawn: round1(gameTime - lastRespawnTime),
+          target: pilot?.lastAim.kind ?? null,
+          targetDistance: Math.round(pilot?.lastAim.distance ?? 0),
+        });
+      }
       recentCrashes.push(gameTime);
       while (recentCrashes.length > 0 && gameTime - recentCrashes[0] > 20) recentCrashes.shift();
       // 连续坠毁（20 秒内 3 次）：下次复活时抬到安全高度，避免测量陷入死循环
@@ -583,6 +628,7 @@ export function installBalanceHarness(access: DevHookAccess): BalanceHarnessApi 
   const onStep = (deltaTime: number): void => {
     const state = run as RunState;
     gameTime += deltaTime;
+    wrapUnitDamage();
     const session = access.getSession();
     const level = session.getLevel();
     if (level !== lastLevelSeen) {
@@ -674,20 +720,26 @@ export function installBalanceHarness(access: DevHookAccess): BalanceHarnessApi 
     if (!run) return;
     run.rescues++;
     const player = access.getPlayerAircraft();
-    let highest = world.groundY(player.position.x, player.position.z);
+    // 在周围 3 圈 × 8 个点里找地表最低（远离立柱 / 岩壁）的位置，抬到其上方 120 米（不超过软顶界）
+    const ceiling = GAME_CONSTANTS.WORLD.SOFT_CEILING - 40;
+    let bestX = player.position.x;
+    let bestZ = player.position.z;
+    let bestGround = world.groundY(bestX, bestZ);
     for (let ring = 1; ring <= 3; ring++) {
       for (let i = 0; i < 8; i++) {
         const angle = (i / 8) * Math.PI * 2;
-        const ground = world.groundY(
-          player.position.x + Math.cos(angle) * ring * 120,
-          player.position.z + Math.sin(angle) * ring * 120
-        );
-        if (Number.isFinite(ground)) highest = Math.max(highest, ground);
+        const x = player.position.x + Math.cos(angle) * ring * 120;
+        const z = player.position.z + Math.sin(angle) * ring * 120;
+        const ground = world.groundY(x, z);
+        if (Number.isFinite(ground) && (!Number.isFinite(bestGround) || ground < bestGround)) {
+          bestGround = ground;
+          bestX = x;
+          bestZ = z;
+        }
       }
     }
-    const position = player.position.clone();
-    position.y = Math.max(position.y, highest + 120);
-    access.getPlayerSystem().placeAt(position, player.quaternion.clone());
+    const y = Math.min(ceiling, (Number.isFinite(bestGround) ? bestGround : 0) + 120);
+    access.getPlayerSystem().placeAt(new THREE.Vector3(bestX, y, bestZ), player.quaternion.clone());
     access.onPlayerTeleported();
   };
 
@@ -786,6 +838,7 @@ export function installBalanceHarness(access: DevHookAccess): BalanceHarnessApi 
     world.quaternion.copy(player.quaternion);
     world.speed = playerSystem.getSpeed();
     world.secondsSinceHit = gameTime - lastHitTime;
+    world.secondsSinceRespawn = gameTime - lastRespawnTime;
     targets.length = 0;
     missileSet.clear();
     let nearestMissile = Infinity;
@@ -1086,6 +1139,7 @@ export function installBalanceHarness(access: DevHookAccess): BalanceHarnessApi 
       totalDamage: Math.round(run.totalDamage),
       totalDeaths: run.totalDeaths,
       rescues: run.rescues,
+      crashLog,
       passiveSurvival: run.passiveSurvival,
       hangars: run.hangars,
       levels: run.levels.map(summarizeLevel),
@@ -1114,6 +1168,7 @@ export function installBalanceHarness(access: DevHookAccess): BalanceHarnessApi 
       lastRespawnTime = -1e9;
       trackedBoss = null;
       recentCrashes.length = 0;
+      crashLog.length = 0;
       rescuePending = false;
       shots.length = 0;
       shotCursor = 0;

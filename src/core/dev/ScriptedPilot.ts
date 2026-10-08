@@ -54,6 +54,8 @@ export interface PilotWorld {
   flareCharges: number;
   /** 距上次受到伤害的秒数（用于受击后的规避机动） */
   secondsSinceHit: number;
+  /** 距上次复活的秒数：复活后先沿复活航向飞离（复活点可能紧贴岩壁 / 立柱） */
+  secondsSinceRespawn: number;
 }
 
 export interface PilotDecision {
@@ -103,17 +105,21 @@ const MISSILE_CONE_DEG = 10;
 const YAW_RATE = GAME_CONSTANTS.PLAYER.YAW_SPEED;
 const PITCH_RATE = GAME_CONSTANTS.PLAYER.PITCH_SPEED;
 const ROLL_DEADBAND = 0.08;
+/** 复活后保持复活航向、缓慢爬升的时间（秒）：先飞离复活点附近的岩壁 / 立柱再找目标 */
+const RESPAWN_HOLD_SECONDS = 1.8;
 /** 受击后的规避蛇行：幅度（弧度）、周期（秒）、持续（秒）；近距离射击窗口内不蛇行 */
 const JINK_AMPLITUDE = 0.22;
 const JINK_PERIOD = 2.6;
 const JINK_AFTER_HIT = 2;
 const JINK_MIN_TARGET_DISTANCE = GAME_CONSTANTS.PROJECTILE.MAX_DISTANCE;
 /** 地形：前瞻时间点（秒）与需要的离地余量（米） */
-const TERRAIN_LOOKAHEAD: readonly number[] = [0, 0.4, 0.8, 1.2, 1.8, 2.6];
+const TERRAIN_LOOKAHEAD_SECONDS = 2.6;
+/** 前瞻采样间距（米）：细立柱（城堡塔楼、天梯支柱）只有十几米粗，采样必须比它们密 */
+const TERRAIN_PROBE_SPACING = 12;
 const TERRAIN_MARGIN = 14;
 /** 地形告警时试探的相对航向（弧度）与距离（米） */
 const ESCAPE_OFFSETS: readonly number[] = [0, 0.5, -0.5, 1.0, -1.0, 1.6, -1.6, 2.4, -2.4];
-const ESCAPE_PROBE_DISTANCES: readonly number[] = [30, 60, 100, 150, 220];
+const ESCAPE_PROBE_DISTANCES: readonly number[] = Array.from({ length: 16 }, (_, i) => 15 + i * 14);
 /** 对地攻击时允许的最低离地高度（米）与最大俯冲角（sin） */
 const ATTACK_FLOOR_AGL = 22;
 const MAX_DIVE_SIN = 0.62;
@@ -122,8 +128,17 @@ const SURFACE_MAX_DEPRESSION = 0.55;
 const SURFACE_EXTEND_MIN = GAME_CONSTANTS.PROJECTILE.MAX_DISTANCE * 0.85;
 const SURFACE_SETUP_AGL = 65;
 /** Boss：贴得太近（钻进机体 / 部件间来回打转）时先拉开到再进入距离，再回头射击 */
-const BOSS_MIN_RANGE = 130;
-const BOSS_REENGAGE_RANGE = 330;
+const BOSS_MIN_RANGE = 100;
+const BOSS_REENGAGE_RANGE = 290;
+/**
+ * 狗斗：敌机贴近（< JET_TOO_CLOSE 米）且机头指不过去（> JET_OFF_AXIS）时先直线拉开，
+ * 拉到 JET_REENGAGE 米或 JET_EXTEND_MAX 秒后回头对头；近距离转弯缠斗时收油门缩小转弯半径。
+ */
+const JET_TOO_CLOSE = 70;
+const JET_OFF_AXIS = 0.9;
+const JET_REENGAGE = 240;
+const JET_EXTEND_MAX = 3.5;
+const TURN_FIGHT_RANGE = 220;
 /** 选目标时机头夹角的权重：正后方的目标按 1 + ANGLE_WEIGHT 倍距离计 */
 const ANGLE_WEIGHT = 0.8;
 /** 巡航高度（无目标时，离地米） */
@@ -223,6 +238,7 @@ export class ScriptedPilot {
   private chargeHeld = false;
   /** 对地攻击：拉开距离中（掠过目标后先飞远再回头） */
   private extending = false;
+  private extendTimer = 0;
   private wasSpecial = false;
   /** checkTerrain 的附带结果：越过前方地形所需的最小爬升（sin）、是否迎面岩壁 */
   private terrainRequiredSlope = -1;
@@ -309,11 +325,18 @@ export class ScriptedPilot {
       } else if (target.kind === 'boss') {
         this.planStandoff(position, target.position, forward, tmpDesired);
       } else {
-        this.extending = false;
+        this.planDogfight(dt, position, target.position, forward, tmpDesired);
       }
     } else {
       this.extending = false;
       this.cruiseDirection(world, agl, tmpDesired);
+    }
+    if (world.secondsSinceRespawn < RESPAWN_HOLD_SECONDS) {
+      tmpDesired.set(forward.x, 0, forward.z);
+      if (tmpDesired.lengthSq() < 1e-6) tmpDesired.set(0, 0, -1);
+      tmpDesired.normalize();
+      tmpDesired.y = 0.2;
+      tmpDesired.normalize();
     }
     if (this.extending) this.stats.extendSeconds += dt;
     this.clock += dt;
@@ -364,7 +387,14 @@ export class ScriptedPilot {
     }
 
     this.steer(dt, world.quaternion, right, up, tmpDesired, input);
-    input.throttle = true;
+    // 油门：平时满油门；近距离缠斗（目标不在机头前方）时收油门缩小转弯半径
+    input.throttle = !(
+      target &&
+      (target.kind === 'jet' || target.kind === 'unit-air') &&
+      !this.extending &&
+      distance < TURN_FIGHT_RANGE &&
+      angleBetween(forward, tmpToTarget.subVectors(target.position, position)) > 0.6
+    );
 
     // ── 武器 ──
     if (target && terrainAlert < 2) {
@@ -521,7 +551,35 @@ export class ScriptedPilot {
     }
     if (out.lengthSq() < 1e-6) out.set(0, 0, -1);
     out.normalize();
-    out.y = THREE.MathUtils.clamp((target.y + 15 - position.y) / 150, -0.3, 0.3);
+    // 拉开时高度向目标上方 30 米靠拢（海面 / 地面 Boss 不贴水面），回头时自然形成浅俯冲
+    out.y = THREE.MathUtils.clamp((target.y + 30 - position.y) / 150, -0.3, 0.3);
+    out.normalize();
+  }
+
+  /** 对敌机：太近且指不过去时直线拉开（有时间上限，追尾的敌机甩不掉也要回头） */
+  private planDogfight(
+    dt: number,
+    position: THREE.Vector3,
+    target: THREE.Vector3,
+    forward: THREE.Vector3,
+    out: THREE.Vector3
+  ): void {
+    const distance = position.distanceTo(target);
+    if (this.extending) {
+      this.extendTimer += dt;
+      if (distance > JET_REENGAGE || this.extendTimer > JET_EXTEND_MAX) this.extending = false;
+    } else if (
+      distance < JET_TOO_CLOSE &&
+      angleBetween(forward, tmpToTarget.subVectors(target, position)) > JET_OFF_AXIS
+    ) {
+      this.extending = true;
+      this.extendTimer = 0;
+    }
+    if (!this.extending) return;
+    out.set(forward.x, 0, forward.z);
+    if (out.lengthSq() < 1e-6) out.set(0, 0, -1);
+    out.normalize();
+    out.y = THREE.MathUtils.clamp((target.y - position.y) / 200, -0.25, 0.25);
     out.normalize();
   }
 
@@ -551,7 +609,9 @@ export class ScriptedPilot {
     let alert = 0;
     this.terrainRequiredSlope = -1;
     this.terrainWall = false;
-    for (const t of TERRAIN_LOOKAHEAD) {
+    const steps = Math.ceil((speed * TERRAIN_LOOKAHEAD_SECONDS) / TERRAIN_PROBE_SPACING);
+    for (let i = 0; i <= steps; i++) {
+      const t = (i / steps) * TERRAIN_LOOKAHEAD_SECONDS;
       const x = position.x + forward.x * speed * t;
       const z = position.z + forward.z * speed * t;
       const y = position.y + forward.y * speed * t;
