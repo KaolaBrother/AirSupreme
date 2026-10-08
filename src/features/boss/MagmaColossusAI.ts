@@ -682,6 +682,7 @@ export class MagmaColossusAI implements IAdvancedBoss {
     if (!rig) throw new Error('MagmaColossusAI: mesh factory produced no rig');
     (mesh as MagmaColossusGroup & { bossParts?: THREE.Mesh[] }).bossParts = built.bossParts;
     (mesh as MagmaColossusGroup).colossusRig = rig;
+    if (mesh.userData.hitRadius === undefined) mesh.userData.hitRadius = built.userData.hitRadius;
     if (!mesh.name) mesh.name = built.name;
     return rig;
   }

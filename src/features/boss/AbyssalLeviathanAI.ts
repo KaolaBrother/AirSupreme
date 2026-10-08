@@ -714,6 +714,7 @@ export class AbyssalLeviathanAI implements IAdvancedBoss {
     if (!rig) throw new Error('AbyssalLeviathanAI: mesh factory produced no rig');
     (mesh as AbyssalLeviathanGroup & { bossParts?: THREE.Mesh[] }).bossParts = built.bossParts;
     (mesh as AbyssalLeviathanGroup).leviathanRig = rig;
+    if (mesh.userData.hitRadius === undefined) mesh.userData.hitRadius = built.userData.hitRadius;
     if (!mesh.name) mesh.name = built.name;
     return rig;
   }
