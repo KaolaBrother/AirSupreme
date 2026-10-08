@@ -19,10 +19,24 @@ const TERRAIN_MIN_CLEARANCE = 12;
 /** 绝对兜底：穿入地形时直接抬到地表以上（米） */
 const TERRAIN_HARD_FLOOR = 5;
 
+/**
+ * 开火距离上限（米）：超出则不开火。子弹射程 500 米，但远距离点射只在玩家直线飞行时
+ * 才会命中，只会制造无从躲避的消耗；把交火拉进可见、可规避的距离。
+ */
+const FIRE_RANGE = 420;
+/**
+ * 瞄准散布（弧度）：总散布角 = (1 - accuracy) × AIM_SPREAD，偏航与俯仰各自独立均匀分布。
+ * accuracy 由 EnemyTypes 基础值 + 关卡曲线的命中加成（Difficulty.getLevelScaling）给出。
+ */
+const AIM_SPREAD = 0.4;
+
 // 每帧复用的临时对象（所有敌机实例共享，update 内同步使用）
 const tmpDirection = new THREE.Vector3();
 const tmpForward = new THREE.Vector3();
 const tmpTarget = new THREE.Vector3();
+const tmpAxis = new THREE.Vector3();
+const tmpQuaternion = new THREE.Quaternion();
+const WORLD_UP = new THREE.Vector3(0, 1, 0);
 const lookHelper = new THREE.Object3D();
 
 export class EnemyAI {
@@ -178,8 +192,9 @@ export class EnemyAI {
       const dot = toTarget.dot(forward);
 
       const fireAngle = Math.cos((this.config.fireSpreadAngle * Math.PI) / 180);
+      const inRange = this.mesh.position.distanceToSquared(fireTarget) < FIRE_RANGE * FIRE_RANGE;
 
-      if (dot > fireAngle) {
+      if (dot > fireAngle && inRange) {
         this.fire(fireTarget);
         this.attackCooldown = this.config.attackCooldown;
       }
@@ -427,14 +442,15 @@ export class EnemyAI {
     const direction = new THREE.Vector3().subVectors(targetPosition, this.mesh.position);
     direction.normalize();
 
-    // 添加随机扰动（让瞄准不准确）
-    const perturbationStrength = (1 - this.config.accuracy) * 0.4;
-    const anglePerturbation = (Math.random() - 0.5) * perturbationStrength;
-
-    // 使用四元数在Y轴上应用随机旋转
-    const quaternion = new THREE.Quaternion();
-    quaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), anglePerturbation);
-    direction.applyQuaternion(quaternion);
+    // 添加随机扰动（让瞄准不准确）：偏航（绕世界 Y）与俯仰（绕水平侧轴）各自独立
+    const spread = Math.max(0, 1 - this.config.accuracy) * AIM_SPREAD;
+    tmpQuaternion.setFromAxisAngle(WORLD_UP, (Math.random() - 0.5) * spread);
+    direction.applyQuaternion(tmpQuaternion);
+    tmpAxis.crossVectors(direction, WORLD_UP);
+    if (tmpAxis.lengthSq() > 1e-8) {
+      tmpQuaternion.setFromAxisAngle(tmpAxis.normalize(), (Math.random() - 0.5) * spread);
+      direction.applyQuaternion(tmpQuaternion);
+    }
     direction.normalize();
 
     // 触发回调

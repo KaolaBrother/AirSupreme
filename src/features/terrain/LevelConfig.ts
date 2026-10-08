@@ -364,10 +364,11 @@ export const LEVELS: LevelConfig[] = [
       vignetteStrength: 0.1,
     },
     totalWaves: 5,
-    enemiesPerWave: [2, 3, 4, 5, 6],
+    // 教学关：敌机数逐波缓升（16 架），第 2 关起再按关卡曲线加密
+    enemiesPerWave: [2, 3, 3, 4, 4],
     enemyTypes: [
       { type: 'SCOUT', minWave: 1, maxCount: 2 },
-      { type: 'FIGHTER', minWave: 2, maxCount: 2 },
+      { type: 'FIGHTER', minWave: 3, maxCount: 2 },
     ],
     waveInterval: 15,
     eventTemplates: [LevelWaveEventType.INTERCEPT],
@@ -1438,7 +1439,7 @@ export const LEVELS: LevelConfig[] = [
       vignetteStrength: 0.3,
     },
     totalWaves: 8,
-    enemiesPerWave: [7, 8, 8, 9, 9, 10, 10, 12],
+    enemiesPerWave: [6, 7, 7, 8, 8, 9, 9, 10],
     enemyTypes: [
       { type: 'FIGHTER', minWave: 1, maxCount: 4 },
       { type: 'HEAVY', minWave: 1, maxCount: 4 },
