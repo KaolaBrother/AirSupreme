@@ -4,6 +4,103 @@
 
 - Initialized Kaola-Workflow documentation structure.
 
+### 十关故事战役（`workflow/ten-level-campaign`）
+
+#### 战役与剧情
+
+- 十章故事战役「AIR SUPREME · 天穹之战」（`src/features/campaign/CampaignData.ts`）：序章、每章章节卡片（章节 · 行动代号、地点、打字机正文、任务目标）、新武器解锁台词、任务结算（本关得分 / 击落 / 平民损失 / 友军损失 / 总分）、第 10 章之后的尾声与片尾字幕，最后 `MISSION COMPLETE`（`src/ui/StoryOverlay.ts`）
+- 剧情卡片：点击 / 轻触 / 空格 / 回车先显示全文再翻页，Esc 或「跳过」结束整段；卡片显示时隐藏 HUD / 雷达 / 无线电 / 移动端按键；卡片、结算与机库期间冻结模拟
+- 无线电通讯（`src/ui/RadioComms.ts`）：天穹（林岚上校）、渡鸦（僚机秦野）、萤火（陈曦博士）、神谕、民用频道；章节台词按入关、波次开始 / 结束、Boss 登场 / 阶段 / 低血量 / 击破触发；首次遭遇每类单位有提示；平民误伤、导弹告警、低血量为高优先级，打断普通台词
+- 普通模式流程：章节卡片 → 简报 + 无线电 → 波次 → Boss → 任务结算 → 机库 → 下一章（`CampaignFlowController`）
+- Boss 模式扩展到第 1-10 关：没有剧情卡片，只播 Boss 登场台词与高优先级告警；武器解锁到所选关卡，Boss 之间进入机库
+
+#### 关卡与环境
+
+- 新增第 6-10 关：熔炉之心（`VOLCANO`，火山岛兵工厂）、极光冰海（`ARCTIC`，极夜冰海）、雷霆峡谷（`CANYON`，雷暴峡谷）、天梯之巅（`STRATOSPHERE`，平流层云海与天梯）、神谕核心（`CITADEL`，陨石坑黑曜城堡），各有专属环境模块（`src/features/terrain/environments/`）
+- 新天气预设 `ash`（火山灰 + 余烬）、`aurora`（极光带 + 轻雪）；峡谷使用 `storm`，闪电劈向真实地表；阴暗天气下云层更柔和
+- 第 1-10 关都配置后处理调色 `postFx`（曝光 / 对比度 / 饱和度 / 泛光 / 暗角）
+- 地表采样 `TerrainGenerator.sampleSurface` / `getSurfaceKind`（经 `LevelManager.getSurfaceSample` / `getSurfaceKind`）：地面单位、舰船、Boss 落脚、命中特效与音效按真实地表高度、水面与材质选型；第 9 关云海为坠毁面
+- 开始菜单「起始关卡」扩展到第 1-10 关，下方显示章节标题
+
+#### Boss
+
+- 新增第 6-10 关 Boss（`IAdvancedBoss`，`src/features/boss/BossContracts.ts`）：攻城机甲「熔岩巨像」MAGMA COLOSSUS、巨型潜艇「深渊利维坦」ABYSSAL LEVIATHAN、装甲飞艇「雷霆」TEMPEST、隐形飞翼「幻影」PHANTOM WING、三阶段最终 Boss「神谕主宰」ORACLE PRIME；各有阶段、无敌窗口、弱点倍率、可独立摧毁的子目标、特殊攻击预警与死亡演出
+- 熔岩巨像：四足步行、迫击炮齐射与落点准星、践踏冲击环、齐射后散热口打开（弱点）、熔岩柱与胸口光束；深渊利维坦：潜航无敌、红圈预警后破冰上浮、压载舱 / 指挥塔 / 导弹舱子目标、可击毁水雷、冲撞；雷霆飞艇：6 个气囊、特斯拉连锁电弧、雷暴云、无人机舱与召雷；幻影之翼：隐形伏击、激光长矛危险航道、全息诱饵，EMP 迫使现形，隐形时不可锁定、雷达不显示；神谕主宰：四座护盾塔 → 暴露核心与审判之矛 → 过载冲击环、天罚光柱与「终焉之光」，阶段联动城堡核心光柱
+- Boss 战 HUD 显示 Boss 状态与阶段菱形（第 1-5 关按血量三段划分）；阶段切换播放台词、警报、`phase-change` 刺激音与音乐升级
+- 第 6-10 关 Boss 召唤的无人机由单位系统的自杀无人机担任，其余小兵映射到敌机
+
+#### 地面 / 海上 / 空中单位
+
+- 17 种单位（`src/features/units/UnitTypes.ts`）分属三阵营，新增 `Faction.CIVILIAN`（不与任何阵营敌对）：
+  - 敌方：主战坦克、地空导弹车、双联高炮、雷达站、高速炮艇、导弹护卫舰、攻击潜艇、武装直升机、战略轰炸机、自杀无人机
+  - 友军：友军车队、友军护卫舰、友军预警机、友军运输机
+  - 平民：民航客机、民用货轮、民用卡车
+- 每种单位独立行为：导弹车锁定 → 发射（可被热焰弹诱骗）、高炮提前量弹幕、潜艇潜航 / 上浮（只有上浮时可被击中）、炮艇蛇形机动、护卫舰垂发 + 近防、直升机贴地扫射、轰炸机轰炸友军地面 / 海上单位、无人机俯冲撞击、友军护卫舰拦截导弹、护送目标与平民沿航线行进后离场
+- 每关每波部署表（`src/features/units/UnitDeployments.ts`），与敌机波次并行：本波敌机与敌方单位全部清空才算过波（残留单位有时限兜底）；峡谷与城堡的地面车队沿环境提供的道路行进
+- 得分规则：击毁敌方单位得分（乘关卡得分倍率）；亲手击毁平民 / 友军单位扣分并告警，计入结算；护送目标安全抵达有奖励分
+- 友军预警机在线时雷达量程扩大；敌方雷达站存活时敌机命中率提高
+- 雷达新增图例：敌方地面单位（红色方块）、敌方舰艇（红色菱形）、友军单位（金色三角）、平民（灰色空心圆）
+
+#### 特殊武器与热焰弹
+
+- 5 种特殊武器（`src/features/weapons/`）：集束火箭（第 2 章解锁）、脉冲激光（第 4 章）、蜂群导弹（第 6 章）、电磁轨道炮（第 7 章）、电磁脉冲（第 9 章）
+- 按键：F 发射（激光按住照射、轨道炮按住蓄力松开发射），Tab / X 切换，1-5 直接选择；移动端「特武」「切换」按钮
+- 火箭齐射近炸溅射；激光持续照射、过热后冷却到底才能再用；蜂群导弹自动分配给前方锥形范围内的不同敌方目标；轨道炮贯穿弹道上所有目标、过早松开取消且不耗弹；EMP 瘫痪敌方单位与敌机、摧毁范围内的单位导弹与 Boss 导弹、迫使幻影之翼现形
+- 特殊武器只伤敌方与平民目标，友军与玩家永不受伤；新解锁的武器满弹，复活时补给
+- 热焰弹（G / 移动端「热焰」，`CountermeasureSystem`）：从机尾抛出一扇热焰弹，诱骗地空导弹与第 6-10 关 Boss 导弹；充能制，「热焰弹挂架」升级扩容 2 → 6 发
+
+#### 视角
+
+- `CameraRig`（`src/features/camera/`）：第三人称追尾 / 第一人称座舱，V 键或移动端「视角」按钮平滑切换；开始菜单新增「视角」设置，最后一次的选择会持久化
+- 第一人称座舱：遮光罩、三块多功能显示器、前上方控制面板、圆表、告警灯与 HUD 组合玻璃；隐藏机体外壳，护盾球随视角淡化
+- 创伤式镜头震动（受击、爆炸、武器后坐、Boss 特殊攻击）；视场角随速度与加力放大
+- 友军僚机改用盟军涂装（同机体、同命中半径）；玩家加力尾焰随油门变化
+
+#### 成长、机库与存档
+
+- 14 条升级线（`src/features/upgrade/UpgradeSystem.ts`）：7 条核心属性扩展到 10 级（终值与原 5 级满级一致，步长减半），新增复合装甲（满级减伤 40%）、热焰弹挂架（2 → 6 发）与 5 条特殊武器强化（各 5 级，武器解锁前锁定）
+- 层级上限随章节开放：核心 `min(10, 关卡 + 1)`，装甲 / 热焰弹 `min(满级, ceil(关卡 / 2) + 1)`，武器 `min(5, 关卡 - 解锁关卡 + 2)`；每档花费随层级上升
+- 章节之间的机库整备（`UpgradeMenu` 的 `hangar` 模式，「出击」进入下一章）；从后续章节开局（普通或 Boss 模式）补发起步升级点并先进入机库
+- 中途自动存档（`src/core/save/SaveSystem.ts`）：入关、每波结束、Boss 战前写入检查点，HUD 弹出提示并播放存档音效
+- 开始菜单「继续战役」按钮（显示如 `第6关 · 熔炉之心 · 第3波`）；`MISSION FAILED` 结算提供「从检查点继续」；检查点还原分数、生命、导弹、升级、武器解锁与弹药、热焰弹、视角与本局统计
+- 普通模式新开一局清除旧检查点；Boss 模式不写检查点；打完第 10 章标记战役完成（`air-supreme:campaign-progress`）并清除检查点；损坏的存档读取时被清除
+
+#### 音乐与音效
+
+- 新音乐系统（`src/core/Audio/MusicSystem.ts` + `src/core/Audio/music/`）：前瞻式音序器、合成乐器、混响与限幅总线；23 首曲目（10 首关卡曲、10 首 Boss 曲、菜单 / 剧情 / 胜利曲）与 7 个刺激音，全部实时合成
+- `setIntensity`：Boss 阶段推进时音乐图层、速度与滤波升级，神谕主宰逐帧驱动强度；刺激音对齐下一拍并移调到当前调性，Boss 击破 / 关卡完成 / 游戏结束 / 战役通关刺激音接管并结束当前曲目
+- 开始菜单音乐（第一次用户手势后播放，进入战斗淡出、回到菜单恢复）；暂停时音乐淡出并停止持续音效，继续时恢复
+- 新音效（`src/core/Audio/sfx/`）：特殊武器各阶段、热焰弹、地空导弹锁定 / 发射、炸弹、坦克炮、直升机、汽笛、声呐、视角切换、自动存档、无线电、打字机、武器切换 / 解锁、平民告警、章节重音、雷击、熔岩喷发、护盾受击、Boss 阶段警报、结算计数、按作战域区分的单位被毁；地面冲击新增熔岩 / 冰面 / 岩石 / 云层；音效总线压缩器
+- 远处单位事件按距离静音并限流（`CampaignSfxRouter`）
+
+#### 特效与 HUD
+
+- 粒子系统改为实例化后端 + 分层配方，粒子预算随画质预设变化；新增枪口焰、受损冒烟、拾取爆闪、EMP 电环、舰船级大水花与熔岩 / 冰面 / 岩石 / 云层冲击
+- HDR 后处理（`PostFxPipeline`：场景 → 泛光 → 调色 / 屏幕效果），按关卡 `postFx` 调色；`performance` 画质关闭后处理，屏幕效果改用轻量叠加层
+- 屏幕效果：受击脉冲、低血量心跳暗角、加力速度线、闪白、EMP 电磁闪
+- 翼尖凝结尾迹（玩家、敌机与僚机）、护盾受击六边形涟漪、玩家与残血敌机受损冒烟
+- HUD 新面板：特殊武器挂架（弹药 / 装填 / 热量 / 蓄力 / 冷却 / 槽位）、热焰弹计数、自动存档提示、视角标签、Boss 状态条与阶段菱形、导弹告警（`locking` / `incoming`，合并地空导弹与 Boss 导弹）、闪烁告警；雷达量程倍率
+- 移动端拇指弧触控布局，新增「特武」「热焰」「切换」「视角」按钮，按钮外圈显示装填 / 热量 / 蓄力进度与导弹告警
+
+#### 修复
+
+- 后处理隔帧丢深度（VFX 升级中引入、合并前已修复）：调色 ShaderPass 沿用默认 `needsSwap = true`，EffectComposer 隔帧把场景画进无深度缓冲的 writeBuffer，`quality` / `balanced` 画质下玩家机身消失、其他飞机半透明；末尾 Pass 改为不交换，闲置 writeBuffer 缩回 1×1（`0db18f2`，由 `PostFxPipeline.test.ts` 固定）
+- 第 1-5 关 Boss 原先固定在 +Z 200 米出生（玩家朝 -Z 时在身后），现在出生在玩家前方（贴近战场边缘时偏转 30° / 60° / 90° 或朝向中心）；子弹按部件形状的命中体积判定；敌机子弹不再误伤 Boss
+- 每关出生姿态按地形采样挑选航向，并校验前方 1.5 公里航道净空（第 6 关不再正对火山，第 9、10 关不再冲向天梯支柱 / 城墙，第 3 关避开山脊）
+- 坠毁复活：离地 40 米、机翼水平；原航向前方 400 米内有上升地形时改朝净空最大的方向
+- 敌机前瞻避让高耸地形，不再穿过火山、峡谷崖壁与坑缘
+- 玩家子弹 / 导弹对大型舰船、雷达站与 Boss 部件按命中半径判定；命中特效与音效按采样地表选型（不再用硬编码的湖区半径与固定平面）
+- 敌机血条不再显示「NaNm」；Boss 导弹在 NaN / Infinity 输入下保持有限状态（单帧 NaN 不再让在途导弹永久失效）
+
+#### 运行时与测试
+
+- 新的重型模块按需加载：`CameraRig`、`UnitSystem`、`WeaponSystem`、`CountermeasureSystem`、`ContrailSystem`、`StoryOverlay` / `RadioComms`、第 6-10 关 Boss（Boss 在登场时加载，其余在菜单空闲时预热）
+- 协调器接线拆到 `src/core/` 下的控制器（`CampaignFlowController`、`UnitController`、`SpecialWeaponsController`、`PlayerViewController`、`CombatVfxController`、`CombatHudFeed`、`AdvancedBossController`），表现层统一经 `ICampaignPresentation`（见 `docs/decisions/0001-campaign-presentation-adapter.md`）
+- `EventBus` 没有新增事件类型：单位开火经 `bridgeUnitFireToEventBus` 接入现有 `ENEMY_FIRED` / `FRIENDLY_FIRED`
+- 开发构建专用调试钩子 `window.__AIR_SUPREME_DEV__`（生产构建裁剪）
+- 去掉 `WeaponSystem.prepareFrame`、`InputHandler.getState`、`CombatSystem` 碰撞回调的逐帧分配
+- 新增规格测试：`AdvancedBosses`、`CameraRig`、`CampaignAudio`、`CampaignData`、`CampaignHud`、`CampaignMenus`、`CampaignVfx`、`PostFxPipeline`、`RadioComms`、`SaveSystem`、`SpecialWeapons`、`StoryOverlay`、`TerrainLevels`、`UnitSystem`、`UpgradeTiers`（`src/__tests__/*.test.ts`）；更新 `Boss.integration`、`BossTypes`、`UpgradeMenu`、`UpgradeSystem` 的过期断言
+
 ### 战斗音效解锁（共享 AudioContext）
 
 - 开始游戏 / 再来一局点击时解锁 Web Audio：战斗 SFX 与 BGM 现在能在该点击上手势上出声
