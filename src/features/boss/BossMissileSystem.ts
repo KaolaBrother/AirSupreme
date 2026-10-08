@@ -15,6 +15,11 @@ const BOSS_NOSE_Z = 2.31;
 // 弹体慢速滚转（弧度/秒），飞行朝向由外层 Group 四元数控制，不受影响
 const BOSS_ROLL_SPEED = 0.45;
 
+/** 三个分量都是有限数：一帧 NaN / Infinity 写进速度或位置，导弹就会永远失控 */
+function isFiniteVector(v: THREE.Vector3): boolean {
+  return Number.isFinite(v.x) && Number.isFinite(v.y) && Number.isFinite(v.z);
+}
+
 /**
  * 弹体纵剖面（半径, 轴向位置，未乘 SCALE），从尾到头，车削成两级一体弹体：
  * 收口喷管 → 尾裙 → 助推器段 → 凸起分离环 → 级间收束 → 主级弹体 → 大型雷达罩
@@ -637,8 +642,14 @@ export class BossMissile {
     this.mesh = new THREE.Group();
     this.buildMissileModel();
 
-    this.mesh.position.copy(position);
-    scene.add(this.mesh);
+    if (isFiniteVector(position)) {
+      this.mesh.position.copy(position);
+      scene.add(this.mesh);
+    } else {
+      // 发射点非有限：不进场景、直接作废（系统下一次 update 回收），不留下 NaN 状态
+      this.startPosition.set(0, 0, 0);
+      this.active = false;
+    }
 
     this.velocity = new THREE.Vector3(0, this.speed, 0);
 
@@ -678,6 +689,13 @@ export class BossMissile {
 
   public update(deltaTime: number): void {
     if (!this.active) return;
+    // 非有限步长会把 NaN 写进寿命与位置：跳过本帧
+    if (!Number.isFinite(deltaTime)) return;
+    // 公开字段被外部写成非有限值：位置已无法恢复，静默作废（不在 NaN 处爆炸）
+    if (!isFiniteVector(this.mesh.position) || !isFiniteVector(this.velocity)) {
+      this.active = false;
+      return;
+    }
 
     this.lifetime += deltaTime;
 
@@ -749,13 +767,17 @@ export class BossMissile {
   }
 
   private huntTarget(deltaTime: number): void {
+    let source: THREE.Vector3;
     if (this.isTargetingPlayer && this.playerMesh) {
-      this.targetPosition.copy(this.playerMesh.position);
+      source = this.playerMesh.position;
     } else if (this.target) {
-      this.targetPosition.copy(this.target.position);
+      source = this.target.position;
     } else {
       return;
     }
+    // 目标坐标非有限（玩家 / 诱饵锚点异常的那一帧）：本帧保持航向，不让 NaN 写进速度
+    if (!isFiniteVector(source)) return;
+    this.targetPosition.copy(source);
 
     this.targetDirection.subVectors(this.targetPosition, this.mesh.position).normalize();
     this.currentDirection.copy(this.velocity).normalize();
@@ -763,6 +785,8 @@ export class BossMissile {
 
     this.currentDirection.lerp(this.targetDirection, turnAngle * 2);
     this.currentDirection.normalize();
+    // 极端坐标相减溢出同样会得到非有限方向：保持原速度
+    if (!isFiniteVector(this.currentDirection)) return;
     this.velocity.copy(this.currentDirection).multiplyScalar(this.speed);
   }
 
@@ -808,6 +832,8 @@ export class BossMissile {
   }
 
   public takeDamage(damage: number): void {
+    // NaN / -Infinity 会把血量写成 NaN / Infinity（导弹从此打不掉）：忽略；+Infinity 照常致命
+    if (Number.isNaN(damage) || damage === -Infinity) return;
     this.particleSystem.createHit(this.mesh.position, 1.2);
     this.health.takeDamage(damage);
   }
@@ -843,6 +869,8 @@ export class BossMissileSystem {
     playerMesh: THREE.Object3D | null = null,
     targetingPlayer: boolean = false
   ): void {
+    // 发射点非有限（Boss 挂点计算异常）：不发射，避免产生永远飞行的 NaN 导弹
+    if (!isFiniteVector(position)) return;
     const missile = new BossMissile(
       this.scene,
       position,
