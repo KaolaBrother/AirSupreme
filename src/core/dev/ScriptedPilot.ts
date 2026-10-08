@@ -362,10 +362,15 @@ export class ScriptedPilot {
     const terrainAlert = this.checkTerrain(world, forward);
     if (terrainAlert > 0) {
       this.stats.terrainSeconds += dt;
-      if (terrainAlert >= 2 || this.terrainWall) {
-        // 紧急 / 迎面岩壁：在扇面里找净空最大的航向（峡谷岩壁 / 天梯立柱要转弯，不能只拉起），并爬升
+      if (this.terrainWall) {
+        // 迎面岩壁 / 立柱（爬不过去，或越过它会顶到软顶界）：只转向不猛拉，转弯半径最小
         this.findEscapeHeading(world, forward, tmpDesired);
-        tmpDesired.y = terrainAlert >= 2 ? 2.5 : 1.0;
+        tmpDesired.y = 0.2;
+        tmpDesired.normalize();
+      } else if (terrainAlert >= 2) {
+        // 紧急：在扇面里找净空最大的航向并猛拉
+        this.findEscapeHeading(world, forward, tmpDesired);
+        tmpDesired.y = 2.5;
         tmpDesired.normalize();
       } else {
         // 一般告警：保持朝向目标，只把爬升角抬到越过前方地形所需的最小值（扫射时不至于整段放弃）
@@ -624,7 +629,8 @@ export class ScriptedPilot {
           // 从现在直线飞过去需要的最小爬升（sin）；陡到爬不过去就是“墙”，要转向
           const slope = (ground + margin - position.y) / (speed * t);
           this.terrainRequiredSlope = Math.max(this.terrainRequiredSlope, slope);
-          if (slope > 0.7 && t <= 1.8) this.terrainWall = true;
+          // 爬不过去，或越过它要飞到软顶界之上（会被顶界压回去撞上）都算“墙”
+          if ((slope > 0.7 && t <= 1.8) || ground + margin > CEILING_Y) this.terrainWall = true;
         }
       }
     }
