@@ -70,7 +70,8 @@ function countChars(text: string): number {
 /**
  * 无线电通讯：说话人（呼号 / 头像 / 色调来自 CAMPAIGN_SPEAKERS）+ 逐字台词的紧凑面板。
  *
- * - enqueue 时若空闲立即显示（同步回调 onLineShown），否则排队；
+ * - enqueue 时若空闲（isBusy() 为 false）立即显示（同步回调 onLineShown），否则排队；
+ *   一句播完后的短暂间隔（GAP_SECONDS）也算忙碌，保证两句之间总有停顿、面板不会闪一下就换句；
  *   'high' 优先级立即打断普通台词（被打断且尚未说完的台词回到队首重播），
  *   高优先级之间按先后排队并排在所有普通台词前面。重复文本（正在播或已排队）会被忽略。
  * - 显示时间完全由 update(dt) 驱动：暂停游戏 = 台词停住。
@@ -169,8 +170,9 @@ export class RadioComms {
     }
   }
 
+  /** 正在播放、有排队台词，或处于两句之间的间隔中（与 enqueue 的立即显示条件一致） */
   public isBusy(): boolean {
-    return this.current !== null || this.queue.length > 0;
+    return this.current !== null || this.queue.length > 0 || this.gap > 0;
   }
 
   public clear(): void {
