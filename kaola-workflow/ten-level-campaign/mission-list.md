@@ -138,10 +138,12 @@ Rollup native) · harness reproduces the VFX regression (alternating frames, see
   result: merged ed5d423 (6 commits): root hitRadius Colossus 77 m / Leviathan 61.3 m (be366ee); BossMissileSystem ignores non-finite targets/deltas/launches/damage (bit-identical trace for finite inputs; Infinity delta used to freeze the trail loop); EnemyHealthBars hides non-finite labels (no NaNm in bosses 1-10 probes); per-frame allocations WeaponSystem 64→0 B, InputHandler.getState 104→0 B, collisions 162→0 B, CombatSystem.update 280→128 B (rest is MissileSystem.update filter).
 
 - item: Polish + balance before the audit — RadioComms enqueue/isBusy gap, AudioManager NaN volume clamp, Colossus/Leviathan ensureRig copies the root hitRadius, health-bar names for bosses 6-10, MissileSystem.update allocation, boss spawn when the player is already outside the spawn box flying outward, L3 start clearance, Sky Carrier spawn height; difficulty/upgrade curve across levels 1-10 measured with a scripted pilot and tuned (R12)
-  status: todo
+  status: in-flight
+  dispatched: session 3 · polish = implementer (standard tier) in /home/claude/wt/polish on batch/polish (owns RadioComms.ts, AudioManager.ts, MagmaColossusAI.ts, AbyssalLeviathanAI.ts, EnemyHealthBars.ts, MissileSystem.ts, src/core/boss/**, BossBattleController.ts, src/core/campaign/LevelStartPose.ts); balance = implementer (reasoning tier) in /home/claude/wt/balance on batch/balance (owns Difficulty.ts, public/config/game-config.json, src/config.ts, LevelConfig.ts enemiesPerWave/difficulty fields, UnitDeployments.ts, EnemyAI.ts tuning, BossTypes.ts configs, UpgradeSystem.ts costs/points, src/core/dev/** for a scripted pilot); from 2198d50; output = commits + reports
 
 - item: Dock docs against the code (README/README.zh-CN, CHANGELOG, IMPLEMENTATION_PLAN, docs/architecture, docs/api, TECHNICAL_DOCUMENTATION)
-  status: todo
+  status: in-flight
+  dispatched: session 3 · doc-updater (standard tier) in /home/claude/wt/docs on batch/docs (from 2198d50); owns README.md, README.zh-CN.md, CHANGELOG.md, TECHNICAL_DOCUMENTATION.md, docs/**; transcribes verified ground truth only; output = commits + report
 
 - item: Final audit against R1-R12, full sandbox validation + Chromium playthrough of all 10 levels, then merge to main and push (user asked for merge + resync)
   status: todo
