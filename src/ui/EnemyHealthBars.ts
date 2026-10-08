@@ -9,6 +9,10 @@ const TARGET_POSITION_THRESHOLD_SQ = 0.01;
 const CAMERA_ROTATION_THRESHOLD = 0.0025;
 const HEALTH_PERCENT_THRESHOLD = 0.001;
 
+function isFiniteVector(v: Vector3): boolean {
+  return Number.isFinite(v.x) && Number.isFinite(v.y) && Number.isFinite(v.z);
+}
+
 /**
  * 敌人血条管理器
  * 为每个敌人显示血条
@@ -26,7 +30,8 @@ export class EnemyHealthBars {
       screenPos: { x: number; y: number; z: number } | null; // 缓存屏幕位置
       lastBarWorldPosition: Vector3;
       lastHealthPercent: number;
-      wasInView: boolean;
+      /** null：上一帧因坐标 / 距离非有限而隐藏，下一帧强制刷新 */
+      wasInView: boolean | null;
     }
   > = new Map();
   private readonly textContentCache = new WeakMap<HTMLElement, string>();
@@ -125,7 +130,10 @@ export class EnemyHealthBars {
 
     this.lastCameraPosition.copy(camera.position);
     this.lastCameraQuaternion.copy(camera.quaternion);
-    this.lastPlayerPosition.copy(playerPosition);
+    // 非有限的玩家坐标不进缓存，否则之后的“玩家是否移动”判断会一直为 false
+    if (isFiniteVector(playerPosition)) {
+      this.lastPlayerPosition.copy(playerPosition);
+    }
     this.cameraStateInitialized = true;
   }
 
@@ -189,6 +197,18 @@ export class EnemyHealthBars {
     this.barWorldPosition.copy(worldPos);
     this.barWorldPosition.y += this.getBarHeightOffset(enemy.mesh);
 
+    // 目标坐标非有限（NaN / Infinity）：本帧隐藏血条与箭头，不创建、不缓存非有限值
+    if (!isFiniteVector(this.barWorldPosition)) {
+      if (barData) {
+        this.setStyleValue(barData.bar, 'display', 'none');
+        if (barData.chevron) {
+          this.resetArrowIndicator(barData.chevron);
+        }
+        barData.wasInView = null;
+      }
+      return;
+    }
+
     if (!barData) {
       const bar = this.createHealthBar();
       const background = this.createBackgroundBar(barWidth, isBoss);
@@ -251,6 +271,7 @@ export class EnemyHealthBars {
     }
 
     const color = this.getHealthColor(healthPercent);
+    let distanceHidden = false;
 
     if (inView) {
       const barWidth = isBoss ? 120 : 60;
@@ -281,24 +302,30 @@ export class EnemyHealthBars {
     } else {
       this.setStyleValue(barData.bar, 'display', 'none');
       if (barData.chevron) {
-        this.setStyleValue(barData.chevron.element, 'display', 'flex');
-        this.setStyleValue(barData.chevron.element, 'opacity', '1');
-        this.setStyleValue(barData.chevron.element, 'visibility', 'visible');
-        if (needsArrowUpdate) {
-          const distance = playerPosition.distanceTo(worldPos);
-          // 使用相机位置计算方向向量，而不是玩家位置
-          // 因为箭头指示器是相对于相机视野的方向
-          this.cameraLocal.copy(worldPos).sub(camera.position);
-          this.invertedCameraQuaternion.copy(camera.quaternion).invert();
-          this.cameraLocal.applyQuaternion(this.invertedCameraQuaternion);
-          this.updateArrowIndicator(barData.chevron, this.cameraLocal, distance);
+        const distance = playerPosition.distanceTo(worldPos);
+        if (!Number.isFinite(distance)) {
+          // 距离非有限（玩家坐标异常）：本帧隐藏箭头而不是显示 "NaNm"，下一帧强制刷新
+          this.resetArrowIndicator(barData.chevron);
+          distanceHidden = true;
+        } else {
+          this.setStyleValue(barData.chevron.element, 'display', 'flex');
+          this.setStyleValue(barData.chevron.element, 'opacity', '1');
+          this.setStyleValue(barData.chevron.element, 'visibility', 'visible');
+          if (needsArrowUpdate) {
+            // 使用相机位置计算方向向量，而不是玩家位置
+            // 因为箭头指示器是相对于相机视野的方向
+            this.cameraLocal.copy(worldPos).sub(camera.position);
+            this.invertedCameraQuaternion.copy(camera.quaternion).invert();
+            this.cameraLocal.applyQuaternion(this.invertedCameraQuaternion);
+            this.updateArrowIndicator(barData.chevron, this.cameraLocal, distance);
+          }
         }
       }
     }
 
     barData.lastBarWorldPosition.copy(this.barWorldPosition);
     barData.lastHealthPercent = healthPercent;
-    barData.wasInView = inView;
+    barData.wasInView = distanceHidden ? null : inView;
   }
 
   /**

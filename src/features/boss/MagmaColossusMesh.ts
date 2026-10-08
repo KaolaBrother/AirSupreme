@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { getDeclaredHitRadius } from '@/core/CombatContracts';
 import type { BossConfig } from './BossTypes';
 import { createGlowSprite } from './MagmaColossusHazards';
 
@@ -1208,6 +1209,12 @@ export function createMagmaColossusMesh(config: BossConfig): THREE.Group {
       piston,
     });
   }
+
+  // 根节点命中半径（米）：与飞艇 / 幻影之翼 / 神谕主宰同一口径——以根节点原点为球心、
+  // 包住中央主体碰撞球的包围球。巨像根节点在两对足之间的地面上，中央主体是躯干内壳
+  // （球心离地 BODY_HEIGHT + 0.2，半径 5.6），即 15.4 × scale；各部件半径不变。
+  const hullCentre = new THREE.Vector3().addVectors(body.position, hull.position);
+  group.userData.hitRadius = hullCentre.length() + getDeclaredHitRadius(hull, 0);
 
   const rig: MagmaColossusRig = {
     scale: s,
