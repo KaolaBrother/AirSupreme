@@ -99,8 +99,8 @@ Seventeen unit types fight alongside the enemy jets. They spawn wave by wave (`s
 | Faction | What it means for you |
 | ------- | --------------------- |
 | **Hostile** | Counts toward clearing the wave — a wave ends only when its jets **and** its hostile units are down (if only stragglers remain, the wave releases after a time limit). Destroying one scores points. |
-| **Friendly** | Fights on your side. Escorts (convoys, transports) earn a bonus when they arrive safely; if you destroy a friendly unit yourself you lose score. |
-| **Civilian** (neutral) | Never hostile to anyone. Your first hit on one draws a cease-fire call on the radio; destroying one costs score and is counted in the debrief. |
+| **Friendly** | Fights on your side. Escorts (convoys, transports) earn a bonus when they arrive safely; if you destroy a friendly unit yourself you lose score, and every ally lost is counted in the debrief. |
+| **Civilian** (neutral) | Never hostile to anyone, but can be caught in the crossfire. Your first hit on one draws a cease-fire call on the radio; destroying one yourself costs score, and every civilian lost is counted in the debrief. |
 
 Hostile units:
 
