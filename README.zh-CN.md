@@ -217,7 +217,7 @@
 
 第 10 章之后：任务结算 -> 尾声与片尾字幕 -> `MISSION COMPLETE`。
 
-开始菜单同时支持 **Boss 模式**，可直接挑战十个 Boss 中的任意一个：没有剧情卡片（只有 Boss 登场台词），武器解锁到该章，Boss 之间会进入机库整备。Boss 出现在玩家前方；阶段切换时有无线电台词、HUD 告警与音乐升级，HUD 显示 Boss 状态与阶段菱形。Boss 血量、伤害与射速见 `src/features/boss/BossTypes.ts` 的 `BOSS_CONFIGS`。
+开始菜单同时支持 **Boss 模式**，可直接挑战十个 Boss 中的任意一个：没有剧情卡片（只有 Boss 登场台词），武器解锁到该章，Boss 之间会进入机库整备。Boss 出现在玩家前方；阶段切换时有警报、无线电台词与音乐升级（第 6-10 关 Boss 另有 HUD 闪烁告警），HUD 显示 Boss 状态与阶段菱形。Boss 血量、伤害与射速见 `src/features/boss/BossTypes.ts` 的 `BOSS_CONFIGS`。
 
 | # | Boss | 打法 / 弱点 |
 | -: | ---- | ----------- |

@@ -208,7 +208,7 @@ Normal-mode flow:
 
 After chapter 10: debrief → epilogue and credits → `MISSION COMPLETE`.
 
-The start menu also offers **Boss mode** to fight any of the ten bosses directly: no story cards (only the boss's arrival lines), weapons unlocked through that chapter, and a hangar stop between bosses. Bosses arrive ahead of you; phase changes bring radio lines, a HUD warning and a lift in the music, and the HUD shows the boss's status and phase pips. Boss HP, damage and fire rates live in `BOSS_CONFIGS` (`src/features/boss/BossTypes.ts`).
+The start menu also offers **Boss mode** to fight any of the ten bosses directly: no story cards (only the boss's arrival lines), weapons unlocked through that chapter, and a hangar stop between bosses. Bosses arrive ahead of you; phase changes bring an alarm, radio lines and a lift in the music (bosses 6–10 also flash a HUD warning), and the HUD shows the boss's status and phase pips. Boss HP, damage and fire rates live in `BOSS_CONFIGS` (`src/features/boss/BossTypes.ts`).
 
 | # | Boss | How it fights / weak point |
 | -: | ---- | -------------------------- |
