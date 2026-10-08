@@ -70,6 +70,20 @@ export class InputHandler {
   /** F / 特殊武器按钮的按下沿：低帧率下即使按键短于一帧，下一次模拟步也能看到一次扣扳机 */
   private specialTapQueued: boolean = false;
 
+  /** getState() 复用的结果对象（每个模拟步调用一次，避免逐帧分配） */
+  private readonly state: InputState = {
+    pitchUp: false,
+    pitchDown: false,
+    yawLeft: false,
+    yawRight: false,
+    rollLeft: false,
+    rollRight: false,
+    fire: false,
+    missile: false,
+    throttle: false,
+    special: false,
+  };
+
   private isMobile: boolean;
 
   constructor() {
@@ -401,7 +415,8 @@ export class InputHandler {
   }
 
   /**
-   * 获取当前输入状态
+   * 获取当前输入状态。
+   * 返回的是复用对象：每次调用都会覆盖上一次的结果，调用方只在当帧读取；需要跨帧保留请自行复制。
    */
   public getState(): InputState {
     if (this.isMobile) {
@@ -415,36 +430,37 @@ export class InputHandler {
    */
   private getMobileState(): InputState {
     const threshold = 0.3;
-    return {
-      pitchUp: this.joystickY < -threshold,
-      pitchDown: this.joystickY > threshold,
-      yawLeft: this.joystickX < -threshold,
-      yawRight: this.joystickX > threshold,
-      rollLeft: false,
-      rollRight: false,
-      fire: this.firePressed,
-      missile: this.missilePressed,
-      throttle: this.throttlePressed,
-      special: this.specialPressed || this.takeSpecialTap(),
-    };
+    const state = this.state;
+    state.pitchUp = this.joystickY < -threshold;
+    state.pitchDown = this.joystickY > threshold;
+    state.yawLeft = this.joystickX < -threshold;
+    state.yawRight = this.joystickX > threshold;
+    state.rollLeft = false;
+    state.rollRight = false;
+    state.fire = this.firePressed;
+    state.missile = this.missilePressed;
+    state.throttle = this.throttlePressed;
+    state.special = this.specialPressed || this.takeSpecialTap();
+    return state;
   }
 
   /**
    * 获取桌面端输入状态
    */
   private getDesktopState(): InputState {
-    return {
-      pitchUp: this.keys.has('KeyW') || this.keys.has('ArrowUp'),
-      pitchDown: this.keys.has('KeyS') || this.keys.has('ArrowDown'),
-      yawLeft: this.keys.has('KeyA'),
-      yawRight: this.keys.has('KeyD'),
-      rollLeft: this.keys.has('KeyQ'),
-      rollRight: this.keys.has('KeyE'),
-      fire: this.keys.has('Space'),
-      missile: this.keys.has('KeyM') || this.keys.has('ShiftRight'), // M键或右Shift发射导弹
-      throttle: this.keys.has('ShiftLeft') || this.keys.has('ControlLeft'),
-      special: this.keys.has('KeyF') || this.takeSpecialTap(),
-    };
+    const keys = this.keys;
+    const state = this.state;
+    state.pitchUp = keys.has('KeyW') || keys.has('ArrowUp');
+    state.pitchDown = keys.has('KeyS') || keys.has('ArrowDown');
+    state.yawLeft = keys.has('KeyA');
+    state.yawRight = keys.has('KeyD');
+    state.rollLeft = keys.has('KeyQ');
+    state.rollRight = keys.has('KeyE');
+    state.fire = keys.has('Space');
+    state.missile = keys.has('KeyM') || keys.has('ShiftRight'); // M键或右Shift发射导弹
+    state.throttle = keys.has('ShiftLeft') || keys.has('ControlLeft');
+    state.special = keys.has('KeyF') || this.takeSpecialTap();
+    return state;
   }
 
   /** V / 视角按钮：本帧是否请求切换第一 / 第三人称（读取即清除） */
