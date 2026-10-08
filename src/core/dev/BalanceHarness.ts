@@ -198,6 +198,9 @@ interface ShotRecord {
 
 const SHOT_BUFFER_SIZE = 800;
 const SHOT_MAX_AGE = GAME_CONSTANTS.PROJECTILE.MAX_DISTANCE / GAME_CONSTANTS.PROJECTILE.SPEED + 0.5;
+/** 死因归因窗口（秒）与 deathLog 条数上限 */
+const DEATH_WINDOW = 10;
+const DEATH_LOG_LIMIT = 120;
 
 function round1(value: number): number {
   return Math.round(value * 10) / 10;
@@ -258,6 +261,10 @@ export function installBalanceHarness(access: DevHookAccess): BalanceHarnessApi 
   const recentCrashes: number[] = [];
   /** 最近的坠毁现场（排查地形 / 复活问题） */
   const crashLog: Array<Record<string, unknown>> = [];
+  /** 最近 DEATH_WINDOW 秒内的受击（按来源归因），阵亡时汇总成 deathLog */
+  const recentHits: Array<{ t: number; source: string; damage: number }> = [];
+  /** 每次阵亡的死因：阵亡前 DEATH_WINDOW 秒内伤害最高的来源 */
+  const deathLog: Array<Record<string, unknown>> = [];
   let rescuePending = false;
   let bossActive = false;
   /** 已建档的 Boss 对象（死亡演出期间仍是 currentBoss，避免重复建档） */
@@ -495,6 +502,8 @@ export function installBalanceHarness(access: DevHookAccess): BalanceHarnessApi 
     lastHitTime = gameTime;
     run.totalDamage += damage;
     const source = attributeHit(damage);
+    recentHits.push({ t: gameTime, source, damage });
+    while (recentHits.length > 0 && gameTime - recentHits[0].t > DEATH_WINDOW) recentHits.shift();
     const record = currentLevelRecord();
     if (record?.boss && record.boss.end === null) {
       record.boss.damage += damage;
@@ -528,6 +537,23 @@ export function installBalanceHarness(access: DevHookAccess): BalanceHarnessApi 
       deathPosition.y <= world.groundY(deathPosition.x, deathPosition.z) + 0.5;
     const respawnCrash = crash && gameTime - lastRespawnTime < 4;
     const record = currentLevelRecord();
+    if (deathLog.length < DEATH_LOG_LIMIT) {
+      const bySource = new Map<string, number>();
+      for (const hit of recentHits) {
+        if (gameTime - hit.t <= DEATH_WINDOW) {
+          bySource.set(hit.source, (bySource.get(hit.source) ?? 0) + hit.damage);
+        }
+      }
+      const top = [...bySource.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3);
+      deathLog.push({
+        t: round1(gameTime),
+        level: access.getSession().getLevel(),
+        phase: record?.boss && record.boss.end === null ? 'boss' : `w${record?.waves.length ?? 0}`,
+        crash,
+        sources: top.map(([source, damage]) => `${source} ${Math.round(damage)}`).join(', '),
+      });
+    }
+    recentHits.length = 0;
     if (record) {
       if (record.firstDeathAt === null) record.firstDeathAt = gameTime - record.start;
       if (record.boss && record.boss.end === null) {
@@ -1140,6 +1166,7 @@ export function installBalanceHarness(access: DevHookAccess): BalanceHarnessApi 
       totalDeaths: run.totalDeaths,
       rescues: run.rescues,
       crashLog,
+      deathLog,
       passiveSurvival: run.passiveSurvival,
       hangars: run.hangars,
       levels: run.levels.map(summarizeLevel),
@@ -1169,6 +1196,8 @@ export function installBalanceHarness(access: DevHookAccess): BalanceHarnessApi 
       trackedBoss = null;
       recentCrashes.length = 0;
       crashLog.length = 0;
+      recentHits.length = 0;
+      deathLog.length = 0;
       rescuePending = false;
       shots.length = 0;
       shotCursor = 0;
