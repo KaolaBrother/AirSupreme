@@ -245,6 +245,17 @@ function findSpawnSpot(frame: SpawnFrame, spec: SpawnSpec, sample: BossSurfaceSa
   return { x, z, groundY: sampleGround(sample, x, z) };
 }
 
+/**
+ * 天空母舰：SkyCarrierAI 的巡航高度是 200 米（每秒收敛 5% 的高度差）。玩家此时一般在 20~150 米，
+ * 若在前方 200 米、200 米高出生，母舰在机头上方 35~42°，而第三人称视野上沿只有约 +19°
+ * （垂直视场 75°、追尾相机俯视约 18°），一出场就在画面外。改为前方 500 米、比玩家高约 100 米
+ * （160~200 米；160 米时舰底仍高于第五关最高楼顶 135 米）出生：一出场就在画面上部，随后自行爬升到巡航高度。
+ */
+const SKY_CARRIER_SPAWN_DISTANCE = 500;
+const SKY_CARRIER_ABOVE_PLAYER = 100;
+const SKY_CARRIER_MIN_SPAWN_Y = 160;
+const SKY_CARRIER_CRUISE_Y = 200;
+
 /** 各 Boss 的设计距离 / 侧偏 / 地表约束（api-spec §2 与第 1-5 关的原设计值） */
 function getSpawnSpec(type: BossType, random: () => number): SpawnSpec {
   switch (type) {
@@ -257,7 +268,7 @@ function getSpawnSpec(type: BossType, random: () => number): SpawnSpec {
     case BossType.MISSILE_DESTROYER:
       return { distance: 200, lateral: 0, accept: (surface) => surface.water };
     case BossType.SKY_CARRIER:
-      return { distance: 200, lateral: 0, accept: null };
+      return { distance: SKY_CARRIER_SPAWN_DISTANCE, lateral: 0, accept: null };
     case BossType.MAGMA_COLOSSUS:
       // 陆地，且不在火山锥上
       return {
@@ -374,7 +385,7 @@ export interface LegacyBossSpawnRequest {
  * - 移动堡垒：前方 200 米，y = -50（沙漠网格基准面）
  * - 章鱼战舰：前方 200 米、左右 ±50 米，y = 150（触手下缘离地至少约 15 米）
  * - 导弹驱逐舰：前方 200 米附近的水面，y = -50
- * - 天空母舰：前方 200 米，y = 200（且高于地表 120 米）
+ * - 天空母舰：前方 500 米，比玩家高约 100 米（160~200 米，且高于地表 120 米），随后爬升到 200 米巡航
  * 前方放不下时（见 hasBossSpawnRoomAhead）取最靠近机头的方向。
  */
 export function resolveLegacyBossSpawn(request: LegacyBossSpawnRequest): THREE.Vector3 {
@@ -395,9 +406,14 @@ export function resolveLegacyBossSpawn(request: LegacyBossSpawnRequest): THREE.V
     case BossType.MISSILE_DESTROYER:
       position.set(spot.x, -50, spot.z);
       break;
-    case BossType.SKY_CARRIER:
-      position.set(spot.x, airSpawnY(Math.max(200, spot.groundY + 120)), spot.z);
+    case BossType.SKY_CARRIER: {
+      const approachY = Math.min(
+        SKY_CARRIER_CRUISE_Y,
+        Math.max(SKY_CARRIER_MIN_SPAWN_Y, playerY + SKY_CARRIER_ABOVE_PLAYER)
+      );
+      position.set(spot.x, airSpawnY(Math.max(approachY, spot.groundY + 120)), spot.z);
       break;
+    }
     case BossType.HEAVY_BOMBER:
     default: {
       const desired = playerY + 50 + random() * 50;
