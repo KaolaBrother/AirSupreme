@@ -29,7 +29,7 @@ export class GameLoop {
 
   private targetFps: number = this.DEFAULT_FPS;
   private minFps: number = this.MIN_FPS;
-  /** 模拟时间倍率（固定步长不变，每帧多跑几步）；只供开发调试使用，默认 1 */
+  /** 模拟时间倍率（固定步长不变，每帧多跑几步）；只在开发构建可改（见 setTimeScale），默认 1 */
   private timeScale: number = 1;
 
   private get targetFrameTime(): number {
@@ -111,8 +111,16 @@ export class GameLoop {
     requestAnimationFrame(loop);
   }
 
-  /** 模拟时间倍率（1..16）：开发构建的调试钩子用于在软件渲染下加速推进游戏时间 */
+  /**
+   * 模拟时间倍率（1..16），只在开发构建生效：调试钩子（src/core/dev/DevHooks.ts，
+   * window.__AIR_SUPREME_DEV__.setTimeScale）用它在软件渲染（1-4 fps）下加速推进游戏时间，
+   * 做长流程的端到端验证。正式版没有调用方；生产构建里 import.meta.env.DEV 为 false，
+   * 本方法被常量折叠为空操作，timeScale 恒为 1（getTimeScale 供渲染插值使用，返回 1）。
+   */
   public setTimeScale(scale: number): void {
+    if (!import.meta.env.DEV) {
+      return;
+    }
     this.timeScale = Number.isFinite(scale) ? Math.max(1, Math.min(16, scale)) : 1;
   }
 
