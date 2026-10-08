@@ -12,6 +12,7 @@ import type { PlayerStats } from '@/features/upgrade/UpgradeSystem';
 import { CAMPAIGN_SAVE_KEY } from '@/core/save/SaveSystem';
 import { Faction } from '@/core/Faction';
 import { EventBus, GameEventType } from '@/core/EventBus';
+import { installBalanceHarness } from './BalanceHarness';
 
 /**
  * 开发构建专用调试钩子（window.__AIR_SUPREME_DEV__）。
@@ -321,6 +322,8 @@ export function installDevHooks(access: DevHookAccess): void {
       playerSystem.syncMaxHealth();
       playerSystem.getHealth().healToMax();
     },
+    /** 难度 / 成长曲线测量：脚本飞行员 + 自动机库 + 逐关统计（见 BalanceHarness） */
+    balance: installBalanceHarness(access),
   };
   (window as unknown as { __AIR_SUPREME_DEV__?: typeof hooks }).__AIR_SUPREME_DEV__ = hooks;
 }
