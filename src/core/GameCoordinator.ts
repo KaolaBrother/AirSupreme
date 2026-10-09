@@ -2097,13 +2097,17 @@ export class GameCoordinator {
     this.hud.showMissionComplete(finalScore);
   }
 
-  /** 检查点所需的运行时快照（统计由流程控制器补上） */
+  /**
+   * 检查点所需的运行时快照（统计由流程控制器补上）。
+   * 'hangar'（击破上一关 Boss 后、下一章之前）：level 是即将开始的那一关，升级上限与武器解锁
+   * 按那一关写入（新解锁的武器没有弹药记录，读档时满弹）。
+   */
   private captureCheckpoint(
     kind: CheckpointKind,
     level: number,
     wave: number
   ): CampaignCheckpointInput {
-    return {
+    const snapshot: CampaignCheckpointInput = {
       checkpoint: kind,
       level,
       wave,
@@ -2117,11 +2121,18 @@ export class GameCoordinator {
       cameraMode: this.view.getMode(),
       stats: this.campaign.getRunStats(),
     };
+    if (kind === 'hangar') {
+      const unlocked = getUnlockedWeaponsThrough(level);
+      snapshot.upgrades = { ...snapshot.upgrades, campaignLevel: level, unlockedWeapons: unlocked };
+      snapshot.weapons = { ...snapshot.weapons, unlocked: [...unlocked] };
+    }
+    return snapshot;
   }
 
   /**
    * 读档还原（progression notes 第 4 步）：reset → import(upgrades) → 关卡上限 → 武器解锁 →
    * 武器等级 → importState → 热焰弹 → 分数 / 生命 / 导弹 / 视角。
+   * 机库检查点之后是新的一章：和正常换关一样在章节开始时补满弹药（不保留存档里的弹药）。
    */
   private restoreCheckpoint(save: CampaignSaveData): void {
     const upgrades = this.playerStats.getUpgrades();
@@ -2131,7 +2142,7 @@ export class GameCoordinator {
     upgrades.setUnlockedWeapons(getUnlockedWeaponsThrough(save.level));
     this.weapons.syncProgression(this.playerStats, upgrades.getUnlockedWeapons());
     this.weapons.importState(save.weapons, save.flares);
-    this.keepRestoredAmmo = true;
+    this.keepRestoredAmmo = save.checkpoint !== 'hangar';
 
     this.gameState.reset();
     this.gameState.addScore(save.score);

@@ -21,8 +21,11 @@ export const CAMPAIGN_SAVE_KEY = 'air-supreme:campaign-save';
 export const CAMPAIGN_PROGRESS_KEY = 'air-supreme:campaign-progress';
 export const CAMPAIGN_SAVE_VERSION = 1;
 
-/** 检查点类型：入关、波次之间、Boss 战之前 */
-export type CheckpointKind = 'level-start' | 'wave' | 'boss';
+/**
+ * 检查点类型：入关、波次之间、Boss 战之前、机库（击破上一关 Boss 后、下一章开始之前；
+ * level 是即将开始的那一关，wave 为 0）
+ */
+export type CheckpointKind = 'level-start' | 'wave' | 'boss' | 'hangar';
 
 export interface CampaignRunStats {
   kills: number;
@@ -65,7 +68,7 @@ export interface CampaignProgress {
   highestLevel: number;
 }
 
-const CHECKPOINT_KINDS: readonly CheckpointKind[] = ['level-start', 'wave', 'boss'];
+const CHECKPOINT_KINDS: readonly CheckpointKind[] = ['level-start', 'wave', 'boss', 'hangar'];
 
 /** 合理性上限：只用来拒绝离谱值，实际容量由各系统在恢复时自行钳制 */
 const MAX_SAVED_WAVE_INDEX = 16;
@@ -316,19 +319,25 @@ const CHECKPOINT_LABEL: LocalizedText = {
 };
 const CHECKPOINT_WAVE: LocalizedText = { en: 'Wave {wave}', zh: '第{wave}波' };
 const CHECKPOINT_BOSS: LocalizedText = { en: 'Boss', zh: 'Boss 战' };
+const CHECKPOINT_HANGAR: LocalizedText = { en: 'Hangar', zh: '机库整备' };
 
 /**
  * 检查点的简短描述（当前语言），如 “Ch. 6 · Heart of the Forge · Wave 3” /
- * “第6关 · 熔炉之心 · 第3波”；Boss 检查点显示 “Boss” / “Boss 战”。
+ * “第6关 · 熔炉之心 · 第3波”；Boss 检查点显示 “Boss” / “Boss 战”，
+ * 机库检查点（下一章开始之前）显示 “Hangar” / “机库整备”，如 “Ch. 2 · Sandstorm · Hangar”。
  * 波次以 1 开始计数（wave 字段是下一波的 0 基序号）。
  */
 export function describeCheckpoint(data: CampaignSaveData): string {
   const level = clampLevel(data?.level, 1);
   const title = tr(getCampaignChapter(level).title);
-  const stage =
-    data?.checkpoint === 'boss'
-      ? tr(CHECKPOINT_BOSS)
-      : tr(CHECKPOINT_WAVE, { wave: clampWave(data?.wave) + 1 });
+  let stage: string;
+  if (data?.checkpoint === 'boss') {
+    stage = tr(CHECKPOINT_BOSS);
+  } else if (data?.checkpoint === 'hangar') {
+    stage = tr(CHECKPOINT_HANGAR);
+  } else {
+    stage = tr(CHECKPOINT_WAVE, { wave: clampWave(data?.wave) + 1 });
+  }
   return tr(CHECKPOINT_LABEL, { level, title, stage });
 }
 
