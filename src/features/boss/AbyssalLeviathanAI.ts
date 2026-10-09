@@ -99,7 +99,7 @@ interface LeviathanPhaseTuning {
 const PHASE_TUNING: readonly LeviathanPhaseTuning[] = [
   {
     surfacedTime: 14,
-    submergedTime: 9,
+    submergedTime: 7,
     speedFactor: 1,
     turretFactor: 1,
     missileCount: 3,
@@ -117,7 +117,7 @@ const PHASE_TUNING: readonly LeviathanPhaseTuning[] = [
   },
   {
     surfacedTime: 11.5,
-    submergedTime: 7,
+    submergedTime: 5.5,
     speedFactor: 1.2,
     turretFactor: 0.85,
     missileCount: 4,

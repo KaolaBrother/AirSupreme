@@ -2,7 +2,8 @@ import * as THREE from 'three';
 import { BossConfig } from './BossTypes';
 import { HealthSystem } from '@/features/combat/HealthSystem';
 import { ParticleTrailRenderer } from '@/features/effects/ParticleTrailRenderer';
-import { BossMissileSystem } from './BossMissileSystem';
+import { TargetLeadTracker } from './BossAim';
+import { BossMissileSystem, type BossMissileFlightProfile } from './BossMissileSystem';
 import { ParticleSystem } from '@/features/effects/ParticleSystem';
 import { EnemyType } from '@/features/enemy/EnemyTypes';
 
@@ -23,6 +24,17 @@ type BossGroup = THREE.Group & {
  * - 两个导弹发射井
  * - 每 60 秒从仓库口飞出 3 架敌机（除 Scout 以外）
  */
+/** 重炮弹速（Boss 子弹池固定弹速，米/秒）与对玩家的提前量 */
+const CANNON_PROJECTILE_SPEED = 100;
+const CANNON_LEAD = 0.6;
+/** 舰载导弹：比旧版快、能追上平飞的玩家，转向较钝（急转可甩掉），10 秒燃尽 */
+const CARRIER_MISSILE: Readonly<BossMissileFlightProfile> = {
+  speed: 72,
+  turnRate: 0.95,
+  lead: 0.3,
+  lifetime: 10,
+};
+
 export class SkyCarrierAI {
   private static readonly CRITICAL_HEALTH_THRESHOLD = 0.24;
   private static readonly TERMINAL_HEALTH_THRESHOLD = 0.16;
@@ -59,6 +71,8 @@ export class SkyCarrierAI {
 
   // 武器系统
   private cannonCooldown: number = 0;
+  /** 玩家速度估计（重炮提前量） */
+  private readonly playerTracker = new TargetLeadTracker();
   private currentCannon: number = 0; // 0 = 左翼, 1 = 右翼
   private missileCooldown: number = 0;
   private currentMissileLauncher: number = 0;
@@ -128,6 +142,7 @@ export class SkyCarrierAI {
 
     this.playerMesh = playerMesh;
     this.friendlyMeshes = friendlyMeshes;
+    this.playerTracker.update(deltaTime, playerMesh?.position);
 
     // 缓慢追踪玩家
     this.updateMovement(deltaTime, playerMesh);
@@ -395,6 +410,16 @@ export class SkyCarrierAI {
     const firePosition = this.mesh.position.clone().add(cannonOffset);
 
     const targetPosition = this.findNearestThreat();
+    if (this.playerMesh && targetPosition.distanceToSquared(this.playerMesh.position) < 1e-6) {
+      // 打玩家时按提前量瞄准拦截点
+      this.playerTracker.leadPoint(
+        firePosition,
+        this.playerMesh.position,
+        CANNON_PROJECTILE_SPEED,
+        CANNON_LEAD,
+        targetPosition
+      );
+    }
 
     const direction = new THREE.Vector3().subVectors(targetPosition, firePosition).normalize();
 
@@ -461,7 +486,8 @@ export class SkyCarrierAI {
       target,
       this.friendlyMeshes,
       this.playerMesh,
-      targetingPlayer
+      targetingPlayer,
+      CARRIER_MISSILE
     );
     this.onMissileFired?.();
   }

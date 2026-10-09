@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { BOSS_CONFIGS, BossType, type BossConfig } from './BossTypes';
-import { BossMissileSystem } from './BossMissileSystem';
+import { BossMissileSystem, type BossMissileFlightProfile } from './BossMissileSystem';
 import type { BossHazardHit, BossMinionKind, BossSubTarget, IAdvancedBoss } from './BossContracts';
 import { HealthSystem } from '@/features/combat/HealthSystem';
 import type { ParticleSystem } from '@/features/effects/ParticleSystem';
@@ -190,6 +190,18 @@ const SAFE_PASS_DISTANCE = 70;
 const MIN_ALTITUDE = 30;
 const MAX_ALTITUDE = 480;
 const DEATH_SEQUENCE_DURATION = 4.2;
+/**
+ * 弹舱导弹：比玩家快、按提前量追踪，转向有限（大过载急转可甩掉），热焰弹可诱骗；8 秒燃尽。
+ * 旧版 50 米/秒的慢速导弹追不上任何机动中的玩家，幻影几乎没有威胁。
+ */
+const BAY_MISSILE: Readonly<BossMissileFlightProfile> = {
+  speed: 88,
+  turnRate: 1.3,
+  lead: 0.5,
+  lifetime: 8,
+};
+/** 机炮对玩家的提前量（拦截点比例） */
+const CANNON_LEAD = 0.9;
 const MAX_STEP_DT = 0.1;
 const WARNING_THROTTLE = 4;
 
@@ -1487,7 +1499,7 @@ export class PhantomWingAI implements IAdvancedBoss {
     const distance = this.tmpA.distanceTo(this.playerPos);
     this.tmpB
       .copy(this.playerPos)
-      .addScaledVector(this.playerVel, (distance / 100) * 0.7)
+      .addScaledVector(this.playerVel, (distance / 100) * CANNON_LEAD)
       .sub(this.tmpA);
     if (this.tmpB.lengthSq() < 1e-6) return;
     this.tmpB.normalize();
@@ -1572,12 +1584,15 @@ export class PhantomWingAI implements IAdvancedBoss {
         }
       }
     }
+    // 从弹舱向前下方弹出，再转向目标
+    this.tmpB.copy(this.flight.forward).addScaledVector(this.flight.up, -0.4);
     this.missileSystem.fire(
       this.tmpA.clone(),
       target,
       this.friendlyMeshes,
       this.playerMesh,
-      target === null
+      target === null,
+      { ...BAY_MISSILE, launchDirection: this.tmpB }
     );
     this.missileFired++;
     this.fx.emit('createHit', this.tmpA, 1.4, 'enemy');
