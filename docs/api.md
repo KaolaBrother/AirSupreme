@@ -116,7 +116,7 @@ tr({ en: 'Wave {n}', zh: '第{n}波' }, { n: 3 }); // 'Wave 3' | '第3波'
 
 Snapshots handed to the HUD stay `string` and are localised when they are produced (for example `WeaponSystem.getHudState().name` is `tr(config.name)`). Per-frame code keeps its `{ en, zh }` objects as module-level constants, so nothing bilingual is allocated per frame.
 
-**Live switching.** `src/main.ts` calls `setLocale(loadStartFlowSettings().language)` before any UI renders, writes the page shell (title, loading screen, touch-button labels and `aria-label`s) in that language and rewrites it on `onLocaleChange`. Other subscribers: `StartMenu`, `PauseMenu` and `UpgradeMenu` (re-render in place), `HUD` (its own text, the settlement panel, and any briefing banner, autosave toast, flashed warning, boss status label or power-up timer still on screen that was given bilingual text — see `HudText` under [HUD, story overlay, radio, radar, menus](#hud-story-overlay-radio-radar-menus)), `AdvancedBossController` (while a boss 6–10 is active, it re-pushes the boss's status label at once), `EnemyHealthBars` (every bar name, also while paused), `ModelPreview`, `RadioComms` (the line on screen) and `VoiceSystem` (stops the current line, re-prefetches in the new language). `StoryOverlay` writes each card in the locale current when the card is shown: a card already on screen keeps its language and the rest of its narration is skipped. These keep their bilingual source and follow a switch while visible: the level and boss briefings, the checkpoint autosave toasts (including "Resumed: …"), the short wave / tutorial completion objectives, the power-up timer names, the score-penalty flash ("Civilian hit · -{points} pts"), the return-to-arena prompt, the boss bearing call-out, and the phase labels and hazard warnings of bosses 6–10 (`IAdvancedBoss.onPhaseChange` / `onHazardWarning` carry `HudText`). Bosses 6–10 build `getStatusLabel()` in the current language and the controller re-sends it every 0.25 s and on a switch. Messages still resolved with `tr()` when emitted: the centre callouts (`showPowerUpBig`) and the unit and weapon warnings.
+**Live switching.** `src/main.ts` calls `setLocale(loadStartFlowSettings().language)` before any UI renders, writes the page shell (title, loading screen, touch-button labels and `aria-label`s) in that language and rewrites it on `onLocaleChange`. Other subscribers: `StartMenu`, `PauseMenu` and `UpgradeMenu` (re-render in place), `HUD` (its own text, the settlement panel, and any briefing banner, autosave toast, flashed warning, boss status label, power-up timer or centre callout still on screen that was given bilingual text — see `HudText` under [HUD, story overlay, radio, radar, menus](#hud-story-overlay-radio-radar-menus)), `AdvancedBossController` (while a boss 6–10 is active, it re-pushes the boss's status label at once), `EnemyHealthBars` (every bar name, also while paused), `ModelPreview` (labels and model names; it re-frames the model for the new name label), `RadioComms` (the line on screen) and `VoiceSystem` (stops the current line, re-prefetches in the new language). `StoryOverlay` writes each card in the locale current when the card is shown: a card already on screen keeps its language and the rest of its narration is skipped. These keep their bilingual source and follow a switch while visible: the level and boss briefings, the checkpoint autosave toasts (including "Resumed: …"), the short wave / tutorial completion objectives, the power-up timer names, the score-penalty flash ("Civilian hit · -{points} pts"), the return-to-arena prompt, the boss bearing call-out, the unit warnings from `UnitController` (cease fire, missile inbound, remaining targets left the area), the centre callouts from `showPowerUpBig` (allied support, laser warnings, wingman losses, pickups with their POWER-UP! subtitle, upgrade feedback and points, escort results, tutorial hints, wave / event announcements, boss destroyed, and the special-weapon notices sent through `SpecialWeaponsDeps.notify`), and the phase labels and hazard warnings of bosses 6–10 (`IAdvancedBoss.onPhaseChange` / `onHazardWarning` carry `HudText`). Bosses 6–10 build `getStatusLabel()` in the current language and the controller re-sends it every 0.25 s and on a switch.
 
 ## Crash surface
 
@@ -1330,7 +1330,7 @@ export class CountermeasureSystem implements IDecoyProvider {
 }
 ```
 
-`SpecialWeaponsController` (`src/core/combat/SpecialWeaponsController.ts`) owns one `WeaponSystem` and one `CountermeasureSystem`, implements `IDecoyProvider` for units and for every boss (both boss controllers run a `BossFlareDecoyRedirector` on it, see [Bosses](#bosses)), and exposes `handleInput(input, cycleRequested, slotRequested, flareRequested, aircraft, canFire)`, `syncProgression(stats, unlocked): SpecialWeaponId[]`, `refill()`, `clearInFlight()`, `exportState()` and `importState(state, flareCharges)` to the coordinator.
+`SpecialWeaponsController` (`src/core/combat/SpecialWeaponsController.ts`) owns one `WeaponSystem` and one `CountermeasureSystem`, implements `IDecoyProvider` for units and for every boss (both boss controllers run a `BossFlareDecoyRedirector` on it, see [Bosses](#bosses)), and exposes `handleInput(input, cycleRequested, slotRequested, flareRequested, aircraft, canFire)`, `syncProgression(stats, unlocked): SpecialWeaponId[]`, `refill()`, `clearInFlight()`, `exportState()` and `importState(state, flareCharges)` to the coordinator. Its short notices go through `SpecialWeaponsDeps.notify(icon: string, text: HudText)`, which the coordinator wires to `HUD.showPowerUpBig(icon, text, 0.9, true)`: "No special weapons yet", "Weapon not unlocked yet" and, on a weapon switch, the selected weapon's bilingual `SpecialWeaponConfig.name` (not the already-localised `getHudState().name`), so a notice on screen follows a language switch.
 
 ## Camera
 
@@ -1846,6 +1846,8 @@ public showBriefing(briefing: BriefingRequest): void;
 
 // HUD
 export type HudCameraMode = 'third-person' | 'first-person';
+/** 敌人计数：'wave' 为“敌人 N · 剩余 M”（本关波次）；'boss' 为 Boss 战，只显示在场的敌方数 */
+export type HudEnemyCounterMode = 'wave' | 'boss';
 export type HudMissileWarningLevel = 'none' | 'locking' | 'incoming';
 export type HudWarningTone = 'threat' | 'sys' | 'ally';
 export type HudWeaponMode = 'salvo' | 'beam' | 'charge' | 'pulse';
@@ -1882,9 +1884,20 @@ public setMissileWarning(level: HudMissileWarningLevel): void;
 public flashWarning(text: HudText, tone: HudWarningTone = 'threat'): void;
 /** 持续型道具的倒计时（duration <= 0 的即时道具不显示）；name 可本地化 */
 public showPowerUp(name: HudText, icon: string, duration: number = 0): void;
+/** 中央大字提示（锁定圈上方的横幅）；简报显示期间只保留最新一条，简报收起后显示 */
+public showPowerUpBig(
+  icon: string,
+  name: HudText,
+  minDisplayTime: number = HUD.TOAST_DEFAULT_MS / 1000, // 0.8 s
+  hideSubtext: boolean = false,
+  variant: BigMessageVariant = 'announcement' // module-private: 'announcement' | 'powerup'
+): void;
+public setEnemyCounterMode(mode: HudEnemyCounterMode): void;
 ```
 
-`HudText` given to `showBriefing`, `showAutosave`, `flashWarning`, `setBossStatus` and `showPowerUp` is kept as the source; while the banner, toast, warning, boss label or power-up timer is on screen, a language switch re-renders it in place (no animation replay, no timer reset). Plain strings show as given. The per-frame power-up countdown reads a cached string.
+`HudText` given to `showBriefing`, `showAutosave`, `flashWarning`, `setBossStatus`, `showPowerUp` and `showPowerUpBig` is kept as the source; while the banner, toast, warning, boss label, power-up timer or centre callout (with the `'powerup'` variant's POWER-UP! subtitle) is on screen, a language switch re-renders it in place (no animation replay, no timer reset). A callout queued behind a briefing is resolved when it shows. Plain strings show as given. The per-frame power-up countdown reads a cached string.
+
+The enemy counter reads `ENEMIES n · LEFT m` (`敌人 n · 剩余 m`) in `'wave'` mode. `GameCoordinator.updateUI` sets `'boss'` during a boss fight (`sessionState.isBossMode()` or `sessionState.isInBossBattle()`) and `'wave'` otherwise: the counter then reads `ENEMIES n` (`敌人 n`), where n is the hostiles actually present — live enemy jets (boss-launched ones included) plus live hostile units (boss drones included) — and the wave roster's LEFT count is not shown.
 
 ```typescript
 // StoryOverlay
@@ -2018,7 +2031,7 @@ HUD layout (`HUD.ts`, `theme/hudExtrasStyles.ts`, `theme/radioStyles.ts`): `#hud
 
 Health bars (`src/ui/EnemyHealthBars.ts`) show a friendly AI jet's pilot callsign when its mesh carries `userData.displayName` (`LocalizedText` or string — set from `WingmanProfile.callsign`), ahead of the per-name label cache, and rename every bar at once on a language switch. Bars come in three sizes: boss body (120 × 10 px, with its name), boss part (44 × 5 px on a dark track) and everything else (60 × 6 px, with its name). Of the boss parts in view, only the one nearest the reticle shows its name, with hysteresis (another part must be under 80 % of its distance to take over); parts no longer draw their own off-screen chevrons.
 
-`ModelPreview` builds every boss from its own mesh factory through a lazy `Record<BossType, loader>` (bosses 6–10 from `MagmaColossusMesh`, `AbyssalLeviathanMesh`, `TempestZeppelinMesh`, `PhantomWingMesh`, `OraclePrimeMesh`), frames the bounding volume of the visible geometry (hidden parts and sprites excluded) in both the vertical and horizontal field of view, and disposes each previewed model's geometries, materials and instance buffers once, skipping shared resources.
+`ModelPreview` builds every boss from its own mesh factory through a lazy `Record<BossType, loader>` (bosses 6–10 from `MagmaColossusMesh`, `AbyssalLeviathanMesh`, `TempestZeppelinMesh`, `PhantomWingMesh`, `OraclePrimeMesh`), scales the visible geometry (hidden parts and sprites excluded) to a fixed bounding sphere, and disposes each previewed model's geometries, materials and instance buffers once, skipping shared resources. The sphere is framed in the part of the canvas above the name label: after the name is written (and again on resize and on a language switch) `frameCamera()` reads the label's top from the DOM, keeps 8 px clear of it and of the canvas top (the region reaches at least halfway down the canvas), backs the camera off until the sphere fits the region's height (or the canvas width, if narrower), and moves the projection centre into the region with `setViewOffset`; before the canvas has a layout it frames the whole canvas. The name label stays on one line when it fits (18 px type below 600 px width), and a landscape viewport up to 520 px tall uses two columns: the canvas on the left, the controls on the right.
 
 ## Input
 
