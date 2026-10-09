@@ -4,23 +4,129 @@ import {
   Color,
   DirectionalLight,
   Group,
-  Mesh,
+  InstancedMesh,
+  MathUtils,
   PerspectiveCamera,
   Scene,
+  Sprite,
   Vector3,
   WebGLRenderer,
 } from 'three';
+import type { BufferGeometry, Material, Object3D } from 'three';
 import { EnemyType, ENEMY_CONFIGS } from '@/features/enemy/EnemyTypes';
-import { BossType, BOSS_CONFIGS } from '@/features/boss/BossTypes';
+import { BossType, BOSS_CONFIGS, type BossConfig } from '@/features/boss/BossTypes';
 import { onLocaleChange, tr } from '@/i18n';
 
-// 包围盒自适应取景的目标包围球半径（相机固定在 (0,2,8)，fov 50°）。
-// 包围球半径是盒对角线的一半（≥ 各半轴），按 3.1 取景仍留有安全余量
+// 包围球取景：模型统一缩放到这个包围球半径，相机按视场角后退到横纵都容得下整个球
 const PREVIEW_FIT_RADIUS = 3.1;
+/** 包围球外留的边距（倍数） */
+const PREVIEW_FRAME_MARGIN = 1.08;
+/** 相机俯视方向（原先固定在 (0, 2, 8)） */
+const PREVIEW_VIEW_DIRECTION = new Vector3(0, 2, 8).normalize();
 
 interface AircraftMeshFactoryModule {
   createPlayerMesh: () => Group;
   createEnemyMesh: (config: (typeof ENEMY_CONFIGS)[EnemyType]) => Group;
+}
+
+/**
+ * 每个 Boss 的预览模型工厂：与战斗中使用的模型同源，按需加载（与第 1-5 关一致）。
+ * Record 保证新增 Boss 时必须给出预览模型，不会再退回重型轰炸机。
+ */
+const BOSS_MESH_LOADERS: Readonly<Record<BossType, (config: BossConfig) => Promise<Group>>> = {
+  [BossType.HEAVY_BOMBER]: async (config) =>
+    (await import('@/features/boss/BossAI')).createBossMesh(config),
+  [BossType.DESERT_FORTRESS]: async (config) =>
+    (await import('@/features/boss/DesertFortressAI')).createDesertFortressMesh(config),
+  [BossType.OCTOPUS_WARSHIP]: async (config) =>
+    (await import('@/features/boss/OctopusWarshipAI')).createOctopusWarshipMesh(config),
+  [BossType.MISSILE_DESTROYER]: async (config) =>
+    (await import('@/features/boss/MissileDestroyerAI')).createMissileDestroyerMesh(config),
+  [BossType.SKY_CARRIER]: async (config) =>
+    (await import('@/features/boss/SkyCarrierAI')).createSkyCarrierMesh(config),
+  [BossType.MAGMA_COLOSSUS]: async (config) =>
+    (await import('@/features/boss/MagmaColossusMesh')).createMagmaColossusMesh(config),
+  [BossType.ABYSSAL_LEVIATHAN]: async (config) =>
+    (await import('@/features/boss/AbyssalLeviathanMesh')).createAbyssalLeviathanMesh(config),
+  [BossType.TEMPEST_ZEPPELIN]: async (config) =>
+    (await import('@/features/boss/TempestZeppelinMesh')).createTempestZeppelinMesh(config),
+  [BossType.PHANTOM_WING]: async (config) =>
+    (await import('@/features/boss/PhantomWingMesh')).createPhantomWingMesh(config),
+  [BossType.ORACLE_PRIME]: async (config) =>
+    (await import('@/features/boss/OraclePrimeMesh')).createOraclePrimeMesh(config),
+};
+
+type Renderable = Object3D & {
+  geometry?: BufferGeometry;
+  material?: Material | Material[];
+};
+
+const scratchBox = new Box3();
+
+/**
+ * 只按可见的几何体求包围盒：隐藏的部件（未触发的熔岩斑块、隐形的瞳孔光晕等）与
+ * 加色光晕 Sprite 不参与取景，否则大模型会被一圈看不见的东西撑大、显得过小。
+ */
+function computeVisibleBounds(root: Object3D, target: Box3): Box3 {
+  target.makeEmpty();
+  root.updateWorldMatrix(true, true);
+  root.traverseVisible((object) => {
+    if (object instanceof Sprite) {
+      return;
+    }
+    if (object instanceof InstancedMesh) {
+      object.computeBoundingBox();
+      if (object.boundingBox) {
+        target.union(scratchBox.copy(object.boundingBox).applyMatrix4(object.matrixWorld));
+      }
+      return;
+    }
+    const geometry = (object as Renderable).geometry;
+    if (!geometry || !geometry.getAttribute('position')) {
+      return;
+    }
+    if (!geometry.boundingBox) {
+      geometry.computeBoundingBox();
+    }
+    if (geometry.boundingBox) {
+      target.union(scratchBox.copy(geometry.boundingBox).applyMatrix4(object.matrixWorld));
+    }
+  });
+  return target;
+}
+
+/**
+ * 释放预览模型：几何体、材质与 InstancedMesh 的实例缓冲（同一资源只释放一次）。
+ * 跳过 userData.sharedResource 标记的共享资源；Sprite 共用 three 内置平面几何体，不释放；
+ * 纹理都是跨模型共享的（光晕 / 导弹涂装），不在这里释放。
+ */
+function disposePreviewTree(root: Object3D): void {
+  const seen = new Set<object>();
+  root.traverse((object) => {
+    if (object.userData.sharedResource === true) {
+      return;
+    }
+    if (object instanceof InstancedMesh) {
+      object.dispose();
+    }
+    const renderable = object as Renderable;
+    const geometry = renderable.geometry;
+    if (geometry && !(object instanceof Sprite) && !seen.has(geometry)) {
+      seen.add(geometry);
+      if (geometry.userData.sharedResource !== true) {
+        geometry.dispose();
+      }
+    }
+    const material = renderable.material;
+    const materials = material === undefined ? [] : Array.isArray(material) ? material : [material];
+    for (const entry of materials) {
+      if (seen.has(entry) || entry.userData.sharedResource === true) {
+        continue;
+      }
+      seen.add(entry);
+      entry.dispose();
+    }
+  });
 }
 
 interface AircraftInfo {
@@ -303,61 +409,17 @@ export class ModelPreview {
       });
     }
 
-    // Boss
+    // Boss：每个 Boss 用自己的模型（第 6-10 关不再退回重型轰炸机）
     const bossTypes = Object.values(BossType);
     for (const type of bossTypes) {
       const config = BOSS_CONFIGS[type];
-      if (type === BossType.DESERT_FORTRESS) {
-        this.aircrafts.push({
-          id: type,
-          name: tr(config.name),
-          type: 'boss',
-          createMesh: async () => {
-            const module = await import('@/features/boss/DesertFortressAI');
-            return module.createDesertFortressMesh(config);
-          },
-        });
-      } else if (type === BossType.OCTOPUS_WARSHIP) {
-        this.aircrafts.push({
-          id: type,
-          name: tr(config.name),
-          type: 'boss',
-          createMesh: async () => {
-            const module = await import('@/features/boss/OctopusWarshipAI');
-            return module.createOctopusWarshipMesh(config);
-          },
-        });
-      } else if (type === BossType.MISSILE_DESTROYER) {
-        this.aircrafts.push({
-          id: type,
-          name: tr(config.name),
-          type: 'boss',
-          createMesh: async () => {
-            const module = await import('@/features/boss/MissileDestroyerAI');
-            return module.createMissileDestroyerMesh(config);
-          },
-        });
-      } else if (type === BossType.SKY_CARRIER) {
-        this.aircrafts.push({
-          id: type,
-          name: tr(config.name),
-          type: 'boss',
-          createMesh: async () => {
-            const module = await import('@/features/boss/SkyCarrierAI');
-            return module.createSkyCarrierMesh(config);
-          },
-        });
-      } else {
-        this.aircrafts.push({
-          id: type,
-          name: tr(config.name),
-          type: 'boss',
-          createMesh: async () => {
-            const module = await import('@/features/boss/BossAI');
-            return module.createBossMesh(config);
-          },
-        });
-      }
+      const loadMesh = BOSS_MESH_LOADERS[type];
+      this.aircrafts.push({
+        id: type,
+        name: tr(config.name),
+        type: 'boss',
+        createMesh: () => loadMesh(config),
+      });
     }
 
     // 导弹：直接复用战斗模型的视觉装配工厂，与实战外观完全一致
@@ -455,10 +517,28 @@ export class ModelPreview {
     if (canvasContainer) {
       const width = canvasContainer.clientWidth;
       const height = canvasContainer.clientHeight;
-      this.camera.aspect = width / height;
-      this.camera.updateProjectionMatrix();
+      if (width > 0 && height > 0) {
+        this.camera.aspect = width / height;
+      }
+      this.frameCamera();
       this.renderer.setSize(width, height);
     }
+  }
+
+  /**
+   * 包围球取景：模型已缩放到半径 PREVIEW_FIT_RADIUS 的包围球，相机沿固定俯视方向后退到
+   * 纵向与横向视场都能容下整个球（竖屏窄画布时横向视场更小，需要退得更远）。
+   */
+  private frameCamera(): void {
+    const halfVertical = MathUtils.degToRad(this.camera.fov / 2);
+    const aspect =
+      Number.isFinite(this.camera.aspect) && this.camera.aspect > 0 ? this.camera.aspect : 1;
+    const halfHorizontal = Math.atan(Math.tan(halfVertical) * aspect);
+    const halfAngle = Math.min(halfVertical, halfHorizontal);
+    const distance = (PREVIEW_FIT_RADIUS * PREVIEW_FRAME_MARGIN) / Math.sin(halfAngle);
+    this.camera.position.copy(PREVIEW_VIEW_DIRECTION).multiplyScalar(distance);
+    this.camera.lookAt(0, 0, 0);
+    this.camera.updateProjectionMatrix();
   }
 
   private async showAircraft(index: number): Promise<void> {
@@ -478,46 +558,32 @@ export class ModelPreview {
 
     const mesh = await aircraft.createMesh();
     if (loadSequence !== this.meshLoadSequence || this.container.style.display === 'none') {
-      this.disposeMeshTree(mesh);
+      disposePreviewTree(mesh);
       return;
     }
 
-    // 包围盒自适应取景：把模型统一缩放到固定包围球半径，
-    // 并用外层包装组让模型围绕真实几何中心旋转（渲染循环旋转 currentMesh）
-    const bounds = new Box3().setFromObject(mesh);
-    const center = bounds.getCenter(new Vector3());
-    const radius = bounds.getSize(new Vector3()).length() / 2;
-    const fitScale = radius > 0 ? PREVIEW_FIT_RADIUS / radius : 1;
-    // 乘以而非覆盖：Boss 工厂组自带固有缩放（如八爪鱼战舰 scale=5），
-    // setScalar 会把固有缩放一并抹掉导致模型远小于取景预期
-    mesh.scale.multiplyScalar(fitScale);
-    mesh.position.copy(center).multiplyScalar(-fitScale);
+    // 包围球取景：按可见几何体的包围盒求包围球，把模型统一缩放到固定半径并移到原点。
+    // 缩放 / 平移放在中间的取景组上，不改动工厂组自带的变换（如八爪鱼战舰 scale=5）；
+    // 外层包装组负责旋转（渲染循环旋转 currentMesh），模型绕几何中心转动
+    const bounds = computeVisibleBounds(mesh, new Box3());
+    const fit = new Group();
+    if (!bounds.isEmpty()) {
+      const center = bounds.getCenter(new Vector3());
+      const radius = bounds.getSize(new Vector3()).length() / 2;
+      const fitScale = radius > 0 && Number.isFinite(radius) ? PREVIEW_FIT_RADIUS / radius : 1;
+      fit.scale.setScalar(fitScale);
+      fit.position.copy(center).multiplyScalar(-fitScale);
+    }
+    fit.add(mesh);
 
     const wrapper = new Group();
-    wrapper.add(mesh);
+    wrapper.add(fit);
 
     this.currentMesh = wrapper;
     this.scene.add(wrapper);
+    this.frameCamera();
 
     this.nameDisplay.textContent = aircraft.name;
-  }
-
-  private disposeMeshTree(root: Group): void {
-    root.traverse((object) => {
-      // 跨机体共享的资源（航空信号灯、引擎尾焰材质、导弹共享几何体/涂装等）
-      // 不随预览销毁释放
-      if (object.userData.sharedResource === true) {
-        return;
-      }
-      if (object instanceof Mesh) {
-        object.geometry.dispose();
-        if (Array.isArray(object.material)) {
-          object.material.forEach((material) => material.dispose());
-        } else {
-          object.material.dispose();
-        }
-      }
-    });
   }
 
   private disposeCurrentMesh(): void {
@@ -526,7 +592,7 @@ export class ModelPreview {
     }
 
     this.scene.remove(this.currentMesh);
-    this.disposeMeshTree(this.currentMesh);
+    disposePreviewTree(this.currentMesh);
     this.currentMesh = null;
   }
 
