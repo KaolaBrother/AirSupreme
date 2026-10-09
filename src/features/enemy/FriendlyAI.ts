@@ -4,11 +4,12 @@ import { EnemyConfig } from './EnemyTypes';
 
 /**
  * 编队位（玩家水平航向坐标系，米）：0 号在左、1 号在右，之后左右交替向外、向后错开。
- * 位于机翼线略前方：追尾视角里看得到僚机，又不进入相机与座机之间的视线走廊。
+ * 位于机翼线前方约 38 米：16:9 追尾视角里僚机落在画面两侧约三分之一处（避开四角 HUD 面板），
+ * 又远离相机与座机之间的视线走廊。
  */
-const SLOT_LATERAL = 42;
-const SLOT_AHEAD = 28;
-const SLOT_UP = 8;
+const SLOT_LATERAL = 40;
+const SLOT_AHEAD = 38;
+const SLOT_UP = 6;
 const SLOT_RANK_LATERAL = 35;
 const SLOT_RANK_BACK = 25;
 const SLOT_RANK_UP = 4;
