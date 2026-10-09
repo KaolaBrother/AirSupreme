@@ -122,6 +122,16 @@ const TERRAIN_MARGIN = 14;
 /** 地形告警时试探的相对航向（弧度）与距离（米） */
 const ESCAPE_OFFSETS: readonly number[] = [0, 0.5, -0.5, 1.0, -1.0, 1.6, -1.6, 2.4, -2.4];
 const ESCAPE_PROBE_DISTANCES: readonly number[] = Array.from({ length: 16 }, (_, i) => 15 + i * 14);
+/**
+ * 侧向余量（米）：前瞻 / 避让在航线两侧各这么远再看一条线。转弯时的弧线与机体宽度会让机头线
+ * 擦过的柱子（天梯支柱 / 主干 / 导轨、城堡塔楼）撞上来；侧线只认爬不过去的“墙”，缓坡照旧
+ * 只看机头线（不影响低空对地攻击）
+ */
+const TERRAIN_SIDE_CLEARANCE = 14;
+/** 期望方向偏离机头超过这么多（弧度）时沿期望方向也查一次墙：转弯之前先看清弯里有没有柱子 */
+const TURN_PROBE_ANGLE = 0.3;
+/** 避让航向评分：远处的高地按“每前进 1 米可爬升这么多米”扣除可爬升量 */
+const CLIMB_PER_METER = 0.45;
 /** 对地攻击时允许的最低离地高度（米）与最大俯冲角（sin） */
 const ATTACK_FLOOR_AGL = 22;
 const MAX_DIVE_SIN = 0.62;
@@ -203,6 +213,13 @@ function angleBetween(a: THREE.Vector3, b: THREE.Vector3): number {
   const denominator = a.length() * b.length();
   if (denominator < 1e-6) return Math.PI;
   return Math.acos(THREE.MathUtils.clamp(a.dot(b) / denominator, -1, 1));
+}
+
+/** 两向量水平投影的夹角（弧度），任一投影接近零时为 0 */
+function horizontalAngle(a: THREE.Vector3, b: THREE.Vector3): number {
+  const denominator = Math.hypot(a.x, a.z) * Math.hypot(b.x, b.z);
+  if (denominator < 1e-6) return 0;
+  return Math.acos(THREE.MathUtils.clamp((a.x * b.x + a.z * b.z) / denominator, -1, 1));
 }
 
 /**
@@ -373,9 +390,14 @@ export class ScriptedPilot {
       tmpDesired.normalize();
     }
     const terrainAlert = this.checkTerrain(world, forward);
-    if (terrainAlert > 0) {
+    // 转弯之前先看弯里：期望方向偏离机头较多时沿它查一次墙（机头线看不到弯内侧的柱子）
+    const turnWall =
+      terrainAlert === 0 &&
+      horizontalAngle(forward, tmpDesired) > TURN_PROBE_ANGLE &&
+      this.wallAlong(world, tmpDesired);
+    if (terrainAlert > 0 || turnWall) {
       this.stats.terrainSeconds += dt;
-      if (this.terrainWall) {
+      if (this.terrainWall || turnWall) {
         // 迎面岩壁 / 立柱（爬不过去，或越过它会顶到软顶界）：只转向不猛拉，转弯半径最小
         this.findEscapeHeading(world, forward, tmpDesired);
         tmpDesired.y = 0.2;
@@ -634,23 +656,30 @@ export class ScriptedPilot {
     let alert = 0;
     this.terrainRequiredSlope = -1;
     this.terrainWall = false;
+    // 侧线方向：机头水平投影的右侧
+    const horizontal = Math.hypot(forward.x, forward.z);
+    const sideX = horizontal > 1e-3 ? (-forward.z / horizontal) * TERRAIN_SIDE_CLEARANCE : 0;
+    const sideZ = horizontal > 1e-3 ? (forward.x / horizontal) * TERRAIN_SIDE_CLEARANCE : 0;
     const steps = Math.ceil((speed * TERRAIN_LOOKAHEAD_SECONDS) / TERRAIN_PROBE_SPACING);
     for (let i = 0; i <= steps; i++) {
       const t = (i / steps) * TERRAIN_LOOKAHEAD_SECONDS;
       const x = position.x + forward.x * speed * t;
       const z = position.z + forward.z * speed * t;
       const y = position.y + forward.y * speed * t;
-      const ground = world.groundY(x, z);
-      if (!Number.isFinite(ground)) continue;
       const margin = TERRAIN_MARGIN + 4 * t;
-      if (y < ground + margin) {
+      for (let lane = -1; lane <= 1; lane++) {
+        if (lane !== 0 && (t <= 0 || horizontal <= 1e-3)) continue;
+        const ground = world.groundY(x + sideX * lane, z + sideZ * lane);
+        if (!Number.isFinite(ground) || !(y < ground + margin)) continue;
+        // 从现在直线飞过去需要的最小爬升（sin）；陡到爬不过去就是“墙”，要转向
+        const slope = t > 0 ? (ground + margin - position.y) / (speed * t) : 0;
+        // 爬不过去，或越过它要飞到软顶界之上（会被顶界压回去撞上）都算“墙”
+        const wall = t > 0 && ((slope > 0.7 && t <= 1.8) || ground + margin > CEILING_Y);
+        if (lane !== 0 && !wall) continue;
         alert = Math.max(alert, t <= 0.8 ? 2 : 1);
         if (t > 0) {
-          // 从现在直线飞过去需要的最小爬升（sin）；陡到爬不过去就是“墙”，要转向
-          const slope = (ground + margin - position.y) / (speed * t);
           this.terrainRequiredSlope = Math.max(this.terrainRequiredSlope, slope);
-          // 爬不过去，或越过它要飞到软顶界之上（会被顶界压回去撞上）都算“墙”
-          if ((slope > 0.7 && t <= 1.8) || ground + margin > CEILING_Y) this.terrainWall = true;
+          if (wall) this.terrainWall = true;
         }
       }
     }
@@ -658,8 +687,44 @@ export class ScriptedPilot {
   }
 
   /**
+   * 沿水平方向 direction（只取 x / z）查墙：中线与两侧线上，前瞻距离内有爬不过去（同 checkTerrain
+   * 的“墙”判据）的地表 / 结构时返回 true。
+   */
+  private wallAlong(world: PilotWorld, direction: THREE.Vector3): boolean {
+    const position = world.position;
+    const horizontal = Math.hypot(direction.x, direction.z);
+    if (horizontal <= 1e-3) return false;
+    const dirX = direction.x / horizontal;
+    const dirZ = direction.z / horizontal;
+    const sideX = -dirZ * TERRAIN_SIDE_CLEARANCE;
+    const sideZ = dirX * TERRAIN_SIDE_CLEARANCE;
+    const speed = Math.max(10, world.speed);
+    const range = speed * TERRAIN_LOOKAHEAD_SECONDS;
+    for (
+      let distance = TERRAIN_PROBE_SPACING;
+      distance <= range;
+      distance += TERRAIN_PROBE_SPACING
+    ) {
+      const t = distance / speed;
+      const margin = TERRAIN_MARGIN + 4 * t;
+      for (let lane = -1; lane <= 1; lane++) {
+        const ground = world.groundY(
+          position.x + dirX * distance + sideX * lane,
+          position.z + dirZ * distance + sideZ * lane
+        );
+        if (!Number.isFinite(ground)) continue;
+        const slope = (ground + margin - position.y) / distance;
+        if ((slope > 0.7 && t <= 1.8) || (ground + margin > CEILING_Y && ground > position.y)) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  /**
    * 告警时的避让航向（写入 out 的水平分量）：以当前航向为中心的扇面内逐个试探，
-   * 取“前方各距离上高度余量的最小值”最大的方向；同分时偏向转角小的方向。
+   * 取“前方各距离上（中线与两侧线）高度余量的最小值”最大的方向；同分时偏向转角小的方向。
    */
   private findEscapeHeading(world: PilotWorld, forward: THREE.Vector3, out: THREE.Vector3): void {
     const position = world.position;
@@ -670,12 +735,19 @@ export class ScriptedPilot {
       const heading = baseHeading + offset;
       const dirX = -Math.sin(heading);
       const dirZ = -Math.cos(heading);
+      const sideX = -dirZ * TERRAIN_SIDE_CLEARANCE;
+      const sideZ = dirX * TERRAIN_SIDE_CLEARANCE;
       let worst = Infinity;
       for (const distance of ESCAPE_PROBE_DISTANCES) {
-        const ground = world.groundY(position.x + dirX * distance, position.z + dirZ * distance);
-        if (!Number.isFinite(ground)) continue;
-        // 每 100 米可以爬升约 45 米：远处的高地扣除可爬升量
-        worst = Math.min(worst, position.y + distance * 0.45 - ground);
+        for (let lane = -1; lane <= 1; lane++) {
+          const ground = world.groundY(
+            position.x + dirX * distance + sideX * lane,
+            position.z + dirZ * distance + sideZ * lane
+          );
+          if (!Number.isFinite(ground)) continue;
+          // 每 100 米可以爬升约 45 米：远处的高地扣除可爬升量
+          worst = Math.min(worst, position.y + distance * CLIMB_PER_METER - ground);
+        }
       }
       const score = (Number.isFinite(worst) ? worst : 500) - Math.abs(offset) * 6;
       if (score > bestScore) {
