@@ -88,12 +88,14 @@ export class DesertFortressAI {
 
     this.missileSystem = new BossMissileSystem(scene, particleSystem, config.missileDamage);
 
+    // 高炮弹伤害取 Boss 配置的 damage（已按难度调整）
     this.flakCannonSystem = new FlakCannonSystem(
       scene,
       FLAK_CANNON_CONFIG.AOE_RADIUS,
       (position, radius, damage) => {
         this.onFlakExplode?.(position, radius, damage);
-      }
+      },
+      config.damage
     );
 
     this.missileCooldown = config.missileFireInterval;

@@ -834,7 +834,8 @@ export class GameCoordinator {
     this.resourceRegistry.addUnsubscriber(
       EventBus.on(GameEventType.POWERUP_COLLECTED, ({ payload }) => {
         this.audioManager.playPowerUp();
-        this.hud.showPowerUp(tr(payload.config.name), payload.config.icon, payload.config.duration);
+        // 双语原文：倒计时期间切换语言，HUD 按新语言重绘道具名
+        this.hud.showPowerUp(payload.config.name, payload.config.icon, payload.config.duration);
         this.particleSystem?.createPickupBurst(this.playerAircraft.position);
 
         this.handlePowerUpEffect(payload.type, payload.config);
@@ -1420,7 +1421,7 @@ export class GameCoordinator {
       this.hud.showPowerUpBig(config.icon, tr(config.name), 1, false, 'powerup');
 
       if (config.duration > 0) {
-        this.hud.showPowerUp(tr(config.name), config.icon, config.duration);
+        this.hud.showPowerUp(config.name, config.icon, config.duration);
       }
 
       powerUpSystem.addActivePowerUp(type, config);
@@ -1428,7 +1429,7 @@ export class GameCoordinator {
 
     powerUpSystem.checkPlayerCollisions(this.playerSystem.getPosition(), (_type, config) => {
       this.audioManager.playPowerUp();
-      this.hud.showPowerUp(tr(config.name), config.icon, 0);
+      this.hud.showPowerUp(config.name, config.icon, 0);
     });
   }
 
@@ -1703,17 +1704,21 @@ export class GameCoordinator {
     const cooldownMultiplier =
       difficultyProfile.bossCooldownMultiplier *
       getLevelScaling(this.sessionState.getLevel()).bossCooldownMultiplier;
-    return {
+    // 武器伤害（主炮 / 高炮 / 激光、导弹、眼睛光弹）都按难度档的伤害倍率缩放
+    const scaleDamage = (base: number): number =>
+      Math.max(1, Math.round(base * difficultyProfile.enemyDamageMultiplier));
+    const adjusted: BossConfig = {
       ...config,
       health: Math.max(1, Math.round(config.health * difficultyProfile.enemyHealthMultiplier)),
-      damage: Math.max(1, Math.round(config.damage * difficultyProfile.enemyDamageMultiplier)),
+      damage: scaleDamage(config.damage),
       cannonFireInterval: config.cannonFireInterval * cooldownMultiplier,
       missileFireInterval: config.missileFireInterval * cooldownMultiplier,
-      missileDamage: Math.max(
-        1,
-        Math.round(config.missileDamage * difficultyProfile.enemyDamageMultiplier)
-      ),
+      missileDamage: scaleDamage(config.missileDamage),
     };
+    if (config.eyeDamage !== undefined) {
+      adjusted.eyeDamage = scaleDamage(config.eyeDamage);
+    }
+    return adjusted;
   }
 
   private getCurrentDifficultyProfile(): ReturnType<typeof getDifficultyProfile> {
@@ -2385,11 +2390,14 @@ export class GameCoordinator {
       this.gameState.addScore(-deducted);
       this.playerStats.addScore(-deducted);
     }
-    const penalty = { points: Math.round(points) };
+    // 双语原文 + 参数：告警显示期间切换语言，HUD 按新语言重绘
     this.presentation.flashWarning(
-      civilian
-        ? tr({ en: 'Civilian hit · -{points} pts', zh: '误伤平民 · 扣除 {points} 分' }, penalty)
-        : tr({ en: 'Friendly fire · -{points} pts', zh: '误伤友军 · 扣除 {points} 分' }, penalty),
+      {
+        text: civilian
+          ? { en: 'Civilian hit · -{points} pts', zh: '误伤平民 · 扣除 {points} 分' }
+          : { en: 'Friendly fire · -{points} pts', zh: '误伤友军 · 扣除 {points} 分' },
+        params: { points: Math.round(points) },
+      },
       'threat'
     );
   }

@@ -37,7 +37,11 @@ export interface BossConfig {
   // 基础属性
   health: number; // 血量
   speed: number; // 速度
-  damage: number; // 单门重炮伤害
+  /**
+   * 单门重炮伤害（基础值，Boss 战开始时按难度档 enemyDamageMultiplier 缩放）；
+   * 第 2、4 关是高炮弹的爆炸伤害，第 3 关是激光扫射伤害
+   */
+  damage: number;
   scale: number; // 体型缩放
 
   // AI 行为参数
@@ -48,6 +52,8 @@ export interface BossConfig {
   cannonFireInterval: number; // 重炮发射间隔（秒）
   missileFireInterval: number; // 导弹发射间隔（秒）
   missileDamage: number; // 导弹单发伤害（基础值，Boss 战开始时按难度档 enemyDamageMultiplier 缩放）
+  /** 眼睛光弹单发伤害（第 3 关；基础值，与 missileDamage 一样按难度档缩放）；缺省 EYE_CONFIG.DAMAGE */
+  eyeDamage?: number;
 
   // 射程
   maxRange: number; // 最大射程（导弹飞行距离上限）
@@ -164,7 +170,8 @@ export const BOSS_CONFIGS: Record<BossType, BossConfig> = {
     name: { en: 'Desert Fortress Boss', zh: '沙漠堡垒 Boss' },
     health: 2800,
     speed: 0,
-    damage: FLAK_CANNON_CONFIG.DAMAGE,
+    // 高炮弹：基础值翻倍，“普通”档单发 15，与高炮伤害随难度缩放之前的实测调校一致
+    damage: FLAK_CANNON_CONFIG.DAMAGE * 2,
     scale: 5,
     circleRadius: 0,
     turnSpeed: 0,
@@ -186,6 +193,8 @@ export const BOSS_CONFIGS: Record<BossType, BossConfig> = {
     cannonFireInterval: 0,
     missileFireInterval: 0,
     missileDamage: 0,
+    // 眼睛光弹：基础值翻倍，“普通”档单发 20，与光弹伤害随难度缩放之前的实测调校一致
+    eyeDamage: EYE_CONFIG.DAMAGE * 2,
     maxRange: LASER_SWEEP_CONFIG.RANGE,
     scoreValue: 3000,
   },
@@ -194,7 +203,8 @@ export const BOSS_CONFIGS: Record<BossType, BossConfig> = {
     name: { en: 'Missile Destroyer Boss', zh: '导弹驱逐舰 Boss' },
     health: 2500,
     speed: 10,
-    damage: FLAK_CANNON_CONFIG.DAMAGE,
+    // 高炮弹：同第 2 关，“普通”档单发 15
+    damage: FLAK_CANNON_CONFIG.DAMAGE * 2,
     scale: 5,
     circleRadius: 0,
     turnSpeed: 0.2,

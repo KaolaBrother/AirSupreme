@@ -35,17 +35,38 @@ export class PlayerSystem implements IGameSystem {
   /** 航迹采样间隔（秒）与环形缓冲容量：约 16 秒的安全航迹，固定大小、无逐帧分配 */
   private static readonly TRACK_SAMPLE_INTERVAL = 0.25;
   private static readonly TRACK_CAPACITY = 64;
-  /** 复活净空探测：沿航向 0..400 米（近处步长更细），中线 + 两侧平行线 */
+  /**
+   * 复活净空探测：沿航向 0..400 米（近处步长更细），机体中线两侧各 24 米内每 3 米一条平行线。
+   * 平行线比最细的柱状结构（天梯导轨 8 米宽）更密，航线两侧留出转弯余量——不再擦着刚撞上的
+   * 立柱复活、稍一转向又撞上去
+   */
   private static readonly RESPAWN_PROBE_RANGE = 400;
-  private static readonly RESPAWN_PROBE_SIDE_OFFSET = 10;
+  private static readonly RESPAWN_PROBE_HALF_WIDTH = 24;
+  private static readonly RESPAWN_PROBE_LANE_SPACING = 3;
   /** 探测线上表面高于“复活高度 - 该余量”即视为挡路（米） */
   private static readonly RESPAWN_PROBE_MARGIN = 20;
+  /**
+   * 复活后这么多秒（飞行时钟）内又坠毁：下一次复活的首选航向掉头、背离坠毁点。否则航迹太短时
+   * 复活点与航向和上一次完全相同，同样的飞法会一次次撞上同一处障碍
+   */
+  private static readonly QUICK_RECRASH_SECONDS = 8;
   /** 复活后坠毁宽限（秒）：期间触地 / 撞上结构不坠毁，抬到表面之上并拉起机头 */
   private static readonly RESPAWN_CRASH_GRACE = 3;
   /** 宽限期触地时抬到表面之上的高度（米） */
   private static readonly GRACE_LIFT = 3;
   /** 宽限期触地时拉起到的俯仰角（弧度，约 12°） */
   private static readonly GRACE_PITCH = 0.21;
+  /**
+   * 宽限期触地需要抬升超过这么多米即视为撞上竖直结构（岩壁 / 立柱 / 塔身；一个模拟步里地表
+   * 抬高十几米只可能是近乎竖直的面）：改为水平推出并转离墙面
+   */
+  private static readonly GRACE_WALL_LIFT = 12;
+  /** 水平推出：由近到远每 2 米一圈、最远 48 米，每圈 16 个方位，找表面低于机体的位置 */
+  private static readonly GRACE_ESCAPE_STEP = 2;
+  private static readonly GRACE_ESCAPE_RANGE = 48;
+  private static readonly GRACE_ESCAPE_DIRECTIONS = 16;
+  /** 推出后的机头：去掉撞向墙面的分量，再加上这么多倍的外法线（贴墙掠过时外偏约 30°） */
+  private static readonly GRACE_ESCAPE_OUTWARD = 0.6;
 
   private controller: PlayerController;
   private health: HealthSystem;
@@ -75,6 +96,12 @@ export class PlayerSystem implements IGameSystem {
   private crashTime: number = 0;
   private crashHeading: number = 0;
   private hasCrashPosition: boolean = false;
+  /** 最近一次阵亡是撞上地表 / 结构（而不是被击落） */
+  private crashWasSurface: boolean = false;
+  /** 坠毁判定正在结算撞地伤害（handleDeath 据此区分撞地与被击落） */
+  private surfaceImpactPending: boolean = false;
+  /** 最近一次复活的飞行时钟时间（出生 / 读档 / placeAt 后为 -Infinity） */
+  private lastRespawnClock: number = -Infinity;
   private readonly respawnPosition = new THREE.Vector3();
   /** 净空探测结果（复用字段，避免分配） */
   private probeFirstBlocked: number = Infinity;
@@ -225,6 +252,7 @@ export class PlayerSystem implements IGameSystem {
     // 新航迹从复活点开始：坠毁前的样本通向障碍物，不再作为下一次复活的候选
     this.resetTrack(this.respawnPosition);
     this.hasCrashPosition = false;
+    this.lastRespawnClock = this.flightClock;
     this.crashGraceTimer = PlayerSystem.RESPAWN_CRASH_GRACE;
     this.isRespawning = false;
     EventBus.emit(GameEventType.PLAYER_RESPAWN, {
@@ -241,11 +269,13 @@ export class PlayerSystem implements IGameSystem {
     }
     this.crashTime = this.flightClock;
     this.crashHeading = this.headingOf(this.mesh.quaternion, this.trackAnchorHeading);
+    this.crashWasSurface = this.surfaceImpactPending;
   }
 
   /**
    * 复活位姿：沿航迹回退到坠毁前 ≥ 3 秒且离坠毁点 ≥ 150 米的安全样本（航迹太短时由最远样本
-   * 外推到 150 米），再由 0..400 米净空探测定航向与高度。写入 out，返回航向（绕 Y，机头 -Z 为 0）。
+   * 外推到 150 米），再由 0..400 米净空探测定航向与高度。复活后不久又坠毁时首选航向掉头
+   * （背离坠毁点）。写入 out，返回航向（绕 Y，机头 -Z 为 0）。
    */
   private resolveRespawnPose(out: THREE.Vector3): number {
     let preferredHeading = this.trackAnchorHeading;
@@ -262,6 +292,13 @@ export class PlayerSystem implements IGameSystem {
         preferredHeading = this.trackHeadingAt(k, preferredHeading);
       } else {
         preferredHeading = this.extrapolateRespawnPoint(out);
+      }
+      if (
+        this.crashWasSurface &&
+        this.crashTime - this.lastRespawnClock < PlayerSystem.QUICK_RECRASH_SECONDS
+      ) {
+        // 复活后不久又撞上（多半是同一处障碍）：这次背离它复活，不再沿同一条航线飞回去
+        preferredHeading += Math.PI;
       }
     }
     if (!Number.isFinite(out.x) || !Number.isFinite(out.z)) {
@@ -384,23 +421,25 @@ export class PlayerSystem implements IGameSystem {
   }
 
   /**
-   * 沿航向探测 0..400 米（40 米内 2 米步长，150 米内 4 米，之后 6 米）的中线与两侧平行线，
+   * 沿航向探测 0..400 米（40 米内 2 米步长，之后 3 米）、中线两侧各 24 米内每 3 米一条平行线，
    * 写入 probeFirstBlocked（首个表面高于 y - 余量的距离，无则 Infinity）与 probeHighestTop。
    */
   private probeHeading(x: number, z: number, y: number, heading: number): void {
     const forwardX = -Math.sin(heading);
     const forwardZ = -Math.cos(heading);
     // 右侧向量：前向 (fx, fz) → (-fz, fx)
-    const sideX = -forwardZ * PlayerSystem.RESPAWN_PROBE_SIDE_OFFSET;
-    const sideZ = forwardX * PlayerSystem.RESPAWN_PROBE_SIDE_OFFSET;
+    const rightX = -forwardZ;
+    const rightZ = forwardX;
+    const halfWidth = PlayerSystem.RESPAWN_PROBE_HALF_WIDTH;
+    const spacing = PlayerSystem.RESPAWN_PROBE_LANE_SPACING;
     const blockedAbove = y - PlayerSystem.RESPAWN_PROBE_MARGIN;
     let firstBlocked = Infinity;
     let highestTop = -Infinity;
     for (let distance = 0; distance <= PlayerSystem.RESPAWN_PROBE_RANGE; ) {
       const centerX = x + forwardX * distance;
       const centerZ = z + forwardZ * distance;
-      for (let lane = -1; lane <= 1; lane++) {
-        const top = this.sampleCrashSurfaceY(centerX + sideX * lane, centerZ + sideZ * lane);
+      for (let lane = -halfWidth; lane <= halfWidth; lane += spacing) {
+        const top = this.sampleCrashSurfaceY(centerX + rightX * lane, centerZ + rightZ * lane);
         if (top > highestTop) {
           highestTop = top;
         }
@@ -408,7 +447,7 @@ export class PlayerSystem implements IGameSystem {
           firstBlocked = distance;
         }
       }
-      distance += distance < 40 ? 2 : distance < 150 ? 4 : 6;
+      distance += distance < 40 ? 2 : 3;
     }
     this.probeFirstBlocked = firstBlocked;
     this.probeHighestTop = highestTop;
@@ -509,14 +548,104 @@ export class PlayerSystem implements IGameSystem {
     this.mesh.quaternion.multiplyQuaternions(this.attitudeYaw, this.attitudePitch);
   }
 
-  /** 复活宽限期内触地：抬到表面之上；机头低于约 12° 时改平机翼并拉起（航向不变） */
+  /**
+   * 复活宽限期内触地：地面 / 缓坡抬到表面之上，机头低于约 12° 时改平机翼并拉起（航向不变）。
+   * 撞上竖直结构（要抬 GRACE_WALL_LIFT 米以上）时改为水平推出并转离墙面：只往上抬会让飞机贴着
+   * 立柱 / 岩壁一路爬升（天梯导轨顶在 7000 米），宽限一结束仍在柱体里坠毁。
+   */
   private recoverFromGraceContact(surfaceY: number): void {
-    this.mesh.position.y = surfaceY + PlayerSystem.GRACE_LIFT;
+    const position = this.mesh.position;
+    if (
+      surfaceY + PlayerSystem.GRACE_LIFT - position.y > PlayerSystem.GRACE_WALL_LIFT &&
+      this.escapeWall(position)
+    ) {
+      return;
+    }
+    position.y = surfaceY + PlayerSystem.GRACE_LIFT;
     const forward = this.scratchForward.set(0, 0, -1).applyQuaternion(this.mesh.quaternion);
     if (forward.y < Math.sin(PlayerSystem.GRACE_PITCH)) {
       const heading = this.headingOf(this.mesh.quaternion, this.trackAnchorHeading);
       this.setAttitude(heading, PlayerSystem.GRACE_PITCH);
     }
+  }
+
+  /**
+   * 宽限期撞墙：由近到远逐圈（每 2 米，最远 48 米，每圈 16 个方位）找表面低于机体（留 GRACE_LIFT
+   * 余量）的位置，取最近一圈开阔方位的平均方向作为墙面外法线，把机体水平推到那里；机头去掉撞向
+   * 墙面的分量再偏向外法线，机翼与俯仰改平。找不到开阔处（埋在大块地形里）返回 false。
+   */
+  private escapeWall(position: THREE.Vector3): boolean {
+    const clearBelow = position.y - PlayerSystem.GRACE_LIFT;
+    const directions = PlayerSystem.GRACE_ESCAPE_DIRECTIONS;
+    const sector = (Math.PI * 2) / directions;
+    for (
+      let radius = PlayerSystem.GRACE_ESCAPE_STEP;
+      radius <= PlayerSystem.GRACE_ESCAPE_RANGE;
+      radius += PlayerSystem.GRACE_ESCAPE_STEP
+    ) {
+      let sumX = 0;
+      let sumZ = 0;
+      let firstX = 0;
+      let firstZ = 0;
+      let open = 0;
+      for (let i = 0; i < directions; i++) {
+        const dirX = Math.cos(i * sector);
+        const dirZ = Math.sin(i * sector);
+        if (
+          this.sampleCrashSurfaceY(position.x + dirX * radius, position.z + dirZ * radius) <
+          clearBelow
+        ) {
+          if (open === 0) {
+            firstX = dirX;
+            firstZ = dirZ;
+          }
+          sumX += dirX;
+          sumZ += dirZ;
+          open++;
+        }
+      }
+      if (open === 0) {
+        continue;
+      }
+      // 开阔方位的平均方向（左右对称抵消时退回第一个开阔方位），落点仍须开阔
+      const length = Math.hypot(sumX, sumZ);
+      let normalX = length > 1e-3 ? sumX / length : firstX;
+      let normalZ = length > 1e-3 ? sumZ / length : firstZ;
+      if (
+        !(
+          this.sampleCrashSurfaceY(position.x + normalX * radius, position.z + normalZ * radius) <
+          clearBelow
+        )
+      ) {
+        normalX = firstX;
+        normalZ = firstZ;
+      }
+      position.x += normalX * radius;
+      position.z += normalZ * radius;
+
+      const forward = this.scratchForward.set(0, 0, -1).applyQuaternion(this.mesh.quaternion);
+      let headingX = forward.x;
+      let headingZ = forward.z;
+      const horizontal = Math.hypot(headingX, headingZ);
+      if (horizontal > 1e-3) {
+        headingX /= horizontal;
+        headingZ /= horizontal;
+        const into = headingX * normalX + headingZ * normalZ;
+        if (into < 0) {
+          headingX -= into * normalX;
+          headingZ -= into * normalZ;
+        }
+      } else {
+        headingX = 0;
+        headingZ = 0;
+      }
+      headingX += normalX * PlayerSystem.GRACE_ESCAPE_OUTWARD;
+      headingZ += normalZ * PlayerSystem.GRACE_ESCAPE_OUTWARD;
+      // 前向 (-sin h, -cos h) → h = atan2(-x, -z)
+      this.setAttitude(Math.atan2(-headingX, -headingZ), 0);
+      return true;
+    }
+    return false;
   }
 
   private updateShield(deltaTime: number): void {
@@ -616,7 +745,8 @@ export class PlayerSystem implements IGameSystem {
   }
 
   /**
-   * 坠毁判定：世界 Y ≤ 表面即坠毁（护盾道具不防撞地）；复活宽限期内改为抬升 + 拉起。
+   * 坠毁判定：世界 Y ≤ 表面即坠毁（护盾道具不防撞地）；复活宽限期内改为抬升 + 拉起
+   * （撞上竖直结构时水平推出并转离墙面，见 recoverFromGraceContact）。
    * 返回本帧采样的表面高度（位置非法时为 NaN），供航迹记录复用。
    */
   private checkGroundCollision(): number {
@@ -633,7 +763,12 @@ export class PlayerSystem implements IGameSystem {
       this.recoverFromGraceContact(surfaceY);
       return surfaceY;
     }
-    this.health.takeDamage(1000);
+    this.surfaceImpactPending = true;
+    try {
+      this.health.takeDamage(1000);
+    } finally {
+      this.surfaceImpactPending = false;
+    }
     return surfaceY;
   }
 
@@ -655,6 +790,7 @@ export class PlayerSystem implements IGameSystem {
     this.mesh.quaternion.copy(quaternion);
     this.resetTrack(position);
     this.hasCrashPosition = false;
+    this.lastRespawnClock = -Infinity;
     this.crashGraceTimer = 0;
     this.syncVisualState();
     if (this.shieldGroup) {

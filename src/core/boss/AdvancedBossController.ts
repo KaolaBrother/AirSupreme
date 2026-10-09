@@ -9,6 +9,7 @@ import { Faction } from '@/core/Faction';
 import { GAME_CONSTANTS } from '@/config';
 import { getDeclaredHitRadius, type DecoyPoint } from '@/core/CombatContracts';
 import type { ICampaignPresentation } from '@/core/campaign/CampaignPresentation';
+import { onLocaleChange } from '@/i18n';
 import type { TerrainEnvironment } from '@/features/terrain/environments/TerrainEnvironment';
 import type { BossMinionKind, BossSubTarget, IAdvancedBoss } from '@/features/boss/BossContracts';
 import { BossConfig, BossType } from '@/features/boss/BossTypes';
@@ -115,6 +116,8 @@ export class AdvancedBossController {
   private readonly weaponTargetBuffer: Object3D[] = [];
   private readonly hitWorldPosition = new Vector3();
   private bossStatusTimer = 0;
+  /** Boss 在场期间订阅语言切换（激活时订阅，清场 / 击破时取消） */
+  private unsubscribeLocale: (() => void) | null = null;
   private lowHealthAnnounced = false;
   private lastCoreState: CitadelCoreVisualState | null = null;
   /** Boss 特殊武器命中玩家 / 友军的累计次数（调试与验证用） */
@@ -244,6 +247,9 @@ export class AdvancedBossController {
     this.boss = boss;
     this.lowHealthAnnounced = false;
     this.bossStatusTimer = 0;
+    // 状态提示由 Boss 按当前语言生成：切换语言（多在暂停菜单里，逐帧推送停着）时立即重推
+    this.unsubscribeLocale?.();
+    this.unsubscribeLocale = boss ? onLocaleChange(() => this.pushBossStatus()) : null;
   }
 
   /** CITADEL 决战区（神谕主宰锚点）；不是第 10 关地形时为 null */
@@ -308,6 +314,8 @@ export class AdvancedBossController {
 
   public reset(): void {
     this.boss = null;
+    this.unsubscribeLocale?.();
+    this.unsubscribeLocale = null;
     this.hazardCooldowns.clear();
     this.decoyRedirector?.clear();
     this.currentParts.clear();
@@ -536,10 +544,7 @@ export class AdvancedBossController {
     this.bossStatusTimer -= deltaTime;
     if (this.bossStatusTimer > 0) return;
     this.bossStatusTimer = BOSS_STATUS_INTERVAL;
-    presentation.setBossStatus(boss.getStatusLabel(), {
-      current: boss.getPhase(),
-      total: boss.getPhaseCount(),
-    });
+    this.pushBossStatus();
     if (!this.lowHealthAnnounced && boss.isAlive()) {
       const health = boss.getHealth();
       if (health.max > 0 && health.current / health.max < 0.25) {
@@ -548,6 +553,16 @@ export class AdvancedBossController {
         presentation.onBossLowHealth(this.deps.getLevel(), intensity === undefined);
       }
     }
+  }
+
+  /** Boss 状态条：Boss 按当前语言生成的状态提示 + 阶段（getStatusLabel 按状态与语言缓存） */
+  private pushBossStatus(): void {
+    const boss = this.boss;
+    if (!boss) return;
+    this.deps.presentation.setBossStatus(boss.getStatusLabel(), {
+      current: boss.getPhase(),
+      total: boss.getPhaseCount(),
+    });
   }
 
   // ───────────────────────────── 协调器查询 ─────────────────────────────

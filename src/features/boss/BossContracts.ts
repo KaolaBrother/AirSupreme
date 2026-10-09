@@ -2,6 +2,7 @@ import type { Group, Object3D, Vector3 } from 'three';
 import type { BossConfig } from './BossTypes';
 import type { BossMissileSystem } from './BossMissileSystem';
 import type { HeavyWeaponImpactProfile } from '@/features/effects/ParticleSystem';
+import type { HudText } from '@/ui/HUD';
 
 /**
  * 所有 Boss（含前五关）共同遵守的鸭子类型契约。
@@ -76,15 +77,18 @@ export interface IAdvancedBoss extends IBossCore {
   onFire?: (position: Vector3, direction: Vector3, damage: number) => void;
   /** 导弹发射提示：控制器播放发射音效 */
   onMissileFired?: () => void;
-  /** 阶段切换：控制器播放剧情台词 / 音乐强调；label 已按当前语言取值 */
-  onPhaseChange?: (phase: number, label: string) => void;
+  /**
+   * 阶段切换：控制器播放剧情台词 / 音乐强调并闪烁提示。label 传双语原文（或 { text, params }，
+   * 见 HudText）：HUD 按当前语言显示，显示期间切换语言随之重绘；纯字符串原样显示。
+   */
+  onPhaseChange?: (phase: number, label: HudText) => void;
   /** 召唤小兵 */
   onSpawnMinion?: (position: Vector3, kind: BossMinionKind) => void;
   /**
-   * 特殊武器预警（例如“电弧充能”）：控制器显示 HUD 提示并播放预警音。
-   * label 在发出时按当前语言取值（tr），表现层原样显示。
+   * 特殊武器预警（例如“电弧充能”）：控制器显示 HUD 闪烁提示并播放预警音。
+   * label 与 onPhaseChange 相同，传双语原文（或 { text, params }）。
    */
-  onHazardWarning?: (label: string) => void;
+  onHazardWarning?: (label: HudText) => void;
 }
 
 /** 运行时判别：只有实现了扩展契约的 Boss 才走高级伤害 / 特殊武器路径 */

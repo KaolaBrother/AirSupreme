@@ -175,10 +175,15 @@ export interface ICampaignPresentation {
   showAutosave(label: HudText): void;
   /** announce = false：开局 / 读档同步视角，不播放切换音效 */
   setCameraMode(mode: CameraModeSetting, announce?: boolean): void;
-  setBossStatus(label: string | null, phase?: { current: number; total: number }): void;
+  /**
+   * Boss 状态条（null 且没有阶段时收起）。label 用双语对象或 { text, params }（见 HudText）时，
+   * 显示期间切换语言按新语言重绘；纯字符串原样显示。
+   */
+  setBossStatus(label: HudText | null, phase?: { current: number; total: number }): void;
   /** 导弹告警：单位（SAM）与 Boss 导弹两个来源取最高级 */
   setMissileWarning(level: MissileWarningLevel, source?: 'units' | 'boss'): void;
-  flashWarning(text: string, tone: 'threat' | 'sys' | 'ally'): void;
+  /** 闪烁告警（约 2.2 秒）；text 可本地化（同上） */
+  flashWarning(text: HudText, tone: 'threat' | 'sys' | 'ally'): void;
   setRadarRangeMultiplier(multiplier: number): void;
   /** 每个模拟步长：低血量蜂鸣 + 低血量无线电（高优先级） */
   updatePlayerHealth(deltaTime: number, healthPercent: number, active: boolean): void;
@@ -188,8 +193,8 @@ export interface ICampaignPresentation {
   playBossMusic(level: number): void;
   playStinger(kind: CampaignStinger): void;
   setMusicIntensity(intensity: number): void;
-  /** Boss 进入新阶段：阶段台词、警报 + phase-change 刺激音、音乐强度、HUD 闪烁告警 */
-  onBossPhaseChange(level: number, phase: number, label: string | null): void;
+  /** Boss 进入新阶段：阶段台词、警报 + phase-change 刺激音、音乐强度、HUD 闪烁告警（label 可本地化） */
+  onBossPhaseChange(level: number, phase: number, label: HudText | null): void;
   /** Boss 血量首次低于 25%：台词；adjustIntensity 时音乐强度拉满 */
   onBossLowHealth(level: number, adjustIntensity: boolean): void;
   onPause(): void;
@@ -857,7 +862,7 @@ export class DefaultCampaignPresentation implements ICampaignPresentation {
     }
   }
 
-  public setBossStatus(label: string | null, phase?: { current: number; total: number }): void {
+  public setBossStatus(label: HudText | null, phase?: { current: number; total: number }): void {
     const hud = this.deps.getHud();
     if (!hud) return;
     if (label === null && !phase) {
@@ -885,7 +890,7 @@ export class DefaultCampaignPresentation implements ICampaignPresentation {
     hud.setMissileWarning(combined);
   }
 
-  public flashWarning(text: string, tone: 'threat' | 'sys' | 'ally'): void {
+  public flashWarning(text: HudText, tone: 'threat' | 'sys' | 'ally'): void {
     this.deps.getHud()?.flashWarning(text, tone);
   }
 
@@ -940,7 +945,7 @@ export class DefaultCampaignPresentation implements ICampaignPresentation {
     this.deps.music.setIntensity(intensity);
   }
 
-  public onBossPhaseChange(level: number, phase: number, label: string | null): void {
+  public onBossPhaseChange(level: number, phase: number, label: HudText | null): void {
     this.radio('boss-phase', level, phase);
     this.sfx.playBossAlarm(true);
     if (label) {

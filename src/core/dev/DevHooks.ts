@@ -16,6 +16,7 @@ import type { PlayerStats } from '@/features/upgrade/UpgradeSystem';
 import { CAMPAIGN_SAVE_KEY } from '@/core/save/SaveSystem';
 import { Faction } from '@/core/Faction';
 import { EventBus, GameEventType } from '@/core/EventBus';
+import { POWER_UP_CONFIGS, PowerUpType } from '@/features/powerups/PowerUpSystem';
 import { installBalanceHarness } from './BalanceHarness';
 
 /**
@@ -369,6 +370,14 @@ export function installDevHooks(access: DevHookAccess): void {
       const playerSystem = access.getPlayerSystem();
       playerSystem.syncMaxHealth();
       playerSystem.getHealth().healToMax();
+    },
+    /** 发放道具：走拾取时的 POWERUP_COLLECTED 处理（HUD 倒计时、效果、音效）；缺省伤害提升 */
+    grantPowerUp: (type: string = PowerUpType.DAMAGE): PowerUpType => {
+      const key = (Object.values(PowerUpType) as string[]).includes(type)
+        ? (type as PowerUpType)
+        : PowerUpType.DAMAGE;
+      EventBus.emit(GameEventType.POWERUP_COLLECTED, { type: key, config: POWER_UP_CONFIGS[key] });
+      return key;
     },
     /** 难度 / 成长曲线测量：脚本飞行员 + 自动机库 + 逐关统计（见 BalanceHarness） */
     balance: installBalanceHarness(access),
