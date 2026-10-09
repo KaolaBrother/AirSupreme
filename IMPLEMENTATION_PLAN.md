@@ -137,11 +137,13 @@
     - `G1 - 战役/界面接线`：简报横幅与存档提示改传可本地化文本（切换语言即时重绘）、开始菜单难度名改用 `Difficulty` 档案标签、友机在编队位入场 — owned：`src/core/GameCoordinator.ts`、`src/core/campaign/**`、`src/core/save/**`、`src/ui/StartMenu.ts`、`src/ui/PauseMenu.ts`
     - `G2 - 战斗收尾`：Boss 导弹伤害随难度、干扰弹可诱骗 Boss 1-5 导弹、EMP 球壳近距离不再白屏、`EnemyAI` 正式的编队运动接口（替代 `applyStun`）、Boss 复测 — owned：`src/core/boss/**`、`src/core/BossBattleController.ts`、`src/features/boss/**`（除 `*Mesh.ts`）、`src/features/weapons/**`、`src/core/combat/**`、`src/features/enemy/EnemyAI.ts`、`src/features/enemy/FriendlyAI.ts`、`src/core/dev/**`
     - `T - 测试`（独立测试作者，并行）：更新 2 条过期测试、`VoicePack.test.ts` 严格化、为第 1 波行为补规格测试 — owned：`src/__tests__/**`、`*.test.ts`
-  - [active] 第 3 波（从 `6d2d780` 起，并行）：
+  - [done] 第 3 波（从 `6d2d780` 起，并行；`1440f25` 合并；独立复验 R1-R16 全部达标，原有问题全部修复）：
     - `P - 收尾打磨`：`flashWarning` / `setBossStatus` / `showPowerUp` 切换语言即时重绘；Boss 高炮与章鱼之眼伤害随难度；编队常量单一来源；第 9 关北塔复活宽限结束即再撞的循环 — owned：`src/ui/HUD.ts`、`src/core/GameCoordinator.ts`、`src/core/BossBattleController.ts`、`src/core/boss/**`、`src/features/boss/**`（除 `*Mesh.ts`）、`src/features/enemy/FriendlyAI.ts`、`src/core/systems/EnemySystem.ts`、`src/core/systems/PlayerSystem.ts`、`src/core/dev/**`、`src/core/campaign/**`
     - `T - 测试第 2 遍`：第 2 波行为（可本地化提示、难度名、友机入场位、Boss 导弹伤害随难度、干扰弹诱骗 Boss 1-5 导弹、`updateKinematic`、EMP 近距淡出） — owned：`src/__tests__/**`、`*.test.ts`
     - `D - 文档`：README / README.zh-CN、CHANGELOG、TECHNICAL_DOCUMENTATION、`docs/**` — owned：上述文档
     - `R - 独立复验`（只读，`6d2d780`）：R1-R16 + 阻断 / 主要问题复查
+  - [active] 第 4 波（从 `1440f25` 起）：`Q` 复验遗留小项（Boss 模式敌机计数、中文“教程”、模型预览标签遮挡、单位告警与大号提示即时重绘）∥ 测试第 3 遍（2 条过期测试 + P 的行为）∥ 文档补充
+  - [watch] 复验 N2：第 1 个 Boss 威胁很低、第 10 关波次压力低于第 8-9 关（单次测量波动约 ±30 %）
   - 之后：合并 `main` 并推送
   - [watch] `GameScene` 阴影相机只覆盖 10×10 m（阴影几乎不可见）
   - 验收：`tsc` / `lint` / `test:run` / `build` 全部通过；无头 Chromium 复现脚本证明阻断与主要问题已消失
