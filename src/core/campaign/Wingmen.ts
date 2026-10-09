@@ -1,9 +1,9 @@
 import type { LocalizedText } from '@/i18n';
 
 /**
- * 具名僚机编队：在场的前两架友军喷气机是玩家的僚机——
+ * 具名僚机编队：先入场的两架友军喷气机是玩家的僚机——
  * 「渡鸦」Raven（杰克·默瑟中尉 Lt. Jack Mercer）与「雨燕」Swift（弗蕾娅·林德奎斯特中尉
- * Lt. Freya Lindqvist）。同时在场的其余友机（第三架起）是普通友军。
+ * Lt. Freya Lindqvist，按战役剧情第 3 章起随队）。同时在场的其余友机是普通友军。
  *
  * 只负责“哪架友机是哪名僚机、谁还在空中”；飞行与作战行为仍由 FriendlyAI 决定。
  */
@@ -17,14 +17,14 @@ export interface WingmanProfile {
   readonly id: WingmanId;
   /** 呼号：友机血条标签（mesh.userData.displayName）与提示文案 */
   readonly callsign: LocalizedText;
-  /** 从第几关起随队出击（战役数据标注加入章节时改这里） */
+  /** 从第几关起随队出击（与战役剧情的入队章节一致） */
   readonly joinsAtLevel: number;
 }
 
-/** 编队顺序即入列顺序：先渡鸦，后雨燕 */
+/** 编队顺序即入列顺序：先渡鸦，后雨燕（雨燕在第 3 章雪山救援中入队） */
 export const WINGMEN: readonly WingmanProfile[] = [
   { id: 'raven', callsign: { en: 'Raven', zh: '渡鸦' }, joinsAtLevel: 1 },
-  { id: 'swift', callsign: { en: 'Swift', zh: '雨燕' }, joinsAtLevel: 1 },
+  { id: 'swift', callsign: { en: 'Swift', zh: '雨燕' }, joinsAtLevel: 3 },
 ];
 
 /** 只读视图：无线电 / 语音据此判断某名僚机此刻是否在空中 */
