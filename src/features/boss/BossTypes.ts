@@ -47,7 +47,7 @@ export interface BossConfig {
   // 武器系统
   cannonFireInterval: number; // 重炮发射间隔（秒）
   missileFireInterval: number; // 导弹发射间隔（秒）
-  missileDamage: number; // 导弹伤害
+  missileDamage: number; // 导弹单发伤害（基础值，Boss 战开始时按难度档 enemyDamageMultiplier 缩放）
 
   // 射程
   maxRange: number; // 最大射程（导弹飞行距离上限）
@@ -275,7 +275,9 @@ export const BOSS_CONFIGS: Record<BossType, BossConfig> = {
     turnSpeed: 0.35,
     cannonFireInterval: 0.6,
     missileFireInterval: 10,
-    missileDamage: BOSS_MISSILE_CONFIG.DAMAGE,
+    // 弹舱导弹是幻影之翼的主要威胁（隐形伏击后齐射）：基础值翻倍，“普通”档单发 90，
+    // 与导弹伤害随难度缩放之前的实测调校一致（约 2.5 分钟击杀、承伤约 1 倍最大生命）
+    missileDamage: BOSS_MISSILE_CONFIG.DAMAGE * 2,
     maxRange: BOSS_MISSILE_CONFIG.MAX_RANGE,
     scoreValue: 6500,
   },

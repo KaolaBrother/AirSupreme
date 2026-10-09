@@ -34,6 +34,8 @@ const SWARM_POOL = 96;
 const RING_POOL = 14;
 const TRACER_POOL = 4;
 const SHELL_POOL = 2;
+/** EMP 冲击环贴近镜头淡出的距离（米） */
+const EMP_RING_NEAR_FADE = 48;
 
 const LASER_SHEATH_COLOR = 0xff2a55;
 const LASER_SHEATH = new THREE.Color(LASER_SHEATH_COLOR);
@@ -516,7 +518,7 @@ export class WeaponFx {
   // 冲击环 / EMP
   // ---------------------------------------------------------------------------
 
-  /** 扩散冲击环：normal 为环面法线 */
+  /** 扩散冲击环：normal 为环面法线；nearFade > 0 时离镜头 nearFade 米内的环段淡出 */
   public spawnRing(
     position: THREE.Vector3,
     normal: THREE.Vector3,
@@ -526,7 +528,8 @@ export class WeaponFx {
     color: THREE.Color,
     opacity: number,
     thickness: number,
-    additive = true
+    additive = true,
+    nearFade = 0
   ): void {
     const ring = this.rings.find((entry) => !entry.active);
     if (!ring || !(life > 0)) return;
@@ -541,6 +544,7 @@ export class WeaponFx {
     ring.material.uniforms.uColor.value.copy(color);
     ring.material.uniforms.uOpacity.value = opacity;
     ring.material.uniforms.uThickness.value = THREE.MathUtils.clamp(thickness, 0.02, 1);
+    ring.material.uniforms.uNearFade.value = Number.isFinite(nearFade) ? Math.max(0, nearFade) : 0;
     ring.mesh.position.copy(position);
     this.tmpA.copy(normal);
     if (this.tmpA.lengthSq() < 1e-8) this.tmpA.set(0, 1, 0);
@@ -560,10 +564,33 @@ export class WeaponFx {
     shell.mesh.scale.setScalar(0.5);
     shell.mesh.visible = true;
 
+    // 两道冲击环都以玩家为中心：扩散初期会从追尾镜头下方 / 身旁掠过，贴近镜头的环段淡出
     this.tmpA.set(0, 1, 0);
-    this.spawnRing(center, this.tmpA, 2, radius, 0.95, COLORS.emp, 0.75, 0.06);
+    this.spawnRing(
+      center,
+      this.tmpA,
+      2,
+      radius,
+      0.95,
+      COLORS.emp,
+      0.55,
+      0.06,
+      true,
+      EMP_RING_NEAR_FADE
+    );
     this.tmpA.set(0.35, 1, 0.2).normalize();
-    this.spawnRing(center, this.tmpA, 1, radius * 0.82, 0.8, COLORS.empCore, 0.35, 0.035);
+    this.spawnRing(
+      center,
+      this.tmpA,
+      1,
+      radius * 0.82,
+      0.8,
+      COLORS.empCore,
+      0.25,
+      0.035,
+      true,
+      EMP_RING_NEAR_FADE
+    );
 
     this.particles.emitEmpBurst(center, radius);
   }

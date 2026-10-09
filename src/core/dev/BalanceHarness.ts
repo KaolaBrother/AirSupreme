@@ -8,7 +8,7 @@ import {
   getDeclaredHitRadius,
   type SpecialWeaponId,
 } from '@/core/CombatContracts';
-import { BossFlareDecoyRedirector } from '@/core/boss/AdvancedBossSupport';
+import { BOSS_DECOY_ANCHOR_NAME } from '@/core/boss/AdvancedBossSupport';
 import { isAdvancedBoss } from '@/features/boss/BossContracts';
 import { BOSS_MISSILE_CONFIG, FLAK_CANNON_CONFIG } from '@/features/boss/BossTypes';
 import {
@@ -70,11 +70,10 @@ export interface BalanceRunOptions {
    */
   pointsBudget?: 'campaign' | 'none';
   /**
-   * 第 1-5 关 Boss 的导弹目前不受热焰弹诱骗（只有第 6-10 关的 AdvancedBossController 跑了
-   * BossFlareDecoyRedirector）。true（默认）时测量框架对旧式 Boss 也跑同一个诱骗器，
-   * 模拟“热焰弹对所有 Boss 导弹都有效”（已提请 BossBattleController 接线）。
+   * 坠地后下次复活把玩家抬到安全高度（默认 true，避免“复活即坠毁”把平衡数据搅乱）；
+   * false 时照实复活，用于检查复活点本身是否安全（respawnCrashes / crashLog）。
    */
-  emulateLegacyFlares?: boolean;
+  rescueCrashes?: boolean;
 }
 
 interface WaveRecord {
@@ -110,6 +109,18 @@ interface BossRecord {
   forced: boolean;
   sources: Record<string, number>;
   respawnCrashes: number;
+  /** Boss 登场时玩家的最大生命与护甲减伤（Boss 模式的机库购买在关卡档案建档之后） */
+  playerMaxHealth: number;
+  playerArmor: number;
+  /**
+   * Boss 导弹：发射数 / 被热焰弹诱骗数 / 诱骗后又重新追踪玩家的数目（诱饵燃尽前没飞到）/
+   * 命中玩家次数；本场投放热焰弹次数
+   */
+  missiles: number;
+  decoyed: number;
+  reacquired: number;
+  missileHits: number;
+  flares: number;
   endReason?: string;
   healthAtEnd?: number;
 }
@@ -171,7 +182,7 @@ const DEFAULT_OPTIONS: Required<BalanceRunOptions> = {
   aimErrorDeg: 1.2,
   traceInterval: 0,
   pointsBudget: 'none',
-  emulateLegacyFlares: true,
+  rescueCrashes: true,
 };
 
 /** 同价时的购买优先级（越靠前越先买）：生存 → 火力 → 导弹 → 机动 */
@@ -280,6 +291,8 @@ export function installBalanceHarness(access: DevHookAccess): BalanceHarnessApi 
   const recentCrashes: number[] = [];
   /** 最近的坠毁现场（排查地形 / 复活问题） */
   const crashLog: Array<Record<string, unknown>> = [];
+  /** 最近的复活位姿 */
+  const respawnLog: Array<Record<string, unknown>> = [];
   /** 最近 DEATH_WINDOW 秒内的受击（按来源归因），阵亡时汇总成 deathLog */
   const recentHits: Array<{ t: number; source: string; damage: number }> = [];
   /** 每次阵亡的死因：阵亡前 DEATH_WINDOW 秒内伤害最高的来源 */
@@ -377,7 +390,10 @@ export function installBalanceHarness(access: DevHookAccess): BalanceHarnessApi 
     };
   };
 
-  /** Boss 战里没有对上子弹的伤害：特殊武器（危险区计数上涨）/ Boss 导弹 / 高炮 / 机炮按伤害值归类 */
+  /**
+   * Boss 战里没有对上子弹的伤害：特殊武器（危险区计数上涨）/ Boss 导弹 / 高炮 / 机炮按伤害值归类。
+   * Boss 导弹伤害按当前 Boss 配置（随难度调整）的 missileDamage 匹配；旧版固定值一并识别。
+   */
   let lastHazardCount = 0;
   const attributeBossHit = (damage: number, armor: number): string => {
     const controller = access.getBossController();
@@ -386,7 +402,10 @@ export function installBalanceHarness(access: DevHookAccess): BalanceHarnessApi 
     lastHazardCount = hazards;
     if (hazard) return 'boss-hazard';
     const matches = (base: number): boolean => Math.abs(base * (1 - armor) - damage) < 0.6;
-    if (matches(BOSS_MISSILE_CONFIG.DAMAGE)) return 'boss-missile';
+    const missileDamage = controller?.getCurrentBoss()?.getConfig().missileDamage ?? 0;
+    if ((missileDamage > 0 && matches(missileDamage)) || matches(BOSS_MISSILE_CONFIG.DAMAGE)) {
+      return 'boss-missile';
+    }
     if (matches(FLAK_CANNON_CONFIG.DAMAGE)) return 'boss-flak';
     return 'boss-gun/other';
   };
@@ -547,6 +566,7 @@ export function installBalanceHarness(access: DevHookAccess): BalanceHarnessApi 
     if (record?.boss && record.boss.end === null) {
       record.boss.damage += damage;
       record.boss.hits++;
+      if (source === 'boss-missile') record.boss.missileHits++;
       record.boss.sources[source] = (record.boss.sources[source] ?? 0) + damage;
       return;
     }
@@ -563,6 +583,23 @@ export function installBalanceHarness(access: DevHookAccess): BalanceHarnessApi 
     if (rescuePending) {
       rescuePending = false;
       rescuePlayer();
+    }
+    // 复活位姿（排查“复活即坠毁”循环）：位置、地表、机头方向
+    if (run && !run.done && respawnLog.length < 60) {
+      const player = access.getPlayerAircraft();
+      const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(player.quaternion);
+      respawnLog.push({
+        t: round1(gameTime),
+        level: access.getSession().getLevel(),
+        pos: [
+          Math.round(player.position.x),
+          Math.round(player.position.y),
+          Math.round(player.position.z),
+        ],
+        ground: Math.round(world.groundY(player.position.x, player.position.z)),
+        forward: [round1(forward.x), round1(forward.y), round1(forward.z)],
+        rescued: run.rescues,
+      });
     }
   });
 
@@ -631,8 +668,8 @@ export function installBalanceHarness(access: DevHookAccess): BalanceHarnessApi 
       recentCrashes.push(gameTime);
       while (recentCrashes.length > 0 && gameTime - recentCrashes[0] > 20) recentCrashes.shift();
       // 坠毁后下次复活抬到安全高度：复活点常贴着岩壁 / 立柱（审计 B1，由 PlayerSystem 修复），
-      // 不抬的话会“复活即坠毁”连环阵亡，把平衡数据（阵亡 / 伤害）搅乱
-      if (crash) {
+      // 不抬的话会“复活即坠毁”连环阵亡，把平衡数据（阵亡 / 伤害）搅乱（rescueCrashes=false 时照实复活）
+      if (crash && run.options.rescueCrashes) {
         rescuePending = true;
         recentCrashes.length = 0;
       }
@@ -681,7 +718,11 @@ export function installBalanceHarness(access: DevHookAccess): BalanceHarnessApi 
       if (run && !run.done && pilot) {
         collectWorld();
         const decision = pilot.decide(deltaTime, world, input);
-        if (decision.deployFlare) tapKey('KeyG');
+        if (decision.deployFlare) {
+          tapKey('KeyG');
+          const fight = bossRecord?.boss;
+          if (bossActive && fight && fight.end === null) fight.flares++;
+        }
         if (run.options.traceInterval > 0 && gameTime >= nextTraceAt && trace.length < 4000) {
           nextTraceAt = gameTime + run.options.traceInterval;
           const position = world.position;
@@ -707,38 +748,38 @@ export function installBalanceHarness(access: DevHookAccess): BalanceHarnessApi 
     };
   };
 
-  /** 旧式 Boss（第 1-5 关）的热焰弹诱骗模拟（见 emulateLegacyFlares） */
-  let legacyDecoys: BossFlareDecoyRedirector | null = null;
-  const findScene = (object: THREE.Object3D): THREE.Scene | null => {
-    let node: THREE.Object3D | null = object;
-    while (node) {
-      if (node instanceof THREE.Scene) return node;
-      node = node.parent;
+  /** 本场 Boss 战见过的导弹 / 被热焰弹诱骗过的 / 诱骗后又回头追玩家的（各计一次） */
+  let seenMissiles = new WeakSet<object>();
+  let decoyedMissiles = new WeakSet<object>();
+  let reacquiredMissiles = new WeakSet<object>();
+  const trackBossMissiles = (): void => {
+    const fight = bossRecord?.boss;
+    if (!bossActive || !fight || fight.end !== null) return;
+    const missileSystem = access.getBossController()?.getCurrentBoss()?.getMissileSystem() ?? null;
+    if (!missileSystem) return;
+    for (const missile of missileSystem.getMissiles()) {
+      if (!seenMissiles.has(missile)) {
+        seenMissiles.add(missile);
+        fight.missiles++;
+      }
+      if (missile.target?.name === BOSS_DECOY_ANCHOR_NAME && !decoyedMissiles.has(missile)) {
+        decoyedMissiles.add(missile);
+        fight.decoyed++;
+      } else if (
+        missile.isTargetingPlayer &&
+        decoyedMissiles.has(missile) &&
+        !reacquiredMissiles.has(missile)
+      ) {
+        reacquiredMissiles.add(missile);
+        fight.reacquired++;
+      }
     }
-    return null;
-  };
-  const updateLegacyFlares = (deltaTime: number): void => {
-    const controller = access.getBossController();
-    const boss = controller?.getCurrentBoss() ?? null;
-    if (!boss || isAdvancedBoss(boss) || !access.getSession().isInBossBattle()) return;
-    if (!legacyDecoys) {
-      const scene = findScene(access.getPlayerAircraft());
-      if (!scene) return;
-      legacyDecoys = new BossFlareDecoyRedirector(scene);
-    }
-    legacyDecoys.update(
-      deltaTime,
-      access.getWeapons().getActiveDecoys(),
-      boss.getMissileSystem(),
-      access.getPlayerAircraft().position
-    );
   };
 
   const onStep = (deltaTime: number): void => {
     const state = run as RunState;
     gameTime += deltaTime;
     wrapUnitDamage();
-    if (state.options.emulateLegacyFlares) updateLegacyFlares(deltaTime);
     const session = access.getSession();
     const level = session.getLevel();
     if (level !== lastLevelSeen) {
@@ -749,6 +790,7 @@ export function installBalanceHarness(access: DevHookAccess): BalanceHarnessApi 
 
     const record = currentLevelRecord();
     trackBoss(record);
+    trackBossMissiles();
 
     // 卡关保护：单波 / Boss 超时强制推进并标记
     const wave = currentWaveRecord();
@@ -796,7 +838,11 @@ export function installBalanceHarness(access: DevHookAccess): BalanceHarnessApi 
       bossActive = true;
       bossRecord = record;
       lastHazardCount = controller?.getHazardHitCount() ?? 0;
+      seenMissiles = new WeakSet<object>();
+      decoyedMissiles = new WeakSet<object>();
+      reacquiredMissiles = new WeakSet<object>();
       const health = boss.getHealth();
+      const stats = access.getStats();
       pilot?.takeStats();
       record.boss = {
         type: boss.getConfig().type,
@@ -812,6 +858,13 @@ export function installBalanceHarness(access: DevHookAccess): BalanceHarnessApi 
         forced: false,
         sources: {},
         respawnCrashes: 0,
+        playerMaxHealth: stats.getMaxHealth(),
+        playerArmor: stats.getArmorReduction(),
+        missiles: 0,
+        decoyed: 0,
+        reacquired: 0,
+        missileHits: 0,
+        flares: 0,
       };
     }
     const tracked = bossRecord;
@@ -1241,6 +1294,8 @@ export function installBalanceHarness(access: DevHookAccess): BalanceHarnessApi 
         ? {
             type: boss.type,
             maxHealth: boss.maxHealth,
+            playerMaxHealth: boss.playerMaxHealth,
+            playerArmor: boss.playerArmor,
             seconds: boss.end === null ? null : round1(bossSeconds),
             damage: Math.round(boss.damage),
             damagePerMin: bossSeconds > 0 ? Math.round((boss.damage / bossSeconds) * 60) : 0,
@@ -1248,6 +1303,11 @@ export function installBalanceHarness(access: DevHookAccess): BalanceHarnessApi 
             crashes: boss.crashes,
             shots: boss.shots,
             respawnCrashes: boss.respawnCrashes || undefined,
+            missiles: boss.missiles,
+            decoyed: boss.decoyed,
+            reacquired: boss.reacquired,
+            missileHits: boss.missileHits,
+            flares: boss.flares,
             endReason: boss.endReason,
             healthAtEnd: boss.healthAtEnd,
             pilot: roundStats(boss.pilot),
@@ -1279,6 +1339,7 @@ export function installBalanceHarness(access: DevHookAccess): BalanceHarnessApi 
       totalDeaths: run.totalDeaths,
       rescues: run.rescues,
       crashLog,
+      respawnLog,
       deathLog,
       passiveSurvival: run.passiveSurvival,
       hangars: run.hangars,
@@ -1310,6 +1371,7 @@ export function installBalanceHarness(access: DevHookAccess): BalanceHarnessApi 
       bossRecord = null;
       recentCrashes.length = 0;
       crashLog.length = 0;
+      respawnLog.length = 0;
       recentHits.length = 0;
       deathLog.length = 0;
       rescuePending = false;

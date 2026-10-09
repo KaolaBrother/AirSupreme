@@ -4,7 +4,6 @@ import type { EnemySystem } from '@/core/systems/EnemySystem';
 import type { PlayerSystem } from '@/core/systems/PlayerSystem';
 import type { ParticleSystem } from '@/features/effects/ParticleSystem';
 import type { BossMissileSystem } from '@/features/boss/BossMissileSystem';
-import { BOSS_MISSILE_CONFIG } from '@/features/boss/BossTypes';
 
 export type BossHitProfile = 'player' | 'enemy' | 'boss';
 export type BossHeavyImpactProfile = 'boss-cannon' | 'laser' | 'flak-hit' | 'boss-armor';
@@ -22,6 +21,9 @@ export interface BossHitFeedbackDeps {
  * 粒子 + 音效分层（重武器冲击 / 命中层 / 装甲火花），以及 Boss 导弹击中玩家或僚机。
  */
 export class BossHitFeedback {
+  /** Boss 导弹的命中候选（玩家 + 僚机），逐帧复用 */
+  private readonly missileTargets: Object3D[] = [];
+
   constructor(private readonly deps: BossHitFeedbackDeps) {}
 
   public createDamageFeedback(
@@ -83,17 +85,24 @@ export class BossHitFeedback {
     return target === this.deps.playerAircraft ? 'player' : 'enemy';
   }
 
-  /** Boss 导弹命中玩家（护盾时只有特效）或友军僚机 */
+  /**
+   * Boss 导弹命中玩家（护盾时只有特效）或友军僚机。伤害取导弹系统报告的单发伤害
+   * （Boss 配置的 missileDamage，已按难度调整）。
+   */
   public checkBossMissileHits(
     bossMissileSystem: BossMissileSystem | null,
-    friendlyMeshes: Object3D[]
+    friendlyMeshes: readonly Object3D[]
   ): void {
     if (!bossMissileSystem) {
       return;
     }
 
     const { playerAircraft, playerSystem, enemySystem } = this.deps;
-    bossMissileSystem.checkCollisions([playerAircraft, ...friendlyMeshes], (target: Object3D) => {
+    const targets = this.missileTargets;
+    targets.length = 0;
+    targets.push(playerAircraft);
+    for (const mesh of friendlyMeshes) targets.push(mesh);
+    bossMissileSystem.checkCollisions(targets, (target: Object3D, damage: number) => {
       const isPlayerTarget = target === playerAircraft;
       const hitProfile: BossHitProfile = isPlayerTarget ? 'player' : 'enemy';
 
@@ -108,9 +117,7 @@ export class BossHitFeedback {
       );
       if (isPlayerTarget) {
         if (!playerSystem.isShieldActive()) {
-          playerSystem.takeCombatDamage(BOSS_MISSILE_CONFIG.DAMAGE, {
-            suppressDefaultFeedback: true,
-          });
+          playerSystem.takeCombatDamage(damage, { suppressDefaultFeedback: true });
         }
         return;
       }
@@ -118,7 +125,7 @@ export class BossHitFeedback {
       const friendly = enemySystem
         .getFriendlyAIs()
         .find((candidate) => candidate.getMesh() === target);
-      friendly?.takeDamage(BOSS_MISSILE_CONFIG.DAMAGE);
+      friendly?.takeDamage(damage);
     });
   }
 }

@@ -95,7 +95,7 @@ export class BossAI {
     this.config = config;
     this.health = new HealthSystem(config.health);
 
-    this.missileSystem = new BossMissileSystem(scene, particleSystem);
+    this.missileSystem = new BossMissileSystem(scene, particleSystem, config.missileDamage);
     const bossGroup = mesh as BossGroup;
     this.weakpointMeshes = bossGroup.weakpointMeshes ?? [];
     this.muzzleMeshes = bossGroup.muzzleMeshes ?? [];
