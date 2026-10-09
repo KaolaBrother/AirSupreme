@@ -6,6 +6,7 @@ import {
   CAMPAIGN_SAVE_VERSION,
   clearCampaignCheckpoint,
   describeCheckpoint,
+  describeCheckpointText,
   getCampaignProgress,
   hasCampaignCheckpoint,
   isSwiftJoinAnnounced,
@@ -527,6 +528,37 @@ describe('SaveSystem', () => {
         expect(describeCheckpoint(save)).toBe(`第${level}关 · ${title.zh} · 第1波`);
       }
     );
+
+    it('honours an explicit locale whatever the interface language is', () => {
+      const save = makeSave({ checkpoint: 'wave', level: 6, wave: 2 });
+      const english = 'Ch. 6 · Heart of the Forge · Wave 3';
+      const chinese = '第6关 · 熔炉之心 · 第3波';
+      expect(describeCheckpoint(save, 'zh-CN')).toBe(chinese);
+      expect(describeCheckpoint(save, 'en')).toBe(english);
+      setLocale('zh-CN');
+      expect(describeCheckpoint(save, 'en')).toBe(english);
+      expect(describeCheckpoint(save, 'zh-CN')).toBe(chinese);
+      expect(describeCheckpoint(save), 'no locale: the interface language').toBe(chinese);
+    });
+
+    it.each<[string, Partial<CampaignSaveData>]>([
+      ['wave', { checkpoint: 'wave', level: 6, wave: 2 }],
+      ['boss', { checkpoint: 'boss', level: 3, wave: 6 }],
+      ['hangar', { checkpoint: 'hangar', level: 4, wave: 0 }],
+      ['level-start', { checkpoint: 'level-start', level: 1, wave: 0 }],
+    ])('describeCheckpointText gives both languages of a %s checkpoint', (_kind, overrides) => {
+      const save = makeSave(overrides);
+      const expected = {
+        en: describeCheckpoint(save, 'en'),
+        zh: describeCheckpoint(save, 'zh-CN'),
+      };
+      expect(describeCheckpointText(save)).toEqual(expected);
+      setLocale('zh-CN');
+      expect(describeCheckpointText(save), 'independent of the interface language').toEqual(
+        expected
+      );
+      expect(expected.en).not.toBe(expected.zh);
+    });
   });
 
   describe('campaign progress', () => {
