@@ -4,6 +4,7 @@ import {
   type CampaignSpeakerId,
   type RadioLine,
 } from '@/features/campaign/CampaignData';
+import { tr, type LocalizedText } from '@/i18n';
 import { getSpeakerGlyph } from '@/ui/theme/hudGlyphs';
 import {
   prefersReducedMotion,
@@ -49,6 +50,8 @@ const MAX_QUEUE = 6;
 /** 被打断的台词若已显示了这么多停留时间，就视为已经传达，不再重播 */
 const INTERRUPT_DELIVERED_RATIO = 0.6;
 const MAX_STEPS_PER_UPDATE = 64;
+/** 读屏文本里“呼号：台词”的分隔符 */
+const SPEAKER_SEPARATOR: LocalizedText = { en: ': ', zh: '：' };
 
 function resolveSpeaker(id: CampaignSpeakerId | string): CampaignSpeaker {
   const known = (CAMPAIGN_SPEAKERS as Readonly<Record<string, CampaignSpeaker>>)[id];
@@ -57,7 +60,7 @@ function resolveSpeaker(id: CampaignSpeakerId | string): CampaignSpeaker {
   }
   return {
     id: 'hq',
-    callsign: String(id || '未知频道'),
+    callsign: String(id || tr({ en: 'Unknown channel', zh: '未知频道' })),
     name: '',
     tone: 'sys',
   };
@@ -422,7 +425,7 @@ export class RadioComms {
       this.name.textContent = extra;
     }
     if (this.srText) {
-      this.srText.textContent = `${speaker.callsign}：${line.line.text}`;
+      this.srText.textContent = `${speaker.callsign}${tr(SPEAKER_SEPARATOR)}${line.line.text}`;
     }
     this.renderReveal(line);
     if (root.style.display !== 'block') {

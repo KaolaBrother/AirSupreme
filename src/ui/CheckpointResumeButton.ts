@@ -1,4 +1,5 @@
 import { describeCheckpoint, type CampaignSaveData } from '@/core/save/SaveSystem';
+import { tr } from '@/i18n';
 import { HUD_COLORS, injectHudTokens } from '@/ui/theme/hudTokens';
 
 /**
@@ -7,6 +8,7 @@ import { HUD_COLORS, injectHudTokens } from '@/ui/theme/hudTokens';
  */
 export class CheckpointResumeButton {
   private button: HTMLButtonElement | null = null;
+  private title: HTMLSpanElement | null = null;
   private detail: HTMLSpanElement | null = null;
   private pending: CampaignSaveData | null = null;
   private onResume: ((save: CampaignSaveData) => void) | null = null;
@@ -19,6 +21,10 @@ export class CheckpointResumeButton {
     this.pending = save;
     this.onResume = onResume;
     const button = this.ensureButton();
+    // 每次显示时按当前语言写标题（实例可能跨越一次语言切换）
+    if (this.title) {
+      this.title.textContent = tr({ en: 'Continue from checkpoint', zh: '从检查点继续' });
+    }
     if (this.detail) {
       this.detail.textContent = describeCheckpoint(save);
     }
@@ -35,6 +41,7 @@ export class CheckpointResumeButton {
   public dispose(): void {
     this.button?.remove();
     this.button = null;
+    this.title = null;
     this.detail = null;
     this.pending = null;
     this.onResume = null;
@@ -73,7 +80,6 @@ export class CheckpointResumeButton {
     `;
 
     const title = document.createElement('span');
-    title.textContent = '从检查点继续';
     title.style.cssText = 'font-size: 16px; font-weight: 700; letter-spacing: 0.08em;';
     const detail = document.createElement('span');
     detail.style.cssText = `font-size: 12px; color: var(--hud-muted, ${HUD_COLORS.muted});`;
@@ -93,6 +99,7 @@ export class CheckpointResumeButton {
 
     document.body.appendChild(button);
     this.button = button;
+    this.title = title;
     this.detail = detail;
     return button;
   }
