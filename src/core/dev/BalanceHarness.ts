@@ -8,10 +8,13 @@ import {
   getDeclaredHitRadius,
   type SpecialWeaponId,
 } from '@/core/CombatContracts';
+import { BossFlareDecoyRedirector } from '@/core/boss/AdvancedBossSupport';
 import { isAdvancedBoss } from '@/features/boss/BossContracts';
+import { BOSS_MISSILE_CONFIG, FLAK_CANNON_CONFIG } from '@/features/boss/BossTypes';
 import {
   UPGRADE_CONFIGS,
   UpgradeType,
+  getStartingUpgradePoints,
   getUpgradeCapForLevel,
   type PlayerUpgrades,
 } from '@/features/upgrade/UpgradeSystem';
@@ -60,6 +63,18 @@ export interface BalanceRunOptions {
   aimErrorDeg?: number;
   /** 每隔这么多秒（游戏时间）记录一条飞行轨迹采样（0 = 不记录） */
   traceInterval?: number;
+  /**
+   * 机库升级点预算：'campaign' 在每次机库前把累计点数补到 getStartingUpgradePoints(关卡)
+   * （跳关开局的官方预算 ≈ 正常推进的玩家进入该关时的存量），Boss 模式连战时机体与战役同步；
+   * 'none'（默认）只用实际得分。
+   */
+  pointsBudget?: 'campaign' | 'none';
+  /**
+   * 第 1-5 关 Boss 的导弹目前不受热焰弹诱骗（只有第 6-10 关的 AdvancedBossController 跑了
+   * BossFlareDecoyRedirector）。true（默认）时测量框架对旧式 Boss 也跑同一个诱骗器，
+   * 模拟“热焰弹对所有 Boss 导弹都有效”（已提请 BossBattleController 接线）。
+   */
+  emulateLegacyFlares?: boolean;
 }
 
 interface WaveRecord {
@@ -105,6 +120,8 @@ interface HangarRecord {
   pointsBefore: number;
   /** 本章所有升级线买到上限还需的点数 */
   capCost: number;
+  /** pointsBudget = 'campaign' 时补发的点数 */
+  bonus: number;
   spent: number;
   pointsAfter: number;
   purchases: Record<string, number>;
@@ -153,6 +170,8 @@ const DEFAULT_OPTIONS: Required<BalanceRunOptions> = {
   bossTimeoutSeconds: 600,
   aimErrorDeg: 1.2,
   traceInterval: 0,
+  pointsBudget: 'none',
+  emulateLegacyFlares: true,
 };
 
 /** 同价时的购买优先级（越靠前越先买）：生存 → 火力 → 导弹 → 机动 */
@@ -353,6 +372,20 @@ export function installBalanceHarness(access: DevHookAccess): BalanceHarnessApi 
     };
   };
 
+  /** Boss 战里没有对上子弹的伤害：特殊武器（危险区计数上涨）/ Boss 导弹 / 高炮 / 机炮按伤害值归类 */
+  let lastHazardCount = 0;
+  const attributeBossHit = (damage: number, armor: number): string => {
+    const controller = access.getBossController();
+    const hazards = controller?.getHazardHitCount() ?? 0;
+    const hazard = hazards > lastHazardCount;
+    lastHazardCount = hazards;
+    if (hazard) return 'boss-hazard';
+    const matches = (base: number): boolean => Math.abs(base * (1 - armor) - damage) < 0.6;
+    if (matches(BOSS_MISSILE_CONFIG.DAMAGE)) return 'boss-missile';
+    if (matches(FLAK_CANNON_CONFIG.DAMAGE)) return 'boss-flak';
+    return 'boss-gun/other';
+  };
+
   /** 找出最可能命中玩家的那颗子弹（伤害吻合、预测位置最近） */
   const attributeHit = (damage: number): string => {
     if (pendingUnitCause) return `unit-${pendingUnitCause}`;
@@ -374,7 +407,8 @@ export function installBalanceHarness(access: DevHookAccess): BalanceHarnessApi 
         best = shot;
       }
     }
-    if (!best) return access.getSession().isInBossBattle() ? 'boss/other' : 'other';
+    if (!best)
+      return access.getSession().isInBossBattle() ? attributeBossHit(damage, armor) : 'other';
     best.used = true;
     return best.label;
   };
@@ -591,8 +625,9 @@ export function installBalanceHarness(access: DevHookAccess): BalanceHarnessApi 
       }
       recentCrashes.push(gameTime);
       while (recentCrashes.length > 0 && gameTime - recentCrashes[0] > 20) recentCrashes.shift();
-      // 连续坠毁（20 秒内 3 次）：下次复活时抬到安全高度，避免测量陷入死循环
-      if (recentCrashes.length >= 3) {
+      // 复活后几秒内又坠毁（复活点贴着岩壁 / 立柱，见审计 B1），或 20 秒内坠毁 3 次：
+      // 下次复活时抬到安全高度，避免“复活即坠毁”的循环把平衡数据（阵亡 / 伤害）搅乱
+      if (respawnCrash || recentCrashes.length >= 3) {
         rescuePending = true;
         recentCrashes.length = 0;
       }
@@ -610,6 +645,21 @@ export function installBalanceHarness(access: DevHookAccess): BalanceHarnessApi 
   });
 
   // ───────────────────────────── 每步钩子 ─────────────────────────────
+
+  /** trace 用：Boss 距离 / 血量 / 是否无敌 / 状态提示（无 Boss 时 undefined） */
+  const describeBoss = (position: THREE.Vector3): Record<string, unknown> | undefined => {
+    const controller = access.getBossController();
+    const boss = controller?.getCurrentBoss() ?? null;
+    if (!boss || !access.getSession().isInBossBattle()) return undefined;
+    const advanced = isAdvancedBoss(boss) ? boss : null;
+    return {
+      d: Math.round(boss.getMesh().position.distanceTo(position)),
+      hp: Math.round(boss.getHealth().current),
+      inv: advanced?.isInvulnerable() ?? false,
+      hidden: controller?.isBossHiddenFromSensors() ?? false,
+      st: advanced?.getStatusLabel() ?? null,
+    };
+  };
 
   const installPatches = (): void => {
     if (patched) return;
@@ -644,6 +694,7 @@ export function installBalanceHarness(access: DevHookAccess): BalanceHarnessApi 
             keys: `${input.yawLeft ? 'L' : ''}${input.yawRight ? 'R' : ''}${input.pitchUp ? 'U' : ''}${input.pitchDown ? 'D' : ''}`,
             targets: targets.length,
             hp: Math.round(access.getPlayerSystem().getHealth().getCurrentHealth()),
+            bossInfo: describeBoss(position),
           });
         }
       }
@@ -651,10 +702,38 @@ export function installBalanceHarness(access: DevHookAccess): BalanceHarnessApi 
     };
   };
 
+  /** 旧式 Boss（第 1-5 关）的热焰弹诱骗模拟（见 emulateLegacyFlares） */
+  let legacyDecoys: BossFlareDecoyRedirector | null = null;
+  const findScene = (object: THREE.Object3D): THREE.Scene | null => {
+    let node: THREE.Object3D | null = object;
+    while (node) {
+      if (node instanceof THREE.Scene) return node;
+      node = node.parent;
+    }
+    return null;
+  };
+  const updateLegacyFlares = (deltaTime: number): void => {
+    const controller = access.getBossController();
+    const boss = controller?.getCurrentBoss() ?? null;
+    if (!boss || isAdvancedBoss(boss) || !access.getSession().isInBossBattle()) return;
+    if (!legacyDecoys) {
+      const scene = findScene(access.getPlayerAircraft());
+      if (!scene) return;
+      legacyDecoys = new BossFlareDecoyRedirector(scene);
+    }
+    legacyDecoys.update(
+      deltaTime,
+      access.getWeapons().getActiveDecoys(),
+      boss.getMissileSystem(),
+      access.getPlayerAircraft().position
+    );
+  };
+
   const onStep = (deltaTime: number): void => {
     const state = run as RunState;
     gameTime += deltaTime;
     wrapUnitDamage();
+    if (state.options.emulateLegacyFlares) updateLegacyFlares(deltaTime);
     const session = access.getSession();
     const level = session.getLevel();
     if (level !== lastLevelSeen) {
@@ -691,7 +770,7 @@ export function installBalanceHarness(access: DevHookAccess): BalanceHarnessApi 
     }
   };
 
-  const trackBoss = (record: LevelRecord | null): void => {
+  const trackBoss = (levelRecord: LevelRecord | null): void => {
     const controller = access.getBossController();
     const boss = controller?.getCurrentBoss() ?? null;
     const active = Boolean(boss && access.getSession().isInBossBattle());
@@ -702,9 +781,14 @@ export function installBalanceHarness(access: DevHookAccess): BalanceHarnessApi 
       boss !== trackedBoss &&
       boss.isAlive() &&
       !(controller?.isBossDying() ?? false);
+    // Boss 模式没有波次（不触发 WAVE_START）：Boss 登场时补建本关档案
+    const record =
+      levelRecord ??
+      (fresh && run && !bossActive ? ensureLevelRecord(access.getSession().getLevel()) : null);
     if (fresh && boss && record && !bossActive) {
       trackedBoss = boss;
       bossActive = true;
+      lastHazardCount = controller?.getHazardHitCount() ?? 0;
       const health = boss.getHealth();
       pilot?.takeStats();
       record.boss = {
@@ -1007,10 +1091,21 @@ export function installBalanceHarness(access: DevHookAccess): BalanceHarnessApi 
       finish(`reached hangar for level ${level}`);
       return;
     }
+    let bonus = 0;
+    if (state.options.pointsBudget === 'campaign') {
+      // 累计（已花 + 现有）补到该关的官方开局预算
+      const spentSoFar = state.hangars.reduce((sum, hangar) => sum + hangar.spent, 0);
+      bonus = Math.max(
+        0,
+        getStartingUpgradePoints(level) - spentSoFar - upgrades.getAvailablePoints()
+      );
+      if (bonus > 0) upgrades.awardBonusPoints(bonus);
+    }
     const record: HangarRecord = {
       level,
       pointsBefore: upgrades.getAvailablePoints(),
       capCost: costToCaps(upgrades),
+      bonus,
       spent: 0,
       pointsAfter: 0,
       purchases: {},
