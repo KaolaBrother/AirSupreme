@@ -23,11 +23,7 @@ import {
   DESERT_BIOME_PALETTE,
   ALPINE_BIOME_PALETTE,
 } from './worldscape/biomes';
-import {
-  buildWorldscapeWater,
-  sampleWaveHeight,
-  type WorldscapeWater,
-} from './worldscape/water';
+import { buildWorldscapeWater, sampleWaveHeight, type WorldscapeWater } from './worldscape/water';
 import {
   buildVegetation,
   grassTuftGeometry,
@@ -378,7 +374,10 @@ export class TerrainGenerator {
     this.createPerimeterHaze();
 
     // 设置雾（优先使用环境雾色，保持与 GameScene 环境配置一致）
-    this.scene.fog = new THREE.FogExp2(config.environment.fogColor ?? config.fogColor, this.weatherProfile.fogDensity);
+    this.scene.fog = new THREE.FogExp2(
+      config.environment.fogColor ?? config.fogColor,
+      this.weatherProfile.fogDensity
+    );
   }
 
   /**
@@ -732,7 +731,12 @@ export class TerrainGenerator {
   }
 
   private createCitySurfaceBoundary(surfaceProfile: LevelSurfaceProfile): void {
-    const borderColor = this.tintColor(surfaceProfile.plazaBaseColor ?? 0x808a98, 0.02, -0.15, -0.05);
+    const borderColor = this.tintColor(
+      surfaceProfile.plazaBaseColor ?? 0x808a98,
+      0.02,
+      -0.15,
+      -0.05
+    );
     const boundaryMaterial = new THREE.MeshStandardMaterial({
       color: borderColor,
       transparent: true,
@@ -936,10 +940,8 @@ export class TerrainGenerator {
 
       // 前三座小屋的烟囱冒烟
       if (i < 3) {
-        const chimneyWorldX =
-          x + Math.cos(-yaw) * width * 0.22 - Math.sin(-yaw) * chimneyOffsetZ;
-        const chimneyWorldZ =
-          z + Math.sin(-yaw) * width * 0.22 + Math.cos(-yaw) * chimneyOffsetZ;
+        const chimneyWorldX = x + Math.cos(-yaw) * width * 0.22 - Math.sin(-yaw) * chimneyOffsetZ;
+        const chimneyWorldZ = z + Math.sin(-yaw) * width * 0.22 + Math.cos(-yaw) * chimneyOffsetZ;
         smokeAnchors.push({
           x: chimneyWorldX,
           y: groundY + height + height * 0.45 + 1.4,
@@ -987,7 +989,8 @@ export class TerrainGenerator {
           const offset = i * 3;
           positions[offset] = anchor.x + sway;
           positions[offset + 1] = anchor.y + rise;
-          positions[offset + 2] = anchor.z + Math.cos(time * 0.6 + phases[i]) * (0.6 + progress[i] * 2);
+          positions[offset + 2] =
+            anchor.z + Math.cos(time * 0.6 + phases[i]) * (0.6 + progress[i] * 2);
         }
         attribute.needsUpdate = true;
         material.opacity = 0.26 + Math.sin(time * 0.5) * 0.05;
@@ -1611,10 +1614,7 @@ export class TerrainGenerator {
       } else {
         // 沙洲岛：隆起的沙丘（高出风暴浪峰）+ 1-3 棵棕榈
         const caySize = 22 + Math.random() * 20;
-        const cay = new THREE.Mesh(
-          new THREE.SphereGeometry(caySize, 12, 8),
-          sandMaterial
-        );
+        const cay = new THREE.Mesh(new THREE.SphereGeometry(caySize, 12, 8), sandMaterial);
         cay.scale.set(1, 0.3, 0.8 + Math.random() * 0.4);
         cay.position.y = -48;
         cay.rotation.y = Math.random() * Math.PI * 2;
@@ -1671,7 +1671,10 @@ export class TerrainGenerator {
 
     // 断裂的塔顶：散落的石块
     for (let r = 0; r < 5; r++) {
-      const debris = new THREE.Mesh(new THREE.DodecahedronGeometry(2.4 + Math.random() * 2, 0), rockMaterial);
+      const debris = new THREE.Mesh(
+        new THREE.DodecahedronGeometry(2.4 + Math.random() * 2, 0),
+        rockMaterial
+      );
       debris.position.set(
         (Math.random() - 0.5) * 26,
         -44 + Math.random() * 3,
@@ -1913,7 +1916,12 @@ export class TerrainGenerator {
       0.08,
       0.13
     );
-    const ambientEdge = this.tintColor(surfaceProfile.plazaBaseColor ?? 0x808a98, -0.01, 0.12, 0.04);
+    const ambientEdge = this.tintColor(
+      surfaceProfile.plazaBaseColor ?? 0x808a98,
+      -0.01,
+      0.12,
+      0.04
+    );
 
     const ambientFill = new THREE.Mesh(
       new THREE.PlaneGeometry(4000, 4000),
@@ -2035,7 +2043,10 @@ export class TerrainGenerator {
 
     // 水平道路
     for (let i = -6; i <= 6; i++) {
-      const corridor = new THREE.Mesh(new THREE.PlaneGeometry(roadExtent, 26), corridorCoreMaterial);
+      const corridor = new THREE.Mesh(
+        new THREE.PlaneGeometry(roadExtent, 26),
+        corridorCoreMaterial
+      );
       corridor.rotation.x = -Math.PI / 2;
       corridor.position.set(0, -49.64, i * 250);
       staging.add(corridor);
@@ -2114,7 +2125,10 @@ export class TerrainGenerator {
 
     // 垂直道路
     for (let i = -6; i <= 6; i++) {
-      const corridor = new THREE.Mesh(new THREE.PlaneGeometry(26, roadExtent), corridorCoreMaterial);
+      const corridor = new THREE.Mesh(
+        new THREE.PlaneGeometry(26, roadExtent),
+        corridorCoreMaterial
+      );
       corridor.rotation.x = -Math.PI / 2;
       corridor.position.set(i * 250, -49.64, 0);
       staging.add(corridor);
@@ -2186,7 +2200,11 @@ export class TerrainGenerator {
     const gridSpan = gridMax - gridMin + 1;
     const blockCount = gridSpan * gridSpan;
 
-    const plazas = new THREE.InstancedMesh(new THREE.PlaneGeometry(190, 190), plazaMaterial, blockCount);
+    const plazas = new THREE.InstancedMesh(
+      new THREE.PlaneGeometry(190, 190),
+      plazaMaterial,
+      blockCount
+    );
     const basePads = new THREE.InstancedMesh(
       new THREE.PlaneGeometry(162, 162),
       basePadMaterial,
@@ -2508,7 +2526,11 @@ export class TerrainGenerator {
         transparent: true,
         opacity: 0.75,
       }),
-      beaconMast: new THREE.MeshStandardMaterial({ color: 0x6a7280, roughness: 0.6, metalness: 0.4 }),
+      beaconMast: new THREE.MeshStandardMaterial({
+        color: 0x6a7280,
+        roughness: 0.6,
+        metalness: 0.4,
+      }),
     };
   }
 
@@ -2524,7 +2546,9 @@ export class TerrainGenerator {
     const building = new THREE.Group();
     const tokens = this.designTokens;
 
-    const bodyColor = new THREE.Color(surfaceProfile.buildingBaseColor ?? tokens.structure).offsetHSL(
+    const bodyColor = new THREE.Color(
+      surfaceProfile.buildingBaseColor ?? tokens.structure
+    ).offsetHSL(
       (Math.random() - 0.5) * 0.02,
       -0.02 + Math.random() * 0.04,
       -0.1 + Math.random() * 0.14
@@ -2639,7 +2663,10 @@ export class TerrainGenerator {
 
     // 高层建筑顶部红色航空障碍灯（共享材质统一闪烁）
     if (this.cityBeaconMaterial && height > 52) {
-      const beaconMast = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 3.4, 6), kit.beaconMast);
+      const beaconMast = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.12, 0.12, 3.4, 6),
+        kit.beaconMast
+      );
       beaconMast.position.y = height + 1.7;
       building.add(beaconMast);
 
@@ -2665,7 +2692,9 @@ export class TerrainGenerator {
     const width = 13 + Math.random() * 12;
     const depth = 11 + Math.random() * 10;
 
-    const bodyColor = new THREE.Color(surfaceProfile.buildingBaseColor ?? tokens.structure).offsetHSL(
+    const bodyColor = new THREE.Color(
+      surfaceProfile.buildingBaseColor ?? tokens.structure
+    ).offsetHSL(
       (Math.random() - 0.5) * 0.015,
       -0.03 + Math.random() * 0.04,
       -0.05 + Math.random() * 0.1
@@ -2685,7 +2714,7 @@ export class TerrainGenerator {
         new THREE.BoxGeometry(width + 0.12, 1.1, depth + 0.12),
         kit.midriseStrip
       );
-      strip.position.y = 4 + s * (height - 6) / stripCount;
+      strip.position.y = 4 + (s * (height - 6)) / stripCount;
       building.add(strip);
     }
 
@@ -2848,7 +2877,12 @@ export class TerrainGenerator {
     // —— 双子玻璃塔：两座等高玻璃幕墙板楼，一座带天线 ——
     {
       const glassMaterial = new THREE.MeshStandardMaterial({
-        color: this.tintColor(surfaceProfile.buildingBaseColor ?? tokens.structure, 0.02, 0.05, -0.04),
+        color: this.tintColor(
+          surfaceProfile.buildingBaseColor ?? tokens.structure,
+          0.02,
+          0.05,
+          -0.04
+        ),
         roughness: 0.16,
         metalness: 0.6,
         emissive: 0x16202e,
@@ -3207,7 +3241,11 @@ export class TerrainGenerator {
           0.32 * Math.sin(x * 0.021 + z * 0.013) +
           0.18 * Math.sin(x * 0.052 - z * 0.047 + 1.7);
         vertexColor.copy(dry).lerp(lush, THREE.MathUtils.clamp(blend, 0, 1));
-        const edge = THREE.MathUtils.smoothstep(Math.hypot(x, z), meadowRadius * 0.78, meadowRadius);
+        const edge = THREE.MathUtils.smoothstep(
+          Math.hypot(x, z),
+          meadowRadius * 0.78,
+          meadowRadius
+        );
         vertexColor.lerp(floor, edge * 0.22);
         colors[i * 3] = vertexColor.r;
         colors[i * 3 + 1] = vertexColor.g;
@@ -3543,11 +3581,7 @@ export class TerrainGenerator {
       for (let f = 0; f < floors; f++) {
         const floorHeight = 6 + Math.random() * 5;
         const block = new THREE.Mesh(
-          new THREE.BoxGeometry(
-            width * (1 - f * 0.08),
-            floorHeight,
-            depth * (1 - f * 0.06)
-          ),
+          new THREE.BoxGeometry(width * (1 - f * 0.08), floorHeight, depth * (1 - f * 0.06)),
           ruinMaterial
         );
         block.position.set(
@@ -3621,7 +3655,11 @@ export class TerrainGenerator {
       roughness: 0.96,
       metalness: 0,
     });
-    const hills = new THREE.InstancedMesh(new THREE.SphereGeometry(1, 14, 10), hillMaterial, hillCount);
+    const hills = new THREE.InstancedMesh(
+      new THREE.SphereGeometry(1, 14, 10),
+      hillMaterial,
+      hillCount
+    );
     for (let i = 0; i < hillCount; i++) {
       // 让出 +X 方向的扇区（东缘界河），丘陵分布在其余约 300°
       const angle = 0.65 + (i / hillCount) * (Math.PI * 2 - 1.3) + Math.random() * 0.3;
@@ -3670,7 +3708,10 @@ export class TerrainGenerator {
       jib.position.set(spot.jib * 0.32, spot.height + 0.8, 0);
       crane.add(jib);
 
-      const counterJib = new THREE.Mesh(new THREE.BoxGeometry(spot.jib * 0.36, 1.6, 2), steelMaterial);
+      const counterJib = new THREE.Mesh(
+        new THREE.BoxGeometry(spot.jib * 0.36, 1.6, 2),
+        steelMaterial
+      );
       counterJib.position.set(-spot.jib * 0.26, spot.height + 0.8, 0);
       crane.add(counterJib);
 
@@ -3901,10 +3942,7 @@ export class TerrainGenerator {
         staging.add(beam);
       }
       if (this.cityBeaconMaterial) {
-        const beacon = new THREE.Mesh(
-          new THREE.SphereGeometry(0.6, 6, 6),
-          this.cityBeaconMaterial
-        );
+        const beacon = new THREE.Mesh(new THREE.SphereGeometry(0.6, 6, 6), this.cityBeaconMaterial);
         beacon.position.set(towerX, towerTopY + 1, bridgeZ);
         staging.add(beacon);
       }
@@ -4042,7 +4080,12 @@ export class TerrainGenerator {
     const lampMaterial = new THREE.MeshBasicMaterial({ color: 0xffe2ae, toneMapped: false });
 
     // 高度错层：东西向 30、南北向 38，二者在 (500,-500) 立体交叉，且都跨越环城高架（22）
-    const lines: Array<{ axis: 'x' | 'z'; fixedCoord: number; deckHeight: number; halfLength: number }> = [
+    const lines: Array<{
+      axis: 'x' | 'z';
+      fixedCoord: number;
+      deckHeight: number;
+      halfLength: number;
+    }> = [
       { axis: 'x', fixedCoord: -500, deckHeight: 30, halfLength: 1350 }, // 沿 z=-500（东端匝道止于界河前）
       { axis: 'z', fixedCoord: 500, deckHeight: 38, halfLength: 1550 }, // 沿 x=500（上层）
     ];
@@ -4207,8 +4250,7 @@ export class TerrainGenerator {
     for (let i = 0; i < options.count; i++) {
       progress[i] = Math.random();
       speeds[i] =
-        (options.speedRange[0] +
-          Math.random() * (options.speedRange[1] - options.speedRange[0])) /
+        (options.speedRange[0] + Math.random() * (options.speedRange[1] - options.speedRange[0])) /
         Math.abs(span);
     }
     const dummy = new THREE.Object3D();
@@ -4305,11 +4347,7 @@ export class TerrainGenerator {
       dummy.updateMatrix();
       arches.setMatrixAt(i, dummy.matrix);
 
-      dummy.position.set(
-        Math.cos(jointAngle) * loopRadius,
-        -50,
-        Math.sin(jointAngle) * loopRadius
-      );
+      dummy.position.set(Math.cos(jointAngle) * loopRadius, -50, Math.sin(jointAngle) * loopRadius);
       dummy.rotation.set(0, -jointAngle, 0);
       dummy.scale.setScalar(1);
       dummy.updateMatrix();
@@ -4491,7 +4529,8 @@ export class TerrainGenerator {
     ctx.fillStyle = haze;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    const veilCount = 5 + Math.floor(profile.intensity * 5) + Math.floor(presetOverlay.streakBoost * 0.08);
+    const veilCount =
+      5 + Math.floor(profile.intensity * 5) + Math.floor(presetOverlay.streakBoost * 0.08);
     ctx.save();
     ctx.globalCompositeOperation = 'screen';
     for (let i = 0; i < veilCount; i++) {
@@ -4545,7 +4584,14 @@ export class TerrainGenerator {
       const radiusX = canvas.width * (0.22 + Math.random() * 0.18);
       const radiusY = 28 + Math.random() * 34;
       const alpha = 0.01 + Math.random() * 0.014;
-      const mist = ctx.createRadialGradient(centerX, centerY, radiusY * 0.15, centerX, centerY, radiusX);
+      const mist = ctx.createRadialGradient(
+        centerX,
+        centerY,
+        radiusY * 0.15,
+        centerX,
+        centerY,
+        radiusX
+      );
       mist.addColorStop(0, this.toCanvasColor(profile.skyGlow, alpha));
       mist.addColorStop(0.4, this.toCanvasColor(profile.cloudTint, alpha * 0.75));
       mist.addColorStop(1, 'rgba(255,255,255,0)');
@@ -4721,9 +4767,9 @@ export class TerrainGenerator {
           Math.sin(this.time * (0.9 + this.weatherProfile.intensity * 0.4)) * 0.5 + 0.5;
         const waterResponse = this.getWaterVisualResponse(this.weatherProfile);
         waterMaterial.emissiveIntensity =
-          waterResponse.baseEmissive
-          + shimmer * waterResponse.emissiveAmplitude
-          + this.weatherProfile.intensity * 0.04;
+          waterResponse.baseEmissive +
+          shimmer * waterResponse.emissiveAmplitude +
+          this.weatherProfile.intensity * 0.04;
         waterMaterial.opacity = THREE.MathUtils.clamp(
           waterResponse.baseOpacity + shimmer * waterResponse.opacityAmplitude,
           0.78,
@@ -4768,7 +4814,8 @@ export class TerrainGenerator {
         positions.array[index] = x + deltaTime * this.weatherProfile.particleDrift;
         positions.array[index + 1] = y - deltaTime * this.weatherProfile.particleSpeed;
         positions.array[index + 2] =
-          z + deltaTime * Math.sin(this.time * 0.7 + i * 0.31) * this.weatherProfile.intensity * 1.5;
+          z +
+          deltaTime * Math.sin(this.time * 0.7 + i * 0.31) * this.weatherProfile.intensity * 1.5;
 
         if ((positions.array[index + 1] as number) < this.weatherParticleFloor) {
           // 以玩家最近位置为中心重生，保证飞到战场边缘时天气粒子不会"耗尽"
@@ -5559,7 +5606,11 @@ export class TerrainGenerator {
       }
     }
 
-    dock.position.set(dockDirection.x * (shoreRadius - 16), 0, dockDirection.y * (shoreRadius - 16));
+    dock.position.set(
+      dockDirection.x * (shoreRadius - 16),
+      0,
+      dockDirection.y * (shoreRadius - 16)
+    );
     dock.rotation.y = Math.atan2(dockDirection.x, dockDirection.y);
     // 码头桥面 + 10 根木桩合批（11 → 2 个 draw call）
     this.flushStaticBatch(dock, 'lakeDock');
@@ -5644,7 +5695,12 @@ export class TerrainGenerator {
 
   /** 沙漠远景台地（平顶山），强化地平线剪影 */
   private createDesertMesas(surfaceProfile: LevelSurfaceProfile): void {
-    const mesaColor = this.tintColor(surfaceProfile.groundDetailColor ?? 0x9d7e4e, 0.01, 0.04, -0.06);
+    const mesaColor = this.tintColor(
+      surfaceProfile.groundDetailColor ?? 0x9d7e4e,
+      0.01,
+      0.04,
+      -0.06
+    );
     for (let i = 0; i < 6; i++) {
       const angle = (i / 6) * Math.PI * 2 + Math.random() * 0.4;
       const distance = 1760 + Math.random() * 480;
@@ -5678,7 +5734,12 @@ export class TerrainGenerator {
 
   /** 风蚀岩拱 */
   private createDesertArches(surfaceProfile: LevelSurfaceProfile): void {
-    const archColor = this.tintColor(surfaceProfile.groundDetailColor ?? 0x9d7e4e, 0.005, 0.08, -0.02);
+    const archColor = this.tintColor(
+      surfaceProfile.groundDetailColor ?? 0x9d7e4e,
+      0.005,
+      0.08,
+      -0.02
+    );
     const archMaterial = new THREE.MeshStandardMaterial({
       color: archColor,
       roughness: 0.94,
@@ -5703,7 +5764,12 @@ export class TerrainGenerator {
 
   /** 游走的尘卷风：双层旋转半透明锥体 */
   private createDustDevils(surfaceProfile: LevelSurfaceProfile): void {
-    const devilColor = this.tintColor(surfaceProfile.groundAccentColor ?? 0xe0ba74, 0.01, -0.1, 0.04);
+    const devilColor = this.tintColor(
+      surfaceProfile.groundAccentColor ?? 0xe0ba74,
+      0.01,
+      -0.1,
+      0.04
+    );
     const devilCount = this.scaleCount(3);
 
     for (let i = 0; i < devilCount; i++) {
@@ -6310,7 +6376,8 @@ export class TerrainGenerator {
         0,
         1
       ),
-      fogDensity: environmentConfig.fogDensity ?? weatherConfig.fogDensity ?? baseProfile.fogDensity,
+      fogDensity:
+        environmentConfig.fogDensity ?? weatherConfig.fogDensity ?? baseProfile.fogDensity,
       cloudCount: Math.max(
         4,
         Math.round(
@@ -6322,13 +6389,19 @@ export class TerrainGenerator {
         )
       ),
       cloudOpacity:
-        weatherConfig.cloudOpacity ?? baseProfile.cloudOpacity + (environmentConfig.cloudCover ?? 0) * 0.08,
+        weatherConfig.cloudOpacity ??
+        baseProfile.cloudOpacity + (environmentConfig.cloudCover ?? 0) * 0.08,
       cloudTint: environmentConfig.cloudTint ?? weatherConfig.cloudTint ?? baseProfile.cloudTint,
-      cloudSpeed: environmentConfig.cloudSpeed ?? weatherConfig.cloudSpeed ?? baseProfile.cloudSpeed,
+      cloudSpeed:
+        environmentConfig.cloudSpeed ?? weatherConfig.cloudSpeed ?? baseProfile.cloudSpeed,
       cloudHeightMin:
-        environmentConfig.cloudHeightMin ?? weatherConfig.cloudHeightMin ?? baseProfile.cloudHeightMin,
+        environmentConfig.cloudHeightMin ??
+        weatherConfig.cloudHeightMin ??
+        baseProfile.cloudHeightMin,
       cloudHeightMax:
-        environmentConfig.cloudHeightMax ?? weatherConfig.cloudHeightMax ?? baseProfile.cloudHeightMax,
+        environmentConfig.cloudHeightMax ??
+        weatherConfig.cloudHeightMax ??
+        baseProfile.cloudHeightMax,
       particleCount:
         environmentConfig.particleCount ?? weatherConfig.particleCount ?? baseProfile.particleCount,
       particleSize:
@@ -6340,7 +6413,9 @@ export class TerrainGenerator {
       particleColor:
         environmentConfig.particleColor ?? weatherConfig.particleColor ?? baseProfile.particleColor,
       waterWaveScale:
-        environmentConfig.waterWaveScale ?? weatherConfig.waterWaveScale ?? baseProfile.waterWaveScale,
+        environmentConfig.waterWaveScale ??
+        weatherConfig.waterWaveScale ??
+        baseProfile.waterWaveScale,
       skyGlow: environmentConfig.skyGlow ?? weatherConfig.skyGlow ?? baseProfile.skyGlow,
       windAngle: weatherConfig.windAngle ?? baseProfile.windAngle,
     };
@@ -6771,19 +6846,19 @@ export class TerrainGenerator {
           ctx.arc(x, y, size * 0.3, 0, Math.PI * 2);
           ctx.fill();
           break;
-      case 'asphalt': {
-        const grain = 0.8 + Math.random() * 2.2;
-        ctx.fillRect(x, y, grain, grain);
-        if (Math.random() < 0.08) {
-          const crackLen = 3 + Math.random() * 8;
+        case 'asphalt': {
+          const grain = 0.8 + Math.random() * 2.2;
+          ctx.fillRect(x, y, grain, grain);
+          if (Math.random() < 0.08) {
+            const crackLen = 3 + Math.random() * 8;
             ctx.strokeStyle = this.toCanvasColor(detail, 0.14);
             ctx.beginPath();
             ctx.moveTo(x, y);
             ctx.lineTo(x + crackLen, y + (Math.random() - 0.5) * 2);
             ctx.stroke();
           }
-        break;
-      }
+          break;
+        }
         case 'water':
           ctx.fillRect(x, y, size * 1.8, 1 + Math.random() * 2);
           break;

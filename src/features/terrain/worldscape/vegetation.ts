@@ -238,7 +238,16 @@ export function buildVegetation(
       flatShading: true,
       roughness: 1,
     });
-    injectSnowAndWind(pineLeafMat, uniforms.snow, uniforms.time, uniforms.wind, 0.18, 6.0, 'pine', snowRange);
+    injectSnowAndWind(
+      pineLeafMat,
+      uniforms.snow,
+      uniforms.time,
+      uniforms.wind,
+      0.18,
+      6.0,
+      'pine',
+      snowRange
+    );
     injectSnowCover(pineTrunkMat, uniforms.snow, 'trunk', snowRange);
 
     const pineTrunks = new THREE.InstancedMesh(pine.trunk, pineTrunkMat, rule.count);
@@ -294,7 +303,16 @@ export function buildVegetation(
       flatShading: true,
       roughness: 1,
     });
-    injectSnowAndWind(leafLeafMat, uniforms.snow, uniforms.time, uniforms.wind, 0.22, 4.4, 'leaf', snowRange);
+    injectSnowAndWind(
+      leafLeafMat,
+      uniforms.snow,
+      uniforms.time,
+      uniforms.wind,
+      0.22,
+      4.4,
+      'leaf',
+      snowRange
+    );
     injectSnowCover(leafTrunkMat, uniforms.snow, 'trunk2', snowRange);
 
     const leafTrunks = new THREE.InstancedMesh(leaf.trunk, leafTrunkMat, rule.count);
@@ -452,7 +470,8 @@ function farPineGeometry(): THREE.BufferGeometry {
 /** 远景阔叶：一个二十面体椭球包住四个叶团（20 个三角形，近景 104 个） */
 function farBlobGeometry(foliage: THREE.BufferGeometry): THREE.BufferGeometry {
   foliage.computeBoundingBox();
-  const box = foliage.boundingBox ?? new THREE.Box3(new THREE.Vector3(-1, 2, -1), new THREE.Vector3(1, 4, 1));
+  const box =
+    foliage.boundingBox ?? new THREE.Box3(new THREE.Vector3(-1, 2, -1), new THREE.Vector3(1, 4, 1));
   const center = box.getCenter(new THREE.Vector3());
   const size = box.getSize(new THREE.Vector3());
   const blob = new THREE.IcosahedronGeometry(1, 0);
@@ -567,7 +586,13 @@ function buildLodTiles(
         near.add(nearMesh);
         disposables.push(nearMesh);
         if (layer.far) {
-          const farMesh = createTileMesh(layer.mesh, layer.far, indices, layer.castShadow, layer.margin);
+          const farMesh = createTileMesh(
+            layer.mesh,
+            layer.far,
+            indices,
+            layer.castShadow,
+            layer.margin
+          );
           far.add(farMesh);
           disposables.push(farMesh);
         }
@@ -590,7 +615,11 @@ function buildLodTiles(
   }
 }
 
-function registerScatterMesh(group: THREE.Group, mesh: THREE.InstancedMesh, castShadow: boolean): void {
+function registerScatterMesh(
+  group: THREE.Group,
+  mesh: THREE.InstancedMesh,
+  castShadow: boolean
+): void {
   mesh.castShadow = castShadow;
   mesh.receiveShadow = true;
   // 实例散布覆盖全图：禁用视锥剔除，避免按几何包围盒误剔除
