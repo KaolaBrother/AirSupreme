@@ -37,6 +37,7 @@ import {
 } from './worldscape/vegetation';
 import { injectWindSway } from './worldscape/shadermods';
 import { CloudField } from './worldscape/clouds';
+import { StaticBatcher, consolidateMaterialGroups } from './worldscape/staticBatch';
 import {
   createTerrainEnvironment,
   environmentSurfaceKind,
@@ -118,6 +119,21 @@ interface WeatherProfile {
   particleColor: THREE.ColorRepresentation;
   waterWaveScale: number;
   skyGlow: THREE.ColorRepresentation;
+}
+
+/** 城市楼群共享材质包（见 createCityBuildingKit） */
+interface CityBuildingKit {
+  facade: THREE.MeshStandardMaterial[];
+  billboard: THREE.MeshStandardMaterial[];
+  /** 摩天楼塔身/塔尖：顶点色 = 每栋楼的墙色 */
+  towerBody: THREE.MeshStandardMaterial;
+  /** 中层楼体/屋顶设备：顶点色 = 每栋楼的墙色 */
+  midriseBody: THREE.MeshStandardMaterial;
+  midriseStrip: THREE.MeshStandardMaterial;
+  antenna: THREE.MeshStandardMaterial;
+  tank: THREE.MeshStandardMaterial;
+  baseGlow: THREE.MeshStandardMaterial;
+  beaconMast: THREE.MeshStandardMaterial;
 }
 
 /** 湖畔调色板：所有兜底的最终回落 */
@@ -496,6 +512,16 @@ export class TerrainGenerator {
     return { time: this.worldscapeTime, wind: this.worldscapeWind, snow: this.worldscapeSnow };
   }
 
+  /**
+   * 静态合批：staging（未挂载的暂存组）里的普通网格按材质合并后挂到 terrainGroup，
+   * 每种材质只剩一个 draw call；返回生成的合批网格。
+   */
+  private flushStaticBatch(staging: THREE.Object3D, name: string): THREE.Mesh[] {
+    const batch = new StaticBatcher();
+    batch.addObject(staging);
+    return batch.flush(this.terrainGroup, name);
+  }
+
   /** 沿给定方向从湖心向外步进，找到水岸线半径（高度首次越过水位） */
   private findShorelineRadius(dirX: number, dirZ: number, fallback = 620): number {
     if (!this.stageField) return fallback;
@@ -563,6 +589,8 @@ export class TerrainGenerator {
         emissive: accentColor,
         emissiveIntensity: 1.15,
         side: THREE.DoubleSide,
+        // 平面窗片：双面透明材质默认拆成背面 + 正面两遍绘制，平面几何单遍即可（外观相同）
+        forceSinglePass: true,
       });
       const windowLights = new THREE.InstancedMesh(windowGeometry, windowMaterial, tint.count);
       for (let i = 0; i < tint.count; i++) {
@@ -601,6 +629,7 @@ export class TerrainGenerator {
       emissiveIntensity: 0.85,
       depthWrite: false,
       side: THREE.DoubleSide,
+      forceSinglePass: true,
     });
     const sideLineColor = this.tintColor(surfaceProfile.windowColor ?? 0x7ee6ff, 0.01, 0.18, 0.2);
     const sideBandMaterial = new THREE.MeshStandardMaterial({
@@ -614,23 +643,25 @@ export class TerrainGenerator {
       depthWrite: false,
     });
 
+    // 13 × 2 条走廊各 4 条光带：按材质合批（104 个网格 → 3 个）
+    const staging = new THREE.Group();
     const lineExtent = this.halfExtent * 2;
     for (let i = -6; i <= 6; i++) {
       const line = new THREE.Mesh(new THREE.PlaneGeometry(lineExtent, 3.2), roadGlowMaterial);
       line.rotation.x = -Math.PI / 2;
       line.position.set(0, -49.2, i * 250 + 7);
-      this.terrainGroup.add(line);
+      staging.add(line);
 
       const corridorBand = new THREE.Mesh(new THREE.PlaneGeometry(lineExtent, 16), lowBandMaterial);
       corridorBand.rotation.x = -Math.PI / 2;
       corridorBand.position.set(0, -49.34, i * 250);
-      this.terrainGroup.add(corridorBand);
+      staging.add(corridorBand);
 
       for (let side = -1; side <= 1; side += 2) {
         const sideBand = new THREE.Mesh(new THREE.PlaneGeometry(lineExtent, 2.2), sideBandMaterial);
         sideBand.rotation.x = -Math.PI / 2;
         sideBand.position.set(0, -49.22, i * 250 + side * 9);
-        this.terrainGroup.add(sideBand);
+        staging.add(sideBand);
       }
     }
 
@@ -638,20 +669,21 @@ export class TerrainGenerator {
       const line = new THREE.Mesh(new THREE.PlaneGeometry(3.2, lineExtent), roadGlowMaterial);
       line.rotation.x = -Math.PI / 2;
       line.position.set(i * 250 - 7, -49.2, 0);
-      this.terrainGroup.add(line);
+      staging.add(line);
 
       const corridorBand = new THREE.Mesh(new THREE.PlaneGeometry(16, lineExtent), lowBandMaterial);
       corridorBand.rotation.x = -Math.PI / 2;
       corridorBand.position.set(i * 250, -49.34, 0);
-      this.terrainGroup.add(corridorBand);
+      staging.add(corridorBand);
 
       for (let side = -1; side <= 1; side += 2) {
         const sideBand = new THREE.Mesh(new THREE.PlaneGeometry(2.2, lineExtent), sideBandMaterial);
         sideBand.rotation.x = -Math.PI / 2;
         sideBand.position.set(i * 250 + side * 9, -49.22, 0);
-        this.terrainGroup.add(sideBand);
+        staging.add(sideBand);
       }
     }
+    this.flushStaticBatch(staging, 'cityNightLights');
   }
 
   private createCitySurfaceBoundary(surfaceProfile: LevelSurfaceProfile): void {
@@ -665,6 +697,7 @@ export class TerrainGenerator {
       emissive: this.tintColor(borderColor, 0.04, 0.1, 0.08),
       emissiveIntensity: 0.2,
       side: THREE.DoubleSide,
+      forceSinglePass: true,
       depthWrite: false,
       polygonOffset: true,
       polygonOffsetFactor: -6,
@@ -679,6 +712,7 @@ export class TerrainGenerator {
       emissive: this.tintColor(surfaceProfile.plazaBaseColor ?? 0x808a98, 0.02, 0.22, 0.06),
       emissiveIntensity: 0.32,
       side: THREE.DoubleSide,
+      forceSinglePass: true,
       depthWrite: false,
       polygonOffset: true,
       polygonOffsetFactor: -7,
@@ -1591,6 +1625,7 @@ export class TerrainGenerator {
   /**
    * 创建美丽的棕榈树
    */
+
   private createBeautifulPalmTree(): THREE.Group {
     const palm = new THREE.Group();
 
@@ -1825,6 +1860,7 @@ export class TerrainGenerator {
         emissive: ambientCore,
         emissiveIntensity: 0.42,
         side: THREE.DoubleSide,
+        forceSinglePass: true,
         depthWrite: false,
         polygonOffset: true,
         polygonOffsetFactor: -10,
@@ -1846,12 +1882,14 @@ export class TerrainGenerator {
       emissive: this.tintColor(ambientEdge, 0.03, 0.2, -0.04),
       emissiveIntensity: 0.3,
       side: THREE.DoubleSide,
+      forceSinglePass: true,
       depthWrite: false,
       polygonOffset: true,
       polygonOffsetFactor: -11,
       polygonOffsetUnits: -11,
     });
 
+    const staging = new THREE.Group();
     const contourHeights = [-49.56, -49.535, -49.51];
     const contourWidths = [4000, 3280, 2560];
     const contourHeightsLength = [260, 336, 410];
@@ -1864,8 +1902,9 @@ export class TerrainGenerator {
       strip.position.set(0, contourHeights[i], -220 + i * 190);
       strip.renderOrder = 4;
       strip.receiveShadow = true;
-      this.terrainGroup.add(strip);
+      staging.add(strip);
     }
+    this.flushStaticBatch(staging, 'cityGroundContours');
   }
 
   /**
@@ -1903,6 +1942,7 @@ export class TerrainGenerator {
       emissiveIntensity: 1.05,
       depthWrite: false,
       side: THREE.DoubleSide,
+      forceSinglePass: true,
       polygonOffset: true,
       polygonOffsetFactor: -8,
       polygonOffsetUnits: -8,
@@ -1917,19 +1957,22 @@ export class TerrainGenerator {
       emissiveIntensity: 0.85,
       depthWrite: false,
       side: THREE.DoubleSide,
+      forceSinglePass: true,
       polygonOffset: true,
       polygonOffsetFactor: -9,
       polygonOffsetUnits: -9,
     });
 
     const roadExtent = this.halfExtent * 2; // 道路总长：覆盖整个 ±halfExtent 战场
+    // 26 条道路 × 4 层贴花按材质合批（104 个网格 → 3 个）
+    const staging = new THREE.Group();
 
     // 水平道路
     for (let i = -6; i <= 6; i++) {
       const corridor = new THREE.Mesh(new THREE.PlaneGeometry(roadExtent, 26), corridorCoreMaterial);
       corridor.rotation.x = -Math.PI / 2;
       corridor.position.set(0, -49.64, i * 250);
-      this.terrainGroup.add(corridor);
+      staging.add(corridor);
 
       for (let j = -1; j <= 1; j += 2) {
         const sideRibbon = new THREE.Mesh(
@@ -1938,13 +1981,13 @@ export class TerrainGenerator {
         );
         sideRibbon.rotation.x = -Math.PI / 2;
         sideRibbon.position.set(0, -49.6, i * 250 + j * 13);
-        this.terrainGroup.add(sideRibbon);
+        staging.add(sideRibbon);
       }
 
       const road = new THREE.Mesh(new THREE.PlaneGeometry(roadExtent, 20), roadMaterial);
       road.rotation.x = -Math.PI / 2;
       road.position.set(0, -49.9, i * 250);
-      this.terrainGroup.add(road);
+      staging.add(road);
     }
 
     // 道路标线（实例化：13 条横向道路 × 59 段虚线）
@@ -2008,7 +2051,7 @@ export class TerrainGenerator {
       const corridor = new THREE.Mesh(new THREE.PlaneGeometry(26, roadExtent), corridorCoreMaterial);
       corridor.rotation.x = -Math.PI / 2;
       corridor.position.set(i * 250, -49.64, 0);
-      this.terrainGroup.add(corridor);
+      staging.add(corridor);
 
       for (let j = -1; j <= 1; j += 2) {
         const sideRibbon = new THREE.Mesh(
@@ -2017,14 +2060,15 @@ export class TerrainGenerator {
         );
         sideRibbon.rotation.x = -Math.PI / 2;
         sideRibbon.position.set(i * 250 + j * 13, -49.6, 0);
-        this.terrainGroup.add(sideRibbon);
+        staging.add(sideRibbon);
       }
 
       const road = new THREE.Mesh(new THREE.PlaneGeometry(20, roadExtent), roadMaterial);
       road.rotation.x = -Math.PI / 2;
       road.position.set(i * 250, -49.9, 0);
-      this.terrainGroup.add(road);
+      staging.add(road);
     }
+    this.flushStaticBatch(staging, 'cityRoads');
   }
 
   private createCityBlocks(surfaceProfile: LevelSurfaceProfile): void {
@@ -2183,9 +2227,12 @@ export class TerrainGenerator {
 
     // 楼侧发光广告牌共享材质（3 张霓虹色块拼贴）
     const billboardMaterials = this.createBillboardMaterials();
+    const kit = this.createCityBuildingKit(surfaceProfile, facadeMaterials, billboardMaterials);
+    // 摩天楼 / 中层楼 / 地标塔楼的静态零件先挂在暂存组里，最后按材质合批（几百栋楼 → 十几个 draw call）
+    const staging = new THREE.Group();
 
     // 地标塔楼先落位（帝国大厦式尖塔/克莱斯勒式皇冠/双子玻璃塔），随机楼避让
-    const landmarkSpots = this.createCitySkylineLandmarks(surfaceProfile, facadeMaterials);
+    const landmarkSpots = this.createCitySkylineLandmarks(surfaceProfile, facadeMaterials, staging);
 
     // 屋顶细节收集点：随机摩天楼/中层楼登记屋顶，统一实例化铺空调机组/天线/红色警示灯
     const rooftopSpots: Array<{ x: number; z: number; topY: number; span: number }> = [];
@@ -2205,15 +2252,10 @@ export class TerrainGenerator {
       if (landmarkSpots.some((spot) => Math.hypot(x - spot.x, z - spot.z) < 60)) continue;
 
       const height = Math.random() < 0.25 ? 120 + Math.random() * 65 : 60 + Math.random() * 90;
-      const skyscraper = this.createSkyscraper(
-        surfaceProfile,
-        facadeMaterials,
-        height,
-        billboardMaterials
-      );
+      const skyscraper = this.createSkyscraper(surfaceProfile, kit, height);
       skyscraper.position.set(x, -50, z);
       skyscraper.rotation.y = Math.floor(Math.random() * 4) * (Math.PI / 2);
-      this.terrainGroup.add(skyscraper);
+      staging.add(skyscraper);
       rooftopSpots.push({ x, z, topY: -50 + height, span: 10 });
       placed++;
     }
@@ -2239,15 +2281,23 @@ export class TerrainGenerator {
       if (Math.abs(z - -500) < 20 || Math.abs(x - 500) < 20) continue;
 
       const height = 25 + Math.random() * 35;
-      const midrise = this.createMidriseBuilding(surfaceProfile, height);
+      const midrise = this.createMidriseBuilding(surfaceProfile, kit, height);
       midrise.position.set(x, -50, z);
       midrise.rotation.y = Math.floor(Math.random() * 4) * (Math.PI / 2);
-      this.terrainGroup.add(midrise);
+      staging.add(midrise);
       if (Math.random() < 0.6) {
         rooftopSpots.push({ x, z, topY: -50 + height, span: 7 });
       }
       placed++;
     }
+
+    // 合批：楼体按顶点色共用材质，立面/广告牌/天线/水箱/光带/警示灯各一个网格
+    const batch = new StaticBatcher();
+    batch.addObject(staging, (mesh) => {
+      const color: unknown = mesh.userData.batchColor;
+      return color instanceof THREE.Color ? color : undefined;
+    });
+    batch.flush(this.terrainGroup, 'cityBuildings');
 
     // 屋顶细节：实例化空调机组、屋顶水箱、天线杆与红色航空警示灯
     this.createRooftopGreebles(rooftopSpots);
@@ -2333,27 +2383,86 @@ export class TerrainGenerator {
     return texture;
   }
 
-  /** 摩天楼：阶梯收分塔身 + 密集窗格立面 + 塔尖/天线群/屋顶水箱/楼侧广告牌 */
-  private createSkyscraper(
+  /**
+   * 城市楼群共享材质：楼体用顶点色区分每栋楼的墙色（原先一栋楼一个材质），
+   * 天线 / 水箱 / 底层光带 / 警示灯杆 / 中层窗带原本参数完全相同，各共用一个，
+   * 这样整片楼群可以按材质合批。
+   */
+  private createCityBuildingKit(
     surfaceProfile: LevelSurfaceProfile,
     facadeMaterials: THREE.MeshStandardMaterial[],
-    height: number,
-    billboardMaterials: THREE.MeshStandardMaterial[] = []
+    billboardMaterials: THREE.MeshStandardMaterial[]
+  ): CityBuildingKit {
+    const tokens = this.designTokens;
+    const glowColor = this.tintColor(tokens.glow, 0.01, 0.1, 0.06);
+    const stripColor = surfaceProfile.windowColor ?? tokens.glow;
+    return {
+      facade: facadeMaterials,
+      billboard: billboardMaterials,
+      towerBody: new THREE.MeshStandardMaterial({
+        color: 0xffffff,
+        vertexColors: true,
+        roughness: 0.42,
+        metalness: 0.22,
+        emissive: 0x10131a,
+        emissiveIntensity: 0.06,
+      }),
+      midriseBody: new THREE.MeshStandardMaterial({
+        color: 0xffffff,
+        vertexColors: true,
+        roughness: 0.55,
+        metalness: 0.12,
+        emissive: 0x10131a,
+        emissiveIntensity: 0.05,
+      }),
+      midriseStrip: new THREE.MeshStandardMaterial({
+        color: this.tintColor(stripColor, 0, -0.15, -0.08),
+        emissive: stripColor,
+        emissiveIntensity: 0.55,
+        roughness: 0.3,
+        metalness: 0.1,
+      }),
+      antenna: new THREE.MeshStandardMaterial({
+        color: 0x888888,
+        roughness: 0.6,
+        metalness: 0.4,
+      }),
+      tank: new THREE.MeshStandardMaterial({
+        color: this.tintColor(tokens.structureAccent, 0, -0.12, -0.1),
+        roughness: 0.7,
+        metalness: 0.3,
+      }),
+      baseGlow: new THREE.MeshStandardMaterial({
+        color: this.tintColor(glowColor, -0.02, -0.05, 0.06),
+        emissive: glowColor,
+        emissiveIntensity: 0.78,
+        roughness: 0.22,
+        metalness: 0.28,
+        transparent: true,
+        opacity: 0.75,
+      }),
+      beaconMast: new THREE.MeshStandardMaterial({ color: 0x6a7280, roughness: 0.6, metalness: 0.4 }),
+    };
+  }
+
+  /**
+   * 摩天楼：阶梯收分塔身 + 密集窗格立面 + 塔尖/天线群/屋顶水箱/楼侧广告牌。
+   * 返回未挂载的 Group（由调用方并入合批）；塔身网格的 userData.batchColor 为本楼墙色。
+   */
+  private createSkyscraper(
+    surfaceProfile: LevelSurfaceProfile,
+    kit: CityBuildingKit,
+    height: number
   ): THREE.Group {
     const building = new THREE.Group();
     const tokens = this.designTokens;
 
-    const bodyMaterial = new THREE.MeshStandardMaterial({
-      color: new THREE.Color(surfaceProfile.buildingBaseColor ?? tokens.structure).offsetHSL(
-        (Math.random() - 0.5) * 0.02,
-        -0.02 + Math.random() * 0.04,
-        -0.1 + Math.random() * 0.14
-      ),
-      roughness: 0.42,
-      metalness: 0.22,
-      emissive: 0x10131a,
-      emissiveIntensity: 0.06,
-    });
+    const bodyColor = new THREE.Color(surfaceProfile.buildingBaseColor ?? tokens.structure).offsetHSL(
+      (Math.random() - 0.5) * 0.02,
+      -0.02 + Math.random() * 0.04,
+      -0.1 + Math.random() * 0.14
+    );
+    const bodyMaterial = kit.towerBody;
 
     const baseWidth = 17 + Math.random() * 13;
     const baseDepth = 17 + Math.random() * 13;
@@ -2376,11 +2485,12 @@ export class TerrainGenerator {
       body.position.y = tierBaseY + tierHeight / 2;
       body.castShadow = true;
       body.receiveShadow = true;
+      body.userData.batchColor = bodyColor;
       building.add(body);
 
       // 下部塔身四面贴密集窗格
       if (tier < facadeTiers) {
-        const facadeMaterial = facadeMaterials[Math.floor(Math.random() * facadeMaterials.length)];
+        const facadeMaterial = kit.facade[Math.floor(Math.random() * kit.facade.length)];
         const faces = [
           { x: 0, z: tierDepth / 2 + 0.06, rotY: 0, w: tierWidth },
           { x: 0, z: -tierDepth / 2 - 0.06, rotY: Math.PI, w: tierWidth },
@@ -2402,9 +2512,8 @@ export class TerrainGenerator {
     }
 
     // 楼侧发光广告牌（约 1/3 的楼，挂在底层立面外侧）
-    if (billboardMaterials.length > 0 && Math.random() < 0.34) {
-      const billboardMaterial =
-        billboardMaterials[Math.floor(Math.random() * billboardMaterials.length)];
+    if (kit.billboard.length > 0 && Math.random() < 0.34) {
+      const billboardMaterial = kit.billboard[Math.floor(Math.random() * kit.billboard.length)];
       const billboardWidth = baseWidth * 0.72;
       const billboard = new THREE.Mesh(
         new THREE.PlaneGeometry(billboardWidth, billboardWidth * 0.5),
@@ -2421,21 +2530,17 @@ export class TerrainGenerator {
         bodyMaterial
       );
       spire.position.y = height + 5;
+      spire.userData.batchColor = bodyColor;
       building.add(spire);
     }
 
     // 天线群
     if (Math.random() > 0.45) {
-      const antennaMaterial = new THREE.MeshStandardMaterial({
-        color: 0x888888,
-        roughness: 0.6,
-        metalness: 0.4,
-      });
       const antennaCount = 2 + Math.floor(Math.random() * 2);
       for (let a = 0; a < antennaCount; a++) {
         const antenna = new THREE.Mesh(
           new THREE.CylinderGeometry(0.12, 0.12, 4 + Math.random() * 5, 6),
-          antennaMaterial
+          kit.antenna
         );
         antenna.position.set(
           (Math.random() - 0.5) * baseWidth * 0.4,
@@ -2448,14 +2553,7 @@ export class TerrainGenerator {
 
     // 屋顶水箱（中间层顶部）
     if (Math.random() > 0.5) {
-      const tank = new THREE.Mesh(
-        new THREE.CylinderGeometry(1.7, 1.7, 3.2, 9),
-        new THREE.MeshStandardMaterial({
-          color: this.tintColor(tokens.structureAccent, 0, -0.12, -0.1),
-          roughness: 0.7,
-          metalness: 0.3,
-        })
-      );
+      const tank = new THREE.Mesh(new THREE.CylinderGeometry(1.7, 1.7, 3.2, 9), kit.tank);
       tank.position.set(
         baseWidth * 0.18,
         height * (tierRatios[0] + tierRatios[1]) + 1.6,
@@ -2465,28 +2563,16 @@ export class TerrainGenerator {
     }
 
     // 底层光带
-    const glowColor = this.tintColor(tokens.glow, 0.01, 0.1, 0.06);
     const baseGlow = new THREE.Mesh(
       new THREE.BoxGeometry(baseWidth + 0.2, 0.6, baseDepth + 0.2),
-      new THREE.MeshStandardMaterial({
-        color: this.tintColor(glowColor, -0.02, -0.05, 0.06),
-        emissive: glowColor,
-        emissiveIntensity: 0.78,
-        roughness: 0.22,
-        metalness: 0.28,
-        transparent: true,
-        opacity: 0.75,
-      })
+      kit.baseGlow
     );
     baseGlow.position.y = 0.3;
     building.add(baseGlow);
 
     // 高层建筑顶部红色航空障碍灯（共享材质统一闪烁）
     if (this.cityBeaconMaterial && height > 52) {
-      const beaconMast = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.12, 0.12, 3.4, 6),
-        new THREE.MeshStandardMaterial({ color: 0x6a7280, roughness: 0.6, metalness: 0.4 })
-      );
+      const beaconMast = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 3.4, 6), kit.beaconMast);
       beaconMast.position.y = height + 1.7;
       building.add(beaconMast);
 
@@ -2501,9 +2587,10 @@ export class TerrainGenerator {
     return building;
   }
 
-  /** 中层建筑：宿舍/办公体块 + 重复横向窗带 */
+  /** 中层建筑：宿舍/办公体块 + 重复横向窗带（返回未挂载的 Group，由调用方并入合批） */
   private createMidriseBuilding(
     surfaceProfile: LevelSurfaceProfile,
+    kit: CityBuildingKit,
     height: number
   ): THREE.Group {
     const building = new THREE.Group();
@@ -2511,37 +2598,25 @@ export class TerrainGenerator {
     const width = 13 + Math.random() * 12;
     const depth = 11 + Math.random() * 10;
 
-    const bodyMaterial = new THREE.MeshStandardMaterial({
-      color: new THREE.Color(surfaceProfile.buildingBaseColor ?? tokens.structure).offsetHSL(
-        (Math.random() - 0.5) * 0.015,
-        -0.03 + Math.random() * 0.04,
-        -0.05 + Math.random() * 0.1
-      ),
-      roughness: 0.55,
-      metalness: 0.12,
-      emissive: 0x10131a,
-      emissiveIntensity: 0.05,
-    });
+    const bodyColor = new THREE.Color(surfaceProfile.buildingBaseColor ?? tokens.structure).offsetHSL(
+      (Math.random() - 0.5) * 0.015,
+      -0.03 + Math.random() * 0.04,
+      -0.05 + Math.random() * 0.1
+    );
+    const bodyMaterial = kit.midriseBody;
     const body = new THREE.Mesh(new THREE.BoxGeometry(width, height, depth), bodyMaterial);
     body.position.y = height / 2;
     body.castShadow = true;
     body.receiveShadow = true;
+    body.userData.batchColor = bodyColor;
     building.add(body);
 
     // 重复窗带：每隔一层一条横贯的发光带
-    const stripColor = surfaceProfile.windowColor ?? tokens.glow;
-    const stripMaterial = new THREE.MeshStandardMaterial({
-      color: this.tintColor(stripColor, 0, -0.15, -0.08),
-      emissive: stripColor,
-      emissiveIntensity: 0.55,
-      roughness: 0.3,
-      metalness: 0.1,
-    });
     const stripCount = Math.max(2, Math.floor(height / 8));
     for (let s = 0; s < stripCount; s++) {
       const strip = new THREE.Mesh(
         new THREE.BoxGeometry(width + 0.12, 1.1, depth + 0.12),
-        stripMaterial
+        kit.midriseStrip
       );
       strip.position.y = 4 + s * (height - 6) / stripCount;
       building.add(strip);
@@ -2554,6 +2629,7 @@ export class TerrainGenerator {
         bodyMaterial
       );
       rooftop.position.y = height + 1.1;
+      rooftop.userData.batchColor = bodyColor;
       building.add(rooftop);
     }
 
@@ -2577,6 +2653,7 @@ export class TerrainGenerator {
   private createCitySkylineLandmarks(
     surfaceProfile: LevelSurfaceProfile,
     facadeMaterials: THREE.MeshStandardMaterial[],
+    staging: THREE.Object3D
   ): Array<{ x: number; z: number }> {
     const tokens = this.designTokens;
     const spots: Array<{ x: number; z: number }> = [];
@@ -2641,7 +2718,7 @@ export class TerrainGenerator {
       }
       empire.position.set(330, -50, -310);
       empire.rotation.y = 0.4;
-      this.terrainGroup.add(empire);
+      staging.add(empire);
       spots.push({ x: 330, z: -310 });
     }
 
@@ -2697,7 +2774,7 @@ export class TerrainGenerator {
         chrysler.add(beacon);
       }
       chrysler.position.set(-360, -50, 290);
-      this.terrainGroup.add(chrysler);
+      staging.add(chrysler);
       spots.push({ x: -360, z: 290 });
     }
 
@@ -2746,7 +2823,7 @@ export class TerrainGenerator {
           tower.add(beacon);
         }
         tower.position.set(spot.x, -50, spot.z);
-        this.terrainGroup.add(tower);
+        staging.add(tower);
         spots.push(spot);
       });
     }
@@ -2788,12 +2865,19 @@ export class TerrainGenerator {
       metalness: 0.2,
     });
 
-    // BoxGeometry 面序：+x, -x, +y(顶), -y(底), +z, -z
+    // BoxGeometry 面序：+x, -x, +y(顶), -y(底), +z, -z；同材质的面分组合并（6 → 2 个 draw call）
     const towerGeometry = new THREE.BoxGeometry(1, 1, 1);
     towerGeometry.translate(0, 0.5, 0);
     const towers = new THREE.InstancedMesh(
       towerGeometry,
-      [glassFacade, glassFacade, roofMaterial, roofMaterial, glassFacade, glassFacade],
+      consolidateMaterialGroups(towerGeometry, [
+        glassFacade,
+        glassFacade,
+        roofMaterial,
+        roofMaterial,
+        glassFacade,
+        glassFacade,
+      ]),
       towerCount
     );
     towers.castShadow = true;
@@ -3126,6 +3210,7 @@ export class TerrainGenerator {
     });
     const pathSegments = 16;
     const lampSpots: Array<{ x: number; z: number }> = [];
+    const pathStaging = new THREE.Group();
     for (let i = 0; i < pathSegments; i++) {
       const t0 = i / pathSegments;
       const t1 = (i + 1) / pathSegments;
@@ -3139,11 +3224,12 @@ export class TerrainGenerator {
       strip.rotation.z = Math.atan2(-(z1 - z0), x1 - x0);
       strip.position.set((x0 + x1) / 2, -48.98, (z0 + z1) / 2);
       strip.renderOrder = 7;
-      this.terrainGroup.add(strip);
+      pathStaging.add(strip);
       if (i % 2 === 0) {
         lampSpots.push({ x: x0, z: z0 + 8 });
       }
     }
+    this.flushStaticBatch(pathStaging, 'cityParkPath');
 
     // 公园外周一圈暖光路灯，让公园边界在夜里读得出来
     const perimeterLampCount = 14;
@@ -3254,6 +3340,8 @@ export class TerrainGenerator {
       metalness: 0.3,
     });
 
+    // 20 段桥面 + 护栏按材质合批（60 个网格 → 2 个）
+    const deckStaging = new THREE.Group();
     for (let i = 0; i < segments; i++) {
       const a0 = (i / segments) * Math.PI * 2;
       const a1 = ((i + 1) / segments) * Math.PI * 2;
@@ -3275,8 +3363,9 @@ export class TerrainGenerator {
         rail.position.set(0, 1.3, side * 12.6);
         segment.add(rail);
       }
-      this.terrainGroup.add(segment);
+      deckStaging.add(segment);
     }
+    this.flushStaticBatch(deckStaging, 'cityRingHighway');
 
     // 支撑柱（每 ~80 米一根，实例化）
     const pillarCount = Math.floor((Math.PI * 2 * ringRadius) / 80);
@@ -3368,6 +3457,8 @@ export class TerrainGenerator {
       flatShading: true,
     });
 
+    // 倒塌/倾斜建筑与弹坑环丘共用废墟材质：合批成一个网格
+    const ruinStaging = new THREE.Group();
     // 倒塌/倾斜建筑：错位堆叠体块 + 倾斜旋转
     const collapsedCount = 9;
     for (let i = 0; i < collapsedCount; i++) {
@@ -3406,7 +3497,7 @@ export class TerrainGenerator {
       ruin.position.set(Math.cos(angle) * radius, -50, Math.sin(angle) * radius);
       ruin.rotation.z = (Math.random() - 0.5) * 0.22;
       ruin.rotation.y = Math.random() * Math.PI * 2;
-      this.terrainGroup.add(ruin);
+      ruinStaging.add(ruin);
     }
 
     // 瓦砾堆：实例化十二面体碎块，聚簇分布
@@ -3449,8 +3540,9 @@ export class TerrainGenerator {
       );
       crater.rotation.x = -Math.PI / 2;
       crater.position.set(spot.x, -50 + spot.radius * 0.05, spot.z);
-      this.terrainGroup.add(crater);
+      ruinStaging.add(crater);
     }
+    this.flushStaticBatch(ruinStaging, 'cityRuins');
 
     // 城市外缘起伏丘陵（1550-2100）
     const hillCount = 10;
@@ -3491,6 +3583,8 @@ export class TerrainGenerator {
       metalness: 0.4,
     });
 
+    // 塔吊 / 水塔 / 体育场的静态零件合批（闪烁警示灯与体育场灯带材质各自独立，仍各成一组）
+    const staging = new THREE.Group();
     // 塔吊（T 形剪影 + 闪烁警示灯）
     const craneSpots = [
       { x: 620, z: 180, height: 64, jib: 42, yaw: 0.6 },
@@ -3533,7 +3627,7 @@ export class TerrainGenerator {
 
       crane.position.set(spot.x, -50, spot.z);
       crane.rotation.y = spot.yaw;
-      this.terrainGroup.add(crane);
+      staging.add(crane);
     }
 
     // 水塔
@@ -3561,7 +3655,7 @@ export class TerrainGenerator {
     tankCap.position.y = 36;
     waterTower.add(tankCap);
     waterTower.position.set(-820, -50, -380);
-    this.terrainGroup.add(waterTower);
+    staging.add(waterTower);
 
     // 低矮体育场：环形碗体 + 顶缘灯带
     const stadium = new THREE.Group();
@@ -3607,7 +3701,8 @@ export class TerrainGenerator {
     });
 
     stadium.position.set(1080, -50, 640);
-    this.terrainGroup.add(stadium);
+    staging.add(stadium);
+    this.flushStaticBatch(staging, 'cityLandmarks');
   }
 
   /**
@@ -3647,12 +3742,14 @@ export class TerrainGenerator {
       emissive: 0x141a22,
       emissiveIntensity: 0.1,
     });
+    const wallStaging = new THREE.Group();
     for (const side of [-1, 1]) {
       const wall = new THREE.Mesh(new THREE.BoxGeometry(6, 2.8, 4000), embankmentMaterial);
       wall.position.set(riverCenterX + side * riverHalfWidth, -48.6, 0);
       wall.receiveShadow = true;
-      this.terrainGroup.add(wall);
+      wallStaging.add(wall);
     }
+    this.flushStaticBatch(wallStaging, 'cityRiverEmbankment');
 
     // 岸灯：沿两岸的暖光点（实例化）
     const bankLampCount = this.scaleCount(48);
@@ -3700,26 +3797,28 @@ export class TerrainGenerator {
       metalness: 0.5,
     });
 
+    // 桥面 / 护栏 / 引桥 / 桥塔 / 警示灯 / 主缆全是静态零件：按材质合批
+    const staging = new THREE.Group();
     // 桥面 + 护栏
     const deckLength = deckEndX - deckStartX;
     const deck = new THREE.Mesh(new THREE.BoxGeometry(deckLength, 1.6, 22), steelMaterial);
     deck.position.set((deckStartX + deckEndX) / 2, deckTopY - 0.8, bridgeZ);
     deck.castShadow = true;
-    this.terrainGroup.add(deck);
+    staging.add(deck);
     for (const side of [-1, 1]) {
       const rail = new THREE.Mesh(new THREE.BoxGeometry(deckLength, 1.1, 0.4), cableMaterial);
       rail.position.set((deckStartX + deckEndX) / 2, deckTopY + 0.55, bridgeZ + side * 10.6);
-      this.terrainGroup.add(rail);
+      staging.add(rail);
     }
 
     // 城侧引桥坡道 + 远侧桥台
     const ramp = new THREE.Mesh(new THREE.BoxGeometry(84, 1.4, 22), steelMaterial);
     ramp.position.set(deckStartX - 41, (deckTopY + -50) / 2 + 0.5, bridgeZ);
     ramp.rotation.z = Math.atan2(deckTopY - -50, 82);
-    this.terrainGroup.add(ramp);
+    staging.add(ramp);
     const abutment = new THREE.Mesh(new THREE.BoxGeometry(18, 9.5, 24), steelMaterial);
     abutment.position.set(deckEndX - 6, -45.2, bridgeZ);
-    this.terrainGroup.add(abutment);
+    staging.add(abutment);
 
     // 双 H 形桥塔（塔腿立于水中，顶上红色警示灯）
     for (const towerX of towerXs) {
@@ -3727,12 +3826,12 @@ export class TerrainGenerator {
         const leg = new THREE.Mesh(new THREE.BoxGeometry(3, towerTopY - -50, 3), steelMaterial);
         leg.position.set(towerX, (towerTopY + -50) / 2, bridgeZ + side * 8);
         leg.castShadow = true;
-        this.terrainGroup.add(leg);
+        staging.add(leg);
       }
       for (const beamY of [deckTopY - 3, towerTopY - 4]) {
         const beam = new THREE.Mesh(new THREE.BoxGeometry(3, 3, 19), steelMaterial);
         beam.position.set(towerX, beamY, bridgeZ);
-        this.terrainGroup.add(beam);
+        staging.add(beam);
       }
       if (this.cityBeaconMaterial) {
         const beacon = new THREE.Mesh(
@@ -3740,7 +3839,7 @@ export class TerrainGenerator {
           this.cityBeaconMaterial
         );
         beacon.position.set(towerX, towerTopY + 1, bridgeZ);
-        this.terrainGroup.add(beacon);
+        staging.add(beacon);
       }
     }
 
@@ -3777,8 +3876,10 @@ export class TerrainGenerator {
     cableGeometries.forEach((geometry) => geometry.dispose());
     if (mergedCables) {
       const cables = new THREE.Mesh(mergedCables, cableMaterial);
-      this.terrainGroup.add(cables);
+      staging.add(cables);
     }
+    this.flushStaticBatch(staging, 'citySuspensionBridge');
+    mergedCables?.dispose();
 
     // 竖直吊索：沿中跨等距下挂到桥面（实例化，按吊索长度缩放）
     const mainSpanCurve = new THREE.QuadraticBezierCurve3(
@@ -3879,6 +3980,8 @@ export class TerrainGenerator {
       { axis: 'z', fixedCoord: 500, deckHeight: 38, halfLength: 1550 }, // 沿 x=500（上层）
     ];
     const dummy = new THREE.Object3D();
+    // 两条高架的桥面 / 护栏 / 匝道按材质合批
+    const staging = new THREE.Group();
 
     for (const line of lines) {
       const deckTopY = -50 + line.deckHeight;
@@ -3898,7 +4001,7 @@ export class TerrainGenerator {
         horizontal ? line.fixedCoord : 0
       );
       deck.castShadow = true;
-      this.terrainGroup.add(deck);
+      staging.add(deck);
       for (const side of [-1, 1]) {
         const rail = new THREE.Mesh(
           horizontal
@@ -3911,7 +4014,7 @@ export class TerrainGenerator {
           deckTopY + 0.55,
           horizontal ? line.fixedCoord + side * 11.6 : 0
         );
-        this.terrainGroup.add(rail);
+        staging.add(rail);
       }
 
       // 桥墩（实例化，每 ~78 米）
@@ -3978,7 +4081,7 @@ export class TerrainGenerator {
         } else {
           ramp.rotation.x = end * slope;
         }
-        this.terrainGroup.add(ramp);
+        staging.add(ramp);
       }
 
       // 双向车流
@@ -4003,6 +4106,7 @@ export class TerrainGenerator {
         speedRange: [55, 100],
       });
     }
+    this.flushStaticBatch(staging, 'cityExpressways');
   }
 
   /** 沿直线循环的车灯流：白头灯/红尾灯小面片沿固定轴往复（实例化 + animatedProps 驱动） */
@@ -4178,7 +4282,14 @@ export class TerrainGenerator {
     const totalCars = consists.reduce((sum, consist) => sum + consist.cars, 0);
     const trains = new THREE.InstancedMesh(
       carGeometry,
-      [carRoofMaterial, carRoofMaterial, carRoofMaterial, carRoofMaterial, carSideMaterial, carSideMaterial],
+      consolidateMaterialGroups(carGeometry, [
+        carRoofMaterial,
+        carRoofMaterial,
+        carRoofMaterial,
+        carRoofMaterial,
+        carSideMaterial,
+        carSideMaterial,
+      ]),
       totalCars
     );
     trains.frustumCulled = false;
@@ -5907,6 +6018,8 @@ export class TerrainGenerator {
           opacity: 0.07,
           blending: THREE.AdditiveBlending,
           side: THREE.DoubleSide,
+          // 加法混合与绘制顺序无关：单遍绘制双面即可（默认会拆成背面 + 正面两遍）
+          forceSinglePass: true,
           depthWrite: false,
           fog: false,
           toneMapped: false,
@@ -6005,6 +6118,8 @@ export class TerrainGenerator {
       metalness: 0.4,
     });
 
+    // 灯柱 / 背板共用一个材质合批；每块招牌的两面灯箱共用本招牌的闪烁材质，各合成一个网格
+    const staging = new THREE.Group();
     spots.forEach((spot, index) => {
       const sign = new THREE.Group();
       sign.name = 'neonSign';
@@ -6022,6 +6137,8 @@ export class TerrainGenerator {
         transparent: true,
         opacity: 0.85,
         side: THREE.DoubleSide,
+        // 两面灯箱之间隔着不透明背板，任一视角只看得到一面：单遍绘制与默认两遍外观相同
+        forceSinglePass: true,
         toneMapped: false,
       });
       const panel = new THREE.Mesh(new THREE.PlaneGeometry(15, 7), neonMaterial);
@@ -6034,7 +6151,7 @@ export class TerrainGenerator {
 
       sign.position.set(spot.x, -50, spot.z);
       sign.rotation.y = spot.rotationY;
-      this.terrainGroup.add(sign);
+      staging.add(sign);
 
       const flickerSpeed = 1.6 + Math.random() * 1.8;
       const phase = Math.random() * Math.PI * 2;
@@ -6044,6 +6161,7 @@ export class TerrainGenerator {
         neonMaterial.opacity = base * dropout;
       });
     });
+    this.flushStaticBatch(staging, 'cityNeonSigns');
   }
 
   private resolveWeatherProfile(config: LevelConfig): WeatherProfile {
