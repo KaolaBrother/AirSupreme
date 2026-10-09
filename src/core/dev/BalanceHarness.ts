@@ -1048,11 +1048,8 @@ export function installBalanceHarness(access: DevHookAccess): BalanceHarnessApi 
       world.bossSpeed = Number.isFinite(bodySpeed) && bodySpeed < 250 ? bodySpeed : 0;
       const missileSystem = boss.getMissileSystem();
       if (missileSystem) {
-        // 告警只看正在追踪玩家的导弹（与 HUD 一致：被热焰弹诱骗走的不再告警）
-        for (const missile of missileSystem.getMissiles()) {
-          const mesh = missile.getMesh();
+        for (const mesh of missileSystem.getMissileMeshes()) {
           missileSet.add(mesh);
-          if (!missile.isTargetingPlayer) continue;
           nearestMissile = Math.min(nearestMissile, mesh.position.distanceTo(world.position));
         }
       }
