@@ -60,7 +60,10 @@ const MISSILE_WARNING_RADIO_COOLDOWN = 9;
  * 首次遭遇台词不经过这里：UnitSystem.onFirstContact → presentation.unitFirstContact
  * （UNIT_FIRST_CONTACT_RADIO，友军预警机 / 护卫舰同样走这条路径）。
  */
-const ALLY_LOSS_RADIO: Readonly<Partial<Record<string, GenericRadioKey>>> = {};
+const ALLY_LOSS_RADIO: Readonly<Partial<Record<string, GenericRadioKey>>> = {
+  ALLY_AWACS: 'awacs-lost',
+  ALLY_FRIGATE: 'frigate-lost',
+};
 
 /**
  * 地面 / 海上 / 空中单位的运行时接线（api-spec §3 + integration-notes「Units」）：
