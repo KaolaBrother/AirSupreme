@@ -8,6 +8,7 @@ import {
 } from '@/core/save/SaveSystem';
 import {
   DEFAULT_START_FLOW_SETTINGS,
+  DEFAULT_VOICE_VOLUME,
   START_MENU_STORAGE_KEY,
   createSessionSettingsSnapshot,
   loadStartFlowSettings,
@@ -140,6 +141,77 @@ describe('SessionSettings campaign fields', () => {
     expect(loaded.startLevel).toBe(3);
     expect(loaded.gameMode).toBe('boss');
     expect(loaded.testScore).toBe(5000);
+  });
+});
+
+describe('SessionSettings voice volume', () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
+  afterEach(() => {
+    window.localStorage.clear();
+  });
+
+  it('defaults to 0.9', () => {
+    expect(DEFAULT_VOICE_VOLUME).toBe(0.9);
+    expect(DEFAULT_START_FLOW_SETTINGS.voiceVolume).toBe(0.9);
+    expect(normalizeStartFlowSettings().voiceVolume).toBe(0.9);
+    expect(normalizeStartFlowSettings({}).voiceVolume).toBe(0.9);
+    expect(loadStartFlowSettings().voiceVolume).toBe(0.9);
+  });
+
+  it('clamps to 0..1 and falls back to the default for junk', () => {
+    expect(normalizeStartFlowSettings({ voiceVolume: 0 }).voiceVolume).toBe(0);
+    expect(normalizeStartFlowSettings({ voiceVolume: 0.35 }).voiceVolume).toBe(0.35);
+    expect(normalizeStartFlowSettings({ voiceVolume: 1.6 }).voiceVolume).toBe(1);
+    expect(normalizeStartFlowSettings({ voiceVolume: -0.2 }).voiceVolume).toBe(0);
+    expect(normalizeStartFlowSettings({ voiceVolume: Number.NaN }).voiceVolume).toBe(0.9);
+    const junk = { voiceVolume: 'loud' } as unknown as Parameters<
+      typeof normalizeStartFlowSettings
+    >[0];
+    expect(normalizeStartFlowSettings(junk).voiceVolume).toBe(0.9);
+  });
+
+  it('persists, and later partial saves keep it', () => {
+    saveStartFlowSettings({ voiceVolume: 0.3 });
+    const stored = JSON.parse(window.localStorage.getItem(START_MENU_STORAGE_KEY) ?? '{}') as {
+      voiceVolume?: unknown;
+    };
+    expect(stored.voiceVolume).toBe(0.3);
+    expect(loadStartFlowSettings().voiceVolume).toBe(0.3);
+
+    saveStartFlowSettings({ musicVolume: 0.2, language: 'zh-CN' });
+    expect(loadStartFlowSettings().voiceVolume).toBe(0.3);
+    saveStartFlowSettings({ voiceVolume: 0 });
+    expect(loadStartFlowSettings().voiceVolume).toBe(0);
+  });
+
+  it('loads settings saved before the voice option existed with the default', () => {
+    window.localStorage.setItem(
+      START_MENU_STORAGE_KEY,
+      JSON.stringify({
+        difficulty: 2,
+        sfxVolume: 0.4,
+        musicVolume: 0.6,
+        qualityPreset: 'quality',
+        tutorialEnabled: true,
+        playerLives: 4,
+        startLevel: 5,
+        gameMode: 'normal',
+        testScore: 0,
+        cameraMode: 'first-person',
+        language: 'zh-CN',
+      })
+    );
+
+    const loaded = loadStartFlowSettings();
+    expect(loaded.voiceVolume).toBe(0.9);
+    expect(loaded.sfxVolume).toBe(0.4);
+    expect(loaded.musicVolume).toBe(0.6);
+    expect(loaded.cameraMode).toBe('first-person');
+    expect(loaded.language).toBe('zh-CN');
+    expect(loaded.startLevel).toBe(5);
   });
 });
 
@@ -356,6 +428,66 @@ describe('StartMenu campaign additions', () => {
       setLocale('en');
       expect(rowText('language-row')).toContain('English');
       expect(startButtonText()).toBe('Start Game');
+    });
+  });
+
+  describe('#voice-row', () => {
+    const VOICE_LABEL = { en: 'Voice volume', zh: '语音音量' };
+
+    function voiceValue(): string {
+      return document.getElementById('voice-value')?.textContent ?? '';
+    }
+
+    it.each(LOCALES)(
+      'shows the voice volume, 90% by default, in the interface language (%s)',
+      (locale) => {
+        setLocale(locale);
+        createMenu();
+        expect(rowText('voice-row')).toContain(textIn(VOICE_LABEL, locale));
+        expect(voiceValue()).toBe('90%');
+
+        const other = locale === 'en' ? 'zh-CN' : 'en';
+        setLocale(other);
+        expect(rowText('voice-row')).toContain(textIn(VOICE_LABEL, other));
+        expect(voiceValue()).toBe('90%');
+      }
+    );
+
+    it('steps by 10% between 0% (text only) and 100%, persisting each step', () => {
+      createMenu();
+      rowButton('voice-row', '+').click();
+      expect(voiceValue()).toBe('100%');
+      rowButton('voice-row', '+').click();
+      expect(voiceValue()).toBe('100%');
+      expect(loadStartFlowSettings().voiceVolume).toBe(1);
+
+      for (let step = 0; step < 12; step++) {
+        rowButton('voice-row', '-').click();
+      }
+      expect(voiceValue()).toBe('0%');
+      expect(loadStartFlowSettings().voiceVolume).toBe(0);
+
+      rowButton('voice-row', '+').click();
+      expect(voiceValue()).toBe('10%');
+      expect(loadStartFlowSettings().voiceVolume).toBeCloseTo(0.1, 5);
+    });
+
+    it('hands the voice volume to onStart', () => {
+      const startMenu = createMenu();
+      rowButton('voice-row', '-').click();
+      rowButton('voice-row', '-').click();
+      let started: GameSettings | null = null;
+      startMenu.setOnStart((settings) => {
+        started = settings;
+      });
+      (document.getElementById('start-btn') as HTMLButtonElement).click();
+      expect((started as GameSettings | null)?.voiceVolume).toBeCloseTo(0.7, 5);
+    });
+
+    it('opens with the persisted voice volume', () => {
+      saveStartFlowSettings({ voiceVolume: 0.3 });
+      createMenu();
+      expect(voiceValue()).toBe('30%');
     });
   });
 
