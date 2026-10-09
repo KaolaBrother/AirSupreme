@@ -4,6 +4,7 @@ import { Faction } from '@/core/Faction';
 import { BOSS_CONFIGS, BossType, getBossForLevel } from '@/features/boss/BossTypes';
 import { getCampaignChapter } from '@/features/campaign/CampaignData';
 import { ENEMY_CONFIGS, EnemyType } from '@/features/enemy/EnemyTypes';
+import { tr } from '@/i18n';
 import { OffscreenChevron } from '@/ui/OffscreenChevron';
 import { HUD_COLORS } from '@/ui/theme/hudTokens';
 
@@ -48,7 +49,7 @@ function buildBossLabels(): ReadonlyMap<string, string> {
   for (const type of Object.values(BossType)) {
     const key = `BOSS_${type}`;
     if (!labels.has(key)) {
-      labels.set(key, BOSS_CONFIGS[type].name.replace(/\s*Boss$/i, '') || FALLBACK_ENEMY_LABEL);
+      labels.set(key, tr(BOSS_CONFIGS[type].name).replace(/\s*Boss$/i, '') || FALLBACK_ENEMY_LABEL);
     }
   }
   return labels;
@@ -74,7 +75,7 @@ function resolveTargetLabel(mesh: Object3D, isFriendly: boolean): string {
     if (name.startsWith(prefix)) return label;
   }
   if (isEnemyType(name)) {
-    const typeName = ENEMY_CONFIGS[name].name;
+    const typeName = tr(ENEMY_CONFIGS[name].name);
     return isFriendly ? `${FALLBACK_FRIENDLY_LABEL}${typeName}` : typeName;
   }
   if (name.startsWith('UNIT_') || mesh.userData.unitType !== undefined) {
@@ -344,7 +345,8 @@ export class EnemyHealthBars {
       screenPos.z < 1;
     const visibilityChanged = inView !== barData.wasInView;
     const needsPositionUpdate = inView && (visibilityChanged || cameraMoved || targetMoved);
-    const needsArrowUpdate = !inView && (visibilityChanged || cameraMoved || targetMoved || playerMoved);
+    const needsArrowUpdate =
+      !inView && (visibilityChanged || cameraMoved || targetMoved || playerMoved);
 
     if (!needsHealthUpdate && !needsPositionUpdate && !needsArrowUpdate && !visibilityChanged) {
       return;
@@ -581,10 +583,7 @@ export class EnemyHealthBars {
   /**
    * 世界坐标转屏幕坐标
    */
-  private worldToScreen(
-    position: Vector3,
-    camera: Camera
-  ): { x: number; y: number; z: number } {
+  private worldToScreen(position: Vector3, camera: Camera): { x: number; y: number; z: number } {
     this.screenVector.copy(position).project(camera);
 
     // NDC: x, y 范围是 -1 到 1

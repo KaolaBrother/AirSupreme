@@ -1,3 +1,5 @@
+import type { LocalizedText } from '@/i18n';
+
 /**
  * 敌人类型枚举
  */
@@ -23,7 +25,8 @@ export enum EnemyAIState {
  */
 export interface EnemyConfig {
   type: EnemyType;
-  name: string;
+  /** 显示名（血条 / 模型预览），中英双语 */
+  name: LocalizedText;
 
   // 基础属性
   health: number;
@@ -73,7 +76,7 @@ export interface EnemyConfig {
 export const ENEMY_CONFIGS: Record<EnemyType, EnemyConfig> = {
   [EnemyType.SCOUT]: {
     type: EnemyType.SCOUT,
-    name: '侦察机',
+    name: { en: 'Scout', zh: '侦察机' },
     health: 60,
     speed: 40, // 基于导弹（80）的一半
     damage: 5, // 伤害减半
@@ -102,7 +105,7 @@ export const ENEMY_CONFIGS: Record<EnemyType, EnemyConfig> = {
 
   [EnemyType.FIGHTER]: {
     type: EnemyType.FIGHTER,
-    name: '战斗机',
+    name: { en: 'Fighter', zh: '战斗机' },
     health: 100,
     speed: 55, // 比导弹慢30%
     damage: 7.5, // 伤害减半
@@ -131,7 +134,7 @@ export const ENEMY_CONFIGS: Record<EnemyType, EnemyConfig> = {
 
   [EnemyType.HEAVY]: {
     type: EnemyType.HEAVY,
-    name: '重型轰炸机',
+    name: { en: 'Heavy Bomber', zh: '重型轰炸机' },
     health: 300,
     speed: 35, // 慢速但转向慢
     damage: 15, // 伤害减半
@@ -160,7 +163,7 @@ export const ENEMY_CONFIGS: Record<EnemyType, EnemyConfig> = {
 
   [EnemyType.SNIPER]: {
     type: EnemyType.SNIPER,
-    name: '狙击机',
+    name: { en: 'Sniper', zh: '狙击机' },
     health: 80,
     speed: 45, // 中等速度
     damage: 20, // 伤害减半
@@ -189,7 +192,7 @@ export const ENEMY_CONFIGS: Record<EnemyType, EnemyConfig> = {
 
   [EnemyType.ACE]: {
     type: EnemyType.ACE,
-    name: '王牌飞行员',
+    name: { en: 'Ace', zh: '王牌飞行员' },
     health: 160,
     speed: 70, // 接近导弹速度
     damage: 12.5, // 伤害减半

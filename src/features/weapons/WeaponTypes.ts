@@ -1,4 +1,5 @@
 import { SPECIAL_WEAPON_IDS, type SpecialWeaponId } from '@/core/CombatContracts';
+import type { LocalizedText } from '@/i18n';
 
 /**
  * 特殊武器类型与数值曲线
@@ -18,10 +19,11 @@ export type SpecialWeaponMode = 'salvo' | 'beam' | 'charge' | 'pulse';
 
 export interface SpecialWeaponConfig {
   id: SpecialWeaponId;
-  name: string;
+  /** 武器名（HUD 武器面板 / 升级菜单），中英双语 */
+  name: LocalizedText;
   shortCode: string;
   icon: string;
-  description: string;
+  description: LocalizedText;
   mode: SpecialWeaponMode;
   maxUpgradeLevel: 5;
 }
@@ -58,46 +60,61 @@ export const SPECIAL_WEAPON_MAX_UPGRADE_LEVEL = 5;
 export const SPECIAL_WEAPON_CONFIGS: Record<SpecialWeaponId, SpecialWeaponConfig> = {
   rockets: {
     id: 'rockets',
-    name: '集束火箭',
+    name: { en: 'Cluster Rockets', zh: '集束火箭' },
     shortCode: 'RKT',
     icon: '🚀',
-    description: '按 F 齐射一组无制导火箭，命中、近炸或飞抵射程尽头时爆炸，范围杀伤装甲车队。',
+    description: {
+      en: 'Press F to fire a salvo of unguided rockets that burst on impact, by proximity or at max range, shredding armored columns.',
+      zh: '按 F 齐射一组无制导火箭，命中、近炸或飞抵射程尽头时爆炸，范围杀伤装甲车队。',
+    },
     mode: 'salvo',
     maxUpgradeLevel: 5,
   },
   laser: {
     id: 'laser',
-    name: '脉冲激光',
+    name: { en: 'Pulse Laser', zh: '脉冲激光' },
     shortCode: 'LSR',
     icon: '🔆',
-    description: '按住 F 持续照射，灼烧光束上的第一个目标；热量满载会强制冷却。',
+    description: {
+      en: 'Hold F for a sustained beam that burns the first target in its path. Max heat forces a cooldown.',
+      zh: '按住 F 持续照射，灼烧光束上的第一个目标；热量满载会强制冷却。',
+    },
     mode: 'beam',
     maxUpgradeLevel: 5,
   },
   swarm: {
     id: 'swarm',
-    name: '蜂群导弹',
+    name: { en: 'Swarm Missiles', zh: '蜂群导弹' },
     shortCode: 'SWM',
     icon: '🐝',
-    description: '按 F 齐射一群微型导弹，自动分配给前方锥形范围内的不同敌方目标。',
+    description: {
+      en: 'Press F to launch a swarm of micro-missiles that split across different enemy targets in a forward cone.',
+      zh: '按 F 齐射一群微型导弹，自动分配给前方锥形范围内的不同敌方目标。',
+    },
     mode: 'salvo',
     maxUpgradeLevel: 5,
   },
   railgun: {
     id: 'railgun',
-    name: '电磁轨道炮',
+    name: { en: 'Railgun', zh: '电磁轨道炮' },
     shortCode: 'RLG',
     icon: '☄️',
-    description: '按住 F 蓄力，松开射出瞬时穿甲弹，贯穿弹道上的所有目标；蓄力越满伤害越高。',
+    description: {
+      en: 'Hold F to charge, release to fire an instant armor-piercing slug through every target in line. More charge, more damage.',
+      zh: '按住 F 蓄力，松开射出瞬时穿甲弹，贯穿弹道上的所有目标；蓄力越满伤害越高。',
+    },
     mode: 'charge',
     maxUpgradeLevel: 5,
   },
   emp: {
     id: 'emp',
-    name: '电磁脉冲',
+    name: { en: 'EMP', zh: '电磁脉冲' },
     shortCode: 'EMP',
     icon: '🌀',
-    description: '按 F 释放电磁脉冲，瘫痪范围内的敌方单位与来袭导弹，并迫使隐形目标现形。',
+    description: {
+      en: 'Press F to release an electromagnetic pulse that stuns enemies and incoming missiles in range and forces cloaked targets into view.',
+      zh: '按 F 释放电磁脉冲，瘫痪范围内的敌方单位与来袭导弹，并迫使隐形目标现形。',
+    },
     mode: 'pulse',
     maxUpgradeLevel: 5,
   },

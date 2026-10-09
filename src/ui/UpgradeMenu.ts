@@ -7,6 +7,7 @@ import {
   getWeaponIdForUpgrade,
 } from '@/features/upgrade/UpgradeSystem';
 import { getSpecialWeaponStats, type SpecialWeaponStats } from '@/features/weapons/WeaponTypes';
+import { tr } from '@/i18n';
 import { HUD_COLORS, injectHudTokens } from '@/ui/theme/hudTokens';
 
 /** pause：对局中暂停升级（默认）；hangar：章节之间的机库整备 */
@@ -808,7 +809,7 @@ export class UpgradeMenu {
 
     const name = document.createElement('span');
     name.className = 'card-name';
-    name.textContent = config.name;
+    name.textContent = tr(config.name);
 
     const badge = document.createElement('span');
     badge.className = 'card-badge';
@@ -835,7 +836,7 @@ export class UpgradeMenu {
 
     const description = document.createElement('div');
     description.className = 'card-desc';
-    description.textContent = config.description;
+    description.textContent = tr(config.description);
 
     const tier = document.createElement('div');
     tier.className = 'card-tier';
@@ -1022,9 +1023,13 @@ export class UpgradeMenu {
     const currentValue = this.upgrades.getValue(type);
     const nextValue = isMaxed ? currentValue : currentValue + config.valuePerLevel;
 
-    elements.currentValue.textContent = this.formatValue(currentValue, config.unit);
-    elements.nextValue.textContent = isMaxed ? 'MAX' : this.formatValue(nextValue, config.unit);
-    elements.gainValue.textContent = this.formatDelta(config.valuePerLevel, config.unit, isMaxed);
+    elements.currentValue.textContent = this.formatValue(currentValue, tr(config.unit));
+    elements.nextValue.textContent = isMaxed ? 'MAX' : this.formatValue(nextValue, tr(config.unit));
+    elements.gainValue.textContent = this.formatDelta(
+      config.valuePerLevel,
+      tr(config.unit),
+      isMaxed
+    );
   }
 
   private getUpgradeButtonLabel(cost: number): string {

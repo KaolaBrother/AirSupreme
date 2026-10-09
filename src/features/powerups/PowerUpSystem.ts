@@ -3,6 +3,7 @@ import { ParticleSystem } from '@/features/effects/ParticleSystem';
 import { BalloonPowerUp } from './BalloonPowerUp';
 import { SpawnBalloon } from '@/features/effects/SpawnBalloon';
 import { getLogger } from '@/core/utils/Logger';
+import type { LocalizedText } from '@/i18n';
 
 const log = getLogger('PowerUpSystem');
 
@@ -20,8 +21,9 @@ export enum PowerUpType {
  */
 export interface PowerUpConfig {
   type: PowerUpType;
-  name: string;
-  description: string;
+  /** 道具名（拾取提示），中英双语 */
+  name: LocalizedText;
+  description: LocalizedText;
   color: number;
   duration: number; // 持续时间（秒），-1 表示永久
   value: number; // 效果值
@@ -34,8 +36,8 @@ export interface PowerUpConfig {
 export const POWER_UP_CONFIGS: Record<PowerUpType, PowerUpConfig> = {
   [PowerUpType.HEALTH]: {
     type: PowerUpType.HEALTH,
-    name: '生命恢复',
-    description: '恢复 30 点生命值',
+    name: { en: 'Repair Kit', zh: '生命恢复' },
+    description: { en: 'Restores 30 health', zh: '恢复 30 点生命值' },
     color: 0x00ff00,
     duration: 0, // 即时效果
     value: 30,
@@ -43,8 +45,8 @@ export const POWER_UP_CONFIGS: Record<PowerUpType, PowerUpConfig> = {
   },
   [PowerUpType.SHIELD]: {
     type: PowerUpType.SHIELD,
-    name: '能量护盾',
-    description: '获得 10 秒无敌护盾',
+    name: { en: 'Energy Shield', zh: '能量护盾' },
+    description: { en: '10 seconds of invulnerability', zh: '获得 10 秒无敌护盾' },
     color: 0x00ffff,
     duration: 10,
     value: 1,
@@ -52,8 +54,8 @@ export const POWER_UP_CONFIGS: Record<PowerUpType, PowerUpConfig> = {
   },
   [PowerUpType.SPEED]: {
     type: PowerUpType.SPEED,
-    name: '速度提升',
-    description: '速度提升 50%，持续 15 秒',
+    name: { en: 'Speed Boost', zh: '速度提升' },
+    description: { en: '+50% speed for 15 seconds', zh: '速度提升 50%，持续 15 秒' },
     color: 0xffff00,
     duration: 15,
     value: 1.5,
@@ -61,8 +63,8 @@ export const POWER_UP_CONFIGS: Record<PowerUpType, PowerUpConfig> = {
   },
   [PowerUpType.DAMAGE]: {
     type: PowerUpType.DAMAGE,
-    name: '伤害提升',
-    description: '伤害提升 100%，持续 20 秒',
+    name: { en: 'Damage Boost', zh: '伤害提升' },
+    description: { en: '+100% damage for 20 seconds', zh: '伤害提升 100%，持续 20 秒' },
     color: 0xff4444,
     duration: 20,
     value: 2.0,
@@ -70,8 +72,11 @@ export const POWER_UP_CONFIGS: Record<PowerUpType, PowerUpConfig> = {
   },
   [PowerUpType.MULTISHOT]: {
     type: PowerUpType.MULTISHOT,
-    name: '快速射击',
-    description: '射速提升3倍，子弹扩散，导弹连发3枚',
+    name: { en: 'Rapid Fire', zh: '快速射击' },
+    description: {
+      en: 'Triple fire rate with spread shots; missiles fire in threes',
+      zh: '射速提升3倍，子弹扩散，导弹连发3枚',
+    },
     color: 0xff00ff,
     duration: 20,
     value: 3,
@@ -79,8 +84,8 @@ export const POWER_UP_CONFIGS: Record<PowerUpType, PowerUpConfig> = {
   },
   [PowerUpType.BOMB]: {
     type: PowerUpType.BOMB,
-    name: '召唤友军',
-    description: '召唤一架友军飞机协助战斗',
+    name: { en: 'Call Wingman', zh: '召唤友军' },
+    description: { en: 'Calls in a friendly fighter to help', zh: '召唤一架友军飞机协助战斗' },
     color: 0xff8800,
     duration: 0,
     value: 1,

@@ -12,6 +12,7 @@ import {
 } from 'three';
 import { EnemyType, ENEMY_CONFIGS } from '@/features/enemy/EnemyTypes';
 import { BossType, BOSS_CONFIGS } from '@/features/boss/BossTypes';
+import { tr } from '@/i18n';
 
 // 包围盒自适应取景的目标包围球半径（相机固定在 (0,2,8)，fov 50°）。
 // 包围球半径是盒对角线的一半（≥ 各半轴），按 3.1 取景仍留有安全余量
@@ -253,7 +254,7 @@ export class ModelPreview {
       const config = ENEMY_CONFIGS[type];
       this.aircrafts.push({
         id: type,
-        name: config.name,
+        name: tr(config.name),
         type: 'enemy',
         createMesh: async () => {
           const { createEnemyMesh } = await this.loadAircraftMeshFactory();
@@ -269,7 +270,7 @@ export class ModelPreview {
       if (type === BossType.DESERT_FORTRESS) {
         this.aircrafts.push({
           id: type,
-          name: config.name,
+          name: tr(config.name),
           type: 'boss',
           createMesh: async () => {
             const module = await import('@/features/boss/DesertFortressAI');
@@ -279,7 +280,7 @@ export class ModelPreview {
       } else if (type === BossType.OCTOPUS_WARSHIP) {
         this.aircrafts.push({
           id: type,
-          name: config.name,
+          name: tr(config.name),
           type: 'boss',
           createMesh: async () => {
             const module = await import('@/features/boss/OctopusWarshipAI');
@@ -289,7 +290,7 @@ export class ModelPreview {
       } else if (type === BossType.MISSILE_DESTROYER) {
         this.aircrafts.push({
           id: type,
-          name: config.name,
+          name: tr(config.name),
           type: 'boss',
           createMesh: async () => {
             const module = await import('@/features/boss/MissileDestroyerAI');
@@ -299,7 +300,7 @@ export class ModelPreview {
       } else if (type === BossType.SKY_CARRIER) {
         this.aircrafts.push({
           id: type,
-          name: config.name,
+          name: tr(config.name),
           type: 'boss',
           createMesh: async () => {
             const module = await import('@/features/boss/SkyCarrierAI');
@@ -309,7 +310,7 @@ export class ModelPreview {
       } else {
         this.aircrafts.push({
           id: type,
-          name: config.name,
+          name: tr(config.name),
           type: 'boss',
           createMesh: async () => {
             const module = await import('@/features/boss/BossAI');
