@@ -27,7 +27,7 @@
 
 - 剧本以英文重写并附忠实的简体中文版；国际化角色表 `CAMPAIGN_SPEAKERS`（`src/features/campaign/CampaignCast.ts`），友方机组中有四名女性：天穹 Skydome（埃琳娜·瓦尔加上校，指挥部，兼剧情旁白）、渡鸦 Raven（杰克·默瑟中尉，僚机）、雨燕 Swift（弗蕾娅·林德奎斯特中尉，第二僚机，第 3 章起随队）、萤火 Firefly（陈曦博士，首席科学家）、灯塔 Lighthouse（阿米莉亚·哈特上尉，预警机指挥员）、壁垒 Bulwark（梁伟中校，友军护卫舰舰长）；另有神谕 ORACLE、客机机长「海岸702」、货轮大副「北星号」；每个角色带配音选角用的性别与声音说明
 - 剧本数据拆分为 `CampaignTypes` / `CampaignCast` / `CampaignChapters` / `CampaignRadio` / `CampaignStory` / `ChapterTitles`，`CampaignData` 仍是唯一导入入口；每句配音台词带稳定唯一 id（同时是语音文件名），`getVoiceScript()` 列出全部配音台词
-- 具名僚机（`src/core/campaign/Wingmen.ts`）：每关开场整个僚机编队一起升空——第 1-2 关渡鸦，第 3 关起渡鸦与雨燕，血条显示呼号；被击落的僚机本关不再出现，换关 / 读档 / Boss 击破后归队；其余友机为普通友军；坠毁提示点名僚机
+- 具名僚机（`src/core/campaign/Wingmen.ts`）：每关开场整个僚机编队一起升空——第 1-2 关渡鸦，第 3 关起渡鸦与雨燕，血条显示呼号；被击落的僚机本关不再出现，换关 / 读档 / Boss 击破后归队；其余友机为普通友军（不派编队的 Boss 模式里，最先到场的友机领取空出的僚机呼号）；坠毁提示点名僚机
 - 僚机无线电：雨燕每局战役第一次随编队升空时报到一次；僚机被击落时由另一名僚机（在空中时）或天穹指挥部播报（`WINGMAN_EVENT_RADIO`，新增通用台词 `swift-joined`、`raven-down-swift`、`raven-down-hq`、`swift-down-raven`、`swift-down-hq`）
 - 友军损失无线电：友军预警机与护卫舰被击毁时由各自的机组 / 舰员播报（`awacs-lost` / `frigate-lost`），其余友军单位仍为 `ally-unit-destroyed`；扣分提示按当前语言点名单位
 - 无线电头像：雨燕（雨燕剪影，叉尾，与渡鸦的战机图标区分）、灯塔（带雷达罩的预警机）、壁垒（护卫舰）、海岸702（宽体客机）、北星号（货轮）各有专属图标，每个说话人都有自己的头像
