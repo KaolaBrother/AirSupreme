@@ -2,7 +2,11 @@ import * as THREE from 'three';
 import { IGameSystem } from '@/core/interfaces/IGameSystem';
 import { EventBus, GameEventType } from '@/core/EventBus';
 import { LevelManager } from '@/features/levels/LevelManager';
-import { FriendlyAI } from '@/features/enemy/FriendlyAI';
+import {
+  FriendlyAI,
+  getFormationSlotOffset,
+  type FormationSlotOffset,
+} from '@/features/enemy/FriendlyAI';
 import { Faction } from '@/core/Faction';
 import type { DifficultyProfile } from '@/core/Difficulty';
 import { GameSessionState } from '@/core/GameSessionState';
@@ -15,17 +19,11 @@ const PLAYER_VELOCITY_SMOOTHING = 0.25;
 const PLAYER_VELOCITY_DECAY = 0.6;
 
 /**
- * 友机入场点（玩家水平航向坐标系，米）：与 FriendlyAI 的编队位同侧同横距——偶数号在左、
- * 奇数号在右，横距 40 米，每排再向外 35 米、向后 25 米、向上 4 米——落在编队位后方 12 米，
- * 从侧前方滑进编队位。横距 ≥ 40 米，从不落在追尾相机的视线走廊里（座机后方 60 米到前方 35 米、
- * 横向 ±28 米）。FriendlyAI 的编队常量没有导出，这里按同一布局取值，改编队位时两处一起改。
+ * 友机入场点：FriendlyAI 的编队位（getFormationSlotOffset，同侧同横距、同高度）向后退这么多米，
+ * 从侧前方滑进编队位。编队位横距 ≥ 40 米，入场点从不落在追尾相机的视线走廊里（座机后方 60 米
+ * 到前方 35 米、横向 ±28 米）。
  */
-const FRIENDLY_SPAWN_LATERAL = 40;
-const FRIENDLY_SPAWN_RANK_LATERAL = 35;
-const FRIENDLY_SPAWN_AHEAD = 26;
-const FRIENDLY_SPAWN_RANK_BACK = 25;
-const FRIENDLY_SPAWN_UP = 6;
-const FRIENDLY_SPAWN_RANK_UP = 4;
+const FRIENDLY_SPAWN_BEHIND_SLOT = 12;
 /** 机头方向的水平分量低于此值（俯仰约 78° 以上）时，入场航向改用平滑速度的水平方向 */
 const MIN_HEADING_HORIZONTAL = 0.2;
 
@@ -43,6 +41,8 @@ export class EnemySystem implements IGameSystem {
   private readonly lastPlayerPosition = new THREE.Vector3();
   private readonly playerStep = new THREE.Vector3();
   private hasLastPlayerPosition = false;
+  /** 入场位姿计算复用的编队位偏移 */
+  private readonly spawnSlotOffset: FormationSlotOffset = { side: -1, along: 0, lateral: 0, up: 0 };
 
   constructor(scene: THREE.Scene, sessionState?: GameSessionState) {
     this.levelManager = new LevelManager(scene);
@@ -317,15 +317,13 @@ export class EnemySystem implements IGameSystem {
     headingZ /= length;
     outHeading.set(headingX, 0, headingZ);
 
-    const slot = this.nextFormationSlot();
-    const side = slot % 2 === 0 ? -1 : 1;
-    const rank = Math.floor(slot / 2);
-    const along = FRIENDLY_SPAWN_AHEAD - rank * FRIENDLY_SPAWN_RANK_BACK;
-    const lateral = side * (FRIENDLY_SPAWN_LATERAL + rank * FRIENDLY_SPAWN_RANK_LATERAL);
+    const slot = getFormationSlotOffset(this.nextFormationSlot(), this.spawnSlotOffset);
+    const along = slot.along - FRIENDLY_SPAWN_BEHIND_SLOT;
+    const lateral = slot.lateral;
     // 右侧向量：前向 (x, z) → (-z, x)，与 FriendlyAI 的编队坐标系一致
     outPosition.set(
       playerPosition.x + headingX * along - headingZ * lateral,
-      playerPosition.y + FRIENDLY_SPAWN_UP + rank * FRIENDLY_SPAWN_RANK_UP,
+      playerPosition.y + slot.up,
       playerPosition.z + headingZ * along + headingX * lateral
     );
   }

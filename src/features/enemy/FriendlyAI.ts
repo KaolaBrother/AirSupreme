@@ -14,6 +14,33 @@ const SLOT_RANK_LATERAL = 35;
 const SLOT_RANK_BACK = 25;
 const SLOT_RANK_UP = 4;
 
+/** 编队位在玩家水平航向坐标系中的偏移（米）：along 向前、lateral 向右、up 向上 */
+export interface FormationSlotOffset {
+  /** -1 = 左侧，1 = 右侧 */
+  side: number;
+  along: number;
+  lateral: number;
+  up: number;
+}
+
+/**
+ * 第 slot 号编队位的偏移（写入 out 并返回，不分配）：偶数号在左、奇数号在右，每排再向外、
+ * 向后、向上错开。编队布局只在这里定义，EnemySystem 的友机入场点也按它取值。
+ */
+export function getFormationSlotOffset(
+  slot: number,
+  out: FormationSlotOffset
+): FormationSlotOffset {
+  const safeSlot = Number.isInteger(slot) && slot >= 0 ? slot : 0;
+  const side = safeSlot % 2 === 0 ? -1 : 1;
+  const rank = Math.floor(safeSlot / 2);
+  out.side = side;
+  out.along = SLOT_AHEAD - rank * SLOT_RANK_BACK;
+  out.lateral = side * (SLOT_LATERAL + rank * SLOT_RANK_LATERAL);
+  out.up = SLOT_UP + rank * SLOT_RANK_UP;
+  return out;
+}
+
 /**
  * 追尾相机视线走廊（同一坐标系）：座机后 60 米（相机在后 15 米）到前 35 米、横向 ±28 米。
  * 空闲僚机不停留在走廊内，也不横穿走廊；需要换边时从走廊后方（相机之后，画面外）或前方绕行。
@@ -45,6 +72,7 @@ const tmpTarget = new THREE.Vector3();
 const tmpDesired = new THREE.Vector3();
 const tmpDirection = new THREE.Vector3();
 const tmpAxis = new THREE.Vector3();
+const tmpSlot: FormationSlotOffset = { side: -1, along: 0, lateral: 0, up: 0 };
 /** Liang–Barsky 裁剪区间（crossesCorridor 内部使用） */
 const clipRange = { t0: 0, t1: 1 };
 
@@ -194,11 +222,11 @@ export class FriendlyAI {
     const along = dx * forwardX + dz * forwardZ;
     const lateral = dx * rightX + dz * rightZ;
 
-    const side = this.formationSlot % 2 === 0 ? -1 : 1;
-    const rank = Math.floor(this.formationSlot / 2);
-    const slotLateral = side * (SLOT_LATERAL + rank * SLOT_RANK_LATERAL);
-    const slotAlong = SLOT_AHEAD - rank * SLOT_RANK_BACK;
-    const slotUp = SLOT_UP + rank * SLOT_RANK_UP;
+    const slot = getFormationSlotOffset(this.formationSlot, tmpSlot);
+    const side = slot.side;
+    const slotLateral = slot.lateral;
+    const slotAlong = slot.along;
+    const slotUp = slot.up;
 
     let targetAlong = slotAlong;
     let targetLateral = slotLateral;
