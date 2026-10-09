@@ -224,17 +224,16 @@ ${toneBlock('muted', '195, 204, 214')}
   max-width: 560px;
 }
 
-/* 竖屏：顶部状态栏下方整行；Boss 阶段条出现时再让一行 */
+/*
+ * 竖屏：顶部状态栏下方整行，排在 HUD 顶部消息栈（Boss 阶段条 / 简报 / 事件目标）之后；
+ * HUD 把栈底的视口坐标写在 <html> 的 --hud-stack-bottom，HUD 未挂载时退回状态栏下方
+ */
 #radio-comms[data-density='touch-portrait'] {
   left: max(10px, env(safe-area-inset-left));
   right: max(10px, env(safe-area-inset-right));
-  top: 196px;
+  top: calc(var(--hud-stack-bottom, calc(128px + env(safe-area-inset-top, 0px))) + 8px);
   bottom: auto;
   width: auto;
-}
-
-:root[data-hud-boss='on'] #radio-comms[data-density='touch-portrait'] {
-  top: 226px;
 }
 
 #radio-comms:not([data-density='desktop']) .rc-panel {
