@@ -47,8 +47,8 @@
      "name": "Scottish Paisley"
     }
    },
-   "totalDurationSeconds": 958.08,
-   "fileCount": 195,
+   "totalDurationSeconds": 983.2,
+   "fileCount": 200,
    "files": [
     {
      "id": "prologue-1",
@@ -2276,11 +2276,48 @@
    "flowId": "8hOPD23dQzGZnfe3UNIl",
    "flowName": "AirSupreme voice ZH",
    "createdAt": "2026-10-09T05:12:21.134Z",
-   "outputFormat": null,
+   "outputFormat": "mp3_44100_128 (MPEG-1 Layer III, 128 kbps CBR, 44.1 kHz, mono)",
    "generationsPerLine": 1,
-   "cast": null,
-   "totalDurationSeconds": 950.64,
-   "fileCount": 195,
+   "cast": {
+    "hq": {
+     "en": "85xci5bgwOrimRmBcbA1",
+     "zh": "rtRocV7drsrJFSQPxlD3"
+    },
+    "wingman": {
+     "en": "bkWmSiLbVbuhntmf2Kw7",
+     "zh": "E8c1bekb52tdh7tvpKVK"
+    },
+    "wingman2": {
+     "en": "oVXQ3H21hRI9OtM4YH5K",
+     "zh": "ggacvEjbmpoSuEinfFWs"
+    },
+    "scientist": {
+     "en": "1a0nAYA3FcNQcMMfbddY",
+     "zh": "NchRhc5KPgHwZagz6MrZ"
+    },
+    "awacs": {
+     "en": "NEgR5Tdirh4i83cUnrPG",
+     "zh": "t5SIDRTVMdbNUqrSAycs"
+    },
+    "frigate": {
+     "en": "NIkIuJZ8oQMuKZqwKtnm",
+     "zh": "d8IR2QHf65bKkLRMo3sk"
+    },
+    "oracle": {
+     "en": "gJ4a5qWqzRc6NDQT0dIz",
+     "zh": "Fo6zHX740rFxxP1fWDxu"
+    },
+    "airliner": {
+     "en": "piXgOkv6rY9OLgHwO2Zm",
+     "zh": "t0rw9qQF814RSPRK0vm2"
+    },
+    "freighter": {
+     "en": "YIn3yKpQSeXNJMF5CIuj",
+     "zh": "lcRaSg5QsH61bfHjo8qM"
+    }
+   },
+   "totalDurationSeconds": 978.56,
+   "fileCount": 200,
    "files": [
     {
      "id": "prologue-1",
