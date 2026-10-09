@@ -4,7 +4,7 @@ import { Faction } from '@/core/Faction';
 import { BOSS_CONFIGS, BossType, getBossForLevel } from '@/features/boss/BossTypes';
 import { getCampaignChapter } from '@/features/campaign/CampaignData';
 import { ENEMY_CONFIGS, EnemyType } from '@/features/enemy/EnemyTypes';
-import { tr } from '@/i18n';
+import { getLocale, tr, type Locale, type LocalizedText } from '@/i18n';
 import { OffscreenChevron } from '@/ui/OffscreenChevron';
 import { HUD_COLORS } from '@/ui/theme/hudTokens';
 
@@ -14,24 +14,26 @@ const TARGET_POSITION_THRESHOLD_SQ = 0.01;
 const CAMERA_ROTATION_THRESHOLD = 0.0025;
 const HEALTH_PERCENT_THRESHOLD = 0.001;
 
-/** 兜底标签（与其余 HUD 一样以中文为主） */
-const FALLBACK_ENEMY_LABEL = '敌方目标';
-const FALLBACK_FRIENDLY_LABEL = '友军';
+/** 兜底标签（按界面语言取值） */
+const FALLBACK_ENEMY_LABEL: LocalizedText = { en: 'Hostile', zh: '敌方目标' };
+const FALLBACK_FRIENDLY_LABEL: LocalizedText = { en: 'Friendly', zh: '友军' };
+/** 友军敌机型号：“友军” + 型号名 */
+const FRIENDLY_TYPE_LABEL: LocalizedText = { en: 'Allied {type}', zh: '友军{type}' };
 
 /**
  * Boss 部件网格名前缀 → 标签（第三关的眼睛、第 6-10 关带独立血量的子目标）。
  * 用语与 CampaignData 的 Boss 简报 / 弱点提示一致。
  */
-const BOSS_PART_LABELS: ReadonlyArray<readonly [prefix: string, label: string]> = [
-  ['boss_eye', '触手之眼'],
-  ['colossus_vent', '散热口'],
-  ['leviathan_sail', '指挥塔'],
-  ['leviathan_ballast_tank', '压载舱'],
-  ['leviathan_missile_bay', '导弹舱'],
-  ['zeppelin_gas_cell', '气囊'],
-  ['zeppelin_hangar', '无人机舱'],
-  ['phantom_phase_emitter', '相位发射器'],
-  ['oracle_pylon', '护盾塔'],
+const BOSS_PART_LABELS: ReadonlyArray<readonly [prefix: string, label: LocalizedText]> = [
+  ['boss_eye', { en: 'Tentacle Eye', zh: '触手之眼' }],
+  ['colossus_vent', { en: 'Heat Vent', zh: '散热口' }],
+  ['leviathan_sail', { en: 'Conning Tower', zh: '指挥塔' }],
+  ['leviathan_ballast_tank', { en: 'Ballast Tank', zh: '压载舱' }],
+  ['leviathan_missile_bay', { en: 'Missile Bay', zh: '导弹舱' }],
+  ['zeppelin_gas_cell', { en: 'Gas Cell', zh: '气囊' }],
+  ['zeppelin_hangar', { en: 'Drone Hangar', zh: '无人机舱' }],
+  ['phantom_phase_emitter', { en: 'Phase Emitter', zh: '相位发射器' }],
+  ['oracle_pylon', { en: 'Shield Pylon', zh: '护盾塔' }],
 ];
 
 /**
@@ -49,42 +51,71 @@ function buildBossLabels(): ReadonlyMap<string, string> {
   for (const type of Object.values(BossType)) {
     const key = `BOSS_${type}`;
     if (!labels.has(key)) {
-      labels.set(key, tr(BOSS_CONFIGS[type].name).replace(/\s*Boss$/i, '') || FALLBACK_ENEMY_LABEL);
+      labels.set(key, tr(BOSS_CONFIGS[type].name).replace(/\s*Boss$/i, '') || tr(FALLBACK_ENEMY_LABEL));
     }
   }
   return labels;
 }
 
+/** Boss 名表按语言缓存：切换语言后下一次查询重建 */
 let bossLabels: ReadonlyMap<string, string> | null = null;
+let bossLabelsLocale: Locale | null = null;
 
 function isEnemyType(name: string): name is EnemyType {
   return Object.prototype.hasOwnProperty.call(ENEMY_CONFIGS, name);
 }
 
+function isLocalizedText(value: unknown): value is LocalizedText {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    typeof (value as LocalizedText).en === 'string' &&
+    typeof (value as LocalizedText).zh === 'string'
+  );
+}
+
+/**
+ * 友军 AI 战机的飞行员呼号（运行时写在 mesh.userData.displayName，双语对象或字符串）。
+ * 每帧调用：只挑字段，不分配。
+ */
+function readDisplayName(mesh: Object3D): string | null {
+  const value: unknown = mesh.userData.displayName;
+  if (isLocalizedText(value)) {
+    return tr(value) || null;
+  }
+  return typeof value === 'string' && value ? value : null;
+}
+
 /**
  * 解析血条标签：Boss 本体 → 战役名；Boss 部件 → 部件名；敌机（含 Boss 召唤的敌机）→
- * ENEMY_CONFIGS 中文名（友军加“友军”前缀）；地面 / 海上 / 空中单位（UNIT_*）→ 按阵营的通用名。
+ * ENEMY_CONFIGS 型号名（友军加“友军”前缀）；地面 / 海上 / 空中单位（UNIT_*）→ 按阵营的通用名。
  */
 function resolveTargetLabel(mesh: Object3D, isFriendly: boolean): string {
   const name = mesh.name || '';
   if (name.startsWith('BOSS_')) {
-    bossLabels ??= buildBossLabels();
-    return bossLabels.get(name) ?? FALLBACK_ENEMY_LABEL;
+    const locale = getLocale();
+    if (!bossLabels || bossLabelsLocale !== locale) {
+      bossLabels = buildBossLabels();
+      bossLabelsLocale = locale;
+    }
+    return bossLabels.get(name) ?? tr(FALLBACK_ENEMY_LABEL);
   }
   for (const [prefix, label] of BOSS_PART_LABELS) {
-    if (name.startsWith(prefix)) return label;
+    if (name.startsWith(prefix)) return tr(label);
   }
   if (isEnemyType(name)) {
     const typeName = tr(ENEMY_CONFIGS[name].name);
-    return isFriendly ? `${FALLBACK_FRIENDLY_LABEL}${typeName}` : typeName;
+    return isFriendly ? tr(FRIENDLY_TYPE_LABEL, { type: typeName }) : typeName;
   }
   if (name.startsWith('UNIT_') || mesh.userData.unitType !== undefined) {
     const faction: unknown = mesh.userData.faction;
-    if (isFriendly || faction === Faction.FRIENDLY) return '友军单位';
-    if (faction === Faction.CIVILIAN) return '民用目标';
-    return '敌方单位';
+    if (isFriendly || faction === Faction.FRIENDLY) {
+      return tr({ en: 'Friendly unit', zh: '友军单位' });
+    }
+    if (faction === Faction.CIVILIAN) return tr({ en: 'Civilian', zh: '民用目标' });
+    return tr({ en: 'Hostile unit', zh: '敌方单位' });
   }
-  return isFriendly ? FALLBACK_FRIENDLY_LABEL : FALLBACK_ENEMY_LABEL;
+  return tr(isFriendly ? FALLBACK_FRIENDLY_LABEL : FALLBACK_ENEMY_LABEL);
 }
 
 function isFiniteVector(v: Vector3): boolean {
@@ -112,9 +143,10 @@ export class EnemyHealthBars {
       wasInView: boolean | null;
     }
   > = new Map();
-  /** 网格名 → 血条标签（敌方 / 友军分开缓存） */
+  /** 网格名 → 血条标签（敌方 / 友军分开缓存；缓存属于 labelLocale，换语言时清空） */
   private readonly enemyLabelCache = new Map<string, string>();
   private readonly friendlyLabelCache = new Map<string, string>();
+  private labelLocale: Locale | null = null;
   private readonly textContentCache = new WeakMap<HTMLElement, string>();
   private readonly styleValueCache = new WeakMap<HTMLElement, Map<string, string>>();
   private readonly worldPosition = new Vector3();
@@ -172,6 +204,7 @@ export class EnemyHealthBars {
     playerPosition: Vector3
   ): void {
     this.init();
+    this.syncLabelLocale();
 
     const cameraMoved =
       !this.cameraStateInitialized ||
@@ -216,6 +249,20 @@ export class EnemyHealthBars {
       this.lastPlayerPosition.copy(playerPosition);
     }
     this.cameraStateInitialized = true;
+  }
+
+  /** 界面语言变了：清空标签缓存，并让现有血条在本帧重写名字 */
+  private syncLabelLocale(): void {
+    const locale = getLocale();
+    if (locale === this.labelLocale) {
+      return;
+    }
+    this.labelLocale = locale;
+    this.enemyLabelCache.clear();
+    this.friendlyLabelCache.clear();
+    for (const barData of this.healthBars.values()) {
+      barData.lastHealthPercent = Number.NaN;
+    }
   }
 
   /**
@@ -618,6 +665,13 @@ export class EnemyHealthBars {
    * 获取目标名称（敌人和友军）；按网格名缓存，逐帧不重复解析
    */
   private getTargetName(mesh: Object3D, isFriendly: boolean): string {
+    // 友军 AI 战机带飞行员呼号时直接显示呼号（僚机可能共用同一网格名，不能按名缓存）
+    if (isFriendly) {
+      const callsign = readDisplayName(mesh);
+      if (callsign) {
+        return callsign;
+      }
+    }
     const key = mesh.name;
     if (!key) {
       return resolveTargetLabel(mesh, isFriendly);

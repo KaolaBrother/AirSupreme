@@ -6,7 +6,7 @@ import {
   TOTAL_LEVELS,
   type CampaignChapter,
 } from '@/features/campaign/CampaignData';
-import { tr } from '@/i18n';
+import { tr, type LocalizedText } from '@/i18n';
 import { GLYPH_PIN } from '@/ui/theme/hudGlyphs';
 import { prefersReducedMotion, readHudLayoutDensity } from '@/ui/theme/hudPalette';
 import { injectStoryStyles } from '@/ui/theme/storyStyles';
@@ -57,8 +57,12 @@ const TYPE_CHAR_MS = 34;
 const TYPE_PAUSE_COMMA_MS = 120;
 const TYPE_PAUSE_STOP_MS = 280;
 const TYPE_PARAGRAPH_GAP_MS = 380;
-const COMMA_MARKS = '，、；：,;:';
-const STOP_MARKS = '。！？…!?';
+/**
+ * 句末标点（。！？… 以及英文 . ! ?）长停顿，句中标点（，、；： 以及 , ; :）短停顿。
+ * 用 Unicode 属性同时覆盖中英文标点。
+ */
+const STOP_MARK = /[\p{Sentence_Terminal}…]/u;
+const PAUSE_MARK = /\p{Terminal_Punctuation}/u;
 
 /** 全文出现后的自动翻页停留：按字数估算阅读时间 */
 const HOLD_MS_PER_CHAR = 42;
@@ -80,7 +84,8 @@ const LEAVE_MS = 300;
 /** 减少动态效果时没有打字阶段，短暂屏蔽输入，防止刚出现就被连按跳过 */
 const REDUCED_MOTION_INPUT_GUARD_MS = 400;
 
-const ROUTE_LABEL = '航路点';
+const ROUTE_LABEL: LocalizedText = { en: 'WAYPOINT', zh: '航路点' };
+const FINAL_SCORE_LABEL: LocalizedText = { en: 'FINAL SCORE', zh: '最终得分' };
 const CREDIT_SEPARATOR = '——';
 /** 演出期间写在 <html> 上，样式据此收起战斗 HUD 与指示层 */
 const ACTIVE_ATTRIBUTE = 'data-story-overlay';
@@ -118,10 +123,10 @@ function splitCampaignTitle(): { latin: string; title: string } {
 }
 
 function pauseAfter(char: string): number {
-  if (STOP_MARKS.includes(char)) {
+  if (STOP_MARK.test(char)) {
     return TYPE_PAUSE_STOP_MS;
   }
-  if (COMMA_MARKS.includes(char)) {
+  if (PAUSE_MARK.test(char)) {
     return TYPE_PAUSE_COMMA_MS;
   }
   return 0;
@@ -630,7 +635,7 @@ export class StoryOverlay {
     const { latin, title } = splitCampaignTitle();
     const card = el('article', 'so-card');
     const ident = this.buildIdent({
-      kicker: '序章',
+      kicker: tr({ en: 'PROLOGUE', zh: '序章' }),
       title,
       operationCn: '',
       operationCode: latin,
@@ -662,7 +667,7 @@ export class StoryOverlay {
     const extras = el('section', 'so-extras is-pending');
     const objectives = chapter.objectives ?? [];
     if (objectives.length > 0) {
-      extras.appendChild(el('div', 'so-obj-title', '任务目标'));
+      extras.appendChild(el('div', 'so-obj-title', tr({ en: 'OBJECTIVES', zh: '任务目标' })));
       const list = el('ul', 'so-objectives');
       for (const objective of objectives) {
         list.appendChild(el('li', undefined, tr(objective)));
@@ -673,7 +678,7 @@ export class StoryOverlay {
       const unlock = el('div', 'so-unlock');
       unlock.setAttribute('data-hud-unlock', '');
       unlock.append(
-        el('span', 'so-unlock-tag', '新武器'),
+        el('span', 'so-unlock-tag', tr({ en: 'NEW WEAPON', zh: '新武器' })),
         el('span', undefined, session.unlockLine)
       );
       extras.appendChild(unlock);
@@ -695,7 +700,7 @@ export class StoryOverlay {
     const card = el('article', 'so-card is-debrief');
     const ident = this.buildIdent({
       kicker: tr(chapter.chapterLabel),
-      status: '任务完成',
+      status: tr({ en: 'MISSION COMPLETE', zh: '任务完成' }),
       title: tr(chapter.title),
       operationCn: tr(chapter.operationName),
       operationCode: chapter.codename,
@@ -728,13 +733,15 @@ export class StoryOverlay {
       tally.appendChild(row);
     };
 
-    addRow('本关得分', formatStoryNumber(data.scoreGained, true), { key: 'score' });
-    addRow('击落 / 摧毁', formatStoryNumber(data.kills), { key: 'kills' });
-    addRow('平民损失', formatStoryNumber(data.civiliansLost), {
+    addRow(tr({ en: 'Mission score', zh: '本关得分' }), formatStoryNumber(data.scoreGained, true), {
+      key: 'score',
+    });
+    addRow(tr({ en: 'Kills', zh: '击落 / 摧毁' }), formatStoryNumber(data.kills), { key: 'kills' });
+    addRow(tr({ en: 'Civilian losses', zh: '平民损失' }), formatStoryNumber(data.civiliansLost), {
       key: 'civilians',
       tone: safeNumber(data.civiliansLost) > 0 ? 'threat' : undefined,
     });
-    addRow('友军损失', formatStoryNumber(data.alliesLost), {
+    addRow(tr({ en: 'Allied losses', zh: '友军损失' }), formatStoryNumber(data.alliesLost), {
       key: 'allies',
       tone: safeNumber(data.alliesLost) > 0 ? 'threat' : undefined,
     });
@@ -746,10 +753,13 @@ export class StoryOverlay {
         tone: points < 0 ? 'threat' : 'ally',
       });
     }
-    addRow('总分', formatStoryNumber(data.totalScore), { className: 'is-total', key: 'total' });
+    addRow(tr({ en: 'Total score', zh: '总分' }), formatStoryNumber(data.totalScore), {
+      className: 'is-total',
+      key: 'total',
+    });
 
     const actions = el('div', 'so-actions');
-    const continueButton = el('button', 'so-continue', '继续');
+    const continueButton = el('button', 'so-continue', tr({ en: 'Continue', zh: '继续' }));
     continueButton.type = 'button';
     continueButton.addEventListener('click', (event) => {
       event.preventDefault();
@@ -769,7 +779,7 @@ export class StoryOverlay {
     const { latin, title } = splitCampaignTitle();
     const card = el('article', 'so-card');
     const ident = this.buildIdent({
-      kicker: '尾声',
+      kicker: tr({ en: 'EPILOGUE', zh: '尾声' }),
       title,
       operationCn: '',
       operationCode: latin,
@@ -780,7 +790,7 @@ export class StoryOverlay {
     const score = el('div', 'so-route-caption so-final');
     score.setAttribute('data-stat', 'final-score');
     score.append(
-      el('span', undefined, '最终得分'),
+      el('span', undefined, tr(FINAL_SCORE_LABEL)),
       el('span', undefined, formatStoryNumber(session.finalScore))
     );
     ident.appendChild(score);
@@ -832,7 +842,7 @@ export class StoryOverlay {
 
     const finale = el('div', 'so-finale is-pending');
     finale.append(
-      el('div', 'so-finale-label', '最终得分'),
+      el('div', 'so-finale-label', tr(FINAL_SCORE_LABEL)),
       el('div', 'so-finale-score', formatStoryNumber(session.finalScore))
     );
     if (closing) {
@@ -868,7 +878,10 @@ export class StoryOverlay {
       if (spec.operationCn) {
         operation.appendChild(el('span', 'so-op-cn', spec.operationCn));
       }
-      if (spec.operationCode) {
+      // 英文界面下行动名与英文代号可能相同：只显示一次
+      const sameAsName =
+        spec.operationCode.trim().toLowerCase() === spec.operationCn.trim().toLowerCase();
+      if (spec.operationCode && !sameAsName) {
         operation.appendChild(el('span', 'so-op-code', spec.operationCode));
       }
       ident.appendChild(operation);
@@ -904,11 +917,17 @@ export class StoryOverlay {
     const reached = currentLevel ?? Math.min(TOTAL_LEVELS, Math.max(0, doneThrough));
     const caption = el('div', 'so-route-caption');
     caption.append(
-      el('span', undefined, ROUTE_LABEL),
+      el('span', undefined, tr(ROUTE_LABEL)),
       el('span', undefined, `${String(reached).padStart(2, '0')} / ${TOTAL_LEVELS}`)
     );
     route.setAttribute('role', 'img');
-    route.setAttribute('aria-label', `战役进度 ${reached} / ${TOTAL_LEVELS}`);
+    route.setAttribute(
+      'aria-label',
+      tr(
+        { en: 'Campaign progress {reached} of {total}', zh: '战役进度 {reached} / {total}' },
+        { reached, total: TOTAL_LEVELS }
+      )
+    );
     route.append(track, caption);
     return route;
   }
@@ -921,7 +940,7 @@ export class StoryOverlay {
 
   private buildTypedText(lines: readonly string[]): HTMLElement {
     const text = el('section', 'so-text');
-    text.setAttribute('aria-label', lines.join(''));
+    text.setAttribute('aria-label', lines.join(' '));
     this.paragraphs = [];
     for (const line of lines) {
       const paragraph = el('p', 'so-para');
@@ -939,34 +958,39 @@ export class StoryOverlay {
   private describeCard(session: StorySession, card: StoryCard): string {
     switch (card) {
       case 'prologue':
-        return `序章 ${splitCampaignTitle().title}`;
+        return tr(
+          { en: 'Prologue: {title}', zh: '序章 {title}' },
+          { title: splitCampaignTitle().title }
+        );
       case 'chapter':
       case 'debrief':
         return session.chapter
           ? `${tr(session.chapter.chapterLabel)} ${tr(session.chapter.title)}`
           : '';
       case 'epilogue':
-        return '尾声';
+        return tr({ en: 'Epilogue', zh: '尾声' });
       case 'credits':
-        return '片尾字幕';
+        return tr({ en: 'Credits', zh: '片尾字幕' });
     }
   }
 
-  /** 提示语与跳过按钮随卡片切换 */
+  /** 提示语与跳过按钮随卡片切换（每张卡片都按当前语言重写） */
   private updateChrome(card: StoryCard): void {
     const prompt = this.prompt;
     const skip = this.skipButton;
     if (!prompt || !skip) {
       return;
     }
-    let desktopText = '按空格键继续';
-    let touchText = '轻触屏幕继续';
+    const pressSpace: LocalizedText = { en: 'Press Space to continue', zh: '按空格键继续' };
+    const tapScreen: LocalizedText = { en: 'Tap to continue', zh: '轻触屏幕继续' };
+    let desktopText = tr(pressSpace);
+    let touchText = tr(tapScreen);
     if (card === 'debrief') {
-      desktopText = '按回车键继续';
-      touchText = '轻触「继续」';
-    } else if (card === 'credits') {
-      desktopText = this.finaleShown ? '按空格键继续' : '按空格键跳过字幕';
-      touchText = this.finaleShown ? '轻触屏幕继续' : '轻触跳过字幕';
+      desktopText = tr({ en: 'Press Enter to continue', zh: '按回车键继续' });
+      touchText = tr({ en: 'Tap “Continue”', zh: '轻触「继续」' });
+    } else if (card === 'credits' && !this.finaleShown) {
+      desktopText = tr({ en: 'Press Space to skip the credits', zh: '按空格键跳过字幕' });
+      touchText = tr({ en: 'Tap to skip the credits', zh: '轻触跳过字幕' });
     }
     const desktop = prompt.querySelector('.so-desktop-only');
     const touch = prompt.querySelector('.so-touch-only');
@@ -976,6 +1000,12 @@ export class StoryOverlay {
     if (touch && touch.textContent !== touchText) {
       touch.textContent = touchText;
     }
+    const skipLabel = skip.querySelector('.so-skip-label');
+    const skipText = tr({ en: 'Skip', zh: '跳过' });
+    if (skipLabel && skipLabel.textContent !== skipText) {
+      skipLabel.textContent = skipText;
+    }
+    skip.setAttribute('aria-label', tr({ en: 'Skip story', zh: '跳过剧情' }));
     skip.style.display = card === 'debrief' ? 'none' : 'inline-flex';
   }
 
@@ -1008,10 +1038,10 @@ export class StoryOverlay {
     prompt.append(el('span', 'so-desktop-only'), el('span', 'so-touch-only'));
     barBottom.appendChild(prompt);
 
+    // 文字由 updateChrome 按当前语言写入
     const skip = el('button', 'so-skip');
     skip.type = 'button';
-    skip.setAttribute('aria-label', '跳过剧情');
-    skip.append(el('span', undefined, '跳过'), el('span', 'so-key so-desktop-only', 'Esc'));
+    skip.append(el('span', 'so-skip-label'), el('span', 'so-key so-desktop-only', 'Esc'));
     skip.addEventListener('click', this.handleSkipClick);
 
     barBottom.appendChild(skip);

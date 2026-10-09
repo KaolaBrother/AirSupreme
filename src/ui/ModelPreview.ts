@@ -12,7 +12,7 @@ import {
 } from 'three';
 import { EnemyType, ENEMY_CONFIGS } from '@/features/enemy/EnemyTypes';
 import { BossType, BOSS_CONFIGS } from '@/features/boss/BossTypes';
-import { tr } from '@/i18n';
+import { onLocaleChange, tr } from '@/i18n';
 
 // 包围盒自适应取景的目标包围球半径（相机固定在 (0,2,8)，fov 50°）。
 // 包围球半径是盒对角线的一半（≥ 各半轴），按 3.1 取景仍留有安全余量
@@ -45,11 +45,13 @@ export class ModelPreview {
   private resizeHandler!: () => void;
   private meshLoadSequence: number = 0;
   private aircraftMeshFactoryPromise: Promise<AircraftMeshFactoryModule> | null = null;
+  private readonly unsubscribeLocale: () => void;
 
   constructor() {
     this.container = this.createContainer();
     this.container.style.display = 'none';
     document.body.appendChild(this.container);
+    this.applyStaticText();
 
     this.nameDisplay = this.createNameDisplay();
 
@@ -70,6 +72,44 @@ export class ModelPreview {
 
     this.resizeHandler = () => this.resizeRenderer();
     window.addEventListener('resize', this.resizeHandler);
+    this.unsubscribeLocale = onLocaleChange(() => this.handleLocaleChange());
+  }
+
+  /** 页头 / 按钮 / 提示文字按当前语言写入 */
+  private applyStaticText(): void {
+    const setText = (id: string, text: string): void => {
+      const element = this.container.querySelector(`#${id}`);
+      if (element) {
+        element.textContent = text;
+      }
+    };
+    setText('preview-header', tr({ en: '✈️ Aircraft Model Preview', zh: '✈️ 飞机模型预览' }));
+    setText('rotate-toggle', this.getRotateLabel());
+    setText(
+      'preview-touch-hint',
+      tr({
+        en: '💡 Swipe to switch models · drag to rotate',
+        zh: '💡 滑动屏幕切换模型 / 拖拽旋转',
+      })
+    );
+    setText('back-btn', tr({ en: '← Back to Main Menu', zh: '← 返回主菜单' }));
+  }
+
+  private getRotateLabel(): string {
+    return this.autoRotate
+      ? tr({ en: '🔄 Auto-rotate: On', zh: '🔄 自动旋转: 开' })
+      : tr({ en: '🔄 Auto-rotate: Off', zh: '🔄 自动旋转: 关' });
+  }
+
+  /** 语言切换：重写静态文字，并按新语言重建机型列表（名称在建表时取值） */
+  private handleLocaleChange(): void {
+    this.applyStaticText();
+    this.aircrafts = [];
+    this.setupAircrafts();
+    const current = this.aircrafts[this.currentIndex];
+    if (current && this.currentMesh) {
+      this.nameDisplay.textContent = current.name;
+    }
   }
 
   private createContainer(): HTMLDivElement {
@@ -199,16 +239,16 @@ export class ModelPreview {
         }
       </style>
 
-      <div class="preview-header">✈️ 飞机模型预览</div>
+      <div class="preview-header" id="preview-header"></div>
       <div class="preview-canvas-container" id="canvas-container"></div>
       <div class="nav-controls">
         <button class="nav-btn" id="prev-btn">◀</button>
         <div class="page-indicator" id="page-indicator">1 / 9</div>
         <button class="nav-btn" id="next-btn">▶</button>
       </div>
-      <button class="rotate-toggle" id="rotate-toggle">🔄 自动旋转: 开</button>
-      <div class="touch-hint">💡 滑动屏幕切换模型 / 拖拽旋转</div>
-      <button class="back-btn" id="back-btn">← 返回主菜单</button>
+      <button class="rotate-toggle" id="rotate-toggle"></button>
+      <div class="touch-hint" id="preview-touch-hint"></div>
+      <button class="back-btn" id="back-btn"></button>
     `;
 
     return container;
@@ -240,7 +280,7 @@ export class ModelPreview {
     // 玩家飞机 - 使用工厂函数
     this.aircrafts.push({
       id: 'player',
-      name: '玩家飞机',
+      name: tr({ en: 'Player jet', zh: '玩家飞机' }),
       type: 'player',
       createMesh: async () => {
         const { createPlayerMesh } = await this.loadAircraftMeshFactory();
@@ -323,7 +363,7 @@ export class ModelPreview {
     // 导弹：直接复用战斗模型的视觉装配工厂，与实战外观完全一致
     this.aircrafts.push({
       id: 'player_missile',
-      name: '玩家导弹',
+      name: tr({ en: 'Player missile', zh: '玩家导弹' }),
       type: 'missile',
       createMesh: async () => {
         const module = await import('@/features/combat/MissileSystem');
@@ -333,7 +373,7 @@ export class ModelPreview {
 
     this.aircrafts.push({
       id: 'boss_missile',
-      name: 'Boss 导弹',
+      name: tr({ en: 'Boss missile', zh: 'Boss 导弹' }),
       type: 'missile',
       createMesh: async () => {
         const module = await import('@/features/boss/BossMissileSystem');
@@ -363,7 +403,7 @@ export class ModelPreview {
     rotateToggle?.addEventListener('click', () => {
       this.autoRotate = !this.autoRotate;
       if (rotateToggle) {
-        rotateToggle.textContent = `🔄 自动旋转: ${this.autoRotate ? '开' : '关'}`;
+        rotateToggle.textContent = this.getRotateLabel();
       }
     });
 
@@ -427,7 +467,10 @@ export class ModelPreview {
 
     this.currentIndex = index;
     const aircraft = this.aircrafts[index];
-    this.nameDisplay.textContent = `加载中: ${aircraft.name}`;
+    this.nameDisplay.textContent = tr(
+      { en: 'Loading: {name}', zh: '加载中: {name}' },
+      { name: aircraft.name }
+    );
     const indicator = document.getElementById('page-indicator');
     if (indicator) {
       indicator.textContent = `${index + 1} / ${this.aircrafts.length}`;
@@ -535,6 +578,7 @@ export class ModelPreview {
     if (this.animationId) {
       cancelAnimationFrame(this.animationId);
     }
+    this.unsubscribeLocale();
     window.removeEventListener('resize', this.resizeHandler);
     this.disposeCurrentMesh();
     this.renderer.dispose();

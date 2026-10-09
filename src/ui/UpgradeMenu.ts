@@ -7,7 +7,7 @@ import {
   getWeaponIdForUpgrade,
 } from '@/features/upgrade/UpgradeSystem';
 import { getSpecialWeaponStats, type SpecialWeaponStats } from '@/features/weapons/WeaponTypes';
-import { tr } from '@/i18n';
+import { onLocaleChange, tr, type LocalizedText } from '@/i18n';
 import { HUD_COLORS, injectHudTokens } from '@/ui/theme/hudTokens';
 
 /** pause：对局中暂停升级（默认）；hangar：章节之间的机库整备 */
@@ -34,11 +34,21 @@ interface UpgradeCardElements {
   button: HTMLButtonElement;
 }
 
+interface UpgradeSection {
+  title: LocalizedText;
+  types: UpgradeType[];
+}
+
 interface WeaponMetric {
-  label: string;
+  label: LocalizedText;
   unit: string;
   value: (stats: SpecialWeaponStats) => number;
 }
+
+/** 锁定武器的解锁章节：未排进战役时显示“暂未解锁” */
+const UNLOCK_LATER: LocalizedText = { en: 'a later chapter', zh: '暂未' };
+const UNLOCKS_IN: LocalizedText = { en: 'Unlocks in {chapter}', zh: '{chapter}解锁' };
+const MAXED: LocalizedText = { en: 'Maxed', zh: '已满级' };
 
 /**
  * 升级菜单：对局中暂停升级（pause）与章节之间的机库整备（hangar）共用。
@@ -62,9 +72,12 @@ export class UpgradeMenu {
   private subtitleDisplay: HTMLDivElement | null = null;
   private hintDisplay: HTMLDivElement | null = null;
   private resumeButton: HTMLButtonElement | null = null;
+  /** 最近一次 show 的参数：语言切换后重建 DOM 时沿用 */
+  private lastShowOptions: UpgradeMenuShowOptions = {};
+  private readonly unsubscribeLocale: () => void;
 
   private static readonly PAUSE_TITLE = '⚙️ Upgrades';
-  private static readonly HANGAR_TITLE = '机库整备';
+  private static readonly HANGAR_TITLE: LocalizedText = { en: 'Refit & Rearm', zh: '机库整备' };
 
   /** 卡片短代号（航电风格，不用 emoji） */
   private static readonly UPGRADE_CODES: Record<UpgradeType, string> = {
@@ -84,22 +97,22 @@ export class UpgradeMenu {
     [UpgradeType.WEAPON_EMP]: 'EMP',
   };
 
-  private static readonly SECTIONS: ReadonlyArray<{ title: string; types: UpgradeType[] }> = [
+  private static readonly SECTIONS: ReadonlyArray<UpgradeSection> = [
     {
-      title: '机体',
+      title: { en: 'AIRFRAME', zh: '机体' },
       types: [UpgradeType.MAX_HEALTH, UpgradeType.SPEED, UpgradeType.FIRE_RATE, UpgradeType.DAMAGE],
     },
     {
-      title: '导弹',
+      title: { en: 'MISSILES', zh: '导弹' },
       types: [
         UpgradeType.MISSILE_LOCK_RADIUS,
         UpgradeType.MISSILE_RELOAD_TIME,
         UpgradeType.MISSILE_LOCK_TIME,
       ],
     },
-    { title: '防护', types: [UpgradeType.ARMOR, UpgradeType.FLARES] },
+    { title: { en: 'DEFENSE', zh: '防护' }, types: [UpgradeType.ARMOR, UpgradeType.FLARES] },
     {
-      title: '特殊武器',
+      title: { en: 'SPECIAL WEAPONS', zh: '特殊武器' },
       types: [
         UpgradeType.WEAPON_ROCKETS,
         UpgradeType.WEAPON_LASER,
@@ -116,11 +129,19 @@ export class UpgradeMenu {
 
   /** 特殊武器卡片的代表数值（来自 getSpecialWeaponStats 的 0..5 级曲线） */
   private static readonly WEAPON_METRICS: Record<SpecialWeaponId, WeaponMetric> = {
-    rockets: { label: '齐射伤害', unit: '', value: (s) => s.projectileCount * s.damage },
-    laser: { label: '每秒伤害', unit: '', value: (s) => s.damage },
-    swarm: { label: '齐射伤害', unit: '', value: (s) => s.projectileCount * s.damage },
-    railgun: { label: '满蓄伤害', unit: '', value: (s) => s.damage },
-    emp: { label: '瘫痪时长', unit: 's', value: (s) => s.stunSeconds },
+    rockets: {
+      label: { en: 'Salvo dmg', zh: '齐射伤害' },
+      unit: '',
+      value: (s) => s.projectileCount * s.damage,
+    },
+    laser: { label: { en: 'DPS', zh: '每秒伤害' }, unit: '', value: (s) => s.damage },
+    swarm: {
+      label: { en: 'Salvo dmg', zh: '齐射伤害' },
+      unit: '',
+      value: (s) => s.projectileCount * s.damage,
+    },
+    railgun: { label: { en: 'Full charge', zh: '满蓄伤害' }, unit: '', value: (s) => s.damage },
+    emp: { label: { en: 'Stun time', zh: '瘫痪时长' }, unit: 's', value: (s) => s.stunSeconds },
   };
 
   constructor(
@@ -132,6 +153,35 @@ export class UpgradeMenu {
     this.upgrades = upgrades;
     this.onUpgrade = onUpgrade;
     this.onResume = onResume;
+    this.unsubscribeLocale = onLocaleChange(() => this.handleLocaleChange());
+  }
+
+  /**
+   * 语言切换：卡片里的静态文字（分区、数值标签、升级名称与说明）都在创建 DOM 时写入，
+   * 因此直接丢弃旧 DOM；正在显示时按原参数立即重建，否则等下次 show 再按新语言创建。
+   */
+  private handleLocaleChange(): void {
+    if (this.disposed || !this.container) {
+      return;
+    }
+    const wasVisible = this.visible;
+    this.releaseDom();
+    if (wasVisible) {
+      this.show(this.lastShowOptions);
+    }
+  }
+
+  private releaseDom(): void {
+    this.container?.remove();
+    this.container = null;
+    this.upgradeCards.clear();
+    this.pointsDisplay = null;
+    this.footerPoints = null;
+    this.kickerDisplay = null;
+    this.titleDisplay = null;
+    this.subtitleDisplay = null;
+    this.hintDisplay = null;
+    this.resumeButton = null;
   }
 
   /**
@@ -147,7 +197,8 @@ export class UpgradeMenu {
       this.container = this.createContainer();
       document.body.appendChild(this.container);
     }
-    this.applyMode(options ?? {});
+    this.lastShowOptions = options ?? {};
+    this.applyMode(this.lastShowOptions);
     this.updateDisplay();
     this.container.style.display = 'flex';
     this.visible = true;
@@ -176,11 +227,14 @@ export class UpgradeMenu {
 
     const points = this.upgrades.getAvailablePoints();
     if (this.pointsDisplay) {
-      this.pointsDisplay.textContent = `⭐ 可用升级点: ${points}`;
+      this.pointsDisplay.textContent = this.formatPointsHeadline(points);
       this.pointsDisplay.classList.toggle('has-points', points > 0);
     }
     if (this.footerPoints) {
-      this.footerPoints.textContent = `⭐ ${points} 点可用`;
+      this.footerPoints.textContent = tr(
+        { en: '⭐ Points available: {points}', zh: '⭐ {points} 点可用' },
+        { points }
+      );
     }
 
     UpgradeMenu.DISPLAY_ORDER.forEach((type) => {
@@ -196,7 +250,7 @@ export class UpgradeMenu {
     const subtitle = options.subtitle ?? (hangar ? this.getDefaultHangarSubtitle() : '');
     if (this.titleDisplay) {
       this.titleDisplay.textContent =
-        options.title ?? (hangar ? UpgradeMenu.HANGAR_TITLE : UpgradeMenu.PAUSE_TITLE);
+        options.title ?? (hangar ? tr(UpgradeMenu.HANGAR_TITLE) : UpgradeMenu.PAUSE_TITLE);
     }
     if (this.subtitleDisplay) {
       this.subtitleDisplay.textContent = subtitle;
@@ -209,7 +263,9 @@ export class UpgradeMenu {
       this.hintDisplay.style.display = hangar ? '' : 'none';
     }
     if (this.resumeButton) {
-      this.resumeButton.textContent = hangar ? '出击' : '▶ 返回战斗';
+      this.resumeButton.textContent = hangar
+        ? tr({ en: 'Launch', zh: '出击' })
+        : tr({ en: '▶ Back to battle', zh: '▶ 返回战斗' });
       this.resumeButton.classList.toggle('hangar', hangar);
     }
     this.container?.classList.toggle('mode-hangar', hangar);
@@ -217,7 +273,14 @@ export class UpgradeMenu {
 
   private getDefaultHangarSubtitle(): string {
     const chapter = getCampaignChapter(this.upgrades.getCampaignLevel());
-    return `下一站：${tr(chapter.chapterLabel)} · ${tr(chapter.title)}`;
+    return tr(
+      { en: 'Next: {chapter} · {title}', zh: '下一站：{chapter} · {title}' },
+      { chapter: tr(chapter.chapterLabel), title: tr(chapter.title) }
+    );
+  }
+
+  private formatPointsHeadline(points: number): string {
+    return tr({ en: '⭐ Upgrade points: {points}', zh: '⭐ 可用升级点: {points}' }, { points });
   }
 
   private handleContinue(): void {
@@ -725,7 +788,7 @@ export class UpgradeMenu {
 
     this.kickerDisplay = document.createElement('div');
     this.kickerDisplay.className = 'upgrade-kicker';
-    this.kickerDisplay.textContent = 'HANGAR · 出击准备';
+    this.kickerDisplay.textContent = tr({ en: 'HANGAR · PRE-FLIGHT', zh: 'HANGAR · 出击准备' });
     this.kickerDisplay.style.display = 'none';
 
     this.titleDisplay = document.createElement('div');
@@ -738,11 +801,14 @@ export class UpgradeMenu {
 
     this.pointsDisplay = document.createElement('div');
     this.pointsDisplay.className = 'upgrade-points';
-    this.pointsDisplay.textContent = `⭐ 可用升级点: ${this.upgrades.getAvailablePoints()}`;
+    this.pointsDisplay.textContent = this.formatPointsHeadline(this.upgrades.getAvailablePoints());
 
     this.hintDisplay = document.createElement('div');
     this.hintDisplay.className = 'upgrade-hint';
-    this.hintDisplay.textContent = '强化上限随章节推进逐步开放，未用完的升级点会保留';
+    this.hintDisplay.textContent = tr({
+      en: 'Upgrade caps rise as the campaign advances. Unspent points carry over.',
+      zh: '强化上限随章节推进逐步开放，未用完的升级点会保留',
+    });
     this.hintDisplay.style.display = 'none';
 
     header.appendChild(this.kickerDisplay);
@@ -758,7 +824,7 @@ export class UpgradeMenu {
     UpgradeMenu.SECTIONS.forEach((section) => {
       const sectionTitle = document.createElement('div');
       sectionTitle.className = 'upgrade-section-title';
-      sectionTitle.textContent = section.title;
+      sectionTitle.textContent = tr(section.title);
       grid.appendChild(sectionTitle);
 
       section.types.forEach((type) => {
@@ -780,7 +846,7 @@ export class UpgradeMenu {
 
     const resumeBtn = document.createElement('button');
     resumeBtn.className = 'resume-btn';
-    resumeBtn.textContent = '▶ 返回战斗';
+    resumeBtn.textContent = tr({ en: '▶ Back to battle', zh: '▶ 返回战斗' });
     resumeBtn.onclick = () => this.handleContinue();
     this.resumeButton = resumeBtn;
 
@@ -813,7 +879,7 @@ export class UpgradeMenu {
 
     const badge = document.createElement('span');
     badge.className = 'card-badge';
-    badge.textContent = '新解锁';
+    badge.textContent = tr({ en: 'NEW', zh: '新解锁' });
     badge.style.display = 'none';
 
     const dotsContainer = document.createElement('div');
@@ -851,9 +917,15 @@ export class UpgradeMenu {
     stats.className = 'card-stats';
 
     const metric = weaponId ? UpgradeMenu.WEAPON_METRICS[weaponId] : null;
-    const currentStat = this.createStatItem(metric ? metric.label : '当前', 'current');
-    const nextStat = this.createStatItem('下一级', 'next');
-    const gainStat = this.createStatItem(metric ? '本级提升' : '每级收益', 'gain');
+    const currentStat = this.createStatItem(
+      tr(metric ? metric.label : { en: 'Current', zh: '当前' }),
+      'current'
+    );
+    const nextStat = this.createStatItem(tr({ en: 'Next', zh: '下一级' }), 'next');
+    const gainStat = this.createStatItem(
+      metric ? tr({ en: 'Gain', zh: '本级提升' }) : tr({ en: 'Per level', zh: '每级收益' }),
+      'gain'
+    );
 
     const costDisplay = document.createElement('div');
     costDisplay.className = 'upgrade-cost';
@@ -926,7 +998,8 @@ export class UpgradeMenu {
     const weaponId = getWeaponIdForUpgrade(type);
     const unlockLevel = weaponId ? getWeaponUnlockLevel(weaponId) : null;
     const unlockLabel =
-      unlockLevel === null ? '暂未' : tr(getCampaignChapter(unlockLevel).chapterLabel);
+      unlockLevel === null ? tr(UNLOCK_LATER) : tr(getCampaignChapter(unlockLevel).chapterLabel);
+    const unlockText = tr(UNLOCKS_IN, { chapter: unlockLabel });
     const nextRaiseLevel = this.upgrades.getNextCapRaiseLevel(type);
 
     elements.card.classList.remove('upgradeable', 'maxed', 'capped', 'weapon-locked');
@@ -952,21 +1025,33 @@ export class UpgradeMenu {
 
     elements.tierLevel.textContent = `Lv ${level}/${config.maxLevel}`;
     if (isLocked) {
-      elements.tierCap.textContent = `${unlockLabel}解锁`;
+      elements.tierCap.textContent = unlockText;
     } else if (isMaxed) {
-      elements.tierCap.textContent = '已满级';
+      elements.tierCap.textContent = tr(MAXED);
     } else {
-      const raise = nextRaiseLevel === null ? '' : ` · 第${nextRaiseLevel}关提升`;
-      elements.tierCap.textContent = `本章上限 ${cap}/${config.maxLevel}${raise}`;
+      const raise =
+        nextRaiseLevel === null
+          ? ''
+          : tr(
+              { en: ' · rises in Level {level}', zh: ' · 第{level}关提升' },
+              {
+                level: nextRaiseLevel,
+              }
+            );
+      elements.tierCap.textContent =
+        tr(
+          { en: 'Chapter cap {cap}/{max}', zh: '本章上限 {cap}/{max}' },
+          { cap, max: config.maxLevel }
+        ) + raise;
     }
 
     this.updateCardValues(type, elements, level, isMaxed);
 
     if (!isMaxed) {
       const cost = this.upgrades.getUpgradeCost(type);
-      elements.cost.textContent = `花费: ⭐${cost}`;
+      elements.cost.textContent = tr({ en: 'Cost: ⭐{cost}', zh: '花费: ⭐{cost}' }, { cost });
     } else {
-      elements.cost.textContent = '已满级';
+      elements.cost.textContent = tr(MAXED);
     }
 
     elements.button.classList.remove('available', 'locked', 'maxed');
@@ -974,7 +1059,7 @@ export class UpgradeMenu {
 
     if (isMaxed) {
       elements.button.classList.add('maxed');
-      elements.button.textContent = '✓ 已满级';
+      elements.button.textContent = `✓ ${tr(MAXED)}`;
       return;
     }
 
@@ -991,12 +1076,20 @@ export class UpgradeMenu {
 
     elements.button.classList.add('locked');
     if (isLocked) {
-      elements.button.textContent = `${unlockLabel}解锁`;
+      elements.button.textContent = unlockText;
     } else if (isCapped) {
       elements.button.textContent =
-        nextRaiseLevel === null ? '已达本章上限' : `已达本章上限 · 第${nextRaiseLevel}关开放`;
+        nextRaiseLevel === null
+          ? tr({ en: 'Chapter cap reached', zh: '已达本章上限' })
+          : tr(
+              { en: 'Cap reached · opens in Level {level}', zh: '已达本章上限 · 第{level}关开放' },
+              { level: nextRaiseLevel }
+            );
     } else {
-      elements.button.textContent = `升级点不足 (${this.upgrades.getUpgradeCost(type)}点)`;
+      elements.button.textContent = tr(
+        { en: 'Not enough points ({cost} needed)', zh: '升级点不足 ({cost}点)' },
+        { cost: this.upgrades.getUpgradeCost(type) }
+      );
     }
   }
 
@@ -1034,7 +1127,9 @@ export class UpgradeMenu {
 
   private getUpgradeButtonLabel(cost: number): string {
     const isMobile = window.innerWidth <= 600;
-    return isMobile ? `升级 (${cost}点)` : `立即升级 (${cost} 点)`;
+    return isMobile
+      ? tr({ en: 'Upgrade (⭐{cost})', zh: '升级 ({cost}点)' }, { cost })
+      : tr({ en: 'Upgrade now (⭐{cost})', zh: '立即升级 ({cost} 点)' }, { cost });
   }
 
   private formatValue(value: number, unit: string): string {
@@ -1055,18 +1150,8 @@ export class UpgradeMenu {
   public dispose(): void {
     this.disposed = true;
     this.visible = false;
-    if (this.container && this.container.parentNode) {
-      this.container.parentNode.removeChild(this.container);
-    }
-    this.container = null;
-    this.upgradeCards.clear();
-    this.pointsDisplay = null;
-    this.footerPoints = null;
-    this.kickerDisplay = null;
-    this.titleDisplay = null;
-    this.subtitleDisplay = null;
-    this.hintDisplay = null;
-    this.resumeButton = null;
+    this.unsubscribeLocale();
+    this.releaseDom();
     this.continueOverride = null;
   }
 }

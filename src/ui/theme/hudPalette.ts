@@ -22,8 +22,15 @@ export const HUD_COLORS = {
   shadow: '0 12px 24px rgba(0, 0, 0, 0.28)',
 } as const;
 
-/** 叙事文本（章节卡、结算总结、结局）使用的衬线字体栈，CJK 优先 */
+/**
+ * 叙事文本（章节卡、结算总结、结局）使用的衬线字体栈：拉丁字体在前，汉字按字回落到后面的 CJK 衬线。
+ * 中文界面（<html lang="zh-CN">）改用 HUD_SERIF_STACK_ZH，标点与数字也走 CJK 字体。
+ */
 export const HUD_SERIF_STACK =
+  "'Iowan Old Style', 'Palatino Linotype', Palatino, 'Book Antiqua', Georgia, 'Times New Roman', 'Noto Serif SC', 'Noto Serif CJK SC', 'Source Han Serif SC', 'Songti SC', 'STSong', serif";
+
+/** 中文界面的衬线字体栈，CJK 优先 */
+export const HUD_SERIF_STACK_ZH =
   "'Noto Serif SC', 'Noto Serif CJK SC', 'Source Han Serif SC', 'Songti SC', 'STSong', 'SimSun', serif";
 
 /** 语义色调：与 CampaignSpeakerTone 兼容（sys / ally / threat / weapon / muted） */

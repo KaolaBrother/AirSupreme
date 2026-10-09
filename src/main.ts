@@ -5,9 +5,55 @@ import type { GameCoordinator } from './core/GameCoordinator';
 import { loadStartFlowSettings } from './core/SessionSettings';
 import type { CampaignSaveData } from './core/save/SaveSystem';
 import { MenuMusic } from './core/campaign/MenuMusic';
+import { onLocaleChange, setLocale, tr } from './i18n';
 import { StartMenu, type GameSettings } from './ui/StartMenu';
 
 const log = getLogger('Main');
+
+function setShellText(selector: string, text: string): void {
+  const element = document.querySelector<HTMLElement>(selector);
+  if (element && element.textContent !== text) {
+    element.textContent = text;
+  }
+}
+
+function setShellLabel(selector: string, label: string): void {
+  const element = document.querySelector<HTMLElement>(selector);
+  if (element && element.getAttribute('aria-label') !== label) {
+    element.setAttribute('aria-label', label);
+  }
+}
+
+/**
+ * index.html 的静态文案（页面标题、加载画面、触控按键）按当前语言刷新。
+ * index.html 里写的是英文默认值；特武键的武器代号与各键角标由 HUD 接管，这里不写。
+ */
+function localizeShell(): void {
+  document.title = tr({ en: 'Air Supreme - 3D Air Combat', zh: 'Air Supreme - 3D 空战游戏' });
+  setShellText('#loading-screen .loading-sub', tr({ en: 'The Skydome War', zh: '天穹之战' }));
+  setShellText('#loading-screen .loading-status', tr({ en: 'Loading…', zh: '加载中...' }));
+
+  setShellText('#fire-button', tr({ en: 'FIRE', zh: '开火' }));
+  setShellText('#missile-button', tr({ en: 'MSL', zh: '导弹' }));
+  setShellText('#throttle-button', tr({ en: 'BOOST', zh: '加速' }));
+  setShellText('#upgrade-button', tr({ en: 'PAUSE', zh: '暂停' }));
+  setShellText('#flare-button .tc-main', tr({ en: 'FLARE', zh: '热焰' }));
+  setShellText('#cycle-button .tc-main', tr({ en: 'SWAP', zh: '切换' }));
+  setShellText('#camera-button .tc-main', tr({ en: 'VIEW', zh: '视角' }));
+  // 挂着武器时主标签是武器代号（HUD 写入），只在空挂架时写占位名
+  if (!document.getElementById('special-button')?.getAttribute('data-weapon')) {
+    setShellText('#special-button .tc-main', tr({ en: 'SPEC', zh: '特武' }));
+  }
+
+  setShellLabel('#fire-button', tr({ en: 'Fire guns', zh: '开火' }));
+  setShellLabel('#missile-button', tr({ en: 'Fire missile', zh: '发射导弹' }));
+  setShellLabel('#throttle-button', tr({ en: 'Boost', zh: '加速' }));
+  setShellLabel('#upgrade-button', tr({ en: 'Pause', zh: '暂停' }));
+  setShellLabel('#special-button', tr({ en: 'Special weapon', zh: '特殊武器' }));
+  setShellLabel('#flare-button', tr({ en: 'Flares', zh: '热焰弹' }));
+  setShellLabel('#cycle-button', tr({ en: 'Switch special weapon', zh: '切换特殊武器' }));
+  setShellLabel('#camera-button', tr({ en: 'Switch camera view', zh: '切换视角' }));
+}
 
 function hideLoadingScreen(): void {
   const loadingScreen = document.getElementById('loading-screen');
@@ -16,32 +62,48 @@ function hideLoadingScreen(): void {
   }
 }
 
+function renderLoadingMessage(title: string, lines: string[]): void {
+  const loadingScreen = document.getElementById('loading-screen');
+  if (!loadingScreen) {
+    return;
+  }
+
+  const box = document.createElement('div');
+  box.style.cssText = 'text-align: center; color: white; padding: 0 20px;';
+  const heading = document.createElement('h1');
+  heading.style.cssText = 'font-size: 32px; margin-bottom: 20px; letter-spacing: 0.06em;';
+  heading.textContent = title;
+  box.appendChild(heading);
+  lines.forEach((line, index) => {
+    const paragraph = document.createElement('p');
+    paragraph.style.cssText =
+      index === 0
+        ? 'font-size: 16px; opacity: 0.8;'
+        : 'font-size: 14px; margin-top: 20px; opacity: 0.6;';
+    paragraph.textContent = line;
+    box.appendChild(paragraph);
+  });
+  loadingScreen.replaceChildren(box);
+}
+
 function showEnteringBattlefield(): void {
   const loadingScreen = document.getElementById('loading-screen');
   if (loadingScreen) {
     loadingScreen.classList.remove('hidden');
-    loadingScreen.innerHTML = `
-          <div style="text-align: center; color: white;">
-            <h1 style="font-size: 32px; margin-bottom: 20px;">⏳ 正在进入战场</h1>
-            <p style="font-size: 16px; opacity: 0.8;">正在初始化游戏运行时...</p>
-          </div>
-        `;
+    renderLoadingMessage(tr({ en: '⏳ Entering the battlefield', zh: '⏳ 正在进入战场' }), [
+      tr({ en: 'Starting the game runtime…', zh: '正在初始化游戏运行时...' }),
+    ]);
   }
 }
 
 function showError(message: string): void {
-  const loadingScreen = document.getElementById('loading-screen');
-  if (loadingScreen) {
-    loadingScreen.innerHTML = `
-      <div style="text-align: center; color: white;">
-        <h1 style="font-size: 32px; margin-bottom: 20px;">⚠️ 加载失败</h1>
-        <p style="font-size: 16px; opacity: 0.8;">${message}</p>
-        <p style="font-size: 14px; margin-top: 20px; opacity: 0.6;">
-          请尝试刷新页面或使用其他浏览器
-        </p>
-      </div>
-    `;
-  }
+  renderLoadingMessage(tr({ en: '⚠️ Failed to load', zh: '⚠️ 加载失败' }), [
+    message,
+    tr({
+      en: 'Try reloading the page or using a different browser.',
+      zh: '请尝试刷新页面或使用其他浏览器',
+    }),
+  ]);
 }
 
 function checkWebGL(): boolean {
@@ -77,8 +139,13 @@ function warmGameCoordinatorChunk(): void {
 }
 
 async function main(): Promise<void> {
+  // 先确定界面语言（默认英文），之后渲染的一切（包括错误提示）都按它取文案
+  setLocale(loadStartFlowSettings().language);
+  localizeShell();
+  onLocaleChange(() => localizeShell());
+
   if (!checkWebGL()) {
-    showError('您的浏览器不支持 WebGL');
+    showError(tr({ en: 'Your browser does not support WebGL.', zh: '您的浏览器不支持 WebGL' }));
     return;
   }
 
@@ -154,8 +221,13 @@ async function main(): Promise<void> {
         lastSettings = settings;
         hideLoadingScreen();
       } catch (error) {
-        log.error('游戏启动失败:', error);
-        showError('游戏启动失败，请查看控制台了解详情');
+        log.error('Game failed to start:', error);
+        showError(
+          tr({
+            en: 'The game failed to start. See the console for details.',
+            zh: '游戏启动失败，请查看控制台了解详情',
+          })
+        );
       }
     }
 
@@ -170,22 +242,27 @@ async function main(): Promise<void> {
     hideLoadingScreen();
     warmGameCoordinatorChunk();
 
-    log.info('🎮 Air Supreme - 3D 空战游戏 (v2)');
-    log.info('📖 控制说明:');
-    log.info('  W/S - 俯仰（机头上下）');
-    log.info('  A/D - 偏航（机头左右）');
-    log.info('  Q/E - 翻滚（机翼倾斜）');
-    log.info('  空格 - 开火');
-    log.info('  M - 导弹');
-    log.info('  Shift - 加速');
-    log.info('📱 移动端: 使用虚拟摇杆和按钮控制');
+    log.info('🎮 Air Supreme - 3D air combat (v2)');
+    log.info('📖 Controls:');
+    log.info('  W/S - pitch (nose up / down)');
+    log.info('  A/D - yaw (nose left / right)');
+    log.info('  Q/E - roll (bank the wings)');
+    log.info('  Space - fire');
+    log.info('  M - missile');
+    log.info('  Shift - boost');
+    log.info('📱 Mobile: virtual stick and buttons');
 
     window.addEventListener('beforeunload', () => {
       game?.dispose();
     });
   } catch (error) {
-    log.error('游戏初始化失败:', error);
-    showError('游戏初始化失败，请查看控制台了解详情');
+    log.error('Game initialization failed:', error);
+    showError(
+      tr({
+        en: 'The game failed to initialize. See the console for details.',
+        zh: '游戏初始化失败，请查看控制台了解详情',
+      })
+    );
   }
 }
 

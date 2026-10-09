@@ -1,4 +1,4 @@
-import { HUD_COLORS, HUD_LAYERS, HUD_SERIF_STACK } from './hudPalette';
+import { HUD_COLORS, HUD_LAYERS, HUD_SERIF_STACK, HUD_SERIF_STACK_ZH } from './hudPalette';
 
 /**
  * 剧情覆盖层（章节卡 / 结算 / 结局字幕）样式。
@@ -35,6 +35,10 @@ const STORY_CSS = `
   opacity: 1;
   visibility: visible;
   transition: opacity 0.28s ease, visibility 0s linear 0s;
+}
+
+#story-overlay:lang(zh) {
+  --so-serif: var(--hud-serif, ${HUD_SERIF_STACK_ZH});
 }
 
 /* 收起：先淡出，再在淡出结束时切到 visibility: hidden */
@@ -918,6 +922,35 @@ const STORY_CSS = `
 
   #story-overlay .so-prompt {
     font-size: 10px;
+  }
+}
+
+/* ---------------------------------------------------------------- 英文排版 */
+/* 英文标题按单词换行：收小字号与字距，避免左栏里三行大字；数字与字幕行的宽字距也收一些 */
+#story-overlay:lang(en) .so-title {
+  font-size: clamp(32px, 4.3vw, 54px);
+  line-height: 1.04;
+  letter-spacing: 0.01em;
+}
+
+#story-overlay:lang(en) .so-finale-line {
+  letter-spacing: 0.16em;
+}
+
+#story-overlay:lang(en) .so-roll-line,
+#story-overlay:lang(en) .so-roll-title {
+  letter-spacing: 0.06em;
+}
+
+@media (max-aspect-ratio: 1/1) {
+  #story-overlay:lang(en) .so-title {
+    font-size: clamp(28px, 8.4vw, 40px);
+  }
+}
+
+@media (max-height: 520px) and (min-aspect-ratio: 1/1) {
+  #story-overlay:lang(en) .so-title {
+    font-size: 26px;
   }
 }
 

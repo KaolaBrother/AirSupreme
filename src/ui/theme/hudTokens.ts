@@ -1,10 +1,16 @@
 import { GameConfig } from '@/config';
-import { HUD_COLORS, HUD_SERIF_STACK, type HudLayoutDensity } from './hudPalette';
+import {
+  HUD_COLORS,
+  HUD_SERIF_STACK,
+  HUD_SERIF_STACK_ZH,
+  type HudLayoutDensity,
+} from './hudPalette';
 
 export {
   HUD_COLORS,
   HUD_LAYERS,
   HUD_SERIF_STACK,
+  HUD_SERIF_STACK_ZH,
   HUD_TONE_COLORS,
   getHudToneColor,
   prefersReducedMotion,
@@ -33,6 +39,10 @@ const HUD_TOKEN_CSS = `
   --hud-font: 'Arial', sans-serif;
   --hud-mono: 'Consolas', 'Arial Black', monospace;
   --hud-serif: ${HUD_SERIF_STACK};
+}
+
+:root:lang(zh) {
+  --hud-serif: ${HUD_SERIF_STACK_ZH};
 }
 `;
 

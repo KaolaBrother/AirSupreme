@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta
@@ -10,7 +10,7 @@
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="theme-color" content="#000000" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-    <title>Air Supreme - 3D 空战游戏</title>
+    <title>Air Supreme - 3D Air Combat</title>
     <style>
       :root {
         --hud-sys: #8fe4ff;
@@ -90,15 +90,38 @@
         color: var(--hud-muted);
       }
 
+      /* 副标题：英文用拉丁衬线 + 大写字距，中文（<html lang="zh-CN">）沿用 CJK 衬线与宽字距 */
       #loading-screen .loading-sub {
         margin: -8px 0 22px;
-        font-family: 'Noto Serif SC', 'Noto Serif CJK SC', 'Source Han Serif SC', 'Songti SC',
-          'STSong', 'SimSun', serif;
-        font-size: 20px;
+        padding: 0 16px;
+        font-family:
+          'Iowan Old Style', 'Palatino Linotype', Palatino, Georgia, 'Times New Roman',
+          'Noto Serif SC', 'Noto Serif CJK SC', 'Source Han Serif SC', 'Songti SC', serif;
+        font-size: 16px;
         font-weight: 700;
+        letter-spacing: 0.32em;
+        text-indent: 0.32em;
+        text-transform: uppercase;
+        text-align: center;
+        color: var(--hud-text);
+      }
+
+      #loading-screen .loading-sub:lang(zh) {
+        font-family:
+          'Noto Serif SC', 'Noto Serif CJK SC', 'Source Han Serif SC', 'Songti SC', 'STSong',
+          'SimSun', serif;
+        font-size: 20px;
         letter-spacing: 0.6em;
         text-indent: 0.6em;
-        color: var(--hud-text);
+      }
+
+      /* 手机竖屏：标题收一号，避免 AIR SUPREME 超出屏幕宽度 */
+      @media (max-width: 480px) {
+        #loading-screen h1 {
+          font-size: 34px;
+          letter-spacing: 0.12em;
+          text-align: center;
+        }
       }
 
       .loading-bar {
@@ -318,6 +341,14 @@
         --glow: rgba(143, 228, 255, 0.22);
       }
 
+      /* 英文标签比两个汉字宽：小按键收一号字，避免顶到圆边 */
+      #upgrade-button:lang(en),
+      #camera-button:lang(en),
+      #cycle-button:lang(en) {
+        font-size: 10px;
+        letter-spacing: 0.02em;
+      }
+
       /* 特武 / 热焰：外圈进度环（装填 / 热量 / 蓄能 / 回复），由 HUD 写入 --tc-meter（0..1） */
       #special-button::before,
       #flare-button::before {
@@ -329,7 +360,11 @@
           var(--meter) calc(var(--tc-meter, 0) * 1turn),
           rgba(143, 228, 255, 0.12) 0
         );
-        -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 3px));
+        -webkit-mask: radial-gradient(
+          farthest-side,
+          transparent calc(100% - 3px),
+          #000 calc(100% - 3px)
+        );
         mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 3px));
         pointer-events: none;
       }
@@ -395,7 +430,9 @@
 
       @keyframes flare-urgent {
         50% {
-          box-shadow: 0 0 0 4px rgba(255, 77, 77, 0.45), 0 4px 18px rgba(255, 77, 77, 0.7);
+          box-shadow:
+            0 0 0 4px rgba(255, 77, 77, 0.45),
+            0 4px 18px rgba(255, 77, 77, 0.7);
         }
       }
 
@@ -482,17 +519,17 @@
     </style>
   </head>
   <body>
-    <!-- 加载画面 -->
+    <!-- 加载画面（英文默认值；main.ts 按语言设置改写） -->
     <div id="loading-screen">
       <h1>AIR SUPREME</h1>
-      <div class="loading-sub">天穹之战</div>
-      <p>加载中...</p>
+      <div class="loading-sub">The Skydome War</div>
+      <p class="loading-status">Loading…</p>
       <div class="loading-bar">
         <div class="loading-bar-fill"></div>
       </div>
     </div>
 
-    <!-- 移动端虚拟控制器 -->
+    <!-- 移动端虚拟控制器（按键文字为英文默认值；main.ts / HUD 按语言设置改写） -->
     <div class="mobile-controls" id="mobile-controls">
       <!-- 左侧：虚拟摇杆 -->
       <div id="joystick">
@@ -501,22 +538,35 @@
 
       <!-- 右侧：按键簇（拇指弧，见上方样式说明） -->
       <div class="button-container">
-        <button id="fire-button" class="touch-btn" type="button">开火</button>
-        <button id="missile-button" class="touch-btn" type="button">导弹</button>
-        <button id="special-button" class="touch-btn" type="button" aria-label="特殊武器">
-          <span class="tc-main">特武</span><span class="tc-sub" aria-hidden="true"></span>
+        <button id="fire-button" class="touch-btn" type="button" aria-label="Fire guns">
+          FIRE
         </button>
-        <button id="flare-button" class="touch-btn" type="button" aria-label="热焰弹">
-          <span class="tc-main">热焰</span><span class="tc-sub" aria-hidden="true"></span>
+        <button id="missile-button" class="touch-btn" type="button" aria-label="Fire missile">
+          MSL
         </button>
-        <button id="throttle-button" class="touch-btn" type="button">加速</button>
-        <button id="cycle-button" class="touch-btn" type="button" aria-label="切换特殊武器">
-          <span class="tc-main">切换</span><span class="tc-sub" aria-hidden="true"></span>
+        <button id="special-button" class="touch-btn" type="button" aria-label="Special weapon">
+          <span class="tc-main">SPEC</span><span class="tc-sub" aria-hidden="true"></span>
         </button>
-        <button id="camera-button" class="touch-btn" type="button" aria-label="切换视角">
-          <span class="tc-main">视角</span><span class="tc-sub" aria-hidden="true"></span>
+        <button id="flare-button" class="touch-btn" type="button" aria-label="Flares">
+          <span class="tc-main">FLARE</span><span class="tc-sub" aria-hidden="true"></span>
         </button>
-        <button id="upgrade-button" class="touch-btn" type="button">暂停</button>
+        <button id="throttle-button" class="touch-btn" type="button" aria-label="Boost">
+          BOOST
+        </button>
+        <button
+          id="cycle-button"
+          class="touch-btn"
+          type="button"
+          aria-label="Switch special weapon"
+        >
+          <span class="tc-main">SWAP</span><span class="tc-sub" aria-hidden="true"></span>
+        </button>
+        <button id="camera-button" class="touch-btn" type="button" aria-label="Switch camera view">
+          <span class="tc-main">VIEW</span><span class="tc-sub" aria-hidden="true"></span>
+        </button>
+        <button id="upgrade-button" class="touch-btn" type="button" aria-label="Pause">
+          PAUSE
+        </button>
       </div>
     </div>
 
