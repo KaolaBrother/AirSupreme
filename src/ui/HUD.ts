@@ -672,9 +672,14 @@ export class HUD {
     `;
     this.setTextContent(this.powerUpDisplay, '');
 
+    // 生命与导弹 pip：桌面 / 横屏上下两行，竖屏并排一行（缩短状态列，给下方消息栈让高度）
+    const pipGroup = document.createElement('div');
+    pipGroup.className = 'hud-pip-group';
+    pipGroup.appendChild(this.livesDisplay);
+    pipGroup.appendChild(this.missilesDisplay);
+
     this.statusColumn.appendChild(this.enemiesDisplay);
-    this.statusColumn.appendChild(this.livesDisplay);
-    this.statusColumn.appendChild(this.missilesDisplay);
+    this.statusColumn.appendChild(pipGroup);
     this.statusColumn.appendChild(this.missileProgressDisplay);
     this.statusColumn.appendChild(this.powerUpDisplay);
 

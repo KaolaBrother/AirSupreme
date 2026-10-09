@@ -165,6 +165,23 @@ const HUD_EXTRAS_CSS = `
   width: 100px;
 }
 
+.hud-pip-group {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+#hud:not([data-layout-density='desktop']) .hud-pip-group {
+  gap: 5px;
+}
+
+/* 竖屏：生命与导弹并排一行，状态列更矮，不压到下方整行的消息栈 */
+#hud[data-layout-density='touch-portrait'] .hud-pip-group {
+  flex-direction: row;
+  align-items: center;
+}
+
 /* ------------------------------------------------------------ 中央消息栈（Boss 阶段条 / 简报 / 事件目标） */
 #hud-top-stack {
   position: absolute;
