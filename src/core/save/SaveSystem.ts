@@ -1,4 +1,5 @@
 import { SPECIAL_WEAPON_IDS, type SpecialWeaponId } from '@/core/CombatContracts';
+import { WINGMEN } from '@/core/campaign/Wingmen';
 import {
   DEFAULT_START_FLOW_SETTINGS,
   getLocalStorage,
@@ -55,6 +56,11 @@ export interface CampaignSaveData {
   flares: number;
   cameraMode: CameraModeSetting;
   stats: CampaignRunStats;
+  /**
+   * 本局战役雨燕的入列台词是否已播过（每局只播一次，读档不重播）。
+   * 可选：加入这个字段之前写的存档没有它，按关卡推断（见 isSwiftJoinAnnounced）。
+   */
+  swiftJoined?: boolean;
 }
 
 export type CampaignCheckpointInput = Omit<CampaignSaveData, 'version' | 'savedAt'>;
@@ -69,6 +75,9 @@ export interface CampaignProgress {
 }
 
 const CHECKPOINT_KINDS: readonly CheckpointKind[] = ['level-start', 'wave', 'boss', 'hangar'];
+
+/** 雨燕随队的关卡（与 Wingmen.WINGMEN 的 joinsAtLevel 一致） */
+const SWIFT_JOINS_AT_LEVEL = WINGMEN.find((wingman) => wingman.id === 'swift')?.joinsAtLevel ?? 3;
 
 /** 合理性上限：只用来拒绝离谱值，实际容量由各系统在恢复时自行钳制 */
 const MAX_SAVED_WAVE_INDEX = 16;
@@ -162,6 +171,7 @@ function normalizeStats(value: unknown): CampaignRunStats {
 /**
  * 规范化检查点主体（不含 version / savedAt）。
  * 关卡号是检查点的身份：缺失或非数字视为损坏，返回 null；其余字段越界钳制、缺失取默认值。
+ * 可选的 swiftJoined 只在是布尔值时保留（旧存档没有它，由 isSwiftJoinAnnounced 按关卡推断）。
  */
 function normalizeCheckpointBody(source: PlainRecord): CampaignCheckpointInput | null {
   if (typeof source.level !== 'number' || !Number.isFinite(source.level)) {
@@ -169,7 +179,7 @@ function normalizeCheckpointBody(source: PlainRecord): CampaignCheckpointInput |
   }
 
   const wave = clampWave(source.wave);
-  return {
+  const body: CampaignCheckpointInput = {
     checkpoint: normalizeCheckpointKind(source.checkpoint, wave),
     level: clampLevel(source.level, 1),
     wave,
@@ -183,6 +193,10 @@ function normalizeCheckpointBody(source: PlainRecord): CampaignCheckpointInput |
     cameraMode: normalizeCameraModeSetting(source.cameraMode),
     stats: normalizeStats(source.stats),
   };
+  if (typeof source.swiftJoined === 'boolean') {
+    body.swiftJoined = source.swiftJoined;
+  }
+  return body;
 }
 
 function removeKey(storage: Storage, key: string): void {
@@ -339,6 +353,18 @@ export function describeCheckpoint(data: CampaignSaveData): string {
     stage = tr(CHECKPOINT_WAVE, { wave: clampWave(data?.wave) + 1 });
   }
   return tr(CHECKPOINT_LABEL, { level, title, stage });
+}
+
+/**
+ * 本局战役雨燕的入列台词是否已播过。存档里有 swiftJoined 时以它为准；
+ * 旧存档（没有这个字段）按关卡推断：已过雨燕随队的那一关（level > 3）视为已播，
+ * 否则视为未播（她在本局首次升空时报到一次）。
+ */
+export function isSwiftJoinAnnounced(data: CampaignSaveData): boolean {
+  if (typeof data?.swiftJoined === 'boolean') {
+    return data.swiftJoined;
+  }
+  return clampLevel(data?.level, 1) > SWIFT_JOINS_AT_LEVEL;
 }
 
 function normalizeProgress(source: PlainRecord): CampaignProgress {

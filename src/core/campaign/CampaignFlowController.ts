@@ -2,6 +2,8 @@ import type { GameSessionState } from '@/core/GameSessionState';
 import {
   clearCampaignCheckpoint,
   describeCheckpoint,
+  isSwiftJoinAnnounced,
+  loadCampaignCheckpoint,
   markCampaignCompleted,
   recordLevelReached,
   saveCampaignCheckpoint,
@@ -19,6 +21,7 @@ import { getLevelConfig } from '@/features/terrain/LevelConfig';
 import { getStartingUpgradePoints, type PlayerStats } from '@/features/upgrade/UpgradeSystem';
 import { tr } from '@/i18n';
 import type { CampaignDebriefInput, ICampaignPresentation } from './CampaignPresentation';
+import type { WingmanId } from './Wingmen';
 
 /**
  * 协调器提供给战役流程的具体操作。流程控制器只决定“接下来发生什么”，
@@ -84,6 +87,8 @@ export class CampaignFlowController {
   private firstLevelOfSession = true;
   private victory = false;
   private disposed = false;
+  /** 本局雨燕的入列台词已播过（每局一次；写进检查点，读档不重播） */
+  private swiftJoined = false;
   private outro: PendingOutro | null = null;
 
   constructor(private readonly deps: CampaignFlowDeps) {}
@@ -133,6 +138,7 @@ export class CampaignFlowController {
   public resumeFromCheckpoint(save: CampaignSaveData): void {
     this.firstLevelOfSession = false;
     this.stats = { ...save.stats };
+    this.swiftJoined = isSwiftJoinAnnounced(save);
     this.levelStartScore = save.score;
     this.levelKills = 0;
     this.levelCiviliansLost = 0;
@@ -381,6 +387,25 @@ export class CampaignFlowController {
     }
   }
 
+  /**
+   * 具名僚机随队升空（关卡开场 / 读档回到 Boss 战前的编队起飞；增援与道具召唤的友机不经过这里）：
+   * 雨燕本局第一次升空时播她的入列台词——每局战役只播一次，并立即记进当前检查点，
+   * 读档 / 继续不会重播；Boss 模式不播。渡鸦从第 1 章起随队，没有入列台词。
+   */
+  public handleWingmanLaunched(id: WingmanId): void {
+    if (id !== 'swift' || this.swiftJoined || this.deps.session.isBossMode()) return;
+    this.swiftJoined = true;
+    this.deps.presentation.onWingmanEvent(id, 'joined');
+    this.persistSwiftJoined();
+  }
+
+  /** 把“雨燕已入列”补写进当前检查点（入关检查点写在她升空之前） */
+  private persistSwiftJoined(): void {
+    const save = loadCampaignCheckpoint();
+    if (!save || save.swiftJoined === true) return;
+    saveCampaignCheckpoint({ ...save, swiftJoined: true });
+  }
+
   public getRunStats(): CampaignRunStats {
     return { ...this.stats };
   }
@@ -396,6 +421,7 @@ export class CampaignFlowController {
     this.levelCiviliansLost = 0;
     this.levelAlliesLost = 0;
     this.victory = false;
+    this.swiftJoined = false;
     this.outro = null;
   }
 
@@ -426,6 +452,7 @@ export class CampaignFlowController {
     if (session.isBossMode()) return;
     const data = this.deps.captureCheckpoint(kind, level, wave);
     data.stats = this.getRunStats();
+    data.swiftJoined = this.swiftJoined;
     if (!saveCampaignCheckpoint(data) || !announce) return;
     let label: string;
     switch (kind) {

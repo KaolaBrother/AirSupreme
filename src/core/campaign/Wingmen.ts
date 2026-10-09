@@ -35,6 +35,7 @@ export interface WingmanStatus {
 /**
  * 僚机名册：新友机按编队顺序领取第一个可用的僚机身份（已随队、不在空中、本关未被击落），
  * 没有可用身份时是普通友机。僚机被击落后本关不再出现，换关 / 清场后重新归队。
+ * 关卡开场由协调器让全部可用的僚机一起升空（countAvailable），之后的增援都是普通友机。
  */
 export class WingmanRoster implements WingmanStatus {
   /** 友机 id（网格 uuid，与 FRIENDLY_SPAWNED / FRIENDLY_DEATH 的 friendlyId 一致）→ 僚机 */
@@ -46,12 +47,26 @@ export class WingmanRoster implements WingmanStatus {
   /** 新友机入场：返回它的僚机身份；null 表示普通友机 */
   public assign(friendlyId: string, level: number): WingmanProfile | null {
     for (const profile of this.profiles) {
-      if (profile.joinsAtLevel > level) continue;
-      if (this.downed.has(profile.id) || this.isFlying(profile.id)) continue;
+      if (!this.isAvailable(profile, level)) continue;
       this.flying.set(friendlyId, profile);
       return profile;
     }
     return null;
+  }
+
+  /** 此刻还能领取的僚机身份数（该关已随队、不在空中、本关未被击落） */
+  public countAvailable(level: number): number {
+    let count = 0;
+    for (const profile of this.profiles) {
+      if (this.isAvailable(profile, level)) count++;
+    }
+    return count;
+  }
+
+  private isAvailable(profile: WingmanProfile, level: number): boolean {
+    return (
+      profile.joinsAtLevel <= level && !this.downed.has(profile.id) && !this.isFlying(profile.id)
+    );
   }
 
   /** 友机坠毁：是僚机则记为本关被击落并返回其身份；普通友机返回 null */
