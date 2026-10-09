@@ -168,3 +168,145 @@ describe('UnitController ally-loss radio (ALLY_LOSS_RADIO)', () => {
     }
   );
 });
+
+/**
+ * 紧急告警配音配额（终验修复 F2）：地空导弹发射的配音每波（每场 Boss 战）最多两次，
+ * 第二次至少隔 20 秒；只有真的进了无线电（genericRadio 返回 true）才计数；HUD 闪烁告警每次发射
+ * 都有；新的一波（spawnForWave）与 Boss 战开始（clear）重新计数。误伤平民同样每波最多两次配音。
+ */
+describe('UnitController urgent-warning radio budget', () => {
+  type BudgetPresentationStub = PresentationStub & {
+    setRadarRangeMultiplier: ReturnType<typeof vi.fn>;
+  };
+  let presentation: BudgetPresentationStub;
+  let controller: UnitController;
+  let system: UnitSystem;
+  let radioAccepts: boolean;
+  const playerMesh = new THREE.Object3D();
+  const playerPosition = new THREE.Vector3(0, 300, 0);
+  const sam = {} as UnitInstance;
+
+  beforeEach(async () => {
+    radioAccepts = true;
+    presentation = {
+      genericRadio: vi.fn(() => radioAccepts),
+      unitFirstContact: vi.fn(),
+      onUnitEvent: vi.fn(),
+      flashWarning: vi.fn(),
+      setMissileWarning: vi.fn(),
+      setRadarRangeMultiplier: vi.fn(),
+    };
+    controller = new UnitController({
+      scene: new THREE.Scene(),
+      presentation: presentation as unknown as ICampaignPresentation,
+      awardKill: vi.fn(),
+      applyPenalty: vi.fn(),
+      onAssetLost: vi.fn(),
+      damagePlayer: vi.fn(),
+      onExplosion: vi.fn(),
+      onEscortResult: vi.fn(),
+    });
+    system = await controller.ensureLoaded(particleStub());
+  });
+
+  afterEach(() => {
+    controller.dispose();
+    resetLocale();
+  });
+
+  function advance(seconds: number, dt = 0.1): void {
+    for (let elapsed = 0; elapsed < seconds - 1e-9; elapsed += dt) {
+      controller.update(dt, playerMesh, playerPosition, [], [], false);
+    }
+  }
+
+  function missileLaunch(): void {
+    system.onLockWarning?.(sam, 'launched');
+  }
+
+  function voiced(key: GenericRadioKey): number {
+    return presentation.genericRadio.mock.calls.filter(([called]) => called === key).length;
+  }
+
+  function accepted(key: GenericRadioKey): number {
+    return presentation.genericRadio.mock.calls.filter(
+      ([called], index) =>
+        called === key && presentation.genericRadio.mock.results[index]?.value === true
+    ).length;
+  }
+
+  it('flashes the HUD warning on every launch but voices at most two per wave, 20 s apart', () => {
+    missileLaunch();
+    expect(accepted('missile-warning')).toBe(1);
+
+    advance(10);
+    missileLaunch();
+    expect(accepted('missile-warning'), 'second warning inside the 20 s cooldown').toBe(1);
+
+    advance(10.5);
+    missileLaunch();
+    expect(accepted('missile-warning'), 'second warning after 20 s').toBe(2);
+
+    for (let i = 0; i < 4; i++) {
+      advance(60);
+      missileLaunch();
+    }
+    expect(accepted('missile-warning'), 'never a third in the same wave').toBe(2);
+    expect(presentation.flashWarning).toHaveBeenCalledTimes(7);
+    for (const [, tone] of presentation.flashWarning.mock.calls) {
+      expect(tone).toBe('threat');
+    }
+  });
+
+  it('only counts a warning that actually went on the radio', () => {
+    // 正在配音的台词期间告警被跳过（genericRadio 返回 false）：不占配额、不进冷却
+    radioAccepts = false;
+    missileLaunch();
+    missileLaunch();
+    expect(accepted('missile-warning')).toBe(0);
+
+    radioAccepts = true;
+    missileLaunch();
+    expect(accepted('missile-warning')).toBe(1);
+    advance(20.5);
+    missileLaunch();
+    expect(accepted('missile-warning')).toBe(2);
+  });
+
+  it('starts counting again at the next wave and at a boss fight', () => {
+    missileLaunch();
+    advance(21);
+    missileLaunch();
+    missileLaunch();
+    expect(accepted('missile-warning')).toBe(2);
+
+    controller.spawnForWave(1, 1, playerPosition);
+    missileLaunch();
+    expect(accepted('missile-warning'), 'new wave').toBe(3);
+
+    advance(21);
+    missileLaunch();
+    expect(accepted('missile-warning')).toBe(4);
+    missileLaunch();
+    expect(accepted('missile-warning')).toBe(4);
+
+    // Boss 战开始：协调器清场（clear）
+    controller.clear();
+    missileLaunch();
+    expect(accepted('missile-warning'), 'boss fight').toBe(5);
+  });
+
+  it('voices civilian hits at most twice per wave, with the cease-fire warning every time', () => {
+    for (let i = 0; i < 6; i++) {
+      system.onCivilianHit?.(sam);
+      advance(40);
+    }
+    expect(voiced('civilian-hit')).toBeLessThanOrEqual(2);
+    expect(accepted('civilian-hit')).toBe(2);
+    expect(presentation.flashWarning).toHaveBeenCalledTimes(6);
+
+    controller.spawnForWave(1, 2, playerPosition);
+    system.onCivilianHit?.(sam);
+    expect(accepted('civilian-hit')).toBe(3);
+  });
+});

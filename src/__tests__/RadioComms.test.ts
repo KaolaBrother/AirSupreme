@@ -485,3 +485,123 @@ describe('RadioComms voice timing', () => {
     expect(radio.isBusy()).toBe(false);
   });
 });
+
+/**
+ * 终验修复 F2：isVoicing()（当前台词的配音正在说）、被打断的台词最多重播一次、
+ * estimateRemainingSeconds()（Boss 收尾看门狗用的积压估计）。
+ */
+describe('RadioComms voicing state, replay limit and backlog estimate', () => {
+  let radio: RadioComms;
+  let shown: RadioLine[];
+
+  beforeEach(() => {
+    document.body.innerHTML = '';
+    radio = new RadioComms();
+    shown = [];
+    radio.onLineShown = (shownLine) => {
+      shown.push(shownLine);
+    };
+  });
+
+  afterEach(() => {
+    radio.dispose();
+    resetLocale();
+    document.body.innerHTML = '';
+  });
+
+  /** 推进直到空闲，返回用时（秒） */
+  function timeToIdle(dt = 0.01, maxSeconds = 300): number {
+    let elapsed = 0;
+    while (radio.isBusy() && elapsed < maxSeconds) {
+      radio.update(dt);
+      elapsed += dt;
+    }
+    return elapsed;
+  }
+
+  it('isVoicing() is true only between holdForVoice and releaseVoice of the current line', () => {
+    const first = line('Copy that, Falcon.', 'hq', '收到，猎鹰。');
+    expect(radio.isVoicing()).toBe(false);
+    radio.enqueue(first);
+    expect(radio.isVoicing(), 'shown, voice not started yet').toBe(false);
+
+    radio.update(0.1);
+    radio.holdForVoice(first, 3);
+    expect(radio.isVoicing()).toBe(true);
+    radio.update(1);
+    expect(radio.isVoicing()).toBe(true);
+
+    radio.releaseVoice(first);
+    expect(radio.isVoicing()).toBe(false);
+    drain(radio);
+    expect(radio.isVoicing()).toBe(false);
+  });
+
+  it('isVoicing() ignores voice reports for a line that is not on screen', () => {
+    const first = line('First line.', 'hq', '第一句。');
+    const stale = line('Stale line.', 'hq', '过期的一句。');
+    radio.enqueue(first);
+    radio.holdForVoice(stale, 5);
+    expect(radio.isVoicing()).toBe(false);
+  });
+
+  it('an interrupted line replays at most once', () => {
+    const normal = line('正在通报第一波目标的分布情况，请注意东侧。');
+    radio.enqueue(normal);
+    radio.update(0.1);
+    radio.enqueue(GENERIC_RADIO['missile-warning'], { priority: 'high' });
+    expect(shown).toEqual([normal, GENERIC_RADIO['missile-warning']]);
+
+    // 告警说完，被打断的台词重播
+    for (let elapsed = 0; shown.length < 3 && elapsed < 30; elapsed += 0.05) {
+      radio.update(0.05);
+    }
+    expect(shown).toEqual([normal, GENERIC_RADIO['missile-warning'], normal]);
+
+    // 重播刚开始又被打断：这次不再回队
+    radio.update(0.1);
+    radio.enqueue(GENERIC_RADIO['civilian-hit'], { priority: 'high' });
+    drain(radio);
+    expect(shown).toEqual([
+      normal,
+      GENERIC_RADIO['missile-warning'],
+      normal,
+      GENERIC_RADIO['civilian-hit'],
+    ]);
+  });
+
+  it('estimates 0 s when idle and after dispose', () => {
+    expect(radio.estimateRemainingSeconds()).toBe(0);
+    radio.enqueue(line('One more line.'));
+    expect(radio.estimateRemainingSeconds()).toBeGreaterThan(0);
+    radio.dispose();
+    expect(radio.estimateRemainingSeconds()).toBe(0);
+  });
+
+  it('without voices the estimate covers the actual time until the radio is idle', () => {
+    radio.enqueue(line('Short.'));
+    radio.enqueue(line('This is a much longer radio line that takes quite a while to read.'));
+    radio.enqueue(line('第三句，中等长度的台词。'));
+    radio.update(0.4);
+
+    const estimate = radio.estimateRemainingSeconds();
+    const actual = timeToIdle();
+    expect(estimate, 'never underestimates').toBeGreaterThanOrEqual(actual - 0.3);
+    expect(estimate, 'not wildly over').toBeLessThanOrEqual(actual + 2);
+  });
+
+  it('counts the voice durations of the lines still to come', () => {
+    const current = line('Copy.', 'hq', '收到。');
+    const queued = [line('Next one.', 'hq', '下一句。'), line('And another.', 'hq', '还有一句。')];
+    radio.enqueue(current);
+    queued.forEach((entry) => radio.enqueue(entry));
+    radio.update(0.1);
+    radio.holdForVoice(current, 6);
+    radio.update(2);
+
+    const voiceSeconds = (entry: RadioLine): number | null => (queued.includes(entry) ? 8 : null);
+    // 当前句还要说约 4 秒，排队的两句各 8 秒
+    expect(radio.estimateRemainingSeconds(voiceSeconds)).toBeGreaterThanOrEqual(4 + 8 + 8);
+    expect(radio.estimateRemainingSeconds()).toBeGreaterThanOrEqual(4);
+  });
+});

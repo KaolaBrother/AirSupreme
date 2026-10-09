@@ -88,6 +88,13 @@ class FakeVoice implements CampaignVoice {
     return Promise.resolve(null);
   }
 
+  /** 清单时长（测试按需填写；没有的句子返回 null） */
+  readonly durations = new Map<string, number>();
+
+  getLineDuration(lineId: string): number | null {
+    return this.durations.get(lineId) ?? null;
+  }
+
   /** 测试：当前这句开口（时长 seconds） */
   start(seconds: number): void {
     const request = this.requireCurrent();
@@ -359,6 +366,27 @@ describe('campaign presentation voice wiring', () => {
         GENERIC_RADIO['escort-success'].id,
       ]);
       expect(radioText()).toContain(GENERIC_RADIO['escort-success'].text.zh);
+    });
+
+    it('estimates the radio backlog from the voice pack durations (boss outro watchdog)', () => {
+      expect(presentation.getRadioBacklogSeconds()).toBe(0);
+      voice.durations.set(GENERIC_RADIO.checkpoint.id, 7);
+      voice.durations.set(GENERIC_RADIO['escort-success'].id, 9);
+      presentation.genericRadio('checkpoint');
+      presentation.genericRadio('escort-success');
+
+      expect(presentation.getRadioBacklogSeconds()).toBeGreaterThanOrEqual(7 + 9);
+
+      voice.start(7);
+      step(7.2);
+      voice.end();
+      step(1);
+      voice.start(9);
+      step(9.2);
+      voice.end();
+      step(3);
+      expect(presentation.isRadioBusy()).toBe(false);
+      expect(presentation.getRadioBacklogSeconds()).toBe(0);
     });
   });
 
