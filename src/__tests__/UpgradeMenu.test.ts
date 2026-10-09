@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { UpgradeMenu } from '@/ui/UpgradeMenu';
 import { PlayerUpgrades, UpgradeType } from '@/features/upgrade/UpgradeSystem';
+import { setLocale } from '@/i18n';
+import { resetLocale } from './i18nTestUtils';
 
 describe('UpgradeMenu', () => {
   let upgrades: PlayerUpgrades;
@@ -20,6 +22,7 @@ describe('UpgradeMenu', () => {
 
   afterEach(() => {
     menu.dispose();
+    resetLocale();
     document.body.innerHTML = '';
   });
 
@@ -28,13 +31,16 @@ describe('UpgradeMenu', () => {
     menu.show();
 
     const points = document.querySelector('.upgrade-points');
-    expect(points?.textContent).toBe('⭐ 可用升级点: 2');
+    expect(points?.textContent).toBe('⭐ Upgrade points: 2');
     expect(points?.classList.contains('has-points')).toBe(true);
     expect(menu.isVisible()).toBe(true);
 
     upgrades.upgrade(UpgradeType.MAX_HEALTH);
     menu.updateDisplay();
-    expect(points?.textContent).toBe('⭐ 可用升级点: 1');
+    expect(points?.textContent).toBe('⭐ Upgrade points: 1');
+
+    setLocale('zh-CN');
+    expect(document.querySelector('.upgrade-points')?.textContent).toBe('⭐ 可用升级点: 1');
   });
 
   it('updates upgrade button state and points after upgrade click', () => {
@@ -55,7 +61,7 @@ describe('UpgradeMenu', () => {
     expect(onUpgrade).toHaveBeenCalledWith(UpgradeType.MAX_HEALTH);
     expect(upgrades.getLevel(UpgradeType.MAX_HEALTH)).toBe(1);
     expect(upgrades.getAvailablePoints()).toBe(0);
-    expect(document.querySelector('.upgrade-points')?.textContent).toBe('⭐ 可用升级点: 0');
+    expect(document.querySelector('.upgrade-points')?.textContent).toBe('⭐ Upgrade points: 0');
 
     const updatedButton = document.getElementById(buttonId) as HTMLButtonElement;
     expect(updatedButton.classList.contains('locked')).toBe(true);

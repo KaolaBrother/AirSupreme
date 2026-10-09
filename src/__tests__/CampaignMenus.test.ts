@@ -16,8 +16,10 @@ import {
 } from '@/core/SessionSettings';
 import { TOTAL_LEVELS, getCampaignChapter } from '@/features/campaign/CampaignData';
 import { PlayerUpgrades, UPGRADE_CONFIGS, UpgradeType } from '@/features/upgrade/UpgradeSystem';
+import { getLocale, setLocale } from '@/i18n';
 import { StartMenu, type GameSettings } from '@/ui/StartMenu';
 import { UpgradeMenu } from '@/ui/UpgradeMenu';
+import { LOCALES, resetLocale, textIn } from './i18nTestUtils';
 
 type CheckpointInput = Omit<CampaignSaveData, 'version' | 'savedAt'>;
 
@@ -158,6 +160,7 @@ describe('StartMenu campaign additions', () => {
   afterEach(() => {
     menu?.dispose();
     menu = null;
+    resetLocale();
     vi.unstubAllGlobals();
     window.localStorage.clear();
     document.body.innerHTML = '';
@@ -169,16 +172,23 @@ describe('StartMenu campaign additions', () => {
       expect(isShown(document.getElementById('continue-btn'))).toBe(false);
     });
 
-    it('shows 继续战役 with the describeCheckpoint text when a checkpoint exists', () => {
+    it('shows Continue Campaign with the describeCheckpoint text, in either language', () => {
       expect(saveCampaignCheckpoint(CHECKPOINT)).toBe(true);
       const save = loadCampaignCheckpoint() as CampaignSaveData;
       createMenu();
 
       const button = document.getElementById('continue-btn');
       expect(isShown(button)).toBe(true);
-      expect(button?.textContent).toContain('继续战役');
+      expect(button?.textContent).toContain('Continue Campaign');
       expect(button?.textContent).toContain(describeCheckpoint(save));
-      expect(button?.textContent).toContain('第6关 · 熔炉之心 · 第3波');
+      expect(button?.textContent).toContain('Ch. 6 · Heart of the Forge · Wave 3');
+
+      setLocale('zh-CN');
+      const localized = document.getElementById('continue-btn');
+      expect(isShown(localized)).toBe(true);
+      expect(localized?.textContent).toContain('继续战役');
+      expect(localized?.textContent).toContain(describeCheckpoint(save));
+      expect(localized?.textContent).toContain('第6关 · 熔炉之心 · 第3波');
     });
 
     it('stays hidden for a corrupt checkpoint, which is discarded', () => {
@@ -197,7 +207,11 @@ describe('StartMenu campaign additions', () => {
 
       const button = document.getElementById('continue-btn');
       expect(isShown(button)).toBe(true);
-      expect(button?.textContent).toContain('第6关 · 熔炉之心 · Boss 战');
+      expect(button?.textContent).toContain('Ch. 6 · Heart of the Forge · Boss');
+      setLocale('zh-CN');
+      expect(document.getElementById('continue-btn')?.textContent).toContain(
+        '第6关 · 熔炉之心 · Boss 战'
+      );
     });
 
     it('fires setOnContinue with the validated save, not onStart', () => {
@@ -217,27 +231,37 @@ describe('StartMenu campaign additions', () => {
   });
 
   describe('#level-row', () => {
-    it('walks through all ten chapters with their titles and stops at the last', () => {
-      createMenu();
-      const plus = rowButton('level-row', '+');
+    const LEVEL_LABEL = { en: 'Level {level}', zh: '第{level}关' };
 
-      for (let level = 1; level <= TOTAL_LEVELS; level++) {
-        const text = rowText('level-row');
-        expect(text, `level ${level}`).toContain(`第${level}关`);
-        expect(text, `level ${level}`).toContain(getCampaignChapter(level).title);
-        plus.click();
+    it.each(LOCALES)(
+      'walks through all ten chapters with their titles and stops at the last (%s)',
+      (locale) => {
+        setLocale(locale);
+        createMenu();
+        const plus = rowButton('level-row', '+');
+        const label = (level: number): string =>
+          textIn(LEVEL_LABEL, locale).replace('{level}', String(level));
+
+        for (let level = 1; level <= TOTAL_LEVELS; level++) {
+          const text = rowText('level-row');
+          expect(text, `level ${level}`).toContain(label(level));
+          expect(text, `level ${level}`).toContain(textIn(getCampaignChapter(level).title, locale));
+          plus.click();
+        }
+
+        // 已是最后一关，继续 + 不再前进
+        expect(rowText('level-row')).toContain(label(TOTAL_LEVELS));
+        expect(rowText('level-row')).toContain(
+          textIn(getCampaignChapter(TOTAL_LEVELS).title, locale)
+        );
+        expect(loadStartFlowSettings().startLevel).toBe(TOTAL_LEVELS);
       }
-
-      // 已是最后一关，继续 + 不再前进
-      expect(rowText('level-row')).toContain(`第${TOTAL_LEVELS}关`);
-      expect(rowText('level-row')).toContain(getCampaignChapter(TOTAL_LEVELS).title);
-      expect(loadStartFlowSettings().startLevel).toBe(TOTAL_LEVELS);
-    });
+    );
 
     it('starts the game at a level above five', () => {
       saveStartFlowSettings({ startLevel: 8 });
       const startMenu = createMenu();
-      expect(rowText('level-row')).toContain(getCampaignChapter(8).title);
+      expect(rowText('level-row')).toContain(getCampaignChapter(8).title.en);
 
       let started: GameSettings | null = null;
       startMenu.setOnStart((settings) => {
@@ -281,6 +305,57 @@ describe('StartMenu campaign additions', () => {
       saveStartFlowSettings({ cameraMode: 'first-person' });
       createMenu();
       expect(rowText('camera-row')).not.toBe(thirdPersonText);
+    });
+  });
+
+  describe('#language-row', () => {
+    function startButtonText(): string {
+      return document.getElementById('start-btn')?.textContent ?? '';
+    }
+
+    it('starts in English and switches the whole menu to Chinese, persisting the choice', () => {
+      createMenu();
+      expect(rowText('language-row')).toContain('Language');
+      expect(rowText('language-row')).toContain('English');
+      expect(startButtonText()).toBe('Start Game');
+      expect(rowText('level-row')).toContain('Start level');
+
+      rowButton('language-row', '+').click();
+
+      expect(getLocale()).toBe('zh-CN');
+      expect(document.documentElement.lang).toBe('zh-CN');
+      expect(loadStartFlowSettings().language).toBe('zh-CN');
+      expect(rowText('language-row')).toContain('语言');
+      expect(rowText('language-row')).toContain('中文');
+      expect(startButtonText()).toBe('开始游戏');
+      expect(rowText('level-row')).toContain('起始关卡');
+
+      rowButton('language-row', '-').click();
+      expect(getLocale()).toBe('en');
+      expect(loadStartFlowSettings().language).toBe('en');
+      expect(rowText('language-row')).toContain('English');
+      expect(startButtonText()).toBe('Start Game');
+    });
+
+    it('hands the chosen language to onStart', () => {
+      const startMenu = createMenu();
+      rowButton('language-row', '+').click();
+      let started: GameSettings | null = null;
+      startMenu.setOnStart((settings) => {
+        started = settings;
+      });
+      (document.getElementById('start-btn') as HTMLButtonElement).click();
+      expect((started as GameSettings | null)?.language).toBe('zh-CN');
+    });
+
+    it('follows a language change made elsewhere (e.g. the pause menu)', () => {
+      createMenu();
+      setLocale('zh-CN');
+      expect(rowText('language-row')).toContain('中文');
+      expect(startButtonText()).toBe('开始游戏');
+      setLocale('en');
+      expect(rowText('language-row')).toContain('English');
+      expect(startButtonText()).toBe('Start Game');
     });
   });
 
@@ -328,6 +403,7 @@ describe('UpgradeMenu campaign additions', () => {
 
   afterEach(() => {
     menu.dispose();
+    resetLocale();
     document.body.innerHTML = '';
   });
 
@@ -335,6 +411,9 @@ describe('UpgradeMenu campaign additions', () => {
     menu.show();
 
     expect(document.querySelector('#upgrade-menu .upgrade-title')?.textContent).toBe('⚙️ Upgrades');
+    expect(resumeButton().textContent).toBe('▶ Back to battle');
+    setLocale('zh-CN');
+    expect(menu.isVisible(), 'stays open across a language change').toBe(true);
     expect(resumeButton().textContent).toBe('▶ 返回战斗');
 
     resumeButton().click();
