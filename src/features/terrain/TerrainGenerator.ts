@@ -525,7 +525,9 @@ export class TerrainGenerator {
    */
   private flushStaticBatch(staging: THREE.Object3D, name: string): THREE.Mesh[] {
     const batch = new StaticBatcher();
-    batch.addObject(staging);
+    const skipped = batch.addObject(staging);
+    // 不能合批的对象（实例化 / 多材质 / 点线）保持世界变换挂回地形组
+    for (const object of skipped) this.terrainGroup.attach(object);
     return batch.flush(this.terrainGroup, name);
   }
 
@@ -2318,10 +2320,11 @@ export class TerrainGenerator {
 
     // 合批：楼体按顶点色共用材质，立面/广告牌/天线/水箱/光带/警示灯各一个网格
     const batch = new StaticBatcher();
-    batch.addObject(staging, (mesh) => {
+    const skipped = batch.addObject(staging, (mesh) => {
       const color: unknown = mesh.userData.batchColor;
       return color instanceof THREE.Color ? color : undefined;
     });
+    for (const object of skipped) this.terrainGroup.attach(object);
     batch.flush(this.terrainGroup, 'cityBuildings');
 
     // 屋顶细节：实例化空调机组、屋顶水箱、天线杆与红色航空警示灯

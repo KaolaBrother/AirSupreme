@@ -99,7 +99,8 @@ export class StaticBatcher {
 
   /**
    * 把一个按 Group 拼装好的对象整体并入（root 的变换即摆放位置，root 不应已挂在场景里）。
-   * 子网格按其相对 root 父空间的矩阵烘焙；InstancedMesh / 多材质网格不支持，原样跳过并返回它们。
+   * 普通单材质网格按其相对 root 父空间的矩阵烘焙；无法合批的可渲染对象（InstancedMesh、
+   * 多材质网格、点 / 线 / 精灵、灯光）原样跳过并返回，调用方应把它们另行挂回场景。
    */
   public addObject(
     root: THREE.Object3D,
@@ -108,17 +109,33 @@ export class StaticBatcher {
     const skipped: THREE.Object3D[] = [];
     root.updateMatrixWorld(true);
     root.traverse((child) => {
-      if (!(child instanceof THREE.Mesh)) return;
-      if (child instanceof THREE.InstancedMesh || Array.isArray(child.material)) {
-        skipped.push(child);
-        return;
+      if (child instanceof THREE.Mesh && !(child instanceof THREE.InstancedMesh)) {
+        if (!Array.isArray(child.material)) {
+          this.add(child.geometry, child.material, child.matrixWorld, {
+            castShadow: child.castShadow,
+            receiveShadow: child.receiveShadow,
+            renderOrder: child.renderOrder,
+            color: colorOf?.(child),
+          });
+          return;
+        }
       }
-      this.add(child.geometry, child.material, child.matrixWorld, {
-        castShadow: child.castShadow,
-        receiveShadow: child.receiveShadow,
-        renderOrder: child.renderOrder,
-        color: colorOf?.(child),
-      });
+      const renderable = child as THREE.Object3D & {
+        isMesh?: boolean;
+        isPoints?: boolean;
+        isLine?: boolean;
+        isSprite?: boolean;
+        isLight?: boolean;
+      };
+      if (
+        renderable.isMesh ||
+        renderable.isPoints ||
+        renderable.isLine ||
+        renderable.isSprite ||
+        renderable.isLight
+      ) {
+        skipped.push(child);
+      }
     });
     return skipped;
   }
