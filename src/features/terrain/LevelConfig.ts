@@ -976,7 +976,7 @@ export const LEVELS: LevelConfig[] = [
       vignetteStrength: 0.24,
     },
     totalWaves: 7,
-    enemiesPerWave: [4, 4, 5, 5, 5, 6, 6],
+    enemiesPerWave: [5, 5, 5, 5, 6, 6, 6],
     enemyTypes: [
       { type: 'SCOUT', minWave: 1, maxCount: 3 },
       { type: 'FIGHTER', minWave: 1, maxCount: 4 },
@@ -1102,7 +1102,7 @@ export const LEVELS: LevelConfig[] = [
       vignetteStrength: 0.22,
     },
     totalWaves: 7,
-    enemiesPerWave: [4, 5, 5, 5, 6, 6, 6],
+    enemiesPerWave: [4, 5, 5, 5, 5, 6, 6],
     enemyTypes: [
       { type: 'FIGHTER', minWave: 1, maxCount: 4 },
       { type: 'HEAVY', minWave: 1, maxCount: 3 },
@@ -1469,7 +1469,7 @@ export const LEVELS: LevelConfig[] = [
       vignetteStrength: 0.3,
     },
     totalWaves: 8,
-    enemiesPerWave: [4, 4, 5, 5, 5, 5, 6, 6],
+    enemiesPerWave: [3, 4, 4, 4, 5, 5, 5, 5],
     enemyTypes: [
       { type: 'FIGHTER', minWave: 1, maxCount: 4 },
       { type: 'HEAVY', minWave: 1, maxCount: 4 },

@@ -135,7 +135,7 @@ const LEVEL_CURVE: Readonly<Record<LevelCurveKey, readonly number[]>> = {
   unitHealthMultiplier: [1.0, 1.02, 1.04, 1.06, 1.08, 1.1, 1.12, 1.14, 1.16, 1.18],
   unitDamageShare: [1.0, 0.96, 0.93, 0.9, 0.87, 0.84, 0.81, 0.78, 0.76, 0.74],
   bossCooldownMultiplier: [1.0, 0.98, 0.96, 0.94, 0.92, 0.89, 0.87, 0.85, 0.82, 0.8],
-  scoreMultiplier: [1.0, 1.06, 1.11, 1.17, 1.22, 1.28, 1.33, 1.39, 1.44, 1.5],
+  scoreMultiplier: [1.0, 1.12, 1.24, 1.36, 1.48, 1.6, 1.72, 1.84, 1.96, 2.08],
 };
 
 export function getLevelScaling(level: number): LevelScaling {
