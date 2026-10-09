@@ -7,12 +7,13 @@ AirSupreme 是一个基于 Three.js 和 TypeScript 的 3D 飞机战斗游戏。
 ### 当前实现状态（2026-10）
 
 - 十关故事战役已集成：十章剧情（章节卡片、无线电、任务结算、结局）、第 6-10 关环境与 Boss、17 种地面 / 海上 / 空中单位、5 种特殊武器与热焰弹、第一 / 第三人称相机组、分级升级与机库、自动存档与继续战役、程序化音乐与新音效、实例化粒子与 HDR 后处理（详见下文「十关战役系统」与 `CHANGELOG.md`）
+- 界面默认英文，简体中文可在开始菜单 / 暂停菜单实时切换（`src/i18n/`，文案就地双语 `LocalizedText`）；国际化角色阵容与具名僚机渡鸦 / 雨燕；无线电与剧情旁白有英文与普通话配音（`VoiceSystem`，语音包在 `public/voice/`）；难度曲线与 Boss 血量按脚本飞行员实测重新调校（见下文「界面语言」「角色配音」「具名僚机」与「平衡与难度曲线」）
 - 主流程：`main.ts -> StartMenu -> 动态导入 GameCoordinator -> 按需初始化战斗 / 表现层 runtime`；开始菜单「继续战役」与失败结算「从检查点继续」都由 `main.ts` 以检查点重新开局
 - `GameCoordinator` 负责装配；战役接线拆到 `src/core/` 下的控制器（`CampaignFlowController`、`UnitController`、`SpecialWeaponsController`、`PlayerViewController`、`CombatVfxController`、`CombatHudFeed`、`AdvancedBossController`），剧情 / HUD / 音乐 / 音效统一经 `ICampaignPresentation`（见 `docs/decisions/0001-campaign-presentation-adapter.md`）
 - 战斗 runtime、Boss 控制器、升级菜单、presentation runtime，以及相机组、单位、特殊武器、尾迹、剧情界面与第 6-10 关 Boss 都在按需加载路径上
 - `PresentationRuntimeLoader` 负责按需创建 `HUD / EnemyHealthBars / LockOnIndicator / BossMissileIndicator / PresentationController`
 - 普通弹道碰撞链路已支持 `source/tone` 透传，玩家机炮、敌弹、Boss 炮弹、导弹命中可按来源映射不同反馈；对单位与 Boss 部件按命中半径判定
-- 测试：`src/__tests__` 下 55 个 `*.test.ts`（撰写时静态计数，其中 15 个为战役新增）；以 `npm run test:run` 的实际结果为准
+- 测试：`src/__tests__` 下 65 个 `*.test.ts`（撰写时静态计数）；以 `npm run test:run` 的实际结果为准
 
 ### 技术栈
 
@@ -39,6 +40,9 @@ AirSupreme 是一个基于 Three.js 和 TypeScript 的 3D 飞机战斗游戏。
 14. **升级与存档** - 分级升级线、机库、`SaveSystem` 检查点
 15. **音乐与音效** - 前瞻式音序器、23 首曲目、7 个刺激音、新音效
 16. **VFX 与后处理** - 实例化粒子、HDR 后处理、屏幕效果、尾迹
+17. **界面语言** - `src/i18n/`：英文默认、简体中文可选，`LocalizedText` 就地双语，`onLocaleChange` 实时切换
+18. **角色配音** - `VoiceSystem`：英文 / 普通话语音包、电台 / 旁白链路、响度归一化、音乐闪避
+19. **具名僚机** - `WingmanRoster`：渡鸦与雨燕的身份、在空状态与无线电事件
 
 ---
 
@@ -113,7 +117,8 @@ AirSupreme 是一个基于 Three.js 和 TypeScript 的 3D 飞机战斗游戏。
 
 - `EnemyAI.setTerrainSampler(sampler)`：设置后敌机沿速度方向前瞻采样地表，预计高度低于“地表 + 安全高度”时按亏欠高度爬升；位置落到地表以下时直接抬到地表上方。`LevelManager` 为敌机注入自己的 `getCrashSurfaceY`，协调器为友军僚机注入同一采样。未设置时保持原有自由飞行。
 - `EnemyAI.applyStun(seconds)` / `isStunned()`：EMP 瘫痪期间航电失灵——不开火、不切换机动状态，保持惯性滑行。
-- 敌机强度在 `LevelManager` 生成时计算：血量 / 伤害 / 攻击冷却 = 基础配置 × 玩家难度档（`getDifficultyProfile`）× 关卡曲线（`getLevelScaling`）；精度叠加关卡曲线的 `enemyAccuracyBonus` 与敌方雷达站加成（`UnitController.getHostileRadarBonus()`，经 `setAccuracyBonusProvider`），并设上限。`LevelConfig.difficulty` 为旧字段，不再参与计算。
+- 敌机强度在 `LevelManager` 生成时计算：血量 / 伤害 / 攻击冷却 = 基础配置 × 玩家难度档（`getDifficultyProfile`）× 关卡曲线（`getLevelScaling`，读取 `src/core/Difficulty.ts` 中逐关一列的 `LEVEL_CURVE` 表）；精度叠加关卡曲线的 `enemyAccuracyBonus` 与敌方雷达站加成（`UnitController.getHostileRadarBonus()`，经 `setAccuracyBonusProvider`），并设上限。`LevelConfig.difficulty` 为旧字段，不再参与计算。
+- 开火距离：敌机只在开火距离上限 `FIRE_RANGE`（`src/features/enemy/EnemyAI.ts`）以内射击，即使机头已对准目标。
 
 ---
 
@@ -282,16 +287,23 @@ if (dot > 0.866) {
 
 ## 精度系统
 
-所有射击（包括玩家和敌人）都有随机扰动：
+所有射击（包括玩家和敌人）都有随机扰动。敌机（`EnemyAI.fire`）的散布同时作用于偏航与俯仰，两个方向各自独立均匀分布：
 
 ```typescript
-// 扰动强度 = (1 - 精度) × 0.4
-const perturbationStrength = (1 - accuracy) * 0.4;
-const anglePerturbation = (Math.random() - 0.5) * perturbationStrength;
-
-// 在Y轴应用随机旋转
-direction.applyAxisAngle(new THREE.Vector3(0, 1, 0), anglePerturbation);
+// 总散布角 = (1 - 精度) × AIM_SPREAD（AIM_SPREAD = 0.4 弧度）
+const spread = Math.max(0, 1 - accuracy) * AIM_SPREAD;
+// 偏航：绕世界 Y 轴
+tmpQuaternion.setFromAxisAngle(WORLD_UP, (Math.random() - 0.5) * spread);
+direction.applyQuaternion(tmpQuaternion);
+// 俯仰：绕水平侧轴（direction × 世界上方向；竖直射击时侧轴退化，跳过）
+tmpAxis.crossVectors(direction, WORLD_UP);
+if (tmpAxis.lengthSq() > 1e-8) {
+  tmpQuaternion.setFromAxisAngle(tmpAxis.normalize(), (Math.random() - 0.5) * spread);
+  direction.applyQuaternion(tmpQuaternion);
+}
 ```
+
+下表的“最大扰动角度”即每个方向上的散布范围 `(1 - 精度) × 0.4` 弧度（中心两侧各一半）：
 
 | 精度            | 最大扰动角度 | 特点   |
 | --------------- | ------------ | ------ |
@@ -309,20 +321,53 @@ direction.applyAxisAngle(new THREE.Vector3(0, 1, 0), anglePerturbation);
 
 ### 战役流程
 
-- 剧本：`src/features/campaign/CampaignData.ts`——`TOTAL_LEVELS = 10`、十个 `CampaignChapter`（章节标签、行动代号、标题、地点、正文、任务目标、简报、Boss 简报、无线电、解锁武器与解锁台词、结算总结）、说话人 `CAMPAIGN_SPEAKERS`、首次遭遇台词 `UNIT_FIRST_CONTACT_RADIO`、通用台词 `GENERIC_RADIO`、序章 / 尾声 / 片尾字幕。纯数据与纯函数，不依赖渲染 / 音频 / DOM。
+- 剧本：统一从 `src/features/campaign/CampaignData.ts` 导入——`TOTAL_LEVELS = 10`、十个 `CampaignChapter`（章节标签、行动代号、标题、地点、正文、任务目标、简报、Boss 简报、无线电、解锁武器与解锁台词、结算总结）、说话人 `CAMPAIGN_SPEAKERS`、首次遭遇台词 `UNIT_FIRST_CONTACT_RADIO`、通用台词 `GENERIC_RADIO`、序章 / 尾声 / 片尾字幕与配音脚本 `getVoiceScript()`。数据分文件存放：`CampaignTypes`（类型）、`CampaignCast`（角色）、`CampaignChapters`（章节）、`CampaignRadio`（首次遭遇 / 通用台词）、`CampaignStory`（标题 / 序章 / 尾声 / 字幕）、`ChapterTitles`（章节标题，与 `LevelConfig` 的关卡名是同一个对象）。所有面向玩家的字段都是 `LocalizedText`；每句配音台词（`RadioLine`、`VoicedText`）带稳定唯一 id，同时是语音文件名。纯数据与纯函数，不依赖渲染 / 音频 / DOM。
 - 流程控制：`CampaignFlowController`（`src/core/campaign/`）只决定“接下来发生什么”；加载关卡、开始波次 / Boss、机库、进度同步、剧情冻结、存档快照由协调器经 `CampaignFlowDeps` 提供。
-- 正常模式：章节卡片（新游戏第一章前播序章；有新武器的章节附解锁台词）→ 检查点 `level-start` → 入关无线电 + 简报 → 波次（每波开始部署单位；本波敌机与敌方单位全部清空才过波）→ 检查点 `wave` → … → 检查点 `boss` → Boss 战 → 击破收尾（至少等爆炸播完，最多等收尾台词说完）→ 任务结算 → 机库（下一章的升级上限与武器解锁）→ 下一章。第 10 章之后：`markCampaignCompleted` + `clearCampaignCheckpoint` → 结算 → 尾声与片尾字幕 → `MISSION COMPLETE`。
+- 正常模式：章节卡片（新游戏第一章前播序章；有新武器的章节附解锁台词）→ 检查点 `level-start` → 入关无线电 + 简报 → 波次（每波开始部署单位；本波敌机与敌方单位全部清空才过波）→ 检查点 `wave` → … → 检查点 `boss` → Boss 战 → 击破收尾（至少等爆炸播完，再等有配音的收尾台词说完，上限 `BOSS_OUTRO_MAX_MS`）→ 任务结算 → 机库（下一章的升级上限与武器解锁）→ 下一章。第 10 章之后：`markCampaignCompleted` + `clearCampaignCheckpoint` → 结算 → 尾声与片尾字幕 → `MISSION COMPLETE`。
 - Boss 模式：没有剧情卡片、结算与检查点；武器解锁到所选关卡；Boss 之间进入机库；无线电只播 Boss 登场台词与高优先级告警。
 - 新开一局：`setupNewRun(L)` 清空升级、设定关卡上限、解锁至 L 的武器；L > 1 时补发 `getStartingUpgradePoints(L)` 并先进入机库；正常模式清除旧检查点。
 - 剧情冻结：`setStoryHold(true)` 期间模拟暂停（渲染继续），只推进表现层，并吞掉暂停 / 升级 / 单次动作按键。
 
 ### 表现层（ICampaignPresentation）
 
-- 玩法代码只经 `ICampaignPresentation`（`src/core/campaign/CampaignPresentation.ts`）讲故事 / 报状态 / 出声音；`DefaultCampaignPresentation` 驱动 `StoryOverlay`、`RadioComms`、HUD 新面板、雷达量程、`MusicSystem` 与 `CampaignSfxRouter`。
-- `StoryOverlay`：章节 / 序章 / 解锁卡片（打字机，`onTypeTick` 每字回调用于打字音）、结算卡片（逐行计数音）、尾声 + 片尾字幕；点击 / 轻触 / 空格 / 回车先显示全文再翻页，Esc 或「跳过」结束整段；卡片显示时 `<html data-story-overlay>` 隐藏 HUD、雷达、无线电、移动端按键与指示层。
-- `RadioComms`：说话人呼号 / 头像 / 色调来自 `CAMPAIGN_SPEAKERS`；空闲时立即显示，`high` 优先级打断普通台词（被打断且未说完的台词重播），重复文本忽略，队列有上限；显示时间只由 `update(dt)` 推进（暂停即停住）。剧情界面加载完成前的台词先缓存。
-- 高优先级通用台词：平民误伤、导弹告警、低血量。地空导弹发射时另有 HUD 闪烁告警「导弹来袭 · 按 G 投放热焰弹」（有冷却），误伤平民时「停火！那是平民目标！」。
+- 玩法代码只经 `ICampaignPresentation`（`src/core/campaign/CampaignPresentation.ts`）讲故事 / 报状态 / 出声音；`DefaultCampaignPresentation` 驱动 `StoryOverlay`、`RadioComms`、HUD 新面板、雷达量程、`MusicSystem`、`CampaignSfxRouter`，以及（可选的）配音 `CampaignVoice`（协调器传入它的 `VoiceSystem`）。
+- `StoryOverlay`：章节 / 序章 / 解锁卡片（打字机，`onTypeTick` 每字回调用于打字音）、结算卡片（逐行计数音）、尾声 + 片尾字幕；点击 / 轻触 / 空格 / 回车先显示全文再翻页，Esc 或「跳过」结束整段；卡片显示时 `<html data-story-overlay>` 隐藏 HUD、雷达、无线电、移动端按键与指示层。有旁白挂钩（`narration: StoryNarration`）时，序章 / 简报 / 尾声的每一段先按段落 id 请求配音，短暂等待开口（超时则按纯文字打字），按配音时长调整打字节奏，让文字在配音结束前一点打完，再等配音说完（有兜底上限）才进入下一段；整张卡听完后只留看任务目标的时间再自动翻页。显示全文、翻页、Esc / 跳过、收起都会停下旁白；减少动态效果时直接显示全文但照常朗读；卡片写成后切换过语言则不再朗读。
+- `RadioComms`：说话人呼号 / 头像 / 色调来自 `CAMPAIGN_SPEAKERS`（头像图标 `getSpeakerGlyph`，每个说话人都有）；空闲时立即显示（两句之间的短暂间隔也算忙碌），`high` 优先级打断普通台词（被打断且未说完的台词重播），重复文本忽略，队列有上限；显示时间只由 `update(dt)` 推进（暂停即停住）。剧情界面加载完成前的台词先缓存。有配音时：开口后 `holdForVoice(line, 时长)` 让台词至少停留到配音结束再加一小段尾巴，下一句等 `releaseVoice(line)`（有兜底上限）；配音没说完就被打断的台词一定重播（重播时配音从头再说）。切换语言时当前台词的呼号、正文与读屏文本立即重写。
+- 配音接线：`onLineShown` 播放该句无线电配音（`kind: 'radio'`，按说话人选电台音色）；旁白挂钩以 `NARRATION_SPEAKER`（天穹）朗读；入关（`showChapterIntro`）预取本章台词——序章（显示时）、简报、入关台词、其余章节台词与紧急告警，`playBossMusic` 预取本章 Boss 台词；`onPause` / `onResume` 暂停 / 续播；`clearRadio` 停下无线电配音，结算卡片让正在说的那句说完，失败 / 通关 / 释放停下全部配音。
+- 高优先级通用台词：平民误伤、导弹告警、低血量。地空导弹发射时另有 HUD 闪烁告警「Missile inbound · Press G for flares / 导弹来袭 · 按 G 投放热焰弹」（有冷却），误伤平民时「Cease fire! Those are civilians! / 停火！那是平民目标！」；告警文案按当前语言发出。
 - HUD 推送做差分：数值不变时不调用 HUD、不分配对象；导弹告警合并单位（SAM）与 Boss 导弹两路，取最高级（`none` / `locking` / `incoming`）。
+
+### 界面语言（i18n）
+
+- 核心：`src/i18n/index.ts`，导入时不访问 `document` / `window`。`Locale = 'en' | 'zh-CN'`，`DEFAULT_LOCALE = 'en'`；双语文案 `LocalizedText { en, zh }`（两个字段都必填）；`tr(text, params?)` = `localize` + `format`（`{name}` 占位符，未提供的保持原样）；`localize` 对纯字符串原样返回；`normalizeLocale` 把 `zh` / `zh-cn` / `zh-hans…` 规整为 `'zh-CN'`，其余一律回到英文；`setLocale` 语言未变化时不通知，变化时同步 `<html lang>` 并逐个通知 `onLocaleChange` 的订阅者（某个订阅者抛错不影响其余）。
+- 数据约定：文案就地双语，不用键值字符串表（见 `docs/decisions/0002-bilingual-text-and-voice-packs.md`）。`UnitConfig.name`、`BossConfig.name`、`EnemyConfig.name`、`SpecialWeaponConfig.name` / `description`、`UpgradeConfig.name` / `description` / `unit`、`PowerUpConfig.name` / `description`、`LevelConfig.name` / `description`、`DifficultyProfile.label` 与战役剧本的全部面向玩家字段都是 `LocalizedText`，在显示处用 `tr()` 取当前语言；交给 HUD 的快照（如 `WeaponSystem.getHudState().name`）在生成时就是当前语言的字符串。逐帧路径把双语对象提升为模块常量，不做逐帧分配。
+- 设置与启动：`StartFlowSettings.language`（缺省英文，不跟随浏览器；旧存档与无法识别的值按英文读取）随开始流程设置持久化；`main.ts` 在任何界面渲染之前 `setLocale(loadStartFlowSettings().language)`，并写入对应语言的页面标题、加载画面与触控按键文字（含读屏标签）。`index.html` 本身以 `lang="en"` 与英文默认文案发布。
+- 切换：开始菜单与暂停菜单的「Language / 语言」一行（选项名 `LANGUAGE_ENDONYMS`：English / 中文，`stepLanguage` 循环切换）保存设置后调用 `setLocale`。订阅者：开始 / 暂停 / 升级菜单原位重绘，HUD 重写自身文字与结算面板，血条立即改名（暂停中也生效），模型预览重建列表，无线电重写当前台词，`VoiceSystem` 停下当前配音并按新语言重新预取，`main.ts` 改写页面外壳。剧情卡片在显示时按当前语言写成，切换后从下一张起换语言；协调器提示与目标、Boss 状态 / 阶段 / 特殊攻击告警、单位与武器告警、存档提示在发出时取当前语言。
+- 英文排版：大字公告与简报标题换行，英文剧情标题字号更小，叙事衬线字体拉丁优先（`:lang(zh)` 时回到 CJK 衬线）；打字机停顿用 Unicode 标点类别，中英文句读都会停顿。
+
+### 角色配音（VoiceSystem）
+
+- 语音包：`public/voice/<en|zh>/<台词 id>.mp3`（运行时路径 `/voice/...`），两种语言各一套，覆盖 `getVoiceScript()` 列出的全部台词；`public/voice/manifest.json`（`{ version, format, languages: { en: { [id]: { duration, bytes } }, zh: {...} } }`）是运行时契约，`public/voice/provenance.json` 记录生成方式（模型、声音 id、生成 id、每个文件的 sha256），游戏不读取它。文件保留生成器嵌入的 C2PA 来源凭证。格式、id 规则与重新生成的步骤见 `docs/voice-lines.md`。
+- `VoiceSystem`（`src/core/Audio/VoiceSystem.ts`，协调器持有，经共享 AudioContext）：清单懒加载；按界面语言选包（`getVoicePackLanguage`：`zh-CN` → `zh`，其余 → `en`）；只请求清单里有的 id，缺失的台词直接纯文字；同一时刻只有一句配音，新的 `play()` 顶掉旧的；`play()` 立即返回请求编号、从不抛错，结果经 `onStart` → `onEnd`，或 `onSilent(原因)`（`unavailable` / `muted` / `timeout` / `error` / `stopped` / `superseded` / `disposed`）异步回调；加载超过 `maxStartDelayMs` 时这一句改为纯文字（缓冲区照常缓存）。
+- 链路：无线电台词经逐句按说话人的带通与底噪（`RADIO_PROFILES`，指挥部 / 预警机较宽较干净，座舱、护卫舰与民用频道更窄、底噪更重，神谕的频道更宽）→ 共用电台级（带限、存在感峰值、软饱和、压缩器），自然说完时补一声静噪尾音；旁白走高通 + 轻压缩的干净链路；解码后按门限 RMS（`measureVoiceGainDb`）归一化响度；语音音量 × 总线电平 → 与音效、音乐共用的输出限幅。无线电台词在开麦提示音之后才开口。
+- 闪避：说话时经 `voiceDuckBridge`（`src/core/Audio/VoiceDucking.ts`，保持型闪避，新请求覆盖未执行的旧请求）把 `MusicSystem` 总线末端的配音闪避级压低（无线电比旁白压得更深），说完后延迟一会儿再平滑恢复，连续几句无线电之间音乐不回弹；停下 / 暂停时立即恢复。
+- 暂停与容错：`pause()` 淡出并记住断点，`resume()` 从断点续播；实时看门狗在收不到 `onended` 时按说完处理，无线电队列与打字机不会卡住；切换语言时 `stopAll()` 并按新语言重新预取最近一批。缓存：解码缓冲区与编码数据各一个 LRU；`prefetch(ids)` 去重，前几句立即解码，其余只取编码数据。
+- 音量：`StartFlowSettings.voiceVolume`（0..1，缺省 `DEFAULT_VOICE_VOLUME`），开始菜单「Voice volume / 语音音量」与暂停菜单「Voice / 语音」一行（10% 步进，实时生效并持久化）；为 0 时不加载语音，无线电与剧情卡片只显示文字。
+- 诊断：`createOutputAnalyser()` / `getDebugState()`；开发构建的 `window.__AIR_SUPREME_DEV__.voice` 提供 `state()`、`sample()`（人声 / 音乐电平与闪避量）、`say(id, kind)`、`radio(key)`、`wingman(id, event)`。
+
+### 具名僚机（Wingmen）
+
+- `WingmanRoster`（`src/core/campaign/Wingmen.ts`，协调器持有）：友军 AI 战机入场时调用 `assign(mesh.uuid, 关卡)`，按 `WINGMEN` 的编队顺序领取第一个“已随队、不在空中、本关未被击落”的身份——渡鸦 Raven（第 1 关起）、雨燕 Swift（第 3 关起），没有可用身份时是普通友军；呼号写入 `mesh.userData.displayName`，血条据此显示。`FRIENDLY_DEATH` 时 `release` 把僚机记为本关被击落，坠毁提示点名僚机；准备关卡（换关 / 读档）与 Boss 击破时 `reset()` 全员归队。飞行与作战行为仍由 `FriendlyAI` 决定。
+- 无线电：`ICampaignPresentation.onWingmanEvent(id, 'joined' | 'down')` 经 `WINGMAN_EVENT_RADIO` 播放通用台词——雨燕入列报到（`swift-joined`）；渡鸦被击落时雨燕在空中则由她播报（`raven-down-swift`），否则由天穹指挥部（`raven-down-hq`）；雨燕被击落同理（`swift-down-raven` / `swift-down-hq`）。渡鸦没有入列台词。`isWingmanFlying(id)` 由名册（`WingmanStatus`）回答。
+- 友军单位损失：`UnitController` 的 `ALLY_LOSS_RADIO` 让友军预警机与护卫舰被击毁时播放各自机组 / 舰员的台词（`awacs-lost` / `frigate-lost`），其余友军单位为 `ally-unit-destroyed`。
+
+### 平衡与难度曲线
+
+- 逐关强度：`getLevelScaling(level)` 读取 `src/core/Difficulty.ts` 中的 `LEVEL_CURVE` 表（每列一关，第 1 关为基准 1.0，逐关单调变难）；敌方火力（伤害 ÷ 冷却）到第 10 关约为第 1 关的 3 倍，血量涨幅压低，以免关卡越拖越长。
+- 难度档：`getDifficultyProfile(1..5)` 在关卡曲线之上整体缩放敌人；基础数值按“专家”手感编写，默认档 3（「标准」，英文 Normal）由脚本飞行员实测调校。档名为 `LocalizedText`（英文 Very Easy / Easy / Normal / Hard / Expert）。
+- 敌机：开火距离上限 `FIRE_RANGE` 与偏航 + 俯仰散布（`EnemyAI.ts`，见上文「精度系统」）；同时在场的敌机上限是按设备固定的玩法规则（`GameConfig.getMaxEnemies()`，桌面 / 移动端各一个值），与画质无关。
+- 波次与 Boss：第 1 关为教学关（敌机逐波缓升、战斗机从第 3 波开始、不部署高炮与地空导弹车）；Boss 血量按实测击杀时间设定（`BOSS_CONFIGS`）。具体数值以源码为准。
+- 测量工具：开发构建专用的脚本飞行员（`src/core/dev/ScriptedPilot.ts`）与平衡测量（`src/core/dev/BalanceHarness.ts`，`window.__AIR_SUPREME_DEV__.balance`）：以称职的普通玩家水平飞行、自动机库采购，记录每波清场时间、伤害来源、阵亡与最后 10 秒的主要伤害来源、Boss 击杀时间、得分与升级点。
 
 ### 关卡与地形环境
 
@@ -392,19 +437,19 @@ direction.applyAxisAngle(new THREE.Vector3(0, 1, 0), anglePerturbation);
 - 层级上限 `getUpgradeCapForLevel(type, campaignLevel)`：核心 `min(10, 关卡 + 1)`；防御 `min(满级, ceil(关卡 / 2) + 1)`；武器解锁前为 0，之后 `min(5, 关卡 - 解锁关卡 + 2)`。`canUpgrade` 要求未锁定、未满级、低于本关上限且升级点足够；`getNextCapRaiseLevel` 供菜单提示「第 N 关开放」。
 - 升级点：分数累计发放（关卡得分倍率由调用方乘入；扣分不收回已发放的点数）；`awardBonusPoints` 发放额外点数；从后续章节开局时按 `getStartingUpgradePoints(L)` 补偿（按上一关全部上限总花费的一定比例）。
 - 效果：`getArmorReduction()`（0..0.4，`PlayerSystem.takeCombatDamage` 先减伤）、`getFlareCapacity()`（2..6）、`getWeaponUpgradeLevel(id)`（0..5）。
-- 机库：`UpgradeMenu.show({ mode: 'hangar', subtitle, onContinue })`，标题「机库整备」、底部按钮「出击」；每张卡片显示等级、本章上限与锁定武器的解锁章节。购买后 `syncProgression` 同步武器等级、热焰弹容量、锁定参数与生命上限。
+- 机库：`UpgradeMenu.show({ mode: 'hangar', subtitle, onContinue })`，标题「机库整备」、底部按钮「出击」（英文界面为 Refit & Rearm / Launch）；每张卡片显示等级、本章上限与锁定武器的解锁章节。购买后 `syncProgression` 同步武器等级、热焰弹容量、锁定参数与生命上限。
 
 ### 存档
 
 - `SaveSystem`（`src/core/save/SaveSystem.ts`）：单个检查点 `air-supreme:campaign-save`（`CAMPAIGN_SAVE_VERSION = 1`）+ 战役进度 `air-supreme:campaign-progress`；只在调用时访问 `localStorage`，读写失败不抛出；读取时校验并规范化（损坏或外来数据删除键并返回 null；越界钳制、缺失取默认）。
-- 检查点类型：`level-start`（章节卡片之后，wave 0）、`wave`（第 k 波结束后，wave = k + 1，最后一波除外）、`boss`（全部波次清空后，wave = 总波数）；只在正常模式写入。`describeCheckpoint` 生成「第6关 · 熔炉之心 · 第3波」或「… · Boss 战」。
+- 检查点类型：`level-start`（章节卡片之后，wave 0）、`wave`（第 k 波结束后，wave = k + 1，最后一波除外）、`boss`（全部波次清空后，wave = 总波数）；只在正常模式写入。`describeCheckpoint` 按当前语言生成「第6关 · 熔炉之心 · 第3波」或「… · Boss 战」（英文为 `Ch. 6 · Heart of the Forge · Wave 3` / `… · Boss`）。
 - 内容：关卡、波次、难度、分数、生命、导弹、`PlayerUpgrades.export()`、`WeaponSystem.exportState()`、热焰弹、视角、本局统计（击落、平民损失、阵亡、游戏时间）。
 - 继续：开始菜单「继续战役」/ 失败结算「从检查点继续」→ `main.ts` 用存档的难度 / 关卡 / 生命 / 视角重新开局（`resume`）→ `restoreCheckpoint`（reset → import → 关卡上限 → 武器解锁 → 武器等级 → importState → 分数 / 生命 / 导弹 / 视角）→ `resumeFromCheckpoint` 回到存档波次或 Boss 战前。
 - 清除：普通模式新开一局、通关第 10 章；`recordLevelReached` / `markCampaignCompleted` 维护进度记录。
 
 ### 音乐与音效
 
-- `MusicSystem`：23 首程序化曲目（`LevelMusic`：10 首关卡曲、10 首 Boss 曲与 `MENU` / `STORY` / `VICTORY`）与 7 个刺激音（`MusicStinger`），由 `src/core/Audio/music/`（`Sequencer` 前瞻式音序器、`Instruments`、`Compose`、`Theory`、`tracks/`）实时合成，不加载音频文件；按 AudioContext 时钟提前调度，主线程卡顿时自动放大前瞻窗口。
+- `MusicSystem`：23 首程序化曲目（`LevelMusic`：10 首关卡曲、10 首 Boss 曲与 `MENU` / `STORY` / `VICTORY`）与 7 个刺激音（`MusicStinger`），由 `src/core/Audio/music/`（`Sequencer` 前瞻式音序器、`Instruments`、`Compose`、`Theory`、`tracks/`）实时合成，音乐与音效都不加载音频文件（唯一的音频文件是配音包）；按 AudioContext 时钟提前调度，主线程卡顿时自动放大前瞻窗口。总线顺序：会话 → 刺激音闪避 → 音效闪避 → 音量 → 配音闪避（`voiceDuckBridge`）→ 次声高通 → 共享输出（限幅）。
 - `setIntensity(0..1)`：图层增减、速度微升、低通逐渐打开；Boss 阶段越高强度越高，低于 25% 血量拉满，神谕主宰逐帧使用 `getMusicIntensity()`；切换曲目时恢复为新曲目的缺省强度。
 - 刺激音对齐下一拍并移调到当前调性，播放时闪避主音乐；`boss-defeated` / `level-complete` / `game-over` / `campaign-complete` 接管并结束当前曲目；曲目切换使用交叉淡化。
 - 调用时机：章节卡片 → 剧情曲 + 章节重音 + 打字音；入关 → 关卡曲 + `chapter-start`；波次检查点 → `checkpoint`；清场 → `level-complete`；Boss → Boss 曲；阶段切换 → 警报 + `phase-change`；击破 → `boss-defeated`；结算 → 胜利曲 + 计数音；结局 → 剧情曲；失败 → `game-over`；通关 → `campaign-complete` + 胜利曲；暂停 → `pauseMusic` + `stopSustainedSounds`，继续 → `resumeMusic`。
@@ -424,7 +469,8 @@ direction.applyAxisAngle(new THREE.Vector3(0, 1, 0), anglePerturbation);
 
 - HUD 新面板：`updateWeaponPanel`（特殊武器挂架）、`updateFlares`、`showAutosave`、`setCameraMode`、`setBossStatus`（`null` 收起）、`setMissileWarning`、`flashWarning`；自动存档提示与闪烁告警的计时由 `hud.update(dt)` 推进（暂停时冻结）。
 - 雷达：`RadarBlipKind` 新增 `enemy-ground`（红色方块）、`enemy-sea`（红色菱形）、`ally-unit`（金色三角）、`neutral`（灰色空心圆）；`setRangeMultiplier` 由友军预警机驱动；`CombatHudFeed` 用池化对象生成雷达点（20 Hz）与血条快照（含第 6-10 关 Boss 子目标）。
-- 移动端：`index.html` 拇指弧按键簇新增 `#special-button`、`#flare-button`、`#cycle-button`、`#camera-button`；HUD 写入按钮的武器标签、外圈进度（`--tc-meter`）、空弹 / 告警状态（`data-alert`）与视角状态。
+- 移动端：`index.html` 拇指弧按键簇新增 `#special-button`、`#flare-button`、`#cycle-button`、`#camera-button`；按键文字默认英文（FIRE / MSL / SPEC / FLARE / BOOST / SWAP / VIEW / PAUSE），`main.ts` 按语言改写（中文为 开火 / 导弹 / 特武 / 热焰 / 加速 / 切换 / 视角 / 暂停）；HUD 写入按钮的武器代号、外圈进度（`--tc-meter`）、空弹 / 告警状态（`data-alert`）与视角状态。
+- 血条：友军 AI 战机的 `mesh.userData.displayName`（僚机呼号）优先于按名称缓存的标签；敌机显示机型，Boss 与 Boss 部件显示名称，单位显示阵营标签，都按当前语言，切换语言时所有血条立即改名。
 
 ---
 
@@ -432,7 +478,8 @@ direction.applyAxisAngle(new THREE.Vector3(0, 1, 0), anglePerturbation);
 
 ```
 src/
-├── main.ts                       # 入口：StartMenu、MenuMusic、按需导入 GameCoordinator、继续战役
+├── main.ts                       # 入口：先应用已保存的语言，StartMenu、MenuMusic、按需导入 GameCoordinator、继续战役
+├── i18n/                         # 本地化核心：LocalizedText、tr / localize / format、getLocale / setLocale / onLocaleChange
 ├── Game.ts                       # 向后兼容导出（re-export GameCoordinator）
 ├── Game.legacy.ts                # 旧实现（已废弃）
 ├── config.ts                     # GameConfig（设备 / 画质预设）与 GAME_CONSTANTS
@@ -442,7 +489,7 @@ src/
 │   ├── PresentationRuntimeLoader.ts / PresentationController.ts
 │   ├── EventBus.ts / GameLoop.ts / GameState.ts / GameSessionState.ts / SessionSettings.ts
 │   ├── CombatContracts.ts / Faction.ts / Difficulty.ts
-│   ├── campaign/                 # CampaignFlowController、CampaignPresentation、CampaignSfx、LevelStartPose、MenuMusic
+│   ├── campaign/                 # CampaignFlowController、CampaignPresentation、CampaignSfx、LevelStartPose、MenuMusic、Wingmen
 │   ├── units/                    # UnitController
 │   ├── combat/                   # SpecialWeaponsController
 │   ├── camera/                   # PlayerViewController
@@ -450,13 +497,13 @@ src/
 │   ├── boss/                     # AdvancedBossController、AdvancedBossSupport、BossHitFeedback、LegacyBossHitVolumes
 │   ├── hud/                      # CombatHudFeed
 │   ├── save/                     # SaveSystem
-│   ├── dev/                      # DevHooks（仅开发构建）
+│   ├── dev/                      # DevHooks、ScriptedPilot、BalanceHarness（仅开发构建）
 │   ├── systems/                  # PlayerSystem、CombatSystem、EnemySystem、PowerUpSystem
 │   ├── Input/                    # InputHandler
-│   ├── Audio/                    # AudioManager、MusicSystem、AudioContextHost、AudioKit、music/、sfx/
+│   ├── Audio/                    # AudioManager、MusicSystem、VoiceSystem、VoiceDucking、AudioContextHost、AudioKit、music/、sfx/
 │   └── utils/                    # ConfigLoader、Logger
 ├── features/
-│   ├── campaign/                 # CampaignData
+│   ├── campaign/                 # CampaignData（导入入口）、CampaignTypes、CampaignCast、CampaignChapters、CampaignRadio、CampaignStory、ChapterTitles
 │   ├── enemy/                    # EnemyAI、FriendlyAI、EnemyTypes、EnemyFSM（旧版，已废弃）
 │   ├── units/                    # UnitTypes、UnitDeployments、UnitSystem、UnitBehaviors、UnitBehaviorsAir、UnitMesh*、UnitMissiles、UnitProjectiles、UnitEventBridge …
 │   ├── weapons/                  # WeaponTypes、WeaponSystem、CountermeasureSystem、控制器与特效
@@ -473,11 +520,24 @@ src/
 ├── scenes/                       # GameScene（渲染器、光照、后处理）
 ├── ui/                           # HUD、StartMenu、PauseMenu、UpgradeMenu、StoryOverlay、RadioComms、RadarMinimap、CheckpointResumeButton、EnemyHealthBars、LockOnIndicator、ModelPreview、theme/ …
 └── __tests__/                    # Vitest 测试
+
+public/voice/                     # 配音包：en/、zh/（<台词 id>.mp3）、manifest.json、provenance.json
 ```
 
 ---
 
 ## 最近更新记录
+
+### 2026-10: 英文默认、角色配音与实测平衡
+
+**主要变更**（逐项见 `CHANGELOG.md` 的 Unreleased）:
+
+1. **界面语言** - 英文默认、简体中文可在开始 / 暂停菜单实时切换；`src/i18n/` 本地化核心，数据层与界面文案就地双语（`LocalizedText`），语言随设置持久化
+2. **角色阵容** - 英文重写的剧本附中文版；国际化角色表（四名女性友方角色），新增雨燕、灯塔、壁垒三个角色；每句配音台词有稳定 id 与 `getVoiceScript()`
+3. **具名僚机** - `WingmanRoster`：渡鸦与雨燕（第 3 关起），血条显示呼号，入列 / 被击落的无线电；友军预警机与护卫舰损失由各自的机组播报
+4. **角色配音** - 英文与普通话语音包（`public/voice/`）、`VoiceSystem`（电台 / 旁白链路、响度归一化、音乐闪避、预取、暂停续播、看门狗）、无线电与剧情卡片按配音计时、语音音量；Boss 收尾等待上限放宽到 16 秒
+5. **平衡** - `LEVEL_CURVE` 逐关曲线、难度档重新居中、敌机开火距离与俯仰散布、固定的同屏敌机上限、第 1 关更温和、Boss 血量按实测重设、开发构建的脚本飞行员测量工具
+6. **修复** - 第 1-10 关 Boss 统一出场定位与返回提示、出生姿态航道净空、血条命名、熔岩巨像 / 深渊利维坦命中半径、非有限音量、无线电间隔、导弹列表原地压缩、语言切换的重绘问题与旁白打字节奏
 
 ### 2026-10: 十关故事战役
 
@@ -673,6 +733,11 @@ npm run test:run   # Vitest 单次运行（npm run test 为监听模式）
 
 新特殊武器、单位、Boss、关卡 / 章节与环境模块的改动点见 `docs/conventions.md` 的「Adding content」；契约签名见 `docs/api.md`。
 
+### 修改文案与配音
+
+- 面向玩家的文案写成 `LocalizedText`（`{ en, zh }`，两种语言都要填），在显示处用 `tr()` 取值；逐帧路径把双语对象提升为模块常量。
+- 改动有配音的台词（无线电、章节简报、序章 / 尾声）时，id 保持不变就必须重新录制两种语言（或者换一个新 id），否则旧录音会配在新字幕上；新增台词要在两套语音包里录制并更新 `manifest.json` 与 `provenance.json`。步骤见 `docs/voice-lines.md`，`src/__tests__/VoicePack.test.ts` 会检查清单与脚本是否一致。
+
 ### 修改敌人配置
 
 编辑 `src/features/enemy/EnemyTypes.ts`:
@@ -821,5 +886,5 @@ const history = loggerManager.exportHistory();
 
 ---
 
-**文档更新日期**: 2026-10-08
-**项目版本**: 2.2.1 + Unreleased（十关故事战役）
+**文档更新日期**: 2026-10-09
+**项目版本**: 2.2.1 + Unreleased（十关故事战役、英文默认与角色配音）
