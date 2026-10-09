@@ -220,7 +220,7 @@ Normal-mode flow:
 
 After chapter 10: debrief → epilogue and credits → `MISSION COMPLETE`.
 
-The start menu also offers **Boss mode** to fight any of the ten bosses directly: no story cards (only the boss's arrival lines), weapons unlocked through that chapter, and a hangar stop between bosses. Bosses arrive ahead of you — if you are flying out of the arena, a *Return to the combat zone · Boss incoming* prompt holds the boss until you turn back, and a boss that appears far off or off your nose is called out with its bearing and distance. Phase changes bring an alarm, radio lines and a lift in the music (bosses 6–10 also flash a HUD warning), and the HUD shows the boss's status and phase pips. After the kill, the debrief waits until every defeat line on the radio has been heard (game time, so pausing does not cut it short), up to a cap worked out from the voiced lines still queued plus 6 s, never more than 75 s (`BOSS_OUTRO_MAX_SECONDS` in `src/core/campaign/CampaignFlowController.ts`). Boss missiles hit harder or softer with the difficulty you pick (45 per hit on Normal for most bosses), and flares decoy the missiles of all ten bosses. Boss HP, damage and fire rates live in `BOSS_CONFIGS` (`src/features/boss/BossTypes.ts`).
+The start menu also offers **Boss mode** to fight any of the ten bosses directly: no story cards (only the boss's arrival lines), weapons unlocked through that chapter, and a hangar stop between bosses. Bosses arrive ahead of you — if you are flying out of the arena, a *Return to the combat zone · Boss incoming* prompt holds the boss until you turn back, and a boss that appears far off or off your nose is called out with its bearing and distance. Phase changes bring an alarm, radio lines and a lift in the music (bosses 6–10 also flash a HUD warning), and the HUD shows the boss's status and phase pips. After the kill, the debrief waits until every defeat line on the radio has been heard (game time, so pausing does not cut it short), up to a cap worked out from the voiced lines still queued plus 6 s, never more than 75 s (`BOSS_OUTRO_MAX_SECONDS` in `src/core/campaign/CampaignFlowController.ts`). Boss missiles, flak and the Kraken's eye bolts hit harder or softer with the difficulty you pick (on Normal: 45 per missile for most bosses, 15 per flak burst, 20 per eye bolt), and flares decoy the missiles of all ten bosses. Boss HP, damage and fire rates live in `BOSS_CONFIGS` (`src/features/boss/BossTypes.ts`).
 
 | # | Boss | How it fights / weak point |
 | -: | ---- | -------------------------- |
@@ -272,7 +272,7 @@ The start menu also offers **Boss mode** to fight any of the ten bosses directly
 - Radio panel with a portrait glyph for every speaker and a priority queue (urgent warnings interrupt chatter, but not a voiced line); voiced lines stay up until the voice finishes
 - Health bars label jets by type, bosses by name and units by side (hostile / friendly / civilian), in the current language; your wingmen show their callsigns. Boss parts get compact bars, and only the part nearest your reticle shows its name
 - The layout respects the screen's safe areas and keeps the top of the screen free of overlaps on phones in portrait and landscape: a status column on the right (wave, lives, missiles, reload, power-up timer), a centre message stack (boss strip, briefing, event objective) with the radio panel below it; pickup and event callouts appear above the lock ring, never on the reticle
-- Level and boss briefings and the autosave toast switch language on the spot if you change it while they are showing
+- Level and boss briefings, the autosave toast, flashing warnings, the boss status strip and power-up timers switch language on the spot if you change it while they are showing
 - On touch devices the weapon, flare, camera and missile state shows on the touch buttons themselves
 
 ### 🛩️ Aircraft Detail
@@ -393,8 +393,8 @@ npm run test:run  # vitest, single run (npm run test = watch mode)
 
 - The ten-level campaign (story, levels 6–10, bosses 6–10, units, special weapons, camera rig, autosave, hangar, music and VFX overhaul) is integrated, together with the English-first interface and its Chinese option, the new cast and named wingmen, and English / Mandarin voice acting; see `CHANGELOG.md` → *Unreleased*
 - `GameCoordinator`, combat runtime, boss controllers, presentation/UI runtime and the new campaign systems are all on lazy-init paths; voice lines are fetched on demand (the current chapter's lines are prefetched when it starts)
-- The fixes from an independent final audit (respawn safety, hangar checkpoint, radio warning budget, both wingmen, HUD layout on phones, boss previews, balance curve, terrain performance) are merged; see `CHANGELOG.md` → *Unreleased* → *终验修复* (audit fixes)
-- Tests live in `src/__tests__` (77 `*.test.ts` files; 1,662 tests passing and 2 skipped at the time of writing); run `npm run test:run` for current results
+- The fixes from an independent final audit (respawn safety, hangar checkpoint, radio warning budget, both wingmen, HUD layout on phones, boss previews, balance curve, terrain performance) are merged, followed by a polish pass (live relabelling of warnings and timers, flak and eye-bolt damage by difficulty, respawn wall escape); see `CHANGELOG.md` → *Unreleased* → *终验修复* (audit fixes) and *收尾打磨* (polish)
+- Tests live in `src/__tests__`; run `npm run test:run` for the current count and results
 - Known observations: the `vendor-three` chunk-size warning during build
 
 ## 📁 Project Structure
@@ -542,7 +542,7 @@ Per-preset particle budgets, pixel ratio and target FPS live in `GameConfig` (`s
 - Enemy bullets vs player and friendly units (friendly fire doesn't hurt the player)
 - Player vs power-ups
 - Player vs terrain/water: crash when world `Y <=` `getCrashSurfaceY` (`WORLDSCAPE_WATER_Y` = `-48` when no terrain); every level, including the cloud deck of level 9, is sampled
-- Each level starts on a heading with a clear corridor ahead. After a crash you respawn back along your own flight path — at least 3 s and 150 m before the crash point, at least 40 m up — on a heading checked clear for 400 m, and for 3 s after respawning, touching the ground or a structure bumps you back up instead of costing another life. The Energy Shield does not protect against terrain
+- Each level starts on a heading with a clear corridor ahead. After a crash you respawn back along your own flight path — at least 3 s and 150 m before the crash point, at least 40 m up — on a heading checked clear for 400 m (turned away from the obstacle if you hit the ground again within 8 s of respawning), and for 3 s after respawning, touching the ground bumps you back up and flying into a wall or pylon pushes you out sideways and turns you away, instead of costing another life. The Energy Shield does not protect against terrain
 
 ## 📝 Development Notes
 

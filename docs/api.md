@@ -116,7 +116,7 @@ tr({ en: 'Wave {n}', zh: '第{n}波' }, { n: 3 }); // 'Wave 3' | '第3波'
 
 Snapshots handed to the HUD stay `string` and are localised when they are produced (for example `WeaponSystem.getHudState().name` is `tr(config.name)`). Per-frame code keeps its `{ en, zh }` objects as module-level constants, so nothing bilingual is allocated per frame.
 
-**Live switching.** `src/main.ts` calls `setLocale(loadStartFlowSettings().language)` before any UI renders, writes the page shell (title, loading screen, touch-button labels and `aria-label`s) in that language and rewrites it on `onLocaleChange`. Other subscribers: `StartMenu`, `PauseMenu` and `UpgradeMenu` (re-render in place), `HUD` (its own text, the settlement panel, and a briefing banner or autosave toast still on screen that was given bilingual text — see `HudText` under [HUD, story overlay, radio, radar, menus](#hud-story-overlay-radio-radar-menus)), `EnemyHealthBars` (every bar name, also while paused), `ModelPreview`, `RadioComms` (the line on screen) and `VoiceSystem` (stops the current line, re-prefetches in the new language). `StoryOverlay` writes each card in the locale current when the card is shown: a card already on screen keeps its language and the rest of its narration is skipped. The level and boss briefings, the checkpoint autosave toasts (including "Resumed: …") and the short wave / tutorial completion objectives keep their bilingual source and follow a switch while visible. Other runtime messages — coordinator toasts (`showPowerUpBig`), flashed warnings, boss status / phase / hazard labels, unit and weapon warnings — call `tr()` when they are emitted.
+**Live switching.** `src/main.ts` calls `setLocale(loadStartFlowSettings().language)` before any UI renders, writes the page shell (title, loading screen, touch-button labels and `aria-label`s) in that language and rewrites it on `onLocaleChange`. Other subscribers: `StartMenu`, `PauseMenu` and `UpgradeMenu` (re-render in place), `HUD` (its own text, the settlement panel, and any briefing banner, autosave toast, flashed warning, boss status label or power-up timer still on screen that was given bilingual text — see `HudText` under [HUD, story overlay, radio, radar, menus](#hud-story-overlay-radio-radar-menus)), `AdvancedBossController` (while a boss 6–10 is active, it re-pushes the boss's status label at once), `EnemyHealthBars` (every bar name, also while paused), `ModelPreview`, `RadioComms` (the line on screen) and `VoiceSystem` (stops the current line, re-prefetches in the new language). `StoryOverlay` writes each card in the locale current when the card is shown: a card already on screen keeps its language and the rest of its narration is skipped. These keep their bilingual source and follow a switch while visible: the level and boss briefings, the checkpoint autosave toasts (including "Resumed: …"), the short wave / tutorial completion objectives, the power-up timer names, the score-penalty flash ("Civilian hit · -{points} pts"), the return-to-arena prompt, the boss bearing call-out, and the phase labels and hazard warnings of bosses 6–10 (`IAdvancedBoss.onPhaseChange` / `onHazardWarning` carry `HudText`). Bosses 6–10 build `getStatusLabel()` in the current language and the controller re-sends it every 0.25 s and on a switch. Messages still resolved with `tr()` when emitted: the centre callouts (`showPowerUpBig`) and the unit and weapon warnings.
 
 ## Crash surface
 
@@ -147,8 +147,8 @@ this.playerSystem.setCrashSurfaceSampler(
 
 - **Safe track.** While flying, every 0.25 s the position is pushed into a fixed ring buffer (64 samples, about 16 s, no per-frame allocation) if it is more than 10 m above the sampled surface. The track restarts from the spawn point at construction, on `placeAt` (level start, checkpoint) and at every respawn, so samples that led into an obstacle are never reused.
 - **Respawn point.** The newest sample taken at least 3 s and at least 150 m (horizontally) before the crash; if the track is too short (just after a level start, a checkpoint or a respawn) the farthest sample is pushed out along the crash → sample direction to 150 m from the crash point (straight back along the crash heading when they coincide). The point is clamped inside `GAME_CONSTANTS.WORLD.SOFT_BOUNDARY_RADIUS` and raised to at least 40 m above the surface; the jet comes back wings level.
-- **Heading.** Eight candidates, starting with the heading flown at that sample, then ±45°, ±90°, ±135° and 180°. Each is probed 0–400 m ahead (2 m steps to 40 m, 4 m to 150 m, 6 m beyond; the centre line plus lanes 10 m to each side), and a surface higher than 20 m below the flight level blocks it. The first clear heading wins; if all are blocked, the jet climbs above the heading with the lowest obstacle line (when that stays under `SOFT_CEILING`), otherwise it takes the heading whose first obstacle is farthest.
-- **Crash grace.** For 3 s after a respawn, touching the surface lifts the jet 3 m above it and, if the nose is below about 12°, levels the wings and pitches up to 12° instead of killing it. `placeAt` clears the crash record and the grace.
+- **Heading.** Eight candidates, starting with the heading flown at that sample, then ±45°, ±90°, ±135° and 180°. If the death was a surface crash within 8 s (flight clock) of the previous respawn, the starting heading is turned round, away from the crash, so a quick re-crash does not repeat the same flight (shot-down deaths keep the normal order). Each candidate is probed 0–400 m ahead (2 m steps to 40 m, then 3 m) across a corridor 24 m either side of the path, with a lane every 3 m (closer than the 8 m-wide Sky Ladder rails), and a surface higher than 20 m below the flight level blocks it. The first clear heading wins; if all are blocked, the jet climbs above the heading with the lowest obstacle line (when that stays under `SOFT_CEILING`), otherwise it takes the heading whose first obstacle is farthest.
+- **Crash grace.** For 3 s after a respawn, contact with the surface does not kill. On a floor or slope the jet is lifted 3 m above it and, if the nose is below about 12°, levelled and pitched up to 12°. If staying above the surface would take more than 12 m of lift, the contact counts as a wall: the jet is pushed out horizontally to the nearest open spot (rings every 2 m out to 48 m, 16 bearings each, open = surface more than 3 m below the jet), its heading loses the into-wall component and turns outward, and wings and pitch are levelled; if no open spot is found it falls back to the lift. `placeAt` clears the crash record, the quick re-crash state and the grace.
 
 ## Surface sampling and levels
 
@@ -513,10 +513,12 @@ export interface ICampaignPresentation {
   showAutosave(label: HudText): void;
   /** announce = false：开局 / 读档同步视角，不播放切换音效 */
   setCameraMode(mode: CameraModeSetting, announce?: boolean): void;
-  setBossStatus(label: string | null, phase?: { current: number; total: number }): void;
+  /** Boss 状态条（null 且没有阶段时收起）；HudText 在显示期间随语言切换重绘，纯字符串原样显示 */
+  setBossStatus(label: HudText | null, phase?: { current: number; total: number }): void;
   /** 导弹告警：单位（SAM）与 Boss 导弹两个来源取最高级 */
   setMissileWarning(level: MissileWarningLevel, source?: 'units' | 'boss'): void;
-  flashWarning(text: string, tone: 'threat' | 'sys' | 'ally'): void;
+  /** 闪烁告警（约 2.2 秒）；text 可本地化（同上） */
+  flashWarning(text: HudText, tone: 'threat' | 'sys' | 'ally'): void;
   setRadarRangeMultiplier(multiplier: number): void;
   /** 每个模拟步长：低血量蜂鸣 + 低血量无线电（高优先级） */
   updatePlayerHealth(deltaTime: number, healthPercent: number, active: boolean): void;
@@ -526,8 +528,8 @@ export interface ICampaignPresentation {
   playBossMusic(level: number): void;
   playStinger(kind: CampaignStinger): void;
   setMusicIntensity(intensity: number): void;
-  /** Boss 进入新阶段：阶段台词、警报 + phase-change 刺激音、音乐强度、HUD 闪烁告警 */
-  onBossPhaseChange(level: number, phase: number, label: string | null): void;
+  /** Boss 进入新阶段：阶段台词、警报 + phase-change 刺激音、音乐强度、HUD 闪烁告警（label 可本地化） */
+  onBossPhaseChange(level: number, phase: number, label: HudText | null): void;
   /** Boss 血量首次低于 25%：台词；adjustIntensity 时音乐强度拉满 */
   onBossLowHealth(level: number, adjustIntensity: boolean): void;
   onPause(): void;
@@ -763,6 +765,17 @@ export class WingmanRoster implements WingmanStatus {
 Formation flight (`src/features/enemy/FriendlyAI.ts`, `src/core/systems/EnemySystem.ts`, `src/features/enemy/EnemyAI.ts`):
 
 ```typescript
+// FriendlyAI.ts — 编队位布局的唯一来源（EnemySystem 的友机入场点也按它取值）
+/** 编队位在玩家水平航向坐标系中的偏移（米）：along 向前、lateral 向右、up 向上 */
+export interface FormationSlotOffset {
+  side: number; // -1 = 左侧，1 = 右侧
+  along: number;
+  lateral: number;
+  up: number;
+}
+/** 第 slot 号编队位的偏移（写入 out 并返回，不分配）：偶数号在左、奇数号在右，每排再向外、向后、向上错开 */
+export function getFormationSlotOffset(slot: number, out: FormationSlotOffset): FormationSlotOffset;
+
 // FriendlyAI
 /** 有敌机（或 Boss 本体 / 部件等额外目标）时追击最近的目标；没有目标时飞向编队位 */
 public update(
@@ -788,10 +801,10 @@ getFriendlySpawnPose(
 ): void;
 ```
 
-- **Slots.** `EnemySystem.spawnFriendly` gives each new friendly the lowest slot no living friendly holds, so the two named wingmen never share a side. Slots are laid out in the player's horizontal heading frame (from the smoothed player velocity): slot 0 left, slot 1 right, 38 m ahead of the wing line, 40 m out, 6 m up; each further rank adds 35 m out, 25 m back and 4 m up.
+- **Slots.** `EnemySystem.spawnFriendly` gives each new friendly the lowest slot no living friendly holds, so the two named wingmen never share a side. `getFormationSlotOffset` lays slots out in the player's horizontal heading frame (from the smoothed player velocity): slot 0 left, slot 1 right, 38 m ahead of the wing line, 40 m out, 6 m up; each further rank adds 35 m out, 25 m back and 4 m up.
 - **Camera corridor.** An idle friendly steers clear of the chase camera's sight corridor (60 m behind to 35 m ahead of the jet, ±28 m to the side): inside it, it steps out sideways first (with a higher gain); a path to its slot that would cross it goes round behind the camera or well ahead of the jet (the right-hand slot detours further, so two wingmen changing sides do not meet).
 - **Steering.** Desired velocity = player velocity + a clamped correction toward the target point, followed with a 2 rad/s turn rate and 25 m/s² acceleration, then `EnemyAI.updateKinematic(dt)` (see [Enemy AI](#enemy-ai)). As soon as an enemy jet or boss target exists, `update` returns to the usual chase from the frozen manoeuvre state.
-- **Spawn pose.** `getFriendlySpawnPose` places the next friendly on its slot's side (40 m out plus 35 m per rank, 26 m ahead minus 25 m per rank, 6 m plus 4 m per rank up) in the player's nose frame, falling back to the smoothed velocity when the nose is near vertical, then −Z. The coordinator writes the pose to the mesh before constructing `FriendlyAI` (the AI snapshots its interpolation state in the constructor), keeps it at least 30 m above the terrain, points the nose along the player's heading and starts it at `max(config.speed, player speed)`.
+- **Spawn pose.** `getFriendlySpawnPose` places the next friendly at its slot's `getFormationSlotOffset` moved 12 m back (40 m out plus 35 m per rank, 26 m ahead minus 25 m per rank, 6 m plus 4 m per rank up) in the player's nose frame, falling back to the smoothed velocity when the nose is near vertical, then −Z. The coordinator writes the pose to the mesh before constructing `FriendlyAI` (the AI snapshots its interpolation state in the constructor), keeps it at least 30 m above the terrain, points the nose along the player's heading and starts it at `max(config.speed, player speed)`.
 
 ## Enemy AI
 
@@ -1446,9 +1459,11 @@ export interface IAdvancedBoss extends IBossCore {
 
   onFire?: (position: Vector3, direction: Vector3, damage: number) => void;
   onMissileFired?: () => void;
-  onPhaseChange?: (phase: number, label: string) => void;
+  /** label 传双语原文（或 { text, params }，见 HudText）：HUD 按当前语言显示，显示期间切换语言随之重绘 */
+  onPhaseChange?: (phase: number, label: HudText) => void;
   onSpawnMinion?: (position: Vector3, kind: BossMinionKind) => void;
-  onHazardWarning?: (label: string) => void;
+  /** 特殊武器预警（HUD 闪烁提示 + 预警音）；label 同 onPhaseChange */
+  onHazardWarning?: (label: HudText) => void;
 }
 export function isAdvancedBoss(boss: unknown): boss is IAdvancedBoss;
 ```
@@ -1512,7 +1527,7 @@ export class TargetLeadTracker {
 export const BOSS_DECOY_ANCHOR_NAME = 'boss-missile-decoy-anchor';
 ```
 
-- **Damage by difficulty.** `GameCoordinator.getAdjustedBossConfig` scales `missileDamage` by the difficulty's `enemyDamageMultiplier` (rounded, at least 1) along with `health` and `damage`, and every missile-carrying boss passes it to its `BossMissileSystem`; `BossHitFeedback.checkBossMissileHits` applies the reported value to the player (through armour, not while shielded) and to wingmen. With the base 90 that is 31 / 38 / 45 / 56 / 70 per hit from Very Easy to Expert; the Phantom Wing's base is doubled (63 … 140, 90 on Normal).
+- **Damage by difficulty.** `GameCoordinator.getAdjustedBossConfig` scales `missileDamage` by the difficulty's `enemyDamageMultiplier` (rounded, at least 1) along with `health` and `damage`, and every missile-carrying boss passes it to its `BossMissileSystem`; `BossHitFeedback.checkBossMissileHits` applies the reported value to the player (through armour, not while shielded) and to wingmen. With the base 90 that is 31 / 38 / 45 / 56 / 70 per hit from Very Easy to Expert; the Phantom Wing's base is doubled (63 … 140, 90 on Normal). Flak and the Octopus Warship's eye bolts follow the same rule: `FlakCannonSystem(scene, explosionRadius, onExplode, damage = FLAK_CANNON_CONFIG.DAMAGE)` takes the boss's scaled `damage` (Desert Fortress and Missile Destroyer; base 30) and passes it to every shell's explosion, and `EyeSystem(scene, damage = EYE_CONFIG.DAMAGE)` takes the scaled `BossConfig.eyeDamage` (optional, base 40; `OctopusWarshipAI.getEyeDamage()` returns the system's value). Per hit from Very Easy to Expert: flak 11 / 13 / 15 / 19 / 23, eye bolts 14 / 17 / 20 / 25 / 31 (Normal keeps the tuned 15 / 20).
 - **Flares.** `BossBattleController` now runs the same `BossFlareDecoyRedirector` as `AdvancedBossController`, so flares pull the player-tracking missiles of bosses 1–5 too: a missile within 420 m can be redirected to an anchor that follows a burning flare (chance from the strongest flare) and detonates there.
 - **Profiles in use.** Trident (level 4) launches salvos of 2 missiles — 3 at 35 % health or less — at 72 m/s (turn rate 0.85 rad/s, lead 0.3, 7 s fuel, 0.4 s apart) every `missileFireInterval` (20 s base) and fires 95 m/s flak with 50 % lead and ±32 m scatter; the Sky Carrier's missiles fly at 72 m/s (0.95 rad/s, lead 0.3, 10 s); the Phantom Wing's bay missiles at 88 m/s (1.3 rad/s, lead 0.5, 8 s), ejected forward and down. Sandwall's flak (80 m/s) and the Sky Carrier's cannons (100 m/s) lead the player through `TargetLeadTracker` (50 % and 60 %).
 
@@ -1861,10 +1876,15 @@ public updateWeaponPanel(state: HudWeaponPanelState): void;
 public updateFlares(charges: number, max: number, rechargeProgress: number): void;
 public showAutosave(label?: HudText): void; // ~2.6 s toast, timed by update(dt)
 public setCameraMode(mode: HudCameraMode): void;
-public setBossStatus(label: string | null, phase?: { current: number; total: number }): void; // null hides the strip
+public setBossStatus(label: HudText | null, phase?: { current: number; total: number }): void; // null hides the strip
 public setMissileWarning(level: HudMissileWarningLevel): void;
-public flashWarning(text: string, tone: HudWarningTone = 'threat'): void;
+/** 屏幕中下方的闪烁告警，约 2.2 秒；同一句话重复调用只续时 */
+public flashWarning(text: HudText, tone: HudWarningTone = 'threat'): void;
+/** 持续型道具的倒计时（duration <= 0 的即时道具不显示）；name 可本地化 */
+public showPowerUp(name: HudText, icon: string, duration: number = 0): void;
 ```
+
+`HudText` given to `showBriefing`, `showAutosave`, `flashWarning`, `setBossStatus` and `showPowerUp` is kept as the source; while the banner, toast, warning, boss label or power-up timer is on screen, a language switch re-renders it in place (no animation replay, no timer reset). Plain strings show as given. The per-frame power-up countdown reads a cached string.
 
 ```typescript
 // StoryOverlay
@@ -2129,7 +2149,8 @@ public playMissileDry(): void;
 
 When running the game, `window.game` exposes the coordinator for console inspection.
 
-Dev builds only (`import.meta.env.DEV`): `GameCoordinator` dynamically imports `src/core/dev/DevHooks.ts` when a game starts, whose `installDevHooks(access: DevHookAccess): void` publishes `window.__AIR_SUPREME_DEV__` (state readout, simulation time scale, wave clearing, boss damage, teleports). The production build strips the import. Two groups were added with the voice and balance work:
+Dev builds only (`import.meta.env.DEV`): `GameCoordinator` dynamically imports `src/core/dev/DevHooks.ts` when a game starts, whose `installDevHooks(access: DevHookAccess): void` publishes `window.__AIR_SUPREME_DEV__` (state readout, simulation time scale, wave clearing, boss damage, teleports). The production build strips the import. Added with the voice, balance and polish work:
 
 - `voice` — `state()` (`VoiceSystem.getDebugState()`), `sample()` (voice and music bus RMS in dBFS, the music's voice-duck level, current line and phase, pack language), `say(lineId, kind = 'radio')`, `radio(key: GenericRadioKey)` and `wingman(id: WingmanId, event: WingmanEvent)`.
-- `balance` — the scripted-pilot balance harness (`installBalanceHarness`, `src/core/dev/BalanceHarness.ts`, with the pilot in `ScriptedPilot.ts`), used to measure the difficulty curve and progression.
+- `balance` — the scripted-pilot balance harness (`installBalanceHarness`, `src/core/dev/BalanceHarness.ts`, with the pilot in `ScriptedPilot.ts`), used to measure the difficulty curve and progression. The pilot's terrain look-ahead also checks lines 14 m either side of its path for walls, so it steers around obstacles such as the Sky Ladder pylons.
+- `grantPowerUp(type = 'DAMAGE')` — emits `POWERUP_COLLECTED` with that power-up's config (unknown types fall back to `DAMAGE`), so the real pickup handler runs (HUD timer, effect, sound); returns the type granted.
