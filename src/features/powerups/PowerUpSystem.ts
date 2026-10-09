@@ -37,7 +37,11 @@ export const POWER_UP_CONFIGS: Record<PowerUpType, PowerUpConfig> = {
   [PowerUpType.HEALTH]: {
     type: PowerUpType.HEALTH,
     name: { en: 'Repair Kit', zh: '生命恢复' },
-    description: { en: 'Restores 30 health', zh: '恢复 30 点生命值' },
+    // 效果见 GameCoordinator.handlePowerUpEffect：生命 +1 并回满血
+    description: {
+      en: 'Grants an extra life and fully repairs your jet',
+      zh: '生命 +1，并完全修复战机',
+    },
     color: 0x00ff00,
     duration: 0, // 即时效果
     value: 30,
