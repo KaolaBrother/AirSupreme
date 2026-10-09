@@ -27,6 +27,8 @@ type RadioVoiceState = 'none' | 'playing' | 'done';
 interface QueuedLine {
   line: RadioLine;
   priority: RadioPriority;
+  /** 被打断后重播的这一次（再被打断就不再重播） */
+  replay?: boolean;
 }
 
 interface ActiveLine extends QueuedLine {
@@ -95,8 +97,9 @@ function readingHoldSeconds(chars: number): number {
  *
  * - enqueue 时若空闲（isBusy() 为 false）立即显示（同步回调 onLineShown），否则排队；
  *   一句播完后的短暂间隔（GAP_SECONDS）也算忙碌，保证两句之间总有停顿、面板不会闪一下就换句；
- *   'high' 优先级立即打断普通台词（被打断且尚未说完的台词回到队首重播），
- *   高优先级之间按先后排队并排在所有普通台词前面。重复文本（正在播或已排队）会被忽略。
+ *   'high' 优先级立即打断普通台词（被打断且尚未说完的台词回到队首重播，每句最多重播一次：
+ *   重播时再被打断就不再回队），高优先级之间按先后排队并排在所有普通台词前面。
+ *   重复文本（正在播或已排队）会被忽略。是否允许打断正在配音的台词由调用方决定（isVoicing）。
  * - 显示时间完全由 update(dt) 驱动：暂停游戏 = 台词停住。
  * - 配音（表现层在 onLineShown 里播放）：开口时 holdForVoice(line, 时长)，台词至少停留到
  *   配音结束后 VOICE_TAIL_SECONDS；说话期间下一句等待，直到 releaseVoice(line)（或兜底上限）。
@@ -208,6 +211,13 @@ export class RadioComms {
     return this.current !== null || this.queue.length > 0 || this.gap > 0;
   }
 
+  /** 当前台词的配音正在说（holdForVoice 之后、releaseVoice 之前） */
+  public isVoicing(): boolean {
+    return (
+      this.current !== null && this.current.voice === 'playing' && this.current.phase !== 'out'
+    );
+  }
+
   /**
    * 当前台词的配音开口了：台词至少停留到“此刻 + 配音时长 + VOICE_TAIL_SECONDS”，
    * 并在 releaseVoice 之前不进入淡出（兜底：再多等 VOICE_SAFETY_SECONDS）。
@@ -285,23 +295,26 @@ export class RadioComms {
     }
   }
 
-  /** 普通台词被高优先级打断：没说完的放回普通台词的最前面 */
+  /**
+   * 普通台词被高优先级打断：没说完的放回普通台词的最前面重播——每句最多重播一次
+   * （重播时又被打断就放弃，避免同一句被反复从头念起）。
+   */
   private interruptCurrent(): void {
     const current = this.current;
     if (!current) {
       return;
     }
     this.current = null;
-    // 配音还在说：没传达完，一定重播；配音已说完：已传达；没有配音：按停留时间判断
+    // 配音还在说：没传达完，重播；配音已说完：已传达；没有配音：按停留时间判断
     const delivered =
       current.phase === 'out' ||
       current.voice === 'done' ||
       (current.voice === 'none' &&
         current.phase === 'hold' &&
         current.phaseTime >= current.holdSeconds * INTERRUPT_DELIVERED_RATIO);
-    if (!delivered && current.priority === 'normal') {
+    if (!delivered && current.priority === 'normal' && !current.replay) {
       const firstNormal = this.queue.findIndex((queued) => queued.priority === 'normal');
-      const item: QueuedLine = { line: current.line, priority: current.priority };
+      const item: QueuedLine = { line: current.line, priority: current.priority, replay: true };
       if (firstNormal < 0) {
         this.queue.push(item);
       } else {
