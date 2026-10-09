@@ -246,4 +246,74 @@ describe('HUD localizable banner and toast text', () => {
       expect(timer()).not.toContain('火力增强');
     });
   });
+
+  describe('showPowerUpBig (polish batch Q)', () => {
+    const callout = (): string => textOf('hud-callout');
+    const subtitle = (): string =>
+      document.querySelector('#hud-callout .hud-callout-sub')?.textContent ?? '';
+    const visible = (): boolean => byId('hud-callout')?.style.opacity === '1';
+
+    it.each(FORMS)(
+      'shows %s and redraws it on a language switch while paused',
+      (_l, text, en, zh) => {
+        hud.showPowerUpBig('📡', text, 2);
+        expect(visible()).toBe(true);
+        expect(callout()).toContain(en);
+
+        setLocale('zh-CN');
+        expect(callout()).toContain(zh);
+        expect(callout()).not.toContain(en);
+        setLocale('en');
+        expect(callout()).toContain(en);
+      }
+    );
+
+    it('keeps a plain string as it is', () => {
+      hud.showPowerUpBig('📡', 'Bandits ahead', 2);
+      expect(callout()).toContain('Bandits ahead');
+      setLocale('zh-CN');
+      expect(callout()).toContain('Bandits ahead');
+    });
+
+    it('a language switch neither replays nor extends the callout', () => {
+      hud.showPowerUpBig('📡', FORMS[0][1], 1);
+      hud.update(0.6);
+      setLocale('zh-CN');
+      expect(visible()).toBe(true);
+      expect(callout()).toContain(FORMS[0][3]);
+      hud.update(0.5);
+      expect(visible(), 'gone on its original schedule').toBe(false);
+    });
+
+    it('does not bring back a callout that has gone', () => {
+      hud.showPowerUpBig('📡', FORMS[0][1], 1);
+      hud.update(1.5);
+      expect(visible()).toBe(false);
+      setLocale('zh-CN');
+      expect(visible()).toBe(false);
+    });
+
+    it("relabels a power-up callout's name and its POWER-UP! subtitle", () => {
+      hud.showPowerUpBig('🛡️', { en: 'Shield', zh: '护盾' }, 2, false, 'powerup');
+      expect(callout()).toContain('Shield');
+      expect(subtitle()).toBe('POWER-UP!');
+
+      setLocale('zh-CN');
+      expect(callout()).toContain('护盾');
+      expect(subtitle()).toBe('获得道具！');
+    });
+
+    it('a callout queued behind a briefing shows in the language of the moment it appears', () => {
+      hud.showBriefing({ kicker: 'K', title: 'T', line: 'L', tone: 'sys', durationMs: 1000 });
+      hud.showPowerUpBig('📡', FORMS[1][1], 2);
+      expect(visible(), 'held while the briefing is up').toBe(false);
+
+      setLocale('zh-CN');
+      hud.update(1.1);
+      expect(visible()).toBe(true);
+      expect(callout()).toContain(FORMS[1][3]);
+      setLocale('en');
+      expect(callout()).toContain(FORMS[1][2]);
+    });
+  });
 });

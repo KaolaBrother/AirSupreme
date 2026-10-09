@@ -11,7 +11,8 @@ import {
 import type { ParticleSystem } from '@/features/effects/ParticleSystem';
 import type { UnitInstance, UnitSystem } from '@/features/units/UnitSystem';
 import { UNIT_CONFIGS, UnitType } from '@/features/units/UnitTypes';
-import { setLocale } from '@/i18n';
+import { setLocale, type LocalizedText } from '@/i18n';
+import { HUD, type HudText, type HudWarningTone } from '@/ui/HUD';
 import { LOCALES, expectBilingual, resetLocale, textIn } from './i18nTestUtils';
 
 /**
@@ -308,5 +309,95 @@ describe('UnitController urgent-warning radio budget', () => {
     controller.spawnForWave(1, 2, playerPosition);
     system.onCivilianHit?.(sam);
     expect(accepted('civilian-hit')).toBe(3);
+  });
+});
+
+/**
+ * 打磨批次 Q：单位告警（导弹来袭、误伤平民停火、残余目标脱离战区）把双语原文交给 flashWarning，
+ * 告警显示期间切换语言随之重绘（不再是发出时按当时语言取好的字符串）。
+ */
+describe('UnitController warnings relabel on a language switch', () => {
+  let hud: HUD;
+  let flashWarning: ReturnType<typeof vi.fn>;
+  let controller: UnitController;
+  let system: UnitSystem;
+  const playerMesh = new THREE.Object3D();
+  const playerPosition = new THREE.Vector3(0, 300, 0);
+  const sam = {} as UnitInstance;
+
+  beforeEach(async () => {
+    document.body.innerHTML = '';
+    hud = new HUD();
+    hud.init();
+    // 与协调器的表现层一样：告警交给 HUD.flashWarning
+    flashWarning = vi.fn((text: HudText, tone: HudWarningTone) => hud.flashWarning(text, tone));
+    const presentation = {
+      genericRadio: vi.fn(() => true),
+      unitFirstContact: vi.fn(),
+      onUnitEvent: vi.fn(),
+      flashWarning,
+      setMissileWarning: vi.fn(),
+      setRadarRangeMultiplier: vi.fn(),
+    };
+    controller = new UnitController({
+      scene: new THREE.Scene(),
+      presentation: presentation as unknown as ICampaignPresentation,
+      awardKill: vi.fn(),
+      applyPenalty: vi.fn(),
+      onAssetLost: vi.fn(),
+      damagePlayer: vi.fn(),
+      onExplosion: vi.fn(),
+      onEscortResult: vi.fn(),
+    });
+    system = await controller.ensureLoaded(particleStub());
+  });
+
+  afterEach(() => {
+    controller.dispose();
+    hud.dispose();
+    resetLocale();
+    document.body.innerHTML = '';
+  });
+
+  const flashText = (): string => document.getElementById('hud-flash-warning')?.textContent ?? '';
+
+  /** 唯一一次告警：传的是双语原文，HUD 上按当前语言显示并随切换重绘 */
+  function expectRelabelledWarning(tone: HudWarningTone): void {
+    expect(flashWarning).toHaveBeenCalledTimes(1);
+    const [text, calledTone] = flashWarning.mock.calls[0] as [HudText, HudWarningTone];
+    expect(calledTone).toBe(tone);
+    expect(typeof text, 'a bilingual value, not a string resolved at call time').not.toBe('string');
+    const bilingual = text as LocalizedText;
+    expectBilingual(bilingual, 'warning');
+    expect(bilingual.zh).not.toBe(bilingual.en);
+
+    expect(flashText()).toContain(bilingual.en);
+    setLocale('zh-CN');
+    expect(flashText()).toContain(bilingual.zh);
+    expect(flashText()).not.toContain(bilingual.en);
+    setLocale('en');
+    expect(flashText()).toContain(bilingual.en);
+  }
+
+  it('missile inbound', () => {
+    system.onLockWarning?.(sam, 'launched');
+    expectRelabelledWarning('threat');
+  });
+
+  it('civilian hit (cease fire)', () => {
+    system.onCivilianHit?.(sam);
+    expectRelabelledWarning('threat');
+  });
+
+  it('remaining targets have left the area', () => {
+    // 敌机已清空，远处一座敌方雷达站拖住波次：防卡关放行时告警
+    expect(system.spawnUnit(UnitType.RADAR_STATION, new THREE.Vector3(30000, 0, 30000))).not.toBe(
+      null
+    );
+    for (let elapsed = 0; elapsed < 200 && flashWarning.mock.calls.length === 0; elapsed += 1) {
+      controller.update(1, playerMesh, playerPosition, [], [], true);
+    }
+    expect(controller.getWaveHoldCount(), 'the wave is released').toBe(0);
+    expectRelabelledWarning('sys');
   });
 });
