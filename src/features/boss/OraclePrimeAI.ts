@@ -275,9 +275,9 @@ export class OraclePrimeAI implements IAdvancedBoss {
   public onFire?: (position: THREE.Vector3, direction: THREE.Vector3, damage: number) => void;
   public onDestroy?: (position: THREE.Vector3, config: BossConfig) => void;
   public onMissileFired?: () => void;
-  public onPhaseChange?: (phase: number, label: string) => void;
+  public onPhaseChange?: IAdvancedBoss['onPhaseChange'];
   public onSpawnMinion?: (position: THREE.Vector3, kind: BossMinionKind) => void;
-  public onHazardWarning?: (label: string) => void;
+  public onHazardWarning?: IAdvancedBoss['onHazardWarning'];
   /** 扩展钩子：音效 / 镜头震动 / 屏幕闪光提示（position 为复用向量，需要保存请 clone） */
   public onEffectCue?: (cue: OraclePrimeCue, position: THREE.Vector3, intensity: number) => void;
 
@@ -1068,7 +1068,7 @@ export class OraclePrimeAI implements IAdvancedBoss {
     );
     this.fx.emit('createEmpBurst', this.coreWorld, this.rig.shieldRadius * 1.3);
     this.emitCue('shield-collapse', this.coreWorld, 1);
-    this.onPhaseChange?.(2, tr({ en: 'Shield down · Core exposed', zh: '护盾崩溃 · 核心暴露' }));
+    this.onPhaseChange?.(2, { en: 'Shield down · Core exposed', zh: '护盾崩溃 · 核心暴露' });
   }
 
   private updateCollapse(): void {
@@ -1138,7 +1138,7 @@ export class OraclePrimeAI implements IAdvancedBoss {
     );
     this.spawnVisualRing(this.coreWorld, 40 * this.sizeFactor, 260, 1.8, 26 * this.sizeFactor, 0.9);
     this.emitCue('overload', this.coreWorld, 1);
-    this.onPhaseChange?.(3, tr({ en: 'Core overload', zh: '核心过载' }));
+    this.onPhaseChange?.(3, { en: 'Core overload', zh: '核心过载' });
   }
 
   private updateOverloadRise(): void {
@@ -1546,7 +1546,7 @@ export class OraclePrimeAI implements IAdvancedBoss {
         if (started) {
           pylon.attack = 'active';
           if (pylon.activations % 2 === 1) {
-            this.onHazardWarning?.(tr({ en: 'Arc lock-on', zh: '电弧锁定' }));
+            this.onHazardWarning?.({ en: 'Arc lock-on', zh: '电弧锁定' });
           }
           this.emitCue('arc-telegraph', this.tmpB, 0.7);
         } else {
@@ -1689,15 +1689,13 @@ export class OraclePrimeAI implements IAdvancedBoss {
     if (this.getAlivePylonCount() > 0) {
       this.retaliationTimer = 1.3;
       this.retaliationCount = destroyed >= 3 ? 3 : 2;
-      this.onHazardWarning?.(
-        tr(
-          {
-            en: 'Pylon down {destroyed}/{total} · Oracle retaliates',
-            zh: '护盾塔被毁 {destroyed}/{total} · 神谕反击',
-          },
-          { destroyed, total: this.pylons.length }
-        )
-      );
+      this.onHazardWarning?.({
+        text: {
+          en: 'Pylon down {destroyed}/{total} · Oracle retaliates',
+          zh: '护盾塔被毁 {destroyed}/{total} · 神谕反击',
+        },
+        params: { destroyed, total: this.pylons.length },
+      });
     }
     this.partsDirty = true;
     this.statusKey = -1;
@@ -1711,7 +1709,7 @@ export class OraclePrimeAI implements IAdvancedBoss {
     this.missileQueue = Math.max(this.missileQueue, this.retaliationCount);
     this.missileStagger = 0;
     this.missileFired = 0;
-    this.onHazardWarning?.(tr({ en: 'Missile salvo', zh: '导弹齐射' }));
+    this.onHazardWarning?.({ en: 'Missile salvo', zh: '导弹齐射' });
   }
 
   // ----- 常规火力 -----
@@ -1793,7 +1791,7 @@ export class OraclePrimeAI implements IAdvancedBoss {
     this.missileQueue = tuning.missileCount;
     this.missileStagger = 0.4;
     this.missileFired = 0;
-    if (this.phase >= 2) this.onHazardWarning?.(tr({ en: 'Missile salvo', zh: '导弹齐射' }));
+    if (this.phase >= 2) this.onHazardWarning?.({ en: 'Missile salvo', zh: '导弹齐射' });
   }
 
   private launchMissile(position: THREE.Vector3, preferFriendly: boolean): void {
@@ -1843,7 +1841,7 @@ export class OraclePrimeAI implements IAdvancedBoss {
       this.onSpawnMinion?.(position, kind);
     });
     this.rig.root.getWorldPosition(this.tmpA);
-    this.onHazardWarning?.(tr({ en: 'Drone swarm launched', zh: '无人机群出击' }));
+    this.onHazardWarning?.({ en: 'Drone swarm launched', zh: '无人机群出击' });
     this.emitCue('drone-launch', this.tmpA, 0.7);
   }
 
@@ -1896,9 +1894,10 @@ export class OraclePrimeAI implements IAdvancedBoss {
       case 'last-light':
         this.lastLightDone = true;
         this.coreFlare = 1;
-        this.onHazardWarning?.(
-          tr({ en: 'Light of the End · Triple shock rings', zh: '终焉之光 · 三重冲击环' })
-        );
+        this.onHazardWarning?.({
+          en: 'Light of the End · Triple shock rings',
+          zh: '终焉之光 · 三重冲击环',
+        });
         this.emitCue('last-light', this.coreWorld, 1);
         break;
     }
@@ -1971,8 +1970,8 @@ export class OraclePrimeAI implements IAdvancedBoss {
     }
     this.onHazardWarning?.(
       overload
-        ? tr({ en: 'Tilted halo · Watch the beam height', zh: '倾斜光轮 · 观察光束高度' })
-        : tr({ en: 'Halo sweep · Avoid the ring altitude', zh: '光轮扫掠 · 避开光环高度' })
+        ? { en: 'Tilted halo · Watch the beam height', zh: '倾斜光轮 · 观察光束高度' }
+        : { en: 'Halo sweep · Avoid the ring altitude', zh: '光轮扫掠 · 避开光环高度' }
     );
     this.emitCue('pinwheel-charge', this.coreWorld, 0.8);
   }
@@ -2032,8 +2031,8 @@ export class OraclePrimeAI implements IAdvancedBoss {
     }
     this.onHazardWarning?.(
       triple
-        ? tr({ en: 'Triple Spear of Judgment', zh: '三重审判之矛' })
-        : tr({ en: 'Spear of Judgment · Break hard after lock', zh: '审判之矛 · 锁定后急转' })
+        ? { en: 'Triple Spear of Judgment', zh: '三重审判之矛' }
+        : { en: 'Spear of Judgment · Break hard after lock', zh: '审判之矛 · 锁定后急转' }
     );
     this.emitCue('judgement-charge', this.coreWorld, 0.8);
   }
@@ -2128,11 +2127,11 @@ export class OraclePrimeAI implements IAdvancedBoss {
     if (spawned) {
       this.onHazardWarning?.(
         kind === 'crown'
-          ? tr({
+          ? {
               en: 'Overload shock ring · Fly through the gap or stay clear',
               zh: '过载冲击环 · 穿越缺口或远离',
-            })
-          : tr({ en: 'Twin shock rings · Stay level with the core', zh: '双重冲击环 · 与核心同高' })
+            }
+          : { en: 'Twin shock rings · Stay level with the core', zh: '双重冲击环 · 与核心同高' }
       );
       this.emitCue('shockwave-charge', this.coreWorld, 0.8);
     }
@@ -2210,9 +2209,7 @@ export class OraclePrimeAI implements IAdvancedBoss {
     if (this.majorStep === 4 && this.majorTimer > 1.2) {
       this.exhaustTimer = EXHAUST_TIME;
       this.statusKey = -1;
-      this.onHazardWarning?.(
-        tr({ en: 'Core exhausted · All-out attack!', zh: '核心衰竭 · 全力攻击' })
-      );
+      this.onHazardWarning?.({ en: 'Core exhausted · All-out attack!', zh: '核心衰竭 · 全力攻击' });
       this.emitCue('aperture-open', this.coreWorld, 1);
       this.finishMajor(1.6);
     }
@@ -2251,7 +2248,7 @@ export class OraclePrimeAI implements IAdvancedBoss {
         topY: ground + 900 * sf,
       });
     });
-    this.onHazardWarning?.(tr({ en: 'Orbital strike · Change course', zh: '天罚光柱 · 偏离航线' }));
+    this.onHazardWarning?.({ en: 'Orbital strike · Change course', zh: '天罚光柱 · 偏离航线' });
     this.emitCue('orbital-telegraph', this.tmpA, 0.8);
   }
 
@@ -2546,7 +2543,7 @@ export class OraclePrimeAI implements IAdvancedBoss {
     if (this.hasPlayer) this.orbitals.setTrackedAltitude(this.playerPos.y);
     const pylonEvent = this.pylonLance.update(dt);
     if (pylonEvent === 'lock') {
-      this.onHazardWarning?.(tr({ en: 'Lance lock-on', zh: '光矛锁定' }));
+      this.onHazardWarning?.({ en: 'Lance lock-on', zh: '光矛锁定' });
       this.emitCue('lance-lock', this.pylonLance.getOrigin(), 0.7);
     } else if (pylonEvent === 'fire') {
       this.emitCue('lance-fire', this.pylonLance.getOrigin(), 0.8);

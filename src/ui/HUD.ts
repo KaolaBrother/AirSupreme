@@ -66,7 +66,7 @@ export interface HudTextWithParams {
 
 /**
  * HUD 可本地化文案：纯字符串原样显示（旧调用方不变）；双语对象或 { text, params } 按当前语言取值，
- * 切换语言时仍在显示的简报卡 / 自动存档提示按新语言重绘。
+ * 切换语言时仍在显示的简报卡 / 自动存档提示 / 闪烁告警 / Boss 状态条 / 道具倒计时按新语言重绘。
  */
 export type HudText = string | LocalizedText | HudTextWithParams;
 
@@ -284,6 +284,8 @@ export class HUD {
   private damageFlashDuration: number = 0;
   private damageFlashPeakOpacity: number = 0;
   private lowHealthAlertActive: boolean = false;
+  /** 道具名：原文（可本地化，语言切换时重取）与按当前语言取好的文字（逐帧倒计时只读后者） */
+  private activePowerUpNameSource: HudText | null = null;
   private activePowerUpName: string = '';
   private activePowerUpIcon: string = '';
   private lastPowerUpRemainingSeconds: number = -1;
@@ -345,12 +347,16 @@ export class HUD {
   private cameraMode: HudCameraMode | null = null;
   private cameraFlashTimer: number = 0;
   private bossStatusVisible: boolean = false;
+  /** Boss 状态标签原文（可本地化，语言切换时重绘）与当前显示的文字 */
+  private bossLabelSource: HudText | null = null;
   private bossLabel: string = '';
   private bossPhaseCurrent: number = 0;
   private bossPhaseTotal: number = 0;
   private bossFlashTimer: number = 0;
   private missileWarningLevel: HudMissileWarningLevel = 'none';
   private flashWarningTimer: number = 0;
+  /** 闪烁告警原文（可本地化，语言切换时重绘）与当前显示的文字 */
+  private flashWarningSource: HudText | null = null;
   private flashWarningText: string = '';
   private flashWarningTone: HudWarningTone = 'threat';
   private flashSeq: 'a' | 'b' = 'a';
@@ -962,17 +968,27 @@ export class HUD {
     if (this.autosaveTitle) {
       this.autosaveTitle.textContent = tr({ en: 'Autosaved', zh: '已自动保存' });
     }
-    // 运行时传入的简报 / 存档标签：可本地化的原文按新语言重绘（纯字符串原样保留）
+    // 运行时传入的简报 / 存档标签 / 告警 / Boss 状态 / 道具名：可本地化的原文按新语言重绘
+    // （纯字符串原样保留）
     if (this.briefingTimer > 0) {
       this.renderBriefingText();
     }
     if (this.autosaveTimer > 0) {
       this.renderAutosaveLabel();
     }
+    if (this.flashWarningTimer > 0) {
+      this.renderFlashWarningText();
+    }
+    if (this.activePowerUpNameSource !== null && this.activePowerUpDuration > 0) {
+      this.activePowerUpName = resolveHudText(this.activePowerUpNameSource);
+      this.lastPowerUpRemainingSeconds = -1;
+      this.updatePowerUpTimerText();
+    }
     if (this.cameraMode) {
       this.renderCameraLabels(this.cameraMode);
     }
     if (this.bossStatusVisible && this.bossUi) {
+      this.renderBossLabel(this.bossUi, resolveHudText(this.bossLabelSource));
       this.renderBossPhase(this.bossUi, this.bossPhaseCurrent, this.bossPhaseTotal);
     }
     if (this.warningUi && this.missileWarningLevel !== 'none') {
@@ -1617,11 +1633,11 @@ export class HUD {
 
   /**
    * 显示道具提示
-   * @param name 道具名称
+   * @param name 道具名称：纯字符串，或可本地化文案（见 HudText，倒计时期间切换语言随之重绘）
    * @param icon 道具图标
    * @param duration 持续时间（秒），0表示即时效果（如生命恢复、炸弹）
    */
-  public showPowerUp(name: string, icon: string, duration: number = 0): void {
+  public showPowerUp(name: HudText, icon: string, duration: number = 0): void {
     this.ensureInitialized();
     // 即时效果道具（duration <= 0）不显示在右上角
     if (duration <= 0) {
@@ -1630,7 +1646,8 @@ export class HUD {
     }
 
     // 只有持续效果的道具才显示在右上角
-    this.activePowerUpName = name;
+    this.activePowerUpNameSource = name;
+    this.activePowerUpName = resolveHudText(name);
     this.activePowerUpIcon = icon;
     this.activePowerUpDuration = duration;
     this.powerUpTimer = duration;
@@ -1703,6 +1720,7 @@ export class HUD {
    */
   public hidePowerUp(): void {
     this.ensureInitialized();
+    this.activePowerUpNameSource = null;
     this.activePowerUpName = '';
     this.activePowerUpIcon = '';
     this.lastPowerUpRemainingSeconds = -1;
@@ -2083,17 +2101,26 @@ export class HUD {
     this.setTextContent(ui.phase, total > 0 ? `${tr(TXT_BOSS_PHASE)} ${current}/${total}` : '');
   }
 
+  /** Boss 状态标签文字（空串时收起标签） */
+  private renderBossLabel(ui: BossStatusUi, text: string): void {
+    this.bossLabel = text;
+    this.setTextContent(ui.label, text);
+    this.setStyleValue(ui.label, 'display', text ? 'inline' : 'none');
+  }
+
   /**
    * Boss 状态条（血条下方）：标签 + 阶段菱形；label 为 null 时隐藏。
+   * label 可以是纯字符串或可本地化文案（见 HudText，显示期间切换语言随之重绘）。
    * 阶段推进时整条闪一下。
    */
-  public setBossStatus(label: string | null, phase?: { current: number; total: number }): void {
+  public setBossStatus(label: HudText | null, phase?: { current: number; total: number }): void {
     this.ensureInitialized();
     if (label === null || label === undefined) {
       if (!this.bossStatusVisible) {
         return;
       }
       this.bossStatusVisible = false;
+      this.bossLabelSource = null;
       this.bossLabel = '';
       this.bossPhaseCurrent = 0;
       this.bossPhaseTotal = 0;
@@ -2116,7 +2143,8 @@ export class HUD {
     const current = phase
       ? Math.max(0, Math.min(total, Math.round(HUD.finiteOr(phase.current, 0))))
       : 0;
-    const text = String(label);
+    const text = resolveHudText(label);
+    this.bossLabelSource = label;
     if (
       this.bossStatusVisible &&
       text === this.bossLabel &&
@@ -2127,8 +2155,7 @@ export class HUD {
     }
 
     const phaseAdvanced = this.bossStatusVisible && current > this.bossPhaseCurrent;
-    this.setTextContent(ui.label, text);
-    this.setStyleValue(ui.label, 'display', text ? 'inline' : 'none');
+    this.renderBossLabel(ui, text);
 
     if (ui.pips.length !== total) {
       const fragment = document.createDocumentFragment();
@@ -2151,7 +2178,6 @@ export class HUD {
     ui.root.setAttribute('data-phase', String(current));
     ui.root.setAttribute('data-phase-total', String(total));
 
-    this.bossLabel = text;
     this.bossPhaseCurrent = current;
     this.bossPhaseTotal = total;
     if (!this.bossStatusVisible) {
@@ -2193,10 +2219,13 @@ export class HUD {
     }
   }
 
-  /** 屏幕中下方的闪烁告警（Boss 招式预警、武器过热等），约 2.2 秒后消失；同一句话重复调用只续时 */
-  public flashWarning(text: string, tone: HudWarningTone = 'threat'): void {
+  /**
+   * 屏幕中下方的闪烁告警（Boss 招式预警、武器过热等），约 2.2 秒后消失；同一句话重复调用只续时。
+   * text 可以是纯字符串或可本地化文案（见 HudText，显示期间切换语言随之重绘）。
+   */
+  public flashWarning(text: HudText, tone: HudWarningTone = 'threat'): void {
     this.ensureInitialized();
-    const message = typeof text === 'string' ? text.trim() : '';
+    const message = resolveHudText(text).trim();
     if (!message) {
       return;
     }
@@ -2206,6 +2235,7 @@ export class HUD {
       this.flashWarningTimer > 0 &&
       this.flashWarningText === message &&
       this.flashWarningTone === nextTone;
+    this.flashWarningSource = text;
     this.flashWarningText = message;
     this.flashWarningTone = nextTone;
     this.setTextContent(ui.flashText, message);
@@ -2265,10 +2295,24 @@ export class HUD {
 
   private hideFlashWarning(): void {
     this.flashWarningTimer = 0;
+    this.flashWarningSource = null;
     this.flashWarningText = '';
     if (this.warningUi) {
       this.setStyleValue(this.warningUi.flash, 'display', 'none');
     }
+  }
+
+  /** 语言切换：按新语言重写仍在显示的闪烁告警（不重播动画、不续时；纯字符串原样保留） */
+  private renderFlashWarningText(): void {
+    if (!this.warningUi || this.flashWarningSource === null) {
+      return;
+    }
+    const message = resolveHudText(this.flashWarningSource).trim();
+    if (!message) {
+      return;
+    }
+    this.flashWarningText = message;
+    this.setTextContent(this.warningUi.flashText, message);
   }
 
   /** 结算 / 失败时收起所有战斗告警与临时提示 */
@@ -3037,10 +3081,12 @@ export class HUD {
     this.autosaveLeaving = false;
     this.autosaveLabelSource = null;
     this.flashWarningTimer = 0;
+    this.flashWarningSource = null;
     this.flashWarningText = '';
     this.cameraFlashTimer = 0;
     this.bossFlashTimer = 0;
     this.bossStatusVisible = false;
+    this.bossLabelSource = null;
     this.bossLabel = '';
     this.bossPhaseCurrent = 0;
     this.bossPhaseTotal = 0;

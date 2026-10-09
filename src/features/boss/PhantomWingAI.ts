@@ -4,7 +4,7 @@ import { BossMissileSystem, type BossMissileFlightProfile } from './BossMissileS
 import type { BossHazardHit, BossMinionKind, BossSubTarget, IAdvancedBoss } from './BossContracts';
 import { HealthSystem } from '@/features/combat/HealthSystem';
 import type { ParticleSystem } from '@/features/effects/ParticleSystem';
-import { getLocale, tr, type Locale } from '@/i18n';
+import { getLocale, tr, type Locale, type LocalizedText } from '@/i18n';
 import {
   createHazardProbe,
   disposeObjectTree,
@@ -245,10 +245,10 @@ export class PhantomWingAI implements IAdvancedBoss {
   public onFire?: (position: THREE.Vector3, direction: THREE.Vector3, damage: number) => void;
   public onDestroy?: (position: THREE.Vector3, config: BossConfig) => void;
   public onMissileFired?: () => void;
-  public onPhaseChange?: (phase: number, label: string) => void;
+  public onPhaseChange?: IAdvancedBoss['onPhaseChange'];
   /** 幻影不召唤小兵（全息诱饵由 Boss 自己管理）；保留以满足契约 */
   public onSpawnMinion?: (position: THREE.Vector3, kind: BossMinionKind) => void;
-  public onHazardWarning?: (label: string) => void;
+  public onHazardWarning?: IAdvancedBoss['onHazardWarning'];
   /** 扩展钩子：音效 / 镜头震动提示（position 为复用向量，需要保存请 clone） */
   public onEffectCue?: (cue: PhantomWingCue, position: THREE.Vector3, intensity: number) => void;
 
@@ -881,10 +881,11 @@ export class PhantomWingAI implements IAdvancedBoss {
     this.hasLastPlayer = true;
   }
 
-  private warn(label: string): void {
-    const last = this.warningTimes.get(label);
+  /** 预警（同一句按英文原文节流）；传双语原文，HUD 按当前语言显示、切换语言时重绘 */
+  private warn(label: LocalizedText): void {
+    const last = this.warningTimes.get(label.en);
     if (last !== undefined && this.time - last < WARNING_THROTTLE) return;
-    this.warningTimes.set(label, this.time);
+    this.warningTimes.set(label.en, this.time);
     this.onHazardWarning?.(label);
   }
 
@@ -986,7 +987,7 @@ export class PhantomWingAI implements IAdvancedBoss {
   private startDecloak(): void {
     this.cloakPhase = 'decloaking';
     this.cloakTimer = 0;
-    this.warn(tr({ en: 'Phantom decloaking', zh: '幻影现形' }));
+    this.warn({ en: 'Phantom decloaking', zh: '幻影现形' });
     this.emitCue('decloak', this.mesh.position, 0.9);
     this.statusKey = -1;
   }
@@ -1449,7 +1450,7 @@ export class PhantomWingAI implements IAdvancedBoss {
       strafe * tuning.lanceFire;
     this.lance.telegraph(this.tmpA, this.lanceDir, this.lanceSpec, tuning.lanceTelegraph);
     this.burstLeft = 0;
-    this.warn(tr({ en: 'Laser lance warning', zh: '激光长矛预警' }));
+    this.warn({ en: 'Laser lance warning', zh: '激光长矛预警' });
     this.emitCue('lance-charge', this.tmpA, 0.9);
   }
 
@@ -1660,7 +1661,7 @@ export class PhantomWingAI implements IAdvancedBoss {
     }
     if (spawned > 0) {
       for (const emitter of this.emitters) if (emitter.alive) emitter.sparkTimer = -0.6;
-      this.warn(tr({ en: 'Holo decoys', zh: '全息诱饵' }));
+      this.warn({ en: 'Holo decoys', zh: '全息诱饵' });
       this.emitCue('decoys', this.mesh.position, 0.8);
       this.statusKey = -1;
     }
@@ -1850,8 +1851,8 @@ export class PhantomWingAI implements IAdvancedBoss {
     this.phase = Math.min(PHASE_COUNT, phase);
     const label =
       this.phase === 2
-        ? tr({ en: 'Holo decoys · Find the real one', zh: '全息诱饵 · 真假难辨' })
-        : tr({ en: 'Overclock · Lance barrage', zh: '超频 · 长矛连击' });
+        ? { en: 'Holo decoys · Find the real one', zh: '全息诱饵 · 真假难辨' }
+        : { en: 'Overclock · Lance barrage', zh: '超频 · 长矛连击' };
     const tuning = this.tuning();
     this.decoyTimer = Math.min(this.decoyTimer, 1.5);
     this.lanceTimer = Math.min(this.lanceTimer, 4);

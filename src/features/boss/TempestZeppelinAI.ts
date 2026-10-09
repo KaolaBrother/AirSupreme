@@ -4,7 +4,7 @@ import { BossMissileSystem } from './BossMissileSystem';
 import type { BossHazardHit, BossMinionKind, BossSubTarget, IAdvancedBoss } from './BossContracts';
 import { HealthSystem } from '@/features/combat/HealthSystem';
 import type { ParticleSystem } from '@/features/effects/ParticleSystem';
-import { getLocale, tr, type Locale } from '@/i18n';
+import { getLocale, tr, type Locale, type LocalizedText } from '@/i18n';
 import {
   HazardRingPool,
   createGlowSprite,
@@ -243,9 +243,9 @@ export class TempestZeppelinAI implements IAdvancedBoss {
   public onFire?: (position: THREE.Vector3, direction: THREE.Vector3, damage: number) => void;
   public onDestroy?: (position: THREE.Vector3, config: BossConfig) => void;
   public onMissileFired?: () => void;
-  public onPhaseChange?: (phase: number, label: string) => void;
+  public onPhaseChange?: IAdvancedBoss['onPhaseChange'];
   public onSpawnMinion?: (position: THREE.Vector3, kind: BossMinionKind) => void;
-  public onHazardWarning?: (label: string) => void;
+  public onHazardWarning?: IAdvancedBoss['onHazardWarning'];
   /** 扩展钩子：音效 / 镜头震动提示（position 为复用向量，需要保存请 clone） */
   public onEffectCue?: (
     cue: TempestZeppelinCue,
@@ -873,10 +873,11 @@ export class TempestZeppelinAI implements IAdvancedBoss {
     }
   }
 
-  private warn(label: string): void {
-    const last = this.warningTimes.get(label);
+  /** 预警（同一句按英文原文节流）；传双语原文，HUD 按当前语言显示、切换语言时重绘 */
+  private warn(label: LocalizedText): void {
+    const last = this.warningTimes.get(label.en);
     if (last !== undefined && this.time - last < WARNING_THROTTLE) return;
-    this.warningTimes.set(label, this.time);
+    this.warningTimes.set(label.en, this.time);
     this.onHazardWarning?.(label);
   }
 
@@ -1216,7 +1217,7 @@ export class TempestZeppelinAI implements IAdvancedBoss {
     }
     if (started > 0) {
       this.lashTimer = Math.max(this.lashTimer, 4);
-      this.warn(tr({ en: 'Storm volley', zh: '雷暴齐射' }));
+      this.warn({ en: 'Storm volley', zh: '雷暴齐射' });
       this.rig.gondola.getWorldPosition(this.tmpA);
       this.emitCue('barrage-charge', this.tmpA, 1);
     }
@@ -1242,7 +1243,7 @@ export class TempestZeppelinAI implements IAdvancedBoss {
     coil.halo.visible = true;
     coil.rig.tip.getWorldPosition(this.tmpA);
     if (!barrage) {
-      this.warn(tr({ en: 'Coils charging', zh: '线圈充能' }));
+      this.warn({ en: 'Coils charging', zh: '线圈充能' });
       this.emitCue('coil-charge', this.tmpA, 0.7);
     }
     this.statusKey = -1;
@@ -1513,7 +1514,7 @@ export class TempestZeppelinAI implements IAdvancedBoss {
     if (this.shroudTimer > 0 || this.shroud.isBusy()) return;
     this.shroudTimer = tuning.shroudInterval * this.cadence + tuning.shroudDuration;
     if (this.shroud.start(tuning.shroudDuration)) {
-      this.warn(tr({ en: 'Storm cloud · Keep away from the airship', zh: '雷暴云层 · 远离飞艇' }));
+      this.warn({ en: 'Storm cloud · Keep away from the airship', zh: '雷暴云层 · 远离飞艇' });
       this.emitCue('shroud', this.mesh.position, 0.8);
     }
   }
@@ -1626,7 +1627,7 @@ export class TempestZeppelinAI implements IAdvancedBoss {
     }
     if (spawned > 0) {
       if (this.stormWaves % 2 === 0) {
-        this.warn(tr({ en: 'Lightning strike warning', zh: '召雷预警' }));
+        this.warn({ en: 'Lightning strike warning', zh: '召雷预警' });
       }
       this.stormWaves++;
       this.emitCue('storm-call', this.tmpA, 0.8);
@@ -1706,7 +1707,7 @@ export class TempestZeppelinAI implements IAdvancedBoss {
     this.hangarPhase = 'opening';
     this.hangarTimer = 0;
     this.dronesQueued = tuning.droneCount;
-    this.warn(tr({ en: 'Drone bay open', zh: '无人机舱开启' }));
+    this.warn({ en: 'Drone bay open', zh: '无人机舱开启' });
     this.rig.hangar.launchPoint.getWorldPosition(this.tmpA);
     this.emitCue('hangar-open', this.tmpA, 0.8);
     this.statusKey = -1;
@@ -1784,8 +1785,8 @@ export class TempestZeppelinAI implements IAdvancedBoss {
     const sf = this.sizeFactor;
     const label =
       this.phase === 2
-        ? tr({ en: 'Gas cells ruptured · Drones launching', zh: '气囊破裂 · 无人机升空' })
-        : tr({ en: 'Lift failing · Storm core exposed', zh: '浮力失控 · 风暴核心暴露' });
+        ? { en: 'Gas cells ruptured · Drones launching', zh: '气囊破裂 · 无人机升空' }
+        : { en: 'Lift failing · Storm core exposed', zh: '浮力失控 · 风暴核心暴露' };
     this.mesh.getWorldPosition(this.tmpA);
     if (this.phase === 2) {
       this.hangarCycleTimer = 1.5;

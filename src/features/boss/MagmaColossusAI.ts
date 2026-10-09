@@ -224,9 +224,9 @@ export class MagmaColossusAI implements IAdvancedBoss {
   public onFire?: (position: THREE.Vector3, direction: THREE.Vector3, damage: number) => void;
   public onDestroy?: (position: THREE.Vector3, config: BossConfig) => void;
   public onMissileFired?: () => void;
-  public onPhaseChange?: (phase: number, label: string) => void;
+  public onPhaseChange?: IAdvancedBoss['onPhaseChange'];
   public onSpawnMinion?: (position: THREE.Vector3, kind: BossMinionKind) => void;
-  public onHazardWarning?: (label: string) => void;
+  public onHazardWarning?: IAdvancedBoss['onHazardWarning'];
   /** 扩展钩子：音效 / 镜头震动提示（position 为复用向量，需要保存请 clone） */
   public onEffectCue?: (cue: MagmaColossusCue, position: THREE.Vector3, intensity: number) => void;
 
@@ -1267,7 +1267,7 @@ export class MagmaColossusAI implements IAdvancedBoss {
     this.stompApex.copy(this.stompFrom).lerp(this.stompTo, 0.3);
     this.stompApex.y += 8 * this.rig.scale;
     this.stompMarker.show(this.stompTo, this.getStompRadius());
-    this.onHazardWarning?.(tr({ en: 'Stomp shockwave', zh: '践踏冲击波' }));
+    this.onHazardWarning?.({ en: 'Stomp shockwave', zh: '践踏冲击波' });
     return true;
   }
 
@@ -1368,7 +1368,7 @@ export class MagmaColossusAI implements IAdvancedBoss {
     if (!started) return false;
     this.action = 'beam';
     this.actionTimer = 0;
-    this.onHazardWarning?.(tr({ en: 'Lava beam charging', zh: '熔岩光束充能' }));
+    this.onHazardWarning?.({ en: 'Lava beam charging', zh: '熔岩光束充能' });
     this.emitCue('beam-charge', this.tmpA, 0.8);
     return true;
   }
@@ -1490,7 +1490,7 @@ export class MagmaColossusAI implements IAdvancedBoss {
       });
     }
     if (this.geyserWaves % 3 === 0) {
-      this.onHazardWarning?.(tr({ en: 'Lava geyser warning', zh: '熔岩柱预警' }));
+      this.onHazardWarning?.({ en: 'Lava geyser warning', zh: '熔岩柱预警' });
     }
     this.geyserWaves++;
   }
@@ -1589,8 +1589,8 @@ export class MagmaColossusAI implements IAdvancedBoss {
     this.phase = Math.min(PHASE_COUNT, phase);
     const label =
       this.phase === 2
-        ? tr({ en: 'Vents breached · Magma core exposed', zh: '散热口击穿 · 熔核暴露' })
-        : tr({ en: 'Meltdown rampage', zh: '熔毁暴走' });
+        ? { en: 'Vents breached · Magma core exposed', zh: '散热口击穿 · 熔核暴露' }
+        : { en: 'Meltdown rampage', zh: '熔毁暴走' };
     if (this.phase === 2) {
       for (const vent of this.vents) this.blowPlate(vent);
       this.geyserTimer = 2.5;

@@ -40,7 +40,7 @@ import type { SkyCarrierAI } from '@/features/boss/SkyCarrierAI';
 import type { BossMinionKind } from '@/features/boss/BossContracts';
 import type { BossMissile } from '@/features/boss/BossMissileSystem';
 import { getCampaignChapter } from '@/features/campaign/CampaignData';
-import { tr, type LocalizedText } from '@/i18n';
+import { format, tr, type LocalizedText } from '@/i18n';
 import {
   BOSS_MISSILE_CONFIG,
   BossConfig,
@@ -56,40 +56,72 @@ const NO_OBJECTS: Object3D[] = [];
 
 const DEG = Math.PI / 180;
 
-/** 玩家在战场边缘朝外飞、Boss 前方放不下时的提示（显示时按当前语言取值） */
+/** 玩家在战场边缘朝外飞、Boss 前方放不下时的提示（HUD 显示时按当前语言取值） */
 const RETURN_TO_ARENA_PROMPT: LocalizedText = {
   en: 'Return to the combat zone · Boss incoming',
   zh: '返回作战区域 · Boss 即将现身',
 };
 
+const DIRECTION_AHEAD: LocalizedText = { en: 'dead ahead', zh: '正前方' };
+const DIRECTION_FRONT_RIGHT: LocalizedText = { en: 'front right', zh: '右前方' };
+const DIRECTION_FRONT_LEFT: LocalizedText = { en: 'front left', zh: '左前方' };
+const DIRECTION_RIGHT: LocalizedText = { en: 'right', zh: '右侧' };
+const DIRECTION_LEFT: LocalizedText = { en: 'left', zh: '左侧' };
+const DIRECTION_REAR_RIGHT: LocalizedText = { en: 'rear right', zh: '右后方' };
+const DIRECTION_REAR_LEFT: LocalizedText = { en: 'rear left', zh: '左后方' };
+const DIRECTION_BEHIND: LocalizedText = { en: 'directly behind', zh: '正后方' };
+const DIRECTION_ABOVE: LocalizedText = { en: '{direction}, above', zh: '{direction}偏上' };
+const DIRECTION_BELOW: LocalizedText = { en: '{direction}, below', zh: '{direction}偏下' };
+const BEARING_CITADEL_CORE: LocalizedText = {
+  en: '{boss} (citadel core)',
+  zh: '{boss}（城堡核心）',
+};
+const BEARING_GUIDE: LocalizedText = {
+  en: '{name}: {direction} · {distance} m',
+  zh: '{name}：{direction} {distance} 米',
+};
+
 /**
- * 方位用语（当前语言）：bearing 为水平方位（度，机头为 0、右为正），elevation 为仰角（度）。
+ * 双语填参：模板与双语参数逐语言填好，结果仍是双语对象（HUD 显示期间切换语言可重绘）；
+ * 数字参数两种语言共用。
+ */
+function formatBilingual(
+  template: LocalizedText,
+  params: Readonly<Record<string, LocalizedText | number>>
+): LocalizedText {
+  const en: Record<string, string | number> = {};
+  const zh: Record<string, string | number> = {};
+  for (const [key, value] of Object.entries(params)) {
+    en[key] = typeof value === 'number' ? value : value.en;
+    zh[key] = typeof value === 'number' ? value : value.zh;
+  }
+  return { en: format(template.en, en), zh: format(template.zh, zh) };
+}
+
+/**
+ * 方位用语（双语）：bearing 为水平方位（度，机头为 0、右为正），elevation 为仰角（度）。
  * 例：正前方 / 右前方 / 左侧 / 右后方 / 正后方，仰俯角大时加“偏上 / 偏下”。
  */
-function describeDirection(bearing: number, elevation: number): string {
+function describeDirection(bearing: number, elevation: number): LocalizedText {
   const right = bearing >= 0;
   const off = Math.abs(bearing);
-  let direction: string;
+  let direction: LocalizedText;
   if (off <= 15) {
-    direction = tr({ en: 'dead ahead', zh: '正前方' });
+    direction = DIRECTION_AHEAD;
   } else if (off <= 60) {
-    direction = right
-      ? tr({ en: 'front right', zh: '右前方' })
-      : tr({ en: 'front left', zh: '左前方' });
+    direction = right ? DIRECTION_FRONT_RIGHT : DIRECTION_FRONT_LEFT;
   } else if (off <= 120) {
-    direction = right ? tr({ en: 'right', zh: '右侧' }) : tr({ en: 'left', zh: '左侧' });
+    direction = right ? DIRECTION_RIGHT : DIRECTION_LEFT;
   } else if (off <= 165) {
-    direction = right
-      ? tr({ en: 'rear right', zh: '右后方' })
-      : tr({ en: 'rear left', zh: '左后方' });
+    direction = right ? DIRECTION_REAR_RIGHT : DIRECTION_REAR_LEFT;
   } else {
-    direction = tr({ en: 'directly behind', zh: '正后方' });
+    direction = DIRECTION_BEHIND;
   }
   if (elevation > 30) {
-    return tr({ en: '{direction}, above', zh: '{direction}偏上' }, { direction });
+    return formatBilingual(DIRECTION_ABOVE, { direction });
   }
   if (elevation < -30) {
-    return tr({ en: '{direction}, below', zh: '{direction}偏下' }, { direction });
+    return formatBilingual(DIRECTION_BELOW, { direction });
   }
   return direction;
 }
@@ -489,7 +521,7 @@ export class BossBattleController {
     }
     const { presentation, playerAircraft, scheduleTimeout } = this.deps;
     const pollMs = BossBattleController.SPAWN_ROOM_POLL_MS;
-    presentation.flashWarning(tr(RETURN_TO_ARENA_PROMPT), 'sys');
+    presentation.flashWarning(RETURN_TO_ARENA_PROMPT, 'sys');
     return new Promise<boolean>((resolve) => {
       let flyingMs = 0;
       let sinceReminderMs = 0;
@@ -517,7 +549,7 @@ export class BossBattleController {
         }
         if (sinceReminderMs >= BossBattleController.SPAWN_ROOM_REMIND_MS) {
           sinceReminderMs = 0;
-          presentation.flashWarning(tr(RETURN_TO_ARENA_PROMPT), 'sys');
+          presentation.flashWarning(RETURN_TO_ARENA_PROMPT, 'sys');
         }
         scheduleTimeout(poll, pollMs);
       };
@@ -540,8 +572,8 @@ export class BossBattleController {
     this.bearingGuideTimer = BossBattleController.BEARING_REPEAT_SECONDS;
   }
 
-  /** “名称：方位 距离”；Boss 已在机头 35° 内且不远、隐形中、或坐标非有限时为 null */
-  private describeBossBearing(): string | null {
+  /** “名称：方位 距离”（双语）；Boss 已在机头 35° 内且不远、隐形中、或坐标非有限时为 null */
+  private describeBossBearing(): LocalizedText | null {
     const boss = this.currentBoss;
     if (!boss || !boss.isAlive() || this.isBossHiddenFromSensors()) return null;
     const player = this.deps.playerAircraft;
@@ -565,19 +597,16 @@ export class BossBattleController {
     const fz = flat > 1e-3 ? forward.z / flat : -1;
     const bearing = Math.atan2(dz * fx - dx * fz, dx * fx + dz * fz) / DEG;
     const elevation = Math.atan2(dy, Math.hypot(dx, dz)) / DEG;
-    const chapterBoss = tr(getCampaignChapter(this.currentLevel).boss.name);
+    const chapterBoss = getCampaignChapter(this.currentLevel).boss.name;
     const name =
       this.currentBossType === BossType.ORACLE_PRIME
-        ? tr({ en: '{boss} (citadel core)', zh: '{boss}（城堡核心）' }, { boss: chapterBoss })
+        ? formatBilingual(BEARING_CITADEL_CORE, { boss: chapterBoss })
         : chapterBoss;
-    return tr(
-      { en: '{name}: {direction} · {distance} m', zh: '{name}：{direction} {distance} 米' },
-      {
-        name,
-        direction: describeDirection(bearing, elevation),
-        distance: Math.round(distance / 10) * 10,
-      }
-    );
+    return formatBilingual(BEARING_GUIDE, {
+      name,
+      direction: describeDirection(bearing, elevation),
+      distance: Math.round(distance / 10) * 10,
+    });
   }
 
   private async createBoss(

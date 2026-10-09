@@ -230,9 +230,9 @@ export class AbyssalLeviathanAI implements IAdvancedBoss {
   public onFire?: (position: THREE.Vector3, direction: THREE.Vector3, damage: number) => void;
   public onDestroy?: (position: THREE.Vector3, config: BossConfig) => void;
   public onMissileFired?: () => void;
-  public onPhaseChange?: (phase: number, label: string) => void;
+  public onPhaseChange?: IAdvancedBoss['onPhaseChange'];
   public onSpawnMinion?: (position: THREE.Vector3, kind: BossMinionKind) => void;
-  public onHazardWarning?: (label: string) => void;
+  public onHazardWarning?: IAdvancedBoss['onHazardWarning'];
   /** 扩展钩子：音效 / 镜头震动提示（position 为复用向量，需要保存请 clone） */
   public onEffectCue?: (
     cue: AbyssalLeviathanCue,
@@ -985,7 +985,7 @@ export class AbyssalLeviathanAI implements IAdvancedBoss {
     this.telegraphShown = true;
     this.tmpA.set(this.mesh.position.x, this.seaY, this.mesh.position.z);
     this.breachMarker.show(this.tmpA, 130 * this.sizeFactor);
-    this.onHazardWarning?.(tr({ en: 'Leviathan surfacing', zh: '利维坦上浮' }));
+    this.onHazardWarning?.({ en: 'Leviathan surfacing', zh: '利维坦上浮' });
     this.sonarTimer = Math.min(this.sonarTimer, 0.2);
   }
 
@@ -1247,7 +1247,7 @@ export class AbyssalLeviathanAI implements IAdvancedBoss {
     if (this.salvoState !== 'idle' || !this.isBayAlive()) return;
     this.salvoState = 'opening';
     this.salvoTimer = 0;
-    this.onHazardWarning?.(tr({ en: 'VLS missile salvo', zh: '垂发导弹齐射' }));
+    this.onHazardWarning?.({ en: 'VLS missile salvo', zh: '垂发导弹齐射' });
     this.rig.deck.getWorldPosition(this.tmpA);
     this.emitCue('hatch-open', this.tmpA, 0.7);
   }
@@ -1499,7 +1499,7 @@ export class AbyssalLeviathanAI implements IAdvancedBoss {
           this.ramState = 'telegraph';
           this.ramTimer = 0;
           this.lane.show(this.tmpA, this.yaw, 380 * this.sizeFactor, 48 * this.sizeFactor);
-          this.onHazardWarning?.(tr({ en: 'Ram warning', zh: '冲撞预警' }));
+          this.onHazardWarning?.({ en: 'Ram warning', zh: '冲撞预警' });
           this.emitCue('horn', this.tmpA, 1);
         }
         return;
@@ -1599,8 +1599,8 @@ export class AbyssalLeviathanAI implements IAdvancedBoss {
     this.phase = Math.min(PHASE_COUNT, phase);
     const label =
       this.phase === 2
-        ? tr({ en: 'Mines deployed · Shorter dives', zh: '布雷开始 · 潜航缩短' })
-        : tr({ en: 'Ballast ruptured · Ramming mode', zh: '压载舱破裂 · 冲撞模式' });
+        ? { en: 'Mines deployed · Shorter dives', zh: '布雷开始 · 潜航缩短' }
+        : { en: 'Ballast ruptured · Ramming mode', zh: '压载舱破裂 · 冲撞模式' };
     this.rig.sail.getWorldPosition(this.tmpA);
     if (this.phase >= 3) {
       // 剩余压载舱全部破裂：永久上浮
