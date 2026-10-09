@@ -18,27 +18,27 @@ type BossGroup = THREE.Group & {
 /**
  * 「三叉戟」的导弹齐射：垂直发射单元连射 2 枚（血量过半后 3 枚），间隔 0.4 秒。
  * 导弹比玩家快、按提前量追踪，但转向角速度有限——直线平飞的玩家一定会被追上，
- * 贴近时一个大过载急转（或热焰弹）就能让它冲过头；8 秒燃尽自爆。
+ * 贴近时一个大过载急转（或热焰弹）就能让它冲过头；7 秒燃尽自爆。
  */
 const SALVO_SIZE = 2;
 const SALVO_SIZE_DAMAGED = 3;
 const SALVO_DAMAGED_RATIO = 0.5;
 const SALVO_STAGGER = 0.4;
 const SALVO_MISSILE: Readonly<BossMissileFlightProfile> = {
-  speed: 76,
-  turnRate: 1.0,
+  speed: 72,
+  turnRate: 0.95,
   lead: 0.4,
-  lifetime: 8,
+  lifetime: 7,
 };
 /** 发射方向：竖直向上略偏向目标（垂发） */
 const SALVO_LAUNCH_TILT = 0.35;
 /**
- * 高炮：按提前量（拦截点的 70%）瞄准、弹速 95 米/秒——直线飞行会被弹幕咬住，蛇行可以躲开；
- * 炸点仍有 ±22 米随机散布。
+ * 高炮：按提前量（拦截点的 50%）瞄准、弹速 95 米/秒——直线飞行会被弹幕咬住，蛇行可以躲开；
+ * 炸点仍有 ±28 米随机散布。
  */
 const FLAK_SPEED = 95;
-const FLAK_LEAD = 0.7;
-const FLAK_SCATTER = 44;
+const FLAK_LEAD = 0.5;
+const FLAK_SCATTER = 56;
 
 export class MissileDestroyerAI {
   private static readonly CRITICAL_HEALTH_THRESHOLD = 0.24;

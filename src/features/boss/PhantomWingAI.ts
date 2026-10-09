@@ -99,51 +99,51 @@ interface PhantomPhaseTuning {
 
 const PHASE_TUNING: readonly PhantomPhaseTuning[] = [
   {
-    cruise: 2.3,
+    cruise: 2.15,
     strafe: 3.0,
     turn: 1.6,
-    visibleTime: 11,
-    cloakTime: 5,
+    visibleTime: 12,
+    cloakTime: 4,
     lanceInterval: 11,
     lanceTelegraph: 1.5,
     lanceFire: 1.9,
     lanceChain: 1,
-    burstShots: 3,
-    burstGap: 2.6,
+    burstShots: 5,
+    burstGap: 2.2,
     missileFactor: 1,
     missileCount: 2,
     decoyCount: 0,
     decoyInterval: 0,
   },
   {
-    cruise: 2.5,
+    cruise: 2.35,
     strafe: 3.2,
     turn: 1.8,
-    visibleTime: 9,
-    cloakTime: 5.5,
+    visibleTime: 10,
+    cloakTime: 4.5,
     lanceInterval: 10.5,
     lanceTelegraph: 1.35,
     lanceFire: 2.0,
     lanceChain: 1,
-    burstShots: 4,
-    burstGap: 2.2,
+    burstShots: 6,
+    burstGap: 1.9,
     missileFactor: 0.9,
     missileCount: 2,
     decoyCount: 2,
     decoyInterval: 17,
   },
   {
-    cruise: 2.8,
+    cruise: 2.6,
     strafe: 3.5,
     turn: 2.2,
-    visibleTime: 8,
-    cloakTime: 3.2,
+    visibleTime: 9,
+    cloakTime: 3,
     lanceInterval: 8,
     lanceTelegraph: 1.2,
     lanceFire: 2.2,
     lanceChain: 2,
-    burstShots: 5,
-    burstGap: 1.7,
+    burstShots: 7,
+    burstGap: 1.5,
     missileFactor: 0.8,
     missileCount: 3,
     decoyCount: 3,
@@ -177,7 +177,7 @@ const LANCE_MIN_BEAM_TIME = 0.35;
 const LANCE_CHARGE_SPEED = 0.6;
 /** 潜行结束时距玩家小于该值才现形 */
 const AMBUSH_RANGE = 380;
-const AMBUSH_GRACE = 3;
+const AMBUSH_GRACE = 2;
 const EXTEND_TIME = 2.2;
 const MAX_DECOYS = 3;
 const DECOY_LIFE = 15;
@@ -802,7 +802,7 @@ export class PhantomWingAI implements IAdvancedBoss {
   }
 
   private getArmorMultiplier(): number {
-    let value = this.phase >= 3 ? 0.7 : 0.55;
+    let value = this.phase >= 3 ? 0.78 : 0.65;
     if (this.lowHealthReached) value += 0.15;
     if (this.stunTimer > 0) value += 0.2;
     return Math.min(0.95, value);
