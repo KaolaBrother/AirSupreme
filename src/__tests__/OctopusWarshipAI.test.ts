@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { OctopusWarshipAI, createOctopusWarshipMesh } from '@/features/boss/OctopusWarshipAI';
 import { BOSS_CONFIGS, BossType, EYE_CONFIG } from '@/features/boss/BossTypes';
+import { getDifficultyProfile } from '@/core/Difficulty';
 import * as THREE from 'three';
 import { ParticleSystem } from '@/features/effects/ParticleSystem';
 
@@ -77,9 +78,9 @@ describe('OctopusWarshipAI', () => {
 
       const removable = criticalBossMesh.children.filter(
         (child) =>
-          child.name === 'octopus_core_glow'
-          || child.name.startsWith('octopus_plate_edge_')
-          || child.name.startsWith('octopus_antenna_tip_')
+          child.name === 'octopus_core_glow' ||
+          child.name.startsWith('octopus_plate_edge_') ||
+          child.name.startsWith('octopus_antenna_tip_')
       );
       for (const node of removable) {
         criticalBossMesh.remove(node);
@@ -156,8 +157,31 @@ describe('OctopusWarshipAI', () => {
   });
 
   describe('getEyeDamage', () => {
-    it('should return correct eye damage', () => {
-      expect(boss.getEyeDamage()).toBe(EYE_CONFIG.DAMAGE);
+    // 光弹伤害来自 BossConfig.eyeDamage（基础值 40），Boss 战开始时按难度档缩放（“普通”档 20）
+    it('should return correct eye damage: the config eyeDamage (base 40)', () => {
+      expect(config.eyeDamage).toBe(40);
+      expect(boss.getEyeDamage()).toBe(40);
+    });
+
+    it('deals 20 on Normal, the difficulty-scaled eyeDamage', () => {
+      const normal = getDifficultyProfile(3).enemyDamageMultiplier;
+      const scaled = { ...config, eyeDamage: Math.round((config.eyeDamage ?? 0) * normal) };
+      const normalMesh = createOctopusWarshipMesh(scaled);
+      scene.add(normalMesh);
+      const normalBoss = new OctopusWarshipAI(normalMesh, scaled, particleSystem);
+      normalBoss.init();
+      expect(normalBoss.getEyeDamage()).toBe(20);
+      expect(normalBoss.getEyeSystem().getDamage()).toBe(20);
+    });
+
+    it('falls back to EYE_CONFIG.DAMAGE when the config has no eyeDamage', () => {
+      const plain = { ...config };
+      delete plain.eyeDamage;
+      const plainMesh = createOctopusWarshipMesh(plain);
+      scene.add(plainMesh);
+      const plainBoss = new OctopusWarshipAI(plainMesh, plain, particleSystem);
+      plainBoss.init();
+      expect(plainBoss.getEyeDamage()).toBe(EYE_CONFIG.DAMAGE);
     });
   });
 
