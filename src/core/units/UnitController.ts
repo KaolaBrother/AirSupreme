@@ -18,7 +18,8 @@ import type {
   UnitUpdateContext,
 } from '@/features/units/UnitSystem';
 import type { UnitRadarKind, UnitType } from '@/features/units/UnitTypes';
-import { tr } from '@/i18n';
+import { tr, type LocalizedText } from '@/i18n';
+import { RadioBudget, type RadioBudgetConfig } from '@/core/campaign/RadioBudget';
 
 type UnitMeshModule = typeof import('@/features/units/UnitMeshFactory');
 type UnitBridgeModule = typeof import('@/features/units/UnitEventBridge');
@@ -52,8 +53,21 @@ export interface UnitControllerDeps {
 const WAVE_STALL_LIMIT_SECONDS = 150;
 /** Boss 召唤的无人机同时存在上限 */
 const MAX_BOSS_DRONES = 8;
-/** 锁定告警无线电的最短间隔（秒） */
-const MISSILE_WARNING_RADIO_COOLDOWN = 9;
+/**
+ * 导弹来袭的配音：每波（每场 Boss 战）最多两次，第二次至少隔 20 秒（之后的冷却逐次加长）；
+ * HUD 闪烁告警与告警音每次发射都有。
+ */
+const MISSILE_WARNING_RADIO: RadioBudgetConfig = { maxPerWave: 2, cooldownSeconds: [20, 45] };
+/** 误伤平民的配音：同样每波最多两次（HUD 告警与音效每次都有） */
+const CIVILIAN_HIT_RADIO: RadioBudgetConfig = { maxPerWave: 2, cooldownSeconds: [15, 30] };
+const MISSILE_INBOUND_WARNING: LocalizedText = {
+  en: 'Missile inbound · Press G for flares',
+  zh: '导弹来袭 · 按 G 投放热焰弹',
+};
+const CEASE_FIRE_WARNING: LocalizedText = {
+  en: 'Cease fire! Those are civilians!',
+  zh: '停火！那是平民目标！',
+};
 /**
  * 友军单位被毁时的专属无线电（键为 UnitType 字符串值，如 ALLY_AWACS / ALLY_FRIGATE，
  * 值为 GENERIC_RADIO 的键）；未登记的类型播通用的 'ally-unit-destroyed'。
@@ -92,9 +106,10 @@ export class UnitController {
   private waveStallTimer = 0;
   private waveReleased = false;
 
-  // 告警
+  // 告警（配音配额每波 / 每场 Boss 战重新计数：spawnForWave / clear）
   private lastLockState: PlayerLockState = 'none';
-  private missileWarningCooldown = 0;
+  private readonly missileWarningRadio = new RadioBudget(MISSILE_WARNING_RADIO);
+  private readonly civilianHitRadio = new RadioBudget(CIVILIAN_HIT_RADIO);
 
   // 每帧复用
   private readonly updateContext: UnitUpdateContext = {
@@ -184,11 +199,11 @@ export class UnitController {
     system.onUnitDestroyed = (unit, position, byPlayer) =>
       this.handleUnitDestroyed(unit, position, byPlayer);
     system.onCivilianHit = () => {
-      this.deps.presentation.genericRadio('civilian-hit');
-      this.deps.presentation.flashWarning(
-        tr({ en: 'Cease fire! Those are civilians!', zh: '停火！那是平民目标！' }),
-        'threat'
-      );
+      // HUD 告警与音效每次都有；配音按配额（进了无线电才计数）
+      if (this.civilianHitRadio.isReady() && this.deps.presentation.genericRadio('civilian-hit')) {
+        this.civilianHitRadio.consume();
+      }
+      this.deps.presentation.flashWarning(tr(CEASE_FIRE_WARNING), 'threat');
       this.deps.presentation.onUnitEvent('civilian-hit', null);
     };
     system.onEscortResult = (success) => {
@@ -200,13 +215,14 @@ export class UnitController {
         phase === 'locking' ? 'sam-locking' : 'sam-launched',
         null
       );
-      if (phase === 'launched' && this.missileWarningCooldown <= 0) {
-        this.missileWarningCooldown = MISSILE_WARNING_RADIO_COOLDOWN;
-        this.deps.presentation.genericRadio('missile-warning');
-        this.deps.presentation.flashWarning(
-          tr({ en: 'Missile inbound · Press G for flares', zh: '导弹来袭 · 按 G 投放热焰弹' }),
-          'threat'
-        );
+      if (phase !== 'launched') return;
+      // 每次发射：HUD 闪烁告警（告警音见上）；配音按配额，进了无线电才计数
+      this.deps.presentation.flashWarning(tr(MISSILE_INBOUND_WARNING), 'threat');
+      if (
+        this.missileWarningRadio.isReady() &&
+        this.deps.presentation.genericRadio('missile-warning')
+      ) {
+        this.missileWarningRadio.consume();
       }
     };
     system.onPlayerDamaged = (damage, _cause, position) => this.deps.damagePlayer(damage, position);
@@ -320,10 +336,11 @@ export class UnitController {
 
   // ───────────────────────────── 波次 ─────────────────────────────
 
-  /** 波次开始时部署本波单位（与敌机波次并行） */
+  /** 波次开始时部署本波单位（与敌机波次并行）；告警配音配额重新计数 */
   public spawnForWave(level: number, waveIndex: number, playerPosition: THREE.Vector3): number {
     this.waveStallTimer = 0;
     this.waveReleased = false;
+    this.resetRadioBudgets();
     const system = this.system;
     if (!system) return 0;
     return system.spawnForWave(level, waveIndex, playerPosition).length;
@@ -367,7 +384,8 @@ export class UnitController {
     system.updateWithContext(deltaTime, ctx);
     this.flushExplosionSound();
 
-    if (this.missileWarningCooldown > 0) this.missileWarningCooldown -= deltaTime;
+    this.missileWarningRadio.update(deltaTime);
+    this.civilianHitRadio.update(deltaTime);
 
     // 防卡关：敌机已清空但单位迟迟未清（例如潜艇长时间潜航）
     if (jetsCleared && !this.waveReleased && system.getAliveHostileCount() > 0) {
@@ -515,17 +533,23 @@ export class UnitController {
     return this.level;
   }
 
-  /** 换关 / 读档 / Boss 战开始：移除全部单位、导弹与弹道 */
+  /** 换关 / 读档 / Boss 战开始：移除全部单位、导弹与弹道；告警配音配额重新计数 */
   public clear(): void {
     this.system?.clear();
     this.explosionSoundPending = false;
     this.bossDroneCount = 0;
     this.waveStallTimer = 0;
     this.waveReleased = false;
+    this.resetRadioBudgets();
     if (this.lastLockState !== 'none') {
       this.lastLockState = 'none';
       this.deps.presentation.setMissileWarning('none');
     }
+  }
+
+  private resetRadioBudgets(): void {
+    this.missileWarningRadio.reset();
+    this.civilianHitRadio.reset();
   }
 
   /** 新开一局：首次接触提示重新生效 */

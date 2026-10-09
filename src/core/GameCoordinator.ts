@@ -53,7 +53,7 @@ import { CombatVfxController } from '@/core/vfx/CombatVfxController';
 import { CombatHudFeed } from '@/core/hud/CombatHudFeed';
 import { CampaignFlowController } from '@/core/campaign/CampaignFlowController';
 import { resolveLevelStartPose } from '@/core/campaign/LevelStartPose';
-import { WingmanRoster } from '@/core/campaign/Wingmen';
+import { WingmanRoster, type WingmanProfile } from '@/core/campaign/Wingmen';
 import {
   DefaultCampaignPresentation,
   type ICampaignPresentation,
@@ -949,7 +949,30 @@ export class GameCoordinator {
     }
   }
 
+  /** 友机入场（增援 / 道具召唤 / 护送目标）：可能领到空出的僚机身份，但从不播入列台词 */
   private spawnFriendlyAI(): FriendlyAI {
+    return this.spawnFriendlyJet().friendly;
+  }
+
+  /**
+   * 僚机编队升空：本关已随队、不在空中、本关没被击落的具名僚机全部起飞（第 1-2 关渡鸦，
+   * 第 3 关起渡鸦 + 雨燕）。关卡开场与读档回到 Boss 战前时调用（从波次打到 Boss 时编队已在
+   * 空中，不会重复起飞）；入列台词由战役流程决定（雨燕每局一次）。返回起飞的架数。
+   */
+  private launchWingmen(): number {
+    const count = this.wingmen.countAvailable(this.sessionState.getLevel());
+    let launched = 0;
+    for (let i = 0; i < count; i++) {
+      const { wingman } = this.spawnFriendlyJet();
+      if (!wingman) break;
+      launched++;
+      this.campaign.handleWingmanLaunched(wingman.id);
+    }
+    return launched;
+  }
+
+  /** 生成一架友军喷气机；先入场的友机按编队顺序领取僚机身份（血条显示呼号） */
+  private spawnFriendlyJet(): { friendly: FriendlyAI; wingman: WingmanProfile | null } {
     const enemyTypes = Object.values(EnemyType);
     const randomType = enemyTypes[Math.floor(Math.random() * enemyTypes.length)];
     const config = ENEMY_CONFIGS[randomType];
@@ -973,19 +996,17 @@ export class GameCoordinator {
 
     this.gameScene.scene.add(mesh);
     const enemySystem = this.enemySystem;
+    let wingman: WingmanProfile | null = null;
     if (enemySystem) {
       // 先入场的两架友机是具名僚机（血条显示呼号）；其余为普通友机
-      const wingman = this.wingmen.assign(mesh.uuid, this.sessionState.getLevel());
+      wingman = this.wingmen.assign(mesh.uuid, this.sessionState.getLevel());
       if (wingman) {
         mesh.userData.displayName = wingman.callsign;
       }
       enemySystem.spawnFriendly(friendly);
-      if (wingman) {
-        this.presentation.onWingmanEvent(wingman.id, 'joined');
-      }
     }
     this.handleTutorialFriendlySupport();
-    return friendly;
+    return { friendly, wingman };
   }
 
   private spawnEnemyFromBoss(
@@ -1853,9 +1874,6 @@ export class GameCoordinator {
       session: this.sessionState,
       stats: this.playerStats,
       presentation: this.presentation,
-      scheduleTimeout: (callback, delayMs) => {
-        this.scheduleTimeout(callback, delayMs);
-      },
       prepareLevel: (level, startWave) => this.prepareLevel(level, startWave),
       startLevelCombat: (level, startWave, first) => this.startLevelCombat(level, startWave, first),
       startBossEncounter: (level, isBossMode) => this.startBossEncounter(level, isBossMode),
@@ -1972,7 +1990,8 @@ export class GameCoordinator {
         if (this.sessionState.getLevel() !== level || !this.sessionState.isPlaying()) {
           return;
         }
-        this.spawnFriendlyAI();
+        // 僚机编队升空：第 1-2 关渡鸦，第 3 关起渡鸦与雨燕一起出击
+        this.launchWingmen();
         this.hud.showPowerUpBig(
           '✈️',
           shouldRunTutorialIntro
@@ -2005,6 +2024,12 @@ export class GameCoordinator {
     this.particleSystem?.clear();
     this.powerUpSystem?.clear();
     this.units.clear();
+
+    if (!isBossMode) {
+      // 读档回到 Boss 战前：僚机编队随 Boss 简报升空（从波次打过来时编队已在空中，不会重复起飞；
+      // Boss 模式只有 Boss 战控制器的友军支援）
+      this.launchWingmen();
+    }
 
     this.musicSystem.stopMusic();
     this.sessionState.setInBossBattle(true);
@@ -2100,13 +2125,17 @@ export class GameCoordinator {
     this.hud.showMissionComplete(finalScore);
   }
 
-  /** 检查点所需的运行时快照（统计由流程控制器补上） */
+  /**
+   * 检查点所需的运行时快照（统计与雨燕入列标记由流程控制器补上）。
+   * 'hangar'（击破上一关 Boss 后、下一章之前）：level 是即将开始的那一关，升级上限与武器解锁
+   * 按那一关写入（新解锁的武器没有弹药记录，读档时满弹）。
+   */
   private captureCheckpoint(
     kind: CheckpointKind,
     level: number,
     wave: number
   ): CampaignCheckpointInput {
-    return {
+    const snapshot: CampaignCheckpointInput = {
       checkpoint: kind,
       level,
       wave,
@@ -2120,11 +2149,18 @@ export class GameCoordinator {
       cameraMode: this.view.getMode(),
       stats: this.campaign.getRunStats(),
     };
+    if (kind === 'hangar') {
+      const unlocked = getUnlockedWeaponsThrough(level);
+      snapshot.upgrades = { ...snapshot.upgrades, campaignLevel: level, unlockedWeapons: unlocked };
+      snapshot.weapons = { ...snapshot.weapons, unlocked: [...unlocked] };
+    }
+    return snapshot;
   }
 
   /**
    * 读档还原（progression notes 第 4 步）：reset → import(upgrades) → 关卡上限 → 武器解锁 →
    * 武器等级 → importState → 热焰弹 → 分数 / 生命 / 导弹 / 视角。
+   * 机库检查点之后是新的一章：和正常换关一样在章节开始时补满弹药（不保留存档里的弹药）。
    */
   private restoreCheckpoint(save: CampaignSaveData): void {
     const upgrades = this.playerStats.getUpgrades();
@@ -2134,7 +2170,7 @@ export class GameCoordinator {
     upgrades.setUnlockedWeapons(getUnlockedWeaponsThrough(save.level));
     this.weapons.syncProgression(this.playerStats, upgrades.getUnlockedWeapons());
     this.weapons.importState(save.weapons, save.flares);
-    this.keepRestoredAmmo = true;
+    this.keepRestoredAmmo = save.checkpoint !== 'hangar';
 
     this.gameState.reset();
     this.gameState.addScore(save.score);

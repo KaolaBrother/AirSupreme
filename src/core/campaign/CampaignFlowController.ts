@@ -2,6 +2,8 @@ import type { GameSessionState } from '@/core/GameSessionState';
 import {
   clearCampaignCheckpoint,
   describeCheckpoint,
+  isSwiftJoinAnnounced,
+  loadCampaignCheckpoint,
   markCampaignCompleted,
   recordLevelReached,
   saveCampaignCheckpoint,
@@ -19,6 +21,7 @@ import { getLevelConfig } from '@/features/terrain/LevelConfig';
 import { getStartingUpgradePoints, type PlayerStats } from '@/features/upgrade/UpgradeSystem';
 import { tr } from '@/i18n';
 import type { CampaignDebriefInput, ICampaignPresentation } from './CampaignPresentation';
+import type { WingmanId } from './Wingmen';
 
 /**
  * 协调器提供给战役流程的具体操作。流程控制器只决定“接下来发生什么”，
@@ -28,7 +31,6 @@ export interface CampaignFlowDeps {
   session: GameSessionState;
   stats: PlayerStats;
   presentation: ICampaignPresentation;
-  scheduleTimeout(callback: () => void, delayMs: number): void;
   /** 加载关卡（地形、单位强度、玩家落点、回血、武器同步）；地形就绪后 resolve */
   prepareLevel(level: number, startWave: number): Promise<void>;
   /** 进入波次战斗（简报、教学、首波计时、僚机、关卡音乐） */
@@ -43,26 +45,38 @@ export interface CampaignFlowDeps {
   setStoryHold(hold: boolean): void;
   /** 最终胜利画面 */
   showMissionComplete(finalScore: number): void;
-  /** 当前存档所需的运行时快照（分数 / 生命 / 导弹 / 武器 / 热焰弹 / 视角） */
+  /**
+   * 当前存档所需的运行时快照（分数 / 生命 / 导弹 / 武器 / 热焰弹 / 视角）；
+   * 'hangar' 检查点的 level 是即将开始的那一关（升级上限与武器解锁按那一关）
+   */
   captureCheckpoint(kind: CheckpointKind, level: number, wave: number): CampaignCheckpointInput;
   getScore(): number;
 }
 
 /**
- * 击破 Boss 到结算 / 下一章之间的停顿（毫秒）：至少等爆炸，最多等收尾台词播完。
- * 收尾台词有配音后每章 2-5 句共约 8-23 秒（台词等配音说完）：上限放宽到 16 秒，
- * 多数章节能完整听完；超出时结算卡片出现，正在说的那句说完、其余丢弃。
+ * 击破 Boss 到结算 / 下一章之间的停顿（秒，游戏时间：暂停不计）：至少等爆炸（MIN），
+ * 然后等无线电把收尾台词全部说完（配音后每章 2-5 句，含逐字与停顿约 10-30 秒）。
+ * 看门狗：等待上限 = 开始收尾时无线电的积压估计（按语音包清单里当前语言的配音时长）+ SLACK，
+ * 再夹在 MAX 以内——无论如何不会卡住；到上限时结算卡片出现，正在说的那句照样说完。
  */
-const BOSS_OUTRO_MIN_MS = 1600;
-const BOSS_OUTRO_MAX_MS = 16000;
-const BOSS_OUTRO_POLL_MS = 250;
+const BOSS_OUTRO_MIN_SECONDS = 1.6;
+const BOSS_OUTRO_SLACK_SECONDS = 6;
+const BOSS_OUTRO_MAX_SECONDS = 75;
+
+/** 等待中的 Boss 收尾（tick 推进） */
+interface PendingOutro {
+  elapsed: number;
+  ceiling: number;
+  then: () => void;
+}
 
 /**
  * 十关战役流程（api-spec §10）：
  * 正常模式：章节开场 → 简报 + 无线电 → 波次（单位随波部署，敌机与敌方单位全清才过波）
- * → 自动存档 'wave' → … → 自动存档 'boss' → Boss → 结算 → 机库（下一章上限 / 解锁）→ 下一章；
+ * → 自动存档 'wave' → … → 自动存档 'boss' → Boss → 击破即存 'hangar'（下一关之前的机库）
+ * → 收尾台词 → 结算 → 机库（下一章上限 / 解锁；“出击”时再存一次 'hangar'）→ 下一章；
  * 第 10 关之后：结局 → MISSION COMPLETE，markCampaignCompleted + clearCampaignCheckpoint。
- * Boss 模式：没有剧情卡片，只有 Boss 登场无线电；武器解锁到当前关卡；Boss 之间进入机库整备。
+ * Boss 模式：没有剧情卡片，只有 Boss 登场无线电；武器解锁到当前关卡；Boss 之间进入机库整备；不存档。
  */
 export class CampaignFlowController {
   private stats: CampaignRunStats = { kills: 0, civiliansLost: 0, deaths: 0, playTimeSeconds: 0 };
@@ -73,6 +87,9 @@ export class CampaignFlowController {
   private firstLevelOfSession = true;
   private victory = false;
   private disposed = false;
+  /** 本局雨燕的入列台词已播过（每局一次；写进检查点，读档不重播） */
+  private swiftJoined = false;
+  private outro: PendingOutro | null = null;
 
   constructor(private readonly deps: CampaignFlowDeps) {}
 
@@ -114,15 +131,25 @@ export class CampaignFlowController {
     }
   }
 
-  /** 读档续玩（正常模式）：进度已由协调器还原；按检查点类型回到波次或 Boss 战前 */
+  /**
+   * 读档续玩（正常模式）：进度已由协调器还原；按检查点类型回到机库（下一章之前）、波次或 Boss 战前。
+   * 机库检查点与刚打完上一关一样继续：机库 → 本章开场卡片 → 战斗。
+   */
   public resumeFromCheckpoint(save: CampaignSaveData): void {
     this.firstLevelOfSession = false;
     this.stats = { ...save.stats };
+    this.swiftJoined = isSwiftJoinAnnounced(save);
     this.levelStartScore = save.score;
     this.levelKills = 0;
     this.levelCiviliansLost = 0;
     this.levelAlliesLost = 0;
     const level = save.level;
+    if (save.checkpoint === 'hangar') {
+      this.deps.session.setLevel(level);
+      this.deps.syncProgression(level);
+      this.deps.showHangar(level, () => this.launchChapter(level));
+      return;
+    }
     const totalWaves = getLevelConfig(level)?.totalWaves ?? 1;
     const resumeBoss = save.checkpoint === 'boss' || save.wave >= totalWaves;
     const startWave = resumeBoss ? Math.max(0, totalWaves - 1) : save.wave;
@@ -141,6 +168,16 @@ export class CampaignFlowController {
   }
 
   // ───────────────────────────── 章节 / Boss ─────────────────────────────
+
+  /**
+   * 机库“出击”（Boss 击破后 / 读档回到机库）：先重写 'hangar' 检查点（机库里的购买在章节卡片
+   * 期间退出也不会丢），再进入章节开场。
+   */
+  private launchChapter(level: number): void {
+    if (this.disposed) return;
+    this.writeCheckpoint('hangar', level, 0, false);
+    this.beginChapter(level);
+  }
 
   private beginChapter(level: number): void {
     const session = this.deps.session;
@@ -217,7 +254,11 @@ export class CampaignFlowController {
     this.deps.presentation.playStinger('level-complete');
   }
 
-  /** Boss 被击破：结算 → 机库 → 下一章；第 10 关后结局与通关 */
+  /**
+   * Boss 被击破：收尾台词 → 结算 → 机库 → 下一章；第 10 关后结局与通关。
+   * 正常模式第 1-9 关在击破时立即写 'hangar' 检查点（下一关之前的机库：Boss 后的分数、统计、
+   * 升级点，下一关的上限与武器解锁），收尾 / 结算期间退出也能从机库继续。
+   */
   public handleBossDefeated(level: number, isBossMode: boolean): void {
     const presentation = this.deps.presentation;
     presentation.playStinger('boss-defeated');
@@ -251,6 +292,10 @@ export class CampaignFlowController {
       return;
     }
 
+    if (!isBossMode) {
+      this.writeCheckpoint('hangar', nextLevel, 0);
+    }
+
     this.afterBossOutro(() => {
       const advance = (): void => {
         if (this.disposed) return;
@@ -260,7 +305,7 @@ export class CampaignFlowController {
           if (isBossMode) {
             this.beginBossStage(nextLevel);
           } else {
-            this.beginChapter(nextLevel);
+            this.launchChapter(nextLevel);
           }
         });
       };
@@ -274,21 +319,35 @@ export class CampaignFlowController {
   }
 
   /**
-   * Boss 击破后的收尾：至少停顿 1.6 秒让爆炸播完，再等收尾台词说完（最多 6.5 秒）；
-   * 期间玩家阵亡 / 退出则放弃（不在失败结算上叠结算卡片）。
+   * Boss 击破后的收尾（tick 推进的游戏时间，暂停不计）：至少停顿 BOSS_OUTRO_MIN_SECONDS 让爆炸
+   * 播完，再等无线电把收尾台词全部说完；看门狗上限 = 此刻的无线电积压估计 + 余量（不超过
+   * BOSS_OUTRO_MAX_SECONDS）。期间失败 / 退出时不再推进（不在失败结算上叠结算卡片）。
    */
   private afterBossOutro(then: () => void): void {
-    const startedAt = Date.now();
-    const check = (): void => {
-      if (this.disposed || !this.deps.session.isPlaying()) return;
-      const elapsed = Date.now() - startedAt;
-      if (elapsed < BOSS_OUTRO_MAX_MS && this.deps.presentation.isRadioBusy()) {
-        this.deps.scheduleTimeout(check, BOSS_OUTRO_POLL_MS);
-        return;
-      }
-      then();
+    const backlog = this.deps.presentation.getRadioBacklogSeconds();
+    const estimate = Number.isFinite(backlog) ? Math.max(0, backlog) : BOSS_OUTRO_MAX_SECONDS;
+    this.outro = {
+      elapsed: 0,
+      ceiling: Math.min(
+        BOSS_OUTRO_MAX_SECONDS,
+        Math.max(BOSS_OUTRO_MIN_SECONDS, estimate) + BOSS_OUTRO_SLACK_SECONDS
+      ),
+      then,
     };
-    this.deps.scheduleTimeout(check, BOSS_OUTRO_MIN_MS);
+  }
+
+  private advanceOutro(deltaTime: number): void {
+    const outro = this.outro;
+    if (!outro) return;
+    if (this.disposed || !this.deps.session.isPlaying()) {
+      this.outro = null;
+      return;
+    }
+    outro.elapsed += deltaTime;
+    if (outro.elapsed < BOSS_OUTRO_MIN_SECONDS) return;
+    if (outro.elapsed < outro.ceiling && this.deps.presentation.isRadioBusy()) return;
+    this.outro = null;
+    outro.then();
   }
 
   /** 进入新关卡：升级上限、武器解锁随章节推进（新解锁的武器满弹） */
@@ -320,11 +379,31 @@ export class CampaignFlowController {
     this.stats.deaths++;
   }
 
-  /** 累计游戏时间（模拟步长，只在战斗进行时调用） */
+  /** 累计游戏时间并推进 Boss 收尾（模拟步长，只在战斗进行时调用：暂停 / 剧情冻结时不调用） */
   public tick(deltaTime: number): void {
     if (Number.isFinite(deltaTime) && deltaTime > 0) {
       this.stats.playTimeSeconds += deltaTime;
+      this.advanceOutro(deltaTime);
     }
+  }
+
+  /**
+   * 具名僚机随队升空（关卡开场 / 读档回到 Boss 战前的编队起飞；增援与道具召唤的友机不经过这里）：
+   * 雨燕本局第一次升空时播她的入列台词——每局战役只播一次，并立即记进当前检查点，
+   * 读档 / 继续不会重播；Boss 模式不播。渡鸦从第 1 章起随队，没有入列台词。
+   */
+  public handleWingmanLaunched(id: WingmanId): void {
+    if (id !== 'swift' || this.swiftJoined || this.deps.session.isBossMode()) return;
+    this.swiftJoined = true;
+    this.deps.presentation.onWingmanEvent(id, 'joined');
+    this.persistSwiftJoined();
+  }
+
+  /** 把“雨燕已入列”补写进当前检查点（入关检查点写在她升空之前） */
+  private persistSwiftJoined(): void {
+    const save = loadCampaignCheckpoint();
+    if (!save || save.swiftJoined === true) return;
+    saveCampaignCheckpoint({ ...save, swiftJoined: true });
   }
 
   public getRunStats(): CampaignRunStats {
@@ -342,6 +421,8 @@ export class CampaignFlowController {
     this.levelCiviliansLost = 0;
     this.levelAlliesLost = 0;
     this.victory = false;
+    this.swiftJoined = false;
+    this.outro = null;
   }
 
   private buildDebrief(level: number): CampaignDebriefInput {
@@ -357,29 +438,51 @@ export class CampaignFlowController {
     };
   }
 
-  private writeCheckpoint(kind: CheckpointKind, level: number, wave: number): void {
+  /**
+   * 写检查点（正常模式）。announce：显示存档提示（HUD + 存档音效）；机库“出击”时的重写不提示
+   * （紧接着就是章节卡片）。'hangar' 的 level 是即将开始的那一关。
+   */
+  private writeCheckpoint(
+    kind: CheckpointKind,
+    level: number,
+    wave: number,
+    announce: boolean = true
+  ): void {
     const session = this.deps.session;
     if (session.isBossMode()) return;
     const data = this.deps.captureCheckpoint(kind, level, wave);
     data.stats = this.getRunStats();
-    if (saveCampaignCheckpoint(data)) {
-      const label =
-        kind === 'boss'
-          ? tr({ en: 'Level {level} · Before the boss', zh: '第{level}关 · Boss 战前' }, { level })
-          : tr(
-              { en: 'Level {level} · Wave {wave}', zh: '第{level}关 · 第{wave}波' },
-              { level, wave: wave + 1 }
-            );
-      // 存档提示 + 存档音效；关卡开场与 Boss 战前分别有 chapter-start / level-complete 刺激音，
-      // checkpoint 刺激音只跟在波次检查点后面，避免两段刺激音叠在一起
-      this.deps.presentation.showAutosave(label);
-      if (kind === 'wave') {
-        this.deps.presentation.playStinger('checkpoint');
-      }
+    data.swiftJoined = this.swiftJoined;
+    if (!saveCampaignCheckpoint(data) || !announce) return;
+    let label: string;
+    switch (kind) {
+      case 'boss':
+        label = tr(
+          { en: 'Level {level} · Before the boss', zh: '第{level}关 · Boss 战前' },
+          { level }
+        );
+        break;
+      case 'hangar':
+        // 击破上一关 Boss 时写入：提示刚完成的那一关
+        label = tr({ en: 'Level {level} cleared', zh: '第{level}关完成' }, { level: level - 1 });
+        break;
+      default:
+        label = tr(
+          { en: 'Level {level} · Wave {wave}', zh: '第{level}关 · 第{wave}波' },
+          { level, wave: wave + 1 }
+        );
+        break;
+    }
+    // 存档提示 + 存档音效；关卡开场、Boss 战前与 Boss 击破分别有 chapter-start / level-complete /
+    // boss-defeated 刺激音，checkpoint 刺激音只跟在波次检查点后面，避免两段刺激音叠在一起
+    this.deps.presentation.showAutosave(label);
+    if (kind === 'wave') {
+      this.deps.presentation.playStinger('checkpoint');
     }
   }
 
   public dispose(): void {
     this.disposed = true;
+    this.outro = null;
   }
 }

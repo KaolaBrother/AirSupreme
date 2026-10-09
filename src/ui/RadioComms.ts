@@ -27,6 +27,8 @@ type RadioVoiceState = 'none' | 'playing' | 'done';
 interface QueuedLine {
   line: RadioLine;
   priority: RadioPriority;
+  /** 被打断后重播的这一次（再被打断就不再重播） */
+  replay?: boolean;
 }
 
 interface ActiveLine extends QueuedLine {
@@ -60,6 +62,8 @@ const MAX_STEPS_PER_UPDATE = 64;
 const VOICE_TAIL_SECONDS = 0.4;
 /** 配音说话期间的兜底余量（秒）：超过“开口时刻 + 时长 + 尾巴 + 余量”仍未收到说完也继续 */
 const VOICE_SAFETY_SECONDS = 2.5;
+/** 积压估计：配音从台词出现到开口的余量（秒，加载 / 解码；预取过的台词通常立即开口） */
+const VOICE_START_ALLOWANCE_SECONDS = 0.6;
 /** 读屏文本里“呼号：台词”的分隔符 */
 const SPEAKER_SEPARATOR: LocalizedText = { en: ': ', zh: '：' };
 
@@ -95,8 +99,9 @@ function readingHoldSeconds(chars: number): number {
  *
  * - enqueue 时若空闲（isBusy() 为 false）立即显示（同步回调 onLineShown），否则排队；
  *   一句播完后的短暂间隔（GAP_SECONDS）也算忙碌，保证两句之间总有停顿、面板不会闪一下就换句；
- *   'high' 优先级立即打断普通台词（被打断且尚未说完的台词回到队首重播），
- *   高优先级之间按先后排队并排在所有普通台词前面。重复文本（正在播或已排队）会被忽略。
+ *   'high' 优先级立即打断普通台词（被打断且尚未说完的台词回到队首重播，每句最多重播一次：
+ *   重播时再被打断就不再回队），高优先级之间按先后排队并排在所有普通台词前面。
+ *   重复文本（正在播或已排队）会被忽略。是否允许打断正在配音的台词由调用方决定（isVoicing）。
  * - 显示时间完全由 update(dt) 驱动：暂停游戏 = 台词停住。
  * - 配音（表现层在 onLineShown 里播放）：开口时 holdForVoice(line, 时长)，台词至少停留到
  *   配音结束后 VOICE_TAIL_SECONDS；说话期间下一句等待，直到 releaseVoice(line)（或兜底上限）。
@@ -208,6 +213,68 @@ export class RadioComms {
     return this.current !== null || this.queue.length > 0 || this.gap > 0;
   }
 
+  /** 当前台词的配音正在说（holdForVoice 之后、releaseVoice 之前） */
+  public isVoicing(): boolean {
+    return (
+      this.current !== null && this.current.voice === 'playing' && this.current.phase !== 'out'
+    );
+  }
+
+  /**
+   * 估计无线电全部说完（当前台词 + 排队台词 + 间隔）还要多少秒（update 驱动的时间）。
+   * voiceSeconds 给出某句的配音时长（没有配音时返回 null）：有配音的台词至少停留到配音说完，
+   * 尚未开口的台词另加一点开口余量。只用于等待上限（Boss 收尾），不影响播放时序。
+   */
+  public estimateRemainingSeconds(voiceSeconds?: (line: RadioLine) => number | null): number {
+    if (this.disposed) {
+      return 0;
+    }
+    let total = Math.max(0, this.gap);
+    const current = this.current;
+    if (current) {
+      let remaining = OUT_SECONDS - current.phaseTime;
+      if (current.phase === 'reveal') {
+        remaining = current.revealSeconds - current.phaseTime + current.holdSeconds + OUT_SECONDS;
+      } else if (current.phase === 'hold') {
+        remaining = this.phaseDuration(current) - current.phaseTime + OUT_SECONDS;
+      }
+      if (current.voice === 'none' && current.phase !== 'out') {
+        // 配音还没开口（加载中）：从现在起至少还要整句配音的时长
+        const voice = this.voiceSecondsOf(current.line, voiceSeconds);
+        if (voice !== null) {
+          remaining = Math.max(
+            remaining,
+            voice + VOICE_START_ALLOWANCE_SECONDS + VOICE_TAIL_SECONDS + OUT_SECONDS
+          );
+        }
+      }
+      total += Math.max(0, remaining) + GAP_SECONDS;
+    }
+    for (const queued of this.queue) {
+      const chars = countChars(tr(queued.line.text));
+      const reveal = this.reducedMotion ? 0 : chars / REVEAL_CHARS_PER_SECOND;
+      const voice = this.voiceSecondsOf(queued.line, voiceSeconds);
+      // 逐字阶段与配音同时开始：整句停留 = max(逐字 + 阅读停留, 开口余量 + 配音 + 尾巴)
+      const shown =
+        voice === null
+          ? reveal + readingHoldSeconds(chars)
+          : Math.max(
+              reveal + readingHoldSeconds(chars),
+              VOICE_START_ALLOWANCE_SECONDS + voice + VOICE_TAIL_SECONDS
+            );
+      total += shown + OUT_SECONDS + GAP_SECONDS;
+    }
+    return total;
+  }
+
+  private voiceSecondsOf(
+    line: RadioLine,
+    voiceSeconds: ((line: RadioLine) => number | null) | undefined
+  ): number | null {
+    const seconds = voiceSeconds?.(line);
+    return typeof seconds === 'number' && Number.isFinite(seconds) && seconds > 0 ? seconds : null;
+  }
+
   /**
    * 当前台词的配音开口了：台词至少停留到“此刻 + 配音时长 + VOICE_TAIL_SECONDS”，
    * 并在 releaseVoice 之前不进入淡出（兜底：再多等 VOICE_SAFETY_SECONDS）。
@@ -285,23 +352,26 @@ export class RadioComms {
     }
   }
 
-  /** 普通台词被高优先级打断：没说完的放回普通台词的最前面 */
+  /**
+   * 普通台词被高优先级打断：没说完的放回普通台词的最前面重播——每句最多重播一次
+   * （重播时又被打断就放弃，避免同一句被反复从头念起）。
+   */
   private interruptCurrent(): void {
     const current = this.current;
     if (!current) {
       return;
     }
     this.current = null;
-    // 配音还在说：没传达完，一定重播；配音已说完：已传达；没有配音：按停留时间判断
+    // 配音还在说：没传达完，重播；配音已说完：已传达；没有配音：按停留时间判断
     const delivered =
       current.phase === 'out' ||
       current.voice === 'done' ||
       (current.voice === 'none' &&
         current.phase === 'hold' &&
         current.phaseTime >= current.holdSeconds * INTERRUPT_DELIVERED_RATIO);
-    if (!delivered && current.priority === 'normal') {
+    if (!delivered && current.priority === 'normal' && !current.replay) {
       const firstNormal = this.queue.findIndex((queued) => queued.priority === 'normal');
-      const item: QueuedLine = { line: current.line, priority: current.priority };
+      const item: QueuedLine = { line: current.line, priority: current.priority, replay: true };
       if (firstNormal < 0) {
         this.queue.push(item);
       } else {

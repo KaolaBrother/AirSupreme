@@ -145,7 +145,11 @@ export interface ICampaignPresentation {
     index?: number,
     speakers?: RadioSpeakerFilter
   ): void;
-  genericRadio(key: GenericRadioKey): void;
+  /**
+   * 通用台词。返回这句是否进了无线电：Boss 模式过滤掉的普通台词、正在配音时跳过的紧急告警
+   * （missile-warning / low-health / civilian-hit 从不打断正在配音的台词）返回 false。
+   */
+  genericRadio(key: GenericRadioKey): boolean;
   unitFirstContact(unitType: string): void;
   /** 僚机入列 / 被击落：播放 WINGMAN_EVENT_RADIO 登记的通用台词（未登记的事件不出声） */
   onWingmanEvent(id: WingmanId, event: WingmanEvent): void;
@@ -153,6 +157,11 @@ export interface ICampaignPresentation {
   isWingmanFlying(id: WingmanId): boolean;
   /** 无线电正在播放或有排队台词 */
   isRadioBusy(): boolean;
+  /**
+   * 估计无线电把当前与排队的台词全部说完还要多少秒（游戏时间；有配音的台词按语音包清单里的
+   * 当前语言时长计）。Boss 收尾据此设定等待上限。
+   */
+  getRadioBacklogSeconds(): number;
   /** 关卡结束 / 换关 / 失败：清空无线电 */
   clearRadio(): void;
 
@@ -209,6 +218,8 @@ export interface CampaignVoice {
   resume(): void;
   prefetch(lineIds: readonly string[]): void;
   loadManifest(): Promise<unknown>;
+  /** 清单记录的这句配音时长（秒，当前语言）；没有这句 / 清单未加载时为 null */
+  getLineDuration?(lineId: string): number | null;
 }
 
 interface StoryUiModules {
@@ -243,7 +254,10 @@ interface PendingRadioLine {
   priority: 'normal' | 'high';
 }
 
-/** 高优先级通用台词（打断普通台词） */
+/**
+ * 高优先级通用台词（紧急告警）：打断普通台词，但从不打断正在配音的台词——
+ * 那时直接跳过这句（HUD 闪烁告警 / 告警音照常，紧迫感由它们传达；低血量等配音说完再报）。
+ */
 const HIGH_PRIORITY_RADIO: ReadonlySet<GenericRadioKey> = new Set<GenericRadioKey>([
   'civilian-hit',
   'missile-warning',
@@ -258,7 +272,8 @@ interface WingmanEventRadio {
 
 /**
  * 僚机事件 → 通用台词（GENERIC_RADIO）。渡鸦从第 1 章起一直随队，入列不播台词；
- * 雨燕第 3 章起入列时报到；被击落由另一名僚机（在空中时）或天穹指挥部播报。
+ * 雨燕本局第一次随编队升空（通常是第 3 章开场）时报到——每局只一次，由战役流程
+ * （CampaignFlowController.handleWingmanLaunched）决定；被击落由另一名僚机（在空中时）或天穹指挥部播报。
  * 僚机名册不支持本关内复活（被击落的僚机下一关 / 读档后才归队），所以没有“重返战斗”台词。
  * 未登记的事件不播台词。
  */
@@ -271,6 +286,9 @@ const WINGMAN_EVENT_RADIO: Readonly<
 };
 /** 剧情界面加载前最多缓存的台词 */
 const MAX_PENDING_RADIO = 6;
+/** 积压粗估（剧情界面加载前的缓存台词）：没有配音时长时按阅读上限，每句再加余量（秒） */
+const PENDING_LINE_READING_SECONDS = 6.5;
+const PENDING_LINE_SLACK = 1.5;
 /** 入关预取：紧急告警台词（要求立即开口） */
 const URGENT_VOICE_KEYS: readonly GenericRadioKey[] = [
   'missile-warning',
@@ -421,7 +439,7 @@ export class DefaultCampaignPresentation implements ICampaignPresentation {
 
   /**
    * 无线电台词出现：播放该句配音。开口时台词按配音时长延长停留，说完（或没出声 / 被打断）
-   * 才放行下一句；被高优先级打断后重播时会重新调用这里，配音从头再说一遍。
+   * 才放行下一句；被高优先级打断后重播时（每句最多一次）会重新调用这里，配音从头再说一遍。
    */
   private playRadioVoice(radio: RadioComms, line: RadioLine): void {
     const voice = this.deps.voice;
@@ -616,12 +634,21 @@ export class DefaultCampaignPresentation implements ICampaignPresentation {
     }
   }
 
-  public genericRadio(key: GenericRadioKey): void {
+  public genericRadio(key: GenericRadioKey): boolean {
     const high = HIGH_PRIORITY_RADIO.has(key);
     // Boss 模式只保留高优先级的战术告警
-    if (this.deps.isBossMode() && !high) return;
+    if (this.deps.isBossMode() && !high) return false;
+    // 紧急告警不打断正在配音的台词（剧情台词不会被反复从头念起）
+    if (high && this.isRadioVoicing()) return false;
     const line = GENERIC_RADIO[key];
-    if (line) this.enqueueRadio(line, high ? 'high' : 'normal');
+    if (!line || this.disposed) return false;
+    this.enqueueRadio(line, high ? 'high' : 'normal');
+    return true;
+  }
+
+  /** 无线电当前台词的配音正在说 */
+  private isRadioVoicing(): boolean {
+    return this.storyUi?.radio.isVoicing() ?? false;
   }
 
   public unitFirstContact(unitType: string): void {
@@ -658,6 +685,22 @@ export class DefaultCampaignPresentation implements ICampaignPresentation {
 
   public isRadioBusy(): boolean {
     return this.storyUi ? this.storyUi.radio.isBusy() : this.pendingRadio.length > 0;
+  }
+
+  public getRadioBacklogSeconds(): number {
+    const voice = this.deps.voice;
+    const voiceSeconds = (line: RadioLine): number | null =>
+      voice?.getLineDuration?.(line.id) ?? null;
+    const radio = this.storyUi?.radio;
+    if (radio) {
+      return radio.estimateRemainingSeconds(voiceSeconds);
+    }
+    // 剧情界面还没加载：缓存的台词按“配音时长或阅读上限 + 余量”粗估
+    let total = 0;
+    for (const pending of this.pendingRadio) {
+      total += (voiceSeconds(pending.line) ?? PENDING_LINE_READING_SECONDS) + PENDING_LINE_SLACK;
+    }
+    return total;
   }
 
   public clearRadio(): void {
@@ -862,7 +905,8 @@ export class DefaultCampaignPresentation implements ICampaignPresentation {
       this.lowHealthBeepTimer = 0;
       this.deps.audio.playLowHealthWarning();
     }
-    if (this.lowHealthRadioArmed && this.lowHealthRadioCooldown <= 0) {
+    // 正在配音的台词说完之前不报（蜂鸣照常）；仍然低血量就在那之后报
+    if (this.lowHealthRadioArmed && this.lowHealthRadioCooldown <= 0 && !this.isRadioVoicing()) {
       this.lowHealthRadioArmed = false;
       this.lowHealthRadioCooldown = LOW_HEALTH_RADIO_COOLDOWN;
       this.genericRadio('low-health');
