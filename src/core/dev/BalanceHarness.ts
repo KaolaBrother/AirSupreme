@@ -109,6 +109,9 @@ interface BossRecord {
   forced: boolean;
   sources: Record<string, number>;
   respawnCrashes: number;
+  /** Boss 登场时玩家的最大生命与护甲减伤（Boss 模式的机库购买在关卡档案建档之后） */
+  playerMaxHealth: number;
+  playerArmor: number;
   /**
    * Boss 导弹：发射数 / 被热焰弹诱骗数 / 诱骗后又重新追踪玩家的数目（诱饵燃尽前没飞到）/
    * 命中玩家次数；本场投放热焰弹次数
@@ -820,6 +823,7 @@ export function installBalanceHarness(access: DevHookAccess): BalanceHarnessApi 
       decoyedMissiles = new WeakSet<object>();
       reacquiredMissiles = new WeakSet<object>();
       const health = boss.getHealth();
+      const stats = access.getStats();
       pilot?.takeStats();
       record.boss = {
         type: boss.getConfig().type,
@@ -835,6 +839,8 @@ export function installBalanceHarness(access: DevHookAccess): BalanceHarnessApi 
         forced: false,
         sources: {},
         respawnCrashes: 0,
+        playerMaxHealth: stats.getMaxHealth(),
+        playerArmor: stats.getArmorReduction(),
         missiles: 0,
         decoyed: 0,
         reacquired: 0,
@@ -1272,6 +1278,8 @@ export function installBalanceHarness(access: DevHookAccess): BalanceHarnessApi 
         ? {
             type: boss.type,
             maxHealth: boss.maxHealth,
+            playerMaxHealth: boss.playerMaxHealth,
+            playerArmor: boss.playerArmor,
             seconds: boss.end === null ? null : round1(bossSeconds),
             damage: Math.round(boss.damage),
             damagePerMin: bossSeconds > 0 ? Math.round((boss.damage / bossSeconds) * 60) : 0,
