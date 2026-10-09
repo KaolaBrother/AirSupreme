@@ -8,6 +8,7 @@
  * - setIntensity(0..1)：图层增减、速度微升、会话低通逐渐打开，Boss 阶段推进时音乐随之升级。
  * - 刺激音对齐到当前曲目的下一拍并移调到当前调性，播放时闪避主音乐。
  * - 曲目切换使用交叉淡化；stopMusic / pauseMusic / dispose 会停止全部声源与定时器。
+ * - 角色配音说话时（voiceDuckBridge）整条音乐总线（含刺激音与混响）平滑压低，说完恢复。
  */
 import {
   acquireSharedAudioContext,
@@ -15,6 +16,7 @@ import {
   releaseSharedAudioContext,
   resumeSharedAudioContext,
 } from '@/core/Audio/AudioContextHost';
+import { voiceDuckBridge } from '@/core/Audio/VoiceDucking';
 import {
   MIN_GAIN,
   clamp01,
@@ -313,6 +315,9 @@ export class MusicSystem {
   private sfxDuckGain: GainNode | null = null;
   /** 刺激音对主音乐的闪避 */
   private stingerDuckGain: GainNode | null = null;
+  /** 角色配音的闪避（voiceDuckBridge，作用于整条音乐总线） */
+  private voiceDuckGain: GainNode | null = null;
+  private unsubscribeVoiceDuck?: () => void;
   /** 所有曲目会话的汇合点 */
   private bedInput: GainNode | null = null;
   private stingerBus: GainNode | null = null;
@@ -339,6 +344,9 @@ export class MusicSystem {
     this.unsubscribeDucking = musicDuckingBridge.subscribe((amount, durationMs) => {
       this.applyMusicDuck(amount, durationMs);
     });
+    this.unsubscribeVoiceDuck = voiceDuckBridge.subscribe((level, rampSeconds, delaySeconds) => {
+      this.applyVoiceDuck(level, rampSeconds, delaySeconds);
+    });
   }
 
   private initContext(): void {
@@ -361,14 +369,16 @@ export class MusicSystem {
     }
   }
 
-  /** 会话 → 刺激音闪避 → 音效闪避 → 音量 → 次声高通 → 共享输出（限幅） */
+  /** 会话 → 刺激音闪避 → 音效闪避 → 音量 → 配音闪避 → 次声高通 → 共享输出（限幅） */
   private buildGraph(context: AudioContext): void {
     const master = context.createGain();
     const sfxDuck = context.createGain();
     const stingerDuck = context.createGain();
+    const voiceDuck = context.createGain();
     const bed = context.createGain();
     const stingerBus = context.createGain();
     master.gain.value = this.musicVolume * MUSIC_BUS_LEVEL;
+    voiceDuck.gain.value = Math.max(MIN_GAIN, voiceDuckBridge.getLevel());
     bed.connect(stingerDuck);
     stingerDuck.connect(sfxDuck);
     sfxDuck.connect(master);
@@ -378,9 +388,10 @@ export class MusicSystem {
     highpass.type = 'highpass';
     highpass.frequency.value = 32;
     highpass.Q.value = 0.7;
-    master.connect(highpass);
+    master.connect(voiceDuck);
+    voiceDuck.connect(highpass);
     highpass.connect(output);
-    this.graphNodes = [master, sfxDuck, stingerDuck, bed, stingerBus, highpass];
+    this.graphNodes = [master, sfxDuck, stingerDuck, voiceDuck, bed, stingerBus, highpass];
     const reverb = createReverbBus(context, master, REVERB_RETURN);
     if (reverb) {
       this.graphNodes.push(...reverb.nodes);
@@ -389,6 +400,7 @@ export class MusicSystem {
     this.masterGain = master;
     this.sfxDuckGain = sfxDuck;
     this.stingerDuckGain = stingerDuck;
+    this.voiceDuckGain = voiceDuck;
     this.bedInput = bed;
     this.stingerBus = stingerBus;
   }
@@ -405,6 +417,7 @@ export class MusicSystem {
     this.masterGain = null;
     this.sfxDuckGain = null;
     this.stingerDuckGain = null;
+    this.voiceDuckGain = null;
     this.bedInput = null;
     this.stingerBus = null;
     this.reverbInput = null;
@@ -941,6 +954,49 @@ export class MusicSystem {
     }
   }
 
+  /** 配音闪避：从当前值出发，delaySeconds 后用 rampSeconds 平滑过渡到 level（覆盖未执行的旧请求） */
+  private applyVoiceDuck(level: number, rampSeconds: number, delaySeconds: number): void {
+    const context = this.getLiveContext();
+    const duck = this.voiceDuckGain;
+    if (!context || !duck) {
+      return;
+    }
+    const target = Math.max(MIN_GAIN, Math.min(1, level));
+    const now = context.currentTime;
+    try {
+      holdParam(duck.gain, now);
+      // setTargetAtTime 约 3 个时间常数到位
+      duck.gain.setTargetAtTime(target, now + delaySeconds, Math.max(0.005, rampSeconds / 3));
+    } catch {
+      duck.gain.value = target;
+    }
+  }
+
+  /** 配音闪避的当前增益倍数（1 = 未闪避；没有音频图时为 null） */
+  public getVoiceDuckLevel(): number | null {
+    return this.voiceDuckGain ? this.voiceDuckGain.gain.value : null;
+  }
+
+  /**
+   * 诊断：在音乐总线出口（音量与配音闪避之后）挂一个 AnalyserNode，用于测量电平；
+   * 不支持时返回 null。调用方负责 disconnect。
+   */
+  public createOutputAnalyser(): AnalyserNode | null {
+    const context = this.getLiveContext();
+    const duck = this.voiceDuckGain;
+    if (!context || !duck || typeof context.createAnalyser !== 'function') {
+      return null;
+    }
+    try {
+      const analyser = context.createAnalyser();
+      analyser.fftSize = 2048;
+      duck.connect(analyser);
+      return analyser;
+    } catch {
+      return null;
+    }
+  }
+
   public getIsPlaying(): boolean {
     return this.isPlaying;
   }
@@ -957,6 +1013,8 @@ export class MusicSystem {
     this.pausedMusic = null;
     this.unsubscribeDucking?.();
     this.unsubscribeDucking = undefined;
+    this.unsubscribeVoiceDuck?.();
+    this.unsubscribeVoiceDuck = undefined;
     this.teardownGraph();
     releaseSharedAudioContext(this);
     this.isDisposed = true;
