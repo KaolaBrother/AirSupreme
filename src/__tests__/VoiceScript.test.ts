@@ -190,3 +190,48 @@ describe('voice line ids', () => {
     }
   });
 });
+
+/**
+ * 僚机事件台词（CampaignPresentation.onWingmanEvent）：雨燕入列由她自己报到；
+ * 被击落由另一名僚机（在空中时）或天穹指挥部播报。键名末尾就是说话人。
+ */
+describe('wingman event lines', () => {
+  const WINGMAN_LINES: ReadonlyArray<[key: GenericRadioKey, speaker: CampaignSpeakerId]> = [
+    ['swift-joined', 'wingman2'],
+    ['raven-down-swift', 'wingman2'],
+    ['raven-down-hq', 'hq'],
+    ['swift-down-raven', 'wingman'],
+    ['swift-down-hq', 'hq'],
+  ];
+
+  it.each(WINGMAN_LINES)('%s is spoken by %s in both languages', (key, speaker) => {
+    const line = GENERIC_RADIO[key];
+    expect(line, key).toBeDefined();
+    expect(line.speaker).toBe(speaker);
+    expect(line.id).toBe(`generic-${key}`);
+    expect(line.id).toMatch(FILE_NAME_SAFE);
+    expectBilingual(line.text, key);
+  });
+
+  it('are in the voice script once each, as radio lines', () => {
+    for (const [key, speaker] of WINGMAN_LINES) {
+      const entries = script.filter((entry) => entry.id === GENERIC_RADIO[key].id);
+      expect(entries, key).toHaveLength(1);
+      expect(entries[0]).toMatchObject({ kind: 'radio', speaker });
+      expect(entries[0].text).toEqual(GENERIC_RADIO[key].text);
+    }
+  });
+
+  it('name the downed wingman by callsign in both languages', () => {
+    const raven = CAMPAIGN_SPEAKERS.wingman.callsign;
+    const swift = CAMPAIGN_SPEAKERS.wingman2.callsign;
+    for (const key of ['raven-down-swift', 'raven-down-hq'] as const) {
+      expect(GENERIC_RADIO[key].text.en, key).toContain(raven.en);
+      expect(GENERIC_RADIO[key].text.zh, key).toContain(raven.zh);
+    }
+    for (const key of ['swift-joined', 'swift-down-raven', 'swift-down-hq'] as const) {
+      expect(GENERIC_RADIO[key].text.en, key).toContain(swift.en);
+      expect(GENERIC_RADIO[key].text.zh, key).toContain(swift.zh);
+    }
+  });
+});

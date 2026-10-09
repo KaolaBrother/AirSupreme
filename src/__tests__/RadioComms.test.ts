@@ -7,6 +7,7 @@ import {
 } from '@/features/campaign/CampaignData';
 import { setLocale, type LocalizedText } from '@/i18n';
 import { RadioComms } from '@/ui/RadioComms';
+import { SPEAKER_GLYPHS, getSpeakerGlyph } from '@/ui/theme/hudGlyphs';
 import { LOCALES, resetLocale, textIn } from './i18nTestUtils';
 
 /**
@@ -101,6 +102,24 @@ describe('RadioComms (§9)', () => {
     setLocale('zh-CN');
     radio.enqueue(line(`测试台词：${speaker}`, speaker));
     expect(panelText()).toContain(CAMPAIGN_SPEAKERS[speaker].callsign.zh);
+  });
+
+  it.each(SPEAKER_IDS)('draws the %s portrait glyph next to the callsign', (speaker) => {
+    expect(Object.prototype.hasOwnProperty.call(SPEAKER_GLYPHS, speaker), speaker).toBe(true);
+    expect(getSpeakerGlyph(speaker)).toBe(SPEAKER_GLYPHS[speaker]);
+    expect(SPEAKER_GLYPHS[speaker]).toMatch(/^<svg[\s\S]*<\/svg>$/);
+
+    radio.enqueue(line(`Glyph line: ${speaker}`, speaker));
+    const portrait = panel()?.querySelector('.rc-portrait');
+    const expected = document.createElement('div');
+    expected.innerHTML = SPEAKER_GLYPHS[speaker];
+    expect(portrait?.querySelector('svg')).not.toBeNull();
+    expect(portrait?.innerHTML).toBe(expected.innerHTML);
+  });
+
+  it('gives every speaker a portrait glyph of their own', () => {
+    const glyphs = SPEAKER_IDS.map((speaker) => getSpeakerGlyph(speaker));
+    expect(new Set(glyphs).size).toBe(SPEAKER_IDS.length);
   });
 
   it('still shows a line from an unknown speaker id', () => {
