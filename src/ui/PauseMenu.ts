@@ -1,8 +1,11 @@
 import type { QualityPreset } from '@/config';
 import {
   DEFAULT_START_FLOW_SETTINGS,
+  LANGUAGE_ENDONYMS,
+  stepLanguage,
   type StartFlowSettings,
 } from '@/core/SessionSettings';
+import { onLocaleChange, setLocale, tr, type LocalizedText } from '@/i18n';
 import { HUD_COLORS, injectHudTokens } from '@/ui/theme/hudTokens';
 
 export interface IPauseMenuOptions {
@@ -16,13 +19,16 @@ export interface IPauseMenuOptions {
 }
 
 const QUALITY_PRESETS: QualityPreset[] = ['auto', 'performance', 'balanced', 'quality'];
-const QUALITY_LABELS: Record<QualityPreset, string> = {
-  auto: '自动',
-  performance: '性能',
-  balanced: '平衡',
-  quality: '高质量',
+const QUALITY_LABELS: Record<QualityPreset, LocalizedText> = {
+  auto: { en: 'Auto', zh: '自动' },
+  performance: { en: 'Performance', zh: '性能' },
+  balanced: { en: 'Balanced', zh: '平衡' },
+  quality: { en: 'High', zh: '高质量' },
 };
-const EXIT_CONFIRM_COPY = '返回主菜单？当前进度将丢失。';
+const EXIT_CONFIRM_COPY: LocalizedText = {
+  en: 'Return to the main menu? Your current progress will be lost.',
+  zh: '返回主菜单？当前进度将丢失。',
+};
 const VOLUME_STEP = 0.1;
 
 enum PauseMenuView {
@@ -32,7 +38,7 @@ enum PauseMenuView {
 }
 
 /**
- * 暂停菜单：继续 / 升级 / 运行时音画设置 / 返回主菜单确认
+ * 暂停菜单：继续 / 升级 / 运行时音画与语言设置 / 返回主菜单确认
  */
 export class PauseMenu {
   private readonly options: IPauseMenuOptions;
@@ -41,6 +47,7 @@ export class PauseMenu {
   private visible = false;
   private view: PauseMenuView = PauseMenuView.Default;
   private settings: StartFlowSettings = { ...DEFAULT_START_FLOW_SETTINGS };
+  private readonly unsubscribeLocale: () => void;
 
   constructor(options: IPauseMenuOptions) {
     this.options = options;
@@ -111,6 +118,8 @@ export class PauseMenu {
     this.overlay.appendChild(this.panel);
     document.body.appendChild(this.overlay);
     this.renderDefaultView();
+    // 语言切换后按新语言重绘当前视图（停留在原来的页面）
+    this.unsubscribeLocale = onLocaleChange(() => this.renderView(this.view));
   }
 
   public show(): void {
@@ -149,13 +158,24 @@ export class PauseMenu {
 
   public dispose(): void {
     this.visible = false;
+    this.unsubscribeLocale();
     this.overlay.remove();
+  }
+
+  private renderView(view: PauseMenuView): void {
+    if (view === PauseMenuView.Settings) {
+      this.renderSettingsView();
+    } else if (view === PauseMenuView.Confirm) {
+      this.renderConfirmView();
+    } else {
+      this.renderDefaultView();
+    }
   }
 
   private renderDefaultView(): void {
     this.view = PauseMenuView.Default;
     this.panel.replaceChildren();
-    this.panel.appendChild(this.createTitle('暂停'));
+    this.panel.appendChild(this.createTitle(tr({ en: 'Paused', zh: '暂停' })));
 
     const actions = document.createElement('div');
     actions.className = 'pause-actions';
@@ -165,30 +185,43 @@ export class PauseMenu {
       gap: 12px;
       width: 100%;
     `;
-    actions.appendChild(this.createActionButton('继续', () => this.options.onContinue()));
-    actions.appendChild(this.createActionButton('升级', () => this.options.onUpgrade()));
-    actions.appendChild(this.createActionButton('设置', () => this.renderSettingsView()));
-    actions.appendChild(this.createActionButton('返回菜单', () => this.renderConfirmView()));
+    actions.appendChild(
+      this.createActionButton(tr({ en: 'Resume', zh: '继续' }), () => this.options.onContinue())
+    );
+    actions.appendChild(
+      this.createActionButton(tr({ en: 'Upgrades', zh: '升级' }), () => this.options.onUpgrade())
+    );
+    actions.appendChild(
+      this.createActionButton(tr({ en: 'Settings', zh: '设置' }), () => this.renderSettingsView())
+    );
+    actions.appendChild(
+      this.createActionButton(tr({ en: 'Main Menu', zh: '返回菜单' }), () =>
+        this.renderConfirmView()
+      )
+    );
     this.panel.appendChild(actions);
   }
 
   private renderSettingsView(): void {
     this.view = PauseMenuView.Settings;
     this.panel.replaceChildren();
-    this.panel.appendChild(this.createTitle('设置'));
-    this.panel.appendChild(this.createVolumeRow('音效', 'sfx'));
-    this.panel.appendChild(this.createVolumeRow('音乐', 'music'));
+    this.panel.appendChild(this.createTitle(tr({ en: 'Settings', zh: '设置' })));
+    this.panel.appendChild(this.createVolumeRow('sfx'));
+    this.panel.appendChild(this.createVolumeRow('music'));
     this.panel.appendChild(this.createQualityRow());
-    this.panel.appendChild(this.createActionButton('返回', () => this.renderDefaultView()));
+    this.panel.appendChild(this.createLanguageRow());
+    this.panel.appendChild(
+      this.createActionButton(tr({ en: 'Back', zh: '返回' }), () => this.renderDefaultView())
+    );
   }
 
   private renderConfirmView(): void {
     this.view = PauseMenuView.Confirm;
     this.panel.replaceChildren();
-    this.panel.appendChild(this.createTitle('离开'));
+    this.panel.appendChild(this.createTitle(tr({ en: 'Leave Mission', zh: '离开' })));
 
     const message = document.createElement('div');
-    message.textContent = EXIT_CONFIRM_COPY;
+    message.textContent = tr(EXIT_CONFIRM_COPY);
     message.style.cssText = `
       font-size: 16px;
       line-height: 1.5;
@@ -205,12 +238,69 @@ export class PauseMenu {
       gap: 12px;
       width: 100%;
     `;
-    actions.appendChild(this.createActionButton('取消', () => this.renderDefaultView()));
-    actions.appendChild(this.createActionButton('确定', () => this.options.onExitToMenu()));
+    actions.appendChild(
+      this.createActionButton(tr({ en: 'Cancel', zh: '取消' }), () => this.renderDefaultView())
+    );
+    actions.appendChild(
+      this.createActionButton(tr({ en: 'Confirm', zh: '确定' }), () => this.options.onExitToMenu())
+    );
     this.panel.appendChild(actions);
   }
 
-  private createVolumeRow(label: '音效' | '音乐', bus: 'sfx' | 'music'): HTMLDivElement {
+  private createVolumeRow(bus: 'sfx' | 'music'): HTMLDivElement {
+    const label =
+      bus === 'sfx' ? tr({ en: 'Sound effects', zh: '音效' }) : tr({ en: 'Music', zh: '音乐' });
+    const valueEl = document.createElement('span');
+    valueEl.textContent = this.formatVolume(
+      bus === 'sfx' ? this.settings.sfxVolume : this.settings.musicVolume
+    );
+    valueEl.style.cssText =
+      'min-width: 5em; text-align: center; font-variant-numeric: tabular-nums;';
+
+    return this.createStepperRow(
+      label,
+      valueEl,
+      () => this.adjustVolume(bus, -1, valueEl),
+      () => this.adjustVolume(bus, 1, valueEl)
+    );
+  }
+
+  private createQualityRow(): HTMLDivElement {
+    const valueEl = document.createElement('span');
+    valueEl.textContent = this.getQualityLabel(this.settings.qualityPreset);
+    valueEl.style.cssText = 'min-width: 5em; text-align: center; white-space: nowrap;';
+
+    return this.createStepperRow(
+      tr({ en: 'Graphics', zh: '画质' }),
+      valueEl,
+      () => this.adjustQuality(-1, valueEl),
+      () => this.adjustQuality(1, valueEl)
+    );
+  }
+
+  /** 语言：选项名用各语言自称；切换立即生效并持久化，界面随 onLocaleChange 重绘 */
+  private createLanguageRow(): HTMLDivElement {
+    const valueEl = document.createElement('span');
+    valueEl.textContent = LANGUAGE_ENDONYMS[this.settings.language];
+    valueEl.style.cssText = 'min-width: 5em; text-align: center; white-space: nowrap;';
+
+    const row = this.createStepperRow(
+      tr({ en: 'Language', zh: '语言' }),
+      valueEl,
+      () => this.changeLanguage(-1, valueEl),
+      () => this.changeLanguage(1, valueEl)
+    );
+    row.setAttribute('data-setting', 'language');
+    return row;
+  }
+
+  /** 标签 + [-] 数值 [+] 的一行 */
+  private createStepperRow(
+    label: string,
+    valueEl: HTMLElement,
+    onDecrease: () => void,
+    onIncrease: () => void
+  ): HTMLDivElement {
     const row = document.createElement('div');
     row.style.cssText = `
       display: flex;
@@ -222,51 +312,14 @@ export class PauseMenu {
 
     const labelEl = document.createElement('span');
     labelEl.textContent = label;
-    labelEl.style.cssText = 'font-size: 16px; font-weight: 700; letter-spacing: 0.06em;';
+    labelEl.style.cssText =
+      'min-width: 0; font-size: 16px; font-weight: 700; letter-spacing: 0.06em; line-height: 1.25;';
 
     const control = document.createElement('div');
-    control.style.cssText = 'display: flex; align-items: center; gap: 8px;';
+    control.style.cssText = 'flex: none; display: flex; align-items: center; gap: 8px;';
 
-    const valueEl = document.createElement('span');
-    valueEl.textContent = this.formatVolume(
-      bus === 'sfx' ? this.settings.sfxVolume : this.settings.musicVolume
-    );
-    valueEl.style.cssText = 'min-width: 48px; text-align: center; font-variant-numeric: tabular-nums;';
-
-    const minus = this.createActionButton('-', () => this.adjustVolume(bus, -1, valueEl));
-    const plus = this.createActionButton('+', () => this.adjustVolume(bus, 1, valueEl));
-    control.appendChild(minus);
-    control.appendChild(valueEl);
-    control.appendChild(plus);
-
-    row.appendChild(labelEl);
-    row.appendChild(control);
-    return row;
-  }
-
-  private createQualityRow(): HTMLDivElement {
-    const row = document.createElement('div');
-    row.style.cssText = `
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-      width: 100%;
-    `;
-
-    const labelEl = document.createElement('span');
-    labelEl.textContent = '画质';
-    labelEl.style.cssText = 'font-size: 16px; font-weight: 700; letter-spacing: 0.06em;';
-
-    const control = document.createElement('div');
-    control.style.cssText = 'display: flex; align-items: center; gap: 8px;';
-
-    const valueEl = document.createElement('span');
-    valueEl.textContent = this.getQualityLabel(this.settings.qualityPreset);
-    valueEl.style.cssText = 'min-width: 64px; text-align: center;';
-
-    const minus = this.createActionButton('-', () => this.adjustQuality(-1, valueEl));
-    const plus = this.createActionButton('+', () => this.adjustQuality(1, valueEl));
+    const minus = this.createActionButton('-', onDecrease);
+    const plus = this.createActionButton('+', onIncrease);
     control.appendChild(minus);
     control.appendChild(valueEl);
     control.appendChild(plus);
@@ -316,11 +369,7 @@ export class PauseMenu {
     return button;
   }
 
-  private adjustVolume(
-    bus: 'sfx' | 'music',
-    direction: 1 | -1,
-    valueEl: HTMLElement
-  ): void {
+  private adjustVolume(bus: 'sfx' | 'music', direction: 1 | -1, valueEl: HTMLElement): void {
     const current = bus === 'sfx' ? this.settings.sfxVolume : this.settings.musicVolume;
     const next = this.clampVolume(current + direction * VOLUME_STEP);
     if (bus === 'sfx') {
@@ -343,6 +392,15 @@ export class PauseMenu {
     valueEl.textContent = this.getQualityLabel(next);
   }
 
+  private changeLanguage(direction: 1 | -1, valueEl: HTMLElement): void {
+    const next = stepLanguage(this.settings.language, direction);
+    this.settings.language = next;
+    this.options.saveSettings({ language: next });
+    valueEl.textContent = LANGUAGE_ENDONYMS[next];
+    // 会触发 onLocaleChange：本菜单、HUD、触控按键等按新语言重绘
+    setLocale(next);
+  }
+
   private stepQuality(current: QualityPreset, direction: 1 | -1): QualityPreset {
     const index = QUALITY_PRESETS.indexOf(current);
     const from = index >= 0 ? index : 0;
@@ -360,6 +418,6 @@ export class PauseMenu {
   }
 
   private getQualityLabel(preset: QualityPreset): string {
-    return QUALITY_LABELS[preset] ?? QUALITY_LABELS.auto;
+    return tr(QUALITY_LABELS[preset] ?? QUALITY_LABELS.auto);
   }
 }
