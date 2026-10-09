@@ -492,6 +492,9 @@ export class HazardCooldownTracker {
   }
 }
 
+/** 诱饵锚点节点名：Boss 导弹的 target 是它即表示已被热焰弹诱骗 */
+export const BOSS_DECOY_ANCHOR_NAME = 'boss-missile-decoy-anchor';
+
 /** 单个诱饵锚点：跟随一枚燃烧中的热焰弹（Boss 导弹以它为目标） */
 interface DecoyAnchor {
   object: THREE.Object3D;
@@ -515,7 +518,7 @@ export class BossFlareDecoyRedirector {
   constructor(private readonly scene: THREE.Scene) {
     for (let i = 0; i < BossFlareDecoyRedirector.POOL_SIZE; i++) {
       const object = new THREE.Object3D();
-      object.name = 'boss-missile-decoy-anchor';
+      object.name = BOSS_DECOY_ANCHOR_NAME;
       this.anchors.push({ object, linger: 0, active: false });
     }
   }

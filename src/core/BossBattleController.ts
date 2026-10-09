@@ -19,6 +19,7 @@ import {
 } from '@/core/CombatContracts';
 import type { ICampaignPresentation } from '@/core/campaign/CampaignPresentation';
 import {
+  BossFlareDecoyRedirector,
   hasBossSpawnRoomAhead,
   resolveLegacyBossSpawn,
   type BossSurfaceSampler,
@@ -194,6 +195,8 @@ export class BossBattleController {
   private readonly legacyBossTargets: Object3D[] = [];
   private readonly spawnForward = new Vector3();
   private readonly legacyHitPosition = new Vector3();
+  /** 热焰弹诱骗第 1-5 关 Boss 导弹（与第 6-10 关同一套规则；首次需要时创建） */
+  private legacyDecoys: BossFlareDecoyRedirector | null = null;
 
   // ── 出场方位提示（神谕主宰锚定在城堡核心，可能远在侧后方） ──
   private bearingGuideRemaining = 0;
@@ -343,6 +346,16 @@ export class BossBattleController {
     this.currentBoss.update(deltaTime, this.deps.playerSystem.getMesh(), friendlyMeshes);
     this.feedback.checkBossMissileHits(bossMissileSystem, friendlyMeshes);
     this.updatePlayerWeaponBossCollisions(bossParts, missileMeshes, bossMissileSystem);
+    // 本帧被击破时 Boss 与导弹系统已释放，诱骗器也已在收尾时清空
+    if (this.currentBoss && bossMissileSystem) {
+      this.legacyDecoys ??= new BossFlareDecoyRedirector(this.deps.scene);
+      this.legacyDecoys.update(
+        deltaTime,
+        this.deps.getDecoys(),
+        bossMissileSystem,
+        this.deps.playerAircraft.position
+      );
+    }
 
     if (
       this.currentBossType === BossType.OCTOPUS_WARSHIP &&
@@ -850,11 +863,12 @@ export class BossBattleController {
     return boss;
   }
 
-  /** 清场 / 击破：部件目标缓存与第 6-10 关 Boss 的逐帧状态 */
+  /** 清场 / 击破：部件目标缓存、热焰弹诱饵与第 6-10 关 Boss 的逐帧状态 */
   private resetAdvancedState(): void {
     this.advanced.reset();
     this.partTargets.clear();
     this.legacyHits.clear();
+    this.legacyDecoys?.clear();
   }
 
   /** 神谕的遗言：死亡冻结瞬间只播神谕自己的收尾台词 */
