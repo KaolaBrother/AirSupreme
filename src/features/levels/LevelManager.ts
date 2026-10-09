@@ -36,6 +36,8 @@ const WAVE_GROUP_DISTANCE_RANGE = 200;
 /** 群内散布半径（米，与 getSpawnPosition 一致）：群中心离边界至少这么远 */
 const WAVE_GROUP_SPREAD = 60;
 const WAVE_GROUP_CENTER_ATTEMPTS = 12;
+/** 玩家位置单步变化折算速度超过该值（米/秒）视为瞬移，不用于提前量 */
+const PLAYER_TELEPORT_SPEED = 250;
 
 export enum LevelState {
   IDLE = 'IDLE',
@@ -116,6 +118,11 @@ export class LevelManager {
     this.getCrashSurfaceY(x, z);
   /** 地形尚未加载时 getSurfaceSample 的回退值（惰性创建：模块导入期不读取地形常量） */
   private fallbackSurfaceSample: TerrainSurfaceSample | null = null;
+  /** 玩家速度估计（逐步差分 + 轻度平滑），供敌机计算射击提前量 */
+  private readonly playerVelocity = new Vector3();
+  private readonly lastPlayerPosition = new Vector3();
+  private readonly playerStep = new Vector3();
+  private hasLastPlayerPosition = false;
 
   // 回调
   public onWaveStart?: (wave: number) => void;
@@ -209,6 +216,7 @@ export class LevelManager {
     this.spawnInterval = 0.5;
     this.currentWaveEvent = null;
     this.currentWaveBeatProfile = DEFAULT_ONBOARDING_BEAT_PROFILE;
+    this.resetPlayerVelocity();
 
     log.info('Loading level', { levelId, name: config.name, terrain: config.terrain });
 
@@ -409,11 +417,13 @@ export class LevelManager {
       }
     }
 
+    this.trackPlayerVelocity(deltaTime, playerPosition);
+
     // 生成敌人
     if (this.state === LevelState.WAVE_ACTIVE && this.currentLevel) {
       const maxEnemies = this.currentLevel.enemiesPerWave[this.currentWave] || 0;
       const aliveEnemies = this.enemies.filter((e) => e.isAlive()).length;
-      const maxConcurrentEnemies = GameConfig.getMaxEnemies();
+      const maxConcurrentEnemies = this.getMaxConcurrentEnemies();
 
       // 只要还没达到最大生成数量，就继续生成
       if (this.enemiesSpawnedThisWave < maxEnemies && aliveEnemies < maxConcurrentEnemies) {
@@ -437,7 +447,9 @@ export class LevelManager {
     }
 
     // 更新敌人
+    const leadVelocity = this.hasLastPlayerPosition ? this.playerVelocity : null;
     for (const enemy of this.enemies) {
+      enemy.setTargetVelocity(leadVelocity);
       enemy.update(deltaTime, playerPosition, friendlyMeshes, playerPosition);
     }
 
@@ -449,6 +461,42 @@ export class LevelManager {
         this.enemies.splice(i, 1);
       }
     }
+  }
+
+  /**
+   * 玩家速度估计：位置逐步差分，按约 0.1 秒时间常数平滑；
+   * 瞬移（复活 / 读档 / 开发工具摆位）或非有限值时清零重来。
+   */
+  private trackPlayerVelocity(deltaTime: number, playerPosition: Vector3): void {
+    if (
+      !(deltaTime > 0) ||
+      !Number.isFinite(playerPosition.x) ||
+      !Number.isFinite(playerPosition.y) ||
+      !Number.isFinite(playerPosition.z)
+    ) {
+      return;
+    }
+    if (this.hasLastPlayerPosition) {
+      this.playerStep.subVectors(playerPosition, this.lastPlayerPosition).divideScalar(deltaTime);
+      if (this.playerStep.lengthSq() < PLAYER_TELEPORT_SPEED * PLAYER_TELEPORT_SPEED) {
+        this.playerVelocity.lerp(this.playerStep, Math.min(1, deltaTime * 10));
+      } else {
+        this.playerVelocity.set(0, 0, 0);
+      }
+    }
+    this.lastPlayerPosition.copy(playerPosition);
+    this.hasLastPlayerPosition = true;
+  }
+
+  private resetPlayerVelocity(): void {
+    this.playerVelocity.set(0, 0, 0);
+    this.hasLastPlayerPosition = false;
+  }
+
+  /** 同时在场的敌机上限：设备基础值（GameConfig）+ 关卡曲线加成（后期同时来袭更多） */
+  public getMaxConcurrentEnemies(): number {
+    const bonus = getLevelScaling(this.currentLevel?.id ?? 1).concurrentEnemyBonus;
+    return Math.max(1, GameConfig.getMaxEnemies() + (Number.isFinite(bonus) ? bonus : 0));
   }
 
   /**
@@ -642,6 +690,7 @@ export class LevelManager {
     }
     this.activePortals = [];
     this.enemiesSpawnedThisWave = 0;
+    this.resetPlayerVelocity();
   }
 
   /**
@@ -960,6 +1009,7 @@ export class LevelManager {
       damage: Math.max(1, Math.round(baseConfig.damage * damageMultiplier * 10) / 10),
       attackCooldown: Math.max(0.1, baseConfig.attackCooldown * cooldownMultiplier),
       accuracy: Math.min(0.95, baseConfig.accuracy + accuracyBonus),
+      aimLead: Math.max(0, Math.min(1, scaling.enemyAimLead)),
     };
   }
 }
