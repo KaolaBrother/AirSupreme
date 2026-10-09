@@ -125,6 +125,9 @@ export interface CampaignChapter {
  * 通用战场台词（不随章节变化）。新增：
  * - awacs-lost：友军预警机（ALLY_AWACS）被击毁时，代替 ally-unit-destroyed
  * - frigate-lost：友军护卫舰（ALLY_FRIGATE）被击毁时，代替 ally-unit-destroyed
+ * - 僚机事件（键名末尾是说话人）：swift-joined 雨燕入列（第 3 章起）；
+ *   raven-down-swift / raven-down-hq 渡鸦被击落（雨燕在空中时由她播报，否则天穹指挥部）；
+ *   swift-down-raven / swift-down-hq 雨燕被击落（渡鸦在空中时由他播报，否则天穹指挥部）
  */
 export type GenericRadioKey =
   | 'civilian-hit'
@@ -137,7 +140,12 @@ export type GenericRadioKey =
   | 'missile-warning'
   | 'low-health'
   | 'weapon-overheat'
-  | 'checkpoint';
+  | 'checkpoint'
+  | 'swift-joined'
+  | 'raven-down-swift'
+  | 'raven-down-hq'
+  | 'swift-down-raven'
+  | 'swift-down-hq';
 
 /** 配音脚本条目（getVoiceScript 的返回值，供配音批次逐句生成语音） */
 export interface VoiceScriptLine {
