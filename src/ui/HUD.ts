@@ -57,6 +57,7 @@ const TXT_THIRD_PERSON: LocalizedText = { en: 'Third-person', zh: '第三人称'
 const TXT_DECK_FIRST_PERSON: LocalizedText = { en: '1ST', zh: '座舱' };
 const TXT_DECK_THIRD_PERSON: LocalizedText = { en: '3RD', zh: '机外' };
 const TXT_BOSS_PHASE: LocalizedText = { en: 'PHASE', zh: '阶段' };
+const TXT_POWER_UP: LocalizedText = { en: 'POWER-UP!', zh: '获得道具！' };
 
 /** 带占位参数的双语文案：{ text: { en: 'Wave {wave}', zh: '第{wave}波' }, params: { wave: 3 } } */
 export interface HudTextWithParams {
@@ -66,7 +67,8 @@ export interface HudTextWithParams {
 
 /**
  * HUD 可本地化文案：纯字符串原样显示（旧调用方不变）；双语对象或 { text, params } 按当前语言取值，
- * 切换语言时仍在显示的简报卡 / 自动存档提示 / 闪烁告警 / Boss 状态条 / 道具倒计时按新语言重绘。
+ * 切换语言时仍在显示的简报卡 / 自动存档提示 / 闪烁告警 / Boss 状态条 / 道具倒计时 / 中央大字提示
+ * 按新语言重绘。
  */
 export type HudText = string | LocalizedText | HudTextWithParams;
 
@@ -215,7 +217,7 @@ type SettlementActions = {
 
 type PendingBigMessage = {
   icon: string;
-  name: string;
+  name: HudText;
   minDisplayTime: number;
   hideSubtext: boolean;
   variant: BigMessageVariant;
@@ -277,6 +279,9 @@ export class HUD {
   private powerUpTimer: number = 0;
   private activePowerUpDuration: number = 0; // 道具持续时间
   private powerUpBigTimer: number = 0; // 大字提示显示计时器
+  /** 正在显示的大字提示原文（可本地化，语言切换时重绘）与样式；隐藏后清空 */
+  private powerUpBigSource: HudText | null = null;
+  private powerUpBigVariant: BigMessageVariant = 'announcement';
   private briefingTimer: number = 0;
   private respawnTimer: number = 0;
   private pendingBigMessage: PendingBigMessage | null = null;
@@ -968,10 +973,13 @@ export class HUD {
     if (this.autosaveTitle) {
       this.autosaveTitle.textContent = tr({ en: 'Autosaved', zh: '已自动保存' });
     }
-    // 运行时传入的简报 / 存档标签 / 告警 / Boss 状态 / 道具名：可本地化的原文按新语言重绘
-    // （纯字符串原样保留）
+    // 运行时传入的简报 / 存档标签 / 告警 / Boss 状态 / 道具名 / 大字提示：可本地化的原文按新语言
+    // 重绘（纯字符串原样保留）
     if (this.briefingTimer > 0) {
       this.renderBriefingText();
+    }
+    if (this.powerUpBigSource !== null) {
+      this.renderPowerUpBigText();
     }
     if (this.autosaveTimer > 0) {
       this.renderAutosaveLabel();
@@ -1732,13 +1740,13 @@ export class HUD {
   /**
    * 显示道具大字提示（屏幕中央）
    * @param icon 道具图标
-   * @param name 道具名称
+   * @param name 提示文字：纯字符串，或可本地化文案（见 HudText，显示期间切换语言随之重绘）
    * @param minDisplayTime 最小显示时间（秒），默认 800ms
    * @param hideSubtext 是否隐藏副标题，默认false
    */
   public showPowerUpBig(
     icon: string,
-    name: string,
+    name: HudText,
     minDisplayTime: number = HUD.TOAST_DEFAULT_MS / 1000,
     hideSubtext: boolean = false,
     variant: BigMessageVariant = 'announcement'
@@ -1821,11 +1829,12 @@ export class HUD {
   private hidePowerUpBig(): void {
     this.setStyleValue(this.powerUpBigDisplay, 'opacity', '0');
     this.powerUpBigTimer = 0;
+    this.powerUpBigSource = null;
   }
 
   private presentPowerUpBig(
     icon: string,
-    name: string,
+    name: HudText,
     minDisplayTime: number,
     hideSubtext: boolean,
     variant: BigMessageVariant
@@ -1833,15 +1842,22 @@ export class HUD {
     this.applyBigMessageVariant(variant);
     this.setTextContent(this.powerUpBigIcon, icon);
     this.setStyleValue(this.powerUpBigIcon, 'display', icon ? 'inline-block' : 'none');
-    this.setTextContent(this.powerUpBigText, name);
+    this.powerUpBigSource = name;
+    this.powerUpBigVariant = variant;
+    this.renderPowerUpBigText();
     const shouldHideSubtext = variant === 'announcement' ? true : hideSubtext;
-    this.setTextContent(
-      this.powerUpBigSubtext,
-      variant === 'powerup' ? tr({ en: 'POWER-UP!', zh: '获得道具！' }) : ''
-    );
     this.setStyleValue(this.powerUpBigSubtext, 'display', shouldHideSubtext ? 'none' : 'block');
     this.setStyleValue(this.powerUpBigDisplay, 'opacity', '1');
     this.powerUpBigTimer = minDisplayTime;
+  }
+
+  /** 按当前语言写大字提示的正文与道具副标题（不重播动画、不续时） */
+  private renderPowerUpBigText(): void {
+    this.setTextContent(this.powerUpBigText, resolveHudText(this.powerUpBigSource));
+    this.setTextContent(
+      this.powerUpBigSubtext,
+      this.powerUpBigVariant === 'powerup' ? tr(TXT_POWER_UP) : ''
+    );
   }
 
   private flushPendingBigMessage(): void {

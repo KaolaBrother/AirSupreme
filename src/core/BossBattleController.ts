@@ -40,7 +40,7 @@ import type { SkyCarrierAI } from '@/features/boss/SkyCarrierAI';
 import type { BossMinionKind } from '@/features/boss/BossContracts';
 import type { BossMissile } from '@/features/boss/BossMissileSystem';
 import { getCampaignChapter } from '@/features/campaign/CampaignData';
-import { format, tr, type LocalizedText } from '@/i18n';
+import { format, type LocalizedText } from '@/i18n';
 import {
   BOSS_MISSILE_CONFIG,
   BossConfig,
@@ -61,6 +61,15 @@ const RETURN_TO_ARENA_PROMPT: LocalizedText = {
   en: 'Return to the combat zone · Boss incoming',
   zh: '返回作战区域 · Boss 即将现身',
 };
+
+/** 中央大字提示：双语原文交给 HUD，显示期间切换语言随之重绘 */
+const CALLOUT_ALLIED_SUPPORT: LocalizedText = { en: 'Allied support inbound', zh: '召唤友军' };
+const CALLOUT_ALLIED_REINFORCEMENTS: LocalizedText = {
+  en: 'Allied reinforcements',
+  zh: '友军支援',
+};
+const CALLOUT_LASER_WARNING: LocalizedText = { en: 'Laser warning!', zh: '激光预警！' };
+const CALLOUT_LASER_SWEEP: LocalizedText = { en: 'Laser sweep!', zh: '激光扫射！' };
 
 const DIRECTION_AHEAD: LocalizedText = { en: 'dead ahead', zh: '正前方' };
 const DIRECTION_FRONT_RIGHT: LocalizedText = { en: 'front right', zh: '右前方' };
@@ -318,7 +327,7 @@ export class BossBattleController {
 
     this.deps.scheduleTimeout(() => {
       this.deps.onSpawnFriendly();
-      this.deps.hud.showPowerUpBig('✈️', tr({ en: 'Allied support inbound', zh: '召唤友军' }));
+      this.deps.hud.showPowerUpBig('✈️', CALLOUT_ALLIED_SUPPORT);
     }, 1000);
 
     void this.loadBoss(loadSequence, bossType, isBossMode);
@@ -343,7 +352,7 @@ export class BossBattleController {
       if (this.bossFriendlySpawnTimer >= 30 && advancedBoss.isAlive()) {
         this.bossFriendlySpawnTimer = 0;
         this.deps.onSpawnFriendly();
-        this.deps.hud.showPowerUpBig('✈️', tr({ en: 'Allied reinforcements', zh: '友军支援' }));
+        this.deps.hud.showPowerUpBig('✈️', CALLOUT_ALLIED_REINFORCEMENTS);
       }
 
       this.bossIndicatorUpdateTimer += deltaTime;
@@ -404,7 +413,7 @@ export class BossBattleController {
     if (this.bossFriendlySpawnTimer >= 30) {
       this.bossFriendlySpawnTimer = 0;
       this.deps.onSpawnFriendly();
-      this.deps.hud.showPowerUpBig('✈️', tr({ en: 'Allied reinforcements', zh: '友军支援' }));
+      this.deps.hud.showPowerUpBig('✈️', CALLOUT_ALLIED_REINFORCEMENTS);
     }
 
     this.bossIndicatorUpdateTimer += deltaTime;
@@ -780,11 +789,11 @@ export class BossBattleController {
       this.deps.audioManager.playTeleport();
     };
     boss.onLaserWarning = () => {
-      this.deps.hud.showPowerUpBig('⚠️', tr({ en: 'Laser warning!', zh: '激光预警！' }), 1, true);
+      this.deps.hud.showPowerUpBig('⚠️', CALLOUT_LASER_WARNING, 1, true);
       this.deps.audioManager.playLaserWarning();
     };
     boss.onLaserSweep = () => {
-      this.deps.hud.showPowerUpBig('💣', tr({ en: 'Laser sweep!', zh: '激光扫射！' }), 1, true);
+      this.deps.hud.showPowerUpBig('💣', CALLOUT_LASER_SWEEP, 1, true);
       this.deps.audioManager.playLaserSweep();
     };
     boss.onLaserHit = () => {

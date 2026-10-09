@@ -19,7 +19,7 @@ import { EnemyType, ENEMY_CONFIGS } from '@/features/enemy/EnemyTypes';
 import { PowerUpType, POWER_UP_CONFIGS } from '@/features/powerups/PowerUpSystem';
 import type { UpgradeMenu } from '@/ui/UpgradeMenu';
 import type { PauseMenu } from '@/ui/PauseMenu';
-import type { HUD, HudTextWithParams } from '@/ui/HUD';
+import type { HUD, HudText, HudTextWithParams } from '@/ui/HUD';
 import type { GameSettings } from '@/ui/StartMenu';
 import type { EnemyHealthBars } from '@/ui/EnemyHealthBars';
 import type { LockOnIndicator } from '@/ui/LockOnIndicator';
@@ -66,10 +66,11 @@ import {
   type CheckpointKind,
 } from '@/core/save/SaveSystem';
 import { getCampaignChapter, getUnlockedWeaponsThrough } from '@/features/campaign/CampaignData';
-import { localize, tr, type LocalizedText } from '@/i18n';
+import { format, tr, type LocalizedText } from '@/i18n';
 import {
   DEFAULT_ONBOARDING_BEAT_PROFILE,
-  getWaveOnboardingText,
+  ONBOARDING_TEXT_LIBRARY,
+  type OnboardingMessageSource,
   type OnboardingWaveBeatProfile,
 } from '@/ui/OnboardingManager';
 
@@ -138,8 +139,24 @@ interface TutorialObjectiveDisplay {
 
 interface WaveAnnouncementDisplay {
   icon: string;
-  text: string;
+  /** 双语原文：HUD 显示期间切换语言随之重绘 */
+  text: HudText;
   durationSeconds: number;
+}
+
+/** 波次播报文案（与 getWaveOnboardingText 同一文案库，保留双语原文交给 HUD） */
+function getWaveOnboardingSource(
+  eventType: LevelWaveEventType | null,
+  isComplete: boolean
+): OnboardingMessageSource {
+  if (eventType === null) {
+    return isComplete
+      ? ONBOARDING_TEXT_LIBRARY.firstWaveComplete
+      : ONBOARDING_TEXT_LIBRARY.firstWaveStart;
+  }
+  return isComplete
+    ? ONBOARDING_TEXT_LIBRARY.eventComplete[eventType]
+    : ONBOARDING_TEXT_LIBRARY.eventStart[eventType];
 }
 
 interface CombatRuntimeSystems {
@@ -774,12 +791,13 @@ export class GameCoordinator {
         this.particleSystem?.createExplosion(payload.position, 1.15, 'friendly');
         this.view.addExplosionShake(payload.position, 1.15);
         const wingman = this.wingmen.release(payload.friendlyId);
-        const message = wingman
-          ? tr(
-              { en: '{callsign} is down!', zh: '{callsign}被击落' },
-              { callsign: localize(wingman.callsign) }
-            )
-          : tr({ en: 'Ally down', zh: '友军坠毁' });
+        // 双语原文交给 HUD（呼号两种语言各填各的），显示期间切换语言随之重绘
+        const message: LocalizedText = wingman
+          ? {
+              en: format('{callsign} is down!', { callsign: wingman.callsign.en }),
+              zh: format('{callsign}被击落', { callsign: wingman.callsign.zh }),
+            }
+          : { en: 'Ally down', zh: '友军坠毁' };
         this.hud.showPowerUpBig('⚠️', message, 1, true);
         if (wingman) {
           this.presentation.onWingmanEvent(wingman.id, 'down');
@@ -1059,7 +1077,7 @@ export class GameCoordinator {
       return;
     }
     this.enemySystem.spawnEnemyAt(enemyType, position);
-    this.hud.showPowerUpBig('', tr({ en: 'Enemy fighters launching', zh: '敌机起飞' }));
+    this.hud.showPowerUpBig('', { en: 'Enemy fighters launching', zh: '敌机起飞' });
   }
 
   private syncCameraInterpolationState(): void {
@@ -1418,7 +1436,7 @@ export class GameCoordinator {
       const config = POWER_UP_CONFIGS[type];
       this.audioManager.playBalloonPop();
       this.vfx.pickupBurstAt(balloon);
-      this.hud.showPowerUpBig(config.icon, tr(config.name), 1, false, 'powerup');
+      this.hud.showPowerUpBig(config.icon, config.name, 1, false, 'powerup');
 
       if (config.duration > 0) {
         this.hud.showPowerUp(config.name, config.icon, config.duration);
@@ -2038,8 +2056,8 @@ export class GameCoordinator {
         this.hud.showPowerUpBig(
           '✈️',
           shouldRunTutorialIntro
-            ? tr({ en: 'Friendly flight on station', zh: '友军编队已入场' })
-            : tr({ en: 'Allied support inbound', zh: '召唤友军' })
+            ? { en: 'Friendly flight on station', zh: '友军编队已入场' }
+            : { en: 'Allied support inbound', zh: '召唤友军' }
         );
       },
       shouldRunTutorialIntro
@@ -2355,7 +2373,7 @@ export class GameCoordinator {
         if (!success) {
           this.hud.showPowerUpBig(
             '⚠️',
-            tr({ en: 'Escort target destroyed', zh: '护送目标被摧毁' }),
+            { en: 'Escort target destroyed', zh: '护送目标被摧毁' },
             1.2,
             true
           );
@@ -2364,7 +2382,7 @@ export class GameCoordinator {
         this.awardScore(GameCoordinator.ESCORT_WAVE_SCORE_BONUS);
         this.hud.showPowerUpBig(
           '✅',
-          tr({ en: 'Escort target arrived safely', zh: '护送目标安全抵达' }),
+          { en: 'Escort target arrived safely', zh: '护送目标安全抵达' },
           1.2,
           true
         );
@@ -2477,23 +2495,23 @@ export class GameCoordinator {
     return this.getTutorialIntroDurationMs() + GameCoordinator.TUTORIAL_WAVE_READY_BUFFER_MS;
   }
 
-  private getTutorialStages(): Array<{ icon: string; text: string; hideSubtext?: boolean }> {
+  private getTutorialStages(): Array<{ icon: string; text: LocalizedText; hideSubtext?: boolean }> {
     return [
       {
         icon: '🎮',
-        text: tr({ en: 'Training flight begins', zh: '教程开始' }),
+        text: { en: 'Training flight begins', zh: '教程开始' },
         hideSubtext: true,
       },
-      { icon: '🕹️', text: tr({ en: 'Check turning and strafing', zh: '确认转向与横移' }) },
-      { icon: '⚡', text: tr({ en: 'Build speed, then engage', zh: '提速再接敌' }) },
+      { icon: '🕹️', text: { en: 'Check turning and strafing', zh: '确认转向与横移' } },
+      { icon: '⚡', text: { en: 'Build speed, then engage', zh: '提速再接敌' } },
       {
         icon: '🔥',
-        text: tr({ en: 'Guns to suppress, missiles to kill', zh: '机炮压制，导弹点杀' }),
+        text: { en: 'Guns to suppress, missiles to kill', zh: '机炮压制，导弹点杀' },
       },
-      { icon: '🚀', text: tr({ en: 'Lock on before firing missiles', zh: '锁定后再发射导弹' }) },
+      { icon: '🚀', text: { en: 'Lock on before firing missiles', zh: '锁定后再发射导弹' } },
       {
         icon: '🎯',
-        text: tr({ en: 'The first kill ends the training', zh: '击杀首个目标后转常规' }),
+        text: { en: 'The first kill ends the training', zh: '击杀首个目标后转常规' },
       },
     ];
   }
@@ -2530,7 +2548,7 @@ export class GameCoordinator {
     this.scheduleTimeout(() => {
       this.hud.showPowerUpBig(
         '📡',
-        tr({ en: 'Bandits ahead. Get ready', zh: '前方有敌，准备接敌' }),
+        { en: 'Bandits ahead. Get ready', zh: '前方有敌，准备接敌' },
         GameCoordinator.TUTORIAL_HINT_MED_MS / 1000
       );
     }, waveReadyDelayMs);
@@ -2560,7 +2578,7 @@ export class GameCoordinator {
     isComplete: boolean,
     onboardingBeat: OnboardingWaveBeatProfile = this.getCurrentWaveOnboardingBeat()
   ): WaveAnnouncementDisplay {
-    const textProfile = getWaveOnboardingText(eventType, isComplete);
+    const textProfile = getWaveOnboardingSource(eventType, isComplete);
     const fallbackDurationMs =
       eventType === null
         ? onboardingBeat.firstWaveHintDurationMs
@@ -2584,10 +2602,10 @@ export class GameCoordinator {
       icon: textProfile.icon,
       text: isComplete
         ? textProfile.title
-        : tr(
-            { en: '{title} · Wave {wave}', zh: '{title} · 第{wave}波' },
-            { title: textProfile.title, wave: waveNumber }
-          ),
+        : {
+            en: format('{title} · Wave {wave}', { title: textProfile.title.en, wave: waveNumber }),
+            zh: format('{title} · 第{wave}波', { title: textProfile.title.zh, wave: waveNumber }),
+          },
       durationSeconds: durationMs / 1000,
     };
   }
@@ -2632,7 +2650,7 @@ export class GameCoordinator {
         this.tutorialCombatState.movementHintShown = true;
         this.hud.showPowerUpBig(
           '🕹️',
-          tr({ en: 'Handling confirmed. Now build speed', zh: '机动确认，继续提速拉距' }),
+          { en: 'Handling confirmed. Now build speed', zh: '机动确认，继续提速拉距' },
           GameCoordinator.TUTORIAL_HINT_MED_MS / 1000
         );
         this.updatePlayerFacingObjective();
@@ -2648,7 +2666,7 @@ export class GameCoordinator {
       this.tutorialCombatState.speedHintShown = true;
       this.hud.showPowerUpBig(
         '⚡',
-        tr({ en: 'Good speed. Hold fire to suppress', zh: '速度到位，按住开火压制' }),
+        { en: 'Good speed. Hold fire to suppress', zh: '速度到位，按住开火压制' },
         GameCoordinator.TUTORIAL_HINT_MED_MS / 1000
       );
       this.updatePlayerFacingObjective();
@@ -2663,7 +2681,7 @@ export class GameCoordinator {
     this.tutorialCombatState.fireHintShown = true;
     this.hud.showPowerUpBig(
       '🔥',
-      tr({ en: 'Guns check. Ready a missile lock', zh: '火力确认，准备导弹锁定' }),
+      { en: 'Guns check. Ready a missile lock', zh: '火力确认，准备导弹锁定' },
       GameCoordinator.TUTORIAL_HINT_MED_MS / 1000
     );
     this.updatePlayerFacingObjective();
@@ -2677,7 +2695,7 @@ export class GameCoordinator {
     this.tutorialCombatState.lockHintShown = true;
     this.hud.showPowerUpBig(
       '🎯',
-      tr({ en: 'Hold steady until the lock ring closes', zh: '稳住准星，等待锁定圈闭合' }),
+      { en: 'Hold steady until the lock ring closes', zh: '稳住准星，等待锁定圈闭合' },
       GameCoordinator.TUTORIAL_HINT_MED_MS / 1000
     );
     this.updatePlayerFacingObjective();
@@ -2691,7 +2709,7 @@ export class GameCoordinator {
     this.tutorialCombatState.missileHintShown = true;
     this.hud.showPowerUpBig(
       '🚀',
-      tr({ en: 'Missile away. Prioritize high threats', zh: '导弹已发射，优先点杀高威胁' }),
+      { en: 'Missile away. Prioritize high threats', zh: '导弹已发射，优先点杀高威胁' },
       GameCoordinator.TUTORIAL_HINT_MED_MS / 1000
     );
     this.updatePlayerFacingObjective();
@@ -2705,7 +2723,7 @@ export class GameCoordinator {
     this.tutorialCombatState.lockCompleteHintShown = true;
     this.hud.showPowerUpBig(
       '✅',
-      tr({ en: 'Locked. Fire now!', zh: '锁定完成，立刻发射' }),
+      { en: 'Locked. Fire now!', zh: '锁定完成，立刻发射' },
       GameCoordinator.TUTORIAL_HINT_SHORT_MS / 1000
     );
     this.updatePlayerFacingObjective();
@@ -2719,10 +2737,10 @@ export class GameCoordinator {
     this.tutorialCombatState.killHintShown = true;
     this.hud.showPowerUpBig(
       '🎯',
-      tr({
+      {
         en: 'First kill confirmed. Clear the wave to begin the mission',
         zh: '首杀确认，继续清空本波后正式',
-      }),
+      },
       GameCoordinator.TUTORIAL_HINT_LONG_MS / 1000
     );
     this.tutorialCombatState.active = false;
@@ -2751,7 +2769,7 @@ export class GameCoordinator {
     this.tutorialCombatState.hitHintShown = true;
     this.hud.showPowerUpBig(
       '↪️',
-      tr({ en: 'Hit! Strafe or boost out of the line of fire', zh: '被命中后立刻横移或加速脱离' }),
+      { en: 'Hit! Strafe or boost out of the line of fire', zh: '被命中后立刻横移或加速脱离' },
       GameCoordinator.TUTORIAL_HINT_SHORT_MS / 1000
     );
     this.updatePlayerFacingObjective();
@@ -2765,7 +2783,7 @@ export class GameCoordinator {
     this.tutorialCombatState.friendlySupportHintShown = true;
     this.hud.showPowerUpBig(
       '🤝',
-      tr({ en: 'Wingman on station. Cover them, then attack', zh: '友军到位，先护航再压制' }),
+      { en: 'Wingman on station. Cover them, then attack', zh: '友军到位，先护航再压制' },
       GameCoordinator.TUTORIAL_HINT_MED_MS / 1000
     );
     this.updatePlayerFacingObjective();
@@ -2853,14 +2871,14 @@ export class GameCoordinator {
       this.notifyEarnedUpgradePoints(earnedPoints);
       this.hud.showPowerUpBig(
         '✅',
-        tr({ en: 'Escort complete. Bonus awarded', zh: '护送完成，奖励到位' }),
+        { en: 'Escort complete. Bonus awarded', zh: '护送完成，奖励到位' },
         GameCoordinator.TUTORIAL_HINT_MED_MS / 1000,
         true
       );
     } else {
       this.hud.showPowerUpBig(
         '⚠️',
-        tr({ en: 'Escort lost. Keep up the pressure', zh: '护送失利，继续压制' }),
+        { en: 'Escort lost. Keep up the pressure', zh: '护送失利，继续压制' },
         GameCoordinator.TUTORIAL_HINT_MED_MS / 1000,
         true
       );
@@ -3236,7 +3254,7 @@ export class GameCoordinator {
     this.weapons.clearInFlight();
     this.retireBossMinions();
 
-    this.hud.showPowerUpBig('', tr({ en: 'Boss destroyed', zh: '已击坠' }));
+    this.hud.showPowerUpBig('', { en: 'Boss destroyed', zh: '已击坠' });
     this.campaign.handleBossDefeated(level, isBossMode);
   }
 
@@ -3505,7 +3523,7 @@ export class GameCoordinator {
       this.hud.updateUpgradePoints(this.playerStats.getUpgrades().getAvailablePoints());
       this.audioManager.playPowerUp();
       const feedback = GameCoordinator.UPGRADE_FEEDBACK[type];
-      this.hud.showPowerUpBig(feedback.icon, tr(feedback.label), 1.2, true);
+      this.hud.showPowerUpBig(feedback.icon, feedback.label, 1.2, true);
     }
   }
 
@@ -3514,27 +3532,27 @@ export class GameCoordinator {
       return;
     }
 
-    const pointLabel =
+    const pointLabel: HudText =
       earnedPoints > 1
-        ? tr(
-            { en: '+{points} upgrade points', zh: '获得 {points} 升级点' },
-            { points: earnedPoints }
-          )
-        : tr({ en: '+1 upgrade point', zh: '获得 1 升级点' });
+        ? {
+            text: { en: '+{points} upgrade points', zh: '获得 {points} 升级点' },
+            params: { points: earnedPoints },
+          }
+        : { en: '+1 upgrade point', zh: '获得 1 升级点' };
     this.hud.showPowerUpBig('⭐', pointLabel, 1.1, true);
 
     if (!this.upgradeMenuHintShown) {
       this.upgradeMenuHintShown = true;
       const isMobile = GameConfig.isMobile;
-      const hint = isMobile
-        ? tr({
+      const hint: LocalizedText = isMobile
+        ? {
             en: 'Pause and open Upgrades to improve your jet',
             zh: '暂停后打开升级菜单，立即强化机体',
-          })
-        : tr({
+          }
+        : {
             en: 'Press U or pause to open Upgrades and improve your jet',
             zh: '按 U 或暂停后打开升级菜单，立即强化机体',
-          });
+          };
       this.scheduleTimeout(() => {
         this.hud.showPowerUpBig('🧩', hint, 1.8, true);
       }, 1200);
