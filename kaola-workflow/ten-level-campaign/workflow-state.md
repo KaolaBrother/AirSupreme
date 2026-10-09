@@ -2,14 +2,14 @@
 
 ## Project
 name: ten-level-campaign
-status: active
+status: complete
 
 ## Current Position
 phase: adaptive
 workflow_path: adaptive
 runtime: claude
 main_session_role: orchestrator
-step: session 3 — final audit done (R1-R16: 13 met, R2/R11/R12 partly); fix round F1-F4b dispatched from c060401; next: separate-custody tests → docs → re-audit → merge to main
+step: session 3 — done: final audit → fix round (4 waves) → separate-custody tests → docs → re-audit (R1-R16 met) → merged to main and pushed; local clone synced
 
 ## Selection
 source: user directive (claude.ai project description) — no GitHub issue; all repo issues are closed

@@ -126,7 +126,7 @@
   - R14 角色名国际化，只保留两名中文角色（陈曦、梁伟）；R15 友军女性角色（Varga、Lindqvist、陈曦、Hart）（`b30a040`）
   - R16 中英双语配音（ElevenLabs，每句一条，每语言 200 句，`8277131` + `ed418e3`；`VoiceSystem` 无线电滤波 + 音乐闪避，`d2215ff`）；文档刷新 `c8d3131`
 - [done] 独立终验（`93b9986`，R1-R16）：R1、R3-R10、R13-R16 达标；R2 / R11 / R12 部分达标 —— 复活后原地再撞（阻断）、Boss 击破后无检查点、导弹告警无线电刷屏、雨燕入队台词每关重复、第 5 关绘制调用过多 / 第 1 关性能档三角形过多、难度压力不随关卡上升，另有若干小问题（详见运行记录）
-- [active] 终验修复轮（并行，文件互不重叠，均从 `c060401` 起；第 1 波已于 `29b9e53` 全部合并，门槛通过，2 条测试按规格待更新）：
+- [done] 终验修复轮（并行，文件互不重叠，均从 `c060401` 起；第 1 波 `29b9e53` 合并，共 4 波，终态 `7981ed7`）：
   - `F1 - 玩家/复活/输入/僚机队形`：复活点沿航迹后退并探测 0-50 m、复活后坠毁宽限；移动端暂停键锁存；僚机编队位不挡追尾镜头 — owned：`src/core/systems/PlayerSystem.ts`、`src/core/systems/EnemySystem.ts`、`src/core/Input/InputHandler.ts`、`src/features/enemy/FriendlyAI.ts`
   - `F2 - 战役流程/无线电/存档`：Boss 击破与机库出击时写检查点、导弹告警无线电限频、两名僚机第 3 关起同时出击且入队台词只播一次（记入存档）、Boss 收尾等配音说完、修复包说明、生产日志级别 — owned：`src/core/campaign/**`、`src/core/save/**`、`src/core/units/UnitController.ts`、`src/ui/RadioComms.ts`、`src/core/GameCoordinator.ts`、`src/core/BossBattleController.ts`、`src/features/powerups/PowerUpSystem.ts`、`src/core/utils/Logger.ts`
   - `F3 - 界面打磨`：竖屏 HUD 与教学面板重叠、模型预览 Boss 6-10、Boss 部件标签堆叠、计数器对比度、EMP 闪白、中央弹窗挡准星、切换语言时简报/存档提示重绘（HUD 侧） — owned：`src/ui/HUD.ts`、`src/ui/OnboardingManager.ts`、`src/ui/ModelPreview.ts`、`src/ui/EnemyHealthBars.ts`、`src/ui/theme/**`、`index.html`、`src/features/effects/postfx/**`
@@ -142,12 +142,13 @@
     - `T - 测试第 2 遍`：第 2 波行为（可本地化提示、难度名、友机入场位、Boss 导弹伤害随难度、干扰弹诱骗 Boss 1-5 导弹、`updateKinematic`、EMP 近距淡出） — owned：`src/__tests__/**`、`*.test.ts`
     - `D - 文档`：README / README.zh-CN、CHANGELOG、TECHNICAL_DOCUMENTATION、`docs/**` — owned：上述文档
     - `R - 独立复验`（只读，`6d2d780`）：R1-R16 + 阻断 / 主要问题复查
-  - [active] 第 4 波（从 `1440f25` 起）：`Q` 复验遗留小项（Boss 模式敌机计数、中文“教程”、模型预览标签遮挡、单位告警与大号提示即时重绘）∥ 测试第 3 遍（2 条过期测试 + P 的行为）∥ 文档补充
+  - [done] 第 4 波（从 `1440f25` 起；`7981ed7` 合并，门槛全绿：vitest 1,887 通过 / 87 个文件，真实构建通过）：`Q` 复验遗留小项（Boss 模式敌机计数、中文“教程”、模型预览标签遮挡、单位告警与大号提示即时重绘）∥ 测试第 3 遍（2 条过期测试 + P 的行为）∥ 文档补充
   - [watch] 复验 N2：第 1 个 Boss 威胁很低、第 10 关波次压力低于第 8-9 关（单次测量波动约 ±30 %）
-  - 之后：合并 `main` 并推送
+  - [done] 合并 `main` 并推送（会话 3）
   - [watch] `GameScene` 阴影相机只覆盖 10×10 m（阴影几乎不可见）
   - 验收：`tsc` / `lint` / `test:run` / `build` 全部通过；无头 Chromium 复现脚本证明阻断与主要问题已消失
-- [next] 复验通过后合并 `workflow/ten-level-campaign` → `main` 并推送，同步本地克隆
+- [done] 复验通过后合并 `workflow/ten-level-campaign` → `main` 并推送，同步本地克隆
+- [watch] 后续可选：第 1 个 Boss 威胁偏低、第 10 关波次压力波动、`GameScene` 阴影相机范围、远端过期 WIP 分支（`batch/audio`、`batch/progression`、`batch/story-ui`，需用户确认后删除）
 
 ## 当前概览
 
