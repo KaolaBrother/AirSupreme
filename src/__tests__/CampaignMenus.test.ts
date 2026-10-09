@@ -15,6 +15,7 @@ import {
   normalizeStartFlowSettings,
   saveStartFlowSettings,
 } from '@/core/SessionSettings';
+import { getDifficultyProfile } from '@/core/Difficulty';
 import { TOTAL_LEVELS, getCampaignChapter } from '@/features/campaign/CampaignData';
 import { PlayerUpgrades, UPGRADE_CONFIGS, UpgradeType } from '@/features/upgrade/UpgradeSystem';
 import { getLocale, setLocale } from '@/i18n';
@@ -342,6 +343,73 @@ describe('StartMenu campaign additions', () => {
       (document.getElementById('start-btn') as HTMLButtonElement).click();
 
       expect((started as GameSettings | null)?.startLevel).toBe(8);
+    });
+  });
+
+  describe('#difficulty-row (wave 2: names from Difficulty.ts)', () => {
+    const TIERS = [1, 2, 3, 4, 5] as const;
+    const NAMES = {
+      en: ['Very Easy', 'Easy', 'Normal', 'Hard', 'Expert'],
+      zh: ['非常简单', '简单', '普通', '困难', '专家'],
+    } as const;
+
+    it('the tier names are the Difficulty.ts labels', () => {
+      expect(TIERS.map((tier) => getDifficultyProfile(tier).label.en)).toEqual(NAMES.en);
+      expect(TIERS.map((tier) => getDifficultyProfile(tier).label.zh)).toEqual(NAMES.zh);
+    });
+
+    it.each(LOCALES)('steps Very Easy → Expert with the Difficulty.ts names (%s)', (locale) => {
+      setLocale(locale);
+      createMenu();
+      const names = locale === 'zh-CN' ? NAMES.zh : NAMES.en;
+      const valueText = (): string =>
+        document.getElementById('difficulty-value')?.textContent ?? '';
+      const minus = rowButton('difficulty-row', '-');
+      const plus = rowButton('difficulty-row', '+');
+
+      for (let i = 0; i < 6; i++) minus.click();
+      expect(valueText().trim()).toBe(names[0]);
+      for (let tier = 2; tier <= 5; tier++) {
+        plus.click();
+        expect(valueText().trim(), `tier ${tier}`).toBe(names[tier - 1]);
+        expect(valueText().trim()).toBe(textIn(getDifficultyProfile(tier).label, locale));
+      }
+      plus.click();
+      expect(valueText().trim(), 'stops at Expert').toBe(names[4]);
+    });
+
+    it('relabels the row when the language changes', () => {
+      createMenu();
+      rowButton('difficulty-row', '+').click();
+      const value = (): string => document.getElementById('difficulty-value')?.textContent ?? '';
+      expect(value().trim()).toBe('Hard');
+      setLocale('zh-CN');
+      expect(value().trim()).toBe('困难');
+    });
+
+    it.each(TIERS)('hands the chosen difficulty %i to onStart', (tier) => {
+      const startMenu = createMenu();
+      const minus = rowButton('difficulty-row', '-');
+      for (let i = 0; i < 6; i++) minus.click();
+      for (let i = 1; i < tier; i++) rowButton('difficulty-row', '+').click();
+
+      let started: GameSettings | null = null;
+      startMenu.setOnStart((settings) => {
+        started = settings;
+      });
+      (document.getElementById('start-btn') as HTMLButtonElement).click();
+      expect((started as GameSettings | null)?.difficulty).toBe(tier);
+    });
+
+    it('names the saved difficulty on the Continue button', () => {
+      saveCampaignCheckpoint({ ...CHECKPOINT, difficulty: 2 });
+      createMenu();
+      expect(document.getElementById('continue-btn')?.textContent).toContain('Easy');
+      expect(document.getElementById('continue-btn')?.textContent).not.toContain('Very Easy');
+      setLocale('zh-CN');
+      const text = document.getElementById('continue-btn')?.textContent ?? '';
+      expect(text).toContain('简单');
+      expect(text).not.toContain('非常简单');
     });
   });
 
