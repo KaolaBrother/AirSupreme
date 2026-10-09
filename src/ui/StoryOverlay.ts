@@ -108,7 +108,8 @@ const VOICE_END_GRACE_MS = 1500;
 const NARRATION_TEXT_LEAD_MS = 350;
 const NARRATION_TEXT_MIN_MS = 300;
 const NARRATION_PACE_MIN = 0.3;
-const NARRATION_PACE_MAX = 4;
+/** 普通话旁白约每秒 5 个字（打字机基础节奏的 5–6 倍慢） */
+const NARRATION_PACE_MAX = 6;
 const VOICED_HOLD_BASE_MS = 1800;
 const VOICED_HOLD_MIN_MS = 2600;
 
@@ -833,14 +834,18 @@ export class StoryOverlay {
     }
   }
 
-  /** 打字节奏倍数：自然节奏（每字 + 标点停顿）缩放到“配音时长 − 提前量”，夹在上下限之间 */
+  /**
+   * 打字节奏倍数：自然节奏（每字 + 标点停顿）缩放到“配音时长 − 提前量”，夹在上下限之间。
+   * 第一个字立即出现、最后一个字之后的停顿看不见，所以只累计前 n−1 个字之后的间隔。
+   */
   private static paceFor(paragraph: TypedParagraph, seconds: number): number {
     if (!(seconds > 0)) {
       return 1;
     }
+    const chars = Array.from(paragraph.full);
     let natural = 0;
-    for (const char of paragraph.full) {
-      natural += TYPE_CHAR_MS + pauseAfter(char);
+    for (let i = 0; i < chars.length - 1; i++) {
+      natural += TYPE_CHAR_MS + pauseAfter(chars[i]);
     }
     if (natural <= 0) {
       return 1;
