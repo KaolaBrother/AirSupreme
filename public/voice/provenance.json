@@ -2194,9 +2194,82 @@
      "generationId": "d8raGd3E3X7f6bUEwEzO",
      "chars": 95,
      "tag": "calm"
+    },
+    {
+     "id": "generic-swift-joined",
+     "speaker": "wingman2",
+     "kind": "radio",
+     "path": "en/generic-swift-joined.mp3",
+     "sha256": "e3b8255ca4ec8bb9b2213d60c78387cb72bcb4e6603b71e5adec7c4ca7c56c2f",
+     "voiceId": "oVXQ3H21hRI9OtM4YH5K",
+     "generationId": "FTp33vTj8lowXwYMpvWO",
+     "chars": 67,
+     "tag": "dry",
+     "flowId": "SzjapzkH3sMpXXV0NH71",
+     "batch": "topup"
+    },
+    {
+     "id": "generic-raven-down-swift",
+     "speaker": "wingman2",
+     "kind": "radio",
+     "path": "en/generic-raven-down-swift.mp3",
+     "sha256": "4be5dc1254284a16ba750d1363070cf4819e01dd03928e6c90e475e411540e5e",
+     "voiceId": "oVXQ3H21hRI9OtM4YH5K",
+     "generationId": "FHbGzfZybTaCWHN91rtg",
+     "chars": 77,
+     "tag": "urgent",
+     "flowId": "SzjapzkH3sMpXXV0NH71",
+     "batch": "topup"
+    },
+    {
+     "id": "generic-raven-down-hq",
+     "speaker": "hq",
+     "kind": "radio",
+     "path": "en/generic-raven-down-hq.mp3",
+     "sha256": "80ac6723a8b8704b2ce40e54f6f9ca3b41c8af5ab6b3f6eb1153f6e7fd3b2c73",
+     "voiceId": "85xci5bgwOrimRmBcbA1",
+     "generationId": "hk52pKJzA6JORn5S8vGg",
+     "chars": 75,
+     "tag": null,
+     "flowId": "SzjapzkH3sMpXXV0NH71",
+     "batch": "topup"
+    },
+    {
+     "id": "generic-swift-down-raven",
+     "speaker": "wingman",
+     "kind": "radio",
+     "path": "en/generic-swift-down-raven.mp3",
+     "sha256": "8eeb6e12a1ac95ff6e3d4dc4f46652b2ca8ff0727577b85b6899e1fb4440b606",
+     "voiceId": "bkWmSiLbVbuhntmf2Kw7",
+     "generationId": "DHvzBskIyGGxXNfBYUJJ",
+     "chars": 83,
+     "tag": "urgent",
+     "flowId": "SzjapzkH3sMpXXV0NH71",
+     "batch": "topup"
+    },
+    {
+     "id": "generic-swift-down-hq",
+     "speaker": "hq",
+     "kind": "radio",
+     "path": "en/generic-swift-down-hq.mp3",
+     "sha256": "e53ca1fe3cb8514b97441132a2cd46f4b0efc593a4a445dae701b68913c3d7ad",
+     "voiceId": "85xci5bgwOrimRmBcbA1",
+     "generationId": "9TSYK4m7BjOw7dacJyXw",
+     "chars": 66,
+     "tag": null,
+     "flowId": "SzjapzkH3sMpXXV0NH71",
+     "batch": "topup"
     }
    ],
-   "failures": []
+   "failures": [],
+   "topups": [
+    {
+     "flowId": "SzjapzkH3sMpXXV0NH71",
+     "flowName": "AirSupreme voice top-up",
+     "createdAt": "2026-10-09T07:50:28.109Z",
+     "fileCount": 5
+    }
+   ]
   },
   "zh": {
    "model": "eleven_v4",
@@ -4353,9 +4426,82 @@
      "generationId": "I5yL3hhmcHIBQC6paE4c",
      "chars": 34,
      "tag": null
+    },
+    {
+     "id": "generic-swift-joined",
+     "speaker": "wingman2",
+     "kind": "radio",
+     "path": "zh/generic-swift-joined.mp3",
+     "sha256": "1e35cd6989d9f39552167963bf9ebb3884575e7ce95d2ecb4a59320df01de575",
+     "voiceId": "ggacvEjbmpoSuEinfFWs",
+     "generationId": "aDh22Ba0fLwD2k20umOP",
+     "chars": 21,
+     "tag": null,
+     "flowId": "SzjapzkH3sMpXXV0NH71",
+     "batch": "topup"
+    },
+    {
+     "id": "generic-raven-down-swift",
+     "speaker": "wingman2",
+     "kind": "radio",
+     "path": "zh/generic-raven-down-swift.mp3",
+     "sha256": "462dbf34a706e67314fe95c709dafe0bfc2939e282fadab28bbe4ffcbadceafc",
+     "voiceId": "ggacvEjbmpoSuEinfFWs",
+     "generationId": "AfKfvIS9Aauz8L4ZiuyU",
+     "chars": 24,
+     "tag": null,
+     "flowId": "SzjapzkH3sMpXXV0NH71",
+     "batch": "topup"
+    },
+    {
+     "id": "generic-raven-down-hq",
+     "speaker": "hq",
+     "kind": "radio",
+     "path": "zh/generic-raven-down-hq.mp3",
+     "sha256": "300bf32871863325baf1b371bd7bd646655a995881ead0d0d51822b096160748",
+     "voiceId": "rtRocV7drsrJFSQPxlD3",
+     "generationId": "2grP2NlXuqKnqahNo2cg",
+     "chars": 29,
+     "tag": null,
+     "flowId": "SzjapzkH3sMpXXV0NH71",
+     "batch": "topup"
+    },
+    {
+     "id": "generic-swift-down-raven",
+     "speaker": "wingman",
+     "kind": "radio",
+     "path": "zh/generic-swift-down-raven.mp3",
+     "sha256": "b8e62e6b7aceab8515ed00277013df16891b98be403c2a77049c1c7add24cf8e",
+     "voiceId": "E8c1bekb52tdh7tvpKVK",
+     "generationId": "UH8A3T7F1tvG74mRWrcy",
+     "chars": 28,
+     "tag": null,
+     "flowId": "SzjapzkH3sMpXXV0NH71",
+     "batch": "topup"
+    },
+    {
+     "id": "generic-swift-down-hq",
+     "speaker": "hq",
+     "kind": "radio",
+     "path": "zh/generic-swift-down-hq.mp3",
+     "sha256": "4962cefdfd25b50bb6b8ac9a8cab8b3f5a710205a87db220eba76fbe36c57e26",
+     "voiceId": "rtRocV7drsrJFSQPxlD3",
+     "generationId": "cV7yvMMzi4XeJN7em96V",
+     "chars": 24,
+     "tag": null,
+     "flowId": "SzjapzkH3sMpXXV0NH71",
+     "batch": "topup"
     }
    ],
-   "failures": []
+   "failures": [],
+   "topups": [
+    {
+     "flowId": "SzjapzkH3sMpXXV0NH71",
+     "flowName": "AirSupreme voice top-up",
+     "createdAt": "2026-10-09T07:50:28.109Z",
+     "fileCount": 5
+    }
+   ]
   }
  }
 }

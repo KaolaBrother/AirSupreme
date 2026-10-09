@@ -782,6 +782,26 @@
    "epilogue-5": {
     "duration": 6.08,
     "bytes": 115390
+   },
+   "generic-swift-joined": {
+    "duration": 4.64,
+    "bytes": 92402
+   },
+   "generic-raven-down-swift": {
+    "duration": 4.8,
+    "bytes": 94910
+   },
+   "generic-raven-down-hq": {
+    "duration": 5.68,
+    "bytes": 109121
+   },
+   "generic-swift-down-raven": {
+    "duration": 4.96,
+    "bytes": 97418
+   },
+   "generic-swift-down-hq": {
+    "duration": 5.04,
+    "bytes": 98672
    }
   },
   "zh": {
@@ -1564,6 +1584,26 @@
    "epilogue-5": {
     "duration": 7.76,
     "bytes": 142557
+   },
+   "generic-swift-joined": {
+    "duration": 5.12,
+    "bytes": 99925
+   },
+   "generic-raven-down-swift": {
+    "duration": 5.36,
+    "bytes": 104105
+   },
+   "generic-raven-down-hq": {
+    "duration": 6.08,
+    "bytes": 115390
+   },
+   "generic-swift-down-raven": {
+    "duration": 6.24,
+    "bytes": 117898
+   },
+   "generic-swift-down-hq": {
+    "duration": 5.12,
+    "bytes": 99925
    }
   }
  }
