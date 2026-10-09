@@ -281,4 +281,96 @@ describe('wingman formation', () => {
       expect(fired).toHaveBeenCalled();
     });
   });
+
+  describe('spawn pose (EnemySystem.getFriendlySpawnPose, wave 2)', () => {
+    const HEADINGS = [0, 0.7, Math.PI / 2, 2.5, -1.2, Math.PI];
+
+    function forwardOf(heading: number, pitch = 0): THREE.Vector3 {
+      return new THREE.Vector3(
+        -Math.sin(heading) * Math.cos(pitch),
+        Math.sin(pitch),
+        -Math.cos(heading) * Math.cos(pitch)
+      );
+    }
+
+    function pose(
+      player: THREE.Vector3,
+      forward: THREE.Vector3
+    ): { position: THREE.Vector3; heading: THREE.Vector3 } {
+      const position = new THREE.Vector3();
+      const heading = new THREE.Vector3();
+      enemySystem.getFriendlySpawnPose(player, forward, position, heading);
+      return { position, heading };
+    }
+
+    it.each(HEADINGS)(
+      'heading %s rad: well out to the side, alternating with the slots, outside the corridor',
+      (heading) => {
+        const player: PlayerTrack = { position: new THREE.Vector3(120, 140, -60), heading };
+        const sides: number[] = [];
+        for (let slot = 0; slot < 4; slot++) {
+          const spawned = pose(player.position, forwardOf(heading));
+          const offset = relative(player, spawned.position);
+          expect(Math.abs(offset.lateral), `slot ${slot}`).toBeGreaterThanOrEqual(35);
+          expect(insideCorridor(offset), `slot ${slot}`).toBe(false);
+          expect(spawned.position.distanceTo(player.position), `slot ${slot}`).toBeLessThan(150);
+          sides.push(Math.sign(offset.lateral));
+          // 下一架用下一个编队位
+          const friendly = spawnFriendly(spawned.position);
+          expect(friendly.getFormationSlot()).toBe(slot);
+        }
+        expect(sides[1]).toBe(-sides[0]);
+        expect(sides[2]).toBe(sides[0]);
+        expect(sides[3]).toBe(sides[1]);
+      }
+    );
+
+    it.each(HEADINGS)("heading %s rad: faces the player's horizontal heading", (heading) => {
+      const spawned = pose(new THREE.Vector3(0, 100, 0), forwardOf(heading));
+      expect(spawned.heading.y).toBe(0);
+      expect(spawned.heading.length()).toBeCloseTo(1, 6);
+      expect(spawned.heading.dot(forwardOf(heading))).toBeGreaterThan(0.999);
+    });
+
+    it('uses the horizontal heading of a climbing or diving player', () => {
+      for (const pitch of [0.6, -0.9]) {
+        const spawned = pose(new THREE.Vector3(0, 300, 0), forwardOf(1.1, pitch));
+        expect(spawned.heading.y).toBe(0);
+        expect(spawned.heading.dot(forwardOf(1.1))).toBeGreaterThan(0.999);
+      }
+    });
+
+    it('stays finite for a vertical or degenerate player forward', () => {
+      for (const forward of [new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, 0)]) {
+        const spawned = pose(new THREE.Vector3(10, 200, 10), forward);
+        for (const value of [...spawned.position.toArray(), ...spawned.heading.toArray()]) {
+          expect(Number.isFinite(value)).toBe(true);
+        }
+        expect(spawned.heading.length()).toBeCloseTo(1, 6);
+      }
+    });
+
+    it('a friendly placed at its spawn pose settles on that side without crossing the corridor', () => {
+      const player: PlayerTrack = { position: new THREE.Vector3(0, 120, 0), heading: 0 };
+      const friendlies: FriendlyAI[] = [];
+      const spawnSides: number[] = [];
+      for (let i = 0; i < 2; i++) {
+        const spawned = pose(player.position, forwardOf(player.heading));
+        spawnSides.push(Math.sign(relative(player, spawned.position).lateral));
+        friendlies.push(spawnFriendly(spawned.position));
+      }
+      const hits: string[] = [];
+      flyPlayer(player, 10, 0, (time) => {
+        friendlies.forEach((friendly, index) => {
+          const offset = relative(player, friendly.getMesh().position);
+          if (insideCorridor(offset)) hits.push(`#${index} at ${time.toFixed(2)} s`);
+        });
+      });
+      expect(hits).toEqual([]);
+      friendlies.forEach((friendly, index) => {
+        const offset = relative(player, friendly.getMesh().position);
+        expect(Math.sign(offset.lateral), `friendly ${index}`).toBe(spawnSides[index]);
+      });
+    });
+  });
 });
