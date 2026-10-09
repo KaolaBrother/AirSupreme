@@ -2,9 +2,12 @@ import type * as THREE from 'three';
 import type { SpecialWeaponId } from '@/core/CombatContracts';
 import type { AudioManager } from '@/core/Audio/AudioManager';
 import { getLevelMusicForLevel, type MusicSystem } from '@/core/Audio/MusicSystem';
+import type { VoiceKind, VoicePlayOptions } from '@/core/Audio/VoiceSystem';
 import type { CameraModeSetting } from '@/core/SessionSettings';
 import {
+  CAMPAIGN_PROLOGUE,
   GENERIC_RADIO,
+  NARRATION_SPEAKER,
   UNIT_FIRST_CONTACT_RADIO,
   getCampaignChapter,
   getChapterRadio,
@@ -15,7 +18,7 @@ import {
 } from '@/features/campaign/CampaignData';
 import type { HUD, HudWeaponPanelState, HudWeaponSlotState } from '@/ui/HUD';
 import type { RadioComms } from '@/ui/RadioComms';
-import type { StoryCardKind, StoryOverlay } from '@/ui/StoryOverlay';
+import type { StoryCardKind, StoryNarration, StoryOverlay } from '@/ui/StoryOverlay';
 import { CampaignSfxRouter } from './CampaignSfx';
 import type { WingmanEvent, WingmanId, WingmanStatus } from './Wingmen';
 
@@ -27,7 +30,9 @@ import type { WingmanEvent, WingmanId, WingmanStatus } from './Wingmen';
  * - 无线电：RadioComms（CampaignData 章节台词、首次遭遇、通用告警；告警为高优先级）；
  * - HUD 新面板：特殊武器 / 热焰弹 / 自动存档 / 视角 / Boss 阶段 / 导弹告警 / 闪烁告警 / 雷达量程；
  * - 音乐：关卡曲 / Boss 曲 / 剧情曲 / 胜利曲、刺激音、强度；
- * - 音效：特殊武器、单位、Boss 效果提示（CampaignSfxRouter）。
+ * - 音效：特殊武器、单位、Boss 效果提示（CampaignSfxRouter）；
+ * - 配音（VoiceSystem，可选）：无线电台词出现时播放该句配音（台词等配音说完），剧情卡片逐段朗读；
+ *   入关预取本章台词；暂停 / 继续、清空无线电、失败、释放时停下或暂停配音。
  *
  * StoryOverlay / RadioComms 与其样式较大，按需加载（开局即预加载）；加载前的无线电台词先排队。
  * 逐帧调用的 HUD 推送都在这里做差分：数值不变时不调用 HUD（HUD 自己也只在变化时写 DOM），
@@ -195,6 +200,17 @@ export interface RadarRangeTarget {
   setRadarRangeMultiplier(multiplier: number): void;
 }
 
+/** 表现层用到的配音接口（VoiceSystem 的子集，便于测试替身） */
+export interface CampaignVoice {
+  play(lineId: string, options: VoicePlayOptions): number;
+  stop(kind?: VoiceKind): void;
+  stopAll(): void;
+  pause(): void;
+  resume(): void;
+  prefetch(lineIds: readonly string[]): void;
+  loadManifest(): Promise<unknown>;
+}
+
 interface StoryUiModules {
   StoryOverlay: typeof import('@/ui/StoryOverlay').StoryOverlay;
   RadioComms: typeof import('@/ui/RadioComms').RadioComms;
@@ -213,6 +229,8 @@ export interface DefaultCampaignPresentationDeps {
   loadStoryUi?(): Promise<StoryUiModules>;
   /** 具名僚机的在空状态（缺省视为都不在空中） */
   wingmen?: WingmanStatus;
+  /** 角色配音（缺省没有配音：无线电与剧情卡片纯文字） */
+  voice?: CampaignVoice;
 }
 
 interface StoryUi {
@@ -231,15 +249,38 @@ const HIGH_PRIORITY_RADIO: ReadonlySet<GenericRadioKey> = new Set<GenericRadioKe
   'missile-warning',
   'low-health',
 ]);
+/** 僚机事件台词：line 由 speakerWingman 播报（他 / 她在空中时），否则播 fallback（天穹指挥部） */
+interface WingmanEventRadio {
+  line: GenericRadioKey;
+  speakerWingman?: WingmanId;
+  fallback?: GenericRadioKey;
+}
+
 /**
- * 僚机事件 → 通用台词键（GENERIC_RADIO）。战役数据为渡鸦 / 雨燕补充入列、被击落台词后在此登记；
+ * 僚机事件 → 通用台词（GENERIC_RADIO）。渡鸦从第 1 章起一直随队，入列不播台词；
+ * 雨燕第 3 章起入列时报到；被击落由另一名僚机（在空中时）或天穹指挥部播报。
+ * 僚机名册不支持本关内复活（被击落的僚机下一关 / 读档后才归队），所以没有“重返战斗”台词。
  * 未登记的事件不播台词。
  */
 const WINGMAN_EVENT_RADIO: Readonly<
-  Partial<Record<`${WingmanId}:${WingmanEvent}`, GenericRadioKey>>
-> = {};
+  Partial<Record<`${WingmanId}:${WingmanEvent}`, WingmanEventRadio>>
+> = {
+  'swift:joined': { line: 'swift-joined' },
+  'raven:down': { line: 'raven-down-swift', speakerWingman: 'swift', fallback: 'raven-down-hq' },
+  'swift:down': { line: 'swift-down-raven', speakerWingman: 'raven', fallback: 'swift-down-hq' },
+};
 /** 剧情界面加载前最多缓存的台词 */
 const MAX_PENDING_RADIO = 6;
+/** 入关预取：紧急告警台词（要求立即开口） */
+const URGENT_VOICE_KEYS: readonly GenericRadioKey[] = [
+  'missile-warning',
+  'low-health',
+  'civilian-hit',
+];
+/** 无线电配音最多等待加载的时间（毫秒）：超过就这句纯文字 */
+const RADIO_VOICE_MAX_DELAY_MS = 1500;
+/** 剧情旁白最多等待加载的时间（毫秒），略短于 StoryOverlay 自己的等待上限 */
+const NARRATION_VOICE_MAX_DELAY_MS = 1500;
 /** 结束当前音乐的刺激音时长（毫秒，含收尾）：其后才开始胜利曲 */
 const ENDING_STINGER_MS: Readonly<Partial<Record<CampaignStinger, number>>> = {
   'boss-defeated': 4200,
@@ -296,6 +337,8 @@ export class DefaultCampaignPresentation implements ICampaignPresentation {
   private readonly timers = new Set<ReturnType<typeof setTimeout>>();
   /** 结束音乐的刺激音还在响到这个时刻（毫秒） */
   private endingStingerUntil = 0;
+  /** 当前无线电配音请求（过期回调据此忽略） */
+  private radioVoiceHandle = 0;
 
   // HUD 差分状态
   private readonly weaponPanel: HudWeaponPanelState = {
@@ -338,6 +381,8 @@ export class DefaultCampaignPresentation implements ICampaignPresentation {
   // ───────────────────────────── 剧情界面加载 ─────────────────────────────
 
   public preloadStoryUi(): Promise<void> {
+    // 配音清单与剧情界面一起尽早加载（失败时纯文字）
+    void this.deps.voice?.loadManifest().catch(() => undefined);
     return this.ensureStoryUi().then(() => undefined);
   }
 
@@ -351,7 +396,11 @@ export class DefaultCampaignPresentation implements ICampaignPresentation {
           const radio = new modules.RadioComms();
           overlay.onTypeTick = () => this.deps.audio.playTypewriterTick();
           overlay.onCardShown = (kind) => this.handleCardShown(kind);
-          radio.onLineShown = () => this.deps.audio.playRadioOpen();
+          overlay.narration = this.createNarration();
+          radio.onLineShown = (line) => {
+            this.deps.audio.playRadioOpen();
+            this.playRadioVoice(radio, line);
+          };
           this.storyUi = { overlay, radio };
           for (const pending of this.pendingRadio) {
             radio.enqueue(pending.line, { priority: pending.priority });
@@ -368,6 +417,84 @@ export class DefaultCampaignPresentation implements ICampaignPresentation {
     return this.storyUiPromise;
   }
 
+  // ───────────────────────────── 配音 ─────────────────────────────
+
+  /**
+   * 无线电台词出现：播放该句配音。开口时台词按配音时长延长停留，说完（或没出声 / 被打断）
+   * 才放行下一句；被高优先级打断后重播时会重新调用这里，配音从头再说一遍。
+   */
+  private playRadioVoice(radio: RadioComms, line: RadioLine): void {
+    const voice = this.deps.voice;
+    if (!voice || this.disposed) return;
+    const handle = voice.play(line.id, {
+      kind: 'radio',
+      speaker: line.speaker,
+      maxStartDelayMs: RADIO_VOICE_MAX_DELAY_MS,
+      onStart: (info) => {
+        if (this.radioVoiceHandle === handle) radio.holdForVoice(line, info.duration);
+      },
+      onEnd: () => {
+        if (this.radioVoiceHandle === handle) this.radioVoiceHandle = 0;
+        radio.releaseVoice(line);
+      },
+      onSilent: () => {
+        if (this.radioVoiceHandle === handle) this.radioVoiceHandle = 0;
+        radio.releaseVoice(line);
+      },
+    });
+    this.radioVoiceHandle = handle;
+  }
+
+  /** 剧情卡片的旁白挂钩：天穹指挥官逐段朗读序章 / 章节简报 / 尾声 */
+  private createNarration(): StoryNarration | null {
+    const voice = this.deps.voice;
+    if (!voice) return null;
+    return {
+      play: (voiceId, events) => {
+        if (this.disposed) {
+          events.onSilent();
+          return;
+        }
+        voice.play(voiceId, {
+          kind: 'narration',
+          speaker: NARRATION_SPEAKER,
+          maxStartDelayMs: NARRATION_VOICE_MAX_DELAY_MS,
+          onStart: (info) => events.onStart(info.duration),
+          onEnd: () => events.onEnd(),
+          onSilent: () => events.onSilent(),
+        });
+      },
+      stop: () => voice.stop('narration'),
+    };
+  }
+
+  /** 入关预取本章配音：序章 → 简报 → 入关台词 → 其余章节台词 → 紧急告警 */
+  private prefetchChapterVoice(level: number, includePrologue: boolean): void {
+    const voice = this.deps.voice;
+    if (!voice) return;
+    const chapter = getCampaignChapter(level);
+    const levelStart = chapter.radio.filter((line) => line.trigger === 'level-start');
+    const rest = chapter.radio.filter((line) => line.trigger !== 'level-start');
+    voice.prefetch([
+      ...(includePrologue ? CAMPAIGN_PROLOGUE.map((line) => line.id) : []),
+      ...chapter.intro.map((line) => line.id),
+      ...levelStart.map((line) => line.id),
+      ...rest.map((line) => line.id),
+      ...URGENT_VOICE_KEYS.map((key) => GENERIC_RADIO[key].id),
+    ]);
+  }
+
+  /** Boss 战预取（Boss 模式没有章节卡片）：本章 Boss 台词 */
+  private prefetchBossVoice(level: number): void {
+    const voice = this.deps.voice;
+    if (!voice) return;
+    voice.prefetch(
+      getCampaignChapter(level)
+        .radio.filter((line) => line.trigger.startsWith('boss-'))
+        .map((line) => line.id)
+    );
+  }
+
   // ───────────────────────────── 剧情卡片 ─────────────────────────────
 
   public showChapterIntro(
@@ -377,6 +504,7 @@ export class DefaultCampaignPresentation implements ICampaignPresentation {
   ): void {
     const token = ++this.storyToken;
     this.clearRadio();
+    this.prefetchChapterVoice(level, options.includePrologue);
     void this.ensureStoryUi().then((ui) => {
       if (this.disposed || token !== this.storyToken) return;
       if (!ui) {
@@ -444,8 +572,8 @@ export class DefaultCampaignPresentation implements ICampaignPresentation {
         audio.playChapterImpact();
         break;
       case 'debrief': {
-        // 关卡结束：清空无线电；胜利曲等 Boss 击破刺激音收尾后再进
-        this.clearRadio();
+        // 关卡结束：清空无线电（正在说的那句配音说完，不在句中截断）；胜利曲等 Boss 击破刺激音收尾后再进
+        this.clearRadioQueue(true);
         this.afterEndingStinger(() => this.deps.music.playVictoryMusic());
         for (let row = 0; row < this.debriefRows; row++) {
           this.schedule(
@@ -503,7 +631,11 @@ export class DefaultCampaignPresentation implements ICampaignPresentation {
   }
 
   public onWingmanEvent(id: WingmanId, event: WingmanEvent): void {
-    const key = WINGMAN_EVENT_RADIO[`${id}:${event}`];
+    const entry = WINGMAN_EVENT_RADIO[`${id}:${event}`];
+    if (!entry) return;
+    const useFallback =
+      entry.speakerWingman !== undefined && !this.isWingmanFlying(entry.speakerWingman);
+    const key = useFallback ? entry.fallback : entry.line;
     if (key) this.genericRadio(key);
   }
 
@@ -529,8 +661,17 @@ export class DefaultCampaignPresentation implements ICampaignPresentation {
   }
 
   public clearRadio(): void {
+    this.clearRadioQueue(false);
+  }
+
+  /** 清空无线电；letVoiceFinish：正在说的那句配音说完（结算卡片），否则立即停下 */
+  private clearRadioQueue(letVoiceFinish: boolean): void {
     this.pendingRadio.length = 0;
     this.storyUi?.radio.clear();
+    if (!letVoiceFinish) {
+      this.radioVoiceHandle = 0;
+      this.deps.voice?.stop('radio');
+    }
   }
 
   // ───────────────────────────── HUD 新面板 ─────────────────────────────
@@ -736,6 +877,7 @@ export class DefaultCampaignPresentation implements ICampaignPresentation {
 
   public playBossMusic(level: number): void {
     this.deps.music.playBossMusic(level);
+    this.prefetchBossVoice(level);
   }
 
   public playStinger(kind: CampaignStinger): void {
@@ -770,14 +912,17 @@ export class DefaultCampaignPresentation implements ICampaignPresentation {
   public onPause(): void {
     this.deps.music.pauseMusic();
     this.deps.audio.stopSustainedSounds();
+    this.deps.voice?.pause();
   }
 
   public onResume(): void {
     this.deps.music.resumeMusic();
+    this.deps.voice?.resume();
   }
 
   public onGameOver(): void {
     this.clearRadio();
+    this.deps.voice?.stopAll();
     this.setMissileWarning('none', 'units');
     this.setMissileWarning('none', 'boss');
     this.deps.audio.stopSustainedSounds();
@@ -786,6 +931,7 @@ export class DefaultCampaignPresentation implements ICampaignPresentation {
 
   public onMissionComplete(): void {
     this.clearRadio();
+    this.deps.voice?.stopAll();
     this.deps.audio.stopSustainedSounds();
     this.playStinger('campaign-complete');
     this.afterEndingStinger(() => this.deps.music.playVictoryMusic());
@@ -850,6 +996,9 @@ export class DefaultCampaignPresentation implements ICampaignPresentation {
     this.storyToken++;
     this.clearTimers();
     this.pendingRadio.length = 0;
+    this.radioVoiceHandle = 0;
+    // 配音系统归协调器所有（由它释放）；这里只停下声音
+    this.deps.voice?.stopAll();
     this.storyUi?.overlay.dispose();
     this.storyUi?.radio.dispose();
     this.storyUi = null;

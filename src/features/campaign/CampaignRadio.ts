@@ -229,4 +229,51 @@ export const GENERIC_RADIO: Readonly<Record<GenericRadioKey, RadioLine>> = {
     speaker: 'hq',
     text: { en: 'Progress logged.', zh: '战况已记录。' },
   },
+  // ── 僚机事件（CampaignPresentation.onWingmanEvent）：雨燕第 3 章起入列；被击落的僚机跳伞生还、
+  //    下一关归队，所以只报“被击落 + 看到伞 / 救援出发”，不写成阵亡 ──
+  'swift-joined': {
+    id: 'generic-swift-joined',
+    trigger: 'wave-start',
+    speaker: 'wingman2',
+    text: {
+      en: 'Swift, on your wing. Do leave a few for me this time, Falcon.',
+      zh: '雨燕就位，在你翼侧。猎鹰，这次给我留几个。',
+    },
+  },
+  'raven-down-swift': {
+    id: 'generic-raven-down-swift',
+    trigger: 'wave-start',
+    speaker: 'wingman2',
+    text: {
+      en: 'Raven’s hit—he’s going down! I see a chute. Falcon, stay on my wing.',
+      zh: '渡鸦中弹了，正在坠落！我看到伞了。猎鹰，跟紧我。',
+    },
+  },
+  'raven-down-hq': {
+    id: 'generic-raven-down-hq',
+    trigger: 'wave-start',
+    speaker: 'hq',
+    text: {
+      en: 'Raven is down. Rescue is on the way. Falcon, you’re on your own—stay sharp.',
+      zh: '渡鸦被击落，救援已经出发。猎鹰，现在只剩你了——保持警惕。',
+    },
+  },
+  'swift-down-raven': {
+    id: 'generic-swift-down-raven',
+    trigger: 'wave-start',
+    speaker: 'wingman',
+    text: {
+      en: 'Swift’s hit! She punched out—I see her chute. Falcon, let’s make them pay!',
+      zh: '雨燕中弹了！她弹射了，我看到伞了。猎鹰，让他们付出代价！',
+    },
+  },
+  'swift-down-hq': {
+    id: 'generic-swift-down-hq',
+    trigger: 'wave-start',
+    speaker: 'hq',
+    text: {
+      en: 'Swift is down. Search and rescue is on her. Keep fighting, Falcon.',
+      zh: '雨燕被击落，搜救队已经去接她了。继续战斗，猎鹰。',
+    },
+  },
 };

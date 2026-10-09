@@ -48,9 +48,13 @@ export interface CampaignFlowDeps {
   getScore(): number;
 }
 
-/** 击破 Boss 到结算 / 下一章之间的停顿（毫秒）：至少等爆炸，最多等收尾台词播完 */
+/**
+ * 击破 Boss 到结算 / 下一章之间的停顿（毫秒）：至少等爆炸，最多等收尾台词播完。
+ * 收尾台词有配音后每章 2-5 句共约 8-23 秒（台词等配音说完）：上限放宽到 16 秒，
+ * 多数章节能完整听完；超出时结算卡片出现，正在说的那句说完、其余丢弃。
+ */
 const BOSS_OUTRO_MIN_MS = 1600;
-const BOSS_OUTRO_MAX_MS = 6500;
+const BOSS_OUTRO_MAX_MS = 16000;
 const BOSS_OUTRO_POLL_MS = 250;
 
 /**

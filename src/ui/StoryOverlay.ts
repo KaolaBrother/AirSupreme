@@ -6,7 +6,7 @@ import {
   TOTAL_LEVELS,
   type CampaignChapter,
 } from '@/features/campaign/CampaignData';
-import { tr, type LocalizedText } from '@/i18n';
+import { getLocale, tr, type Locale, type LocalizedText } from '@/i18n';
 import { GLYPH_PIN } from '@/ui/theme/hudGlyphs';
 import { prefersReducedMotion, readHudLayoutDensity } from '@/ui/theme/hudPalette';
 import { injectStoryStyles } from '@/ui/theme/storyStyles';
@@ -30,8 +30,30 @@ export interface ChapterIntroOptions {
   unlockLine?: string | null;
 }
 
+/** 旁白配音的回调（每次 play 至多一次 onStart，之后 onEnd 与 onSilent 互斥、至多一次） */
+export interface StoryNarrationEvents {
+  /** 配音开口；durationSeconds 为配音时长 */
+  onStart(durationSeconds: number): void;
+  /** 自然说完 */
+  onEnd(): void;
+  /** 没有配音 / 加载失败 / 超时 / 被打断 */
+  onSilent(): void;
+}
+
+/**
+ * 旁白配音挂钩（表现层实现，StoryOverlay 不直接接触音频）：
+ * 序章 / 章节简报 / 尾声的每一段开始打字时 play(段落 id)；跳过、翻页、收起时 stop()。
+ */
+export interface StoryNarration {
+  play(voiceId: string, events: StoryNarrationEvents): void;
+  stop(): void;
+}
+
 /** 单张卡片：序章、章节、结算、尾声、片尾字幕 */
 type StoryCard = 'prologue' | 'chapter' | 'debrief' | 'epilogue' | 'credits';
+
+/** 段落旁白：none 没有配音、pending 待请求、waiting 等开口、playing 正在说、done 说完 / 被停下 */
+type ParagraphVoice = 'none' | 'pending' | 'waiting' | 'playing' | 'done';
 
 interface StorySession {
   kind: StoryCardKind;
@@ -49,6 +71,13 @@ interface TypedParagraph {
   typed: Text;
   full: string;
   shown: number;
+  /** 旁白配音 id（VoicedText.id）；没有配音时为 null */
+  voiceId: string | null;
+  voice: ParagraphVoice;
+  /** 打字节奏倍数：按配音时长调整，让文字在配音结束前一点打完 */
+  pace: number;
+  voiceSeconds: number;
+  voiceStartedAt: number;
 }
 
 /** 打字机节奏（毫秒）：约 29 字/秒，标点处停顿 */
@@ -68,6 +97,21 @@ const PAUSE_MARK = /\p{Terminal_Punctuation}/u;
 const HOLD_MS_PER_CHAR = 42;
 const HOLD_MIN_MS = 3800;
 const HOLD_MAX_MS = 9000;
+
+/**
+ * 旁白配音：段首等配音开口（至多 VOICE_START_WAIT_MS，超时改为纯文字），按配音时长调整打字节奏，
+ * 让文字比配音早 NARRATION_TEXT_LEAD_MS 打完；段尾等配音说完（兜底再多等 VOICE_END_GRACE_MS）。
+ * 整张卡都听完时，自动翻页只留看任务目标的时间（VOICED_HOLD_*）。
+ */
+const VOICE_START_WAIT_MS = 1600;
+const VOICE_END_GRACE_MS = 1500;
+const NARRATION_TEXT_LEAD_MS = 350;
+const NARRATION_TEXT_MIN_MS = 300;
+const NARRATION_PACE_MIN = 0.3;
+/** 普通话旁白约每秒 5 个字（打字机基础节奏的 5–6 倍慢） */
+const NARRATION_PACE_MAX = 6;
+const VOICED_HOLD_BASE_MS = 1800;
+const VOICED_HOLD_MIN_MS = 2600;
 
 /** 结算行依次浮现 */
 const DEBRIEF_ROW_STAGGER_MS = 110;
@@ -164,6 +208,8 @@ export class StoryOverlay {
   public onTypeTick?: () => void;
   /** 每张卡片出现时调用：序章与章节卡为 'chapter'，尾声与片尾字幕为 'ending' */
   public onCardShown?: (kind: StoryCardKind) => void;
+  /** 旁白配音（序章 / 章节简报 / 尾声逐段朗读）；null 时卡片纯文字 */
+  public narration: StoryNarration | null = null;
 
   private root: HTMLDivElement | null = null;
   private stage: HTMLDivElement | null = null;
@@ -186,6 +232,17 @@ export class StoryOverlay {
   private leaveTimer: number = 0;
   private listening: boolean = false;
   private disposed: boolean = false;
+
+  /** 旁白：每次请求 / 停止递增，过期回调据此忽略 */
+  private narrationToken: number = 0;
+  private narrationActive: boolean = false;
+  /** 等待配音开口 / 说完之后的续接 */
+  private voiceWaiter: (() => void) | null = null;
+  private voiceTimer: number = 0;
+  /** 本卡片的旁白都听完了（玩家快进过则为 false） */
+  private narrated: boolean = false;
+  /** 卡片按哪种语言写成：中途切换语言后不再配音（文字与配音语言不一致） */
+  private cardLocale: Locale = 'en';
 
   private readonly handleKeyDown = (event: KeyboardEvent): void => {
     if (!this.session) {
@@ -364,6 +421,7 @@ export class StoryOverlay {
     root.setAttribute('data-card', card);
     root.setAttribute('aria-label', this.describeCard(session, card));
     this.cardShownAt = nowMs();
+    this.cardLocale = getLocale();
 
     switch (card) {
       case 'prologue':
@@ -481,12 +539,24 @@ export class StoryOverlay {
   }
 
   // ---------------------------------------------------------------------------
-  // 打字机
+  // 打字机 + 旁白配音
   // ---------------------------------------------------------------------------
 
   private startTyping(): void {
-    if (this.paragraphs.length === 0 || this.reducedMotion) {
+    if (this.paragraphs.length === 0) {
       this.revealAll();
+      return;
+    }
+    if (this.reducedMotion) {
+      // 不做逐字动画：全文直接出现；有配音时逐段朗读完再自动翻页（输入照常翻页 / 跳过）
+      this.showAllText();
+      this.root?.classList.add('is-instant');
+      if (this.canNarrate()) {
+        this.markSettled();
+        this.narrateStatic(0);
+        return;
+      }
+      this.onTextSettled();
       return;
     }
     this.typing = true;
@@ -505,7 +575,17 @@ export class StoryOverlay {
       this.onTextSettled();
       return;
     }
+    // 段首：先请求这一段的旁白，开口（或确认没有配音）后按配音时长定打字节奏
+    if (paragraph.shown === 0 && paragraph.voice === 'pending') {
+      this.requestVoice(paragraph, () => this.typeNext());
+      return;
+    }
     if (paragraph.shown >= paragraph.full.length) {
+      // 段尾：等这一段的旁白说完再进入下一段
+      if (paragraph.voice === 'playing') {
+        this.awaitVoiceEnd(paragraph, () => this.typeNext());
+        return;
+      }
       paragraph.element.classList.remove('is-typing');
       this.paragraphIndex += 1;
       const next = this.paragraphs[this.paragraphIndex];
@@ -528,22 +608,40 @@ export class StoryOverlay {
         StoryOverlay.invoke(tick);
       }
     }
-    this.typeTimer = window.setTimeout(() => this.typeNext(), TYPE_CHAR_MS + pauseAfter(char));
+    this.typeTimer = window.setTimeout(
+      () => this.typeNext(),
+      (TYPE_CHAR_MS + pauseAfter(char)) * paragraph.pace
+    );
   }
 
-  /** 显示当前卡片的全部内容（快进） */
+  /** 显示当前卡片的全部内容（快进）：玩家选择自己读，旁白停下 */
   private revealAll(): void {
+    this.stopNarration();
+    this.narrated = false;
     if (this.typeTimer) {
       window.clearTimeout(this.typeTimer);
       this.typeTimer = 0;
     }
+    this.showAllText();
+    this.root?.classList.add('is-instant');
+    this.onTextSettled();
+  }
+
+  private showAllText(): void {
     for (const paragraph of this.paragraphs) {
       paragraph.shown = paragraph.full.length;
       paragraph.element.classList.remove('is-typing');
       StoryOverlay.renderParagraph(paragraph);
     }
-    this.root?.classList.add('is-instant');
-    this.onTextSettled();
+  }
+
+  /** 文字已全部出现：任务目标浮现（不安排自动翻页） */
+  private markSettled(): void {
+    this.settled = true;
+    for (const paragraph of this.paragraphs) {
+      paragraph.element.classList.remove('is-typing');
+    }
+    this.extras?.classList.remove('is-pending');
   }
 
   private onTextSettled(): void {
@@ -551,12 +649,12 @@ export class StoryOverlay {
     if (this.settled) {
       return;
     }
-    this.settled = true;
-    for (const paragraph of this.paragraphs) {
-      paragraph.element.classList.remove('is-typing');
-    }
-    this.extras?.classList.remove('is-pending');
+    this.markSettled();
+    this.scheduleAutoAdvance();
+  }
 
+  /** 自动翻页：听完旁白只留看任务目标的时间；否则按全文 + 目标清单字数估算阅读时间 */
+  private scheduleAutoAdvance(): void {
     const session = this.session;
     if (!session) {
       return;
@@ -565,13 +663,195 @@ export class StoryOverlay {
     if (card === 'debrief' || card === 'credits') {
       return;
     }
-    // 自动翻页：按全文 + 目标清单字数估算阅读时间
-    let chars = 0;
+    const extrasChars = this.extras?.textContent?.length ?? 0;
+    if (this.narrated) {
+      const hold = Math.min(
+        HOLD_MAX_MS,
+        Math.max(VOICED_HOLD_MIN_MS, VOICED_HOLD_BASE_MS + extrasChars * HOLD_MS_PER_CHAR)
+      );
+      this.scheduleStep(() => this.advance(), hold);
+      return;
+    }
+    let chars = extrasChars;
     for (const paragraph of this.paragraphs) {
       chars += paragraph.full.length;
     }
-    chars += this.extras?.textContent?.length ?? 0;
     this.scheduleStep(() => this.advance(), holdFor(chars));
+  }
+
+  private canNarrate(): boolean {
+    return (
+      this.narration !== null &&
+      getLocale() === this.cardLocale &&
+      this.paragraphs.some((paragraph) => paragraph.voiceId !== null)
+    );
+  }
+
+  /**
+   * 请求一段旁白；开口（onStart）或确认没有配音（无配音 / 超时 / 失败）后调用一次 resume。
+   * 卡片写成之后切换过语言则不配音（文字仍是旧语言）。
+   */
+  private requestVoice(paragraph: TypedParagraph, resume: () => void): void {
+    const narration = this.narration;
+    if (!narration || !paragraph.voiceId || getLocale() !== this.cardLocale) {
+      paragraph.voice = 'none';
+      resume();
+      return;
+    }
+    this.clearVoiceTimer();
+    const token = ++this.narrationToken;
+    paragraph.voice = 'waiting';
+    this.narrationActive = true;
+    this.voiceWaiter = resume;
+    this.voiceTimer = window.setTimeout(() => {
+      this.voiceTimer = 0;
+      if (token !== this.narrationToken || paragraph.voice !== 'waiting') {
+        return;
+      }
+      // 迟迟没有开口：这一段改为纯文字
+      this.stopNarration();
+      paragraph.voice = 'none';
+      resume();
+    }, VOICE_START_WAIT_MS);
+    try {
+      narration.play(paragraph.voiceId, {
+        onStart: (durationSeconds: number) => {
+          if (token !== this.narrationToken || paragraph.voice !== 'waiting') {
+            return;
+          }
+          this.clearVoiceTimer();
+          paragraph.voice = 'playing';
+          paragraph.voiceSeconds = Number.isFinite(durationSeconds)
+            ? Math.max(0, durationSeconds)
+            : 0;
+          paragraph.voiceStartedAt = nowMs();
+          paragraph.pace = StoryOverlay.paceFor(paragraph, paragraph.voiceSeconds);
+          this.narrated = true;
+          this.takeVoiceWaiter()?.();
+        },
+        onEnd: () => this.handleVoiceDone(token, paragraph),
+        onSilent: () => this.handleVoiceDone(token, paragraph),
+      });
+    } catch (error) {
+      console.error('[StoryOverlay] narration failed', error);
+      if (token === this.narrationToken && paragraph.voice === 'waiting') {
+        this.clearVoiceTimer();
+        this.narrationActive = false;
+        this.voiceWaiter = null;
+        paragraph.voice = 'none';
+        resume();
+      }
+    }
+  }
+
+  /** 旁白说完 / 没出声 / 被停下：等开口的继续打字，段尾等说完的进入下一段 */
+  private handleVoiceDone(token: number, paragraph: TypedParagraph): void {
+    if (token !== this.narrationToken) {
+      return;
+    }
+    this.clearVoiceTimer();
+    this.narrationActive = false;
+    if (paragraph.voice === 'waiting') {
+      paragraph.voice = 'none';
+    } else {
+      paragraph.voice = 'done';
+      // 配音提前停了：剩下的字不再放慢
+      paragraph.pace = Math.min(paragraph.pace, 1);
+    }
+    this.takeVoiceWaiter()?.();
+  }
+
+  /** 段尾等旁白说完（兜底：配音时长 + VOICE_END_GRACE_MS 后照常继续） */
+  private awaitVoiceEnd(paragraph: TypedParagraph, resume: () => void): void {
+    if (paragraph.voice !== 'playing') {
+      resume();
+      return;
+    }
+    this.clearVoiceTimer();
+    this.voiceWaiter = resume;
+    const token = this.narrationToken;
+    const remaining = Math.max(
+      0,
+      paragraph.voiceSeconds * 1000 - (nowMs() - paragraph.voiceStartedAt)
+    );
+    this.voiceTimer = window.setTimeout(() => {
+      this.voiceTimer = 0;
+      if (token !== this.narrationToken || paragraph.voice !== 'playing') {
+        return;
+      }
+      paragraph.voice = 'done';
+      this.takeVoiceWaiter()?.();
+    }, remaining + VOICE_END_GRACE_MS);
+  }
+
+  /** 减少动态效果时：全文已显示，逐段朗读，读完安排自动翻页 */
+  private narrateStatic(index: number): void {
+    const paragraph = this.paragraphs[index];
+    if (!paragraph) {
+      this.scheduleAutoAdvance();
+      return;
+    }
+    this.requestVoice(paragraph, () => {
+      this.awaitVoiceEnd(paragraph, () => {
+        if (index + 1 >= this.paragraphs.length) {
+          this.narrateStatic(index + 1);
+          return;
+        }
+        this.scheduleStep(
+          () => this.narrateStatic(index + 1),
+          paragraph.voice === 'none' ? 0 : TYPE_PARAGRAPH_GAP_MS
+        );
+      });
+    });
+  }
+
+  private takeVoiceWaiter(): (() => void) | null {
+    const waiter = this.voiceWaiter;
+    this.voiceWaiter = null;
+    return waiter;
+  }
+
+  private clearVoiceTimer(): void {
+    if (this.voiceTimer && typeof window !== 'undefined') {
+      window.clearTimeout(this.voiceTimer);
+    }
+    this.voiceTimer = 0;
+  }
+
+  /** 停下旁白（跳过 / 快进 / 翻页 / 收起）；之后到达的旧回调一律忽略 */
+  private stopNarration(): void {
+    this.clearVoiceTimer();
+    this.voiceWaiter = null;
+    this.narrationToken++;
+    if (!this.narrationActive) {
+      return;
+    }
+    this.narrationActive = false;
+    try {
+      this.narration?.stop();
+    } catch (error) {
+      console.error('[StoryOverlay] narration stop failed', error);
+    }
+  }
+
+  /**
+   * 打字节奏倍数：自然节奏（每字 + 标点停顿）缩放到“配音时长 − 提前量”，夹在上下限之间。
+   * 第一个字立即出现、最后一个字之后的停顿看不见，所以只累计前 n−1 个字之后的间隔。
+   */
+  private static paceFor(paragraph: TypedParagraph, seconds: number): number {
+    if (!(seconds > 0)) {
+      return 1;
+    }
+    const chars = Array.from(paragraph.full);
+    let natural = 0;
+    for (let i = 0; i < chars.length - 1; i++) {
+      natural += TYPE_CHAR_MS + pauseAfter(chars[i]);
+    }
+    if (natural <= 0) {
+      return 1;
+    }
+    const target = Math.max(NARRATION_TEXT_MIN_MS, seconds * 1000 - NARRATION_TEXT_LEAD_MS);
+    return Math.min(NARRATION_PACE_MAX, Math.max(NARRATION_PACE_MIN, target / natural));
   }
 
   private static renderParagraph(paragraph: TypedParagraph): void {
@@ -646,7 +926,10 @@ export class StoryOverlay {
     card.append(
       ident,
       StoryOverlay.buildRule(),
-      this.buildTypedText(CAMPAIGN_PROLOGUE.map((line) => tr(line)))
+      this.buildTypedText(
+        CAMPAIGN_PROLOGUE.map((line) => tr(line)),
+        CAMPAIGN_PROLOGUE.map((line) => line.id)
+      )
     );
     return card;
   }
@@ -685,10 +968,14 @@ export class StoryOverlay {
     }
     this.extras = extras;
 
+    const intro = chapter.intro ?? [];
     card.append(
       ident,
       StoryOverlay.buildRule(),
-      this.buildTypedText((chapter.intro ?? []).map((line) => tr(line))),
+      this.buildTypedText(
+        intro.map((line) => tr(line)),
+        intro.map((line) => line.id)
+      ),
       extras
     );
     return card;
@@ -797,7 +1084,10 @@ export class StoryOverlay {
     card.append(
       ident,
       StoryOverlay.buildRule(),
-      this.buildTypedText(CAMPAIGN_EPILOGUE.map((line) => tr(line)))
+      this.buildTypedText(
+        CAMPAIGN_EPILOGUE.map((line) => tr(line)),
+        CAMPAIGN_EPILOGUE.map((line) => line.id)
+      )
     );
     return card;
   }
@@ -938,11 +1228,15 @@ export class StoryOverlay {
     return rule;
   }
 
-  private buildTypedText(lines: readonly string[]): HTMLElement {
+  /** 打字机段落；voiceIds[i] 为第 i 段的旁白配音 id（缺省 / 空串表示不配音） */
+  private buildTypedText(
+    lines: readonly string[],
+    voiceIds: ReadonlyArray<string | null | undefined> = []
+  ): HTMLElement {
     const text = el('section', 'so-text');
     text.setAttribute('aria-label', lines.join(' '));
     this.paragraphs = [];
-    for (const line of lines) {
+    lines.forEach((line, index) => {
       const paragraph = el('p', 'so-para');
       const typed = document.createTextNode('');
       const caret = el('span', 'so-caret');
@@ -950,8 +1244,20 @@ export class StoryOverlay {
       paragraph.append(typed, caret);
       paragraph.setAttribute('data-rest', line);
       text.appendChild(paragraph);
-      this.paragraphs.push({ element: paragraph, typed, full: line, shown: 0 });
-    }
+      const voiceId = voiceIds[index];
+      const hasVoice = typeof voiceId === 'string' && voiceId.length > 0;
+      this.paragraphs.push({
+        element: paragraph,
+        typed,
+        full: line,
+        shown: 0,
+        voiceId: hasVoice ? voiceId : null,
+        voice: hasVoice ? 'pending' : 'none',
+        pace: 1,
+        voiceSeconds: 0,
+        voiceStartedAt: 0,
+      });
+    });
     return text;
   }
 
@@ -1088,6 +1394,8 @@ export class StoryOverlay {
   }
 
   private clearTimers(): void {
+    // 换卡 / 结束 / 收起：旁白一并停下
+    this.stopNarration();
     if (typeof window === 'undefined') {
       return;
     }
@@ -1109,6 +1417,7 @@ export class StoryOverlay {
     this.extras = null;
     this.finale = null;
     this.finaleShown = false;
+    this.narrated = false;
   }
 
   private static classifyKey(event: KeyboardEvent): 'advance' | 'skip' | null {

@@ -225,4 +225,31 @@ describe('wingman callsign on the friendly health bar', () => {
     expect(barLabels()[0]).toBe('Swift');
     expect(barLabels()[1]).toContain(fighter.en);
   });
+
+  it('re-labels the bars at once on a language switch, even while paused', () => {
+    const raven = friendlyJet(-10);
+    raven.userData.displayName = RAVEN.callsign;
+    const ordinary = friendlyJet(10);
+    const friendlies = [
+      { mesh: raven, currentHealth: 100, maxHealth: 100 },
+      { mesh: ordinary, currentHealth: 100, maxHealth: 100 },
+    ];
+    const fighter = ENEMY_CONFIGS[EnemyType.FIGHTER].name;
+    bars.update([], friendlies, camera, player);
+    expect(barLabels()[0]).toBe('Raven');
+
+    // 暂停菜单里切换语言：游戏不再调用 update，名字也要立即换
+    setLocale('zh-CN');
+    expect(barLabels()[0]).toBe('渡鸦');
+    expect(barLabels()[1]).toContain(fighter.zh);
+
+    // 恢复后镜头没动的一帧也保持新语言
+    bars.update([], friendlies, camera, player);
+    expect(barLabels()[0]).toBe('渡鸦');
+    expect(barLabels()[1]).toContain(fighter.zh);
+
+    setLocale('en');
+    expect(barLabels()[0]).toBe('Raven');
+    expect(barLabels()[1]).toContain(fighter.en);
+  });
 });

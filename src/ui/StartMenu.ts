@@ -563,6 +563,22 @@ export class StartMenu {
       )
     );
 
+    // 角色配音音量（0% = 纯文字字幕）
+    const stepVoice = (direction: 1 | -1): void => {
+      const next = Math.round((this.settings.voiceVolume + direction * 0.1) * 10) / 10;
+      this.settings.voiceVolume = Math.min(1, Math.max(0, next));
+      this.updateDisplay();
+    };
+    panel.appendChild(
+      this.createSettingRow(
+        'voice',
+        tr({ en: 'Voice volume', zh: '语音音量' }),
+        `${Math.round(this.settings.voiceVolume * 100)}%`,
+        () => stepVoice(-1),
+        () => stepVoice(1)
+      )
+    );
+
     const presetList: QualityPreset[] = ['auto', 'performance', 'balanced', 'quality'];
     const stepQuality = (direction: 1 | -1): void => {
       const index = presetList.indexOf(this.settings.qualityPreset);
@@ -960,6 +976,7 @@ export class StartMenu {
     this.setRowValue('difficulty', this.getDifficultyText(this.settings.difficulty));
     this.setRowValue('sfx', `${Math.round(audioSettings.sfxVolume * 100)}%`);
     this.setRowValue('music', `${Math.round(audioSettings.musicVolume * 100)}%`);
+    this.setRowValue('voice', `${Math.round(this.settings.voiceVolume * 100)}%`);
     this.setRowValue('quality', this.getQualityPresetText(presentationSettings.qualityPreset));
     this.setRowValue('camera', this.getCameraModeText(this.settings.cameraMode));
     this.setRowValue('tutorial', tr(presentationSettings.tutorialEnabled ? SWITCH_ON : SWITCH_OFF));
@@ -1023,6 +1040,7 @@ export interface GameSettings {
   difficulty: StartFlowSettings['difficulty'];
   sfxVolume: StartFlowSettings['sfxVolume'];
   musicVolume: StartFlowSettings['musicVolume'];
+  voiceVolume: StartFlowSettings['voiceVolume'];
   qualityPreset: StartFlowSettings['qualityPreset'];
   tutorialEnabled: StartFlowSettings['tutorialEnabled'];
   playerLives: StartFlowSettings['playerLives'];

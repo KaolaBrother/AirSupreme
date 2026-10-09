@@ -4,7 +4,7 @@ import {
   type CampaignSpeakerId,
   type RadioLine,
 } from '@/features/campaign/CampaignData';
-import { tr, type LocalizedText } from '@/i18n';
+import { onLocaleChange, tr, type LocalizedText } from '@/i18n';
 import { getSpeakerGlyph } from '@/ui/theme/hudGlyphs';
 import {
   prefersReducedMotion,
@@ -21,6 +21,9 @@ export interface RadioEnqueueOptions {
 
 type RadioPhase = 'reveal' | 'hold' | 'out';
 
+/** 当前台词的配音状态：none 没有配音（或尚未开口）、playing 正在说、done 已说完 / 被停下 */
+type RadioVoiceState = 'none' | 'playing' | 'done';
+
 interface QueuedLine {
   line: RadioLine;
   priority: RadioPriority;
@@ -35,6 +38,9 @@ interface ActiveLine extends QueuedLine {
   holdSeconds: number;
   chars: number;
   shown: number;
+  voice: RadioVoiceState;
+  /** 配音说话期间停留阶段的上限（秒，兜底：收不到“说完”时也会继续） */
+  voiceHoldCap: number;
 }
 
 /** 逐字显示速度（字/秒）与停留时间 */
@@ -50,6 +56,10 @@ const MAX_QUEUE = 6;
 /** 被打断的台词若已显示了这么多停留时间，就视为已经传达，不再重播 */
 const INTERRUPT_DELIVERED_RATIO = 0.6;
 const MAX_STEPS_PER_UPDATE = 64;
+/** 配音说完后台词至少再停留的时间（秒） */
+const VOICE_TAIL_SECONDS = 0.4;
+/** 配音说话期间的兜底余量（秒）：超过“开口时刻 + 时长 + 尾巴 + 余量”仍未收到说完也继续 */
+const VOICE_SAFETY_SECONDS = 2.5;
 /** 读屏文本里“呼号：台词”的分隔符 */
 const SPEAKER_SEPARATOR: LocalizedText = { en: ': ', zh: '：' };
 
@@ -72,6 +82,14 @@ function countChars(text: string): number {
   return Array.from(text).length;
 }
 
+/** 阅读停留时间：基础 + 每字，夹在上下限之间 */
+function readingHoldSeconds(chars: number): number {
+  return Math.min(
+    HOLD_MAX_SECONDS,
+    Math.max(HOLD_MIN_SECONDS, HOLD_BASE_SECONDS + chars * HOLD_PER_CHAR_SECONDS)
+  );
+}
+
 /**
  * 无线电通讯：说话人（呼号 / 头像 / 色调来自 CAMPAIGN_SPEAKERS）+ 逐字台词的紧凑面板。
  *
@@ -80,6 +98,10 @@ function countChars(text: string): number {
  *   'high' 优先级立即打断普通台词（被打断且尚未说完的台词回到队首重播），
  *   高优先级之间按先后排队并排在所有普通台词前面。重复文本（正在播或已排队）会被忽略。
  * - 显示时间完全由 update(dt) 驱动：暂停游戏 = 台词停住。
+ * - 配音（表现层在 onLineShown 里播放）：开口时 holdForVoice(line, 时长)，台词至少停留到
+ *   配音结束后 VOICE_TAIL_SECONDS；说话期间下一句等待，直到 releaseVoice(line)（或兜底上限）。
+ *   被打断时若配音还没说完，这句一定重播（重播时表现层重新播放配音）。没有配音时时序不变。
+ * - 切换语言：当前台词（呼号、正文、读屏文本）立即按新语言重写。
  * - 面板 pointer-events: none，不遮挡准星与雷达；DOM 首次显示时才创建，没有 document 时只跑逻辑。
  */
 export class RadioComms {
@@ -100,11 +122,16 @@ export class RadioComms {
   private srText: HTMLDivElement | null = null;
   private density: HudLayoutDensity = 'desktop';
   private lastGlyphSpeaker: string = '';
+  private readonly unsubscribeLocale: () => void;
 
   private readonly handleResize = (): void => {
     // 等 HUD 自己的 resize 处理先更新布局密度
     window.setTimeout(() => this.applyDensity(), 0);
   };
+
+  constructor() {
+    this.unsubscribeLocale = onLocaleChange(() => this.relocalize());
+  }
 
   public enqueue(line: RadioLine, options?: RadioEnqueueOptions): void {
     const text = line && line.text ? tr(line.text) : '';
@@ -181,6 +208,41 @@ export class RadioComms {
     return this.current !== null || this.queue.length > 0 || this.gap > 0;
   }
 
+  /**
+   * 当前台词的配音开口了：台词至少停留到“此刻 + 配音时长 + VOICE_TAIL_SECONDS”，
+   * 并在 releaseVoice 之前不进入淡出（兜底：再多等 VOICE_SAFETY_SECONDS）。
+   * line 不是当前台词（已换句 / 已清空）时忽略。
+   */
+  public holdForVoice(line: RadioLine, durationSeconds: number): void {
+    const current = this.current;
+    if (this.disposed || !current || current.line !== line || current.phase === 'out') {
+      return;
+    }
+    const duration = Number.isFinite(durationSeconds) ? Math.max(0, durationSeconds) : 0;
+    const required = this.elapsedOf(current) + duration + VOICE_TAIL_SECONDS;
+    current.holdSeconds = Math.max(current.holdSeconds, required - current.revealSeconds);
+    current.voice = 'playing';
+    current.voiceHoldCap = required + VOICE_SAFETY_SECONDS - current.revealSeconds;
+  }
+
+  /**
+   * 当前台词的配音说完 / 被停下 / 不可用：解除等待；说过话的台词再停留 VOICE_TAIL_SECONDS。
+   * line 不是当前台词时忽略。
+   */
+  public releaseVoice(line: RadioLine): void {
+    const current = this.current;
+    if (this.disposed || !current || current.line !== line || current.phase === 'out') {
+      return;
+    }
+    if (current.voice === 'playing') {
+      current.holdSeconds = Math.max(
+        current.holdSeconds,
+        this.elapsedOf(current) + VOICE_TAIL_SECONDS - current.revealSeconds
+      );
+      current.voice = 'done';
+    }
+  }
+
   public clear(): void {
     this.queue.length = 0;
     this.current = null;
@@ -189,6 +251,7 @@ export class RadioComms {
   }
 
   public dispose(): void {
+    this.unsubscribeLocale();
     this.clear();
     if (this.root && typeof window !== 'undefined') {
       window.removeEventListener('resize', this.handleResize);
@@ -229,9 +292,12 @@ export class RadioComms {
       return;
     }
     this.current = null;
+    // 配音还在说：没传达完，一定重播；配音已说完：已传达；没有配音：按停留时间判断
     const delivered =
       current.phase === 'out' ||
-      (current.phase === 'hold' &&
+      current.voice === 'done' ||
+      (current.voice === 'none' &&
+        current.phase === 'hold' &&
         current.phaseTime >= current.holdSeconds * INTERRUPT_DELIVERED_RATIO);
     if (!delivered && current.priority === 'normal') {
       const firstNormal = this.queue.findIndex((queued) => queued.priority === 'normal');
@@ -256,10 +322,7 @@ export class RadioComms {
     const chars = countChars(tr(item.line.text));
     this.reducedMotion = prefersReducedMotion();
     const revealSeconds = this.reducedMotion ? 0 : chars / REVEAL_CHARS_PER_SECOND;
-    const holdSeconds = Math.min(
-      HOLD_MAX_SECONDS,
-      Math.max(HOLD_MIN_SECONDS, HOLD_BASE_SECONDS + chars * HOLD_PER_CHAR_SECONDS)
-    );
+    const holdSeconds = readingHoldSeconds(chars);
     const active: ActiveLine = {
       ...item,
       speaker: resolveSpeaker(item.line.speaker),
@@ -269,6 +332,8 @@ export class RadioComms {
       holdSeconds,
       chars,
       shown: revealSeconds > 0 ? 0 : chars,
+      voice: 'none',
+      voiceHoldCap: holdSeconds,
     };
     this.current = active;
     this.gap = 0;
@@ -289,10 +354,47 @@ export class RadioComms {
       case 'reveal':
         return line.revealSeconds;
       case 'hold':
-        return line.holdSeconds;
+        // 配音说话期间等它说完（releaseVoice），兜底上限 voiceHoldCap
+        return line.voice === 'playing'
+          ? Math.max(line.holdSeconds, line.voiceHoldCap)
+          : line.holdSeconds;
       case 'out':
         return OUT_SECONDS;
     }
+  }
+
+  /** 这句已显示了多久（逐字 + 停留阶段，秒） */
+  private elapsedOf(line: ActiveLine): number {
+    switch (line.phase) {
+      case 'reveal':
+        return line.phaseTime;
+      case 'hold':
+        return line.revealSeconds + line.phaseTime;
+      case 'out':
+        return line.revealSeconds + line.holdSeconds + line.phaseTime;
+    }
+  }
+
+  /**
+   * 界面语言切换：当前台词按新语言重写（呼号、正文、读屏文本），不重播入场动画；
+   * 逐字阶段按新文本的字数继续，阅读停留至少满足新文本的长度。
+   */
+  private relocalize(): void {
+    const current = this.current;
+    if (this.disposed || !current) {
+      return;
+    }
+    const chars = countChars(tr(current.line.text));
+    current.chars = chars;
+    if (current.phase === 'reveal') {
+      current.revealSeconds = chars / REVEAL_CHARS_PER_SECOND;
+      current.shown = Math.min(chars, Math.floor(current.phaseTime * REVEAL_CHARS_PER_SECOND) + 1);
+    } else {
+      current.shown = chars;
+    }
+    current.holdSeconds = Math.max(current.holdSeconds, readingHoldSeconds(chars));
+    this.renderSpeaker(current);
+    this.renderReveal(current, true);
   }
 
   private advancePhase(line: ActiveLine): void {
@@ -418,6 +520,16 @@ export class RadioComms {
       this.portrait.innerHTML = getSpeakerGlyph(glyphKey);
       this.lastGlyphSpeaker = glyphKey;
     }
+    this.renderSpeaker(line);
+    this.renderReveal(line);
+    if (root.style.display !== 'block') {
+      root.style.display = 'block';
+    }
+  }
+
+  /** 呼号、角色名与读屏文本（按当前语言） */
+  private renderSpeaker(line: ActiveLine): void {
+    const speaker = line.speaker;
     const callsign = tr(speaker.callsign);
     if (this.callsign) {
       this.callsign.textContent = callsign;
@@ -428,16 +540,12 @@ export class RadioComms {
       this.name.textContent = extra;
     }
     if (this.srText) {
-      this.srText.textContent = `${tr(speaker.callsign)}${tr(SPEAKER_SEPARATOR)}${tr(line.line.text)}`;
-    }
-    this.renderReveal(line);
-    if (root.style.display !== 'block') {
-      root.style.display = 'block';
+      this.srText.textContent = `${callsign}${tr(SPEAKER_SEPARATOR)}${tr(line.line.text)}`;
     }
   }
 
-  private renderReveal(line: ActiveLine): void {
-    if (line.phase === 'reveal') {
+  private renderReveal(line: ActiveLine, force: boolean = false): void {
+    if (line.phase === 'reveal' && !force) {
       const shown = Math.min(line.chars, Math.floor(line.phaseTime * REVEAL_CHARS_PER_SECOND) + 1);
       if (shown === line.shown && this.text?.textContent) {
         return;

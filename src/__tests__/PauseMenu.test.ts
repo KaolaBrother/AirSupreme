@@ -14,6 +14,7 @@ interface IPauseMenuOptions {
   onUpgrade: () => void;
   onExitToMenu: () => void;
   applyAudio: (sfx: number, music: number) => void;
+  applyVoice?: (voice: number) => void;
   applyQuality: (preset: QualityPreset) => void;
   loadSettings: () => StartFlowSettings;
   saveSettings: (partial: Partial<StartFlowSettings>) => void;
@@ -33,6 +34,7 @@ const LABELS = {
   music: { en: 'Music', zh: '音乐' },
   graphics: { en: 'Graphics', zh: '画质' },
   language: { en: 'Language', zh: '语言' },
+  voice: { en: 'Voice', zh: '语音' },
 } satisfies Record<string, LocalizedText>;
 
 /** 只属于开始菜单的设置，不得出现在暂停菜单里 */
@@ -273,6 +275,70 @@ describe.each(LOCALES)('PauseMenu (%s)', (locale: Locale) => {
       saveSettings.mock.calls.length - 1
     ]?.[0] as Partial<StartFlowSettings>;
     expect(savedQuality.qualityPreset).toBe('performance');
+  });
+
+  describe('Voice row', () => {
+    function voiceRow(): HTMLElement | null {
+      return getPauseRoot().querySelector<HTMLElement>('[data-setting="voice"]');
+    }
+
+    function lastSaved(): Partial<StartFlowSettings> {
+      return saveSettings.mock.calls[
+        saveSettings.mock.calls.length - 1
+      ]?.[0] as Partial<StartFlowSettings>;
+    }
+
+    it('adds a Voice row when the game wires the voice volume', () => {
+      createMenu({ applyVoice: vi.fn() }).show();
+      findLabeledButton(label('settings')).click();
+
+      const rows = (['sfx', 'music', 'voice', 'graphics', 'language'] as const).map((key) =>
+        findSettingRow(label(key))
+      );
+      expect(new Set(rows).size, 'five separate settings rows').toBe(5);
+      expect(voiceRow()).toBe(findSettingRow(label('voice')));
+      expect(voiceRow()?.textContent).toContain(label('voice'));
+      expect(voiceRow()?.textContent).toContain('90%');
+    });
+
+    it('applies and saves each 10% step, between 0% (text only) and 100%', () => {
+      const applyVoice = vi.fn();
+      createMenu({ applyVoice }).show();
+      findLabeledButton(label('settings')).click();
+
+      clickSettingAdjust(label('voice'), '-');
+      expect(applyVoice).toHaveBeenLastCalledWith(expect.closeTo(0.8, 5));
+      expect(lastSaved().voiceVolume).toBeCloseTo(0.8, 5);
+      expect(voiceRow()?.textContent).toContain('80%');
+      expect(applyAudio, 'the voice row leaves sfx and music alone').not.toHaveBeenCalled();
+
+      clickSettingAdjust(label('voice'), '+');
+      clickSettingAdjust(label('voice'), '+');
+      clickSettingAdjust(label('voice'), '+');
+      expect(applyVoice).toHaveBeenLastCalledWith(1);
+      expect(voiceRow()?.textContent).toContain('100%');
+
+      for (let step = 0; step < 12; step++) {
+        clickSettingAdjust(label('voice'), '-');
+      }
+      expect(applyVoice).toHaveBeenLastCalledWith(0);
+      expect(lastSaved().voiceVolume).toBe(0);
+      expect(voiceRow()?.textContent).toContain('0%');
+    });
+
+    it('opens with the stored voice volume', () => {
+      stored = { ...stored, voiceVolume: 0.3 };
+      createMenu({ applyVoice: vi.fn() }).show();
+      findLabeledButton(label('settings')).click();
+      expect(voiceRow()?.textContent).toContain('30%');
+    });
+
+    it('has no Voice row when nothing applies the voice volume', () => {
+      createMenu().show();
+      findLabeledButton(label('settings')).click();
+      expect(voiceRow()).toBeNull();
+      expect(getPauseRoot().textContent).not.toContain(label('voice'));
+    });
   });
 
   it('wraps quality presets and clamps volume like StartMenu', () => {
