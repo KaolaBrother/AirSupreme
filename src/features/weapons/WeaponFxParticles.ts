@@ -630,9 +630,12 @@ export class WeaponFxParticles {
 
   /** EMP 中心闪光 + 放射状电火花 */
   public emitEmpBurst(center: THREE.Vector3, radius: number): void {
-    // 中心闪光克制一些：玩家就在球心，过大的光团会糊住整个屏幕
-    this.emitFlash(center, null, 6, 0.16, COLORS.empCore, 1);
-    this.emitFlash(center, null, 13, 0.3, COLORS.emp, 0.2);
+    // 中心闪光克制一些：玩家就在球心，追尾镜头只在 16 米外（泛光会把光团放大成整片白），
+    // 第一人称时镜头就在闪光里，只留电火花
+    if (!this.firstPerson) {
+      this.emitFlash(center, null, 3.5, 0.14, COLORS.empCore, 0.4);
+      this.emitFlash(center, null, 7, 0.24, EMP_HALO, 0.15);
+    }
     const spec = this.spec;
     const arcs = this.glow.scaledCount(56, 16);
     for (let i = 0; i < arcs; i++) {
@@ -658,6 +661,8 @@ export class WeaponFxParticles {
 }
 
 const COLORS = FX_COLORS;
+/** EMP 中心外晕（比冲击波电光色暗一档） */
+const EMP_HALO = FX_COLORS.emp.clone().multiplyScalar(0.45);
 
 /** 由期望数量（可为小数）随机取整：期望值不变，低帧率 / 高帧率下发射率一致 */
 function randomCount(expected: number): number {

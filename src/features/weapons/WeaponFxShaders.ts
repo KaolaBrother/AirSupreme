@@ -217,9 +217,12 @@ export function createBeamGeometry(segments: number): THREE.BufferGeometry {
 
 const RING_VERTEX_SHADER = /* glsl */ `
 varying vec2 vLocal;
+varying float vViewDistance;
 void main() {
   vLocal = position.xy;
-  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  vec4 mv = modelViewMatrix * vec4(position, 1.0);
+  vViewDistance = length(mv.xyz);
+  gl_Position = projectionMatrix * mv;
 }
 `;
 
@@ -228,12 +231,19 @@ uniform vec3 uColor;
 uniform float uOpacity;
 uniform float uThickness;
 uniform float uAdditive;
+uniform float uNearFade;
 varying vec2 vLocal;
+varying float vViewDistance;
 void main() {
   float r = length(vLocal);
   float inner = 1.0 - uThickness;
-  float band = smoothstep(inner, 0.965, r) * (1.0 - smoothstep(0.965, 1.0, r));
+  // smoothstep 要求 edge0 < edge1：细环（厚度 ≤ 0.035，例如 EMP 的倾斜环）的 inner 会等于 / 超过
+  // 0.965，结果未定义——软件渲染下整个圆盘都被画成实心，追尾视角里铺满画面
+  float peak = max(0.965, inner + 0.001);
+  float band = smoothstep(inner, peak, r) * (1.0 - smoothstep(peak, 1.0, r));
   float alpha = pow(band, 1.4) * uOpacity;
+  // 贴近镜头的环段淡出（uNearFade 米内；0 = 不淡出）：以玩家为中心扩散的环会从镜头下方掠过
+  if (uNearFade > 0.0) alpha *= smoothstep(uNearFade * 0.15, uNearFade, vViewDistance);
   if (alpha < 0.003) discard;
   // 加色：亮度即颜色；普通混合：亮天空下保留色相
   gl_FragColor = uAdditive > 0.5 ? vec4(uColor * alpha, 1.0) : vec4(uColor, min(alpha, 1.0));
@@ -261,6 +271,7 @@ export function createShockRing(geometry: THREE.BufferGeometry): ShockRing {
       uOpacity: { value: 0 },
       uThickness: { value: 0.2 },
       uAdditive: { value: 1 },
+      uNearFade: { value: 0 },
     },
     vertexShader: RING_VERTEX_SHADER,
     fragmentShader: RING_FRAGMENT_SHADER,
@@ -290,11 +301,26 @@ const SHELL_VERTEX_SHADER = /* glsl */ `
 varying vec3 vNormalView;
 varying vec3 vViewPosition;
 varying vec3 vLocal;
+varying float vCloseness;
+// 球外：球壳张角半宽的正弦（半径 / 镜头到球心）从 SMALL 到 LARGE 时由全亮压到 CLOSE_GAIN；
+// 球内：镜头到球心 / 半径从 DEEP 到 EDGE（贴近球壳）时同样压暗
+const float SHELL_APPARENT_SMALL = 0.12;
+const float SHELL_APPARENT_LARGE = 0.5;
+const float SHELL_INSIDE_DEEP = 0.5;
+const float SHELL_INSIDE_EDGE = 0.9;
 void main() {
   vLocal = position;
   vNormalView = normalize(normalMatrix * normal);
   vec4 mv = modelViewMatrix * vec4(position, 1.0);
   vViewPosition = mv.xyz;
+  // 单位球按等比缩放：球心 / 半径取自模型矩阵。vCloseness：0 = 远处看（扩散波形完整），
+  // 1 = 镜头贴近球壳（球壳铺满画面、处处掠射）
+  vec3 center = (modelMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
+  float radius = max(length((modelMatrix * vec4(1.0, 0.0, 0.0, 0.0)).xyz), 1e-3);
+  float ratio = distance(cameraPosition, center) / radius;
+  vCloseness = ratio >= 1.0
+    ? smoothstep(SHELL_APPARENT_SMALL, SHELL_APPARENT_LARGE, 1.0 / ratio)
+    : smoothstep(SHELL_INSIDE_DEEP, SHELL_INSIDE_EDGE, ratio);
   gl_Position = projectionMatrix * mv;
 }
 `;
@@ -306,6 +332,12 @@ uniform float uTime;
 varying vec3 vNormalView;
 varying vec3 vViewPosition;
 varying vec3 vLocal;
+varying float vCloseness;
+// 贴近镜头淡出（米）：NEAR 以内的壳面完全透明，FAR 以外不受影响
+const float SHELL_FADE_NEAR = 4.0;
+const float SHELL_FADE_FAR = 32.0;
+// 镜头贴近球壳时整体亮度只剩 CLOSE_GAIN
+const float SHELL_CLOSE_GAIN = 0.1;
 float hash31(vec3 p) {
   p = fract(p * 0.1031);
   p += dot(p, p.zyx + 31.32);
@@ -330,13 +362,18 @@ float noise3(vec3 p) {
   );
 }
 void main() {
-  float facing = abs(dot(normalize(vNormalView), normalize(-vViewPosition)));
+  float viewDistance = length(vViewPosition);
+  float facing = abs(dot(normalize(vNormalView), -vViewPosition / max(viewDistance, 1e-4)));
   float rim = pow(1.0 - facing, 3.0);
   // 电弧网：噪声等值线形成细丝，随时间流动
   vec3 q = vLocal * 11.0 + vec3(0.0, uTime * 2.6, uTime * 1.3);
   float n = noise3(q) * 0.65 + noise3(q * 2.3 + 7.31) * 0.35;
   float filament = 1.0 - smoothstep(0.0, 0.028, abs(n - 0.5));
   float alpha = (rim * 0.85 + filament * (0.015 + rim * 1.3)) * uOpacity;
+  // 镜头贴近球壳（球壳铺满画面、处处掠射）时整体压暗；远处看扩散波 / 在球心附近时不受影响
+  alpha *= mix(1.0, SHELL_CLOSE_GAIN, vCloseness);
+  // 贴着镜头的壳面淡出：镜头穿过球壳的那几帧不再整屏发白
+  alpha *= smoothstep(SHELL_FADE_NEAR, SHELL_FADE_FAR, viewDistance);
   if (alpha < 0.003) discard;
   gl_FragColor = vec4(uColor * alpha, 1.0);
   #include <tonemapping_fragment>
@@ -344,7 +381,10 @@ void main() {
 }
 `;
 
-/** EMP 球壳（菲涅尔边缘 + 电弧条纹，摄像机在球内也能看到） */
+/**
+ * EMP 球壳（菲涅尔边缘 + 电弧条纹，摄像机在球内也能看到）。球心在玩家身上，追尾镜头会在扩散初期
+ * 穿过球壳：镜头贴近球壳时整体压暗、贴着镜头的壳面淡出，远处看到的扩散波形不变。
+ */
 export function createShellMaterial(color: THREE.ColorRepresentation): THREE.ShaderMaterial {
   return new THREE.ShaderMaterial({
     uniforms: {
