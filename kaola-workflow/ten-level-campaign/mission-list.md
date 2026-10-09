@@ -138,12 +138,26 @@ Rollup native) · harness reproduces the VFX regression (alternating frames, see
   result: merged ed5d423 (6 commits): root hitRadius Colossus 77 m / Leviathan 61.3 m (be366ee); BossMissileSystem ignores non-finite targets/deltas/launches/damage (bit-identical trace for finite inputs; Infinity delta used to freeze the trail loop); EnemyHealthBars hides non-finite labels (no NaNm in bosses 1-10 probes); per-frame allocations WeaponSystem 64→0 B, InputHandler.getState 104→0 B, collisions 162→0 B, CombatSystem.update 280→128 B (rest is MissileSystem.update filter).
 
 - item: Polish + balance before the audit — RadioComms enqueue/isBusy gap, AudioManager NaN volume clamp, Colossus/Leviathan ensureRig copies the root hitRadius, health-bar names for bosses 6-10, MissileSystem.update allocation, boss spawn when the player is already outside the spawn box flying outward, L3 start clearance, Sky Carrier spawn height; difficulty/upgrade curve across levels 1-10 measured with a scripted pilot and tuned (R12)
-  status: in-flight
+  status: done
   dispatched: session 3 · polish = implementer (standard tier) in /home/claude/wt/polish on batch/polish (owns RadioComms.ts, AudioManager.ts, MagmaColossusAI.ts, AbyssalLeviathanAI.ts, EnemyHealthBars.ts, MissileSystem.ts, src/core/boss/**, BossBattleController.ts, src/core/campaign/LevelStartPose.ts); balance = implementer (reasoning tier) in /home/claude/wt/balance on batch/balance (owns Difficulty.ts, public/config/game-config.json, src/config.ts, LevelConfig.ts enemiesPerWave/difficulty fields, UnitDeployments.ts, EnemyAI.ts tuning, BossTypes.ts configs, UpgradeSystem.ts costs/points, src/core/dev/** for a scripted pilot); from 2198d50; output = commits + reports
+  result: polish merged de66b72 (10 commits: radio idle = show-now, NaN-proof volumes, rig hit radii, boss/part/unit health-bar names, in-place missile compaction, every boss 1-10 ahead of the player incl. the outward-flying case and the Sky Carrier, comfortable start margins on all levels). Balance merged 0670b0b from the interrupted run's committed work: one LEVEL_CURVE in Difficulty.ts (enemy firepower ~3× by L10, flatter HP growth, L1 = 1.0), standard profile re-centred on an average pilot, enemy fire range capped at 420 m, concurrent-enemy cap as a gameplay rule, gentler L1 waves and lighter L10 waves, unit stacks trimmed, boss HP re-based on measured time-to-kill, dev-only ScriptedPilot + BalanceHarness (absent from prod). Its report never arrived; the final audit re-checks the curve. Tests re-pinned 27c6b49 + be2b9df; suite 1184 pass / 2 skip.
 
 - item: Dock docs against the code (README/README.zh-CN, CHANGELOG, IMPLEMENTATION_PLAN, docs/architecture, docs/api, TECHNICAL_DOCUMENTATION)
-  status: in-flight
+  status: done
   dispatched: session 3 · doc-updater (standard tier) in /home/claude/wt/docs on batch/docs (from 2198d50); owns README.md, README.zh-CN.md, CHANGELOG.md, TECHNICAL_DOCUMENTATION.md, docs/**; transcribes verified ground truth only; output = commits + report
+  result: merged d59f635 (7 commits): README + README.zh-CN, CHANGELOG campaign entry, docs/architecture, docs/api (signatures copied from source), docs/conventions, ADR 0001 (campaign presentation adapter), TECHNICAL_DOCUMENTATION. Needs a refresh after the English-default, cast and voice work (names, controls, language setting, VoiceSystem).
+
+- item: English by default (user, session 3): bilingual core src/i18n (a3434fc, LocalizedText + tr()); every player-facing string in English with Simplified Chinese as a menu setting (persisted); <html lang> follows the setting
+  status: in-flight
+  dispatched: session 3 · i18n-ui implementer (reasoning tier) in /home/claude/wt/i18n-ui on batch/i18n-ui (framework adoption, language setting, menus, HUD, overlays, index.html, main.ts) + runtime-strings implementer (reasoning tier) in /home/claude/wt/i18n-runtime on batch/i18n-runtime (coordinator, controllers, boss warnings, wingman/ally wiring) — both from be2b9df; output = commits + reports
+
+- item: Cast rewrite (user, session 3): international names with only one or two Chinese names; female friendly characters for voice diversity — Col. Elena Varga (HQ "Skydome"), Lt. Jack Mercer ("Raven"), Lt. Freya Lindqvist ("Swift", second wingman, new), Dr. Chen Xi ("Firefly"), Capt. Amelia Hart (AWACS "Lighthouse", new), Cdr. Liang Wei (frigate "Bulwark", new), ORACLE, civilians; bilingual story + radio with stable line ids for voice files
+  status: in-flight
+  dispatched: session 3 · content writer/implementer (reasoning tier) in /home/claude/wt/content on batch/content (from be2b9df): CampaignData + data-file names (units, bosses, weapons, upgrades, levels, enemies, power-ups, save descriptions, difficulty labels); output = commits + report
+
+- item: Character voices (user, session 3): ElevenLabs voice acting in English AND Chinese, one take per line, all radio lines (+ story narration if within budget); files in the repo; radio-filtered playback with music ducking and a voice volume setting
+  status: in-flight
+  dispatched: session 3 · voice producer (reasoning tier), no repo writes in phase 1: cast ElevenLabs voices per character for en + zh and prove the asset path (generate → fetch in the user's Claude browser pane → one zip download → Downloads → device bridge → repo) with two pilot lines; output = report with voice ids + pipeline recipe. Phase 2 (full script) after the content batch lands; runtime VoiceSystem after the i18n batches land.
 
 - item: Final audit against R1-R12, full sandbox validation + Chromium playthrough of all 10 levels, then merge to main and push (user asked for merge + resync)
   status: todo
