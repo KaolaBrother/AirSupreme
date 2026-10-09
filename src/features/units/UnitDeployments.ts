@@ -141,17 +141,12 @@ const LEVEL_6: WaveTable = [
 /** 第 7 关 · 极光冰海（ARCTIC，7 波）：潜艇与护卫舰、冰架雷达；保护友军护卫舰「北辰」 */
 const LEVEL_7: WaveTable = [
   [s(T.ALLY_FRIGATE, 1, 'water'), s(T.SUBMARINE, 1, 'water'), s(T.CIVILIAN_SHIP, 1, 'route')],
-  [s(T.RADAR_STATION, 1, 'ahead'), s(T.GUNBOAT, 2, 'water'), s(T.AA_GUN, 1, 'ahead')],
+  [s(T.RADAR_STATION, 1, 'ahead'), s(T.GUNBOAT, 1, 'water'), s(T.AA_GUN, 1, 'ahead')],
   [s(T.FRIGATE, 2, 'water')],
-  [s(T.SUBMARINE, 1, 'water'), s(T.AA_GUN, 1, 'ahead'), s(T.GUNBOAT, 2, 'water')],
+  [s(T.SUBMARINE, 1, 'water'), s(T.GUNBOAT, 2, 'water')],
   [s(T.BOMBER, 2, 'high-altitude'), s(T.GUNBOAT, 1, 'water'), s(T.DRONE, 3, 'ahead')],
-  [s(T.FRIGATE, 1, 'water'), s(T.SUBMARINE, 1, 'water'), s(T.CIVILIAN_SHIP, 1, 'route')],
-  [
-    s(T.FRIGATE, 1, 'water'),
-    s(T.SUBMARINE, 1, 'water'),
-    s(T.GUNBOAT, 2, 'water'),
-    s(T.SAM_LAUNCHER, 1, 'ahead'),
-  ],
+  [s(T.FRIGATE, 1, 'water'), s(T.GUNBOAT, 1, 'water'), s(T.CIVILIAN_SHIP, 1, 'route')],
+  [s(T.FRIGATE, 1, 'water'), s(T.GUNBOAT, 1, 'water'), s(T.SAM_LAUNCHER, 1, 'ahead')],
 ];
 
 /** 第 8 关 · 雷霆峡谷（CANYON，7 波）：护送车队「长弓」穿越峡谷，崖壁直升机与高处导弹车 */
@@ -160,18 +155,13 @@ const LEVEL_8: WaveTable = [
   [s(T.ATTACK_HELICOPTER, 3, 'flank'), s(T.AA_GUN, 1, 'ahead')],
   [s(T.SAM_LAUNCHER, 1, 'ahead'), s(T.AA_GUN, 1, 'around'), s(T.ATTACK_HELICOPTER, 2, 'flank')],
   [s(T.ALLY_TRANSPORT, 1, 'route'), s(T.DRONE, 4, 'ahead'), s(T.ATTACK_HELICOPTER, 1, 'flank')],
-  [s(T.SAM_LAUNCHER, 2, 'around'), s(T.TANK, 1, 'ahead'), s(T.RADAR_STATION, 1, 'flank')],
+  [s(T.SAM_LAUNCHER, 2, 'around')],
   [
     s(T.ALLY_CONVOY, 3, 'route'),
-    s(T.BOMBER, 2, 'high-altitude'),
+    s(T.BOMBER, 1, 'high-altitude'),
     s(T.ATTACK_HELICOPTER, 2, 'flank'),
   ],
-  [
-    s(T.SAM_LAUNCHER, 2, 'around'),
-    s(T.AA_GUN, 1, 'ahead'),
-    s(T.ATTACK_HELICOPTER, 2, 'flank'),
-    s(T.RADAR_STATION, 1, 'ahead'),
-  ],
+  [s(T.SAM_LAUNCHER, 1, 'around'), s(T.AA_GUN, 1, 'ahead'), s(T.ATTACK_HELICOPTER, 2, 'flank')],
 ];
 
 /** 第 9 关 · 天梯之巅（STRATOSPHERE，7 波）：纯空战——轰炸机、无人机蜂群；保护预警机，避开客机 */
@@ -191,11 +181,11 @@ const LEVEL_10: WaveTable = [
     s(T.ALLY_AWACS, 1, 'high-altitude'),
     s(T.ALLY_CONVOY, 3, 'route'),
     s(T.TANK, 1, 'ahead'),
-    s(T.AA_GUN, 2, 'ahead'),
+    s(T.AA_GUN, 1, 'ahead'),
   ],
   [s(T.SAM_LAUNCHER, 2, 'around'), s(T.ATTACK_HELICOPTER, 1, 'flank')],
   [s(T.DRONE, 3, 'ahead'), s(T.TANK, 1, 'flank'), s(T.AA_GUN, 1, 'around')],
-  [s(T.SAM_LAUNCHER, 2, 'around'), s(T.AA_GUN, 1, 'ahead'), s(T.RADAR_STATION, 1, 'flank')],
+  [s(T.SAM_LAUNCHER, 2, 'around'), s(T.AA_GUN, 1, 'ahead')],
   [
     s(T.ALLY_TRANSPORT, 1, 'route'),
     s(T.BOMBER, 2, 'high-altitude'),
@@ -203,11 +193,10 @@ const LEVEL_10: WaveTable = [
     s(T.DRONE, 3, 'ahead'),
   ],
   [s(T.SAM_LAUNCHER, 2, 'flank'), s(T.DRONE, 2, 'ahead')],
-  [s(T.BOMBER, 2, 'high-altitude'), s(T.ATTACK_HELICOPTER, 2, 'around'), s(T.DRONE, 4, 'ahead')],
+  [s(T.BOMBER, 1, 'high-altitude'), s(T.ATTACK_HELICOPTER, 1, 'around'), s(T.DRONE, 3, 'ahead')],
   [
-    s(T.SAM_LAUNCHER, 2, 'around'),
+    s(T.SAM_LAUNCHER, 1, 'around'),
     s(T.AA_GUN, 1, 'flank'),
-    s(T.RADAR_STATION, 1, 'ahead'),
     s(T.ATTACK_HELICOPTER, 1, 'flank'),
     s(T.DRONE, 3, 'around'),
   ],

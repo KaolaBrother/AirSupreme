@@ -123,17 +123,19 @@ type LevelCurveKey = Exclude<keyof LevelScaling, 'level' | 'progress'>;
  * 压力主要来自“同一时刻的火力密度”：后期敌机提前量更足、同时在场更多、伤害与射速更高；
  * 血量涨幅压低（关卡时长由敌人数量决定，波次编成见 LevelConfig / UnitDeployments），
  * 避免关卡越拖越长、把压力稀释掉。玩家这一侧的成长见 UpgradeSystem（层级上限随关卡开放）。
+ * 第 6 关起护甲 / 血量升级已成形、地面防空也变稀，敌机火力（伤害 ÷ 冷却）在此上一个台阶，
+ * 实测压力才能继续逐关上升；单位改为更快开火、单发伤害基本持平（unitDamageShare 下调）。
  */
 const LEVEL_CURVE: Readonly<Record<LevelCurveKey, readonly number[]>> = {
   //                       L1    L2    L3    L4    L5    L6    L7    L8    L9    L10
   enemyHealthMultiplier: [1.0, 1.03, 1.06, 1.09, 1.12, 1.15, 1.18, 1.21, 1.24, 1.27],
-  enemyDamageMultiplier: [1.0, 1.5, 1.68, 1.98, 2.2, 2.6, 2.9, 3.2, 3.5, 3.9],
-  enemyCooldownMultiplier: [1.0, 0.93, 0.87, 0.82, 0.78, 0.74, 0.7, 0.67, 0.64, 0.62],
+  enemyDamageMultiplier: [1.0, 1.7, 1.72, 1.98, 2.2, 2.95, 3.6, 3.7, 3.95, 4.6],
+  enemyCooldownMultiplier: [1.0, 0.9, 0.86, 0.8, 0.76, 0.58, 0.55, 0.52, 0.49, 0.47],
   enemyAccuracyBonus: [0, 0.03, 0.06, 0.09, 0.12, 0.15, 0.18, 0.21, 0.24, 0.27],
   enemyAimLead: [0, 0.2, 0.35, 0.5, 0.6, 0.68, 0.76, 0.82, 0.88, 0.94],
   concurrentEnemyBonus: [0, 0, 0, 1, 1, 1, 2, 2, 2, 2],
   unitHealthMultiplier: [1.0, 1.02, 1.04, 1.06, 1.08, 1.1, 1.12, 1.14, 1.16, 1.18],
-  unitDamageShare: [1.0, 0.96, 0.93, 0.9, 0.87, 0.84, 0.81, 0.78, 0.76, 0.74],
+  unitDamageShare: [1.0, 0.9, 0.9, 0.9, 0.87, 0.73, 0.64, 0.64, 0.64, 0.6],
   bossCooldownMultiplier: [1.0, 0.98, 0.96, 0.94, 0.92, 0.89, 0.87, 0.85, 0.82, 0.8],
   scoreMultiplier: [1.0, 1.12, 1.24, 1.36, 1.48, 1.6, 1.72, 1.84, 1.96, 2.08],
 };
