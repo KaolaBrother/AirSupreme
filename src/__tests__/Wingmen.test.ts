@@ -137,6 +137,38 @@ describe('WingmanRoster', () => {
     expect(roster.assign('jet-c', 3)).toBe(RAVEN);
     expect(roster.assign('jet-d', 3)).toBe(SWIFT);
   });
+
+  describe('countAvailable (the flight that launches at the start of a level)', () => {
+    it.each([1, 2])('level %i: only Raven', (level) => {
+      expect(roster.countAvailable(level)).toBe(1);
+    });
+
+    it.each([3, 4, 5, 6, 7, 8, 9, 10])('level %i: Raven and Swift', (level) => {
+      expect(roster.countAvailable(level)).toBe(2);
+    });
+
+    it('launching all available wingmen flies Raven then Swift; reinforcements are ordinary', () => {
+      const launched: Array<WingmanProfile | null> = [];
+      const count = roster.countAvailable(3);
+      for (let i = 0; i < count; i++) launched.push(roster.assign(`jet-${i}`, 3));
+      expect(launched).toEqual([RAVEN, SWIFT]);
+      expect(roster.countAvailable(3)).toBe(0);
+      expect(roster.assign('reinforcement', 3)).toBeNull();
+    });
+
+    it('a downed wingman stays unavailable for the rest of the level; reset() brings both back', () => {
+      roster.assign('jet-a', 4);
+      roster.assign('jet-b', 4);
+      roster.release('jet-a');
+      expect(roster.countAvailable(4)).toBe(0);
+      roster.release('jet-b');
+      expect(roster.countAvailable(4)).toBe(0);
+
+      roster.reset();
+      expect(roster.countAvailable(4)).toBe(2);
+      expect(roster.countAvailable(2)).toBe(1);
+    });
+  });
 });
 
 describe('wingman callsign on the friendly health bar', () => {

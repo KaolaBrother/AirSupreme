@@ -6,7 +6,7 @@ import { getVoiceScript } from '@/features/campaign/CampaignData';
 
 /**
  * 语音包（public/voice/manifest.json + public/voice/{en,zh}/<id>.mp3）与配音脚本一致：
- * - 除了五句新的僚机事件台词（尚未录制），getVoiceScript() 的每个 id 在 en 与 zh 包里都有条目；
+ * - getVoiceScript() 的每个 id 在 en 与 zh 包里都有条目（没有例外，五句僚机事件台词也已录制）；
  * - 清单里的每个 id 都在脚本里（没有孤儿录音）；
  * - 每个条目都有正的时长，对应的 mp3 文件存在且大小与清单一致；包里没有清单外的文件。
  * VoiceSystem 只请求清单里的 id，所以清单缺一句 = 这句纯文字；清单多一句 = 永远不会播放。
@@ -17,14 +17,14 @@ const VOICE_DIR = path.join(PROJECT_ROOT, 'public', 'voice');
 const LANGUAGES = ['en', 'zh'] as const;
 type PackLanguage = (typeof LANGUAGES)[number];
 
-/** 五句新台词：脚本里已有、语音包里还没有录制 */
-const UNRECORDED_WINGMAN_LINES: ReadonlySet<string> = new Set([
+/** 五句僚机事件台词（雨燕入列、渡鸦 / 雨燕被击落）：曾经暂缺录音，现已在两个包里 */
+const WINGMAN_EVENT_LINES: readonly string[] = [
   'generic-swift-joined',
   'generic-raven-down-swift',
   'generic-raven-down-hq',
   'generic-swift-down-raven',
   'generic-swift-down-hq',
-]);
+];
 
 interface ManifestEntry {
   duration?: unknown;
@@ -61,17 +61,21 @@ describe('voice pack manifest', () => {
     }
   });
 
-  it.each(LANGUAGES)(
-    'has every voice-script line except the five new wingman lines (%s)',
-    (language) => {
-      const ids = packIds(language);
-      const missing = scriptIds.filter((id) => !ids.has(id));
-      expect(
-        missing.filter((id) => !UNRECORDED_WINGMAN_LINES.has(id)),
-        `${language} pack is missing voiced lines`
-      ).toEqual([]);
+  it.each(LANGUAGES)('has every voice-script line, with no exceptions (%s)', (language) => {
+    const ids = packIds(language);
+    const missing = scriptIds.filter((id) => !ids.has(id));
+    expect(missing, `${language} pack is missing voiced lines`).toEqual([]);
+  });
+
+  it.each(LANGUAGES)('has the five wingman event lines recorded (%s)', (language) => {
+    const entries = packEntries(language);
+    for (const id of WINGMAN_EVENT_LINES) {
+      expect(scriptIds, `${id} is in the voice script`).toContain(id);
+      expect(entries[id], `${language} manifest lists ${id}`).toBeDefined();
+      const file = path.join(VOICE_DIR, language, `${id}.mp3`);
+      expect(existsSync(file), `${language}/${id}.mp3`).toBe(true);
     }
-  );
+  });
 
   it.each(LANGUAGES)('only lists lines that are in the voice script (%s)', (language) => {
     const known = new Set(scriptIds);
