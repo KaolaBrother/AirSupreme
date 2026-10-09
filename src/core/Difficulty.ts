@@ -2,7 +2,7 @@ import type { LocalizedText } from '@/i18n';
 
 export interface DifficultyProfile {
   level: 1 | 2 | 3 | 4 | 5;
-  /** 难度名（中英双语）：英文沿用 Very Easy → Expert 的常见档位名，默认档 3 在英文里叫 Normal */
+  /** 难度名（中英双语，逐档一一对应）：Very Easy 非常简单 → Easy 简单 → Normal 普通 → Hard 困难 → Expert 专家 */
   label: LocalizedText;
   enemyHealthMultiplier: number;
   enemyDamageMultiplier: number;
@@ -15,14 +15,14 @@ export interface DifficultyProfile {
  * 难度档（开始菜单的“难度”设置）：在关卡曲线之上整体缩放敌人（敌机、地面 / 海上单位、Boss）。
  *
  * 敌机 / 单位的基础数值（EnemyTypes、UnitBehaviors、BossTypes）按“专家”手感编写；
- * 各档把伤害与开火频率映射到对应的玩家水平。“标准”是默认档：由脚本飞行员
+ * 各档把伤害与开火频率映射到对应的玩家水平。“普通”（Normal）是默认档：由脚本飞行员
  * （src/core/dev/BalanceHarness.ts）实测调校为“称职的普通玩家每关最多损失约一条命”。
  * 伤害 × 冷却共同决定敌方火力：DPS 倍率 ≈ enemyDamageMultiplier / enemyAttackCooldownMultiplier。
  */
 const DIFFICULTY_PROFILES: Record<DifficultyProfile['level'], DifficultyProfile> = {
   1: {
     level: 1,
-    label: { en: 'Very Easy', zh: '简单' },
+    label: { en: 'Very Easy', zh: '非常简单' },
     enemyHealthMultiplier: 0.8,
     enemyDamageMultiplier: 0.35,
     enemyAttackCooldownMultiplier: 1.7,
@@ -31,7 +31,7 @@ const DIFFICULTY_PROFILES: Record<DifficultyProfile['level'], DifficultyProfile>
   },
   2: {
     level: 2,
-    label: { en: 'Easy', zh: '普通' },
+    label: { en: 'Easy', zh: '简单' },
     enemyHealthMultiplier: 0.9,
     enemyDamageMultiplier: 0.42,
     enemyAttackCooldownMultiplier: 1.6,
@@ -40,7 +40,7 @@ const DIFFICULTY_PROFILES: Record<DifficultyProfile['level'], DifficultyProfile>
   },
   3: {
     level: 3,
-    label: { en: 'Normal', zh: '标准' },
+    label: { en: 'Normal', zh: '普通' },
     enemyHealthMultiplier: 1,
     enemyDamageMultiplier: 0.5,
     enemyAttackCooldownMultiplier: 1.5,
