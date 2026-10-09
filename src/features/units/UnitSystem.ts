@@ -1070,7 +1070,9 @@ export class UnitSystem implements IGameSystem {
         return system.hostiles;
       },
       get damageMultiplier() {
-        const value = system.scaling.enemyDamageMultiplier;
+        const share = system.scaling.unitDamageShare;
+        const value =
+          system.scaling.enemyDamageMultiplier * (Number.isFinite(share) && share > 0 ? share : 1);
         return Number.isFinite(value) && value > 0 ? value : 1;
       },
       get cooldownMultiplier() {
