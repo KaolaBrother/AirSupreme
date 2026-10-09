@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { BOSS_CONFIGS, BossType, type BossConfig } from './BossTypes';
-import { BossMissileSystem } from './BossMissileSystem';
+import { BossMissileSystem, type BossMissileFlightProfile } from './BossMissileSystem';
 import type { BossHazardHit, BossMinionKind, BossSubTarget, IAdvancedBoss } from './BossContracts';
 import { HealthSystem } from '@/features/combat/HealthSystem';
 import type { ParticleSystem } from '@/features/effects/ParticleSystem';
@@ -99,51 +99,51 @@ interface PhantomPhaseTuning {
 
 const PHASE_TUNING: readonly PhantomPhaseTuning[] = [
   {
-    cruise: 2.3,
+    cruise: 2.15,
     strafe: 3.0,
     turn: 1.6,
-    visibleTime: 11,
-    cloakTime: 5,
+    visibleTime: 12,
+    cloakTime: 4,
     lanceInterval: 11,
     lanceTelegraph: 1.5,
     lanceFire: 1.9,
     lanceChain: 1,
-    burstShots: 3,
-    burstGap: 2.6,
+    burstShots: 5,
+    burstGap: 2.2,
     missileFactor: 1,
     missileCount: 2,
     decoyCount: 0,
     decoyInterval: 0,
   },
   {
-    cruise: 2.5,
+    cruise: 2.35,
     strafe: 3.2,
     turn: 1.8,
-    visibleTime: 9,
-    cloakTime: 5.5,
+    visibleTime: 10,
+    cloakTime: 4.5,
     lanceInterval: 10.5,
     lanceTelegraph: 1.35,
     lanceFire: 2.0,
     lanceChain: 1,
-    burstShots: 4,
-    burstGap: 2.2,
+    burstShots: 6,
+    burstGap: 1.9,
     missileFactor: 0.9,
     missileCount: 2,
     decoyCount: 2,
     decoyInterval: 17,
   },
   {
-    cruise: 2.8,
+    cruise: 2.6,
     strafe: 3.5,
     turn: 2.2,
-    visibleTime: 8,
-    cloakTime: 3.2,
+    visibleTime: 9,
+    cloakTime: 3,
     lanceInterval: 8,
     lanceTelegraph: 1.2,
     lanceFire: 2.2,
     lanceChain: 2,
-    burstShots: 5,
-    burstGap: 1.7,
+    burstShots: 7,
+    burstGap: 1.5,
     missileFactor: 0.8,
     missileCount: 3,
     decoyCount: 3,
@@ -177,7 +177,7 @@ const LANCE_MIN_BEAM_TIME = 0.35;
 const LANCE_CHARGE_SPEED = 0.6;
 /** 潜行结束时距玩家小于该值才现形 */
 const AMBUSH_RANGE = 380;
-const AMBUSH_GRACE = 3;
+const AMBUSH_GRACE = 2;
 const EXTEND_TIME = 2.2;
 const MAX_DECOYS = 3;
 const DECOY_LIFE = 15;
@@ -190,6 +190,18 @@ const SAFE_PASS_DISTANCE = 70;
 const MIN_ALTITUDE = 30;
 const MAX_ALTITUDE = 480;
 const DEATH_SEQUENCE_DURATION = 4.2;
+/**
+ * 弹舱导弹：比玩家快、按提前量追踪，转向有限（大过载急转可甩掉），热焰弹可诱骗；8 秒燃尽。
+ * 旧版 50 米/秒的慢速导弹追不上任何机动中的玩家，幻影几乎没有威胁。
+ */
+const BAY_MISSILE: Readonly<BossMissileFlightProfile> = {
+  speed: 88,
+  turnRate: 1.3,
+  lead: 0.5,
+  lifetime: 8,
+};
+/** 机炮对玩家的提前量（拦截点比例） */
+const CANNON_LEAD = 0.9;
 const MAX_STEP_DT = 0.1;
 const WARNING_THROTTLE = 4;
 
@@ -790,7 +802,7 @@ export class PhantomWingAI implements IAdvancedBoss {
   }
 
   private getArmorMultiplier(): number {
-    let value = this.phase >= 3 ? 0.7 : 0.55;
+    let value = this.phase >= 3 ? 0.78 : 0.65;
     if (this.lowHealthReached) value += 0.15;
     if (this.stunTimer > 0) value += 0.2;
     return Math.min(0.95, value);
@@ -1487,7 +1499,7 @@ export class PhantomWingAI implements IAdvancedBoss {
     const distance = this.tmpA.distanceTo(this.playerPos);
     this.tmpB
       .copy(this.playerPos)
-      .addScaledVector(this.playerVel, (distance / 100) * 0.7)
+      .addScaledVector(this.playerVel, (distance / 100) * CANNON_LEAD)
       .sub(this.tmpA);
     if (this.tmpB.lengthSq() < 1e-6) return;
     this.tmpB.normalize();
@@ -1572,12 +1584,15 @@ export class PhantomWingAI implements IAdvancedBoss {
         }
       }
     }
+    // 从弹舱向前下方弹出，再转向目标
+    this.tmpB.copy(this.flight.forward).addScaledVector(this.flight.up, -0.4);
     this.missileSystem.fire(
       this.tmpA.clone(),
       target,
       this.friendlyMeshes,
       this.playerMesh,
-      target === null
+      target === null,
+      { ...BAY_MISSILE, launchDirection: this.tmpB }
     );
     this.missileFired++;
     this.fx.emit('createHit', this.tmpA, 1.4, 'enemy');

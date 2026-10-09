@@ -99,7 +99,7 @@ interface LeviathanPhaseTuning {
 const PHASE_TUNING: readonly LeviathanPhaseTuning[] = [
   {
     surfacedTime: 14,
-    submergedTime: 9,
+    submergedTime: 7,
     speedFactor: 1,
     turretFactor: 1,
     missileCount: 3,
@@ -117,7 +117,7 @@ const PHASE_TUNING: readonly LeviathanPhaseTuning[] = [
   },
   {
     surfacedTime: 11.5,
-    submergedTime: 7,
+    submergedTime: 5.5,
     speedFactor: 1.2,
     turretFactor: 0.85,
     missileCount: 4,
@@ -126,7 +126,7 @@ const PHASE_TUNING: readonly LeviathanPhaseTuning[] = [
     mineCount: 6,
     mineTime: 4.6,
     mineInterval: 0,
-    minions: ['drone', 'drone'],
+    minions: ['drone'],
     minionTime: 6.5,
     minionInterval: 0,
     torpedoInterval: 1.8,
@@ -144,7 +144,7 @@ const PHASE_TUNING: readonly LeviathanPhaseTuning[] = [
     mineCount: 8,
     mineTime: 0,
     mineInterval: 14,
-    minions: ['drone', 'drone', 'fighter'],
+    minions: ['drone', 'fighter'],
     minionTime: 0,
     minionInterval: 26,
     torpedoInterval: 0,

@@ -29,6 +29,12 @@ const FIRE_RANGE = 420;
  * accuracy 由 EnemyTypes 基础值 + 关卡曲线的命中加成（Difficulty.getLevelScaling）给出。
  */
 const AIM_SPREAD = 0.4;
+/** 敌机子弹弹速（米/秒，敌方子弹池固定弹速，不继承载机速度），用于计算提前量 */
+const BULLET_SPEED = GAME_CONSTANTS.PROJECTILE.SPEED;
+/** 提前量的最长预测时间（秒）：超出射程的远距离不再外推 */
+const MAX_LEAD_SECONDS = 4;
+/** 目标速度估计的合理上限（米/秒）：更大视为瞬移（复活 / 传送），不做提前 */
+const MAX_TARGET_SPEED = 250;
 
 // 每帧复用的临时对象（所有敌机实例共享，update 内同步使用）
 const tmpDirection = new THREE.Vector3();
@@ -61,6 +67,9 @@ export class EnemyAI {
 
   // 攻击参数
   private attackCooldown: number = 0;
+  /** 开火目标的速度估计（由 LevelManager 每步写入；未设置时不做提前量） */
+  private readonly targetVelocity = new THREE.Vector3();
+  private hasTargetVelocity = false;
 
   // 友军列表（用于盘旋状态判断目标）
   private friendlyMeshes: THREE.Object3D[] = [];
@@ -435,11 +444,50 @@ export class EnemyAI {
   }
 
   /**
+   * 开火目标的速度（世界坐标，米/秒）：设置后按 config.aimLead 计算提前量；
+   * 传 null 或非有限 / 过大的速度（瞬移）则只瞄准目标当前位置。
+   */
+  public setTargetVelocity(velocity: THREE.Vector3 | null): void {
+    if (
+      velocity &&
+      Number.isFinite(velocity.x) &&
+      Number.isFinite(velocity.y) &&
+      Number.isFinite(velocity.z) &&
+      velocity.lengthSq() < MAX_TARGET_SPEED * MAX_TARGET_SPEED
+    ) {
+      this.targetVelocity.copy(velocity);
+      this.hasTargetVelocity = true;
+    } else {
+      this.hasTargetVelocity = false;
+    }
+  }
+
+  /**
+   * 瞄准点：目标位置 + 速度 × 拦截时间 × 提前量系数（两次迭代的一阶拦截，
+   * 与 UnitMotion.predictIntercept 同法；留在本模块内，避免把单位运行时拉进核心分块）。
+   */
+  private computeAimPoint(targetPosition: THREE.Vector3, out: THREE.Vector3): THREE.Vector3 {
+    out.copy(targetPosition);
+    const lead = this.config.aimLead ?? 0;
+    if (!(lead > 0) || !this.hasTargetVelocity) return out;
+    const origin = this.mesh.position;
+    let time = Math.min(MAX_LEAD_SECONDS, origin.distanceTo(targetPosition) / BULLET_SPEED);
+    out.copy(targetPosition).addScaledVector(this.targetVelocity, time);
+    time = Math.min(MAX_LEAD_SECONDS, origin.distanceTo(out) / BULLET_SPEED);
+    out.copy(targetPosition).addScaledVector(this.targetVelocity, time * Math.min(1, lead));
+    if (!Number.isFinite(out.x) || !Number.isFinite(out.y) || !Number.isFinite(out.z)) {
+      out.copy(targetPosition);
+    }
+    return out;
+  }
+
+  /**
    * 射击
    */
   private fire(targetPosition: THREE.Vector3): void {
-    // 计算射击方向
-    const direction = new THREE.Vector3().subVectors(targetPosition, this.mesh.position);
+    // 计算射击方向（按提前量瞄准拦截点）
+    const aimPoint = this.computeAimPoint(targetPosition, tmpTarget);
+    const direction = new THREE.Vector3().subVectors(aimPoint, this.mesh.position);
     direction.normalize();
 
     // 添加随机扰动（让瞄准不准确）：偏航（绕世界 Y）与俯仰（绕水平侧轴）各自独立

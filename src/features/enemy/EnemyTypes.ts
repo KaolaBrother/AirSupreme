@@ -39,6 +39,11 @@ export interface EnemyConfig {
   attackCooldown: number;
   evasionChance: number; // 闪避概率 0-1
   accuracy: number; // 命中精度 0-1
+  /**
+   * 射击提前量 0..1（可选，缺省 0 = 瞄准目标当前位置）：由关卡曲线（Difficulty.enemyAimLead）
+   * 在 LevelManager 生成敌机时写入；友军僚机不设置。
+   */
+  aimLead?: number;
   fireSpreadAngle: number; // 开火角度（度数）- 机头朝向目标在此角度范围内即可开火
 
   // 移动参数

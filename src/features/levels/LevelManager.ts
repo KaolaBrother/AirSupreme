@@ -1,10 +1,6 @@
 import { Vector3 } from 'three';
 import type { Object3D, Scene } from 'three';
-import {
-  LevelConfig,
-  LevelWaveEventType,
-  getLevelConfig,
-} from '@/features/terrain/LevelConfig';
+import { LevelConfig, LevelWaveEventType, getLevelConfig } from '@/features/terrain/LevelConfig';
 import {
   EnemyConfig,
   EnemyType,
@@ -13,10 +9,7 @@ import {
   getEnemyTypesForWave,
 } from '@/features/enemy/EnemyTypes';
 import { EnemyAI } from '@/features/enemy/EnemyAI';
-import {
-  WORLDSCAPE_WATER_Y,
-  type TerrainGenerator,
-} from '@/features/terrain/TerrainGenerator';
+import { WORLDSCAPE_WATER_Y, type TerrainGenerator } from '@/features/terrain/TerrainGenerator';
 import type {
   TerrainEnvironment,
   TerrainSurfaceKind,
@@ -37,6 +30,14 @@ const log = getLogger('LevelManager');
 
 /** 敌机出生点相对地表的最小高度（米），避免在峡谷岩壁 / 火山 / 天梯立柱内部生成 */
 const SPAWN_TERRAIN_CLEARANCE = 45;
+/** 波次敌机群中心距玩家的距离（米）：600-800 */
+const WAVE_GROUP_MIN_DISTANCE = 600;
+const WAVE_GROUP_DISTANCE_RANGE = 200;
+/** 群内散布半径（米，与 getSpawnPosition 一致）：群中心离边界至少这么远 */
+const WAVE_GROUP_SPREAD = 60;
+const WAVE_GROUP_CENTER_ATTEMPTS = 12;
+/** 玩家位置单步变化折算速度超过该值（米/秒）视为瞬移，不用于提前量 */
+const PLAYER_TELEPORT_SPEED = 250;
 
 export enum LevelState {
   IDLE = 'IDLE',
@@ -65,8 +66,9 @@ export class LevelManager {
   private scene: Scene;
   private terrainGenerator: TerrainGenerator | null = null;
   private terrainGeneratorPromise: Promise<TerrainGenerator> | null = null;
-  private spawnPortalModulePromise: Promise<typeof import('@/features/effects/SpawnPortal')> | null =
-    null;
+  private spawnPortalModulePromise: Promise<
+    typeof import('@/features/effects/SpawnPortal')
+  > | null = null;
   private terrainLoadSequence: number = 0;
   private terrainReadyPromise: Promise<void> = Promise.resolve();
 
@@ -116,6 +118,11 @@ export class LevelManager {
     this.getCrashSurfaceY(x, z);
   /** 地形尚未加载时 getSurfaceSample 的回退值（惰性创建：模块导入期不读取地形常量） */
   private fallbackSurfaceSample: TerrainSurfaceSample | null = null;
+  /** 玩家速度估计（逐步差分 + 轻度平滑），供敌机计算射击提前量 */
+  private readonly playerVelocity = new Vector3();
+  private readonly lastPlayerPosition = new Vector3();
+  private readonly playerStep = new Vector3();
+  private hasLastPlayerPosition = false;
 
   // 回调
   public onWaveStart?: (wave: number) => void;
@@ -209,6 +216,7 @@ export class LevelManager {
     this.spawnInterval = 0.5;
     this.currentWaveEvent = null;
     this.currentWaveBeatProfile = DEFAULT_ONBOARDING_BEAT_PROFILE;
+    this.resetPlayerVelocity();
 
     log.info('Loading level', { levelId, name: config.name, terrain: config.terrain });
 
@@ -234,35 +242,42 @@ export class LevelManager {
   }
 
   /**
-   * 计算敌人群中心，确保在战场范围内
+   * 计算敌人群中心：距玩家 600-800 米，且整群（含 60 米散布）落在战场范围内。
+   * 玩家靠近战场边缘时，朝外的随机方向会落到界外——以前直接钳制到边界，
+   * 群中心可能被压到玩家身边（朝外飞时只剩一两百米）。现在只在界内的方向里选，
+   * 都不行时改为朝战场中心方向。
    */
   private calculateWaveGroupCenter(playerPosition: Vector3): Vector3 {
-    // 计算相对于玩家的方向和距离（600-800m）
-    const angle = Math.random() * Math.PI * 2;
-    const distance = 600 + Math.random() * 200;
+    const px = Number.isFinite(playerPosition.x) ? playerPosition.x : 0;
+    const pz = Number.isFinite(playerPosition.z) ? playerPosition.z : 0;
+    const y = Number.isFinite(playerPosition.y) ? playerPosition.y : 0;
+    const limit = this.BATTLEFIELD_MAX - WAVE_GROUP_SPREAD;
 
-    // 计算原始群中心位置
-    const rawCenter = new Vector3(
-      playerPosition.x + Math.cos(angle) * distance,
-      playerPosition.y,
-      playerPosition.z + Math.sin(angle) * distance
-    );
-
-    // 限制在战场范围内（±750米）
-    const clampedCenter = new Vector3(
-      this.clampToBattlefield(rawCenter.x),
-      rawCenter.y,
-      this.clampToBattlefield(rawCenter.z)
-    );
-
-    if (clampedCenter.x !== rawCenter.x || clampedCenter.z !== rawCenter.z) {
-      log.warn('Wave group centre outside the battlefield; clamped to the boundary', {
-        original: { x: rawCenter.x, z: rawCenter.z },
-        clamped: { x: clampedCenter.x, z: clampedCenter.z },
-      });
+    for (let attempt = 0; attempt < WAVE_GROUP_CENTER_ATTEMPTS; attempt++) {
+      const angle = Math.random() * Math.PI * 2;
+      const distance = WAVE_GROUP_MIN_DISTANCE + Math.random() * WAVE_GROUP_DISTANCE_RANGE;
+      const x = px + Math.cos(angle) * distance;
+      const z = pz + Math.sin(angle) * distance;
+      if (Math.abs(x) <= limit && Math.abs(z) <= limit) {
+        return new Vector3(x, y, z);
+      }
     }
 
-    return clampedCenter;
+    // 兜底：从玩家朝战场中心方向（玩家在中心附近时任选方向）
+    const toCenter = Math.hypot(px, pz);
+    const dirX = toCenter > 1 ? -px / toCenter : 1;
+    const dirZ = toCenter > 1 ? -pz / toCenter : 0;
+    const distance = WAVE_GROUP_MIN_DISTANCE + WAVE_GROUP_DISTANCE_RANGE / 2;
+    const center = new Vector3(
+      Math.max(-limit, Math.min(limit, px + dirX * distance)),
+      y,
+      Math.max(-limit, Math.min(limit, pz + dirZ * distance))
+    );
+    log.debug('Wave group centre placed toward the battlefield centre', {
+      player: { x: px, z: pz },
+      center: { x: center.x, z: center.z },
+    });
+    return center;
   }
 
   /**
@@ -373,11 +388,7 @@ export class LevelManager {
   /**
    * 更新关卡管理器
    */
-  public update(
-    deltaTime: number,
-    playerPosition: Vector3,
-    friendlyMeshes?: Object3D[]
-  ): void {
+  public update(deltaTime: number, playerPosition: Vector3, friendlyMeshes?: Object3D[]): void {
     // 更新传送门动画
     for (let i = this.activePortals.length - 1; i >= 0; i--) {
       const portal = this.activePortals[i];
@@ -406,17 +417,16 @@ export class LevelManager {
       }
     }
 
+    this.trackPlayerVelocity(deltaTime, playerPosition);
+
     // 生成敌人
     if (this.state === LevelState.WAVE_ACTIVE && this.currentLevel) {
       const maxEnemies = this.currentLevel.enemiesPerWave[this.currentWave] || 0;
       const aliveEnemies = this.enemies.filter((e) => e.isAlive()).length;
-      const maxConcurrentEnemies = GameConfig.getMaxEnemies();
+      const maxConcurrentEnemies = this.getMaxConcurrentEnemies();
 
       // 只要还没达到最大生成数量，就继续生成
-      if (
-        this.enemiesSpawnedThisWave < maxEnemies &&
-        aliveEnemies < maxConcurrentEnemies
-      ) {
+      if (this.enemiesSpawnedThisWave < maxEnemies && aliveEnemies < maxConcurrentEnemies) {
         this.spawnTimer += deltaTime;
         if (this.spawnTimer >= this.spawnInterval) {
           this.spawnTimer = 0;
@@ -437,7 +447,9 @@ export class LevelManager {
     }
 
     // 更新敌人
+    const leadVelocity = this.hasLastPlayerPosition ? this.playerVelocity : null;
     for (const enemy of this.enemies) {
+      enemy.setTargetVelocity(leadVelocity);
       enemy.update(deltaTime, playerPosition, friendlyMeshes, playerPosition);
     }
 
@@ -449,6 +461,42 @@ export class LevelManager {
         this.enemies.splice(i, 1);
       }
     }
+  }
+
+  /**
+   * 玩家速度估计：位置逐步差分，按约 0.1 秒时间常数平滑；
+   * 瞬移（复活 / 读档 / 开发工具摆位）或非有限值时清零重来。
+   */
+  private trackPlayerVelocity(deltaTime: number, playerPosition: Vector3): void {
+    if (
+      !(deltaTime > 0) ||
+      !Number.isFinite(playerPosition.x) ||
+      !Number.isFinite(playerPosition.y) ||
+      !Number.isFinite(playerPosition.z)
+    ) {
+      return;
+    }
+    if (this.hasLastPlayerPosition) {
+      this.playerStep.subVectors(playerPosition, this.lastPlayerPosition).divideScalar(deltaTime);
+      if (this.playerStep.lengthSq() < PLAYER_TELEPORT_SPEED * PLAYER_TELEPORT_SPEED) {
+        this.playerVelocity.lerp(this.playerStep, Math.min(1, deltaTime * 10));
+      } else {
+        this.playerVelocity.set(0, 0, 0);
+      }
+    }
+    this.lastPlayerPosition.copy(playerPosition);
+    this.hasLastPlayerPosition = true;
+  }
+
+  private resetPlayerVelocity(): void {
+    this.playerVelocity.set(0, 0, 0);
+    this.hasLastPlayerPosition = false;
+  }
+
+  /** 同时在场的敌机上限：设备基础值（GameConfig）+ 关卡曲线加成（后期同时来袭更多） */
+  public getMaxConcurrentEnemies(): number {
+    const bonus = getLevelScaling(this.currentLevel?.id ?? 1).concurrentEnemyBonus;
+    return Math.max(1, GameConfig.getMaxEnemies() + (Number.isFinite(bonus) ? bonus : 0));
   }
 
   /**
@@ -642,6 +690,7 @@ export class LevelManager {
     }
     this.activePortals = [];
     this.enemiesSpawnedThisWave = 0;
+    this.resetPlayerVelocity();
   }
 
   /**
@@ -690,9 +739,9 @@ export class LevelManager {
    * 使用当前波次的固定群中心（waveGroupCenter），所有敌人在群中心60m半径内分布
    */
   private getSpawnPosition(playerPosition: Vector3): Vector3 {
-    const minGroupDistanceFromPlayer = 600; // 群中心最小距离
-    const maxGroupDistanceFromPlayer = 800; // 群中心最大距离
-    const distributionRadius = 60; // 敌人在群内分布半径
+    const minGroupDistanceFromPlayer = WAVE_GROUP_MIN_DISTANCE; // 群中心最小距离
+    const maxGroupDistanceFromPlayer = WAVE_GROUP_MIN_DISTANCE + WAVE_GROUP_DISTANCE_RANGE; // 群中心最大距离
+    const distributionRadius = WAVE_GROUP_SPREAD; // 敌人在群内分布半径
     const minDistanceFromOtherEnemies = 40;
 
     // 战斗区域边界限制
@@ -951,7 +1000,8 @@ export class LevelManager {
       (profile?.enemyAttackCooldownMultiplier ?? 1) * scaling.enemyCooldownMultiplier;
     const providedBonus = this.accuracyBonusProvider?.() ?? 0;
     const accuracyBonus =
-      scaling.enemyAccuracyBonus + (Number.isFinite(providedBonus) ? Math.max(0, providedBonus) : 0);
+      scaling.enemyAccuracyBonus +
+      (Number.isFinite(providedBonus) ? Math.max(0, providedBonus) : 0);
 
     return {
       ...baseConfig,
@@ -959,6 +1009,7 @@ export class LevelManager {
       damage: Math.max(1, Math.round(baseConfig.damage * damageMultiplier * 10) / 10),
       attackCooldown: Math.max(0.1, baseConfig.attackCooldown * cooldownMultiplier),
       accuracy: Math.min(0.95, baseConfig.accuracy + accuracyBonus),
+      aimLead: Math.max(0, Math.min(1, scaling.enemyAimLead)),
     };
   }
 }

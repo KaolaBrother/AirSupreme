@@ -576,6 +576,29 @@ export function createBossMissileVisualMesh(): THREE.Group {
   return group;
 }
 
+/**
+ * 单发导弹的飞行参数。全部缺省 = 旧版慢速导弹（50 米/秒、插值追踪、只受射程限制），
+ * 各关 Boss 的常规导弹都用它；需要“真能追上玩家”的齐射（第 4 关三叉戟）按发传入。
+ */
+export interface BossMissileFlightProfile {
+  /** 巡航速度（米/秒）；限速追踪的导弹发射后约 0.8 秒内从 55% 加速到满速 */
+  speed?: number;
+  /** 最大转向角速度（弧度/秒）：设置后改为限速转向追踪（大过载急转可以甩掉） */
+  turnRate?: number;
+  /** 提前量 0..1（限速追踪时按目标速度外推拦截点） */
+  lead?: number;
+  /** 寿命（秒）：到时燃尽自爆 */
+  lifetime?: number;
+  /** 发射初速方向（世界坐标，缺省竖直向上） */
+  launchDirection?: THREE.Vector3;
+}
+
+/** 限速追踪导弹的加速段（秒）与起始速度比例 */
+const BOOST_TIME = 0.8;
+const BOOST_START = 0.55;
+/** 目标速度估计的合理上限（米/秒）：更大视为瞬移，不做提前量 */
+const MAX_TRACKED_TARGET_SPEED = 250;
+
 export class BossMissile {
   public mesh: THREE.Group;
   public velocity: THREE.Vector3;
@@ -586,6 +609,17 @@ export class BossMissile {
 
   private turnSpeed: number = 0.25;
   private speed: number = 50;
+  /** 限速追踪参数（turnRate 为 null = 旧版插值追踪） */
+  private readonly turnRate: number | null;
+  private readonly lead: number;
+  private readonly maxLifetime: number;
+  private readonly cruiseSpeed: number;
+  private hasLastTarget = false;
+  private readonly lastTargetPosition = new THREE.Vector3();
+  private readonly targetVelocity = new THREE.Vector3();
+  private readonly targetStep = new THREE.Vector3();
+  private readonly turnQuaternion = new THREE.Quaternion();
+  private readonly identityQuaternion = new THREE.Quaternion();
   private particleSystem: ParticleSystem;
   private health: HealthSystem;
   private startPosition: THREE.Vector3;
@@ -620,7 +654,8 @@ export class BossMissile {
     target: THREE.Object3D | null,
     particleSystem: ParticleSystem,
     potentialTargets: THREE.Object3D[] = [],
-    playerMesh: THREE.Object3D | null = null
+    playerMesh: THREE.Object3D | null = null,
+    profile: BossMissileFlightProfile = {}
   ) {
     this.particleSystem = particleSystem;
     this.target = target;
@@ -628,6 +663,13 @@ export class BossMissile {
     this.playerMesh = playerMesh;
     this.startPosition = position.clone();
     this.health = new HealthSystem(BOSS_MISSILE_CONFIG.HEALTH);
+    const finitePositive = (value: number | undefined): number | null =>
+      typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null;
+    this.cruiseSpeed = finitePositive(profile.speed) ?? this.speed;
+    this.turnRate = finitePositive(profile.turnRate);
+    this.lead = Math.min(1, finitePositive(profile.lead) ?? 0);
+    this.maxLifetime = finitePositive(profile.lifetime) ?? Infinity;
+    this.speed = this.turnRate !== null ? this.cruiseSpeed * BOOST_START : this.cruiseSpeed;
 
     // 判断初始目标是否是玩家
     if (!target && playerMesh) {
@@ -652,6 +694,10 @@ export class BossMissile {
     }
 
     this.velocity = new THREE.Vector3(0, this.speed, 0);
+    const launch = profile.launchDirection;
+    if (launch && isFiniteVector(launch) && launch.lengthSq() > 1e-6) {
+      this.velocity.copy(launch).normalize().multiplyScalar(this.speed);
+    }
 
     this.lookTarget.copy(this.mesh.position).add(this.velocity);
     this.mesh.lookAt(this.lookTarget);
@@ -703,6 +749,17 @@ export class BossMissile {
     if (flightDistance > BOSS_MISSILE_CONFIG.MAX_RANGE) {
       this.active = false;
       return;
+    }
+    if (this.lifetime > this.maxLifetime) {
+      // 燃料耗尽：空中自爆（不造成伤害）
+      this.active = false;
+      this.particleSystem.createBossMissileExplosion(this.mesh.position.clone(), 1.2);
+      return;
+    }
+    if (this.turnRate !== null && this.speed < this.cruiseSpeed) {
+      // 助推段：从发射初速加速到巡航速度
+      const boost = (this.cruiseSpeed * (1 - BOOST_START)) / BOOST_TIME;
+      this.speed = Math.min(this.cruiseSpeed, this.speed + boost * deltaTime);
     }
 
     if (this.mesh.position.y <= -50) {
@@ -778,6 +835,10 @@ export class BossMissile {
     // 目标坐标非有限（玩家 / 诱饵锚点异常的那一帧）：本帧保持航向，不让 NaN 写进速度
     if (!isFiniteVector(source)) return;
     this.targetPosition.copy(source);
+    if (this.turnRate !== null) {
+      this.steerRateLimited(deltaTime);
+      return;
+    }
 
     this.targetDirection.subVectors(this.targetPosition, this.mesh.position).normalize();
     this.currentDirection.copy(this.velocity).normalize();
@@ -786,6 +847,54 @@ export class BossMissile {
     this.currentDirection.lerp(this.targetDirection, turnAngle * 2);
     this.currentDirection.normalize();
     // 极端坐标相减溢出同样会得到非有限方向：保持原速度
+    if (!isFiniteVector(this.currentDirection)) return;
+    this.velocity.copy(this.currentDirection).multiplyScalar(this.speed);
+  }
+
+  /**
+   * 限速转向追踪（targetPosition 已写入本帧目标位置）：按目标速度外推拦截点，
+   * 每秒最多转 turnRate 弧度——直线飞行的目标躲不开，贴近时大过载急转可以让它冲过头。
+   */
+  private steerRateLimited(deltaTime: number): void {
+    const turnRate = this.turnRate ?? 0;
+    if (this.hasLastTarget && deltaTime > 0) {
+      this.targetStep
+        .subVectors(this.targetPosition, this.lastTargetPosition)
+        .divideScalar(deltaTime);
+      if (
+        isFiniteVector(this.targetStep) &&
+        this.targetStep.lengthSq() < MAX_TRACKED_TARGET_SPEED * MAX_TRACKED_TARGET_SPEED
+      ) {
+        this.targetVelocity.lerp(this.targetStep, Math.min(1, deltaTime * 6));
+      } else {
+        this.targetVelocity.set(0, 0, 0);
+      }
+    }
+    this.lastTargetPosition.copy(this.targetPosition);
+    this.hasLastTarget = true;
+
+    // 拦截点：剩余飞行时间 ≈ 距离 / 速度（上限 3 秒），按提前量系数外推
+    const distance = this.mesh.position.distanceTo(this.targetPosition);
+    const timeToGo = Math.min(3, distance / Math.max(1, this.cruiseSpeed));
+    this.targetDirection
+      .copy(this.targetPosition)
+      .addScaledVector(this.targetVelocity, timeToGo * this.lead)
+      .sub(this.mesh.position);
+    if (this.targetDirection.lengthSq() < 1e-8) return;
+    this.targetDirection.normalize();
+    this.currentDirection.copy(this.velocity);
+    if (this.currentDirection.lengthSq() < 1e-8) this.currentDirection.copy(this.targetDirection);
+    this.currentDirection.normalize();
+
+    const angle = this.currentDirection.angleTo(this.targetDirection);
+    const maxStep = turnRate * deltaTime;
+    if (angle <= maxStep || angle < 1e-6) {
+      this.currentDirection.copy(this.targetDirection);
+    } else {
+      this.turnQuaternion.setFromUnitVectors(this.currentDirection, this.targetDirection);
+      this.identityQuaternion.identity().slerp(this.turnQuaternion, maxStep / angle);
+      this.currentDirection.applyQuaternion(this.identityQuaternion).normalize();
+    }
     if (!isFiniteVector(this.currentDirection)) return;
     this.velocity.copy(this.currentDirection).multiplyScalar(this.speed);
   }
@@ -867,7 +976,8 @@ export class BossMissileSystem {
     target: THREE.Object3D | null,
     potentialTargets: THREE.Object3D[] = [],
     playerMesh: THREE.Object3D | null = null,
-    targetingPlayer: boolean = false
+    targetingPlayer: boolean = false,
+    profile?: BossMissileFlightProfile
   ): void {
     // 发射点非有限（Boss 挂点计算异常）：不发射，避免产生永远飞行的 NaN 导弹
     if (!isFiniteVector(position)) return;
@@ -877,7 +987,8 @@ export class BossMissileSystem {
       target,
       this.particleSystem,
       potentialTargets,
-      playerMesh
+      playerMesh,
+      profile
     );
     missile.isTargetingPlayer = targetingPlayer;
     this.missiles.push(missile);
