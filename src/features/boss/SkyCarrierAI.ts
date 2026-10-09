@@ -22,8 +22,10 @@ type BossGroup = THREE.Group & {
  * - 缓慢追踪玩家（空中飞行）
  * - 两门重炮（左右翼）
  * - 两个导弹发射井
- * - 每 60 秒从仓库口飞出 3 架敌机（除 Scout 以外）
+ * - 每 60 秒从仓库口飞出 2 架敌机（除 Scout 以外）
  */
+/** 每批起飞的护航机数量 */
+const CARRIER_ESCORTS_PER_LAUNCH = 2;
 /** 重炮弹速（Boss 子弹池固定弹速，米/秒）与对玩家的提前量 */
 const CANNON_PROJECTILE_SPEED = 100;
 const CANNON_LEAD = 0.6;
@@ -500,7 +502,8 @@ export class SkyCarrierAI {
     hangarOffset.applyQuaternion(this.mesh.quaternion);
     const hangarPosition = this.mesh.position.clone().add(hangarOffset);
 
-    for (let i = 0; i < 3; i++) {
+    // 护航机是点缀，不该盖过航母本身（每批三架时常有王牌，久战时伤害几乎全来自护航）
+    for (let i = 0; i < CARRIER_ESCORTS_PER_LAUNCH; i++) {
       const enemyType = availableTypes[Math.floor(Math.random() * availableTypes.length)];
 
       const spawnOffset = new THREE.Vector3((i - 1) * 5, -2, i * 3);

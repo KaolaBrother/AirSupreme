@@ -11,12 +11,12 @@ type BossGroup = THREE.Group & {
 };
 
 /**
- * 「沙墙」高炮：按拦截点的 30% 提前量瞄准玩家、弹速 80 米/秒，炸点 ±30 米散布——
+ * 「沙墙」高炮：按拦截点的 50% 提前量瞄准玩家、弹速 80 米/秒，炸点 ±25 米散布——
  * 直线进入的攻击航线会被弹幕咬住，变换进入方向 / 蛇行可以躲开。
  */
 const FLAK_SPEED = 80;
-const FLAK_LEAD = 0.3;
-const FLAK_SCATTER = 60;
+const FLAK_LEAD = 0.5;
+const FLAK_SCATTER = 50;
 
 export class DesertFortressAI {
   private static readonly CRITICAL_HEALTH_THRESHOLD = 0.24;
