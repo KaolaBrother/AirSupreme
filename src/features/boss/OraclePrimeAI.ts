@@ -4,6 +4,7 @@ import { BossMissileSystem } from './BossMissileSystem';
 import type { BossHazardHit, BossMinionKind, BossSubTarget, IAdvancedBoss } from './BossContracts';
 import { HealthSystem } from '@/features/combat/HealthSystem';
 import type { ParticleSystem } from '@/features/effects/ParticleSystem';
+import { getLocale, tr, type Locale } from '@/i18n';
 import {
   createHazardProbe,
   disposeObjectTree,
@@ -326,6 +327,8 @@ export class OraclePrimeAI implements IAdvancedBoss {
   private partsDirty = true;
   private statusLabel: string | null = null;
   private statusKey = -1;
+  /** 状态提示按生成时的语言缓存；切换语言后重新生成 */
+  private statusLocale: Locale | null = null;
 
   // 护盾
   private shieldFade = 0;
@@ -714,59 +717,82 @@ export class OraclePrimeAI implements IAdvancedBoss {
     const alivePylons = this.getAlivePylonCount();
     const aliveEmitters = this.getAliveEmitterCount();
     const key = code * 100 + alivePylons * 10 + aliveEmitters;
-    if (key === this.statusKey) return this.statusLabel;
+    const locale = getLocale();
+    if (key === this.statusKey && locale === this.statusLocale) return this.statusLabel;
     this.statusKey = key;
+    this.statusLocale = locale;
     switch (code) {
       case 1:
-        this.statusLabel = '神谕崩解';
+        this.statusLabel = tr({ en: 'Oracle collapsing', zh: '神谕崩解' });
         break;
       case 2:
-        this.statusLabel = '电磁干扰 · 护盾塔停摆';
+        this.statusLabel = tr({ en: 'EMP jammed · Pylons offline', zh: '电磁干扰 · 护盾塔停摆' });
         break;
       case 3:
-        this.statusLabel = '电磁瘫痪 · 核心暴露';
+        this.statusLabel = tr({ en: 'EMP stunned · Core exposed', zh: '电磁瘫痪 · 核心暴露' });
         break;
       case 4:
-        this.statusLabel = '神谕苏醒 · 护盾充能';
+        this.statusLabel = tr({
+          en: 'Oracle awakening · Shield charging',
+          zh: '神谕苏醒 · 护盾充能',
+        });
         break;
       case 5:
-        this.statusLabel = `护盾塔 ${alivePylons}/${this.pylons.length} · 核心无敌`;
+        this.statusLabel = tr(
+          {
+            en: 'Pylons {alive}/{total} · Core invulnerable',
+            zh: '护盾塔 {alive}/{total} · 核心无敌',
+          },
+          { alive: alivePylons, total: this.pylons.length }
+        );
         break;
       case 6:
-        this.statusLabel = '护盾崩溃';
+        this.statusLabel = tr({ en: 'Shield down', zh: '护盾崩溃' });
         break;
       case 7:
-        this.statusLabel = '核心过载';
+        this.statusLabel = tr({ en: 'Core overload', zh: '核心过载' });
         break;
       case 8:
-        this.statusLabel = '终焉之光';
+        this.statusLabel = tr({ en: 'Light of the End', zh: '终焉之光' });
         break;
       case 9:
-        this.statusLabel = '核心衰竭 · 弱点暴露';
+        this.statusLabel = tr({
+          en: 'Core exhausted · Weak point exposed',
+          zh: '核心衰竭 · 弱点暴露',
+        });
         break;
       case 10:
-        this.statusLabel = '瞳孔过热 · 弱点暴露';
+        this.statusLabel = tr({
+          en: 'Eye overheated · Weak point exposed',
+          zh: '瞳孔过热 · 弱点暴露',
+        });
         break;
       case 11:
-        this.statusLabel = '光阵过热 · 发射器暴露';
+        this.statusLabel = tr({
+          en: 'Array overheated · Emitters exposed',
+          zh: '光阵过热 · 发射器暴露',
+        });
         break;
       case 12:
-        this.statusLabel = '光轮扫掠';
+        this.statusLabel = tr({ en: 'Halo sweep', zh: '光轮扫掠' });
         break;
       case 13:
-        this.statusLabel = '审判之矛 · 锁定中';
+        this.statusLabel = tr({ en: 'Spear of Judgment · Locking', zh: '审判之矛 · 锁定中' });
         break;
       case 14:
-        this.statusLabel = '过载冲击环';
+        this.statusLabel = tr({ en: 'Overload shock ring', zh: '过载冲击环' });
         break;
       case 15:
-        this.statusLabel = '核心临界';
+        this.statusLabel = tr({ en: 'Core critical', zh: '核心临界' });
         break;
       case 16:
-        this.statusLabel = '核心过载 · 失稳';
+        this.statusLabel = tr({ en: 'Core overload · Unstable', zh: '核心过载 · 失稳' });
         break;
       default:
-        this.statusLabel = `核心暴露 · 光阵 ${aliveEmitters}/${this.emitters.length}`;
+        this.statusLabel = tr(
+          { en: 'Core exposed · Emitters {alive}/{total}', zh: '核心暴露 · 光阵 {alive}/{total}' },
+          { alive: aliveEmitters, total: this.emitters.length }
+        );
     }
     return this.statusLabel;
   }
@@ -1038,7 +1064,7 @@ export class OraclePrimeAI implements IAdvancedBoss {
     );
     this.fx.emit('createEmpBurst', this.coreWorld, this.rig.shieldRadius * 1.3);
     this.emitCue('shield-collapse', this.coreWorld, 1);
-    this.onPhaseChange?.(2, '护盾崩溃 · 核心暴露');
+    this.onPhaseChange?.(2, tr({ en: 'Shield down · Core exposed', zh: '护盾崩溃 · 核心暴露' }));
   }
 
   private updateCollapse(): void {
@@ -1108,7 +1134,7 @@ export class OraclePrimeAI implements IAdvancedBoss {
     );
     this.spawnVisualRing(this.coreWorld, 40 * this.sizeFactor, 260, 1.8, 26 * this.sizeFactor, 0.9);
     this.emitCue('overload', this.coreWorld, 1);
-    this.onPhaseChange?.(3, '核心过载');
+    this.onPhaseChange?.(3, tr({ en: 'Core overload', zh: '核心过载' }));
   }
 
   private updateOverloadRise(): void {
@@ -1515,7 +1541,9 @@ export class OraclePrimeAI implements IAdvancedBoss {
         });
         if (started) {
           pylon.attack = 'active';
-          if (pylon.activations % 2 === 1) this.onHazardWarning?.('电弧锁定');
+          if (pylon.activations % 2 === 1) {
+            this.onHazardWarning?.(tr({ en: 'Arc lock-on', zh: '电弧锁定' }));
+          }
           this.emitCue('arc-telegraph', this.tmpB, 0.7);
         } else {
           this.finishPylonAttack(pylon);
@@ -1657,7 +1685,15 @@ export class OraclePrimeAI implements IAdvancedBoss {
     if (this.getAlivePylonCount() > 0) {
       this.retaliationTimer = 1.3;
       this.retaliationCount = destroyed >= 3 ? 3 : 2;
-      this.onHazardWarning?.(`护盾塔被毁 ${destroyed}/${this.pylons.length} · 神谕反击`);
+      this.onHazardWarning?.(
+        tr(
+          {
+            en: 'Pylon down {destroyed}/{total} · Oracle retaliates',
+            zh: '护盾塔被毁 {destroyed}/{total} · 神谕反击',
+          },
+          { destroyed, total: this.pylons.length }
+        )
+      );
     }
     this.partsDirty = true;
     this.statusKey = -1;
@@ -1671,7 +1707,7 @@ export class OraclePrimeAI implements IAdvancedBoss {
     this.missileQueue = Math.max(this.missileQueue, this.retaliationCount);
     this.missileStagger = 0;
     this.missileFired = 0;
-    this.onHazardWarning?.('导弹齐射');
+    this.onHazardWarning?.(tr({ en: 'Missile salvo', zh: '导弹齐射' }));
   }
 
   // ----- 常规火力 -----
@@ -1753,7 +1789,7 @@ export class OraclePrimeAI implements IAdvancedBoss {
     this.missileQueue = tuning.missileCount;
     this.missileStagger = 0.4;
     this.missileFired = 0;
-    if (this.phase >= 2) this.onHazardWarning?.('导弹齐射');
+    if (this.phase >= 2) this.onHazardWarning?.(tr({ en: 'Missile salvo', zh: '导弹齐射' }));
   }
 
   private launchMissile(position: THREE.Vector3, preferFriendly: boolean): void {
@@ -1803,7 +1839,7 @@ export class OraclePrimeAI implements IAdvancedBoss {
       this.onSpawnMinion?.(position, kind);
     });
     this.rig.root.getWorldPosition(this.tmpA);
-    this.onHazardWarning?.('无人机群出击');
+    this.onHazardWarning?.(tr({ en: 'Drone swarm launched', zh: '无人机群出击' }));
     this.emitCue('drone-launch', this.tmpA, 0.7);
   }
 
@@ -1856,7 +1892,9 @@ export class OraclePrimeAI implements IAdvancedBoss {
       case 'last-light':
         this.lastLightDone = true;
         this.coreFlare = 1;
-        this.onHazardWarning?.('终焉之光 · 三重冲击环');
+        this.onHazardWarning?.(
+          tr({ en: 'Light of the End · Triple shock rings', zh: '终焉之光 · 三重冲击环' })
+        );
         this.emitCue('last-light', this.coreWorld, 1);
         break;
     }
@@ -1927,7 +1965,11 @@ export class OraclePrimeAI implements IAdvancedBoss {
       this.finishMajor(0.3);
       return;
     }
-    this.onHazardWarning?.(overload ? '倾斜光轮 · 观察光束高度' : '光轮扫掠 · 避开光环高度');
+    this.onHazardWarning?.(
+      overload
+        ? tr({ en: 'Tilted halo · Watch the beam height', zh: '倾斜光轮 · 观察光束高度' })
+        : tr({ en: 'Halo sweep · Avoid the ring altitude', zh: '光轮扫掠 · 避开光环高度' })
+    );
     this.emitCue('pinwheel-charge', this.coreWorld, 0.8);
   }
 
@@ -1984,7 +2026,11 @@ export class OraclePrimeAI implements IAdvancedBoss {
       this.finishMajor(0.3);
       return;
     }
-    this.onHazardWarning?.(triple ? '三重审判之矛' : '审判之矛 · 锁定后急转');
+    this.onHazardWarning?.(
+      triple
+        ? tr({ en: 'Triple Spear of Judgment', zh: '三重审判之矛' })
+        : tr({ en: 'Spear of Judgment · Break hard after lock', zh: '审判之矛 · 锁定后急转' })
+    );
     this.emitCue('judgement-charge', this.coreWorld, 0.8);
   }
 
@@ -2077,7 +2123,12 @@ export class OraclePrimeAI implements IAdvancedBoss {
     const spawned = this.shockwaves.spawn(this.coreWorld, spec);
     if (spawned) {
       this.onHazardWarning?.(
-        kind === 'crown' ? '过载冲击环 · 穿越缺口或远离' : '双重冲击环 · 与核心同高'
+        kind === 'crown'
+          ? tr({
+              en: 'Overload shock ring · Fly through the gap or stay clear',
+              zh: '过载冲击环 · 穿越缺口或远离',
+            })
+          : tr({ en: 'Twin shock rings · Stay level with the core', zh: '双重冲击环 · 与核心同高' })
       );
       this.emitCue('shockwave-charge', this.coreWorld, 0.8);
     }
@@ -2155,7 +2206,9 @@ export class OraclePrimeAI implements IAdvancedBoss {
     if (this.majorStep === 4 && this.majorTimer > 1.2) {
       this.exhaustTimer = EXHAUST_TIME;
       this.statusKey = -1;
-      this.onHazardWarning?.('核心衰竭 · 全力攻击');
+      this.onHazardWarning?.(
+        tr({ en: 'Core exhausted · All-out attack!', zh: '核心衰竭 · 全力攻击' })
+      );
       this.emitCue('aperture-open', this.coreWorld, 1);
       this.finishMajor(1.6);
     }
@@ -2194,7 +2247,7 @@ export class OraclePrimeAI implements IAdvancedBoss {
         topY: ground + 900 * sf,
       });
     });
-    this.onHazardWarning?.('天罚光柱 · 偏离航线');
+    this.onHazardWarning?.(tr({ en: 'Orbital strike · Change course', zh: '天罚光柱 · 偏离航线' }));
     this.emitCue('orbital-telegraph', this.tmpA, 0.8);
   }
 
@@ -2489,7 +2542,7 @@ export class OraclePrimeAI implements IAdvancedBoss {
     if (this.hasPlayer) this.orbitals.setTrackedAltitude(this.playerPos.y);
     const pylonEvent = this.pylonLance.update(dt);
     if (pylonEvent === 'lock') {
-      this.onHazardWarning?.('光矛锁定');
+      this.onHazardWarning?.(tr({ en: 'Lance lock-on', zh: '光矛锁定' }));
       this.emitCue('lance-lock', this.pylonLance.getOrigin(), 0.7);
     } else if (pylonEvent === 'fire') {
       this.emitCue('lance-fire', this.pylonLance.getOrigin(), 0.8);

@@ -4,6 +4,7 @@ import { BossMissileSystem } from './BossMissileSystem';
 import type { BossHazardHit, BossMinionKind, BossSubTarget, IAdvancedBoss } from './BossContracts';
 import { HealthSystem } from '@/features/combat/HealthSystem';
 import type { ParticleSystem } from '@/features/effects/ParticleSystem';
+import { getLocale, tr, type Locale } from '@/i18n';
 import {
   ArcShellPool,
   HazardColumnPool,
@@ -317,6 +318,8 @@ export class MagmaColossusAI implements IAdvancedBoss {
   private shutterOpen = 0;
   private statusLabel: string | null = null;
   private statusKey = -1;
+  /** 状态提示按生成时的语言缓存；切换语言后重新生成 */
+  private statusLocale: Locale | null = null;
 
   private readonly playerPos = new THREE.Vector3();
   private readonly playerVel = new THREE.Vector3();
@@ -590,20 +593,40 @@ export class MagmaColossusAI implements IAdvancedBoss {
       this.phase * 100 +
       aliveVents * 10 +
       ventsOpen;
-    if (key === this.statusKey) return this.statusLabel;
+    const locale = getLocale();
+    if (key === this.statusKey && locale === this.statusLocale) return this.statusLabel;
     this.statusKey = key;
+    this.statusLocale = locale;
+    const vents = { alive: aliveVents, total: this.vents.length };
     if (this.dying || this.deathHandled) {
-      this.statusLabel = '结构崩塌';
+      this.statusLabel = tr({ en: 'Structure collapsing', zh: '结构崩塌' });
     } else if (this.stunTimer > 0) {
-      this.statusLabel = '电磁瘫痪 · 散热口强制开启';
+      this.statusLabel = tr({
+        en: 'EMP stunned · Vents forced open',
+        zh: '电磁瘫痪 · 散热口强制开启',
+      });
     } else if (this.phase >= 3) {
-      this.statusLabel = this.lowHealthReached ? '熔毁暴走 · 关节过载' : '熔毁暴走 · 全身弱化';
+      this.statusLabel = this.lowHealthReached
+        ? tr({ en: 'Meltdown rampage · Joints overloaded', zh: '熔毁暴走 · 关节过载' })
+        : tr({ en: 'Meltdown rampage · Armor weakened', zh: '熔毁暴走 · 全身弱化' });
     } else if (this.phase === 2) {
-      this.statusLabel = `熔核暴露 · 散热口 ${aliveVents}/${this.vents.length}`;
+      this.statusLabel = tr(
+        {
+          en: 'Magma core exposed · Vents {alive}/{total}',
+          zh: '熔核暴露 · 散热口 {alive}/{total}',
+        },
+        vents
+      );
     } else if (ventsOpen) {
-      this.statusLabel = `散热口过热开启 · ${aliveVents}/${this.vents.length}`;
+      this.statusLabel = tr(
+        { en: 'Vents overheated open · {alive}/{total}', zh: '散热口过热开启 · {alive}/{total}' },
+        vents
+      );
     } else {
-      this.statusLabel = `玄武岩装甲 · 散热口 ${aliveVents}/${this.vents.length}`;
+      this.statusLabel = tr(
+        { en: 'Basalt armor · Vents {alive}/{total}', zh: '玄武岩装甲 · 散热口 {alive}/{total}' },
+        vents
+      );
     }
     return this.statusLabel;
   }
@@ -1240,7 +1263,7 @@ export class MagmaColossusAI implements IAdvancedBoss {
     this.stompApex.copy(this.stompFrom).lerp(this.stompTo, 0.3);
     this.stompApex.y += 8 * this.rig.scale;
     this.stompMarker.show(this.stompTo, this.getStompRadius());
-    this.onHazardWarning?.('践踏冲击波');
+    this.onHazardWarning?.(tr({ en: 'Stomp shockwave', zh: '践踏冲击波' }));
     return true;
   }
 
@@ -1341,7 +1364,7 @@ export class MagmaColossusAI implements IAdvancedBoss {
     if (!started) return false;
     this.action = 'beam';
     this.actionTimer = 0;
-    this.onHazardWarning?.('熔岩光束充能');
+    this.onHazardWarning?.(tr({ en: 'Lava beam charging', zh: '熔岩光束充能' }));
     this.emitCue('beam-charge', this.tmpA, 0.8);
     return true;
   }
@@ -1462,7 +1485,9 @@ export class MagmaColossusAI implements IAdvancedBoss {
         profile: 'boss-cannon',
       });
     }
-    if (this.geyserWaves % 3 === 0) this.onHazardWarning?.('熔岩柱预警');
+    if (this.geyserWaves % 3 === 0) {
+      this.onHazardWarning?.(tr({ en: 'Lava geyser warning', zh: '熔岩柱预警' }));
+    }
     this.geyserWaves++;
   }
 
@@ -1558,7 +1583,10 @@ export class MagmaColossusAI implements IAdvancedBoss {
 
   private enterPhase(phase: number): void {
     this.phase = Math.min(PHASE_COUNT, phase);
-    const label = this.phase === 2 ? '散热口击穿 · 熔核暴露' : '熔毁暴走';
+    const label =
+      this.phase === 2
+        ? tr({ en: 'Vents breached · Magma core exposed', zh: '散热口击穿 · 熔核暴露' })
+        : tr({ en: 'Meltdown rampage', zh: '熔毁暴走' });
     if (this.phase === 2) {
       for (const vent of this.vents) this.blowPlate(vent);
       this.geyserTimer = 2.5;
