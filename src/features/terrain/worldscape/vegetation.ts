@@ -23,6 +23,7 @@ const _q = new THREE.Quaternion();
 const _s = new THREE.Vector3();
 const _c = new THREE.Color();
 const Y_AXIS = new THREE.Vector3(0, 1, 0);
+const GOLDEN_RATIO_CONJUGATE = 0.6180339887498949;
 
 /** 写入一个实例的位置/朝向/缩放 */
 export function setScatterInstance(
@@ -155,6 +156,24 @@ export interface GrassRule extends ScatterRule {
   lightnessRand?: number;
 }
 
+/**
+ * 分块 + 远近两级细节（LOD）。不配置时整图一块、全细节、关闭视锥剔除（旧行为）。
+ * 配置后：实例按 tiles × tiles 网格分块，每块各自计算包围球参与视锥剔除（主相机与阴影相机）；
+ * 相机到分块中心超过 farDistance 时该块换成远景简模——去掉树干与草簇，
+ * 树冠 / 岩石换成低面替身（远处几个像素高的树看不出差别，三角形少 4~8 倍）。
+ */
+export interface VegetationLodProfile {
+  /** 每边分块数（≥1） */
+  tiles: number;
+  /** 远景切换距离（米，相机到分块中心） */
+  farDistance: number;
+  /**
+   * 均匀抽稀的保留比例（0..1，缺省 1）：在完整放置结果上按实例序号抽稀，
+   * 放置随机序列不变，森林 / 草地的分布形态不变，只是更稀。
+   */
+  keep?: { trees?: number; rocks?: number; grass?: number };
+}
+
 export interface VegetationProfile {
   seed: number;
   /** 放置半边长（米） */
@@ -175,6 +194,8 @@ export interface VegetationProfile {
   pineForestThreshold?: number;
   /** 阔叶湿度阈值（worldshowcase: 0.45） */
   leafMoistureThreshold?: number;
+  /** 分块与远近细节；缺省 = 整图一块全细节 */
+  lod?: VegetationLodProfile;
 }
 
 export interface WorldscapeVegetation {
@@ -198,6 +219,10 @@ export function buildVegetation(
   const snowLine = profile.snowLine;
   const snowRange = profile.snowWorldY;
   const disposables: Array<{ dispose(): void }> = [];
+  /** 放置结果（整图实例），最后统一挂载：直接挂载（旧行为）或拆分为 LOD 分块 */
+  const layers: ScatterLayer[] = [];
+  /** 远景替身几何用独立随机流，不扰动放置随机序列 */
+  const farRand = mulberry32((profile.seed ^ 0x5bd1e995) >>> 0);
 
   /* ----- 松树 ----- */
   if (profile.pines && profile.pines.count > 0) {
@@ -245,8 +270,14 @@ export function buildVegetation(
     }
     pineTrunks.count = placed;
     pineLeaves.count = placed;
-    registerScatterMesh(group, pineTrunks, true);
-    registerScatterMesh(group, pineLeaves, true);
+    layers.push({ mesh: pineTrunks, kind: 'trees', castShadow: true, far: null, margin: 1 });
+    layers.push({
+      mesh: pineLeaves,
+      kind: 'trees',
+      castShadow: true,
+      far: profile.lod ? farPineGeometry() : null,
+      margin: 2,
+    });
   }
 
   /* ----- 阔叶树 ----- */
@@ -291,8 +322,14 @@ export function buildVegetation(
     }
     leafTrunks.count = placed;
     leafLeaves.count = placed;
-    registerScatterMesh(group, leafTrunks, true);
-    registerScatterMesh(group, leafLeaves, true);
+    layers.push({ mesh: leafTrunks, kind: 'trees', castShadow: true, far: null, margin: 1 });
+    layers.push({
+      mesh: leafLeaves,
+      kind: 'trees',
+      castShadow: true,
+      far: profile.lod ? farBlobGeometry(leaf.foliage) : null,
+      margin: 2,
+    });
   }
 
   /* ----- 岩石 ----- */
@@ -328,7 +365,13 @@ export function buildVegetation(
       placed++;
     }
     rocks.count = placed;
-    registerScatterMesh(group, rocks, true);
+    layers.push({
+      mesh: rocks,
+      kind: 'rocks',
+      castShadow: true,
+      far: profile.lod ? farRockGeometry(farRand) : null,
+      margin: 1,
+    });
   }
 
   /* ----- 草地 ----- */
@@ -367,7 +410,13 @@ export function buildVegetation(
       placed++;
     }
     grass.count = placed;
-    registerScatterMesh(group, grass, false);
+    layers.push({ mesh: grass, kind: 'grass', castShadow: false, far: null, margin: 2 });
+  }
+
+  if (profile.lod) {
+    buildLodTiles(group, layers, half, profile.lod, disposables);
+  } else {
+    for (const layer of layers) registerScatterMesh(group, layer.mesh, layer.castShadow);
   }
 
   return {
@@ -376,6 +425,169 @@ export function buildVegetation(
       for (const d of disposables) d.dispose();
     },
   };
+}
+
+interface ScatterLayer {
+  /** 整图放置结果 */
+  mesh: THREE.InstancedMesh;
+  /** 抽稀分类（同一棵树的树干与树冠必须同类，保证保留同一批实例） */
+  kind: 'trees' | 'rocks' | 'grass';
+  castShadow: boolean;
+  /** 远景替身几何（null = 远景不画，如树干 / 草簇） */
+  far: THREE.BufferGeometry | null;
+  /** 包围球外扩（米）：风摆位移 + 余量，避免边缘实例被误剔除 */
+  margin: number;
+}
+
+/**
+ * 远景松树：一只六棱锥覆盖三层锥塔的轮廓（18 个三角形，近景树冠 + 树干 87 个）。
+ * 锥底下探到树干高度，远看不会出现悬空的树冠。
+ */
+function farPineGeometry(): THREE.BufferGeometry {
+  const cone = new THREE.ConeGeometry(1.45, 5.2, 6);
+  cone.translate(0, 0.9 + 2.6, 0);
+  return cone;
+}
+
+/** 远景阔叶：一个二十面体椭球包住四个叶团（20 个三角形，近景 104 个） */
+function farBlobGeometry(foliage: THREE.BufferGeometry): THREE.BufferGeometry {
+  foliage.computeBoundingBox();
+  const box = foliage.boundingBox ?? new THREE.Box3(new THREE.Vector3(-1, 2, -1), new THREE.Vector3(1, 4, 1));
+  const center = box.getCenter(new THREE.Vector3());
+  const size = box.getSize(new THREE.Vector3());
+  const blob = new THREE.IcosahedronGeometry(1, 0);
+  // 二十面体面心在半径约 0.8 处：顶点略出包围盒，面落在盒内，体量与四个叶团的并集相当
+  blob.scale(size.x * 0.55, size.y * 0.55, size.z * 0.55);
+  blob.translate(center.x, center.y, center.z);
+  return blob;
+}
+
+/** 远景岩石：低一级细分的抖动二十面体（20 个三角形，近景 80 个） */
+function farRockGeometry(rand: () => number): THREE.BufferGeometry {
+  const g = new THREE.IcosahedronGeometry(1, 0);
+  const pos = g.attributes.position;
+  const seen = new Map<string, number>();
+  for (let i = 0; i < pos.count; i++) {
+    const key = `${pos.getX(i).toFixed(3)},${pos.getY(i).toFixed(3)},${pos.getZ(i).toFixed(3)}`;
+    let f = seen.get(key);
+    if (f === undefined) {
+      f = 0.8 + rand() * 0.38;
+      seen.set(key, f);
+    }
+    pos.setXYZ(i, pos.getX(i) * f, pos.getY(i) * f * 0.82, pos.getZ(i) * f);
+  }
+  g.computeVertexNormals();
+  return g;
+}
+
+/** 把一组实例拷进新的 InstancedMesh（共享几何/材质），并按实例算包围球参与视锥剔除 */
+function createTileMesh(
+  source: THREE.InstancedMesh,
+  geometry: THREE.BufferGeometry,
+  indices: number[],
+  castShadow: boolean,
+  margin: number
+): THREE.InstancedMesh {
+  const mesh = new THREE.InstancedMesh(geometry, source.material, indices.length);
+  const srcMatrix = source.instanceMatrix.array;
+  const dstMatrix = mesh.instanceMatrix.array;
+  const srcColor = source.instanceColor?.array ?? null;
+  const colors = srcColor ? new Float32Array(indices.length * 3) : null;
+  for (let k = 0; k < indices.length; k++) {
+    const i = indices[k];
+    for (let e = 0; e < 16; e++) dstMatrix[k * 16 + e] = srcMatrix[i * 16 + e];
+    if (srcColor && colors) {
+      colors[k * 3] = srcColor[i * 3];
+      colors[k * 3 + 1] = srcColor[i * 3 + 1];
+      colors[k * 3 + 2] = srcColor[i * 3 + 2];
+    }
+  }
+  if (colors) mesh.instanceColor = new THREE.InstancedBufferAttribute(colors, 3);
+  mesh.instanceMatrix.needsUpdate = true;
+  mesh.castShadow = castShadow;
+  mesh.receiveShadow = true;
+  mesh.computeBoundingSphere();
+  if (mesh.boundingSphere) mesh.boundingSphere.radius += margin;
+  return mesh;
+}
+
+/**
+ * 实例按 tiles × tiles 网格分块：每块一个 THREE.LOD（近景全细节 / 远景替身），
+ * LOD 节点放在分块中心（距离判定用），两级子组反向平移回植被组坐标系，实例矩阵无需改写。
+ */
+function buildLodTiles(
+  group: THREE.Group,
+  layers: ScatterLayer[],
+  half: number,
+  lod: VegetationLodProfile,
+  disposables: Array<{ dispose(): void }>
+): void {
+  const tiles = Math.max(1, Math.round(lod.tiles));
+  const size = (half * 2) / tiles;
+  // 相机所在分块的中心最远约 0.71 个分块边长：切换距离至少 0.8 个边长，脚下的块永远是近景
+  const farDistance = Math.max(lod.farDistance, size * 0.8);
+  const tileOf = (value: number): number =>
+    Math.min(tiles - 1, Math.max(0, Math.floor((value + half) / size)));
+
+  // 每层实例按分块归桶（按实例序号的黄金比例低差异序列抽稀：放置顺序随机，抽稀在空间上均匀）
+  const buckets = layers.map((layer) => {
+    const lists: number[][] = Array.from({ length: tiles * tiles }, () => []);
+    const array = layer.mesh.instanceMatrix.array;
+    const keep = THREE.MathUtils.clamp(lod.keep?.[layer.kind] ?? 1, 0, 1);
+    for (let i = 0; i < layer.mesh.count; i++) {
+      if (keep < 1 && (i * GOLDEN_RATIO_CONJUGATE) % 1 >= keep) continue;
+      const x = array[i * 16 + 12];
+      const z = array[i * 16 + 14];
+      if (!Number.isFinite(x) || !Number.isFinite(z)) continue;
+      lists[tileOf(z) * tiles + tileOf(x)].push(i);
+    }
+    return lists;
+  });
+
+  for (let tz = 0; tz < tiles; tz++) {
+    for (let tx = 0; tx < tiles; tx++) {
+      const tile = tz * tiles + tx;
+      const cx = -half + (tx + 0.5) * size;
+      const cz = -half + (tz + 0.5) * size;
+      const near = new THREE.Group();
+      const far = new THREE.Group();
+      near.position.set(-cx, 0, -cz);
+      far.position.set(-cx, 0, -cz);
+
+      layers.forEach((layer, layerIndex) => {
+        const indices = buckets[layerIndex][tile];
+        if (indices.length === 0) return;
+        const nearMesh = createTileMesh(
+          layer.mesh,
+          layer.mesh.geometry,
+          indices,
+          layer.castShadow,
+          layer.margin
+        );
+        near.add(nearMesh);
+        disposables.push(nearMesh);
+        if (layer.far) {
+          const farMesh = createTileMesh(layer.mesh, layer.far, indices, layer.castShadow, layer.margin);
+          far.add(farMesh);
+          disposables.push(farMesh);
+        }
+      });
+      if (near.children.length === 0) continue;
+
+      const node = new THREE.LOD();
+      node.name = 'vegetationTile';
+      node.position.set(cx, 0, cz);
+      node.addLevel(near, 0);
+      // 轻微滞回：在切换距离附近来回飞不会逐帧闪换
+      node.addLevel(far, farDistance, 0.06);
+      group.add(node);
+    }
+  }
+
+  // 整图放置网格只作数据源，不进场景；远景替身几何随植被一起释放
+  for (const layer of layers) {
+    if (layer.far) disposables.push(layer.far);
+  }
 }
 
 function registerScatterMesh(group: THREE.Group, mesh: THREE.InstancedMesh, castShadow: boolean): void {

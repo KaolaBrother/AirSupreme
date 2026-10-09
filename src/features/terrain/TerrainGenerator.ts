@@ -33,6 +33,7 @@ import {
   grassTuftGeometry,
   leafTreeGeometries,
   setScatterInstance,
+  type VegetationLodProfile,
   type WorldscapeVegetation,
 } from './worldscape/vegetation';
 import { injectWindSway } from './worldscape/shadermods';
@@ -120,6 +121,29 @@ interface WeatherProfile {
   waterWaveScale: number;
   skyGlow: THREE.ColorRepresentation;
 }
+
+type TerrainDetailTier = 'performance' | 'balanced' | 'quality';
+
+/**
+ * 画质档 → 地形细节。生成关卡时从 GameConfig 读取（运行中自动降档从下一次换关生效），
+ * 移动端至少按 performance 档（数量另有 detailScale 缩减）。
+ * vegetation：植被分块 LOD——远景切换距离与均匀抽稀比例（见 worldscape/vegetation）。
+ */
+interface TerrainDetailProfile {
+  vegetation: VegetationLodProfile;
+}
+
+const TERRAIN_DETAIL_PROFILES: Record<TerrainDetailTier, TerrainDetailProfile> = {
+  performance: {
+    vegetation: { tiles: 6, farDistance: 700, keep: { trees: 0.8, rocks: 0.75, grass: 0.55 } },
+  },
+  balanced: {
+    vegetation: { tiles: 6, farDistance: 1000, keep: { grass: 0.85 } },
+  },
+  quality: {
+    vegetation: { tiles: 6, farDistance: 1500 },
+  },
+};
 
 /** 棕榈共享材质（见 createPalmMaterials） */
 interface PalmMaterials {
@@ -278,6 +302,8 @@ export class TerrainGenerator {
   private environment: TerrainEnvironment | null = null;
   /** 海洋关岛屿浅滩（sampleSurface 用：岛上不可航行） */
   private oceanIslandMounds: Array<{ x: number; z: number; radius: number; height: number }> = [];
+  /** 当前关卡的画质细节档（generateTerrain 时按 GameConfig 解析） */
+  private detail: TerrainDetailProfile = TERRAIN_DETAIL_PROFILES.balanced;
 
   constructor(scene: THREE.Scene) {
     this.scene = scene;
@@ -294,6 +320,7 @@ export class TerrainGenerator {
 
     this.clearTerrain();
     this.activeTerrain = config.terrain;
+    this.detail = this.resolveDetailProfile();
     this.weatherProfile = this.resolveWeatherProfile(config);
     this.designTokens = config.environment.designTokens ?? getFallbackDesignTokens(config.terrain);
     // worldscape 着色器 uniform：风力驱动草木摇曳，雪覆盖只在雪山关激活
@@ -475,6 +502,7 @@ export class TerrainGenerator {
         broadleaf: { count: this.scaleCount(1500), minHeight: 2.5, maxHeight: 62, maxSlope: 0.3 },
         rocks: { count: this.scaleCount(900), minHeight: 1 },
         grass: { count: this.scaleCount(24000), minHeight: 2.2, maxHeight: 95, maxSlope: 0.34 },
+        lod: this.detail.vegetation,
       },
       this.getWorldscapeUniforms()
     );
@@ -506,6 +534,14 @@ export class TerrainGenerator {
       speed: -0.18,
       size: 2.2,
     });
+  }
+
+  /** 当前画质档对应的地形细节；移动端至少按 performance 档 */
+  private resolveDetailProfile(): TerrainDetailProfile {
+    const tier: TerrainDetailTier = GameConfig.isMobile
+      ? 'performance'
+      : GameConfig.getEffectiveQualityPreset();
+    return TERRAIN_DETAIL_PROFILES[tier] ?? TERRAIN_DETAIL_PROFILES.balanced;
   }
 
   /** 关卡配置中的太阳位置 → 归一化方向（水面高光用） */
@@ -1004,6 +1040,7 @@ export class TerrainGenerator {
           lightnessRand: 0.18,
         },
         rockTint: { r: 1.12, g: 1, b: 0.78 },
+        // 稀疏碎石 + 干草（约 5 万三角形）：整图两个实例网格比分块更省 draw call，不做 LOD
       },
       this.getWorldscapeUniforms()
     );
@@ -1401,6 +1438,8 @@ export class TerrainGenerator {
         grass: { count: this.scaleCount(7000), minHeight: 1.5, maxHeight: 30, maxSlope: 0.3 },
         snowWorldY: { start: WORLDSCAPE_WATER_Y + 2, end: WORLDSCAPE_WATER_Y + 12 },
         rockTint: { r: 0.98, g: 1, b: 1.08 },
+        // 实例比湖谷少一半：4×4 分块即可，draw call 更少
+        lod: { ...this.detail.vegetation, tiles: 4 },
       },
       this.getWorldscapeUniforms()
     );
