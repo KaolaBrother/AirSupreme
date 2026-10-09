@@ -248,10 +248,9 @@ export class FriendlyAI {
     const desiredSpeed = clamp(desired.length(), FORMATION_MIN_SPEED, maxSpeed);
     this.steerTowards(desired, desiredSpeed, deltaTime);
 
-    // EnemyAI 没有外部操纵接口；applyStun 的约定正是“本步不切换机动状态、保持当前速度、不开火”。
-    // 只持续这一步（stunTimer = deltaTime，在 update 内恰好耗尽），遇敌后状态机照常接管追击。
-    this.enemy.applyStun(deltaTime);
-    this.enemy.update(deltaTime, playerPosition, undefined, null);
+    // 运动学步进：按刚写好的速度积分（地形避让 / 朝向 / 插值照常），不跑机动状态机、不开火；
+    // 遇敌后 update 从冻结的机动状态照常接管追击
+    this.enemy.updateKinematic(deltaTime);
   }
 
   /** 以有限角速度与加速度把当前速度转向期望方向 / 速度（不瞬间掉头） */

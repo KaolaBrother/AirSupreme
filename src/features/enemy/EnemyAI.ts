@@ -45,6 +45,10 @@ const tmpQuaternion = new THREE.Quaternion();
 const WORLD_UP = new THREE.Vector3(0, 1, 0);
 const lookHelper = new THREE.Object3D();
 
+function isFiniteVector(vector: THREE.Vector3): boolean {
+  return Number.isFinite(vector.x) && Number.isFinite(vector.y) && Number.isFinite(vector.z);
+}
+
 export class EnemyAI {
   private mesh: THREE.Group;
   private config: EnemyConfig;
@@ -133,13 +137,7 @@ export class EnemyAI {
     fireTarget: THREE.Vector3 | null = null
   ): void {
     this.capturePreviousVisualState();
-
-    const pos = this.mesh.position;
-    if (!isFinite(pos.x) || !isFinite(pos.y) || !isFinite(pos.z)) {
-      log.error('Enemy position is NaN or Infinity, resetting', {
-        position: { x: pos.x, y: pos.y, z: pos.z },
-      });
-      this.mesh.position.set(0, 0, 0);
+    if (!this.ensureFinitePosition()) {
       return;
     }
 
@@ -173,25 +171,7 @@ export class EnemyAI {
       }
     }
 
-    this.applyTerrainAvoidance();
-    this.mesh.position.addScaledVector(this.velocity, deltaTime);
-    this.enforceTerrainFloor();
-
-    if (this.velocity.lengthSq() > 0) {
-      tmpTarget.copy(this.mesh.position).add(this.velocity);
-      lookHelper.position.copy(this.mesh.position);
-      lookHelper.lookAt(tmpTarget);
-      this.mesh.quaternion.slerp(lookHelper.quaternion, 0.3);
-    }
-
-    // 从引擎 mesh 获取世界位置（名为 'engineGlow'）
-    const engine = this.mesh.getObjectByName('engineGlow');
-    if (engine) {
-      engine.getWorldPosition(this.engineWorldPos);
-    } else {
-      this.engineWorldPos.copy(this.mesh.position);
-    }
-    this.trail.addPoint(this.engineWorldPos);
+    this.integrateMotion(deltaTime);
 
     this.attackCooldown = Math.max(0, this.attackCooldown - deltaTime);
 
@@ -211,6 +191,67 @@ export class EnemyAI {
 
     this.trail.update(deltaTime);
     this.captureCurrentVisualState();
+  }
+
+  /**
+   * 外部操纵的运动学步进（僚机编队飞行等）：调用方先写好 velocity，本步与 update 一样做
+   * 地形避让、位置积分、贴地兜底、按速度方向的四元数朝向、尾迹与渲染插值状态，
+   * 但不运行机动状态机、不开火。机动状态与其计时保持冻结（之后的 update 从原状态继续），
+   * 攻击冷却与 EMP 瘫痪照常计时。velocity 非有限时改为沿机头方向按配置速度飞行。
+   */
+  public updateKinematic(deltaTime: number): void {
+    this.capturePreviousVisualState();
+    if (!this.ensureFinitePosition()) {
+      return;
+    }
+
+    const velocity = this.velocity;
+    if (!isFiniteVector(velocity)) {
+      // 外部写入了非有限速度：沿机头（本地 +Z，朝向即速度方向）按配置速度继续飞
+      velocity.set(0, 0, this.config.speed).applyQuaternion(this.mesh.quaternion);
+      if (!isFiniteVector(velocity)) velocity.set(0, 0, 0);
+    }
+    this.stunTimer = Math.max(0, this.stunTimer - deltaTime);
+    this.integrateMotion(deltaTime);
+    this.attackCooldown = Math.max(0, this.attackCooldown - deltaTime);
+    this.trail.update(deltaTime);
+    this.captureCurrentVisualState();
+  }
+
+  /** 位置为 NaN / Infinity 时复位到原点并返回 false（本步跳过） */
+  private ensureFinitePosition(): boolean {
+    const pos = this.mesh.position;
+    if (isFinite(pos.x) && isFinite(pos.y) && isFinite(pos.z)) {
+      return true;
+    }
+    log.error('Enemy position is NaN or Infinity, resetting', {
+      position: { x: pos.x, y: pos.y, z: pos.z },
+    });
+    this.mesh.position.set(0, 0, 0);
+    return false;
+  }
+
+  /** 地形避让 → 位置积分 → 贴地兜底 → 机头转向速度方向（四元数 slerp）→ 尾迹采样点 */
+  private integrateMotion(deltaTime: number): void {
+    this.applyTerrainAvoidance();
+    this.mesh.position.addScaledVector(this.velocity, deltaTime);
+    this.enforceTerrainFloor();
+
+    if (this.velocity.lengthSq() > 0) {
+      tmpTarget.copy(this.mesh.position).add(this.velocity);
+      lookHelper.position.copy(this.mesh.position);
+      lookHelper.lookAt(tmpTarget);
+      this.mesh.quaternion.slerp(lookHelper.quaternion, 0.3);
+    }
+
+    // 从引擎 mesh 获取世界位置（名为 'engineGlow'）
+    const engine = this.mesh.getObjectByName('engineGlow');
+    if (engine) {
+      engine.getWorldPosition(this.engineWorldPos);
+    } else {
+      this.engineWorldPos.copy(this.mesh.position);
+    }
+    this.trail.addPoint(this.engineWorldPos);
   }
 
   /**
