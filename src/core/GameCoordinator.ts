@@ -445,6 +445,9 @@ export class GameCoordinator {
     quaternion: new THREE.Quaternion(),
   };
   private readonly hitPosition = new THREE.Vector3();
+  /** 友机入场：玩家机头方向（之后复用为 lookAt 目标点）与入场航向 */
+  private readonly friendlySpawnForward = new THREE.Vector3();
+  private readonly friendlySpawnHeading = new THREE.Vector3();
   private lastImpactSoundAt: number = 0;
   /** 读档后的第一次 prepareLevel 保留存档里的弹药 / 热焰弹（不补满） */
   private keepRestoredAmmo: boolean = false;
@@ -989,23 +992,46 @@ export class GameCoordinator {
 
     // 友军僚机使用盟军涂装（同机体 / 同命中半径）
     const mesh = createFriendlyMesh(config);
-    const friendly = new FriendlyAI(mesh, config, this.gameScene.scene);
-    friendly.getEnemy().setTerrainSampler(this.terrainHeightSampler);
+    const enemySystem = this.enemySystem;
 
+    // 入场位姿：玩家身侧、编队位所在一侧（从不落在追尾相机后方的视线走廊里），机头朝玩家航向。
+    // 必须在创建 AI 之前写到网格上：EnemyAI 构造时以网格当前位姿作为插值起点，事后再挪动的话，
+    // 首次更新前的那一帧渲染会把友机拉回构造时的位置（世界原点）。
+    const position = mesh.position;
+    const heading = this.friendlySpawnHeading;
     const playerPos = this.playerSystem.getPosition();
-    const offset = new THREE.Vector3(
-      (Math.random() - 0.5) * 100,
-      (Math.random() - 0.5) * 50,
-      (Math.random() - 0.5) * 100
-    );
-    mesh.position.copy(playerPos).add(offset);
-    const groundY = this.terrainHeightSampler(mesh.position.x, mesh.position.z);
-    if (Number.isFinite(groundY) && mesh.position.y < groundY + 30) {
-      mesh.position.y = groundY + 30;
+    if (enemySystem) {
+      const forward = this.friendlySpawnForward.set(0, 0, -1);
+      forward.applyQuaternion(this.playerAircraft.quaternion);
+      enemySystem.getFriendlySpawnPose(playerPos, forward, position, heading);
+    } else {
+      position.copy(playerPos);
+      heading.set(0, 0, -1);
     }
+    if (
+      !Number.isFinite(position.x) ||
+      !Number.isFinite(position.y) ||
+      !Number.isFinite(position.z)
+    ) {
+      position.set(0, 0, 0);
+    }
+    const groundY = this.terrainHeightSampler(position.x, position.z);
+    if (Number.isFinite(groundY) && position.y < groundY + 30) {
+      position.y = groundY + 30;
+    }
+    // 机体本地 +Z 为机头（EnemyAI 同样以 lookAt 速度方向定姿）
+    mesh.lookAt(this.friendlySpawnForward.copy(position).add(heading));
+
+    const friendly = new FriendlyAI(mesh, config, this.gameScene.scene);
+    const enemy = friendly.getEnemy();
+    enemy.setTerrainSampler(this.terrainHeightSampler);
+    // 初速沿玩家航向、不慢于玩家：直接并入编队，不先掉头或掉队
+    const playerSpeed = this.playerSystem.getSpeed();
+    enemy.velocity
+      .copy(heading)
+      .multiplyScalar(Math.max(config.speed, Number.isFinite(playerSpeed) ? playerSpeed : 0));
 
     this.gameScene.scene.add(mesh);
-    const enemySystem = this.enemySystem;
     let wingman: WingmanProfile | null = null;
     if (enemySystem) {
       // 先入场的两架友机是具名僚机（血条显示呼号）；其余为普通友机

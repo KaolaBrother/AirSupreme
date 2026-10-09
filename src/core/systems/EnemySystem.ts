@@ -14,6 +14,21 @@ const PLAYER_VELOCITY_SMOOTHING = 0.25;
 /** 玩家静止（坠毁等待复活）时速度估计的衰减时间常数（秒） */
 const PLAYER_VELOCITY_DECAY = 0.6;
 
+/**
+ * 友机入场点（玩家水平航向坐标系，米）：与 FriendlyAI 的编队位同侧同横距——偶数号在左、
+ * 奇数号在右，横距 40 米，每排再向外 35 米、向后 25 米、向上 4 米——落在编队位后方 12 米，
+ * 从侧前方滑进编队位。横距 ≥ 40 米，从不落在追尾相机的视线走廊里（座机后方 60 米到前方 35 米、
+ * 横向 ±28 米）。FriendlyAI 的编队常量没有导出，这里按同一布局取值，改编队位时两处一起改。
+ */
+const FRIENDLY_SPAWN_LATERAL = 40;
+const FRIENDLY_SPAWN_RANK_LATERAL = 35;
+const FRIENDLY_SPAWN_AHEAD = 26;
+const FRIENDLY_SPAWN_RANK_BACK = 25;
+const FRIENDLY_SPAWN_UP = 6;
+const FRIENDLY_SPAWN_RANK_UP = 4;
+/** 机头方向的水平分量低于此值（俯仰约 78° 以上）时，入场航向改用平滑速度的水平方向 */
+const MIN_HEADING_HORIZONTAL = 0.2;
+
 export class EnemySystem implements IGameSystem {
   readonly name = 'EnemySystem';
 
@@ -272,6 +287,47 @@ export class EnemySystem implements IGameSystem {
       friendlyId: friendly.getMesh().uuid,
       position: friendly.getMesh().position.clone(),
     });
+  }
+
+  /**
+   * 下一架友机的入场位姿（随后 spawnFriendly 分配的是同一个编队位）：玩家身侧、编队位所在一侧，
+   * 机头朝玩家的水平航向。playerForward 为玩家机头方向（世界坐标）；机头接近竖直时改用平滑速度的
+   * 水平方向，仍不可用时朝 -Z。outPosition 写入世界坐标，outHeading 写入水平单位向量。
+   */
+  getFriendlySpawnPose(
+    playerPosition: THREE.Vector3,
+    playerForward: THREE.Vector3,
+    outPosition: THREE.Vector3,
+    outHeading: THREE.Vector3
+  ): void {
+    let headingX = playerForward.x;
+    let headingZ = playerForward.z;
+    let length = Math.hypot(headingX, headingZ);
+    if (!(length >= MIN_HEADING_HORIZONTAL)) {
+      headingX = this.playerVelocity.x;
+      headingZ = this.playerVelocity.z;
+      length = Math.hypot(headingX, headingZ);
+    }
+    if (!(length > 1e-3) || !Number.isFinite(length)) {
+      headingX = 0;
+      headingZ = -1;
+      length = 1;
+    }
+    headingX /= length;
+    headingZ /= length;
+    outHeading.set(headingX, 0, headingZ);
+
+    const slot = this.nextFormationSlot();
+    const side = slot % 2 === 0 ? -1 : 1;
+    const rank = Math.floor(slot / 2);
+    const along = FRIENDLY_SPAWN_AHEAD - rank * FRIENDLY_SPAWN_RANK_BACK;
+    const lateral = side * (FRIENDLY_SPAWN_LATERAL + rank * FRIENDLY_SPAWN_RANK_LATERAL);
+    // 右侧向量：前向 (x, z) → (-z, x)，与 FriendlyAI 的编队坐标系一致
+    outPosition.set(
+      playerPosition.x + headingX * along - headingZ * lateral,
+      playerPosition.y + FRIENDLY_SPAWN_UP + rank * FRIENDLY_SPAWN_RANK_UP,
+      playerPosition.z + headingZ * along + headingX * lateral
+    );
   }
 
   /**
