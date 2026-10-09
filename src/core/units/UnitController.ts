@@ -6,6 +6,7 @@ import type {
   ICampaignPresentation,
   UnitPresentationEvent,
 } from '@/core/campaign/CampaignPresentation';
+import type { GenericRadioKey } from '@/features/campaign/CampaignData';
 import type { ParticleSystem } from '@/features/effects/ParticleSystem';
 import type { ProjectilePool } from '@/features/combat/ProjectilePool';
 import type { MissileSystem } from '@/features/combat/MissileSystem';
@@ -17,6 +18,7 @@ import type {
   UnitUpdateContext,
 } from '@/features/units/UnitSystem';
 import type { UnitRadarKind, UnitType } from '@/features/units/UnitTypes';
+import { tr } from '@/i18n';
 
 type UnitMeshModule = typeof import('@/features/units/UnitMeshFactory');
 type UnitBridgeModule = typeof import('@/features/units/UnitEventBridge');
@@ -52,6 +54,13 @@ const WAVE_STALL_LIMIT_SECONDS = 150;
 const MAX_BOSS_DRONES = 8;
 /** 锁定告警无线电的最短间隔（秒） */
 const MISSILE_WARNING_RADIO_COOLDOWN = 9;
+/**
+ * 友军单位被毁时的专属无线电（键为 UnitType 字符串值，如 ALLY_AWACS / ALLY_FRIGATE，
+ * 值为 GENERIC_RADIO 的键）；未登记的类型播通用的 'ally-unit-destroyed'。
+ * 首次遭遇台词不经过这里：UnitSystem.onFirstContact → presentation.unitFirstContact
+ * （UNIT_FIRST_CONTACT_RADIO，友军预警机 / 护卫舰同样走这条路径）。
+ */
+const ALLY_LOSS_RADIO: Readonly<Partial<Record<string, GenericRadioKey>>> = {};
 
 /**
  * 地面 / 海上 / 空中单位的运行时接线（api-spec §3 + integration-notes「Units」）：
@@ -173,7 +182,10 @@ export class UnitController {
       this.handleUnitDestroyed(unit, position, byPlayer);
     system.onCivilianHit = () => {
       this.deps.presentation.genericRadio('civilian-hit');
-      this.deps.presentation.flashWarning('停火！那是平民目标！', 'threat');
+      this.deps.presentation.flashWarning(
+        tr({ en: 'Cease fire! Those are civilians!', zh: '停火！那是平民目标！' }),
+        'threat'
+      );
       this.deps.presentation.onUnitEvent('civilian-hit', null);
     };
     system.onEscortResult = (success) => {
@@ -188,7 +200,10 @@ export class UnitController {
       if (phase === 'launched' && this.missileWarningCooldown <= 0) {
         this.missileWarningCooldown = MISSILE_WARNING_RADIO_COOLDOWN;
         this.deps.presentation.genericRadio('missile-warning');
-        this.deps.presentation.flashWarning('导弹来袭 · 按 G 投放热焰弹', 'threat');
+        this.deps.presentation.flashWarning(
+          tr({ en: 'Missile inbound · Press G for flares', zh: '导弹来袭 · 按 G 投放热焰弹' }),
+          'threat'
+        );
       }
     };
     system.onPlayerDamaged = (damage, _cause, position) => this.deps.damagePlayer(damage, position);
@@ -233,7 +248,9 @@ export class UnitController {
     } else {
       const civilian = unit.faction === Faction.CIVILIAN;
       this.deps.onAssetLost(civilian);
-      this.deps.presentation.genericRadio(civilian ? 'civilian-destroyed' : 'ally-unit-destroyed');
+      this.deps.presentation.genericRadio(
+        civilian ? 'civilian-destroyed' : (ALLY_LOSS_RADIO[unit.type] ?? 'ally-unit-destroyed')
+      );
       if (byPlayer && config.penalty > 0) {
         this.deps.applyPenalty(config.penalty, config.name, civilian);
       }
@@ -354,7 +371,10 @@ export class UnitController {
       this.waveStallTimer += deltaTime;
       if (this.waveStallTimer >= WAVE_STALL_LIMIT_SECONDS) {
         this.waveReleased = true;
-        this.deps.presentation.flashWarning('残余目标脱离战区', 'sys');
+        this.deps.presentation.flashWarning(
+          tr({ en: 'Remaining targets have left the area', zh: '残余目标脱离战区' }),
+          'sys'
+        );
       }
     } else if (!jetsCleared) {
       this.waveStallTimer = 0;

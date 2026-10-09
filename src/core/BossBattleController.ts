@@ -39,6 +39,7 @@ import type { SkyCarrierAI } from '@/features/boss/SkyCarrierAI';
 import type { BossMinionKind } from '@/features/boss/BossContracts';
 import type { BossMissile } from '@/features/boss/BossMissileSystem';
 import { getCampaignChapter } from '@/features/campaign/CampaignData';
+import { tr, type LocalizedText } from '@/i18n';
 import {
   BOSS_MISSILE_CONFIG,
   BossConfig,
@@ -54,25 +55,42 @@ const NO_OBJECTS: Object3D[] = [];
 
 const DEG = Math.PI / 180;
 
-/** 玩家在战场边缘朝外飞、Boss 前方放不下时的提示 */
-const RETURN_TO_ARENA_PROMPT = '返回作战区域 · Boss 即将现身';
+/** 玩家在战场边缘朝外飞、Boss 前方放不下时的提示（显示时按当前语言取值） */
+const RETURN_TO_ARENA_PROMPT: LocalizedText = {
+  en: 'Return to the combat zone · Boss incoming',
+  zh: '返回作战区域 · Boss 即将现身',
+};
 
 /**
- * 方位用语：bearing 为水平方位（度，机头为 0、右为正），elevation 为仰角（度）。
+ * 方位用语（当前语言）：bearing 为水平方位（度，机头为 0、右为正），elevation 为仰角（度）。
  * 例：正前方 / 右前方 / 左侧 / 右后方 / 正后方，仰俯角大时加“偏上 / 偏下”。
  */
 function describeDirection(bearing: number, elevation: number): string {
-  const side = bearing >= 0 ? '右' : '左';
+  const right = bearing >= 0;
   const off = Math.abs(bearing);
-  let word: string;
-  if (off <= 15) word = '正前方';
-  else if (off <= 60) word = `${side}前方`;
-  else if (off <= 120) word = `${side}侧`;
-  else if (off <= 165) word = `${side}后方`;
-  else word = '正后方';
-  if (elevation > 30) word += '偏上';
-  else if (elevation < -30) word += '偏下';
-  return word;
+  let direction: string;
+  if (off <= 15) {
+    direction = tr({ en: 'dead ahead', zh: '正前方' });
+  } else if (off <= 60) {
+    direction = right
+      ? tr({ en: 'front right', zh: '右前方' })
+      : tr({ en: 'front left', zh: '左前方' });
+  } else if (off <= 120) {
+    direction = right ? tr({ en: 'right', zh: '右侧' }) : tr({ en: 'left', zh: '左侧' });
+  } else if (off <= 165) {
+    direction = right
+      ? tr({ en: 'rear right', zh: '右后方' })
+      : tr({ en: 'rear left', zh: '左后方' });
+  } else {
+    direction = tr({ en: 'directly behind', zh: '正后方' });
+  }
+  if (elevation > 30) {
+    return tr({ en: '{direction}, above', zh: '{direction}偏上' }, { direction });
+  }
+  if (elevation < -30) {
+    return tr({ en: '{direction}, below', zh: '{direction}偏下' }, { direction });
+  }
+  return direction;
 }
 
 export type ActiveBoss =
@@ -265,7 +283,7 @@ export class BossBattleController {
 
     this.deps.scheduleTimeout(() => {
       this.deps.onSpawnFriendly();
-      this.deps.hud.showPowerUpBig('✈️', '召唤友军');
+      this.deps.hud.showPowerUpBig('✈️', tr({ en: 'Allied support inbound', zh: '召唤友军' }));
     }, 1000);
 
     void this.loadBoss(loadSequence, bossType, isBossMode);
@@ -290,7 +308,7 @@ export class BossBattleController {
       if (this.bossFriendlySpawnTimer >= 30 && advancedBoss.isAlive()) {
         this.bossFriendlySpawnTimer = 0;
         this.deps.onSpawnFriendly();
-        this.deps.hud.showPowerUpBig('✈️', '友军支援');
+        this.deps.hud.showPowerUpBig('✈️', tr({ en: 'Allied reinforcements', zh: '友军支援' }));
       }
 
       this.bossIndicatorUpdateTimer += deltaTime;
@@ -341,7 +359,7 @@ export class BossBattleController {
     if (this.bossFriendlySpawnTimer >= 30) {
       this.bossFriendlySpawnTimer = 0;
       this.deps.onSpawnFriendly();
-      this.deps.hud.showPowerUpBig('✈️', '友军支援');
+      this.deps.hud.showPowerUpBig('✈️', tr({ en: 'Allied reinforcements', zh: '友军支援' }));
     }
 
     this.bossIndicatorUpdateTimer += deltaTime;
@@ -458,7 +476,7 @@ export class BossBattleController {
     }
     const { presentation, playerAircraft, scheduleTimeout } = this.deps;
     const pollMs = BossBattleController.SPAWN_ROOM_POLL_MS;
-    presentation.flashWarning(RETURN_TO_ARENA_PROMPT, 'sys');
+    presentation.flashWarning(tr(RETURN_TO_ARENA_PROMPT), 'sys');
     return new Promise<boolean>((resolve) => {
       let flyingMs = 0;
       let sinceReminderMs = 0;
@@ -486,7 +504,7 @@ export class BossBattleController {
         }
         if (sinceReminderMs >= BossBattleController.SPAWN_ROOM_REMIND_MS) {
           sinceReminderMs = 0;
-          presentation.flashWarning(RETURN_TO_ARENA_PROMPT, 'sys');
+          presentation.flashWarning(tr(RETURN_TO_ARENA_PROMPT), 'sys');
         }
         scheduleTimeout(poll, pollMs);
       };
@@ -536,8 +554,17 @@ export class BossBattleController {
     const elevation = Math.atan2(dy, Math.hypot(dx, dz)) / DEG;
     const chapterBoss = getCampaignChapter(this.currentLevel).boss.name;
     const name =
-      this.currentBossType === BossType.ORACLE_PRIME ? `${chapterBoss}（城堡核心）` : chapterBoss;
-    return `${name}：${describeDirection(bearing, elevation)} ${Math.round(distance / 10) * 10} 米`;
+      this.currentBossType === BossType.ORACLE_PRIME
+        ? tr({ en: '{boss} (citadel core)', zh: '{boss}（城堡核心）' }, { boss: chapterBoss })
+        : chapterBoss;
+    return tr(
+      { en: '{name}: {direction} · {distance} m', zh: '{name}：{direction} {distance} 米' },
+      {
+        name,
+        direction: describeDirection(bearing, elevation),
+        distance: Math.round(distance / 10) * 10,
+      }
+    );
   }
 
   private async createBoss(
@@ -711,11 +738,11 @@ export class BossBattleController {
       this.deps.audioManager.playTeleport();
     };
     boss.onLaserWarning = () => {
-      this.deps.hud.showPowerUpBig('⚠️', '激光预警！', 1, true);
+      this.deps.hud.showPowerUpBig('⚠️', tr({ en: 'Laser warning!', zh: '激光预警！' }), 1, true);
       this.deps.audioManager.playLaserWarning();
     };
     boss.onLaserSweep = () => {
-      this.deps.hud.showPowerUpBig('💣', '激光扫射！', 1, true);
+      this.deps.hud.showPowerUpBig('💣', tr({ en: 'Laser sweep!', zh: '激光扫射！' }), 1, true);
       this.deps.audioManager.playLaserSweep();
     };
     boss.onLaserHit = () => {

@@ -607,7 +607,7 @@ export class Missile {
       const newTarget = this.findNearestEnemy();
       if (newTarget) {
         this.target = newTarget;
-        log.debug('导弹重新锁定目标');
+        log.debug('Missile re-acquired a target');
       }
     }
 

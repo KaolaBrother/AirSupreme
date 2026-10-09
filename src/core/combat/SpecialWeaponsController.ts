@@ -13,6 +13,7 @@ import type { ParticleSystem } from '@/features/effects/ParticleSystem';
 import type { PlayerStats } from '@/features/upgrade/UpgradeSystem';
 import type { CountermeasureSystem } from '@/features/weapons/CountermeasureSystem';
 import type { WeaponMuzzle, WeaponSaveState, WeaponSystem } from '@/features/weapons/WeaponSystem';
+import { tr } from '@/i18n';
 
 export type WeaponSurfaceSampler = (x: number, z: number) => { y: number; water: boolean };
 
@@ -207,7 +208,9 @@ export class SpecialWeaponsController implements IDecoyProvider {
       const before = weapons.getSelected();
       const after = weapons.selectNext();
       if (after && after !== before) this.announceSelection();
-      else if (!after) this.deps.notify('🔒', '尚无特殊武器');
+      else if (!after) {
+        this.deps.notify('🔒', tr({ en: 'No special weapons yet', zh: '尚无特殊武器' }));
+      }
     }
     if (slotRequested >= 0) {
       const id = SPECIAL_WEAPON_IDS[slotRequested];
@@ -216,7 +219,7 @@ export class SpecialWeaponsController implements IDecoyProvider {
         if (weapons.getSelected() !== before) this.announceSelection();
       } else if (id) {
         this.deps.presentation.onWeaponEvent('dry-fire', id);
-        this.deps.notify('🔒', '武器尚未解锁');
+        this.deps.notify('🔒', tr({ en: 'Weapon not unlocked yet', zh: '武器尚未解锁' }));
       }
     }
     if (flareRequested && canFire) {

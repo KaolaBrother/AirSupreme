@@ -17,6 +17,7 @@ import {
 } from '@/features/campaign/CampaignData';
 import { getLevelConfig } from '@/features/terrain/LevelConfig';
 import { getStartingUpgradePoints, type PlayerStats } from '@/features/upgrade/UpgradeSystem';
+import { tr } from '@/i18n';
 import type { CampaignDebriefInput, ICampaignPresentation } from './CampaignPresentation';
 
 /**
@@ -123,7 +124,10 @@ export class CampaignFlowController {
     const startWave = resumeBoss ? Math.max(0, totalWaves - 1) : save.wave;
     void this.deps.prepareLevel(level, startWave).then(() => {
       if (this.disposed) return;
-      this.deps.presentation.showAutosave(`继续：${describeCheckpoint(save)}`);
+      const checkpoint = describeCheckpoint(save);
+      this.deps.presentation.showAutosave(
+        tr({ en: 'Resumed: {checkpoint}', zh: '继续：{checkpoint}' }, { checkpoint })
+      );
       if (resumeBoss) {
         this.deps.startBossEncounter(level, false);
       } else {
@@ -352,7 +356,13 @@ export class CampaignFlowController {
     const data = this.deps.captureCheckpoint(kind, level, wave);
     data.stats = this.getRunStats();
     if (saveCampaignCheckpoint(data)) {
-      const label = kind === 'boss' ? `第${level}关 · Boss 战前` : `第${level}关 · 第${wave + 1}波`;
+      const label =
+        kind === 'boss'
+          ? tr({ en: 'Level {level} · Before the boss', zh: '第{level}关 · Boss 战前' }, { level })
+          : tr(
+              { en: 'Level {level} · Wave {wave}', zh: '第{level}关 · 第{wave}波' },
+              { level, wave: wave + 1 }
+            );
       // 存档提示 + 存档音效；关卡开场与 Boss 战前分别有 chapter-start / level-complete 刺激音，
       // checkpoint 刺激音只跟在波次检查点后面，避免两段刺激音叠在一起
       this.deps.presentation.showAutosave(label);
