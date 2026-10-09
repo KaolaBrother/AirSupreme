@@ -9,6 +9,9 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { mulberry32, smoothstep as smoothstepRange } from './noise';
 
+/** 显隐缓动低于该值的云（缩放 < 原尺寸 0.2%，约米级）视为隐藏，不写入实例槽 */
+const CLOUD_MIN_SHOWN = 0.002;
+
 function makeCloudGeometry(rand: () => number): THREE.BufferGeometry {
   const puffs: THREE.BufferGeometry[] = [];
   const n = 6 + Math.floor(rand() * 4);
@@ -113,8 +116,8 @@ function injectCloudShading(
 }
 
 interface CloudEntry {
-  mesh: THREE.InstancedMesh;
-  index: number;
+  /** 所属云形变体（meshes 下标） */
+  variant: number;
   x: number;
   z: number;
   y: number;
@@ -156,6 +159,8 @@ export class CloudField {
   private readonly meshes: THREE.InstancedMesh[] = [];
   private readonly geometries: THREE.BufferGeometry[] = [];
   private readonly entries: CloudEntry[] = [];
+  /** 每个变体本帧写入的可见实例数（隐藏的云不占实例槽，不进 draw） */
+  private readonly drawCounts: number[] = [];
   private readonly fieldSize: number;
   private readonly tintColor: THREE.Color;
   private tone = 1;
@@ -213,10 +218,10 @@ export class CloudField {
       this.meshes.push(im);
       this.group.add(im);
 
+      this.drawCounts.push(0);
       for (let i = 0; i < perVariant; i++) {
         this.entries.push({
-          mesh: im,
-          index: i,
+          variant: v,
           x: (rand() - 0.5) * this.fieldSize,
           z: (rand() - 0.5) * this.fieldSize,
           y: options.altitudeMin + rand() * Math.max(1, options.altitudeMax - options.altitudeMin),
@@ -269,6 +274,7 @@ export class CloudField {
     const dirZ = Math.sin(windAngle);
     const half = this.fieldSize / 2;
 
+    this.drawCounts.fill(0);
     for (const e of this.entries) {
       const drift = windSpeed * e.speed * dt;
       e.x += dirX * drift;
@@ -280,6 +286,8 @@ export class CloudField {
 
       const want = coverage > e.rank ? 1 : 0;
       e.shown += (want - e.shown) * Math.min(1, dt * 0.9);
+      // 覆盖率之外（或刚开始淡入 / 已淡出到米级大小）的云不画：不再以近零缩放占用顶点处理
+      if (e.shown < CLOUD_MIN_SHOWN) continue;
 
       const s = e.baseScale * (0.0001 + e.shown);
       const sag = stormSag * 70 * e.shown;
@@ -289,9 +297,14 @@ export class CloudField {
       this._quat.setFromAxisAngle(this._yAxis, e.rot);
       this._scl.setScalar(s);
       this._mat4.compose(this._pos, this._quat, this._scl);
-      e.mesh.setMatrixAt(e.index, this._mat4);
+      const mesh = this.meshes[e.variant];
+      mesh.setMatrixAt(this.drawCounts[e.variant]++, this._mat4);
     }
-    for (const m of this.meshes) m.instanceMatrix.needsUpdate = true;
+    this.meshes.forEach((mesh, variant) => {
+      mesh.count = this.drawCounts[variant];
+      mesh.visible = mesh.count > 0;
+      mesh.instanceMatrix.needsUpdate = true;
+    });
   }
 
   dispose(): void {
