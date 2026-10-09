@@ -57,8 +57,11 @@ export class InputHandler {
   private throttlePressed: boolean = false;
   private missilePressed: boolean = false;
   private upgradePressed: boolean = false;
+  /** 桌面 Esc / P 的按住状态（isPauseToggled 取按下沿） */
   private pausePressed: boolean = false;
   private previousPauseState: boolean = false;
+  /** 移动端暂停键的单击锁存：touchstart 置位，游戏消费一次后清除（帧率再低也不丢） */
+  private pauseTapQueued: boolean = false;
   private previousUpgradeState: boolean = false;
   private specialPressed: boolean = false;
 
@@ -320,20 +323,10 @@ export class InputHandler {
       this.addTrackedListener(missileButton, 'touchend', handleMissileEnd);
     }
 
-    // 移动端「升级」舱门打开暂停菜单，而非直接进入商店
-    if (upgradeButton) {
-      const handlePauseCabinStart = (e: TouchEvent): void => {
-        e.preventDefault();
-        this.pausePressed = true;
-      };
-      const handlePauseCabinEnd = (): void => {
-        this.pausePressed = false;
-      };
-      this.addTrackedListener(upgradeButton, 'touchstart', handlePauseCabinStart, {
-        passive: false,
-      });
-      this.addTrackedListener(upgradeButton, 'touchend', handlePauseCabinEnd);
-    }
+    // 移动端「升级」舱门打开暂停菜单，而非直接进入商店；单击锁存，短于一帧的轻触也不丢
+    this.bindTapButton(upgradeButton, () => {
+      this.pauseTapQueued = true;
+    });
 
     // 新增按钮（index.html 中存在时才绑定）：视角切换 / 特殊武器（按住）/ 切换武器 / 热焰弹
     const cameraButton = document.getElementById('camera-button');
@@ -507,15 +500,19 @@ export class InputHandler {
     this.specialTapQueued = false;
   }
 
+  /** 本步是否切换暂停：Esc / P 的按下沿，或一次排队中的移动端暂停键单击（读取即清除） */
   public isPauseToggled(): boolean {
-    const toggled = this.pausePressed && !this.previousPauseState;
+    const keyEdge = this.pausePressed && !this.previousPauseState;
     this.previousPauseState = this.pausePressed;
-    return toggled;
+    const tapped = this.pauseTapQueued;
+    this.pauseTapQueued = false;
+    return keyEdge || tapped;
   }
 
   public resetPauseState(): void {
     this.pausePressed = false;
     this.previousPauseState = false;
+    this.pauseTapQueued = false;
   }
 
   public isUpgradeToggled(): boolean {
