@@ -625,9 +625,9 @@ export function installBalanceHarness(access: DevHookAccess): BalanceHarnessApi 
       }
       recentCrashes.push(gameTime);
       while (recentCrashes.length > 0 && gameTime - recentCrashes[0] > 20) recentCrashes.shift();
-      // 复活后几秒内又坠毁（复活点贴着岩壁 / 立柱，见审计 B1），或 20 秒内坠毁 3 次：
-      // 下次复活时抬到安全高度，避免“复活即坠毁”的循环把平衡数据（阵亡 / 伤害）搅乱
-      if (respawnCrash || recentCrashes.length >= 3) {
+      // 坠毁后下次复活抬到安全高度：复活点常贴着岩壁 / 立柱（审计 B1，由 PlayerSystem 修复），
+      // 不抬的话会“复活即坠毁”连环阵亡，把平衡数据（阵亡 / 伤害）搅乱
+      if (crash) {
         rescuePending = true;
         recentCrashes.length = 0;
       }

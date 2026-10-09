@@ -79,12 +79,12 @@ const LEVEL_3: WaveTable = [
 
 /** 第 4 关 · 深海决战（OCEAN，6 波）：炮艇、护卫舰、潜艇；保护商船与友军护卫舰 */
 const LEVEL_4: WaveTable = [
-  [s(T.ALLY_FRIGATE, 1, 'water'), s(T.CIVILIAN_SHIP, 1, 'route'), s(T.GUNBOAT, 2, 'water')],
+  [s(T.ALLY_FRIGATE, 1, 'water'), s(T.CIVILIAN_SHIP, 1, 'route'), s(T.GUNBOAT, 1, 'water')],
   [s(T.GUNBOAT, 2, 'water'), s(T.CIVILIAN_SHIP, 1, 'route')],
   [s(T.FRIGATE, 1, 'water'), s(T.GUNBOAT, 1, 'water')],
   [s(T.SUBMARINE, 1, 'water'), s(T.GUNBOAT, 1, 'water'), s(T.CIVILIAN_SHIP, 1, 'route')],
   [s(T.FRIGATE, 1, 'water'), s(T.SUBMARINE, 1, 'water'), s(T.ATTACK_HELICOPTER, 1, 'flank')],
-  [s(T.FRIGATE, 1, 'water'), s(T.GUNBOAT, 2, 'water'), s(T.CIVILIAN_SHIP, 1, 'route')],
+  [s(T.FRIGATE, 1, 'water'), s(T.GUNBOAT, 1, 'water'), s(T.CIVILIAN_SHIP, 1, 'route')],
 ];
 
 /** 第 5 关 · 城市废墟（CITY，7 波）：预警机「天眼」、楼顶高炮、平民车流与客机 */
@@ -178,11 +178,11 @@ const LEVEL_8: WaveTable = [
 const LEVEL_9: WaveTable = [
   [s(T.ALLY_AWACS, 1, 'high-altitude'), s(T.DRONE, 3, 'ahead'), s(T.CIVILIAN_AIRLINER, 1, 'route')],
   [s(T.BOMBER, 1, 'high-altitude'), s(T.DRONE, 3, 'around')],
-  [s(T.DRONE, 5, 'ahead'), s(T.CIVILIAN_AIRLINER, 1, 'route')],
+  [s(T.DRONE, 4, 'ahead'), s(T.CIVILIAN_AIRLINER, 1, 'route')],
   [s(T.BOMBER, 1, 'high-altitude'), s(T.DRONE, 4, 'flank')],
   [s(T.BOMBER, 2, 'high-altitude'), s(T.DRONE, 3, 'around'), s(T.CIVILIAN_AIRLINER, 1, 'route')],
-  [s(T.BOMBER, 1, 'high-altitude'), s(T.DRONE, 4, 'ahead')],
-  [s(T.BOMBER, 2, 'high-altitude'), s(T.DRONE, 5, 'around'), s(T.CIVILIAN_AIRLINER, 1, 'route')],
+  [s(T.BOMBER, 1, 'high-altitude'), s(T.DRONE, 3, 'ahead')],
+  [s(T.BOMBER, 2, 'high-altitude'), s(T.DRONE, 4, 'around'), s(T.CIVILIAN_AIRLINER, 1, 'route')],
 ];
 
 /** 第 10 关 · 神谕核心（CITADEL，8 波）：全兵种重防线；全体友军集结 */
@@ -194,7 +194,7 @@ const LEVEL_10: WaveTable = [
     s(T.AA_GUN, 2, 'ahead'),
   ],
   [s(T.SAM_LAUNCHER, 2, 'around'), s(T.ATTACK_HELICOPTER, 2, 'flank')],
-  [s(T.DRONE, 5, 'ahead'), s(T.TANK, 1, 'flank'), s(T.AA_GUN, 1, 'around')],
+  [s(T.DRONE, 4, 'ahead'), s(T.TANK, 1, 'flank'), s(T.AA_GUN, 1, 'around')],
   [s(T.SAM_LAUNCHER, 2, 'around'), s(T.AA_GUN, 1, 'ahead'), s(T.RADAR_STATION, 1, 'flank')],
   [
     s(T.ALLY_TRANSPORT, 1, 'route'),
@@ -202,8 +202,8 @@ const LEVEL_10: WaveTable = [
     s(T.ATTACK_HELICOPTER, 2, 'flank'),
     s(T.DRONE, 3, 'ahead'),
   ],
-  [s(T.TANK, 1, 'around'), s(T.SAM_LAUNCHER, 2, 'flank'), s(T.DRONE, 3, 'ahead')],
-  [s(T.BOMBER, 2, 'high-altitude'), s(T.ATTACK_HELICOPTER, 3, 'around'), s(T.DRONE, 5, 'ahead')],
+  [s(T.SAM_LAUNCHER, 2, 'flank'), s(T.DRONE, 3, 'ahead')],
+  [s(T.BOMBER, 2, 'high-altitude'), s(T.ATTACK_HELICOPTER, 2, 'around'), s(T.DRONE, 4, 'ahead')],
   [
     s(T.SAM_LAUNCHER, 2, 'around'),
     s(T.AA_GUN, 1, 'flank'),
