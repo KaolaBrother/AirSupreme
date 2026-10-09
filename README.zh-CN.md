@@ -422,7 +422,7 @@ src/
 │   ├── SessionSettings.ts        # 开始菜单设置持久化（含语言、语音音量）
 │   ├── GameLoop.ts               # 游戏循环
 │   ├── GameState.ts              # 游戏状态
-│   ├── campaign/                 # 战役流程、表现层适配器、音效路由、出生姿态、菜单音乐、僚机名册 Wingmen
+│   ├── campaign/                 # 战役流程、表现层适配器、音效路由、出生姿态、菜单音乐、僚机名册 Wingmen、告警配额 RadioBudget
 │   ├── units/                    # UnitController（单位运行时接线）
 │   ├── combat/                   # SpecialWeaponsController（特殊武器 + 热焰弹接线）
 │   ├── camera/                   # PlayerViewController（CameraRig 接线）

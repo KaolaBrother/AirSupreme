@@ -413,7 +413,7 @@ src/
 │   ├── SessionSettings.ts        # persisted start-menu settings (incl. language, voice volume)
 │   ├── GameLoop.ts               # game loop
 │   ├── GameState.ts              # game state
-│   ├── campaign/                 # campaign flow, presentation adapter, SFX router, start poses, menu music, Wingmen roster
+│   ├── campaign/                 # campaign flow, presentation adapter, SFX router, start poses, menu music, Wingmen roster, RadioBudget
 │   ├── units/                    # UnitController (unit runtime wiring)
 │   ├── combat/                   # SpecialWeaponsController (weapons + flares wiring)
 │   ├── camera/                   # PlayerViewController (CameraRig wiring)
