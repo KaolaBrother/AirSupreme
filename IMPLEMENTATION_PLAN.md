@@ -126,13 +126,19 @@
   - R14 角色名国际化，只保留两名中文角色（陈曦、梁伟）；R15 友军女性角色（Varga、Lindqvist、陈曦、Hart）（`b30a040`）
   - R16 中英双语配音（ElevenLabs，每句一条，每语言 200 句，`8277131` + `ed418e3`；`VoiceSystem` 无线电滤波 + 音乐闪避，`d2215ff`）；文档刷新 `c8d3131`
 - [done] 独立终验（`93b9986`，R1-R16）：R1、R3-R10、R13-R16 达标；R2 / R11 / R12 部分达标 —— 复活后原地再撞（阻断）、Boss 击破后无检查点、导弹告警无线电刷屏、雨燕入队台词每关重复、第 5 关绘制调用过多 / 第 1 关性能档三角形过多、难度压力不随关卡上升，另有若干小问题（详见运行记录）
-- [active] 终验修复轮（并行，文件互不重叠，均从 `c060401` 起）：
+- [active] 终验修复轮（并行，文件互不重叠，均从 `c060401` 起；第 1 波已于 `29b9e53` 全部合并，门槛通过，2 条测试按规格待更新）：
   - `F1 - 玩家/复活/输入/僚机队形`：复活点沿航迹后退并探测 0-50 m、复活后坠毁宽限；移动端暂停键锁存；僚机编队位不挡追尾镜头 — owned：`src/core/systems/PlayerSystem.ts`、`src/core/systems/EnemySystem.ts`、`src/core/Input/InputHandler.ts`、`src/features/enemy/FriendlyAI.ts`
   - `F2 - 战役流程/无线电/存档`：Boss 击破与机库出击时写检查点、导弹告警无线电限频、两名僚机第 3 关起同时出击且入队台词只播一次（记入存档）、Boss 收尾等配音说完、修复包说明、生产日志级别 — owned：`src/core/campaign/**`、`src/core/save/**`、`src/core/units/UnitController.ts`、`src/ui/RadioComms.ts`、`src/core/GameCoordinator.ts`、`src/core/BossBattleController.ts`、`src/features/powerups/PowerUpSystem.ts`、`src/core/utils/Logger.ts`
   - `F3 - 界面打磨`：竖屏 HUD 与教学面板重叠、模型预览 Boss 6-10、Boss 部件标签堆叠、计数器对比度、EMP 闪白、中央弹窗挡准星、切换语言时简报/存档提示重绘（HUD 侧） — owned：`src/ui/HUD.ts`、`src/ui/OnboardingManager.ts`、`src/ui/ModelPreview.ts`、`src/ui/EnemyHealthBars.ts`、`src/ui/theme/**`、`index.html`、`src/features/effects/postfx/**`
   - `F4a - 性能`：第 5 关城市合批 / 实例化、性能档植被与三角形预算 — owned：`src/features/terrain/TerrainGenerator.ts`、`src/features/terrain/worldscape/**`、`src/features/terrain/environments/**`
   - `F4b - 平衡`：1→10 关压力递增、Boss 4「三叉戟」伤害、幻影之翼击杀时长、难度中英文标签对齐 — owned：`src/core/Difficulty.ts`、`src/features/terrain/LevelConfig.ts`（波次/难度字段）、`src/features/units/UnitDeployments.ts`、`src/features/enemy/EnemyAI.ts`、`src/features/enemy/EnemyTypes.ts`、`src/features/boss/BossTypes.ts`、`src/features/boss/MissileDestroyerAI.ts`、`src/features/boss/PhantomWing*.ts`、`public/config/game-config.json`、`src/config.ts`、`src/features/upgrade/UpgradeSystem.ts`、`src/core/dev/**`、`src/features/levels/LevelManager.ts`（波次生成 + 夹紧告警降级）
-  - 之后：独立测试作者补测试（含 `VoicePack.test.ts` 严格化）→ 文档 → 复验 → 合并 `main`
+  - 第 1 波结果：F4a 第 5 关绘制调用 1,126 → 225、第 1 关性能档三角形 920k → 264k；F4b 标准难度脚本飞行员每分钟受伤（占最大生命）23.6 % → 38.5 % 逐关上升；F1 复活不再原地再撞；F3 竖屏零重叠；F2 Boss 击破即存档、告警限频、双僚机、收尾台词完整
+  - [active] 第 2 波（从 `29b9e53` 起）：
+    - `G1 - 战役/界面接线`：简报横幅与存档提示改传可本地化文本（切换语言即时重绘）、开始菜单难度名改用 `Difficulty` 档案标签、友机在编队位入场 — owned：`src/core/GameCoordinator.ts`、`src/core/campaign/**`、`src/core/save/**`、`src/ui/StartMenu.ts`、`src/ui/PauseMenu.ts`
+    - `G2 - 战斗收尾`：Boss 导弹伤害随难度、干扰弹可诱骗 Boss 1-5 导弹、EMP 球壳近距离不再白屏、`EnemyAI` 正式的编队运动接口（替代 `applyStun`）、Boss 复测 — owned：`src/core/boss/**`、`src/core/BossBattleController.ts`、`src/features/boss/**`（除 `*Mesh.ts`）、`src/features/weapons/**`、`src/core/combat/**`、`src/features/enemy/EnemyAI.ts`、`src/features/enemy/FriendlyAI.ts`、`src/core/dev/**`
+    - `T - 测试`（独立测试作者，并行）：更新 2 条过期测试、`VoicePack.test.ts` 严格化、为第 1 波行为补规格测试 — owned：`src/__tests__/**`、`*.test.ts`
+  - 之后：文档 → 复验 → 合并 `main`
+  - [watch] `GameScene` 阴影相机只覆盖 10×10 m（阴影几乎不可见）
   - 验收：`tsc` / `lint` / `test:run` / `build` 全部通过；无头 Chromium 复现脚本证明阻断与主要问题已消失
 - [next] 复验通过后合并 `workflow/ten-level-campaign` → `main` 并推送，同步本地克隆
 
