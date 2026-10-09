@@ -9,7 +9,7 @@ import {
 import { TOTAL_LEVELS, getCampaignChapter } from '@/features/campaign/CampaignData';
 import { isSpecialWeaponId } from '@/features/weapons/WeaponTypes';
 import type { WeaponSaveState } from '@/features/weapons/WeaponSystem';
-import { tr, type LocalizedText } from '@/i18n';
+import { format, tr, type Locale, type LocalizedText, type TextParams } from '@/i18n';
 
 /**
  * 战役存档：中途自动存档（检查点）+ 战役进度记录。
@@ -335,24 +335,40 @@ const CHECKPOINT_WAVE: LocalizedText = { en: 'Wave {wave}', zh: '第{wave}波' }
 const CHECKPOINT_BOSS: LocalizedText = { en: 'Boss', zh: 'Boss 战' };
 const CHECKPOINT_HANGAR: LocalizedText = { en: 'Hangar', zh: '机库整备' };
 
+/** 按指定语言取双语文案并填充参数；未指定语言时按当前语言（同 tr） */
+function textIn(text: LocalizedText, locale: Locale | undefined, params?: TextParams): string {
+  if (locale === undefined) {
+    return tr(text, params);
+  }
+  return format(locale === 'zh-CN' ? text.zh : text.en, params);
+}
+
 /**
- * 检查点的简短描述（当前语言），如 “Ch. 6 · Heart of the Forge · Wave 3” /
- * “第6关 · 熔炉之心 · 第3波”；Boss 检查点显示 “Boss” / “Boss 战”，
+ * 检查点的简短描述（默认当前语言，传入 locale 时按该语言），
+ * 如 “Ch. 6 · Heart of the Forge · Wave 3” / “第6关 · 熔炉之心 · 第3波”；Boss 检查点显示 “Boss” / “Boss 战”，
  * 机库检查点（下一章开始之前）显示 “Hangar” / “机库整备”，如 “Ch. 2 · Sandstorm · Hangar”。
  * 波次以 1 开始计数（wave 字段是下一波的 0 基序号）。
  */
-export function describeCheckpoint(data: CampaignSaveData): string {
+export function describeCheckpoint(data: CampaignSaveData, locale?: Locale): string {
   const level = clampLevel(data?.level, 1);
-  const title = tr(getCampaignChapter(level).title);
+  const title = textIn(getCampaignChapter(level).title, locale);
   let stage: string;
   if (data?.checkpoint === 'boss') {
-    stage = tr(CHECKPOINT_BOSS);
+    stage = textIn(CHECKPOINT_BOSS, locale);
   } else if (data?.checkpoint === 'hangar') {
-    stage = tr(CHECKPOINT_HANGAR);
+    stage = textIn(CHECKPOINT_HANGAR, locale);
   } else {
-    stage = tr(CHECKPOINT_WAVE, { wave: clampWave(data?.wave) + 1 });
+    stage = textIn(CHECKPOINT_WAVE, locale, { wave: clampWave(data?.wave) + 1 });
   }
-  return tr(CHECKPOINT_LABEL, { level, title, stage });
+  return textIn(CHECKPOINT_LABEL, locale, { level, title, stage });
+}
+
+/**
+ * describeCheckpoint 的双语版本（{ en, zh }）：交给 HUD 的提示用它，
+ * 提示仍在显示时切换语言会按新语言重绘。
+ */
+export function describeCheckpointText(data: CampaignSaveData): LocalizedText {
+  return { en: describeCheckpoint(data, 'en'), zh: describeCheckpoint(data, 'zh-CN') };
 }
 
 /**

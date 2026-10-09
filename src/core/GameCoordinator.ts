@@ -19,7 +19,7 @@ import { EnemyType, ENEMY_CONFIGS } from '@/features/enemy/EnemyTypes';
 import { PowerUpType, POWER_UP_CONFIGS } from '@/features/powerups/PowerUpSystem';
 import type { UpgradeMenu } from '@/ui/UpgradeMenu';
 import type { PauseMenu } from '@/ui/PauseMenu';
-import type { HUD } from '@/ui/HUD';
+import type { HUD, HudTextWithParams } from '@/ui/HUD';
 import type { GameSettings } from '@/ui/StartMenu';
 import type { EnemyHealthBars } from '@/ui/EnemyHealthBars';
 import type { LockOnIndicator } from '@/ui/LockOnIndicator';
@@ -118,6 +118,16 @@ interface WaveObjectiveDisplay {
   title: string;
   objective: string;
   status?: string;
+}
+
+/**
+ * 短暂停留的完成目标（波次事件完成 / 教学完成，约 2-3 秒）：保存双语原文（+ 参数），
+ * HUD 节流刷新时按当前语言取值——停留期间切换语言也跟着换。
+ */
+interface TransientObjectiveDisplay {
+  title: HudTextWithParams;
+  objective: HudTextWithParams;
+  status: HudTextWithParams;
 }
 
 interface TutorialObjectiveDisplay {
@@ -415,7 +425,7 @@ export class GameCoordinator {
   };
   private lastRenderTimestamp: number = 0;
   private upgradeMenuHintShown: boolean = false;
-  private waveCompletionObjective: WaveObjectiveDisplay | null = null;
+  private waveCompletionObjective: TransientObjectiveDisplay | null = null;
   private lastWaveEventPromptSignature: string = '';
   private lastWaveEventCompleteSignature: string = '';
   private lastWaveEventPromptAt: number = 0;
@@ -1427,11 +1437,13 @@ export class GameCoordinator {
   }
 
   private updatePlayerFacingObjective(): void {
-    if (this.waveCompletionObjective) {
+    const completion = this.waveCompletionObjective;
+    if (completion) {
+      // 每次刷新都按当前语言取值（文案不变时 PresentationController 不会重写 DOM）
       this.presentationController.showCompletedEventObjective(
-        this.waveCompletionObjective.title,
-        this.waveCompletionObjective.objective,
-        this.waveCompletionObjective.status
+        tr(completion.title.text, completion.title.params),
+        tr(completion.objective.text, completion.objective.params),
+        tr(completion.status.text, completion.status.params)
       );
       return;
     }
@@ -2682,12 +2694,16 @@ export class GameCoordinator {
     this.tutorialCombatState.active = false;
     this.showTransientObjective(
       {
-        title: tr({ en: 'Training · Complete', zh: '试玩引导 · 完成' }),
-        objective: tr({
-          en: 'Training complete. Regular waves incoming.',
-          zh: '首轮引导完成，进入常规波次。',
-        }),
-        status: tr({ en: 'Tutorial done · Full combat unlocked', zh: '教学完成 · 常规战斗已解锁' }),
+        title: { text: { en: 'Training · Complete', zh: '试玩引导 · 完成' } },
+        objective: {
+          text: {
+            en: 'Training complete. Regular waves incoming.',
+            zh: '首轮引导完成，进入常规波次。',
+          },
+        },
+        status: {
+          text: { en: 'Tutorial done · Full combat unlocked', zh: '教学完成 · 常规战斗已解锁' },
+        },
       },
       GameCoordinator.TUTORIAL_HINT_LONG_MS + 1000
     );
@@ -2831,58 +2847,67 @@ export class GameCoordinator {
     const completedEventType = this.waveEventState.type;
     const onboardingBeat = this.getCurrentWaveOnboardingBeat();
     const now = Date.now();
-    let completionObjective: WaveObjectiveDisplay | null = null;
+    const waveParams = { wave: wave + 1 };
+    let completionObjective: TransientObjectiveDisplay | null = null;
     switch (completedEventType) {
       case LevelWaveEventType.ELITE_HUNT:
         completionObjective = {
-          title: tr(
-            { en: 'Wave {wave} · Elite hunt complete', zh: '第 {wave} 波 · 精英歼灭完成' },
-            { wave: wave + 1 }
-          ),
-          objective: tr({
-            en: 'High-value threats eliminated. Pressure easing.',
-            zh: '高威胁目标已清空，空域压力下降。',
-          }),
-          status: tr({ en: 'Result: threats eliminated', zh: '结果：高威胁已打穿' }),
+          title: {
+            text: { en: 'Wave {wave} · Elite hunt complete', zh: '第 {wave} 波 · 精英歼灭完成' },
+            params: waveParams,
+          },
+          objective: {
+            text: {
+              en: 'High-value threats eliminated. Pressure easing.',
+              zh: '高威胁目标已清空，空域压力下降。',
+            },
+          },
+          status: { text: { en: 'Result: threats eliminated', zh: '结果：高威胁已打穿' } },
         };
         break;
       case LevelWaveEventType.INTERCEPT:
         completionObjective = {
-          title: tr(
-            { en: 'Wave {wave} · Intercept complete', zh: '第 {wave} 波 · 拦截完成' },
-            { wave: wave + 1 }
-          ),
-          objective: tr({
-            en: 'Strike group stopped. Get ready for the next wave.',
-            zh: '前锋突防已压制，准备接续下一波。',
-          }),
-          status: tr({ en: 'Result: intercepted', zh: '结果：拦截完成' }),
+          title: {
+            text: { en: 'Wave {wave} · Intercept complete', zh: '第 {wave} 波 · 拦截完成' },
+            params: waveParams,
+          },
+          objective: {
+            text: {
+              en: 'Strike group stopped. Get ready for the next wave.',
+              zh: '前锋突防已压制，准备接续下一波。',
+            },
+          },
+          status: { text: { en: 'Result: intercepted', zh: '结果：拦截完成' } },
         };
         break;
       case LevelWaveEventType.ESCORT_DEFENSE: {
         const escortSuccess = this.handleEscortWaveComplete(wave);
         completionObjective = escortSuccess
           ? {
-              title: tr(
-                { en: 'Wave {wave} · Escort complete', zh: '第 {wave} 波 · 护送完成' },
-                { wave: wave + 1 }
-              ),
-              objective: tr({
-                en: 'The escort made it through. Pressure broken.',
-                zh: '友军守住关键点，护航压力打穿。',
-              }),
-              status: tr({ en: 'Result: escort succeeded', zh: '结果：护送达成' }),
+              title: {
+                text: { en: 'Wave {wave} · Escort complete', zh: '第 {wave} 波 · 护送完成' },
+                params: waveParams,
+              },
+              objective: {
+                text: {
+                  en: 'The escort made it through. Pressure broken.',
+                  zh: '友军守住关键点，护航压力打穿。',
+                },
+              },
+              status: { text: { en: 'Result: escort succeeded', zh: '结果：护送达成' } },
             }
           : {
-              title: tr(
-                { en: 'Wave {wave} · Escort over', zh: '第 {wave} 波 · 护送结束' },
-                { wave: wave + 1 }
-              ),
-              objective: tr({
-                en: 'Escort lost. Clear the remaining threats.',
-                zh: '护送线受损，清理残余威胁稳局。',
-              }),
-              status: tr({ en: 'Result: escort failed', zh: '结果：护送失利' }),
+              title: {
+                text: { en: 'Wave {wave} · Escort over', zh: '第 {wave} 波 · 护送结束' },
+                params: waveParams,
+              },
+              objective: {
+                text: {
+                  en: 'Escort lost. Clear the remaining threats.',
+                  zh: '护送线受损，清理残余威胁稳局。',
+                },
+              },
+              status: { text: { en: 'Result: escort failed', zh: '结果：护送失利' } },
             };
         break;
       }
@@ -2893,7 +2918,10 @@ export class GameCoordinator {
     this.waveEventState.type = null;
     this.waveEventState.wave = -1;
 
-    const completionSignature = `${wave}|${completionObjective?.title ?? 'unknown'}`;
+    const completionTitle = completionObjective
+      ? tr(completionObjective.title.text, completionObjective.title.params)
+      : 'unknown';
+    const completionSignature = `${wave}|${completionTitle}`;
     const shouldShowCompletion =
       completionSignature !== this.lastWaveEventCompleteSignature ||
       now - this.lastWaveEventCompleteAt >= GameCoordinator.WAVE_EVENT_COMPLETE_COOLDOWN_MS;
@@ -2933,7 +2961,10 @@ export class GameCoordinator {
           return;
         }
 
-        this.showTransientObjective(completionObjective as WaveObjectiveDisplay, objectiveHoldMs);
+        this.showTransientObjective(
+          completionObjective as TransientObjectiveDisplay,
+          objectiveHoldMs
+        );
       }, completionDelayMs);
       return;
     }
@@ -2942,7 +2973,7 @@ export class GameCoordinator {
   }
 
   private showTransientObjective(
-    objective: WaveObjectiveDisplay,
+    objective: TransientObjectiveDisplay,
     holdMs: number = GameCoordinator.OBJECTIVE_COMPLETE_HOLD_MS
   ): void {
     this.waveCompletionObjective = objective;
@@ -3254,26 +3285,29 @@ export class GameCoordinator {
     }
   }
 
-  /** 入关简报（CampaignData：章节 + 关卡标题 + 一句话目标） */
+  /**
+   * 入关简报（CampaignData：章节 + 关卡标题 + 一句话目标）。传双语原文而不是 tr() 的结果：
+   * 简报仍在显示时切换语言，HUD 按新语言重绘。
+   */
   private presentLevelBriefing(level: number): void {
     const chapter = getCampaignChapter(level);
     this.hud.showBriefing({
-      kicker: tr(chapter.chapterLabel),
-      title: tr(chapter.title),
-      line: tr(chapter.levelBriefingLine),
+      kicker: chapter.chapterLabel,
+      title: chapter.title,
+      line: chapter.levelBriefingLine,
       tone: 'sys',
       durationMs: 1800,
     });
     this.audioManager.playWaveStart();
   }
 
-  /** Boss 简报（CampaignData：Boss 名称 + 打法提示），显示完毕后开始 Boss 战 */
+  /** Boss 简报（CampaignData：Boss 名称 + 打法提示，双语原文），显示完毕后开始 Boss 战 */
   private presentBossBriefing(level: number, thenStart: () => void): void {
     const boss = getCampaignChapter(level).boss;
     this.hud.showBriefing({
       kicker: 'BOSS',
-      title: tr(boss.name),
-      line: tr(boss.briefingLine),
+      title: boss.name,
+      line: boss.briefingLine,
       tone: 'threat',
       durationMs: 1800,
     });
