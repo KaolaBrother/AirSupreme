@@ -96,8 +96,8 @@ export class EnemySystem implements IGameSystem {
 
     const friendlyMeshes = this.friendlyMeshBuffer;
     friendlyMeshes.length = 0;
-    for (const friendly of this.friendlyAIs) {
-      friendlyMeshes.push(friendly.getMesh());
+    for (let i = 0; i < this.friendlyAIs.length; i++) {
+      friendlyMeshes.push(this.friendlyAIs[i].getMesh());
     }
     this.levelManager.update(deltaTime, playerPosition, friendlyMeshes);
 
@@ -105,11 +105,12 @@ export class EnemySystem implements IGameSystem {
     const targets = this.friendlyTargetBuffer;
     targets.length = 0;
     if (this.friendlyAIs.length > 0) {
-      for (const enemy of this.levelManager.getEnemies()) {
-        if (enemy.isAlive()) targets.push(enemy.getMesh());
+      const enemies = this.levelManager.getEnemies();
+      for (let i = 0; i < enemies.length; i++) {
+        if (enemies[i].isAlive()) targets.push(enemies[i].getMesh());
       }
       if (additionalTargets) {
-        for (const target of additionalTargets) targets.push(target);
+        for (let i = 0; i < additionalTargets.length; i++) targets.push(additionalTargets[i]);
       }
     }
 
