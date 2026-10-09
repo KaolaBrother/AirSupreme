@@ -52,7 +52,8 @@ describe('Boss System Integration', () => {
       const boss = new BossAI(mesh, config, scene, mockParticleSystem);
 
       expect(boss.isAlive()).toBe(true);
-      expect(boss.getHealth().max).toBe(2000);
+      // 生命值以配置为准（具体数值由平衡标定，见 BossTypes.test.ts）
+      expect(boss.getHealth()).toEqual({ current: config.health, max: config.health });
       expect(boss.getMesh().children.length).toBeGreaterThan(5);
     });
   });

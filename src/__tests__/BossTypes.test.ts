@@ -19,9 +19,10 @@ describe('BossTypes', () => {
       expect(BOSS_CONFIGS[BossType.DESERT_FORTRESS]).toBeDefined();
     });
 
+    // 生命值按实测击杀时间重新标定（21ad1a0）；只在专门针对单个 Boss 配置的用例里写死数值
     it('should have correct HEAVY_BOMBER stats', () => {
       const config = BOSS_CONFIGS[BossType.HEAVY_BOMBER];
-      expect(config.health).toBe(2000);
+      expect(config.health).toBe(1400);
       expect(config.speed).toBe(10);
       expect(config.scale).toBe(5);
       expect(config.damage).toBe(15);
@@ -29,10 +30,19 @@ describe('BossTypes', () => {
 
     it('should have correct DESERT_FORTRESS stats', () => {
       const config = BOSS_CONFIGS[BossType.DESERT_FORTRESS];
-      expect(config.health).toBe(2500);
+      expect(config.health).toBe(2800);
       expect(config.speed).toBe(0);
       expect(config.scale).toBe(5);
       expect(config.damage).toBe(15);
+    });
+
+    // 规范 / 集成说明没有规定 Boss 之间的血量顺序（实测标定后并非随关卡递增），因此不固定顺序
+    it('gives every boss a positive, finite health', () => {
+      for (const type of Object.values(BossType)) {
+        const health = BOSS_CONFIGS[type].health;
+        expect(Number.isFinite(health), `${type} health ${health}`).toBe(true);
+        expect(health, type).toBeGreaterThan(0);
+      }
     });
 
     it('should have correct weapon intervals', () => {
