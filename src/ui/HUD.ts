@@ -2070,6 +2070,8 @@ export class HUD {
         this.setStyleValue(this.bossUi.root, 'display', 'none');
       }
       HUD.setRootMarker('data-hud-boss', null);
+      // 桌面 / 横屏阶段条收起后消息栈上移：尺寸不变，ResizeObserver 不会触发，手动同步栈底
+      this.syncTopStackBottom();
       return;
     }
 
@@ -2123,6 +2125,7 @@ export class HUD {
       this.setStyleValue(ui.root, 'display', 'flex');
       // 桌面 / 横屏：顶部消息栈让出阶段条一行；竖屏阶段条在消息栈里占一整行
       HUD.setRootMarker('data-hud-boss', 'on');
+      this.syncTopStackBottom();
     }
     if (phaseAdvanced) {
       ui.root.classList.remove('is-phase-up');

@@ -10,8 +10,8 @@ import { HUD_COLORS } from './hudPalette';
  * 顶部布局（#hud 已让出安全区，坐标相对安全区）：
  * - 左上信息栏、右上状态列各占一角；中央消息栈（Boss 阶段条 / 简报 / 事件目标 / 竖屏存档提示）
  *   纵向排布，桌面与横屏夹在两侧之间，竖屏排在两侧下方整行。
- * - 中央播报锚定在准星搜索环上方（环半径：桌面 11vmin，横屏 min(9vmin, 90px)，
- *   竖屏 min(8vmin, 80px)，与 LockOnIndicator 一致），向上生长，永不压住准星。
+ * - 中央播报锚定在准星搜索环上方（环半径：桌面 11vmin，竖屏 min(8vmin, 80px)，
+ *   与 LockOnIndicator 一致），向上生长，永不压住准星；横屏高度最紧，接在消息栈下方。
  */
 export const HUD_EXTRAS_STYLE_ID = 'hud-extras-style';
 
@@ -309,10 +309,14 @@ const HUD_EXTRAS_CSS = `
   justify-content: center;
 }
 
+/*
+ * 横屏高度最紧：播报接在顶部消息栈（简报 / 事件目标）下方，夹在两侧信息栏之间，
+ * 与目标卡永不重叠，且位于准星搜索环上方（栈底由 HUD 写入 --hud-stack-bottom）
+ */
 #hud-callout[data-layout-density='touch-landscape'] {
   left: calc(env(safe-area-inset-left, 0px) + 196px);
   right: calc(env(safe-area-inset-right, 0px) + 196px);
-  bottom: calc(50% + min(9vmin, 90px) + 10px);
+  top: calc(var(--hud-stack-bottom, 38px) + 6px);
   transform: none;
   width: auto;
   max-width: none;
