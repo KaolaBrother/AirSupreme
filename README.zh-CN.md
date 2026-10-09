@@ -402,7 +402,7 @@ npm run test:run  # vitest 单次运行（npm run test 为监听模式）
 
 - 十关战役（剧情、第 6-10 关、Boss 6-10、单位、特殊武器、相机组、自动存档、机库、音乐与特效升级）已完成集成，英文优先界面与中文选项、新角色阵容与具名僚机、英文 / 普通话配音也已集成，详见 `CHANGELOG.md` 的 *Unreleased*
 - `GameCoordinator`、战斗运行时、Boss 控制器、presentation/UI runtime 与新增的战役系统都在按需初始化路径上；配音按需获取（每章开始时预取本章台词）
-- 独立终验之后的修复（复活安全、机库检查点、告警配音限频、双僚机出击、手机 HUD 布局、Boss 预览、难度曲线、地形性能）已合并，详见 `CHANGELOG.md` 的 *Unreleased* →「终验修复」
+- 独立终验之后的修复（复活安全、机库检查点、告警配音限频、双僚机出击、手机 HUD 布局、Boss 预览、难度曲线、地形性能）已合并，随后的收尾打磨（告警与倒计时随语言切换重绘、高炮与眼睛光弹伤害随难度、复活时避开墙面）也已合并，详见 `CHANGELOG.md` 的 *Unreleased* →「终验修复」与「收尾打磨」
 - 测试位于 `src/__tests__`；测试数量与结果以 `npm run test:run` 的实际输出为准
 - 已知观察项：构建时的 `vendor-three` chunk 体积 warning
 

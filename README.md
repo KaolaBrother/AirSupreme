@@ -393,7 +393,7 @@ npm run test:run  # vitest, single run (npm run test = watch mode)
 
 - The ten-level campaign (story, levels 6–10, bosses 6–10, units, special weapons, camera rig, autosave, hangar, music and VFX overhaul) is integrated, together with the English-first interface and its Chinese option, the new cast and named wingmen, and English / Mandarin voice acting; see `CHANGELOG.md` → *Unreleased*
 - `GameCoordinator`, combat runtime, boss controllers, presentation/UI runtime and the new campaign systems are all on lazy-init paths; voice lines are fetched on demand (the current chapter's lines are prefetched when it starts)
-- The fixes from an independent final audit (respawn safety, hangar checkpoint, radio warning budget, both wingmen, HUD layout on phones, boss previews, balance curve, terrain performance) are merged; see `CHANGELOG.md` → *Unreleased* → *终验修复* (audit fixes)
+- The fixes from an independent final audit (respawn safety, hangar checkpoint, radio warning budget, both wingmen, HUD layout on phones, boss previews, balance curve, terrain performance) are merged, followed by a polish pass (live relabelling of warnings and timers, flak and eye-bolt damage by difficulty, respawn wall escape); see `CHANGELOG.md` → *Unreleased* → *终验修复* (audit fixes) and *收尾打磨* (polish)
 - Tests live in `src/__tests__`; run `npm run test:run` for the current count and results
 - Known observations: the `vendor-three` chunk-size warning during build
 
