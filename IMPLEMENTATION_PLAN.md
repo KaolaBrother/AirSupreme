@@ -133,11 +133,16 @@
   - `F4a - 性能`：第 5 关城市合批 / 实例化、性能档植被与三角形预算 — owned：`src/features/terrain/TerrainGenerator.ts`、`src/features/terrain/worldscape/**`、`src/features/terrain/environments/**`
   - `F4b - 平衡`：1→10 关压力递增、Boss 4「三叉戟」伤害、幻影之翼击杀时长、难度中英文标签对齐 — owned：`src/core/Difficulty.ts`、`src/features/terrain/LevelConfig.ts`（波次/难度字段）、`src/features/units/UnitDeployments.ts`、`src/features/enemy/EnemyAI.ts`、`src/features/enemy/EnemyTypes.ts`、`src/features/boss/BossTypes.ts`、`src/features/boss/MissileDestroyerAI.ts`、`src/features/boss/PhantomWing*.ts`、`public/config/game-config.json`、`src/config.ts`、`src/features/upgrade/UpgradeSystem.ts`、`src/core/dev/**`、`src/features/levels/LevelManager.ts`（波次生成 + 夹紧告警降级）
   - 第 1 波结果：F4a 第 5 关绘制调用 1,126 → 225、第 1 关性能档三角形 920k → 264k；F4b 标准难度脚本飞行员每分钟受伤（占最大生命）23.6 % → 38.5 % 逐关上升；F1 复活不再原地再撞；F3 竖屏零重叠；F2 Boss 击破即存档、告警限频、双僚机、收尾台词完整
-  - [active] 第 2 波（从 `29b9e53` 起）：
+  - [done] 第 2 波（从 `29b9e53` 起；`6d2d780` 合并，门槛全绿：vitest 1,662 通过 / 77 个文件）：
     - `G1 - 战役/界面接线`：简报横幅与存档提示改传可本地化文本（切换语言即时重绘）、开始菜单难度名改用 `Difficulty` 档案标签、友机在编队位入场 — owned：`src/core/GameCoordinator.ts`、`src/core/campaign/**`、`src/core/save/**`、`src/ui/StartMenu.ts`、`src/ui/PauseMenu.ts`
     - `G2 - 战斗收尾`：Boss 导弹伤害随难度、干扰弹可诱骗 Boss 1-5 导弹、EMP 球壳近距离不再白屏、`EnemyAI` 正式的编队运动接口（替代 `applyStun`）、Boss 复测 — owned：`src/core/boss/**`、`src/core/BossBattleController.ts`、`src/features/boss/**`（除 `*Mesh.ts`）、`src/features/weapons/**`、`src/core/combat/**`、`src/features/enemy/EnemyAI.ts`、`src/features/enemy/FriendlyAI.ts`、`src/core/dev/**`
     - `T - 测试`（独立测试作者，并行）：更新 2 条过期测试、`VoicePack.test.ts` 严格化、为第 1 波行为补规格测试 — owned：`src/__tests__/**`、`*.test.ts`
-  - 之后：文档 → 复验 → 合并 `main`
+  - [active] 第 3 波（从 `6d2d780` 起，并行）：
+    - `P - 收尾打磨`：`flashWarning` / `setBossStatus` / `showPowerUp` 切换语言即时重绘；Boss 高炮与章鱼之眼伤害随难度；编队常量单一来源；第 9 关北塔复活宽限结束即再撞的循环 — owned：`src/ui/HUD.ts`、`src/core/GameCoordinator.ts`、`src/core/BossBattleController.ts`、`src/core/boss/**`、`src/features/boss/**`（除 `*Mesh.ts`）、`src/features/enemy/FriendlyAI.ts`、`src/core/systems/EnemySystem.ts`、`src/core/systems/PlayerSystem.ts`、`src/core/dev/**`、`src/core/campaign/**`
+    - `T - 测试第 2 遍`：第 2 波行为（可本地化提示、难度名、友机入场位、Boss 导弹伤害随难度、干扰弹诱骗 Boss 1-5 导弹、`updateKinematic`、EMP 近距淡出） — owned：`src/__tests__/**`、`*.test.ts`
+    - `D - 文档`：README / README.zh-CN、CHANGELOG、TECHNICAL_DOCUMENTATION、`docs/**` — owned：上述文档
+    - `R - 独立复验`（只读，`6d2d780`）：R1-R16 + 阻断 / 主要问题复查
+  - 之后：合并 `main` 并推送
   - [watch] `GameScene` 阴影相机只覆盖 10×10 m（阴影几乎不可见）
   - 验收：`tsc` / `lint` / `test:run` / `build` 全部通过；无头 Chromium 复现脚本证明阻断与主要问题已消失
 - [next] 复验通过后合并 `workflow/ten-level-campaign` → `main` 并推送，同步本地克隆
