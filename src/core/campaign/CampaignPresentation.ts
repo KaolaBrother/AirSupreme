@@ -157,6 +157,11 @@ export interface ICampaignPresentation {
   isWingmanFlying(id: WingmanId): boolean;
   /** 无线电正在播放或有排队台词 */
   isRadioBusy(): boolean;
+  /**
+   * 估计无线电把当前与排队的台词全部说完还要多少秒（游戏时间；有配音的台词按语音包清单里的
+   * 当前语言时长计）。Boss 收尾据此设定等待上限。
+   */
+  getRadioBacklogSeconds(): number;
   /** 关卡结束 / 换关 / 失败：清空无线电 */
   clearRadio(): void;
 
@@ -213,6 +218,8 @@ export interface CampaignVoice {
   resume(): void;
   prefetch(lineIds: readonly string[]): void;
   loadManifest(): Promise<unknown>;
+  /** 清单记录的这句配音时长（秒，当前语言）；没有这句 / 清单未加载时为 null */
+  getLineDuration?(lineId: string): number | null;
 }
 
 interface StoryUiModules {
@@ -278,6 +285,9 @@ const WINGMAN_EVENT_RADIO: Readonly<
 };
 /** 剧情界面加载前最多缓存的台词 */
 const MAX_PENDING_RADIO = 6;
+/** 积压粗估（剧情界面加载前的缓存台词）：没有配音时长时按阅读上限，每句再加余量（秒） */
+const PENDING_LINE_READING_SECONDS = 6.5;
+const PENDING_LINE_SLACK = 1.5;
 /** 入关预取：紧急告警台词（要求立即开口） */
 const URGENT_VOICE_KEYS: readonly GenericRadioKey[] = [
   'missile-warning',
@@ -674,6 +684,22 @@ export class DefaultCampaignPresentation implements ICampaignPresentation {
 
   public isRadioBusy(): boolean {
     return this.storyUi ? this.storyUi.radio.isBusy() : this.pendingRadio.length > 0;
+  }
+
+  public getRadioBacklogSeconds(): number {
+    const voice = this.deps.voice;
+    const voiceSeconds = (line: RadioLine): number | null =>
+      voice?.getLineDuration?.(line.id) ?? null;
+    const radio = this.storyUi?.radio;
+    if (radio) {
+      return radio.estimateRemainingSeconds(voiceSeconds);
+    }
+    // 剧情界面还没加载：缓存的台词按“配音时长或阅读上限 + 余量”粗估
+    let total = 0;
+    for (const pending of this.pendingRadio) {
+      total += (voiceSeconds(pending.line) ?? PENDING_LINE_READING_SECONDS) + PENDING_LINE_SLACK;
+    }
+    return total;
   }
 
   public clearRadio(): void {

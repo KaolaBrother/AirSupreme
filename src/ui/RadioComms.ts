@@ -62,6 +62,8 @@ const MAX_STEPS_PER_UPDATE = 64;
 const VOICE_TAIL_SECONDS = 0.4;
 /** 配音说话期间的兜底余量（秒）：超过“开口时刻 + 时长 + 尾巴 + 余量”仍未收到说完也继续 */
 const VOICE_SAFETY_SECONDS = 2.5;
+/** 积压估计：配音从台词出现到开口的余量（秒，加载 / 解码；预取过的台词通常立即开口） */
+const VOICE_START_ALLOWANCE_SECONDS = 0.6;
 /** 读屏文本里“呼号：台词”的分隔符 */
 const SPEAKER_SEPARATOR: LocalizedText = { en: ': ', zh: '：' };
 
@@ -216,6 +218,61 @@ export class RadioComms {
     return (
       this.current !== null && this.current.voice === 'playing' && this.current.phase !== 'out'
     );
+  }
+
+  /**
+   * 估计无线电全部说完（当前台词 + 排队台词 + 间隔）还要多少秒（update 驱动的时间）。
+   * voiceSeconds 给出某句的配音时长（没有配音时返回 null）：有配音的台词至少停留到配音说完，
+   * 尚未开口的台词另加一点开口余量。只用于等待上限（Boss 收尾），不影响播放时序。
+   */
+  public estimateRemainingSeconds(voiceSeconds?: (line: RadioLine) => number | null): number {
+    if (this.disposed) {
+      return 0;
+    }
+    let total = Math.max(0, this.gap);
+    const current = this.current;
+    if (current) {
+      let remaining = OUT_SECONDS - current.phaseTime;
+      if (current.phase === 'reveal') {
+        remaining = current.revealSeconds - current.phaseTime + current.holdSeconds + OUT_SECONDS;
+      } else if (current.phase === 'hold') {
+        remaining = this.phaseDuration(current) - current.phaseTime + OUT_SECONDS;
+      }
+      if (current.voice === 'none' && current.phase !== 'out') {
+        // 配音还没开口（加载中）：从现在起至少还要整句配音的时长
+        const voice = this.voiceSecondsOf(current.line, voiceSeconds);
+        if (voice !== null) {
+          remaining = Math.max(
+            remaining,
+            voice + VOICE_START_ALLOWANCE_SECONDS + VOICE_TAIL_SECONDS + OUT_SECONDS
+          );
+        }
+      }
+      total += Math.max(0, remaining) + GAP_SECONDS;
+    }
+    for (const queued of this.queue) {
+      const chars = countChars(tr(queued.line.text));
+      const reveal = this.reducedMotion ? 0 : chars / REVEAL_CHARS_PER_SECOND;
+      const voice = this.voiceSecondsOf(queued.line, voiceSeconds);
+      // 逐字阶段与配音同时开始：整句停留 = max(逐字 + 阅读停留, 开口余量 + 配音 + 尾巴)
+      const shown =
+        voice === null
+          ? reveal + readingHoldSeconds(chars)
+          : Math.max(
+              reveal + readingHoldSeconds(chars),
+              VOICE_START_ALLOWANCE_SECONDS + voice + VOICE_TAIL_SECONDS
+            );
+      total += shown + OUT_SECONDS + GAP_SECONDS;
+    }
+    return total;
+  }
+
+  private voiceSecondsOf(
+    line: RadioLine,
+    voiceSeconds: ((line: RadioLine) => number | null) | undefined
+  ): number | null {
+    const seconds = voiceSeconds?.(line);
+    return typeof seconds === 'number' && Number.isFinite(seconds) && seconds > 0 ? seconds : null;
   }
 
   /**

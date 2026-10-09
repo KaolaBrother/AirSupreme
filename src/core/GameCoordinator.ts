@@ -1853,9 +1853,6 @@ export class GameCoordinator {
       session: this.sessionState,
       stats: this.playerStats,
       presentation: this.presentation,
-      scheduleTimeout: (callback, delayMs) => {
-        this.scheduleTimeout(callback, delayMs);
-      },
       prepareLevel: (level, startWave) => this.prepareLevel(level, startWave),
       startLevelCombat: (level, startWave, first) => this.startLevelCombat(level, startWave, first),
       startBossEncounter: (level, isBossMode) => this.startBossEncounter(level, isBossMode),

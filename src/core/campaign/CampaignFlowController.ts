@@ -28,7 +28,6 @@ export interface CampaignFlowDeps {
   session: GameSessionState;
   stats: PlayerStats;
   presentation: ICampaignPresentation;
-  scheduleTimeout(callback: () => void, delayMs: number): void;
   /** 加载关卡（地形、单位强度、玩家落点、回血、武器同步）；地形就绪后 resolve */
   prepareLevel(level: number, startWave: number): Promise<void>;
   /** 进入波次战斗（简报、教学、首波计时、僚机、关卡音乐） */
@@ -49,13 +48,21 @@ export interface CampaignFlowDeps {
 }
 
 /**
- * 击破 Boss 到结算 / 下一章之间的停顿（毫秒）：至少等爆炸，最多等收尾台词播完。
- * 收尾台词有配音后每章 2-5 句共约 8-23 秒（台词等配音说完）：上限放宽到 16 秒，
- * 多数章节能完整听完；超出时结算卡片出现，正在说的那句说完、其余丢弃。
+ * 击破 Boss 到结算 / 下一章之间的停顿（秒，游戏时间：暂停不计）：至少等爆炸（MIN），
+ * 然后等无线电把收尾台词全部说完（配音后每章 2-5 句，含逐字与停顿约 10-30 秒）。
+ * 看门狗：等待上限 = 开始收尾时无线电的积压估计（按语音包清单里当前语言的配音时长）+ SLACK，
+ * 再夹在 MAX 以内——无论如何不会卡住；到上限时结算卡片出现，正在说的那句照样说完。
  */
-const BOSS_OUTRO_MIN_MS = 1600;
-const BOSS_OUTRO_MAX_MS = 16000;
-const BOSS_OUTRO_POLL_MS = 250;
+const BOSS_OUTRO_MIN_SECONDS = 1.6;
+const BOSS_OUTRO_SLACK_SECONDS = 6;
+const BOSS_OUTRO_MAX_SECONDS = 75;
+
+/** 等待中的 Boss 收尾（tick 推进） */
+interface PendingOutro {
+  elapsed: number;
+  ceiling: number;
+  then: () => void;
+}
 
 /**
  * 十关战役流程（api-spec §10）：
@@ -73,6 +80,7 @@ export class CampaignFlowController {
   private firstLevelOfSession = true;
   private victory = false;
   private disposed = false;
+  private outro: PendingOutro | null = null;
 
   constructor(private readonly deps: CampaignFlowDeps) {}
 
@@ -274,21 +282,35 @@ export class CampaignFlowController {
   }
 
   /**
-   * Boss 击破后的收尾：至少停顿 1.6 秒让爆炸播完，再等收尾台词说完（最多 6.5 秒）；
-   * 期间玩家阵亡 / 退出则放弃（不在失败结算上叠结算卡片）。
+   * Boss 击破后的收尾（tick 推进的游戏时间，暂停不计）：至少停顿 BOSS_OUTRO_MIN_SECONDS 让爆炸
+   * 播完，再等无线电把收尾台词全部说完；看门狗上限 = 此刻的无线电积压估计 + 余量（不超过
+   * BOSS_OUTRO_MAX_SECONDS）。期间失败 / 退出时不再推进（不在失败结算上叠结算卡片）。
    */
   private afterBossOutro(then: () => void): void {
-    const startedAt = Date.now();
-    const check = (): void => {
-      if (this.disposed || !this.deps.session.isPlaying()) return;
-      const elapsed = Date.now() - startedAt;
-      if (elapsed < BOSS_OUTRO_MAX_MS && this.deps.presentation.isRadioBusy()) {
-        this.deps.scheduleTimeout(check, BOSS_OUTRO_POLL_MS);
-        return;
-      }
-      then();
+    const backlog = this.deps.presentation.getRadioBacklogSeconds();
+    const estimate = Number.isFinite(backlog) ? Math.max(0, backlog) : BOSS_OUTRO_MAX_SECONDS;
+    this.outro = {
+      elapsed: 0,
+      ceiling: Math.min(
+        BOSS_OUTRO_MAX_SECONDS,
+        Math.max(BOSS_OUTRO_MIN_SECONDS, estimate) + BOSS_OUTRO_SLACK_SECONDS
+      ),
+      then,
     };
-    this.deps.scheduleTimeout(check, BOSS_OUTRO_MIN_MS);
+  }
+
+  private advanceOutro(deltaTime: number): void {
+    const outro = this.outro;
+    if (!outro) return;
+    if (this.disposed || !this.deps.session.isPlaying()) {
+      this.outro = null;
+      return;
+    }
+    outro.elapsed += deltaTime;
+    if (outro.elapsed < BOSS_OUTRO_MIN_SECONDS) return;
+    if (outro.elapsed < outro.ceiling && this.deps.presentation.isRadioBusy()) return;
+    this.outro = null;
+    outro.then();
   }
 
   /** 进入新关卡：升级上限、武器解锁随章节推进（新解锁的武器满弹） */
@@ -320,10 +342,11 @@ export class CampaignFlowController {
     this.stats.deaths++;
   }
 
-  /** 累计游戏时间（模拟步长，只在战斗进行时调用） */
+  /** 累计游戏时间并推进 Boss 收尾（模拟步长，只在战斗进行时调用：暂停 / 剧情冻结时不调用） */
   public tick(deltaTime: number): void {
     if (Number.isFinite(deltaTime) && deltaTime > 0) {
       this.stats.playTimeSeconds += deltaTime;
+      this.advanceOutro(deltaTime);
     }
   }
 
@@ -342,6 +365,7 @@ export class CampaignFlowController {
     this.levelCiviliansLost = 0;
     this.levelAlliesLost = 0;
     this.victory = false;
+    this.outro = null;
   }
 
   private buildDebrief(level: number): CampaignDebriefInput {
@@ -381,5 +405,6 @@ export class CampaignFlowController {
 
   public dispose(): void {
     this.disposed = true;
+    this.outro = null;
   }
 }
