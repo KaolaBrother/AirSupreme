@@ -2189,7 +2189,12 @@ export class HUD {
   }
 
   private updateCampaignTimers(deltaTime: number): void {
-    if (this.autosaveTimer > 0) {
+    // 竖屏时存档提示与简报同在顶部消息栈：简报显示期间提示被样式隐藏，计时也暂停
+    const autosaveDeferred =
+      this.briefingTimer > 0 &&
+      this.layoutDensity === 'touch-portrait' &&
+      this.autosaveToast?.parentElement === this.topStack;
+    if (this.autosaveTimer > 0 && !autosaveDeferred) {
       this.autosaveTimer = Math.max(0, this.autosaveTimer - deltaTime);
       if (!this.autosaveLeaving && this.autosaveTimer <= HUD.AUTOSAVE_LEAVE_SECONDS) {
         this.autosaveLeaving = true;

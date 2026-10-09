@@ -315,6 +315,21 @@ const HUD_EXTRAS_CSS = `
   width: 100%;
 }
 
+/* 竖屏 360px 宽也让标题与进度标签保持一行 */
+#hud[data-layout-density='touch-portrait'] .hud-obj-head {
+  gap: 2px 8px;
+}
+
+#hud[data-layout-density='touch-portrait'] .hud-obj-title {
+  font-size: 10px;
+  letter-spacing: 0.1em !important;
+}
+
+#hud[data-layout-density='touch-portrait'] .hud-obj-status {
+  padding: 0 5px;
+  letter-spacing: 0.04em !important;
+}
+
 /* ------------------------------------------------------------ 中央播报（准星上方的横幅） */
 #hud-callout {
   left: 50%;
@@ -783,6 +798,19 @@ const HUD_EXTRAS_CSS = `
 #hud-top-stack > .hx-autosave {
   position: static;
   align-self: center;
+  gap: 6px;
+  padding: 4px 10px 4px 8px;
+  font-size: 11px;
+}
+
+#hud-top-stack > .hx-autosave svg {
+  width: 12px;
+  height: 12px;
+}
+
+/* 竖屏简报显示时存档提示让位（HUD 同时暂停它的计时，简报结束后再完整显示） */
+#hud-top-stack[data-briefing='on'] > .hx-autosave {
+  display: none !important;
 }
 
 /* 手机横握：信息栏下方紧贴雷达，改放到雷达右侧 */
