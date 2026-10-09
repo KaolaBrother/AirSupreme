@@ -217,7 +217,7 @@ export class UpgradeMenu {
 
   private getDefaultHangarSubtitle(): string {
     const chapter = getCampaignChapter(this.upgrades.getCampaignLevel());
-    return `下一站：${chapter.chapterLabel} · ${chapter.title}`;
+    return `下一站：${tr(chapter.chapterLabel)} · ${tr(chapter.title)}`;
   }
 
   private handleContinue(): void {
@@ -926,7 +926,7 @@ export class UpgradeMenu {
     const weaponId = getWeaponIdForUpgrade(type);
     const unlockLevel = weaponId ? getWeaponUnlockLevel(weaponId) : null;
     const unlockLabel =
-      unlockLevel === null ? '暂未' : getCampaignChapter(unlockLevel).chapterLabel;
+      unlockLevel === null ? '暂未' : tr(getCampaignChapter(unlockLevel).chapterLabel);
     const nextRaiseLevel = this.upgrades.getNextCapRaiseLevel(type);
 
     elements.card.classList.remove('upgradeable', 'maxed', 'capped', 'weapon-locked');

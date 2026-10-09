@@ -1854,7 +1854,7 @@ export class GameCoordinator {
       upgradeMenu.updateDisplay();
       upgradeMenu.show({
         mode: 'hangar',
-        subtitle: `下一站：${chapter.chapterLabel} · ${chapter.title}`,
+        subtitle: `下一站：${tr(chapter.chapterLabel)} · ${tr(chapter.title)}`,
         onContinue: () => {
           this.setStoryHold(false);
           this.syncProgression(level);
@@ -2960,9 +2960,9 @@ export class GameCoordinator {
   private presentLevelBriefing(level: number): void {
     const chapter = getCampaignChapter(level);
     this.hud.showBriefing({
-      kicker: chapter.chapterLabel,
-      title: chapter.title,
-      line: chapter.levelBriefingLine,
+      kicker: tr(chapter.chapterLabel),
+      title: tr(chapter.title),
+      line: tr(chapter.levelBriefingLine),
       tone: 'sys',
       durationMs: 1800,
     });
@@ -2974,8 +2974,8 @@ export class GameCoordinator {
     const boss = getCampaignChapter(level).boss;
     this.hud.showBriefing({
       kicker: 'BOSS',
-      title: boss.name,
-      line: boss.briefingLine,
+      title: tr(boss.name),
+      line: tr(boss.briefingLine),
       tone: 'threat',
       durationMs: 1800,
     });

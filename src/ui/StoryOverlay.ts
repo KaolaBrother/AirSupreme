@@ -6,6 +6,7 @@ import {
   TOTAL_LEVELS,
   type CampaignChapter,
 } from '@/features/campaign/CampaignData';
+import { tr } from '@/i18n';
 import { GLYPH_PIN } from '@/ui/theme/hudGlyphs';
 import { prefersReducedMotion, readHudLayoutDensity } from '@/ui/theme/hudPalette';
 import { injectStoryStyles } from '@/ui/theme/storyStyles';
@@ -107,11 +108,13 @@ export function formatStoryNumber(value: number, signed = false): string {
 }
 
 function splitCampaignTitle(): { latin: string; title: string } {
-  const parts = CAMPAIGN_TITLE.split('·').map((part) => part.trim());
+  const parts = tr(CAMPAIGN_TITLE)
+    .split('·')
+    .map((part) => part.trim());
   if (parts.length >= 2 && parts[0] && parts[1]) {
     return { latin: parts[0], title: parts.slice(1).join(' · ') };
   }
-  return { latin: '', title: CAMPAIGN_TITLE };
+  return { latin: '', title: tr(CAMPAIGN_TITLE) };
 }
 
 function pauseAfter(char: string): number {
@@ -635,7 +638,11 @@ export class StoryOverlay {
       currentLevel: null,
       doneThrough: 0,
     });
-    card.append(ident, StoryOverlay.buildRule(), this.buildTypedText(CAMPAIGN_PROLOGUE));
+    card.append(
+      ident,
+      StoryOverlay.buildRule(),
+      this.buildTypedText(CAMPAIGN_PROLOGUE.map((line) => tr(line)))
+    );
     return card;
   }
 
@@ -643,11 +650,11 @@ export class StoryOverlay {
     const chapter = session.chapter as CampaignChapter;
     const card = el('article', 'so-card');
     const ident = this.buildIdent({
-      kicker: chapter.chapterLabel,
-      title: chapter.title,
-      operationCn: chapter.operationName,
+      kicker: tr(chapter.chapterLabel),
+      title: tr(chapter.title),
+      operationCn: tr(chapter.operationName),
       operationCode: chapter.codename,
-      location: chapter.location,
+      location: tr(chapter.location),
       currentLevel: chapter.level,
       doneThrough: chapter.level - 1,
     });
@@ -658,7 +665,7 @@ export class StoryOverlay {
       extras.appendChild(el('div', 'so-obj-title', '任务目标'));
       const list = el('ul', 'so-objectives');
       for (const objective of objectives) {
-        list.appendChild(el('li', undefined, objective));
+        list.appendChild(el('li', undefined, tr(objective)));
       }
       extras.appendChild(list);
     }
@@ -673,7 +680,12 @@ export class StoryOverlay {
     }
     this.extras = extras;
 
-    card.append(ident, StoryOverlay.buildRule(), this.buildTypedText(chapter.intro ?? []), extras);
+    card.append(
+      ident,
+      StoryOverlay.buildRule(),
+      this.buildTypedText((chapter.intro ?? []).map((line) => tr(line))),
+      extras
+    );
     return card;
   }
 
@@ -682,17 +694,17 @@ export class StoryOverlay {
     const chapter = data.chapter;
     const card = el('article', 'so-card is-debrief');
     const ident = this.buildIdent({
-      kicker: chapter.chapterLabel,
+      kicker: tr(chapter.chapterLabel),
       status: '任务完成',
-      title: chapter.title,
-      operationCn: chapter.operationName,
+      title: tr(chapter.title),
+      operationCn: tr(chapter.operationName),
       operationCode: chapter.codename,
       location: null,
       currentLevel: chapter.level,
       doneThrough: chapter.level - 1,
     });
     if (chapter.debriefSummary) {
-      ident.appendChild(el('p', 'so-summary', chapter.debriefSummary));
+      ident.appendChild(el('p', 'so-summary', tr(chapter.debriefSummary)));
     }
 
     const column = el('section', 'so-text so-debrief');
@@ -772,14 +784,18 @@ export class StoryOverlay {
       el('span', undefined, formatStoryNumber(session.finalScore))
     );
     ident.appendChild(score);
-    card.append(ident, StoryOverlay.buildRule(), this.buildTypedText(CAMPAIGN_EPILOGUE));
+    card.append(
+      ident,
+      StoryOverlay.buildRule(),
+      this.buildTypedText(CAMPAIGN_EPILOGUE.map((line) => tr(line)))
+    );
     return card;
   }
 
   private buildCreditsCard(session: StorySession): HTMLElement {
     const wrap = el('div', 'so-credits');
     const roll = el('div', 'so-roll');
-    const lines = [...CAMPAIGN_CREDITS];
+    const lines = CAMPAIGN_CREDITS.map((line) => tr(line));
     const last = lines[lines.length - 1];
     const closing = last && !last.includes(CREDIT_SEPARATOR) && lines.length > 1 ? last : null;
     if (closing) {
@@ -790,7 +806,7 @@ export class StoryOverlay {
       if (index === 0 && !line.includes(CREDIT_SEPARATOR)) {
         const titleBlock = el('div', 'so-roll-title');
         const { latin, title } =
-          line === CAMPAIGN_TITLE ? splitCampaignTitle() : { latin: '', title: line };
+          line === tr(CAMPAIGN_TITLE) ? splitCampaignTitle() : { latin: '', title: line };
         if (latin) {
           titleBlock.appendChild(el('span', 'so-roll-latin', latin));
         }
@@ -926,7 +942,9 @@ export class StoryOverlay {
         return `序章 ${splitCampaignTitle().title}`;
       case 'chapter':
       case 'debrief':
-        return session.chapter ? `${session.chapter.chapterLabel} ${session.chapter.title}` : '';
+        return session.chapter
+          ? `${tr(session.chapter.chapterLabel)} ${tr(session.chapter.title)}`
+          : '';
       case 'epilogue':
         return '尾声';
       case 'credits':

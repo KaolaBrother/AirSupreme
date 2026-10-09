@@ -4,6 +4,7 @@ import {
   type CampaignSpeakerId,
   type RadioLine,
 } from '@/features/campaign/CampaignData';
+import { tr } from '@/i18n';
 import { getSpeakerGlyph } from '@/ui/theme/hudGlyphs';
 import {
   prefersReducedMotion,
@@ -57,9 +58,11 @@ function resolveSpeaker(id: CampaignSpeakerId | string): CampaignSpeaker {
   }
   return {
     id: 'hq',
-    callsign: String(id || '未知频道'),
-    name: '',
+    callsign: { en: String(id || 'Unknown channel'), zh: String(id || '未知频道') },
+    name: { en: '', zh: '' },
     tone: 'sys',
+    gender: 'neutral',
+    voiceDirection: { en: '', zh: '' },
   };
 }
 
@@ -102,10 +105,11 @@ export class RadioComms {
   };
 
   public enqueue(line: RadioLine, options?: RadioEnqueueOptions): void {
-    if (this.disposed || !line || typeof line.text !== 'string' || line.text.trim() === '') {
+    const text = line && line.text ? tr(line.text) : '';
+    if (this.disposed || typeof text !== 'string' || text.trim() === '') {
       return;
     }
-    if (this.isDuplicate(line.text)) {
+    if (this.isDuplicate(text)) {
       return;
     }
     const priority: RadioPriority = options?.priority === 'high' ? 'high' : 'normal';
@@ -203,10 +207,10 @@ export class RadioComms {
   // ---------------------------------------------------------------------------
 
   private isDuplicate(text: string): boolean {
-    if (this.current && this.current.line.text === text) {
+    if (this.current && tr(this.current.line.text) === text) {
       return true;
     }
-    return this.queue.some((queued) => queued.line.text === text);
+    return this.queue.some((queued) => tr(queued.line.text) === text);
   }
 
   private trimQueue(): void {
@@ -247,7 +251,7 @@ export class RadioComms {
   }
 
   private startLine(item: QueuedLine): void {
-    const chars = countChars(item.line.text);
+    const chars = countChars(tr(item.line.text));
     this.reducedMotion = prefersReducedMotion();
     const revealSeconds = this.reducedMotion ? 0 : chars / REVEAL_CHARS_PER_SECOND;
     const holdSeconds = Math.min(
@@ -412,17 +416,17 @@ export class RadioComms {
       this.portrait.innerHTML = getSpeakerGlyph(glyphKey);
       this.lastGlyphSpeaker = glyphKey;
     }
+    const callsign = tr(speaker.callsign);
     if (this.callsign) {
-      this.callsign.textContent = speaker.callsign;
+      this.callsign.textContent = callsign;
     }
     if (this.name) {
-      const extra = speaker.name.startsWith(speaker.callsign)
-        ? speaker.name.slice(speaker.callsign.length).trim()
-        : speaker.name;
+      const name = tr(speaker.name);
+      const extra = name.startsWith(callsign) ? name.slice(callsign.length).trim() : name;
       this.name.textContent = extra;
     }
     if (this.srText) {
-      this.srText.textContent = `${speaker.callsign}：${line.line.text}`;
+      this.srText.textContent = `${callsign}：${tr(line.line.text)}`;
     }
     this.renderReveal(line);
     if (root.style.display !== 'block') {
@@ -441,10 +445,9 @@ export class RadioComms {
     if (!this.text) {
       return;
     }
+    const text = tr(line.line.text);
     const visible =
-      line.shown >= line.chars
-        ? line.line.text
-        : Array.from(line.line.text).slice(0, line.shown).join('');
+      line.shown >= line.chars ? text : Array.from(text).slice(0, line.shown).join('');
     if (this.text.textContent !== visible) {
       this.text.textContent = visible;
     }

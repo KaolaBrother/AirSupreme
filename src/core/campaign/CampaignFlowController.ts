@@ -17,6 +17,7 @@ import {
 } from '@/features/campaign/CampaignData';
 import { getLevelConfig } from '@/features/terrain/LevelConfig';
 import { getStartingUpgradePoints, type PlayerStats } from '@/features/upgrade/UpgradeSystem';
+import { tr } from '@/i18n';
 import type { CampaignDebriefInput, ICampaignPresentation } from './CampaignPresentation';
 
 /**
@@ -153,7 +154,10 @@ export class CampaignFlowController {
       // 章节卡片（剧情曲 + 打字机）；第一章前先播序章，本章新武器显示解锁台词
       presentation.showChapterIntro(
         level,
-        { includePrologue: level === 1 && firstOfSession, unlockLine: chapter.unlockLine },
+        {
+          includePrologue: level === 1 && firstOfSession,
+          unlockLine: chapter.unlockLine ? tr(chapter.unlockLine) : null,
+        },
         () => {
           if (this.disposed) return;
           this.deps.setStoryHold(false);

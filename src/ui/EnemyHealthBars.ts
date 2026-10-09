@@ -43,7 +43,7 @@ function buildBossLabels(): ReadonlyMap<string, string> {
   for (let level = 1; ; level++) {
     const type = getBossForLevel(level);
     if (!type) break;
-    const name = getCampaignChapter(level).boss.name;
+    const name = tr(getCampaignChapter(level).boss.name);
     if (name) labels.set(`BOSS_${type}`, name);
   }
   for (const type of Object.values(BossType)) {
