@@ -965,10 +965,17 @@ export class BossMissileSystem {
   private scene: THREE.Scene;
   private particleSystem: ParticleSystem;
   private missiles: BossMissile[] = [];
+  /** 单枚导弹的命中伤害：Boss 配置的 missileDamage（已按难度调整），缺省为基础值 */
+  private readonly damage: number;
 
-  constructor(scene: THREE.Scene, particleSystem: ParticleSystem) {
+  constructor(
+    scene: THREE.Scene,
+    particleSystem: ParticleSystem,
+    damage: number = BOSS_MISSILE_CONFIG.DAMAGE
+  ) {
     this.scene = scene;
     this.particleSystem = particleSystem;
+    this.damage = Number.isFinite(damage) && damage >= 0 ? damage : BOSS_MISSILE_CONFIG.DAMAGE;
   }
 
   public fire(
@@ -1034,7 +1041,7 @@ export class BossMissileSystem {
         if (distance < hitDistance) {
           missile.active = false;
           this.particleSystem.createBossMissileExplosion(missile.mesh.position.clone(), 1.45);
-          onHit(targetMesh, BOSS_MISSILE_CONFIG.DAMAGE);
+          onHit(targetMesh, this.damage);
           break;
         }
       }

@@ -365,7 +365,11 @@ export class TempestZeppelinAI implements IAdvancedBoss {
     const maxHealth = Number.isFinite(config.health) && config.health > 0 ? config.health : 1;
     this.health = new HealthSystem(maxHealth);
     this.health.onDeath = () => this.handleHealthDepleted();
-    this.missileSystem = new BossMissileSystem(scene, resolveMissileParticles(particleSystem));
+    this.missileSystem = new BossMissileSystem(
+      scene,
+      resolveMissileParticles(particleSystem),
+      config.missileDamage
+    );
     this.rig = this.ensureRig(mesh, config);
     this.sizeFactor = this.rig.scale / 6;
     const base = BOSS_CONFIGS[BossType.TEMPEST_ZEPPELIN];

@@ -86,7 +86,7 @@ export class DesertFortressAI {
     this.config = config;
     this.health = new HealthSystem(config.health);
 
-    this.missileSystem = new BossMissileSystem(scene, particleSystem);
+    this.missileSystem = new BossMissileSystem(scene, particleSystem, config.missileDamage);
 
     this.flakCannonSystem = new FlakCannonSystem(
       scene,
