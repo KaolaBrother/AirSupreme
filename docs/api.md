@@ -56,6 +56,8 @@ log.warn('warn');
 log.error('error');
 ```
 
+The minimum level is `DEBUG` in development builds (`import.meta.env.MODE === 'development'`) and `WARN` in every other mode (production, preview, tests); `loggerManager.setMinLevel(level)` overrides it. Log history is stored only in development builds.
+
 ## Localisation (i18n)
 
 Source: `src/i18n/index.ts` (no `document` / `window` access at import time). English is the default; Simplified Chinese is the one other locale.
@@ -109,12 +111,12 @@ tr({ en: 'Wave {n}', zh: '第{n}波' }, { n: 3 }); // 'Wave 3' | '第3波'
 | `UpgradeConfig` | `name`, `description`, `unit` | `src/features/upgrade/UpgradeSystem.ts` |
 | `PowerUpConfig` | `name`, `description` | `src/features/powerups/PowerUpSystem.ts` |
 | `LevelConfig` | `name` (the same object as the chapter title in `CHAPTER_TITLES`), `description` | `src/features/terrain/LevelConfig.ts` |
-| `DifficultyProfile` | `label` (Very Easy · Easy · Normal · Hard · Expert) | `src/core/Difficulty.ts` |
+| `DifficultyProfile` | `label` (Very Easy · Easy · Normal · Hard · Expert = 非常简单 · 简单 · 普通 · 困难 · 专家, tier for tier) | `src/core/Difficulty.ts` |
 | Campaign data | every player-facing field — see [Campaign data](#campaign-data) | `src/features/campaign/` |
 
 Snapshots handed to the HUD stay `string` and are localised when they are produced (for example `WeaponSystem.getHudState().name` is `tr(config.name)`). Per-frame code keeps its `{ en, zh }` objects as module-level constants, so nothing bilingual is allocated per frame.
 
-**Live switching.** `src/main.ts` calls `setLocale(loadStartFlowSettings().language)` before any UI renders, writes the page shell (title, loading screen, touch-button labels and `aria-label`s) in that language and rewrites it on `onLocaleChange`. Other subscribers: `StartMenu`, `PauseMenu` and `UpgradeMenu` (re-render in place), `HUD` (its own text, the settlement panel), `EnemyHealthBars` (every bar name, also while paused), `ModelPreview`, `RadioComms` (the line on screen) and `VoiceSystem` (stops the current line, re-prefetches in the new language). `StoryOverlay` writes each card in the locale current when the card is shown: a card already on screen keeps its language and the rest of its narration is skipped. Runtime messages — coordinator toasts and objectives, boss status / phase / hazard labels, unit and weapon warnings, checkpoint labels — call `tr()` when they are emitted.
+**Live switching.** `src/main.ts` calls `setLocale(loadStartFlowSettings().language)` before any UI renders, writes the page shell (title, loading screen, touch-button labels and `aria-label`s) in that language and rewrites it on `onLocaleChange`. Other subscribers: `StartMenu`, `PauseMenu` and `UpgradeMenu` (re-render in place), `HUD` (its own text, the settlement panel, and a briefing banner or autosave toast still on screen that was given bilingual text — see `HudText` under [HUD, story overlay, radio, radar, menus](#hud-story-overlay-radio-radar-menus)), `EnemyHealthBars` (every bar name, also while paused), `ModelPreview`, `RadioComms` (the line on screen) and `VoiceSystem` (stops the current line, re-prefetches in the new language). `StoryOverlay` writes each card in the locale current when the card is shown: a card already on screen keeps its language and the rest of its narration is skipped. The level and boss briefings, the checkpoint autosave toasts (including "Resumed: …") and the short wave / tutorial completion objectives keep their bilingual source and follow a switch while visible. Other runtime messages — coordinator toasts (`showPowerUpBig`), flashed warnings, boss status / phase / hazard labels, unit and weapon warnings — call `tr()` when they are emitted.
 
 ## Crash surface
 
@@ -139,7 +141,14 @@ this.playerSystem.setCrashSurfaceSampler(
 );
 ```
 
-`TerrainGenerator.getCrashSurfaceY` uses the heightfield (`WORLDSCAPE_WATER_Y + heightAt`) for levels 1–5 and the environment module's sampled surface for levels 6–10; no field → `WORLDSCAPE_WATER_Y`. `LevelManager.getCrashSurfaceY` forwards to the generator, or `WORLDSCAPE_WATER_Y` if terrain is not loaded.
+`TerrainGenerator.getCrashSurfaceY` uses the heightfield (`WORLDSCAPE_WATER_Y + heightAt`) for levels 1–5 and the environment module's sampled surface for levels 6–10; no field → `WORLDSCAPE_WATER_Y`. `LevelManager.getCrashSurfaceY` forwards to the generator, or `WORLDSCAPE_WATER_Y` if terrain is not loaded. The crash check bypasses the SHIELD power-up: the shield never protects against terrain.
+
+**Respawn** (`PlayerSystem`, private constants at the top of the class; the jet reappears after the 2 s respawn delay):
+
+- **Safe track.** While flying, every 0.25 s the position is pushed into a fixed ring buffer (64 samples, about 16 s, no per-frame allocation) if it is more than 10 m above the sampled surface. The track restarts from the spawn point at construction, on `placeAt` (level start, checkpoint) and at every respawn, so samples that led into an obstacle are never reused.
+- **Respawn point.** The newest sample taken at least 3 s and at least 150 m (horizontally) before the crash; if the track is too short (just after a level start, a checkpoint or a respawn) the farthest sample is pushed out along the crash → sample direction to 150 m from the crash point (straight back along the crash heading when they coincide). The point is clamped inside `GAME_CONSTANTS.WORLD.SOFT_BOUNDARY_RADIUS` and raised to at least 40 m above the surface; the jet comes back wings level.
+- **Heading.** Eight candidates, starting with the heading flown at that sample, then ±45°, ±90°, ±135° and 180°. Each is probed 0–400 m ahead (2 m steps to 40 m, 4 m to 150 m, 6 m beyond; the centre line plus lanes 10 m to each side), and a surface higher than 20 m below the flight level blocks it. The first clear heading wins; if all are blocked, the jet climbs above the heading with the lowest obstacle line (when that stays under `SOFT_CEILING`), otherwise it takes the heading whose first obstacle is farthest.
+- **Crash grace.** For 3 s after a respawn, touching the surface lifts the jet 3 m above it and, if the nose is below about 12°, levels the wings and pitches up to 12° instead of killing it. `placeAt` clears the crash record and the grace.
 
 ## Surface sampling and levels
 
@@ -168,9 +177,13 @@ public loadLevel(levelId: number, startWave: number = 0): void;
 public setWaveHoldProvider(provider: (() => number) | null): void; // extra uncleared count (alive hostile units)
 public setAccuracyBonusProvider(provider: (() => number) | null): void; // enemy-jet accuracy bonus
 public areWaveJetsCleared(): boolean;
+/** 同时在场敌机上限：GameConfig.getMaxEnemies()（桌面 6 / 移动端 5）+ 关卡曲线的 concurrentEnemyBonus */
+public getMaxConcurrentEnemies(): number;
 ```
 
 `y` is the world-space surface (the water surface where `water` is true). Water exists on `LAKE`, `OCEAN`, `VOLCANO` (sea around the island), `ARCTIC` (open sea between ice) and the `CANYON` river. Environment modules implement `TerrainEnvironment` (`terrain`, `root`, `hasWater`, `build(ctx)`, `sampleHeight(worldX, worldZ)`, `isWater(worldX, worldZ)`, optional `surfaceKindAt(worldX, worldZ)` and `update(deltaTime, elapsed, focus)`, `dispose()`) on top of `EnvironmentBase`; `sampleEnvironmentSurface(environment, worldX, worldZ, waterY)` turns height + water into the `sampleSurface` result.
+
+`LevelManager` also estimates the player's velocity each step (a jump faster than 250 m/s — respawn, checkpoint, dev teleport — resets it to zero) and hands it to every jet through `EnemyAI.setTargetVelocity`, so jets aim at a lead point (see [Enemy AI](#enemy-ai)). A wave group's spawn centre (600–800 m from the player) is picked among directions that keep the whole group, including its 60 m spread, inside the battlefield; if none of 12 tries fits, it goes toward the battlefield centre instead of being clamped onto the boundary next to the player.
 
 `LevelConfig` (`TerrainType` gains five values, the weather presets gain `ash` / `aurora`, `LEVELS` covers ids 1..10 with names equal to `CampaignChapter.title`):
 
@@ -194,6 +207,47 @@ export function getLevelConfig(levelId: number): LevelConfig | undefined;
 ```
 
 Environment extensions: `CanyonEnvironment.getConvoyRoute(): readonly THREE.Vector3[]` and `CitadelEnvironment.getAssaultRoute(): readonly THREE.Vector3[]` feed `UnitSystem.setRouteProvider`; `CitadelEnvironment.getCoreArena(target?)` anchors Oracle Prime and `setCoreState(state: CitadelCoreState)` (`'online' | 'exposed' | 'overload' | 'offline'`) mirrors its phases.
+
+## Terrain detail and static batching
+
+Source: `src/features/terrain/worldscape/staticBatch.ts`, `src/features/terrain/worldscape/vegetation.ts`, `src/features/terrain/worldscape/clouds.ts`, `TerrainGenerator.ts`.
+
+```typescript
+// staticBatch.ts — 静态装饰几何按「材质 + renderOrder」分桶合并
+export interface StaticBatchPartOptions {
+  castShadow?: boolean;
+  receiveShadow?: boolean;
+  renderOrder?: number;
+  /** 顶点色材质的零件颜色；材质未开启 vertexColors 时忽略，缺省为白色 */
+  color?: THREE.Color;
+}
+export class StaticBatcher {
+  /** 拷贝 geometry 并按 matrix 烘焙（原几何不被修改） */
+  add(geometry: THREE.BufferGeometry, material: THREE.Material, matrix: THREE.Matrix4,
+      options?: StaticBatchPartOptions): void;
+  /** 并入一个拼装好的 Group；无法合批的可渲染对象（InstancedMesh、多材质网格、点 / 线 / 精灵、灯光）连同子树原样返回 */
+  addObject(root: THREE.Object3D, colorOf?: (mesh: THREE.Mesh) => THREE.Color | undefined): THREE.Object3D[];
+  /** 每桶合并为一个 Mesh 挂到 parent 下（matrixAutoUpdate = false），返回生成的网格 */
+  flush(parent: THREE.Object3D, name?: string): THREE.Mesh[];
+}
+/** 多材质几何：同材质的分组在索引里排到一起，每种材质只剩一个分组；返回去重后的材质数组 */
+export function consolidateMaterialGroups(
+  geometry: THREE.BufferGeometry,
+  materials: THREE.Material[]
+): THREE.Material[];
+
+// vegetation.ts — VegetationProfile.lod（缺省 = 整图一块全细节）
+export interface VegetationLodProfile {
+  tiles: number; // 每边分块数
+  farDistance: number; // 远景替身切换距离（米，相机到分块中心）
+  keep?: { trees?: number; rocks?: number; grass?: number }; // 均匀抽稀的保留比例 0..1
+}
+```
+
+- **Static props.** `TerrainGenerator` builds static props (the city's buildings, roads, landmarks, bridge, expressways and light ribbons; the lakeside hamlet and dock; desert dunes, wadis, cacti, dead trees, arches and oasis palms; ocean islands) in an unattached staging group and merges them per material with `StaticBatcher` (`flushStaticBatch`); building walls keep a per-building tint through vertex colours on one shared material. Whatever `addObject` hands back is re-attached to the terrain group with its world transform. Animated parts (traffic, trains, searchlights, blinking beacons and cranes, flickering neon, the stadium rim) keep their own materials and still animate. Flat transparent sheets use `forceSinglePass`, the instanced glass-tower and elevated-train boxes use two material groups instead of six (`consolidateMaterialGroups`), and each bird flock is two `InstancedMesh`es (bodies, wings).
+- **Vegetation LOD.** `buildVegetation` keeps its seeded placement and, with `lod`, splits each layer into a grid of tiles: each tile has its own `InstancedMesh`es with an instance-derived bounding sphere (so the main and shadow cameras cull tiles) under a `THREE.LOD` — full detail near, stand-ins beyond `farDistance` (one cone per pine, one icosahedron per broadleaf crown, a 20-face rock, no trunks or grass tufts). Rocks use a coarser grid (half the tiles, at least 3 × 3). `keep` thins instances evenly without changing the layout.
+- **Detail by preset.** `TerrainGenerator` reads `GameConfig.getEffectiveQualityPreset()` when a level is generated (a runtime auto-downgrade applies from the next level load; mobile always uses the performance tier): `performance` 6 × 6 tiles, stand-ins beyond 700 m, keeps 80 % of trees, 75 % of rocks, 55 % of grass; `balanced` 5 × 5, 1,000 m, 85 % of grass; `quality` 5 × 5, 1,800 m, full density. Level 3 uses at most 4 × 4 tiles; level 2's sparse rocks and grass stay two untiled meshes.
+- **Clouds.** `CloudField.update` writes only the clouds the current coverage shows (scale above 0.2 %) into the front of each variant's instance buffer and sets `count` / `visible`, so hidden clouds cost no vertex work.
 
 ## Shared combat contracts
 
@@ -258,7 +312,13 @@ export interface LevelScaling {
   enemyDamageMultiplier: number;
   enemyCooldownMultiplier: number;
   enemyAccuracyBonus: number;
+  /** 敌机射击提前量 0..1：0 = 瞄准玩家当前位置，1 = 按一阶拦截点完整提前 */
+  enemyAimLead: number;
+  /** 同时在场敌机上限的加成（叠加到 GameConfig.getMaxEnemies() 的桌面 / 移动端基础值上） */
+  concurrentEnemyBonus: number;
   unitHealthMultiplier: number;
+  /** 单位（地面 / 海上 / 空中）伤害相对 enemyDamageMultiplier 的份额 */
+  unitDamageShare: number;
   bossCooldownMultiplier: number;
   scoreMultiplier: number;
 }
@@ -267,7 +327,7 @@ export function getLevelScaling(level: number): LevelScaling;
 
 export interface DifficultyProfile {
   level: 1 | 2 | 3 | 4 | 5;
-  /** 难度名（中英双语）：英文沿用 Very Easy → Expert 的常见档位名，默认档 3 在英文里叫 Normal */
+  /** 难度名（中英双语，逐档一一对应）：Very Easy 非常简单 → Easy 简单 → Normal 普通 → Hard 困难 → Expert 专家 */
   label: LocalizedText;
   enemyHealthMultiplier: number;
   enemyDamageMultiplier: number;
@@ -278,7 +338,7 @@ export interface DifficultyProfile {
 export function getDifficultyProfile(level: number): DifficultyProfile; // player difficulty 1..5
 ```
 
-The per-level values live in one module-private table, `LEVEL_CURVE` (one column per level, level 1 = 1.0), which `getLevelScaling` reads; `LevelManager` (enemy jets) and `UnitController.setLevel` (units) multiply them by the player's `DifficultyProfile`, and `GameCoordinator` applies `scoreMultiplier` to every score award. Difficulty 3 (Normal) is the default; `Difficulty.ts` records that it was tuned with the dev-only scripted-pilot harness (`src/core/dev/BalanceHarness.ts`).
+The per-level values live in one module-private table, `LEVEL_CURVE` (one column per level, level 1 = 1.0 / 0), which `getLevelScaling` reads; `LevelManager` (enemy jets) and `UnitController.setLevel` (units) multiply them by the player's `DifficultyProfile`, and `GameCoordinator` applies `scoreMultiplier` to every score award. Jets take `aimLead` from `enemyAimLead` (0 at level 1, 0.28 at level 2, rising to 0.94 at level 10) and the concurrent-jet cap from `concurrentEnemyBonus` (+1 in levels 4–6, +2 in levels 7–10); units deal `enemyDamageMultiplier × unitDamageShare`. Jet firepower (damage ÷ cooldown) relative to level 1 is about 2× in levels 2–3, 2.5–2.9× in levels 4–5 and steps up from level 6 (about 5.1×) to about 9.8× in level 10; `scoreMultiplier` runs 1.0 → 2.08. Difficulty 3 (Normal) is the default; `Difficulty.ts` records that it was tuned with the dev-only scripted-pilot harness (`src/core/dev/BalanceHarness.ts`, greedy hangar buys): damage taken per minute of about 20–25 % of max health in levels 1–2, about 30 % in levels 3–6 and 35–40 % in levels 8–10, with 0–2 non-crash deaths per level.
 
 ## Campaign data
 
@@ -426,7 +486,11 @@ export interface ICampaignPresentation {
     index?: number,
     speakers?: RadioSpeakerFilter
   ): void;
-  genericRadio(key: GenericRadioKey): void;
+  /**
+   * 通用台词。返回这句是否进了无线电：Boss 模式过滤掉的普通台词、正在配音时跳过的紧急告警
+   * （missile-warning / low-health / civilian-hit 从不打断正在配音的台词）返回 false。
+   */
+  genericRadio(key: GenericRadioKey): boolean;
   unitFirstContact(unitType: string): void;
   /** 僚机入列 / 被击落：播放 WINGMAN_EVENT_RADIO 登记的通用台词（未登记的事件不出声） */
   onWingmanEvent(id: WingmanId, event: WingmanEvent): void;
@@ -434,13 +498,19 @@ export interface ICampaignPresentation {
   isWingmanFlying(id: WingmanId): boolean;
   /** 无线电正在播放或有排队台词 */
   isRadioBusy(): boolean;
+  /**
+   * 估计无线电把当前与排队的台词全部说完还要多少秒（游戏时间；有配音的台词按语音包清单里的
+   * 当前语言时长计）。Boss 收尾据此设定等待上限。
+   */
+  getRadioBacklogSeconds(): number;
   /** 关卡结束 / 换关 / 失败：清空无线电 */
   clearRadio(): void;
 
   // ── HUD 新面板 ──
   updateWeaponPanel(state: CampaignWeaponPanelState | null): void;
   updateFlares(charges: number, max: number, rechargeProgress: number): void;
-  showAutosave(label: string): void;
+  /** 自动存档提示 + 存档音效；双语对象或 { text, params }（HudText）在提示显示期间随语言切换重绘 */
+  showAutosave(label: HudText): void;
   /** announce = false：开局 / 读档同步视角，不播放切换音效 */
   setCameraMode(mode: CameraModeSetting, announce?: boolean): void;
   setBossStatus(label: string | null, phase?: { current: number; total: number }): void;
@@ -534,6 +604,8 @@ export interface CampaignVoice {
   resume(): void;
   prefetch(lineIds: readonly string[]): void;
   loadManifest(): Promise<unknown>;
+  /** 清单记录的这句配音时长（秒，当前语言）；没有这句 / 清单未加载时为 null */
+  getLineDuration?(lineId: string): number | null;
 }
 export interface DefaultCampaignPresentationDeps {
   getHud(): HUD | null;
@@ -556,15 +628,42 @@ export class DefaultCampaignPresentation implements ICampaignPresentation {
 }
 ```
 
-Behaviour worth knowing: radio lines enqueued before the story UI loads are buffered (up to 6, duplicates dropped); `civilian-hit`, `missile-warning` and `low-health` are high priority; Boss mode keeps only `boss-spawn` chapter lines and the high-priority generic lines; per-frame HUD pushes are diffed (no call when nothing visible changed). `GameCoordinator` passes its `WingmanRoster` as `wingmen` and its `VoiceSystem` as `voice`.
+Behaviour worth knowing: radio lines enqueued before the story UI loads are buffered (up to 6, duplicates dropped); `civilian-hit`, `missile-warning` and `low-health` are high priority — they interrupt a normal line that is only being read, but never a line whose voice is playing (`RadioComms.isVoicing()`): then `genericRadio` skips them and returns `false`, and the low-health call waits until the voiced line has ended (the low-health beep does not wait). Boss mode keeps only `boss-spawn` chapter lines and the high-priority generic lines (`genericRadio` returns `false` for the rest). `getRadioBacklogSeconds()` asks `RadioComms.estimateRemainingSeconds` with the current pack's durations from `voice.getLineDuration` (before the story UI loads, each buffered line counts its voice length or 6.5 s, plus 1.5 s). Per-frame HUD pushes are diffed (no call when nothing visible changed). `GameCoordinator` passes its `WingmanRoster` as `wingmen` and its `VoiceSystem` as `voice`.
 
 Voice wiring (all optional — without `voice` the radio and the story cards are text only):
 
-- **Radio.** `RadioComms.onLineShown` plays the line's voice: `voice.play(line.id, { kind: 'radio', speaker: line.speaker, … })`. On start the line is held for the voice (`RadioComms.holdForVoice(line, duration)`); on end or silence it is released (`releaseVoice(line)`). A line replayed after a high-priority interrupt calls `play` again, so its voice starts over.
+- **Radio.** `RadioComms.onLineShown` plays the line's voice: `voice.play(line.id, { kind: 'radio', speaker: line.speaker, … })`. On start the line is held for the voice (`RadioComms.holdForVoice(line, duration)`); on end or silence it is released (`releaseVoice(line)`). A line replayed after a high-priority interrupt (at most one replay per line) calls `play` again, so its voice starts over.
 - **Narration.** `StoryOverlay.narration` is set to a `StoryNarration` that plays each paragraph id as `kind: 'narration'` with `NARRATION_SPEAKER` and stops with `voice.stop('narration')`.
 - **Prefetch.** `showChapterIntro` prefetches the chapter's lines — prologue (when shown), briefing, level-start lines, the rest of the chapter's radio, then the urgent generic lines (`missile-warning`, `low-health`, `civilian-hit`); `playBossMusic` prefetches the chapter's `boss-*` lines (Boss mode has no chapter card). `preloadStoryUi` also starts loading the voice manifest.
 - **Lifecycle.** `onPause` / `onResume` pause and resume the voice; `clearRadio` stops the radio voice; the debrief card clears the radio queue but lets the line being spoken finish; `onGameOver`, `onMissionComplete` and `dispose` stop all voices. The voice belongs to the coordinator, which disposes it.
-- **Wingman events.** `WINGMAN_EVENT_RADIO` maps `swift:joined` → `swift-joined`, `raven:down` → `raven-down-swift` (Swift reports, if she is flying) or else `raven-down-hq`, and `swift:down` → `swift-down-raven` or else `swift-down-hq`. Raven has no join line; unmapped events are silent.
+- **Wingman events.** `WINGMAN_EVENT_RADIO` maps `swift:joined` → `swift-joined`, `raven:down` → `raven-down-swift` (Swift reports, if she is flying) or else `raven-down-hq`, and `swift:down` → `swift-down-raven` or else `swift-down-hq`. Raven has no join line; unmapped events are silent. Outside the dev hooks, `'joined'` is only sent by `CampaignFlowController.handleWingmanLaunched` — once per campaign run, see [Wingmen](#wingmen).
+
+## Radio budget
+
+Source: `src/core/campaign/RadioBudget.ts`. Decides only whether an urgent warning is voiced this time; the caller still shows the HUD flash and plays the warning tone every time.
+
+```typescript
+export interface RadioBudgetConfig {
+  /** 每波最多开口几次 */
+  readonly maxPerWave: number;
+  /** 第 n 次开口之后的冷却（秒，逐次加长；超出数组长度沿用最后一项） */
+  readonly cooldownSeconds: readonly number[];
+}
+export class RadioBudget {
+  constructor(config: RadioBudgetConfig);
+  /** 本波还有配额且不在冷却中 */
+  isReady(): boolean;
+  /** 记一次开口，进入下一档冷却 */
+  consume(): void;
+  /** 推进冷却（游戏时间，秒） */
+  update(deltaTime: number): void;
+  /** 新的一波 / Boss 战：配额与冷却清零 */
+  reset(): void;
+  getUsed(): number;
+}
+```
+
+Usage: when `isReady()`, try the line and `consume()` only if `presentation.genericRadio(key)` returned `true`. `UnitController` keeps two budgets, reset on every `spawnForWave` (wave start) and `clear()` (level change, checkpoint load, boss fight start): the SAM `missile-warning` voice (`{ maxPerWave: 2, cooldownSeconds: [20, 45] }`; the "Missile inbound · Press G for flares" flash and the `sam-launched` sound event go out on every launch) and the `civilian-hit` voice (`{ maxPerWave: 2, cooldownSeconds: [15, 30] }`; the cease-fire flash and the `civilian-hit` sound event go out on every hit).
 
 ## Campaign flow
 
@@ -575,7 +674,6 @@ export interface CampaignFlowDeps {
   session: GameSessionState;
   stats: PlayerStats;
   presentation: ICampaignPresentation;
-  scheduleTimeout(callback: () => void, delayMs: number): void;
   prepareLevel(level: number, startWave: number): Promise<void>;
   startLevelCombat(level: number, startWave: number, firstLevelOfSession: boolean): void;
   startBossEncounter(level: number, isBossMode: boolean): void;
@@ -583,6 +681,7 @@ export interface CampaignFlowDeps {
   syncProgression(level: number): void;
   setStoryHold(hold: boolean): void;
   showMissionComplete(finalScore: number): void;
+  /** 'hangar' 检查点的 level 是即将开始的那一关（升级上限与武器解锁按那一关） */
   captureCheckpoint(kind: CheckpointKind, level: number, wave: number): CampaignCheckpointInput;
   getScore(): number;
 }
@@ -599,14 +698,23 @@ export class CampaignFlowController {
   recordKill(): void;
   recordAssetLost(civilian: boolean): void;
   recordDeath(): void;
+  /** 累计游戏时间并推进 Boss 收尾（只在战斗进行时调用：暂停 / 剧情冻结时不调用） */
   tick(deltaTime: number): void;
+  /** 具名僚机随编队升空：雨燕每局第一次升空时播入列台词并记进当前检查点（Boss 模式不播） */
+  handleWingmanLaunched(id: WingmanId): void;
   getRunStats(): CampaignRunStats;
   isVictory(): boolean;
   dispose(): void;
 }
 ```
 
-The sequence it drives is in [architecture.md → Campaign flow](architecture.md#campaign-flow). After a boss dies, `handleBossDefeated` waits `BOSS_OUTRO_MIN_MS` for the explosion, then polls `presentation.isRadioBusy()` until the defeat lines (now voiced) have played, up to `BOSS_OUTRO_MAX_MS`; it gives up if the player dies or leaves meanwhile.
+The sequence it drives is in [architecture.md → Campaign flow](architecture.md#campaign-flow). Details:
+
+- **Hangar checkpoint.** In normal mode, a boss kill in levels 1–9 writes a `'hangar'` checkpoint at once, with the next level and wave 0: post-boss score, run stats and upgrade points, and the next level's upgrade caps and weapon unlocks (`captureCheckpoint` rewrites `upgrades.campaignLevel` / `unlockedWeapons` and `weapons.unlocked` for that level). Its autosave toast reads "Level N cleared" / "第N关完成" for the level just finished. Pressing **Launch** in the hangar (`launchChapter`) rewrites it silently before the chapter card, so purchases survive a quit during the card. Level 10 marks the campaign complete and clears the checkpoint instead; Boss mode never saves.
+- **Resume.** `resumeFromCheckpoint` on a `'hangar'` save sets the level, syncs progression and opens the hangar; Launch continues as after a boss kill (chapter card without prologue or tutorial, then combat). `'level-start'` / `'wave'` saves resume at the saved wave, `'boss'` saves (or `wave >= totalWaves`) at the boss briefing. The "Resumed: …" toast is a bilingual object built from `describeCheckpointText(save)`.
+- **Boss outro.** `handleBossDefeated` plays the `boss-defeated` stinger, then waits on game time advanced by `tick` (pauses and story holds freeze it): at least `BOSS_OUTRO_MIN_SECONDS` (1.6 s), then until `presentation.isRadioBusy()` is false, with a watchdog ceiling of `min(BOSS_OUTRO_MAX_SECONDS (75 s), max(1.6 s, getRadioBacklogSeconds()) + BOSS_OUTRO_SLACK_SECONDS (6 s))` taken when the outro starts. At the ceiling the debrief opens and the line being spoken finishes. If the player dies or leaves meanwhile, the outro is dropped.
+- **Autosave labels** are `HudText`: `{ text: 'Level {level} · Wave {wave}' | 'Level {level} · Before the boss' | 'Level {level} cleared', params }` (with their Chinese forms), so a toast on screen follows a language switch. Only `'wave'` checkpoints add the `checkpoint` stinger.
+- **Swift's join line.** `handleWingmanLaunched('swift')` plays `onWingmanEvent('swift', 'joined')` the first time Swift launches in a campaign run, then patches `swiftJoined: true` into the stored checkpoint (the `'level-start'` checkpoint is written just before the flight launches); every later checkpoint carries the flag, and `resumeFromCheckpoint` reads it with `isSwiftJoinAnnounced(save)`.
 
 ## Wingmen
 
@@ -636,6 +744,8 @@ export class WingmanRoster implements WingmanStatus {
   constructor(profiles: readonly WingmanProfile[] = WINGMEN);
   /** 新友机入场：返回它的僚机身份；null 表示普通友机 */
   assign(friendlyId: string, level: number): WingmanProfile | null;
+  /** 此刻还能领取的僚机身份数（该关已随队、不在空中、本关未被击落） */
+  countAvailable(level: number): number;
   /** 友机坠毁：是僚机则记为本关被击落并返回其身份；普通友机返回 null */
   release(friendlyId: string): WingmanProfile | null;
   /** 友机全部撤场（换关 / 读档 / Boss 击破）：僚机全部归队 */
@@ -644,7 +754,72 @@ export class WingmanRoster implements WingmanStatus {
 }
 ```
 
-`GameCoordinator` owns one roster. When it spawns a friendly AI jet it calls `assign(mesh.uuid, level)`: the first profile that has joined by that level, is not flying and was not shot down this level wins, the callsign goes to `mesh.userData.displayName` (the health bar label) and `presentation.onWingmanEvent(id, 'joined')` fires. On `FRIENDLY_DEATH` it calls `release(friendlyId)`, names the wingman in the HUD toast and fires `onWingmanEvent(id, 'down')`. `reset()` runs when a level is prepared (new level or checkpoint resume) and when a boss is destroyed. The roster is passed to the presentation as its `WingmanStatus`.
+`GameCoordinator` owns one roster, passed to the presentation as its `WingmanStatus`. Every friendly AI jet is spawned by `spawnFriendlyJet()`, which calls `assign(mesh.uuid, level)` — the first profile that has joined by that level, is not flying and was not shot down this level wins — and puts the callsign on `mesh.userData.displayName` (the health bar label). Launch rules:
+
+- **Named flight.** Shortly after every level start (`startLevelCombat`: 1 s, or after the tutorial intro on level 1) and when a resume starts at a `'boss'` checkpoint (`startBossEncounter` in normal mode), `launchWingmen()` spawns `countAvailable(level)` jets — Raven in levels 1–2, Raven and Swift from level 3 — and calls `CampaignFlowController.handleWingmanLaunched(id)` for each. Coming from the waves to the boss, the flight is already up, so nothing launches twice.
+- **Other friendlies** — wave reinforcements, boss-fight support (`BossBattleController`'s `onSpawnFriendly`), the Call Wingman pickup and escort jets — go through `spawnFriendlyAI()`. They can take a callsign that is free (for example in Boss mode, where no flight launches) but never fire `'joined'`.
+- **Losses and resets.** On `FRIENDLY_DEATH` the coordinator calls `release(friendlyId)`, names the wingman in the HUD toast and fires `onWingmanEvent(id, 'down')`; a downed wingman sits out the rest of the level. `reset()` runs when a level is prepared (new level or checkpoint resume) and when a boss is destroyed.
+
+Formation flight (`src/features/enemy/FriendlyAI.ts`, `src/core/systems/EnemySystem.ts`, `src/features/enemy/EnemyAI.ts`):
+
+```typescript
+// FriendlyAI
+/** 有敌机（或 Boss 本体 / 部件等额外目标）时追击最近的目标；没有目标时飞向编队位 */
+public update(
+  deltaTime: number,
+  enemyMeshes: readonly THREE.Object3D[],
+  playerPosition: THREE.Vector3,
+  playerVelocity?: THREE.Vector3 // EnemySystem 的平滑估计：航向与速度前馈
+): void;
+/** EnemySystem 入场时分配的编队位（0 = 左翼、1 = 右翼、2 = 左二……） */
+public setFormationSlot(slot: number): void;
+public getFormationSlot(): number;
+
+// EnemySystem
+/**
+ * 下一架友机的入场位姿（随后 spawnFriendly 分配同一个编队位）：玩家身侧、编队位所在一侧，
+ * 机头朝玩家的水平航向；outPosition 写入世界坐标，outHeading 写入水平单位向量
+ */
+getFriendlySpawnPose(
+  playerPosition: THREE.Vector3,
+  playerForward: THREE.Vector3,
+  outPosition: THREE.Vector3,
+  outHeading: THREE.Vector3
+): void;
+```
+
+- **Slots.** `EnemySystem.spawnFriendly` gives each new friendly the lowest slot no living friendly holds, so the two named wingmen never share a side. Slots are laid out in the player's horizontal heading frame (from the smoothed player velocity): slot 0 left, slot 1 right, 38 m ahead of the wing line, 40 m out, 6 m up; each further rank adds 35 m out, 25 m back and 4 m up.
+- **Camera corridor.** An idle friendly never holds or crosses the chase camera's sight corridor (60 m behind to 35 m ahead of the jet, ±28 m to the side): inside it, it steps out sideways first; a path to its slot that would cross it goes round behind the camera or well ahead of the jet.
+- **Steering.** Desired velocity = player velocity + a clamped correction toward the target point, followed with a 2 rad/s turn rate and 25 m/s² acceleration, then `EnemyAI.updateKinematic(dt)` (see [Enemy AI](#enemy-ai)). As soon as an enemy jet or boss target exists, `update` returns to the usual chase from the frozen manoeuvre state.
+- **Spawn pose.** `getFriendlySpawnPose` places the next friendly on its slot's side (40 m out plus 35 m per rank, 26 m ahead minus 25 m per rank, 6 m plus 4 m per rank up) in the player's nose frame, falling back to the smoothed velocity when the nose is near vertical, then −Z. The coordinator writes the pose to the mesh before constructing `FriendlyAI` (the AI snapshots its interpolation state in the constructor), keeps it at least 30 m above the terrain, points the nose along the player's heading and starts it at `max(config.speed, player speed)`.
+
+## Enemy AI
+
+Source: `src/features/enemy/EnemyAI.ts`, `EnemyTypes.ts`. Enemy jets and the friendly jets (`FriendlyAI` wraps an `EnemyAI`) share it; `LevelManager` builds each enemy jet's `EnemyConfig` from the base config × level curve × difficulty.
+
+```typescript
+// EnemyConfig (EnemyTypes.ts) addition
+/** 射击提前量 0..1（可选，缺省 0 = 瞄准目标当前位置）：LevelManager 生成敌机时按 enemyAimLead 写入；友军僚机不设置 */
+aimLead?: number;
+
+// EnemyAI
+public update(
+  deltaTime: number,
+  playerPosition: THREE.Vector3 | null,
+  friendlyMeshes?: THREE.Object3D[],
+  fireTarget: THREE.Vector3 | null = null
+): void;
+/** 开火目标的速度（世界坐标，米/秒）：设置后按 config.aimLead 计算提前量；null 或非有限 / 过大（瞬移）的速度只瞄准目标当前位置 */
+public setTargetVelocity(velocity: THREE.Vector3 | null): void;
+/**
+ * 外部操纵的运动学步进（僚机编队飞行等）：调用方先写好 velocity；与 update 一样做地形避让、位置积分、
+ * 贴地兜底、按速度方向的四元数朝向、尾迹与渲染插值，但不运行机动状态机、不开火
+ * （状态与计时冻结，攻击冷却与 EMP 瘫痪照常计时；velocity 非有限时沿机头按配置速度飞行）
+ */
+public updateKinematic(deltaTime: number): void;
+```
+
+Aiming: a jet fires only when its nose is within `fireSpreadAngle` of the target and the target is inside `FIRE_RANGE` (420 m). With a target velocity below 250 m/s and `aimLead > 0`, the shot is aimed at `target + velocity × t × min(1, aimLead)`, where `t` is a two-step first-order intercept time at the bullet speed (`GAME_CONSTANTS.PROJECTILE.SPEED`), capped at 4 s; the accuracy-based yaw / pitch scatter is applied on top. `update` and `updateKinematic` share the same motion integration and NaN guard (a non-finite position is reset to the origin and the step skipped).
 
 ## Save system
 
@@ -655,8 +830,11 @@ export const CAMPAIGN_SAVE_KEY = 'air-supreme:campaign-save';
 export const CAMPAIGN_PROGRESS_KEY = 'air-supreme:campaign-progress';
 export const CAMPAIGN_SAVE_VERSION = 1;
 
-/** 检查点类型：入关、波次之间、Boss 战之前 */
-export type CheckpointKind = 'level-start' | 'wave' | 'boss';
+/**
+ * 检查点类型：入关、波次之间、Boss 战之前、机库（击破上一关 Boss 后、下一章开始之前；
+ * level 是即将开始的那一关，wave 为 0）
+ */
+export type CheckpointKind = 'level-start' | 'wave' | 'boss' | 'hangar';
 
 export interface CampaignRunStats {
   kills: number;
@@ -686,6 +864,11 @@ export interface CampaignSaveData {
   flares: number;
   cameraMode: CameraModeSetting;
   stats: CampaignRunStats;
+  /**
+   * 本局战役雨燕的入列台词是否已播过（每局只播一次，读档不重播）。
+   * 可选：加入这个字段之前写的存档没有它，按关卡推断（见 isSwiftJoinAnnounced）。
+   */
+  swiftJoined?: boolean;
 }
 
 export type CampaignCheckpointInput = Omit<CampaignSaveData, 'version' | 'savedAt'>;
@@ -700,14 +883,21 @@ export function saveCampaignCheckpoint(data: CampaignCheckpointInput): boolean;
 export function loadCampaignCheckpoint(): CampaignSaveData | null;
 export function clearCampaignCheckpoint(): void;
 export function hasCampaignCheckpoint(): boolean;
-/** 如“第6关 · 熔炉之心 · 第3波”；Boss 检查点显示“Boss 战” */
-export function describeCheckpoint(data: CampaignSaveData): string;
+/**
+ * 默认当前语言，传入 locale 时按该语言：如 “Ch. 6 · Heart of the Forge · Wave 3” / “第6关 · 熔炉之心 · 第3波”；
+ * Boss 检查点显示 “Boss” / “Boss 战”，机库检查点显示 “Hangar” / “机库整备”
+ */
+export function describeCheckpoint(data: CampaignSaveData, locale?: Locale): string;
+/** describeCheckpoint 的双语版本 { en, zh }（HUD 提示切换语言时重绘） */
+export function describeCheckpointText(data: CampaignSaveData): LocalizedText;
+/** 存档里有 swiftJoined 时以它为准；旧存档按关卡推断：level > 3 视为已播 */
+export function isSwiftJoinAnnounced(data: CampaignSaveData): boolean;
 export function getCampaignProgress(): CampaignProgress;
 export function markCampaignCompleted(finalScore: number): void;
 export function recordLevelReached(level: number): void;
 ```
 
-`loadCampaignCheckpoint` validates and normalises: corrupt JSON, a non-object, a different version or a missing level removes the key and returns `null`; out-of-range fields are clamped and missing ones defaulted. `saveCampaignCheckpoint` returns `false` when storage is unavailable, the write fails or the level is missing. Checkpoints are written by `CampaignFlowController` in normal mode only: `'level-start'` (wave 0) after the chapter card, `'wave'` (wave k + 1) after wave k except the last, `'boss'` (wave = `totalWaves`) before the boss. Restore order in `GameCoordinator.restoreCheckpoint`: `upgrades.reset()` → `import(save.upgrades)` → `setCampaignLevel` → `setUnlockedWeapons(getUnlockedWeaponsThrough(level))` → `SpecialWeaponsController.syncProgression` → `importState(save.weapons, save.flares)` → score / lives / missiles / camera mode.
+`loadCampaignCheckpoint` validates and normalises: corrupt JSON, a non-object, a different version or a missing level removes the key and returns `null`; out-of-range fields are clamped and missing ones defaulted (an unknown `checkpoint` becomes `'wave'` when `wave > 0`, else `'level-start'`); `swiftJoined` is kept only when it is a boolean. Saves written before `'hangar'` and `swiftJoined` existed load unchanged (`CAMPAIGN_SAVE_VERSION` is still 1). `saveCampaignCheckpoint` returns `false` when storage is unavailable, the write fails or the level is missing. Checkpoints are written by `CampaignFlowController` in normal mode only: `'level-start'` (wave 0) after the chapter card, `'wave'` (wave k + 1) after wave k except the last, `'boss'` (wave = `totalWaves`) before the boss, and `'hangar'` (the next level, wave 0) at a boss kill in levels 1–9 and again, silently, when the hangar's Launch is pressed; each carries the run's `swiftJoined` flag. Restore order in `GameCoordinator.restoreCheckpoint`: `upgrades.reset()` → `import(save.upgrades)` → `setCampaignLevel` → `setUnlockedWeapons(getUnlockedWeaponsThrough(level))` → `SpecialWeaponsController.syncProgression` → `importState(save.weapons, save.flares)` → score / lives / missiles / camera mode. The first `prepareLevel` after a restore keeps the saved ammo and flare charges, except after a `'hangar'` save, where the new chapter refills them as usual.
 
 ## Session settings
 
@@ -1127,7 +1317,7 @@ export class CountermeasureSystem implements IDecoyProvider {
 }
 ```
 
-`SpecialWeaponsController` (`src/core/combat/SpecialWeaponsController.ts`) owns one `WeaponSystem` and one `CountermeasureSystem`, implements `IDecoyProvider` for units and bosses 6–10, and exposes `handleInput(input, cycleRequested, slotRequested, flareRequested, aircraft, canFire)`, `syncProgression(stats, unlocked): SpecialWeaponId[]`, `refill()`, `clearInFlight()`, `exportState()` and `importState(state, flareCharges)` to the coordinator.
+`SpecialWeaponsController` (`src/core/combat/SpecialWeaponsController.ts`) owns one `WeaponSystem` and one `CountermeasureSystem`, implements `IDecoyProvider` for units and for every boss (both boss controllers run a `BossFlareDecoyRedirector` on it, see [Bosses](#bosses)), and exposes `handleInput(input, cycleRequested, slotRequested, flareRequested, aircraft, canFire)`, `syncProgression(stats, unlocked): SpecialWeaponId[]`, `refill()`, `clearInFlight()`, `exportState()` and `importState(state, flareCharges)` to the coordinator.
 
 ## Camera
 
@@ -1274,6 +1464,57 @@ Bosses 6–10 — every class has the constructor `(mesh: THREE.Group, config: B
 | `ORACLE_PRIME` | `OraclePrimeAI` | `createOraclePrimeMesh(config)` | `setGroundSampler`, `setDeathSequenceEnabled`, `isDying`, `getDeathProgress(): number`, `getStage(): OraclePrimeStage`, `getMusicIntensity(): number`, `onEffectCue` (`OraclePrimeCue`) |
 
 Shared extras: `setGroundSampler(sampler: (x: number, z: number) => number): void`, `setDeathSequenceEnabled(enabled: boolean): void` (the controller enables it; `onDestroy` then fires after the death sequence) and `isDying(): boolean`. Parts the lock-on skips carry `userData.bossDeflector` (Oracle's shield proxy) or `userData.bossHazardTarget` (Leviathan mines); Phantom decoys carry `userData.bossDecoy`. `AdvancedBossController` / `AdvancedBossInstance` (`src/core/boss/AdvancedBossController.ts`) and the spawn / cooldown / decoy helpers in `src/core/boss/AdvancedBossSupport.ts` (`resolveAdvancedBossSpawn`, `resolveLegacyBossSpawn`, `HazardCooldownTracker`, `BossFlareDecoyRedirector`, `mapOracleStageToCoreState`) implement the controller side.
+
+Boss missiles, flak and aim (`BossMissileSystem.ts`, `FlakCannonSystem.ts`, `BossAim.ts`, `AdvancedBossSupport.ts`):
+
+```typescript
+// BossMissileSystem — damage：单发命中伤害（Boss 配置的 missileDamage，已按难度调整），缺省 BOSS_MISSILE_CONFIG.DAMAGE（90）
+constructor(scene: THREE.Scene, particleSystem: ParticleSystem, damage: number = BOSS_MISSILE_CONFIG.DAMAGE);
+public fire(
+  position: THREE.Vector3,
+  target: THREE.Object3D | null,
+  potentialTargets: THREE.Object3D[] = [],
+  playerMesh: THREE.Object3D | null = null,
+  targetingPlayer: boolean = false,
+  profile?: BossMissileFlightProfile
+): void;
+public checkCollisions(
+  targetMeshes: THREE.Object3D[],
+  onHit: (target: THREE.Object3D, damage: number) => void // damage = 构造时的单发伤害
+): void;
+
+/** 单发导弹的飞行参数；全部缺省 = 旧版慢速导弹（50 米/秒、插值追踪、只受射程限制） */
+export interface BossMissileFlightProfile {
+  speed?: number; // 巡航速度；限速追踪的导弹发射后约 0.8 秒内从 55% 加速到满速
+  turnRate?: number; // 最大转向角速度（弧度/秒）：设置后改为限速转向追踪，大过载急转可以甩掉
+  lead?: number; // 提前量 0..1
+  lifetime?: number; // 秒，到时空中自爆（不造成伤害）
+  launchDirection?: THREE.Vector3; // 发射初速方向，缺省竖直向上
+}
+
+// FlakCannonSystem
+export interface FlakShotOptions {
+  speed?: number; // 弹速（米/秒，缺省 FLAK_CANNON_CONFIG.SPEED）
+}
+public fire(position: THREE.Vector3, targetPosition: THREE.Vector3, options: FlakShotOptions = {}): void;
+
+// BossAim.ts — 第 1-5 关 Boss 共用：目标速度估计（逐帧差分，> 250 米/秒视为瞬移清零）与提前量瞄准
+export class TargetLeadTracker {
+  readonly velocity: THREE.Vector3;
+  update(deltaTime: number, position: THREE.Vector3 | null | undefined): void;
+  reset(): void;
+  /** target + 速度 × 拦截时间（两次迭代，上限 4 秒）× lead，写入 out */
+  leadPoint(origin: THREE.Vector3, target: THREE.Vector3, projectileSpeed: number, lead: number,
+            out: THREE.Vector3): THREE.Vector3;
+}
+
+// AdvancedBossSupport.ts — 诱饵锚点节点名：Boss 导弹的 target 是它即表示已被热焰弹诱骗
+export const BOSS_DECOY_ANCHOR_NAME = 'boss-missile-decoy-anchor';
+```
+
+- **Damage by difficulty.** `GameCoordinator.getAdjustedBossConfig` scales `missileDamage` by the difficulty's `enemyDamageMultiplier` (rounded, at least 1) along with `health` and `damage`, and every missile-carrying boss passes it to its `BossMissileSystem`; `BossHitFeedback.checkBossMissileHits` applies the reported value to the player (through armour, not while shielded) and to wingmen. With the base 90 that is 31 / 38 / 45 / 56 / 70 per hit from Very Easy to Expert; the Phantom Wing's base is doubled (63 … 140, 90 on Normal).
+- **Flares.** `BossBattleController` now runs the same `BossFlareDecoyRedirector` as `AdvancedBossController`, so flares pull the player-tracking missiles of bosses 1–5 too: a missile within 420 m can be redirected to an anchor that follows a burning flare (chance from the strongest flare) and detonates there.
+- **Profiles in use.** Trident (level 4) launches salvos of 2 missiles — 3 below 35 % health — at 72 m/s (turn rate 0.85 rad/s, lead 0.3, 7 s fuel, 0.4 s apart) every `missileFireInterval` (20 s base) and fires 95 m/s flak with 50 % lead and ±32 m scatter; the Sky Carrier's missiles fly at 72 m/s (0.95 rad/s, lead 0.3, 10 s); the Phantom Wing's bay missiles at 88 m/s (1.3 rad/s, lead 0.5, 8 s), ejected forward and down. Sandwall's flak (80 m/s) and the Sky Carrier's cannons (100 m/s) lead the player through `TargetLeadTracker` (50 % and 60 %).
 
 ## Music
 
@@ -1545,14 +1786,49 @@ public isPostFxEnabled(): boolean;
 // PlayerSystem
 notifyShieldHit(worldPosition: THREE.Vector3): void; // hex ripple; ignored when the shield is hidden
 setShieldViewFade(fade: number): void; // 0..1, driven by the camera blend
-placeAt(position: THREE.Vector3, quaternion: THREE.Quaternion): void; // level start / checkpoint
+placeAt(position: THREE.Vector3, quaternion: THREE.Quaternion): void; // level start / checkpoint; restarts the respawn track
+
+// WeaponFx (src/features/weapons/WeaponFx.ts) — 扩散冲击环；nearFade > 0 时离镜头 nearFade 米内的环段淡出
+public spawnRing(
+  position: THREE.Vector3,
+  normal: THREE.Vector3,
+  fromRadius: number,
+  toRadius: number,
+  life: number,
+  color: THREE.Color,
+  opacity: number,
+  thickness: number,
+  additive = true,
+  nearFade = 0
+): void;
 ```
+
+EMP visuals: `empFlash` decays over 0.5 s (`ScreenEffectsState`); the post-FX grade and the `performance` overlay (`ScreenOverlay`) both draw it as a capped electric-blue screen edge plus a thin ring sweeping outward from just outside the reticle, with sparse glitch bands, and never brighten the centre or mix it toward white. In the world, the two EMP shock rings fade within 48 m of the camera (`nearFade`; the railgun rings pass 0), the ring shader keeps its `smoothstep` edges ordered (a thin ring used to render as a solid disc), the EMP shell dims while the camera is close to it and fades within about 4–32 m of the camera, and the centre flash is smaller and skipped in first person.
 
 ## HUD, story overlay, radio, radar, menus
 
 Source: `src/ui/HUD.ts`, `StoryOverlay.ts`, `RadioComms.ts`, `RadarMinimap.ts`, `StartMenu.ts`, `UpgradeMenu.ts`, `CheckpointResumeButton.ts`, `src/core/PresentationController.ts`.
 
 ```typescript
+// HUD — 可本地化文案
+/** 带占位参数的双语文案：{ text: { en: 'Wave {wave}', zh: '第{wave}波' }, params: { wave: 3 } } */
+export interface HudTextWithParams {
+  readonly text: LocalizedText | string;
+  readonly params?: TextParams;
+}
+/** 纯字符串原样显示；双语对象或 { text, params } 按当前语言取值，显示期间切换语言会重绘 */
+export type HudText = string | LocalizedText | HudTextWithParams;
+export type BriefingTone = 'sys' | 'threat';
+export interface BriefingRequest {
+  kicker: HudText;
+  title: HudText;
+  line: HudText;
+  tone: BriefingTone;
+  durationMs: number;
+}
+/** 入关 / Boss 简报：顶部消息栈里的玻璃卡片，新简报替换旧简报 */
+public showBriefing(briefing: BriefingRequest): void;
+
 // HUD
 export type HudCameraMode = 'third-person' | 'first-person';
 export type HudMissileWarningLevel = 'none' | 'locking' | 'incoming';
@@ -1583,7 +1859,7 @@ export interface HudWeaponPanelState {
 }
 public updateWeaponPanel(state: HudWeaponPanelState): void;
 public updateFlares(charges: number, max: number, rechargeProgress: number): void;
-public showAutosave(label?: string): void;
+public showAutosave(label?: HudText): void; // ~2.6 s toast, timed by update(dt)
 public setCameraMode(mode: HudCameraMode): void;
 public setBossStatus(label: string | null, phase?: { current: number; total: number }): void; // null hides the strip
 public setMissileWarning(level: HudMissileWarningLevel): void;
@@ -1646,6 +1922,13 @@ export class RadioComms {
   update(deltaTime: number): void;
   /** 正在播放、有排队台词，或处于两句之间的间隔中（与 enqueue 的立即显示条件一致） */
   isBusy(): boolean;
+  /** 当前台词的配音正在说（holdForVoice 之后、releaseVoice 之前） */
+  isVoicing(): boolean;
+  /**
+   * 估计全部说完（当前 + 排队 + 间隔）还要多少秒（update 驱动的时间）；voiceSeconds 给出某句的配音时长
+   * （没有配音时返回 null）。只用于等待上限（Boss 收尾），不影响播放时序
+   */
+  estimateRemainingSeconds(voiceSeconds?: (line: RadioLine) => number | null): number;
   /** 当前台词的配音开口了：台词至少停留到“此刻 + 配音时长 + 尾巴”，并在 releaseVoice 之前不进入淡出（有兜底上限） */
   holdForVoice(line: RadioLine, durationSeconds: number): void;
   /** 当前台词的配音说完 / 被停下 / 不可用：解除等待 */
@@ -1658,7 +1941,7 @@ export class RadioComms {
 
 `StoryOverlay` sets `data-story-overlay` on `<html>` while a card is up (the HUD, radar, radio, mobile controls and indicator layers hide); callbacks run once per `show*`, after the overlay closes. With `narration` set, each prologue / briefing / epilogue paragraph asks for its voice by `VoicedText.id` before it types: it waits a short time for the voice to start (otherwise it types as plain text and stops the late voice), paces the typewriter so the text lands just before the voice ends, and waits for the voice to end (with a grace cap) before the next paragraph. A fully narrated card turns the page after a short hold for the objectives instead of the reading-time hold. Space / click (reveal all), the next card, Esc / Skip and `hide()` stop the narration; reduced motion shows the text at once and still narrates; a card written before a language switch is not narrated further.
 
-`RadioComms` shows a line immediately when idle (the short gap between lines counts as busy), lets `'high'` interrupt, ignores duplicate text and caps its queue. Voiced timing: `holdForVoice` keeps the line up until its voice has finished plus a short tail, and the next line waits for `releaseVoice` (or a safety cap); without a voice the reading-time timing is unchanged. An interrupted line whose voice had not finished always replays; one whose voice finished counts as delivered. On a language switch the line on screen (callsign, text, screen-reader text) is rewritten in the new language. Each speaker's portrait glyph comes from `getSpeakerGlyph(speakerId)` (`src/ui/theme/hudGlyphs.ts`), which has an entry for every `CampaignSpeakerId`.
+`RadioComms` shows a line immediately when idle (the short gap between lines counts as busy), lets `'high'` interrupt, ignores duplicate text and caps its queue. Voiced timing: `holdForVoice` keeps the line up until its voice has finished plus a short tail, and the next line waits for `releaseVoice` (or a safety cap); without a voice the reading-time timing is unchanged. An interrupted normal line that was not delivered (its voice had not finished, or a text-only line had not been held long enough) goes back to the front of the normal queue — once: a replay that is interrupted again is dropped; a line whose voice finished counts as delivered. Whether an urgent line may interrupt a voiced one is the caller's decision (`isVoicing()`; the presentation never does). On a language switch the line on screen (callsign, text, screen-reader text) is rewritten in the new language. Each speaker's portrait glyph comes from `getSpeakerGlyph(speakerId)` (`src/ui/theme/hudGlyphs.ts`), which has an entry for every `CampaignSpeakerId`.
 
 ```typescript
 // RadarMinimap
@@ -1711,7 +1994,11 @@ public dispose(): void;
 
 Mobile buttons in `index.html`: `#camera-button`, `#special-button`, `#cycle-button`, `#flare-button` (plus the existing `#fire-button`, `#missile-button`, `#throttle-button`, `#upgrade-button`). The HTML ships English labels (FIRE, MSL, SPEC, FLARE, BOOST, SWAP, VIEW, PAUSE); `src/main.ts` rewrites labels and `aria-label`s for the current language, except the special button's main label while the HUD shows a weapon code there.
 
-Health bars (`src/ui/EnemyHealthBars.ts`) show a friendly AI jet's pilot callsign when its mesh carries `userData.displayName` (`LocalizedText` or string — set from `WingmanProfile.callsign`), ahead of the per-name label cache, and rename every bar at once on a language switch.
+HUD layout (`HUD.ts`, `theme/hudExtrasStyles.ts`, `theme/radioStyles.ts`): `#hud` is inset by `env(safe-area-inset-*)`, and positions and sizes are CSS keyed by `HudLayoutDensity`, so a rotation re-lays out. The right status column `#hud-status` stacks the wave line, lives, missiles, missile reload and power-up timer (lives and missile pips side by side in portrait). The centre message stack `#hud-top-stack` holds the boss strip, briefing, event objective and, in portrait, the autosave toast; on phones in portrait it is a full-width row under the status band, and the radio panel follows its bottom through the `--hud-stack-bottom` variable on `<html>`. In portrait the autosave toast waits (hidden, timer paused) while a briefing is up or while the boss strip and an objective share the stack. Centre callouts (`showPowerUpBig`) are a banner above the lock ring — in touch-landscape just below the message stack — instead of a full-screen block, and the ENEMIES / LEFT counter has the same dark backing as the cockpit panel.
+
+Health bars (`src/ui/EnemyHealthBars.ts`) show a friendly AI jet's pilot callsign when its mesh carries `userData.displayName` (`LocalizedText` or string — set from `WingmanProfile.callsign`), ahead of the per-name label cache, and rename every bar at once on a language switch. Bars come in three sizes: boss body (120 × 10 px, with its name), boss part (44 × 5 px on a dark track) and everything else (60 × 6 px, with its name). Of the boss parts in view, only the one nearest the reticle shows its name, with hysteresis (another part must be under 80 % of its distance to take over); parts no longer draw their own off-screen chevrons.
+
+`ModelPreview` builds every boss from its own mesh factory through a lazy `Record<BossType, loader>` (bosses 6–10 from `MagmaColossusMesh`, `AbyssalLeviathanMesh`, `TempestZeppelinMesh`, `PhantomWingMesh`, `OraclePrimeMesh`), frames the bounding volume of the visible geometry (hidden parts and sprites excluded) in both the vertical and horizontal field of view, and disposes each previewed model's geometries, materials and instance buffers once, skipping shared resources.
 
 ## Input
 
@@ -1737,7 +2024,12 @@ public consumeWeaponCycle(): boolean; // Tab / X / #cycle-button
 public consumeWeaponSlot(): number; // Digit1-5 / Numpad1-5 → 0..4, -1 when none
 public consumeFlareDeploy(): boolean; // G / #flare-button
 public resetActionQueue(): void; // pause / story cards / level change
+/** 本步是否切换暂停：Esc / P 的按下沿，或一次排队中的移动端暂停键单击（读取即清除） */
+public isPauseToggled(): boolean;
+public resetPauseState(): void; // clears the held key edge and a queued pause tap
 ```
+
+The mobile pause button (`#upgrade-button`, labelled PAUSE) latches its tap on `touchstart` like the other tap buttons, so a tap shorter than one simulation step still pauses; the desktop keys keep their held-key edge detection.
 
 Desktop bindings: `KeyW`/`ArrowUp`, `KeyS`/`ArrowDown` pitch · `KeyA`/`KeyD` yaw · `KeyQ`/`KeyE` roll · `Space` fire · `KeyM`/`ShiftRight` missile · `ShiftLeft`/`ControlLeft` throttle · `KeyF` special · `KeyV` camera · `Tab`/`KeyX` cycle (Tab's default is prevented unless a form control has focus) · `Digit1`–`Digit5`/`Numpad1`–`Numpad5` slot · `KeyG` flares · `Escape`/`KeyP` pause · `KeyU` upgrade.
 
