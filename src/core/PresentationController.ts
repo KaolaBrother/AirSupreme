@@ -175,11 +175,7 @@ export class PresentationController {
     this.bossIndicator.clear();
   }
 
-  public updateRadar(
-    playerPos: Vector3,
-    blips: RadarBlip[],
-    playerRotation: Quaternion
-  ): void {
+  public updateRadar(playerPos: Vector3, blips: RadarBlip[], playerRotation: Quaternion): void {
     this.ensureRadar();
     this.radar?.updateBlips(playerPos, blips, playerRotation);
   }
@@ -209,6 +205,12 @@ export class PresentationController {
       marker.style.opacity = '0';
       this.hitMarkerTimeouts[index] = 0;
     }, PresentationController.HIT_MARKER_DURATION_MS);
+  }
+
+  /** 雷达量程倍率（友军预警机在线时放大）：透传到 RadarMinimap.setRangeMultiplier */
+  public setRadarRangeMultiplier(multiplier: number): void {
+    this.ensureRadar();
+    this.radar?.setRangeMultiplier(multiplier);
   }
 
   private ensureRadar(): void {
@@ -287,7 +289,11 @@ export class PresentationController {
       return;
     }
 
-    if (!titleChanged && now - this.lastEventObjectiveStatusUpdatedAt < PresentationController.EVENT_OBJECTIVE_STATUS_THROTTLE_MS) {
+    if (
+      !titleChanged &&
+      now - this.lastEventObjectiveStatusUpdatedAt <
+        PresentationController.EVENT_OBJECTIVE_STATUS_THROTTLE_MS
+    ) {
       return;
     }
 

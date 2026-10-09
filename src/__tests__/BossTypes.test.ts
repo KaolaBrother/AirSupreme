@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { getDifficultyProfile } from '@/core/Difficulty';
 import {
   BossType,
   BossCannonPosition,
@@ -19,20 +20,33 @@ describe('BossTypes', () => {
       expect(BOSS_CONFIGS[BossType.DESERT_FORTRESS]).toBeDefined();
     });
 
+    // 生命值按实测击杀时间重新标定（21ad1a0）；只在专门针对单个 Boss 配置的用例里写死数值
     it('should have correct HEAVY_BOMBER stats', () => {
       const config = BOSS_CONFIGS[BossType.HEAVY_BOMBER];
-      expect(config.health).toBe(2000);
+      expect(config.health).toBe(1400);
       expect(config.speed).toBe(10);
       expect(config.scale).toBe(5);
       expect(config.damage).toBe(15);
     });
 
-    it('should have correct DESERT_FORTRESS stats', () => {
+    it('should have correct DESERT_FORTRESS stats (flak base damage 30, still 15 on Normal)', () => {
       const config = BOSS_CONFIGS[BossType.DESERT_FORTRESS];
-      expect(config.health).toBe(2500);
+      expect(config.health).toBe(2800);
       expect(config.speed).toBe(0);
       expect(config.scale).toBe(5);
-      expect(config.damage).toBe(15);
+      // 配置里是未缩放的基础值；Boss 战开始时按难度档的伤害倍率缩放（“普通”档 ×0.5 = 15）
+      expect(config.damage).toBe(30);
+      const normal = getDifficultyProfile(3).enemyDamageMultiplier;
+      expect(Math.round(config.damage * normal)).toBe(15);
+    });
+
+    // 规范 / 集成说明没有规定 Boss 之间的血量顺序（实测标定后并非随关卡递增），因此不固定顺序
+    it('gives every boss a positive, finite health', () => {
+      for (const type of Object.values(BossType)) {
+        const health = BOSS_CONFIGS[type].health;
+        expect(Number.isFinite(health), `${type} health ${health}`).toBe(true);
+        expect(health, type).toBeGreaterThan(0);
+      }
     });
 
     it('should have correct weapon intervals', () => {
@@ -166,9 +180,29 @@ describe('BossTypes', () => {
       expect(getBossForLevel(5)).toBe(BossType.SKY_CARRIER);
     });
 
+    it('should return MAGMA_COLOSSUS for level 6', () => {
+      expect(getBossForLevel(6)).toBe(BossType.MAGMA_COLOSSUS);
+    });
+
+    it('should return ABYSSAL_LEVIATHAN for level 7', () => {
+      expect(getBossForLevel(7)).toBe(BossType.ABYSSAL_LEVIATHAN);
+    });
+
+    it('should return TEMPEST_ZEPPELIN for level 8', () => {
+      expect(getBossForLevel(8)).toBe(BossType.TEMPEST_ZEPPELIN);
+    });
+
+    it('should return PHANTOM_WING for level 9', () => {
+      expect(getBossForLevel(9)).toBe(BossType.PHANTOM_WING);
+    });
+
+    it('should return ORACLE_PRIME for level 10', () => {
+      expect(getBossForLevel(10)).toBe(BossType.ORACLE_PRIME);
+    });
+
     it('should return null for invalid levels', () => {
       expect(getBossForLevel(0)).toBeNull();
-      expect(getBossForLevel(6)).toBeNull();
+      expect(getBossForLevel(11)).toBeNull();
       expect(getBossForLevel(-1)).toBeNull();
       expect(getBossForLevel(100)).toBeNull();
     });

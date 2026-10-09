@@ -1,3 +1,5 @@
+import type { LocalizedText } from '@/i18n';
+
 /**
  * Boss 类型枚举
  */
@@ -7,6 +9,11 @@ export enum BossType {
   OCTOPUS_WARSHIP = 'OCTOPUS_WARSHIP', // 第三关 Boss：八爪鱼战舰
   MISSILE_DESTROYER = 'MISSILE_DESTROYER', // 第四关 Boss：导弹驱逐舰
   SKY_CARRIER = 'SKY_CARRIER', // 第五关 Boss：空中航空母舰
+  MAGMA_COLOSSUS = 'MAGMA_COLOSSUS', // 第六关 Boss：熔岩巨像（四足攻城机甲）
+  ABYSSAL_LEVIATHAN = 'ABYSSAL_LEVIATHAN', // 第七关 Boss：深渊利维坦（破冰巨型潜艇）
+  TEMPEST_ZEPPELIN = 'TEMPEST_ZEPPELIN', // 第八关 Boss：雷霆飞艇（特斯拉线圈装甲飞艇）
+  PHANTOM_WING = 'PHANTOM_WING', // 第九关 Boss：幻影之翼（隐形飞翼）
+  ORACLE_PRIME = 'ORACLE_PRIME', // 第十关 Boss：神谕主宰（多阶段最终 Boss）
 }
 
 /**
@@ -24,12 +31,17 @@ export enum BossCannonPosition {
  */
 export interface BossConfig {
   type: BossType;
-  name: string;
+  /** 配置名（模型预览 / 血条兜底），中英双语 */
+  name: LocalizedText;
 
   // 基础属性
   health: number; // 血量
   speed: number; // 速度
-  damage: number; // 单门重炮伤害
+  /**
+   * 单门重炮伤害（基础值，Boss 战开始时按难度档 enemyDamageMultiplier 缩放）；
+   * 第 2、4 关是高炮弹的爆炸伤害，第 3 关是激光扫射伤害
+   */
+  damage: number;
   scale: number; // 体型缩放
 
   // AI 行为参数
@@ -39,7 +51,9 @@ export interface BossConfig {
   // 武器系统
   cannonFireInterval: number; // 重炮发射间隔（秒）
   missileFireInterval: number; // 导弹发射间隔（秒）
-  missileDamage: number; // 导弹伤害
+  missileDamage: number; // 导弹单发伤害（基础值，Boss 战开始时按难度档 enemyDamageMultiplier 缩放）
+  /** 眼睛光弹单发伤害（第 3 关；基础值，与 missileDamage 一样按难度档缩放）；缺省 EYE_CONFIG.DAMAGE */
+  eyeDamage?: number;
 
   // 射程
   maxRange: number; // 最大射程（导弹飞行距离上限）
@@ -138,8 +152,8 @@ export enum FlakCannonPosition {
 export const BOSS_CONFIGS: Record<BossType, BossConfig> = {
   [BossType.HEAVY_BOMBER]: {
     type: BossType.HEAVY_BOMBER,
-    name: '重型轰炸机 Boss',
-    health: 2000,
+    name: { en: 'Heavy Bomber Boss', zh: '重型轰炸机 Boss' },
+    health: 1400,
     speed: 10,
     damage: 15,
     scale: 5,
@@ -153,10 +167,11 @@ export const BOSS_CONFIGS: Record<BossType, BossConfig> = {
   },
   [BossType.DESERT_FORTRESS]: {
     type: BossType.DESERT_FORTRESS,
-    name: '沙漠堡垒 Boss',
-    health: 2500,
+    name: { en: 'Desert Fortress Boss', zh: '沙漠堡垒 Boss' },
+    health: 2800,
     speed: 0,
-    damage: FLAK_CANNON_CONFIG.DAMAGE,
+    // 高炮弹：基础值翻倍，“普通”档单发 15，与高炮伤害随难度缩放之前的实测调校一致
+    damage: FLAK_CANNON_CONFIG.DAMAGE * 2,
     scale: 5,
     circleRadius: 0,
     turnSpeed: 0,
@@ -168,8 +183,8 @@ export const BOSS_CONFIGS: Record<BossType, BossConfig> = {
   },
   [BossType.OCTOPUS_WARSHIP]: {
     type: BossType.OCTOPUS_WARSHIP,
-    name: '八爪鱼战舰 Boss',
-    health: 3000,
+    name: { en: 'Octopus Warship Boss', zh: '八爪鱼战舰 Boss' },
+    health: 6300,
     speed: 5,
     damage: LASER_SWEEP_CONFIG.DAMAGE,
     scale: 5,
@@ -178,57 +193,142 @@ export const BOSS_CONFIGS: Record<BossType, BossConfig> = {
     cannonFireInterval: 0,
     missileFireInterval: 0,
     missileDamage: 0,
+    // 眼睛光弹：基础值翻倍，“普通”档单发 20，与光弹伤害随难度缩放之前的实测调校一致
+    eyeDamage: EYE_CONFIG.DAMAGE * 2,
     maxRange: LASER_SWEEP_CONFIG.RANGE,
     scoreValue: 3000,
   },
   [BossType.MISSILE_DESTROYER]: {
     type: BossType.MISSILE_DESTROYER,
-    name: '导弹驱逐舰 Boss',
-    health: 3500,
+    name: { en: 'Missile Destroyer Boss', zh: '导弹驱逐舰 Boss' },
+    health: 2500,
     speed: 10,
-    damage: FLAK_CANNON_CONFIG.DAMAGE,
+    // 高炮弹：同第 2 关，“普通”档单发 15
+    damage: FLAK_CANNON_CONFIG.DAMAGE * 2,
     scale: 5,
     circleRadius: 0,
     turnSpeed: 0.2,
     cannonFireInterval: 2.0,
-    missileFireInterval: 8,
+    missileFireInterval: 20,
     missileDamage: BOSS_MISSILE_CONFIG.DAMAGE,
     maxRange: FLAK_CANNON_CONFIG.MAX_RANGE,
     scoreValue: 3500,
   },
   [BossType.SKY_CARRIER]: {
     type: BossType.SKY_CARRIER,
-    name: '空中航空母舰 Boss',
-    health: 4000,
+    name: { en: 'Sky Carrier Boss', zh: '空中航空母舰 Boss' },
+    health: 5000,
     speed: 8,
     damage: 30,
     scale: 5,
     circleRadius: 200,
     turnSpeed: 0.15,
     cannonFireInterval: 0.8,
-    missileFireInterval: 12,
+    missileFireInterval: 18,
     missileDamage: BOSS_MISSILE_CONFIG.DAMAGE,
     maxRange: BOSS_MISSILE_CONFIG.MAX_RANGE,
     scoreValue: 4000,
   },
+  [BossType.MAGMA_COLOSSUS]: {
+    type: BossType.MAGMA_COLOSSUS,
+    name: { en: 'Magma Colossus Boss', zh: '熔岩巨像 Boss' },
+    health: 8100,
+    speed: 6,
+    damage: 16,
+    scale: 5,
+    circleRadius: 0,
+    turnSpeed: 0.25,
+    cannonFireInterval: 1.1,
+    missileFireInterval: 14,
+    missileDamage: BOSS_MISSILE_CONFIG.DAMAGE,
+    maxRange: BOSS_MISSILE_CONFIG.MAX_RANGE,
+    scoreValue: 5000,
+  },
+  [BossType.ABYSSAL_LEVIATHAN]: {
+    type: BossType.ABYSSAL_LEVIATHAN,
+    name: { en: 'Abyssal Leviathan Boss', zh: '深渊利维坦 Boss' },
+    health: 4800,
+    speed: 10,
+    damage: 40,
+    scale: 5.5,
+    circleRadius: 0,
+    turnSpeed: 0.12,
+    cannonFireInterval: 0.9,
+    missileFireInterval: 9,
+    missileDamage: BOSS_MISSILE_CONFIG.DAMAGE,
+    maxRange: BOSS_MISSILE_CONFIG.MAX_RANGE,
+    scoreValue: 5500,
+  },
+  [BossType.TEMPEST_ZEPPELIN]: {
+    type: BossType.TEMPEST_ZEPPELIN,
+    name: { en: 'Tempest Zeppelin Boss', zh: '雷霆飞艇 Boss' },
+    health: 14500,
+    speed: 7,
+    damage: 16,
+    scale: 6,
+    circleRadius: 0,
+    turnSpeed: 0.1,
+    cannonFireInterval: 0.7,
+    missileFireInterval: 11,
+    missileDamage: BOSS_MISSILE_CONFIG.DAMAGE,
+    maxRange: BOSS_MISSILE_CONFIG.MAX_RANGE,
+    scoreValue: 6000,
+  },
+  [BossType.PHANTOM_WING]: {
+    type: BossType.PHANTOM_WING,
+    name: { en: 'Phantom Wing Boss', zh: '幻影之翼 Boss' },
+    health: 9500,
+    speed: 30,
+    damage: 36,
+    scale: 5,
+    circleRadius: 260,
+    turnSpeed: 0.35,
+    cannonFireInterval: 0.6,
+    missileFireInterval: 10,
+    // 弹舱导弹是幻影之翼的主要威胁（隐形伏击后齐射）：基础值翻倍，“普通”档单发 90，
+    // 与导弹伤害随难度缩放之前的实测调校一致（约 2.5 分钟击杀、承伤约 1 倍最大生命）
+    missileDamage: BOSS_MISSILE_CONFIG.DAMAGE * 2,
+    maxRange: BOSS_MISSILE_CONFIG.MAX_RANGE,
+    scoreValue: 6500,
+  },
+  [BossType.ORACLE_PRIME]: {
+    type: BossType.ORACLE_PRIME,
+    name: { en: 'Oracle Prime Boss', zh: '神谕主宰 Boss' },
+    health: 9000,
+    speed: 4,
+    damage: 40,
+    scale: 6,
+    circleRadius: 0,
+    turnSpeed: 0.2,
+    cannonFireInterval: 0.55,
+    missileFireInterval: 8,
+    missileDamage: BOSS_MISSILE_CONFIG.DAMAGE,
+    maxRange: BOSS_MISSILE_CONFIG.MAX_RANGE,
+    scoreValue: 10000,
+  },
 };
+
+/** 关卡 → Boss（战役十关一一对应） */
+const LEVEL_BOSSES: readonly BossType[] = [
+  BossType.HEAVY_BOMBER,
+  BossType.DESERT_FORTRESS,
+  BossType.OCTOPUS_WARSHIP,
+  BossType.MISSILE_DESTROYER,
+  BossType.SKY_CARRIER,
+  BossType.MAGMA_COLOSSUS,
+  BossType.ABYSSAL_LEVIATHAN,
+  BossType.TEMPEST_ZEPPELIN,
+  BossType.PHANTOM_WING,
+  BossType.ORACLE_PRIME,
+];
 
 /**
  * 根据关卡获取 Boss 类型
  */
 export function getBossForLevel(level: number): BossType | null {
-  switch (level) {
-    case 1:
-      return BossType.HEAVY_BOMBER;
-    case 2:
-      return BossType.DESERT_FORTRESS;
-    case 3:
-      return BossType.OCTOPUS_WARSHIP;
-    case 4:
-      return BossType.MISSILE_DESTROYER;
-    case 5:
-      return BossType.SKY_CARRIER;
-    default:
-      return null;
+  if (!Number.isInteger(level) || level < 1 || level > LEVEL_BOSSES.length) {
+    return null;
   }
+
+  return LEVEL_BOSSES[level - 1];
 }

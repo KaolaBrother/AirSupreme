@@ -7,6 +7,11 @@ import {
   LevelLightingConfig,
   LevelPostFxConfig,
 } from '@/features/terrain/LevelConfig';
+import { PostFxPipeline } from '@/features/effects/postfx/PostFxPipeline';
+import type { PostFxQualityOptions } from '@/features/effects/postfx/PostFxPipeline';
+import { ScreenEffectsState } from '@/features/effects/postfx/ScreenEffectsState';
+import type { ScreenEffectsInput } from '@/features/effects/postfx/ScreenEffectsState';
+import { ScreenOverlay } from '@/features/effects/postfx/ScreenOverlay';
 
 /**
  * 游戏场景
@@ -24,6 +29,15 @@ export class GameScene {
   private backgroundTexture?: THREE.CanvasTexture;
   private readonly backgroundCanvas: HTMLCanvasElement;
   private readonly backgroundContext: CanvasRenderingContext2D | null;
+  // 后处理：画质驱动（性能档关闭），setPostFxEnabled 可显式覆盖
+  private postFxPipeline: PostFxPipeline | null = null;
+  private postFxOverride: boolean | null = null;
+  private postFxQualityKey = '';
+  private postFxFailed = false;
+  private postFxGrade: LevelPostFxConfig = { ...DEFAULT_LEVEL_SCENE_CONFIG.postFx };
+  private readonly screenEffects = new ScreenEffectsState();
+  private screenOverlay: ScreenOverlay | null = null;
+  private lastRenderTime = 0;
 
   constructor() {
     // 创建场景
@@ -142,6 +156,81 @@ export class GameScene {
     if (this.ground) {
       this.ground.receiveShadow = sunShadowEnabled;
     }
+
+    this.syncPostFxPipeline();
+  }
+
+  /**
+   * 设置屏幕效果（各项 0..1）：damagePulse / flash / empFlash 为脉冲（取最大值后自动衰减），
+   * lowHealth / speed 为持续量（平滑趋近目标值）。
+   */
+  public setScreenEffects(effects: ScreenEffectsInput): void {
+    this.screenEffects.set(effects);
+  }
+
+  /**
+   * 显式开启/关闭后处理（默认按画质：performance 关闭，balanced/quality 开启）
+   */
+  public setPostFxEnabled(enabled: boolean): void {
+    this.postFxOverride = enabled;
+    this.syncPostFxPipeline();
+  }
+
+  /** 后处理管线当前是否生效 */
+  public isPostFxEnabled(): boolean {
+    return this.postFxPipeline !== null;
+  }
+
+  private getPostFxQuality(): PostFxQualityOptions {
+    const preset = GameConfig.getEffectiveQualityPreset();
+    const antialias = GameConfig.getAntialiasEnabled();
+    return {
+      samples: antialias ? (preset === 'quality' ? 4 : 2) : 0,
+      bloomResolution: preset === 'quality' && !GameConfig.isMobile ? 1 : 0.5,
+    };
+  }
+
+  private syncPostFxPipeline(): void {
+    const preset = GameConfig.getEffectiveQualityPreset();
+    const wanted = !this.postFxFailed && (this.postFxOverride ?? preset !== 'performance');
+    if (!wanted) {
+      this.disposePostFxPipeline();
+      return;
+    }
+
+    const quality = this.getPostFxQuality();
+    const key = `${quality.samples}:${quality.bloomResolution}`;
+    if (this.postFxPipeline && key === this.postFxQualityKey) {
+      this.postFxPipeline.setSize(
+        window.innerWidth,
+        window.innerHeight,
+        this.renderer.getPixelRatio()
+      );
+      return;
+    }
+
+    this.disposePostFxPipeline();
+    if (!PostFxPipeline.isSupported(this.renderer)) {
+      return;
+    }
+    try {
+      this.postFxPipeline = new PostFxPipeline(this.renderer, this.scene, this.camera, quality);
+      this.postFxPipeline.setGrade(this.postFxGrade);
+      this.postFxQualityKey = key;
+    } catch (error) {
+      console.warn('[GameScene] post-processing unavailable, using direct rendering', error);
+      this.postFxFailed = true;
+      this.disposePostFxPipeline();
+    }
+  }
+
+  private disposePostFxPipeline(): void {
+    if (!this.postFxPipeline) {
+      return;
+    }
+    this.postFxPipeline.dispose();
+    this.postFxPipeline = null;
+    this.postFxQualityKey = '';
   }
 
   /**
@@ -186,6 +275,8 @@ export class GameScene {
     this.applyGroundPalette(environment, lighting);
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = postFx.exposure;
+    this.postFxGrade = postFx;
+    this.postFxPipeline?.setGrade(postFx);
     this.applyQualitySettings();
   }
 
@@ -206,7 +297,28 @@ export class GameScene {
    * 渲染场景
    */
   public render(): void {
+    const now = performance.now();
+    const deltaTime =
+      this.lastRenderTime > 0 ? Math.min((now - this.lastRenderTime) / 1000, 0.1) : 0;
+    this.lastRenderTime = now;
+    const effects = this.screenEffects.update(deltaTime);
+
+    if (this.postFxPipeline) {
+      try {
+        this.postFxPipeline.render(deltaTime, effects);
+        return;
+      } catch (error) {
+        console.warn('[GameScene] post-processing failed, falling back to direct rendering', error);
+        this.postFxFailed = true;
+        this.disposePostFxPipeline();
+      }
+    }
+
     this.renderer.render(this.scene, this.camera);
+    if (this.screenEffects.isActive()) {
+      this.screenOverlay ??= new ScreenOverlay();
+      this.screenOverlay.render(this.renderer, effects, this.camera.aspect);
+    }
   }
 
   /**
@@ -218,6 +330,9 @@ export class GameScene {
       this.resizeHandler = undefined;
     }
 
+    this.disposePostFxPipeline();
+    this.screenOverlay?.dispose();
+    this.screenOverlay = null;
     this.renderer.dispose();
     this.renderer.domElement.remove();
     this.backgroundTexture?.dispose();

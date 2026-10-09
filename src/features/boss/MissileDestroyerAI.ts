@@ -6,13 +6,39 @@ import {
   FIGHTER_LAUNCH_CONFIG,
 } from './BossTypes';
 import { HealthSystem } from '@/features/combat/HealthSystem';
-import { BossMissileSystem } from './BossMissileSystem';
+import { TargetLeadTracker } from './BossAim';
+import { BossMissileSystem, type BossMissileFlightProfile } from './BossMissileSystem';
 import { FlakCannonSystem } from './FlakCannonSystem';
 import { ParticleSystem } from '@/features/effects/ParticleSystem';
 
 type BossGroup = THREE.Group & {
   bossParts?: THREE.Mesh[];
 };
+
+/**
+ * 「三叉戟」的导弹齐射：垂直发射单元连射 2 枚（血量低于 35% 后 3 枚），间隔 0.4 秒。
+ * 导弹比玩家快、按提前量追踪，但转向角速度有限——直线平飞的玩家一定会被追上，
+ * 贴近时一个大过载急转（或热焰弹）就能让它冲过头；7 秒燃尽自爆。
+ */
+const SALVO_SIZE = 2;
+const SALVO_SIZE_DAMAGED = 3;
+const SALVO_DAMAGED_RATIO = 0.35;
+const SALVO_STAGGER = 0.4;
+const SALVO_MISSILE: Readonly<BossMissileFlightProfile> = {
+  speed: 72,
+  turnRate: 0.85,
+  lead: 0.3,
+  lifetime: 7,
+};
+/** 发射方向：竖直向上略偏向目标（垂发） */
+const SALVO_LAUNCH_TILT = 0.35;
+/**
+ * 高炮：按提前量（拦截点的 50%）瞄准、弹速 95 米/秒——直线飞行会被弹幕咬住，蛇行可以躲开；
+ * 炸点仍有 ±32 米随机散布。
+ */
+const FLAK_SPEED = 95;
+const FLAK_LEAD = 0.5;
+const FLAK_SCATTER = 64;
 
 export class MissileDestroyerAI {
   private static readonly CRITICAL_HEALTH_THRESHOLD = 0.24;
@@ -50,6 +76,12 @@ export class MissileDestroyerAI {
   private currentFlakCannon: FlakCannonPosition = FlakCannonPosition.FRONT_LEFT;
   private missileCooldown: number = 0;
   private currentMissileLauncher: number = 0;
+  /** 本轮齐射还剩几枚、下一枚的间隔计时 */
+  private salvoRemaining: number = 0;
+  private salvoTimer: number = 0;
+  /** 玩家速度估计（逐帧差分），用于高炮提前量 */
+  private readonly playerTracker = new TargetLeadTracker();
+  private readonly launchDirection = new THREE.Vector3();
 
   private fighterSpawnTimer: number = 0;
 
@@ -86,14 +118,16 @@ export class MissileDestroyerAI {
     this.config = config;
     this.health = new HealthSystem(config.health);
 
-    this.missileSystem = new BossMissileSystem(scene, particleSystem);
+    this.missileSystem = new BossMissileSystem(scene, particleSystem, config.missileDamage);
 
+    // 高炮弹伤害取 Boss 配置的 damage（已按难度调整）
     this.flakCannonSystem = new FlakCannonSystem(
       scene,
       FLAK_CANNON_CONFIG.AOE_RADIUS,
       (position, radius, damage) => {
         this.onFlakExplode?.(position, radius, damage);
-      }
+      },
+      config.damage
     );
 
     this.missileCooldown = config.missileFireInterval;
@@ -114,6 +148,7 @@ export class MissileDestroyerAI {
     this.playerMesh = playerMesh;
     this.friendlyMeshes = friendlyMeshes;
     this.animationTime += deltaTime;
+    this.playerTracker.update(deltaTime, playerMesh?.position);
 
     this.moveTowardsPlayer(deltaTime, playerMesh);
 
@@ -127,9 +162,20 @@ export class MissileDestroyerAI {
       this.advanceToNextFlakCannon();
     }
 
-    if (this.missileCooldown <= 0) {
-      this.fireMissile();
+    if (this.missileCooldown <= 0 && this.salvoRemaining <= 0) {
+      const health = this.getHealth();
+      const damaged = health.current <= health.max * SALVO_DAMAGED_RATIO;
+      this.salvoRemaining = damaged ? SALVO_SIZE_DAMAGED : SALVO_SIZE;
+      this.salvoTimer = 0;
       this.missileCooldown = this.config.missileFireInterval;
+    }
+    if (this.salvoRemaining > 0) {
+      this.salvoTimer -= deltaTime;
+      if (this.salvoTimer <= 0) {
+        this.fireMissile(this.salvoRemaining === 1);
+        this.salvoRemaining--;
+        this.salvoTimer = SALVO_STAGGER;
+      }
     }
 
     this.fighterSpawnTimer += deltaTime;
@@ -408,11 +454,21 @@ export class MissileDestroyerAI {
     if (!target) return;
 
     const targetPosition = target.position.clone();
-    targetPosition.x += (Math.random() - 0.5) * 56;
-    targetPosition.y += (Math.random() - 0.35) * 20;
-    targetPosition.z += (Math.random() - 0.5) * 56;
+    if (target === this.playerMesh) {
+      // 提前量：按弹速估算飞行时间，外推玩家位置
+      this.playerTracker.leadPoint(
+        firePosition,
+        target.position,
+        FLAK_SPEED,
+        FLAK_LEAD,
+        targetPosition
+      );
+    }
+    targetPosition.x += (Math.random() - 0.5) * FLAK_SCATTER;
+    targetPosition.y += (Math.random() - 0.35) * 18;
+    targetPosition.z += (Math.random() - 0.5) * FLAK_SCATTER;
 
-    this.flakCannonSystem.fire(firePosition, targetPosition);
+    this.flakCannonSystem.fire(firePosition, targetPosition, { speed: FLAK_SPEED });
     this.onFlakFire?.(firePosition);
   }
 
@@ -444,16 +500,17 @@ export class MissileDestroyerAI {
     this.currentFlakCannon = cannonOrder[nextIndex];
   }
 
-  private fireMissile(): void {
+  /**
+   * 齐射中的一枚：都追玩家；最后一枚在有友机时一半概率改打最近的友机。
+   * 垂直发射后按 SALVO_MISSILE 的限速追踪飞向目标。
+   */
+  private fireMissile(lastOfSalvo: boolean): void {
     if (!this.playerMesh) return;
 
     let target: THREE.Object3D | null = null;
-    let targetingPlayer = false;
+    let targetingPlayer = true;
 
-    if (Math.random() < 0.5) {
-      targetingPlayer = true;
-      target = null;
-    } else {
+    if (lastOfSalvo && Math.random() < 0.5) {
       let minDistance = Infinity;
       for (const friendly of this.friendlyMeshes) {
         if (!friendly.parent) continue;
@@ -463,9 +520,7 @@ export class MissileDestroyerAI {
           target = friendly;
         }
       }
-      if (!target) {
-        targetingPlayer = true;
-      }
+      targetingPlayer = target === null;
     }
 
     const launcherOffset = this.missileLauncherOffsets[this.currentMissileLauncher].clone();
@@ -475,12 +530,21 @@ export class MissileDestroyerAI {
     this.currentMissileLauncher =
       (this.currentMissileLauncher + 1) % this.missileLauncherOffsets.length;
 
+    // 垂发：竖直向上，略偏向目标
+    const aim = target?.position ?? this.playerMesh.position;
+    this.launchDirection.subVectors(aim, missilePosition).setY(0);
+    if (this.launchDirection.lengthSq() > 1e-6) {
+      this.launchDirection.normalize().multiplyScalar(SALVO_LAUNCH_TILT);
+    }
+    this.launchDirection.y = 1;
+
     this.missileSystem.fire(
       missilePosition,
       target,
       this.friendlyMeshes,
       this.playerMesh,
-      targetingPlayer
+      targetingPlayer,
+      { ...SALVO_MISSILE, launchDirection: this.launchDirection }
     );
     this.onMissileFired?.();
   }

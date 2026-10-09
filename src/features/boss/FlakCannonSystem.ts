@@ -3,7 +3,22 @@ import { FLAK_CANNON_CONFIG } from './BossTypes';
 
 interface FlakProjectileConfig {
   explosionRadius: number;
+  /** 弹速（米/秒，缺省 FLAK_CANNON_CONFIG.SPEED） */
+  speed?: number;
+  /** 爆炸伤害（缺省 FLAK_CANNON_CONFIG.DAMAGE） */
+  damage?: number;
   onExplode?: (position: THREE.Vector3, radius: number, damage: number) => void;
+}
+
+/** 非负有限数原样返回，否则用缺省值 */
+function sanitizeDamage(damage: number | undefined, fallback: number): number {
+  return typeof damage === 'number' && Number.isFinite(damage) && damage >= 0 ? damage : fallback;
+}
+
+/** 单发高炮弹的可选参数（缺省沿用 FLAK_CANNON_CONFIG） */
+export interface FlakShotOptions {
+  /** 弹速（米/秒）：更快的炮弹配合 Boss 的提前量瞄准才追得上机动中的玩家 */
+  speed?: number;
 }
 
 interface FlakExplosionRecord {
@@ -18,7 +33,8 @@ export class FlakProjectile {
   public active: boolean = true;
   public lifetime: number = 0;
 
-  private readonly speed: number = FLAK_CANNON_CONFIG.SPEED;
+  private readonly speed: number;
+  private readonly damage: number;
   private readonly startPosition: THREE.Vector3;
   private readonly config: FlakProjectileConfig;
   private readonly detonationPosition: THREE.Vector3;
@@ -40,6 +56,11 @@ export class FlakProjectile {
     config: FlakProjectileConfig
   ) {
     this.config = config;
+    this.speed =
+      typeof config.speed === 'number' && Number.isFinite(config.speed) && config.speed > 0
+        ? config.speed
+        : FLAK_CANNON_CONFIG.SPEED;
+    this.damage = sanitizeDamage(config.damage, FLAK_CANNON_CONFIG.DAMAGE);
     this.startPosition = position.clone();
     this.detonationPosition = this.computeDetonationPosition(position, targetPosition);
     this.totalDistance = Math.max(position.distanceTo(this.detonationPosition), 1);
@@ -76,9 +97,7 @@ export class FlakProjectile {
     this.warningMesh.visible = false;
     scene.add(this.warningMesh);
 
-    const direction = new THREE.Vector3()
-      .subVectors(this.detonationPosition, position)
-      .normalize();
+    const direction = new THREE.Vector3().subVectors(this.detonationPosition, position).normalize();
     this.velocity = direction.multiplyScalar(this.speed);
   }
 
@@ -113,15 +132,11 @@ export class FlakProjectile {
     this.mesh.scale.setScalar(1 + (armed ? pulse * 0.22 : pulse * 0.08));
 
     if (
-      armed
-      && (
-        distanceToTarget <= FLAK_CANNON_CONFIG.DETONATION_DISTANCE
-        || (this.hasEnteredWarningZone
-          && (
-            distanceToTarget <= this.config.explosionRadius * 0.7
-            || this.hasPassedDetonationPoint()
-          ))
-      )
+      armed &&
+      (distanceToTarget <= FLAK_CANNON_CONFIG.DETONATION_DISTANCE ||
+        (this.hasEnteredWarningZone &&
+          (distanceToTarget <= this.config.explosionRadius * 0.7 ||
+            this.hasPassedDetonationPoint())))
     ) {
       this.explode(this.detonationPosition);
     }
@@ -189,11 +204,7 @@ export class FlakProjectile {
     this.mesh.position.copy(explosionPosition);
     this.warningMesh.visible = false;
     this.warningMaterial.opacity = 0;
-    this.config.onExplode?.(
-      explosionPosition.clone(),
-      FLAK_CANNON_CONFIG.AOE_RADIUS,
-      FLAK_CANNON_CONFIG.DAMAGE
-    );
+    this.config.onExplode?.(explosionPosition.clone(), FLAK_CANNON_CONFIG.AOE_RADIUS, this.damage);
   }
 
   public getMesh(): THREE.Mesh {
@@ -217,20 +228,30 @@ export class FlakCannonSystem {
   private explosionRadius: number;
   private onExplode?: (position: THREE.Vector3, radius: number, damage: number) => void;
   private pendingExplosions: FlakExplosionRecord[] = [];
+  /** 单发高炮弹的爆炸伤害：Boss 配置的 damage（已按难度调整），缺省为 FLAK_CANNON_CONFIG.DAMAGE */
+  private readonly damage: number;
 
   constructor(
     scene: THREE.Scene,
     explosionRadius: number = FLAK_CANNON_CONFIG.AOE_RADIUS,
-    onExplode?: (position: THREE.Vector3, radius: number, damage: number) => void
+    onExplode?: (position: THREE.Vector3, radius: number, damage: number) => void,
+    damage: number = FLAK_CANNON_CONFIG.DAMAGE
   ) {
     this.scene = scene;
     this.explosionRadius = explosionRadius;
     this.onExplode = onExplode;
+    this.damage = sanitizeDamage(damage, FLAK_CANNON_CONFIG.DAMAGE);
   }
 
-  public fire(position: THREE.Vector3, targetPosition: THREE.Vector3): void {
+  public fire(
+    position: THREE.Vector3,
+    targetPosition: THREE.Vector3,
+    options: FlakShotOptions = {}
+  ): void {
     const projectile = new FlakProjectile(this.scene, position, targetPosition, {
       explosionRadius: this.explosionRadius,
+      speed: options.speed,
+      damage: this.damage,
       onExplode: (explodePosition, radius, damage) => {
         this.pendingExplosions.push({
           position: explodePosition.clone(),
@@ -264,7 +285,9 @@ export class FlakCannonSystem {
   }
 
   public getProjectileMeshes(): THREE.Object3D[] {
-    return this.projectiles.filter((projectile) => projectile.active).map((projectile) => projectile.getMesh());
+    return this.projectiles
+      .filter((projectile) => projectile.active)
+      .map((projectile) => projectile.getMesh());
   }
 
   public checkAoeCollisions(

@@ -1,3 +1,6 @@
+import { CHAPTER_TITLES } from '@/features/campaign/ChapterTitles';
+import type { LocalizedText } from '@/i18n';
+
 export interface LevelEnvironmentConfig {
   backgroundGradient: [string, string, string, string];
   fogColor: number;
@@ -94,8 +97,26 @@ export interface LevelLightingConfig {
   shadowNormalBias?: number;
 }
 
+/**
+ * 天气预设：
+ * - ash：火山灰缓落 + 上升的余烬（熔岩/熔火关卡）
+ * - aurora：晴冷空气 + 轻雪，天空悬挂动态极光带（极夜冰海）
+ * - storm：雨幕 + 雷暴闪电（峡谷 / 风暴海）
+ */
+export type LevelWeatherPreset =
+  | 'clear'
+  | 'cloudy'
+  | 'mist'
+  | 'windy'
+  | 'sandstorm'
+  | 'snow'
+  | 'storm'
+  | 'smog'
+  | 'ash'
+  | 'aurora';
+
 export interface LevelWeatherConfig {
-  preset: 'clear' | 'cloudy' | 'mist' | 'windy' | 'sandstorm' | 'snow' | 'storm' | 'smog';
+  preset: LevelWeatherPreset;
   windStrength: number;
   cloudCoverage: number;
   precipitation: number;
@@ -107,6 +128,8 @@ export interface LevelWeatherConfig {
   cloudSpeed?: number;
   cloudHeightMin?: number;
   cloudHeightMax?: number;
+  /** 云色调覆盖 0..1（1 = 晴日亮白低多边形切面，越低越柔和 / 阴沉）；缺省按天气预设推导 */
+  cloudTone?: number;
   intensity?: number;
   fogDensity?: number;
   particleCount?: number;
@@ -177,8 +200,9 @@ export const DEFAULT_LEVEL_SCENE_CONFIG: LevelSceneConfig = {
  */
 export interface LevelConfig {
   id: number;
-  name: string;
-  description: string;
+  /** 关卡名：与战役章节标题是同一个对象（CHAPTER_TITLES） */
+  name: LocalizedText;
+  description: LocalizedText;
 
   // 地形配置
   terrain: TerrainType;
@@ -212,6 +236,16 @@ export enum TerrainType {
   MOUNTAINS = 'MOUNTAINS',
   OCEAN = 'OCEAN',
   CITY = 'CITY',
+  /** 第 6 关：火山岛兵工厂（熔岩河、火山口、周围海域） */
+  VOLCANO = 'VOLCANO',
+  /** 第 7 关：极夜冰海（浮冰、冰山、冰架、开阔海面） */
+  ARCTIC = 'ARCTIC',
+  /** 第 8 关：雷暴峡谷 */
+  CANYON = 'CANYON',
+  /** 第 9 关：平流层云海与天梯 */
+  STRATOSPHERE = 'STRATOSPHERE',
+  /** 第 10 关：陨石坑中的黑曜城堡 */
+  CITADEL = 'CITADEL',
 }
 
 export interface EnemyTypeConfig {
@@ -232,8 +266,11 @@ export enum LevelWaveEventType {
 export const LEVELS: LevelConfig[] = [
   {
     id: 1,
-    name: '湖畔晨曦',
-    description: '在宁静的湖面上空进行首次战斗',
+    name: CHAPTER_TITLES[0],
+    description: {
+      en: 'First battle over a peaceful lake',
+      zh: '在宁静的湖面上空进行首次战斗',
+    },
     terrain: TerrainType.LAKE,
     groundColor: 0x5a9150,
     waterColor: 0x39a08c,
@@ -324,17 +361,21 @@ export const LEVELS: LevelConfig[] = [
       waterWaveScale: 1,
       skyGlow: 0xffecb8,
     },
+    // 晨曦湖谷：通透明亮，轻柔泛光点亮湖面碎光，暗角极弱
     postFx: {
       ...DEFAULT_LEVEL_SCENE_CONFIG.postFx,
       exposure: 1.1,
       contrast: 1.02,
       saturation: 1.06,
+      bloomStrength: 0.12,
+      vignetteStrength: 0.1,
     },
     totalWaves: 5,
-    enemiesPerWave: [2, 3, 4, 5, 6],
+    // 教学关：敌机数逐波缓升（16 架），第 2 关起再按关卡曲线加密
+    enemiesPerWave: [2, 3, 3, 4, 4],
     enemyTypes: [
       { type: 'SCOUT', minWave: 1, maxCount: 2 },
-      { type: 'FIGHTER', minWave: 2, maxCount: 2 },
+      { type: 'FIGHTER', minWave: 3, maxCount: 2 },
     ],
     waveInterval: 15,
     eventTemplates: [LevelWaveEventType.INTERCEPT],
@@ -343,11 +384,13 @@ export const LEVELS: LevelConfig[] = [
     difficulty: 2,
   },
 
-
   {
     id: 2,
-    name: '沙漠风暴',
-    description: '在炎热的沙漠上空迎战敌人',
+    name: CHAPTER_TITLES[1],
+    description: {
+      en: 'Meet the enemy over the scorching desert',
+      zh: '在炎热的沙漠上空迎战敌人',
+    },
     terrain: TerrainType.DESERT,
     groundColor: 0xc8b487,
     fogColor: 0xf4a460,
@@ -430,14 +473,17 @@ export const LEVELS: LevelConfig[] = [
       waterWaveScale: 0.4,
       skyGlow: 0xffb66a,
     },
+    // 沙暴热浪：暖调高对比，泛光表现烈日热辉，暗角压住沙尘边缘
     postFx: {
       ...DEFAULT_LEVEL_SCENE_CONFIG.postFx,
       exposure: 1.08,
       contrast: 1.08,
       saturation: 1.1,
+      bloomStrength: 0.16,
+      vignetteStrength: 0.16,
     },
     totalWaves: 5,
-    enemiesPerWave: [3, 4, 5, 6, 7],
+    enemiesPerWave: [3, 4, 5, 5, 5],
     enemyTypes: [
       { type: 'SCOUT', minWave: 1, maxCount: 2 },
       { type: 'FIGHTER', minWave: 1, maxCount: 3 },
@@ -454,11 +500,13 @@ export const LEVELS: LevelConfig[] = [
     difficulty: 4,
   },
 
-
   {
     id: 3,
-    name: '雪山之巅',
-    description: '在高耸的雪山上空进行艰苦战斗',
+    name: CHAPTER_TITLES[2],
+    description: {
+      en: 'A hard fight above towering snow peaks',
+      zh: '在高耸的雪山上空进行艰苦战斗',
+    },
     terrain: TerrainType.MOUNTAINS,
     groundColor: 0xf4f8ff,
     fogColor: 0xd9ecf5,
@@ -545,14 +593,17 @@ export const LEVELS: LevelConfig[] = [
       waterWaveScale: 0.76,
       skyGlow: 0xd7ecff,
     },
+    // 雪境：雪面本身很亮，泛光克制避免发白；略降饱和保持冷冽
     postFx: {
       ...DEFAULT_LEVEL_SCENE_CONFIG.postFx,
       exposure: 1.04,
       contrast: 1.04,
       saturation: 0.94,
+      bloomStrength: 0.1,
+      vignetteStrength: 0.14,
     },
     totalWaves: 6,
-    enemiesPerWave: [4, 4, 5, 5, 6, 6],
+    enemiesPerWave: [3, 4, 4, 4, 5, 5],
     enemyTypes: [
       { type: 'FIGHTER', minWave: 1, maxCount: 3 },
       { type: 'HEAVY', minWave: 2, maxCount: 2 },
@@ -569,11 +620,13 @@ export const LEVELS: LevelConfig[] = [
     difficulty: 6,
   },
 
-
   {
     id: 4,
-    name: '深海决战',
-    description: '在广阔的海洋上空进行最终决战',
+    name: CHAPTER_TITLES[3],
+    description: {
+      en: 'A decisive battle over the open ocean',
+      zh: '在广阔的海洋上空进行最终决战',
+    },
     terrain: TerrainType.OCEAN,
     groundColor: 0x16406e,
     waterColor: 0x1379a8,
@@ -656,14 +709,17 @@ export const LEVELS: LevelConfig[] = [
       waterWaveScale: 5.2,
       skyGlow: 0x9fc8e8,
     },
+    // 远洋晴昼：海面高光与浪沫适度泛光，暗角轻
     postFx: {
       ...DEFAULT_LEVEL_SCENE_CONFIG.postFx,
       exposure: 1.08,
       contrast: 1.06,
       saturation: 1.06,
+      bloomStrength: 0.15,
+      vignetteStrength: 0.12,
     },
     totalWaves: 6,
-    enemiesPerWave: [5, 5, 6, 6, 6, 7],
+    enemiesPerWave: [4, 4, 5, 5, 5, 5],
     enemyTypes: [
       { type: 'FIGHTER', minWave: 1, maxCount: 4 },
       { type: 'HEAVY', minWave: 2, maxCount: 2 },
@@ -681,11 +737,13 @@ export const LEVELS: LevelConfig[] = [
     difficulty: 8,
   },
 
-
   {
     id: 5,
-    name: '城市废墟',
-    description: '在废弃的城市上空进行终极挑战',
+    name: CHAPTER_TITLES[4],
+    description: {
+      en: 'The ultimate challenge over a ruined city',
+      zh: '在废弃的城市上空进行终极挑战',
+    },
     terrain: TerrainType.CITY,
     groundColor: 0x4f5d6f,
     fogColor: 0x90a3ba,
@@ -780,16 +838,17 @@ export const LEVELS: LevelConfig[] = [
       waterWaveScale: 0.3,
       skyGlow: 0xe4f0ff,
     },
+    // 暮色钢城：霓虹、车流与航空障碍灯需要更明显的泛光，暗角加深夜城纵深
     postFx: {
       ...DEFAULT_LEVEL_SCENE_CONFIG.postFx,
       exposure: 1.16,
       contrast: 1.18,
       saturation: 1.08,
-      bloomStrength: 0.1,
-      vignetteStrength: 0.09,
+      bloomStrength: 0.26,
+      vignetteStrength: 0.18,
     },
     totalWaves: 7,
-    enemiesPerWave: [5, 5, 5, 6, 6, 6, 7],
+    enemiesPerWave: [4, 4, 4, 5, 5, 5, 5],
     enemyTypes: [
       { type: 'SCOUT', minWave: 1, maxCount: 3 },
       { type: 'FIGHTER', minWave: 1, maxCount: 4 },
@@ -808,6 +867,627 @@ export const LEVELS: LevelConfig[] = [
     difficulty: 10,
   },
 
+  // ===========================================================================
+  // 第 6-10 关：战役后半程。difficulty 为遗留字段（统一 10），真实强度由 getLevelScaling 决定。
+  // ===========================================================================
+
+  {
+    id: 6,
+    name: CHAPTER_TITLES[5],
+    description: {
+      en: 'Storm Ember Island’s lava arsenal and put out ORACLE’s forge through ash and heat',
+      zh: '突入赤炎火山岛的熔岩兵工厂，在火山灰与热浪中熄灭神谕的锻炉',
+    },
+    terrain: TerrainType.VOLCANO,
+    groundColor: 0x2a2426,
+    waterColor: 0x14262c,
+    fogColor: 0x5b3a30,
+    skyColors: ['#140709', '#43150f', '#a2401f', '#f2945a'],
+    environment: {
+      ...DEFAULT_LEVEL_SCENE_CONFIG.environment,
+      // 火山灰遮天：近黑的绛紫天顶 → 熔岩映红的地平线
+      backgroundGradient: ['#140709', '#43150f', '#a2401f', '#f2945a'],
+      fogColor: 0x5b3a30,
+      fogNear: 220,
+      fogFar: 2600,
+      fogDensity: 0.00052,
+      cloudCover: 0.22,
+      cloudTint: 0x8a6e64,
+      cloudSpeed: 2.4,
+      cloudHeightMin: 380,
+      cloudHeightMax: 560,
+      weatherIntensity: 0.58,
+      particleCount: 460,
+      particleSize: 3.4,
+      particleSpeed: 7,
+      particleDrift: 4.5,
+      particleColor: 0x8e8580,
+      waterWaveScale: 1.4,
+      skyGlow: 0xff8a4a,
+      surfaceProfile: {
+        groundBaseColor: 0x1e1b1d,
+        groundAccentColor: 0x4a3c38,
+        groundDetailColor: 0x121012,
+        groundEmissiveColor: 0x3a120a,
+        waterBaseColor: 0x14262c,
+        waterAccentColor: 0x6a4a3a,
+        waterDetailColor: 0x081418,
+      },
+      // 熔炉调色板：冷却玄武岩、新鲜黑熔岩、铁锈火山灰、炮铜色工厂与熔金辉光
+      designTokens: {
+        terrainPrimary: 0x3b3436,
+        terrainSecondary: 0x1e1a1c,
+        terrainAccent: 0x7a4e3a,
+        vegetation: 0x3d4a2a,
+        vegetationAccent: 0x667a3a,
+        water: 0x1d3a40,
+        waterDeep: 0x07141a,
+        waterSparkle: 0xff9a5a,
+        structure: 0x2c2d33,
+        structureAccent: 0x7a3b22,
+        glow: 0xff6a1a,
+        horizonHaze: 0x7a4434,
+        distantSilhouette: 0x2a1614,
+      },
+    },
+    lighting: {
+      ...DEFAULT_LEVEL_SCENE_CONFIG.lighting,
+      // 灰幕后的赤日 + 熔岩反照的暖色半球光
+      ambientColor: 0x8a5a4a,
+      ambientIntensity: 0.46,
+      hemisphereSkyColor: 0xff9a6a,
+      hemisphereGroundColor: 0x3a1610,
+      hemisphereIntensity: 0.62,
+      sunColor: 0xffb07a,
+      sunIntensity: 1.6,
+      sunPosition: { x: -220, y: 150, z: -120 },
+      shadowMapSize: 1024,
+    },
+    weather: {
+      ...DEFAULT_LEVEL_SCENE_CONFIG.weather,
+      preset: 'ash',
+      windStrength: 0.36,
+      cloudCoverage: 0.22,
+      precipitation: 0.3,
+      turbulence: 0.42,
+      windAngle: 1.1,
+      cloudOpacity: 0.7,
+      cloudTint: 0x8a6e64,
+      cloudSpeed: 2.4,
+      cloudHeightMin: 380,
+      cloudHeightMax: 560,
+      intensity: 0.58,
+      fogDensity: 0.00052,
+      particleCount: 460,
+      particleSize: 3.4,
+      particleSpeed: 7,
+      particleDrift: 4.5,
+      particleColor: 0x8e8580,
+      waterWaveScale: 1.4,
+      skyGlow: 0xff8a4a,
+    },
+    // 熔岩是本关的光源：较强泛光让熔岩河与炉口发光，高对比 + 深暗角压出灰幕压迫感
+    postFx: {
+      ...DEFAULT_LEVEL_SCENE_CONFIG.postFx,
+      exposure: 1.06,
+      contrast: 1.12,
+      saturation: 1.12,
+      bloomStrength: 0.38,
+      vignetteStrength: 0.24,
+    },
+    totalWaves: 7,
+    enemiesPerWave: [5, 5, 5, 5, 6, 6, 6],
+    enemyTypes: [
+      { type: 'SCOUT', minWave: 1, maxCount: 3 },
+      { type: 'FIGHTER', minWave: 1, maxCount: 4 },
+      { type: 'HEAVY', minWave: 2, maxCount: 3 },
+      { type: 'SNIPER', minWave: 3, maxCount: 2 },
+      { type: 'ACE', minWave: 5, maxCount: 2 },
+    ],
+    waveInterval: 6,
+    // 第六章目标：拦截向外输送机甲的运输编队
+    eventTemplates: [
+      LevelWaveEventType.INTERCEPT,
+      LevelWaveEventType.ELITE_HUNT,
+      LevelWaveEventType.INTERCEPT,
+      LevelWaveEventType.ESCORT_DEFENSE,
+    ],
+    powerUpFrequency: 0.45,
+    powerUpTypes: ['HEALTH', 'SHIELD', 'DAMAGE', 'SPEED', 'MULTISHOT', 'BOMB'],
+    difficulty: 10,
+  },
+
+  {
+    id: 7,
+    name: CHAPTER_TITLES[6],
+    description: {
+      en: 'Under the polar night, catch the Leviathan as it breaks through the drifting ice',
+      zh: '极夜笼罩的北冰洋，在漂移的浮冰与冰山之间截击破冰上浮的利维坦',
+    },
+    terrain: TerrainType.ARCTIC,
+    groundColor: 0xdfe9f2,
+    waterColor: 0x0b2232,
+    fogColor: 0x16283c,
+    skyColors: ['#02050f', '#081a36', '#143a5a', '#2c6a74'],
+    environment: {
+      ...DEFAULT_LEVEL_SCENE_CONFIG.environment,
+      // 极夜：近黑的天顶 → 极光映照的青绿地平线
+      backgroundGradient: ['#02050f', '#081a36', '#143a5a', '#2c6a74'],
+      fogColor: 0x16283c,
+      fogNear: 260,
+      fogFar: 3000,
+      fogDensity: 0.00038,
+      cloudCover: 0.06,
+      cloudTint: 0x5a6f88,
+      cloudSpeed: 1.6,
+      cloudHeightMin: 300,
+      cloudHeightMax: 480,
+      weatherIntensity: 0.34,
+      particleCount: 240,
+      particleSize: 2.6,
+      particleSpeed: 5.5,
+      particleDrift: 1.6,
+      particleColor: 0xe6f2ff,
+      waterWaveScale: 0.9,
+      skyGlow: 0x5ff0c0,
+      surfaceProfile: {
+        groundBaseColor: 0x0a1a26,
+        groundAccentColor: 0x24445a,
+        groundDetailColor: 0x061018,
+        groundEmissiveColor: 0x0a2a30,
+        waterBaseColor: 0x0b2232,
+        waterAccentColor: 0x3a8a8a,
+        waterDetailColor: 0x04121c,
+      },
+      // 极夜冰海调色板：积雪、冰川蓝、深冰青、墨色海水与极光青绿
+      designTokens: {
+        terrainPrimary: 0xe8f1f8,
+        terrainSecondary: 0x9cc4dc,
+        terrainAccent: 0x4aa6d6,
+        vegetation: 0x2e4a4a,
+        vegetationAccent: 0x4a6a6a,
+        water: 0x0f3346,
+        waterDeep: 0x04121c,
+        waterSparkle: 0x8fffe0,
+        structure: 0x4a5560,
+        structureAccent: 0xc8d4de,
+        glow: 0xffc27a,
+        horizonHaze: 0x1e3c50,
+        distantSilhouette: 0x0c1c2c,
+      },
+    },
+    lighting: {
+      ...DEFAULT_LEVEL_SCENE_CONFIG.lighting,
+      // 冷月主光 + 极光青绿的半球天光：冰面在极夜里仍然可读
+      ambientColor: 0x3a5478,
+      ambientIntensity: 0.55,
+      hemisphereSkyColor: 0x58c8b0,
+      hemisphereGroundColor: 0x10202e,
+      hemisphereIntensity: 0.82,
+      sunColor: 0xb4ccff,
+      sunIntensity: 1.25,
+      sunPosition: { x: -180, y: 150, z: 120 },
+      shadowMapSize: 1024,
+    },
+    weather: {
+      ...DEFAULT_LEVEL_SCENE_CONFIG.weather,
+      preset: 'aurora',
+      windStrength: 0.28,
+      cloudCoverage: 0.06,
+      precipitation: 0.2,
+      turbulence: 0.18,
+      windAngle: 2.8,
+      cloudOpacity: 0.5,
+      cloudTint: 0x5a6f88,
+      cloudSpeed: 1.6,
+      cloudHeightMin: 300,
+      cloudHeightMax: 480,
+      intensity: 0.34,
+      fogDensity: 0.00038,
+      particleCount: 240,
+      particleSize: 2.6,
+      particleSpeed: 5.5,
+      particleDrift: 1.6,
+      particleColor: 0xe6f2ff,
+      waterWaveScale: 0.9,
+      skyGlow: 0x5ff0c0,
+    },
+    // 极光与冰面荧光需要泛光，夜色靠曝光略提与较深暗角维持
+    postFx: {
+      ...DEFAULT_LEVEL_SCENE_CONFIG.postFx,
+      exposure: 1.14,
+      contrast: 1.1,
+      saturation: 1.1,
+      bloomStrength: 0.32,
+      vignetteStrength: 0.22,
+    },
+    totalWaves: 7,
+    enemiesPerWave: [4, 4, 5, 5, 5, 5, 6],
+    enemyTypes: [
+      { type: 'FIGHTER', minWave: 1, maxCount: 4 },
+      { type: 'HEAVY', minWave: 1, maxCount: 2 },
+      { type: 'SNIPER', minWave: 2, maxCount: 3 },
+      { type: 'SCOUT', minWave: 3, maxCount: 2 },
+      { type: 'ACE', minWave: 4, maxCount: 2 },
+    ],
+    waveInterval: 5.5,
+    // 第七章目标：保护友军破冰护卫舰「北辰」
+    eventTemplates: [
+      LevelWaveEventType.ESCORT_DEFENSE,
+      LevelWaveEventType.INTERCEPT,
+      LevelWaveEventType.ELITE_HUNT,
+    ],
+    powerUpFrequency: 0.45,
+    powerUpTypes: ['HEALTH', 'SHIELD', 'DAMAGE', 'SPEED', 'MULTISHOT', 'BOMB'],
+    difficulty: 10,
+  },
+
+  {
+    id: 8,
+    name: CHAPTER_TITLES[7],
+    description: {
+      en: 'In the endless storms of Thunder Canyon, hug the cliffs, cover the convoy and meet the armored zeppelin',
+      zh: '终年雷暴的雷鸣峡谷，贴着崖壁掩护车队并迎击装甲飞艇',
+    },
+    terrain: TerrainType.CANYON,
+    groundColor: 0xa4553a,
+    fogColor: 0x47484e,
+    skyColors: ['#07080c', '#121419', '#26282e', '#47484e'],
+    environment: {
+      ...DEFAULT_LEVEL_SCENE_CONFIG.environment,
+      // 雷暴云底：铅黑天顶 → 与雨雾融为一体的铅灰地平线（环境自带低垂云底与远处雨幕）
+      backgroundGradient: ['#07080c', '#121419', '#26282e', '#47484e'],
+      fogColor: 0x47484e,
+      fogNear: 200,
+      fogFar: 2400,
+      fogDensity: 0.00058,
+      cloudCover: 0.5,
+      cloudTint: 0x5a606c,
+      cloudSpeed: 4.2,
+      cloudHeightMin: 330,
+      cloudHeightMax: 480,
+      weatherIntensity: 0.82,
+      particleCount: 260,
+      particleSize: 2.2,
+      particleSpeed: 38,
+      particleDrift: 9,
+      particleColor: 0x9fb0c2,
+      waterWaveScale: 0.6,
+      skyGlow: 0x5a6a8a,
+      surfaceProfile: {
+        groundBaseColor: 0x5a3426,
+        groundAccentColor: 0x8a5a40,
+        groundDetailColor: 0x3a2018,
+        groundEmissiveColor: 0x2a1610,
+      },
+      // 红岩峡谷调色板：赭红砂岩层理、深褐阴影与雷电冷蓝辉光
+      designTokens: {
+        terrainPrimary: 0xa4553a,
+        terrainSecondary: 0x6e3524,
+        terrainAccent: 0xd08a5a,
+        vegetation: 0x56603a,
+        vegetationAccent: 0x7a8a4a,
+        water: 0x4a6a6a,
+        waterDeep: 0x23383a,
+        waterSparkle: 0xb8d8e8,
+        structure: 0x5a5048,
+        structureAccent: 0xa89a8a,
+        glow: 0x9ad0ff,
+        horizonHaze: 0x5a5052,
+        distantSilhouette: 0x3a2a26,
+      },
+    },
+    lighting: {
+      ...DEFAULT_LEVEL_SCENE_CONFIG.lighting,
+      // 阴云漫射：弱化的冷灰顶光 + 较强的天光与红岩反照，背阴崖壁仍然可读
+      ambientColor: 0x8a90a0,
+      ambientIntensity: 0.72,
+      hemisphereSkyColor: 0x8a96b0,
+      hemisphereGroundColor: 0x6a4030,
+      hemisphereIntensity: 0.85,
+      sunColor: 0xd8dcea,
+      sunIntensity: 0.85,
+      sunPosition: { x: 120, y: 200, z: 60 },
+      shadowMapSize: 1024,
+    },
+    weather: {
+      ...DEFAULT_LEVEL_SCENE_CONFIG.weather,
+      preset: 'storm',
+      windStrength: 0.78,
+      cloudCoverage: 0.5,
+      precipitation: 0.75,
+      turbulence: 0.72,
+      windAngle: 0.4,
+      cloudOpacity: 0.8,
+      cloudTint: 0x5a606c,
+      cloudSpeed: 4.2,
+      cloudHeightMin: 330,
+      cloudHeightMax: 480,
+      intensity: 0.82,
+      fogDensity: 0.00058,
+      particleCount: 260,
+      particleSize: 2.2,
+      particleSpeed: 38,
+      particleDrift: 9,
+      particleColor: 0x9fb0c2,
+      waterWaveScale: 0.6,
+      skyGlow: 0x5a6a8a,
+    },
+    // 雷暴：略去饱和 + 高对比，泛光留给闪电、电弧与特斯拉线圈，深暗角压出峡谷幽闭感
+    postFx: {
+      ...DEFAULT_LEVEL_SCENE_CONFIG.postFx,
+      exposure: 1.1,
+      contrast: 1.15,
+      saturation: 0.96,
+      bloomStrength: 0.3,
+      vignetteStrength: 0.26,
+    },
+    totalWaves: 7,
+    enemiesPerWave: [4, 5, 5, 5, 5, 6, 6],
+    enemyTypes: [
+      { type: 'FIGHTER', minWave: 1, maxCount: 4 },
+      { type: 'SCOUT', minWave: 1, maxCount: 3 },
+      { type: 'HEAVY', minWave: 2, maxCount: 2 },
+      { type: 'SNIPER', minWave: 3, maxCount: 3 },
+      { type: 'ACE', minWave: 4, maxCount: 3 },
+    ],
+    waveInterval: 5.5,
+    // 第八章目标：护送友军车队「长弓」穿越峡谷
+    eventTemplates: [
+      LevelWaveEventType.ESCORT_DEFENSE,
+      LevelWaveEventType.ELITE_HUNT,
+      LevelWaveEventType.ESCORT_DEFENSE,
+      LevelWaveEventType.INTERCEPT,
+    ],
+    powerUpFrequency: 0.5,
+    powerUpTypes: ['HEALTH', 'SHIELD', 'DAMAGE', 'SPEED', 'MULTISHOT', 'BOMB'],
+    difficulty: 10,
+  },
+
+  {
+    id: 9,
+    name: CHAPTER_TITLES[8],
+    description: {
+      en: 'Above a burning sea of cloud, cut ORACLE’s upload along the Sky Ladder',
+      zh: '两万米高空的燃烧云海之上，沿天梯轨道电梯截断神谕的上传',
+    },
+    terrain: TerrainType.STRATOSPHERE,
+    groundColor: 0xf6e2d2,
+    fogColor: 0xd8a088,
+    skyColors: ['#050a26', '#1a2a66', '#5e64b0', '#ffae6e'],
+    environment: {
+      ...DEFAULT_LEVEL_SCENE_CONFIG.environment,
+      // 平流层：深靛天顶（白昼可见星光）→ 云海燃烧的橙金地平线
+      backgroundGradient: ['#050a26', '#1a2a66', '#5e64b0', '#ffae6e'],
+      fogColor: 0xd8a088,
+      fogNear: 320,
+      fogFar: 3600,
+      fogDensity: 0.00024,
+      cloudCover: 0.1,
+      cloudTint: 0xffe2cc,
+      cloudSpeed: 3.2,
+      cloudHeightMin: 150,
+      cloudHeightMax: 300,
+      weatherIntensity: 0.18,
+      particleCount: 90,
+      particleSize: 2,
+      particleSpeed: 1.6,
+      particleDrift: 2.4,
+      particleColor: 0xfff0e0,
+      waterWaveScale: 0.4,
+      skyGlow: 0xffc890,
+      surfaceProfile: {
+        groundBaseColor: 0xe8c2b0,
+        groundAccentColor: 0xffe2cc,
+        groundDetailColor: 0xb08890,
+        groundEmissiveColor: 0x6a3a2a,
+      },
+      // 平流层调色板：受光云海、阴影云谷、燃烧橙金与天梯冷白金属
+      designTokens: {
+        terrainPrimary: 0xf6e2d2,
+        terrainSecondary: 0xc89a9a,
+        terrainAccent: 0xffb27a,
+        vegetation: 0x8a9ab8,
+        vegetationAccent: 0xaab8d8,
+        water: 0x6a7ab8,
+        waterDeep: 0x2a3270,
+        waterSparkle: 0xffe0c0,
+        structure: 0xc8ccd8,
+        structureAccent: 0x5a6278,
+        glow: 0x8ad8ff,
+        horizonHaze: 0xe8a888,
+        distantSilhouette: 0x7a6aa0,
+      },
+    },
+    lighting: {
+      ...DEFAULT_LEVEL_SCENE_CONFIG.lighting,
+      // 低角度烈日 + 云海反照的暖色地面半球光
+      ambientColor: 0x9a9ad8,
+      ambientIntensity: 0.5,
+      hemisphereSkyColor: 0x7a8ae0,
+      hemisphereGroundColor: 0xffa77a,
+      hemisphereIntensity: 0.75,
+      sunColor: 0xffc89a,
+      sunIntensity: 2.4,
+      sunPosition: { x: -300, y: 110, z: -200 },
+      shadowMapSize: 1024,
+    },
+    weather: {
+      ...DEFAULT_LEVEL_SCENE_CONFIG.weather,
+      preset: 'clear',
+      windStrength: 0.55,
+      cloudCoverage: 0.1,
+      precipitation: 0,
+      turbulence: 0.3,
+      windAngle: -0.4,
+      cloudOpacity: 0.86,
+      cloudTint: 0xffe2cc,
+      cloudSpeed: 3.2,
+      cloudHeightMin: 150,
+      cloudHeightMax: 300,
+      // 高空零星的云岛与云海同样柔和（不走晴日低多边形切面）
+      cloudTone: 0.72,
+      intensity: 0.18,
+      fogDensity: 0.00024,
+      particleCount: 90,
+      particleSize: 2,
+      particleSpeed: 1.6,
+      particleDrift: 2.4,
+      particleColor: 0xfff0e0,
+      waterWaveScale: 0.4,
+      skyGlow: 0xffc890,
+    },
+    // 稀薄空气：通透高饱和，云海受光面的燃烧感交给泛光，暗角轻
+    postFx: {
+      ...DEFAULT_LEVEL_SCENE_CONFIG.postFx,
+      exposure: 1.05,
+      contrast: 1.1,
+      saturation: 1.14,
+      bloomStrength: 0.34,
+      vignetteStrength: 0.16,
+    },
+    totalWaves: 7,
+    enemiesPerWave: [4, 5, 5, 5, 6, 6, 6],
+    enemyTypes: [
+      { type: 'FIGHTER', minWave: 1, maxCount: 4 },
+      { type: 'SNIPER', minWave: 1, maxCount: 4 },
+      { type: 'SCOUT', minWave: 1, maxCount: 2 },
+      { type: 'ACE', minWave: 2, maxCount: 3 },
+      { type: 'HEAVY', minWave: 3, maxCount: 2 },
+    ],
+    waveInterval: 5,
+    // 第九章目标：保护友军预警机，民航客机正在撤离
+    eventTemplates: [
+      LevelWaveEventType.INTERCEPT,
+      LevelWaveEventType.ESCORT_DEFENSE,
+      LevelWaveEventType.ELITE_HUNT,
+    ],
+    powerUpFrequency: 0.5,
+    powerUpTypes: ['HEALTH', 'SHIELD', 'DAMAGE', 'SPEED', 'MULTISHOT', 'BOMB'],
+    difficulty: 10,
+  },
+
+  {
+    id: 10,
+    name: CHAPTER_TITLES[9],
+    description: {
+      en: 'Break every defense line of the Obsidian Citadel for the final battle with ORACLE',
+      zh: '陨石坑中央的黑曜城堡，突破全部防线，与神谕进行最后的决战',
+    },
+    terrain: TerrainType.CITADEL,
+    groundColor: 0x4c4648,
+    fogColor: 0x2a1c44,
+    skyColors: ['#03020a', '#100a28', '#2c1a4c', '#5a2a5a'],
+    environment: {
+      ...DEFAULT_LEVEL_SCENE_CONFIG.environment,
+      // 神谕之夜：靛黑天顶 → 紫罗兰 → 被熔火与霓虹映亮的梅紫地平线
+      backgroundGradient: ['#03020a', '#100a28', '#2c1a4c', '#5a2a5a'],
+      fogColor: 0x2a1c44,
+      fogNear: 260,
+      fogFar: 2900,
+      fogDensity: 0.00042,
+      cloudCover: 0.32,
+      cloudTint: 0x4a3c6c,
+      cloudSpeed: 2.6,
+      cloudHeightMin: 420,
+      cloudHeightMax: 600,
+      weatherIntensity: 0.4,
+      particleCount: 260,
+      particleSize: 2.6,
+      particleSpeed: 5,
+      particleDrift: 3,
+      particleColor: 0x8a7a96,
+      waterWaveScale: 0.5,
+      skyGlow: 0x8a7aff,
+      surfaceProfile: {
+        groundBaseColor: 0x2e2a38,
+        groundAccentColor: 0x5e566a,
+        groundDetailColor: 0x1c1926,
+        groundEmissiveColor: 0x3a1430,
+      },
+      // 神谕核心调色板：灰紫玄武岩、浅色火山灰台阶、墨紫黑曜石、冷蓝金属；
+      // 发光色交给材质：神谕品红、数据青、熔岩橙、白炽核心
+      designTokens: {
+        terrainPrimary: 0x4c4648,
+        terrainSecondary: 0x2e2a30,
+        terrainAccent: 0x7a7274,
+        vegetation: 0x2a2a30,
+        vegetationAccent: 0x3a3a44,
+        water: 0x1a1030,
+        waterDeep: 0x0a0618,
+        waterSparkle: 0xff5aa0,
+        structure: 0x1a1828,
+        structureAccent: 0x4a4e66,
+        glow: 0xff2a7a,
+        horizonHaze: 0x3a2450,
+        distantSilhouette: 0x161024,
+      },
+    },
+    lighting: {
+      ...DEFAULT_LEVEL_SCENE_CONFIG.lighting,
+      // 冷月主光（西南方高悬）+ 紫罗兰天光；地面半球光是熔岩的橙色反照
+      ambientColor: 0x5a5070,
+      ambientIntensity: 0.5,
+      hemisphereSkyColor: 0x6a64a8,
+      hemisphereGroundColor: 0xff6a2a,
+      hemisphereIntensity: 0.7,
+      sunColor: 0xc8ccff,
+      sunIntensity: 1.7,
+      sunPosition: { x: -180, y: 230, z: 170 },
+      shadowMapSize: 1024,
+    },
+    weather: {
+      ...DEFAULT_LEVEL_SCENE_CONFIG.weather,
+      preset: 'ash',
+      windStrength: 0.3,
+      cloudCoverage: 0.32,
+      precipitation: 0.15,
+      turbulence: 0.36,
+      windAngle: -1.9,
+      cloudOpacity: 0.7,
+      cloudTint: 0x4a3c6c,
+      cloudSpeed: 2.6,
+      cloudHeightMin: 420,
+      cloudHeightMax: 600,
+      intensity: 0.4,
+      fogDensity: 0.00042,
+      particleCount: 260,
+      particleSize: 2.6,
+      particleSpeed: 5,
+      particleDrift: 3,
+      particleColor: 0x8a7a96,
+      waterWaveScale: 0.5,
+      skyGlow: 0x8a7aff,
+    },
+    // 最终决战：最强泛光（霓虹、熔岩、核心光柱）、高对比与最深暗角
+    postFx: {
+      ...DEFAULT_LEVEL_SCENE_CONFIG.postFx,
+      exposure: 1.08,
+      contrast: 1.16,
+      saturation: 1.12,
+      bloomStrength: 0.46,
+      vignetteStrength: 0.3,
+    },
+    totalWaves: 8,
+    enemiesPerWave: [3, 3, 4, 4, 4, 4, 5, 5],
+    enemyTypes: [
+      { type: 'FIGHTER', minWave: 1, maxCount: 4 },
+      { type: 'HEAVY', minWave: 1, maxCount: 2 },
+      { type: 'SCOUT', minWave: 1, maxCount: 2 },
+      { type: 'SNIPER', minWave: 2, maxCount: 3 },
+      { type: 'ACE', minWave: 2, maxCount: 4 },
+    ],
+    waveInterval: 4.5,
+    eventTemplates: [
+      LevelWaveEventType.ELITE_HUNT,
+      LevelWaveEventType.INTERCEPT,
+      LevelWaveEventType.ESCORT_DEFENSE,
+      LevelWaveEventType.ELITE_HUNT,
+    ],
+    powerUpFrequency: 0.55,
+    powerUpTypes: ['HEALTH', 'SHIELD', 'DAMAGE', 'SPEED', 'MULTISHOT', 'BOMB'],
+    difficulty: 10,
+  },
 ];
 
 /**

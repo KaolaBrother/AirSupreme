@@ -29,6 +29,8 @@ export class GameLoop {
 
   private targetFps: number = this.DEFAULT_FPS;
   private minFps: number = this.MIN_FPS;
+  /** 模拟时间倍率（固定步长不变，每帧多跑几步）；只在开发构建可改（见 setTimeScale），默认 1 */
+  private timeScale: number = 1;
 
   private get targetFrameTime(): number {
     return 1000 / this.targetFps;
@@ -65,10 +67,7 @@ export class GameLoop {
   /**
    * 启动游戏循环
    */
-  public start(
-    update: (deltaTime: number) => void,
-    render: (alpha: number) => void
-  ): void {
+  public start(update: (deltaTime: number) => void, render: (alpha: number) => void): void {
     if (this.isRunning) return;
 
     this.isRunning = true;
@@ -92,7 +91,7 @@ export class GameLoop {
       this.evaluateAutoQuality(rawDeltaTime);
 
       // 防止"死亡螺旋"（切换标签页后的大延迟）
-      const deltaTime = Math.min(rawDeltaTime, this.maxDeltaTime);
+      const deltaTime = Math.min(rawDeltaTime, this.maxDeltaTime) * this.timeScale;
 
       // 固定时间步长更新
       this.accumulator += deltaTime;
@@ -102,13 +101,31 @@ export class GameLoop {
       }
 
       // 将剩余累积时间作为插值系数传给渲染层，降低固定步长下的视觉跳变
-      const alpha = this.targetFrameTime > 0
-        ? Math.max(0, Math.min(1, this.accumulator / this.targetFrameTime))
-        : 1;
+      const alpha =
+        this.targetFrameTime > 0
+          ? Math.max(0, Math.min(1, this.accumulator / this.targetFrameTime))
+          : 1;
       render(alpha);
     };
 
     requestAnimationFrame(loop);
+  }
+
+  /**
+   * 模拟时间倍率（1..16），只在开发构建生效：调试钩子（src/core/dev/DevHooks.ts，
+   * window.__AIR_SUPREME_DEV__.setTimeScale）用它在软件渲染（1-4 fps）下加速推进游戏时间，
+   * 做长流程的端到端验证。正式版没有调用方；生产构建里 import.meta.env.DEV 为 false，
+   * 本方法被常量折叠为空操作，timeScale 恒为 1（getTimeScale 供渲染插值使用，返回 1）。
+   */
+  public setTimeScale(scale: number): void {
+    if (!import.meta.env.DEV) {
+      return;
+    }
+    this.timeScale = Number.isFinite(scale) ? Math.max(1, Math.min(16, scale)) : 1;
+  }
+
+  public getTimeScale(): number {
+    return this.timeScale;
   }
 
   /**
@@ -147,9 +164,10 @@ export class GameLoop {
     const targetFPS = GameConfig.getTargetFPSForPreset(preset);
 
     this.targetFps = Math.min(Math.max(targetFPS, this.MIN_FPS), this.MAX_FPS);
-    this.minFps = preset === 'quality'
-      ? Math.max(Math.round(this.targetFps * 0.6), this.MIN_FPS)
-      : this.MIN_FPS;
+    this.minFps =
+      preset === 'quality'
+        ? Math.max(Math.round(this.targetFps * 0.6), this.MIN_FPS)
+        : this.MIN_FPS;
   }
 
   private resetFrameStats(): void {
@@ -191,8 +209,8 @@ export class GameLoop {
 
     this.autoQualityCheckTimer += frameTimeMs;
     if (
-      this.frameTimeSamples.length < Math.min(30, this.FRAME_STATS_SAMPLE_LIMIT)
-      || this.autoQualityCheckTimer < this.AUTO_QUALITY_CHECK_INTERVAL
+      this.frameTimeSamples.length < Math.min(30, this.FRAME_STATS_SAMPLE_LIMIT) ||
+      this.autoQualityCheckTimer < this.AUTO_QUALITY_CHECK_INTERVAL
     ) {
       return;
     }
@@ -241,10 +259,7 @@ export class GameLoop {
   }
 
   private getTargetFPSForPreset(preset: Exclude<QualityPreset, 'auto'>): number {
-    return Math.min(
-      Math.max(GameConfig.getTargetFPSForPreset(preset), this.MIN_FPS),
-      this.MAX_FPS
-    );
+    return Math.min(Math.max(GameConfig.getTargetFPSForPreset(preset), this.MIN_FPS), this.MAX_FPS);
   }
 
   private getAdjacentPreset(

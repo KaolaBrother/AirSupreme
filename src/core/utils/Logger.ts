@@ -24,8 +24,9 @@ export interface LoggerConfig {
 class LoggerManager {
   private readonly isDevMode = import.meta.env.MODE === 'development';
 
+  // 开发构建输出全部日志；其余（生产 / 预览 / 测试）只输出警告与错误
   private config: LoggerConfig = {
-    minLevel: this.isDevMode ? LogLevel.DEBUG : LogLevel.INFO,
+    minLevel: this.isDevMode ? LogLevel.DEBUG : LogLevel.WARN,
     enableConsole: true,
     enableStorage: this.isDevMode,
     maxStorageEntries: 1000,

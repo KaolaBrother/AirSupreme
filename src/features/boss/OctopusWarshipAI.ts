@@ -71,7 +71,8 @@ export class OctopusWarshipAI {
     this.health = new HealthSystem(config.health);
 
     this.laserSystem = new LaserSweepSystem(this.getScene());
-    this.eyeSystem = new EyeSystem(this.getScene());
+    // 光弹伤害取 Boss 配置的 eyeDamage（已按难度调整）
+    this.eyeSystem = new EyeSystem(this.getScene(), config.eyeDamage ?? EYE_CONFIG.DAMAGE);
 
     // 从 mesh 中提取 body parts（由 createOctopusWarshipMesh 设置）
     this.parts = (mesh as BossGroup).bossParts || [];
@@ -539,7 +540,7 @@ export class OctopusWarshipAI {
   }
 
   public getEyeDamage(): number {
-    return EYE_CONFIG.DAMAGE;
+    return this.eyeSystem.getDamage();
   }
 
   public getMissileSystem(): null {

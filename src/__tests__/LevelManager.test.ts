@@ -1,7 +1,11 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { LevelManager, LevelState } from '@/features/levels/LevelManager';
 import { LevelWaveEventType } from '@/features/terrain/LevelConfig';
+import { setLocale, type LocalizedText } from '@/i18n';
 import * as THREE from 'three';
+import { LOCALES, resetLocale, textIn } from './i18nTestUtils';
+
+const INTERCEPT_LABEL: LocalizedText = { en: 'Intercept', zh: '限时拦截' };
 
 vi.mock('@/features/terrain/TerrainGenerator', () => ({
   TerrainGenerator: vi.fn().mockImplementation(() => ({
@@ -18,6 +22,10 @@ describe('LevelManager', () => {
     vi.clearAllMocks();
     scene = new THREE.Scene();
     levelManager = new LevelManager(scene);
+  });
+
+  afterEach(() => {
+    resetLocale();
   });
 
   describe('constructor', () => {
@@ -173,19 +181,25 @@ describe('LevelManager', () => {
       expect(onWaveEventStart).toHaveBeenCalledWith(LevelWaveEventType.ESCORT_DEFENSE, 3);
     });
 
-    it('should expose onboarding beat data in wave progress snapshots', () => {
-      (levelManager as unknown as { currentWave: number; state: LevelState }).currentWave = 1;
-      (levelManager as unknown as { currentWave: number; state: LevelState }).state =
-        LevelState.WAVE_COMPLETE;
+    it.each(LOCALES)(
+      'should expose onboarding beat data in wave progress snapshots (%s)',
+      (locale) => {
+        // 波次开始时按当前界面语言取标签
+        setLocale(locale);
+        (levelManager as unknown as { currentWave: number; state: LevelState }).currentWave = 1;
+        (levelManager as unknown as { currentWave: number; state: LevelState }).state =
+          LevelState.WAVE_COMPLETE;
 
-      levelManager.startWave(undefined, true);
+        levelManager.startWave(undefined, true);
 
-      const snapshot = levelManager.getWaveProgressSnapshot();
-      expect(snapshot).not.toBeNull();
-      expect(snapshot?.eventType).toBe(LevelWaveEventType.INTERCEPT);
-      expect(snapshot?.onboardingBeat.eventTypeLabel).toBe('限时拦截');
-      expect(snapshot?.onboardingBeat.eventPromptDelayMs).toBeGreaterThan(0);
-      expect(levelManager.getCurrentWaveOnboardingBeat().eventBannerLabel).toContain('限时拦截');
-    });
+        const label = textIn(INTERCEPT_LABEL, locale);
+        const snapshot = levelManager.getWaveProgressSnapshot();
+        expect(snapshot).not.toBeNull();
+        expect(snapshot?.eventType).toBe(LevelWaveEventType.INTERCEPT);
+        expect(snapshot?.onboardingBeat.eventTypeLabel).toBe(label);
+        expect(snapshot?.onboardingBeat.eventPromptDelayMs).toBeGreaterThan(0);
+        expect(levelManager.getCurrentWaveOnboardingBeat().eventBannerLabel).toContain(label);
+      }
+    );
   });
 });

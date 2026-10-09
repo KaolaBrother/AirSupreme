@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { BossConfig, FlakCannonPosition, FLAK_CANNON_CONFIG } from './BossTypes';
 import { HealthSystem } from '@/features/combat/HealthSystem';
+import { TargetLeadTracker } from './BossAim';
 import { BossMissileSystem } from './BossMissileSystem';
 import { FlakCannonSystem } from './FlakCannonSystem';
 import { ParticleSystem } from '@/features/effects/ParticleSystem';
@@ -8,6 +9,14 @@ import { ParticleSystem } from '@/features/effects/ParticleSystem';
 type BossGroup = THREE.Group & {
   bossParts?: THREE.Mesh[];
 };
+
+/**
+ * 「沙墙」高炮：按拦截点的 50% 提前量瞄准玩家、弹速 80 米/秒，炸点 ±25 米散布——
+ * 直线进入的攻击航线会被弹幕咬住，变换进入方向 / 蛇行可以躲开。
+ */
+const FLAK_SPEED = 80;
+const FLAK_LEAD = 0.5;
+const FLAK_SCATTER = 50;
 
 export class DesertFortressAI {
   private static readonly CRITICAL_HEALTH_THRESHOLD = 0.24;
@@ -41,6 +50,8 @@ export class DesertFortressAI {
   private readonly terminalColor = new THREE.Color(0xff321a);
 
   private flakCooldown: number = 0;
+  /** 玩家速度估计（高炮提前量） */
+  private readonly playerTracker = new TargetLeadTracker();
   private currentFlakCannon: FlakCannonPosition = FlakCannonPosition.FRONT_LEFT;
   private missileCooldown: number = 0;
   private currentMissileLauncher: number = 0;
@@ -75,14 +86,16 @@ export class DesertFortressAI {
     this.config = config;
     this.health = new HealthSystem(config.health);
 
-    this.missileSystem = new BossMissileSystem(scene, particleSystem);
+    this.missileSystem = new BossMissileSystem(scene, particleSystem, config.missileDamage);
 
+    // 高炮弹伤害取 Boss 配置的 damage（已按难度调整）
     this.flakCannonSystem = new FlakCannonSystem(
       scene,
       FLAK_CANNON_CONFIG.AOE_RADIUS,
       (position, radius, damage) => {
         this.onFlakExplode?.(position, radius, damage);
-      }
+      },
+      config.damage
     );
 
     this.missileCooldown = config.missileFireInterval;
@@ -103,6 +116,7 @@ export class DesertFortressAI {
     this.playerMesh = playerMesh;
     this.friendlyMeshes = friendlyMeshes;
     this.animationTime += deltaTime;
+    this.playerTracker.update(deltaTime, playerMesh?.position);
     this.hitFlashTimer = Math.max(0, this.hitFlashTimer - deltaTime);
 
     this.flakCooldown -= deltaTime;
@@ -330,11 +344,20 @@ export class DesertFortressAI {
     if (!target) return;
 
     const targetPosition = target.position.clone();
-    targetPosition.x += (Math.random() - 0.5) * 54;
+    if (target === this.playerMesh) {
+      this.playerTracker.leadPoint(
+        firePosition,
+        target.position,
+        FLAK_SPEED,
+        FLAK_LEAD,
+        targetPosition
+      );
+    }
+    targetPosition.x += (Math.random() - 0.5) * FLAK_SCATTER;
     targetPosition.y += (Math.random() - 0.35) * 18;
-    targetPosition.z += (Math.random() - 0.5) * 54;
+    targetPosition.z += (Math.random() - 0.5) * FLAK_SCATTER;
 
-    this.flakCannonSystem.fire(firePosition, targetPosition);
+    this.flakCannonSystem.fire(firePosition, targetPosition, { speed: FLAK_SPEED });
     this.onFlakFire?.(firePosition);
   }
 

@@ -52,7 +52,8 @@ describe('Boss System Integration', () => {
       const boss = new BossAI(mesh, config, scene, mockParticleSystem);
 
       expect(boss.isAlive()).toBe(true);
-      expect(boss.getHealth().max).toBe(2000);
+      // 生命值以配置为准（具体数值由平衡标定，见 BossTypes.test.ts）
+      expect(boss.getHealth()).toEqual({ current: config.health, max: config.health });
       expect(boss.getMesh().children.length).toBeGreaterThan(5);
     });
   });
@@ -206,8 +207,8 @@ describe('Boss System Integration', () => {
   });
 
   describe('Boss Level Progression', () => {
-    it('should have boss for each level 1-5', () => {
-      for (let level = 1; level <= 5; level++) {
+    it('should have boss for each level 1-10', () => {
+      for (let level = 1; level <= 10; level++) {
         const bossType = getBossForLevel(level);
         expect(bossType).not.toBeNull();
 
@@ -220,8 +221,9 @@ describe('Boss System Integration', () => {
 
     it('should return null for invalid levels', () => {
       expect(getBossForLevel(0)).toBeNull();
-      expect(getBossForLevel(6)).toBeNull();
+      expect(getBossForLevel(11)).toBeNull();
       expect(getBossForLevel(-1)).toBeNull();
+      expect(getBossForLevel(100)).toBeNull();
     });
   });
 

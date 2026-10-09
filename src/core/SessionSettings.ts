@@ -1,11 +1,19 @@
 import { type QualityPreset } from '@/config';
+import { TOTAL_LEVELS } from '@/features/campaign/CampaignData';
+import { DEFAULT_LOCALE, SUPPORTED_LOCALES, normalizeLocale, type Locale } from '@/i18n';
 
 export type GameMode = 'normal' | 'boss';
+
+/** 视角偏好（与 CameraRig 的 CameraMode 取值一致） */
+export type CameraModeSetting = 'third-person' | 'first-person';
 
 export interface AudioSettings {
   sfxVolume: number;
   musicVolume: number;
 }
+
+/** 角色配音音量的缺省值（0..1；0 = 纯文字，不加载语音） */
+export const DEFAULT_VOICE_VOLUME = 0.9;
 
 export interface PresentationSettings {
   qualityPreset: QualityPreset;
@@ -16,12 +24,17 @@ export interface StartFlowSettings {
   difficulty: number;
   sfxVolume: number;
   musicVolume: number;
+  /** 角色配音音量 0..1（旧存档没有该字段时取缺省值） */
+  voiceVolume: number;
   qualityPreset: QualityPreset;
   tutorialEnabled: boolean;
   playerLives: number;
   startLevel: number;
   gameMode: GameMode;
   testScore: number;
+  cameraMode: CameraModeSetting;
+  /** 界面语言：默认英文（不跟随浏览器语言），可在开始菜单 / 暂停菜单切换为简体中文 */
+  language: Locale;
 }
 
 export interface SessionSettingsSnapshot {
@@ -37,12 +50,15 @@ export const DEFAULT_START_FLOW_SETTINGS: StartFlowSettings = {
   difficulty: 3,
   sfxVolume: 0.7,
   musicVolume: 0.7,
+  voiceVolume: DEFAULT_VOICE_VOLUME,
   qualityPreset: 'auto',
   tutorialEnabled: true,
   playerLives: 3,
   startLevel: 1,
   gameMode: 'normal',
   testScore: 0,
+  cameraMode: 'third-person',
+  language: DEFAULT_LOCALE,
 };
 
 /** 开始菜单与暂停设置共用的 localStorage 键 */
@@ -51,6 +67,23 @@ export const START_MENU_STORAGE_KEY = 'air-supreme:start-menu-settings';
 export const TEST_SCORE_OPTIONS = [0, 5000, 10000, 15000, 20000] as const;
 export type TestScoreOption = (typeof TEST_SCORE_OPTIONS)[number];
 export const MAX_TEST_SCORE = TEST_SCORE_OPTIONS[TEST_SCORE_OPTIONS.length - 1];
+
+/**
+ * 语言设置的选项名：每种语言用它自己的写法（English / 中文），不随界面语言变化，
+ * 这样看不懂当前界面语言的玩家也能认出自己的语言。
+ */
+export const LANGUAGE_ENDONYMS: Readonly<Record<Locale, string>> = {
+  en: 'English',
+  'zh-CN': '中文',
+};
+
+/** 按 SUPPORTED_LOCALES 的顺序循环切换语言（菜单里的 - / +） */
+export function stepLanguage(current: Locale, direction: 1 | -1): Locale {
+  const count = SUPPORTED_LOCALES.length;
+  const index = SUPPORTED_LOCALES.indexOf(normalizeLocale(current));
+  const from = index >= 0 ? index : 0;
+  return SUPPORTED_LOCALES[(from + direction + count) % count];
+}
 
 const QUALITY_PRESETS: QualityPreset[] = ['auto', 'performance', 'balanced', 'quality'];
 
@@ -85,10 +118,15 @@ function normalizeGameMode(value: unknown, fallback: GameMode = 'normal'): GameM
   return value === 'boss' ? 'boss' : fallback;
 }
 
-function normalizeTestScore(
+/** 非法值回退到 fallback（默认第三人称） */
+export function normalizeCameraModeSetting(
   value: unknown,
-  fallback: TestScoreOption = 0
-): TestScoreOption {
+  fallback: CameraModeSetting = 'third-person'
+): CameraModeSetting {
+  return value === 'first-person' || value === 'third-person' ? value : fallback;
+}
+
+function normalizeTestScore(value: unknown, fallback: TestScoreOption = 0): TestScoreOption {
   const clamped = clampInt(value, 0, MAX_TEST_SCORE, fallback);
   let closest: TestScoreOption = TEST_SCORE_OPTIONS[0];
   let closestDistance = Math.abs(clamped - closest);
@@ -108,37 +146,38 @@ export function normalizeStartFlowSettings(raw?: Partial<StartFlowSettings>): St
   const source = raw ?? {};
 
   return {
-    difficulty: clampInt(
-      source.difficulty,
-      1,
-      5,
-      DEFAULT_START_FLOW_SETTINGS.difficulty
-    ),
+    difficulty: clampInt(source.difficulty, 1, 5, DEFAULT_START_FLOW_SETTINGS.difficulty),
     sfxVolume: clampUnit(source.sfxVolume, DEFAULT_START_FLOW_SETTINGS.sfxVolume),
     musicVolume: clampUnit(source.musicVolume, DEFAULT_START_FLOW_SETTINGS.musicVolume),
+    voiceVolume: clampUnit(source.voiceVolume, DEFAULT_START_FLOW_SETTINGS.voiceVolume),
     qualityPreset: normalizeQualityPreset(source.qualityPreset),
     tutorialEnabled:
       typeof source.tutorialEnabled === 'boolean'
         ? source.tutorialEnabled
         : DEFAULT_START_FLOW_SETTINGS.tutorialEnabled,
-    playerLives: clampInt(
-      source.playerLives,
-      1,
-      9,
-      DEFAULT_START_FLOW_SETTINGS.playerLives
-    ),
+    playerLives: clampInt(source.playerLives, 1, 9, DEFAULT_START_FLOW_SETTINGS.playerLives),
     startLevel: clampInt(
       source.startLevel,
       1,
-      5,
+      TOTAL_LEVELS,
       DEFAULT_START_FLOW_SETTINGS.startLevel
     ),
     gameMode: normalizeGameMode(source.gameMode, DEFAULT_START_FLOW_SETTINGS.gameMode),
     testScore: normalizeTestScore(source.testScore),
+    cameraMode: normalizeCameraModeSetting(
+      source.cameraMode,
+      DEFAULT_START_FLOW_SETTINGS.cameraMode
+    ),
+    // 旧存档没有该字段 / 无法识别的值一律回到默认英文
+    language: normalizeLocale(source.language),
   };
 }
 
-function getLocalStorage(): Storage | null {
+/**
+ * 调用时才访问 window.localStorage；不可用（无 DOM、隐私模式、权限拒绝）时返回 null。
+ * 存档系统复用同一入口，保证所有持久化都“读写失败不抛出”。
+ */
+export function getLocalStorage(): Storage | null {
   try {
     const storage = window.localStorage;
     if (
@@ -208,7 +247,9 @@ export function saveStartFlowSettings(settings?: Partial<StartFlowSettings>): vo
   }
 }
 
-export function getAudioSettings(settings: Pick<StartFlowSettings, 'sfxVolume' | 'musicVolume'>): AudioSettings {
+export function getAudioSettings(
+  settings: Pick<StartFlowSettings, 'sfxVolume' | 'musicVolume'>
+): AudioSettings {
   return {
     sfxVolume: clampUnit(settings.sfxVolume, DEFAULT_START_FLOW_SETTINGS.sfxVolume),
     musicVolume: clampUnit(settings.musicVolume, DEFAULT_START_FLOW_SETTINGS.musicVolume),

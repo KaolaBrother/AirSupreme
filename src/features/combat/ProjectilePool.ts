@@ -16,6 +16,32 @@ import {
 } from 'three';
 import { GameConfig, GAME_CONSTANTS } from '@/config';
 import { getVfxTextures } from '@/features/effects/ParticleSystem';
+import { getDeclaredHitRadius } from '@/core/CombatContracts';
+
+/**
+ * 环境命中面：固定高度（旧行为），或按 (x, z) 采样的地表高度（第 6-10 关的高耸地形）。
+ */
+export type ProjectileImpactSurface = number | ((x: number, z: number) => number);
+
+/** 命中阈值（米）：目标未声明 userData.hitRadius 时沿用旧的 5 米 */
+const DEFAULT_COLLISION_THRESHOLD = 5;
+/** 声明了很小命中半径的部件也至少按 2 米判定，避免高速子弹穿过 */
+const MIN_COLLISION_THRESHOLD = 2;
+
+/** 子弹是否撞上环境面（支持固定高度与地表采样两种形式） */
+export function isBelowImpactSurface(
+  position: Vector3,
+  surface: ProjectileImpactSurface | undefined
+): boolean {
+  if (typeof surface === 'number') {
+    return position.y <= surface;
+  }
+  if (typeof surface === 'function') {
+    const surfaceY = surface(position.x, position.z);
+    return Number.isFinite(surfaceY) && position.y <= surfaceY;
+  }
+  return false;
+}
 
 /**
  * 子弹数据
@@ -43,6 +69,7 @@ interface Projectile {
 }
 
 const FORWARD = new Vector3(0, 0, 1);
+const targetWorldPosition = new Vector3();
 
 /**
  * 子弹对象池
@@ -209,7 +236,7 @@ export class ProjectilePool {
    */
   public update(
     deltaTime: number,
-    impactHeight?: number,
+    impactHeight?: ProjectileImpactSurface,
     onEnvironmentHit?: (position: Vector3) => void
   ): void {
     for (const projectile of this.pool) {
@@ -219,10 +246,7 @@ export class ProjectilePool {
       projectile.mesh.position.addScaledVector(projectile.direction, projectile.speed * deltaTime);
       this.updateProjectileVisual(projectile);
 
-      if (
-        typeof impactHeight === 'number'
-        && projectile.mesh.position.y <= impactHeight
-      ) {
+      if (isBelowImpactSurface(projectile.mesh.position, impactHeight)) {
         onEnvironmentHit?.(projectile.mesh.position.clone());
         this.deactivate(projectile);
         continue;
@@ -237,7 +261,8 @@ export class ProjectilePool {
   }
 
   /**
-   * 检查碰撞
+   * 检查碰撞：命中半径取目标声明的 userData.hitRadius（大型舰船 / Boss 部件），
+   * 未声明时沿用 5 米。
    */
   public checkCollisions(
     targets: Object3D[],
@@ -251,11 +276,13 @@ export class ProjectilePool {
 
         if (projectile.owner && target === projectile.owner) continue;
 
-        const targetWorldPos = new Vector3();
-        target.getWorldPosition(targetWorldPos);
+        target.getWorldPosition(targetWorldPosition);
 
-        const distance = projectile.mesh.position.distanceTo(targetWorldPos);
-        const collisionThreshold = 5;
+        const distance = projectile.mesh.position.distanceTo(targetWorldPosition);
+        const collisionThreshold = Math.max(
+          MIN_COLLISION_THRESHOLD,
+          getDeclaredHitRadius(target, DEFAULT_COLLISION_THRESHOLD)
+        );
 
         if (distance < collisionThreshold) {
           onHit(target, projectile.mesh, projectile.damage);
@@ -264,6 +291,30 @@ export class ProjectilePool {
         }
       }
     }
+  }
+
+  /**
+   * 自定义命中判定（例如单位系统的 hitTest）：对每颗活跃子弹调用 test，
+   * 返回 true 表示命中并回收该子弹。position 为子弹世界坐标（只读，勿保存引用）。
+   */
+  public consumeHits(
+    test: (position: Vector3, damage: number, faction: string | undefined, owner?: Object3D) => boolean
+  ): void {
+    for (const projectile of this.pool) {
+      if (!projectile.active) continue;
+      const faction = projectile.mesh.userData.faction as string | undefined;
+      if (test(projectile.mesh.position, projectile.damage, faction, projectile.owner)) {
+        this.deactivate(projectile);
+      }
+    }
+  }
+
+  /** 是否存在活跃子弹（无子弹时可跳过逐弹判定） */
+  public hasActiveProjectiles(): boolean {
+    for (const projectile of this.pool) {
+      if (projectile.active) return true;
+    }
+    return false;
   }
 
   /**

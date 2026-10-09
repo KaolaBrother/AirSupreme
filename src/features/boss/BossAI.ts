@@ -5,6 +5,12 @@ import { ParticleTrailRenderer } from '@/features/effects/ParticleTrailRenderer'
 import { BossMissileSystem } from './BossMissileSystem';
 import { ParticleSystem } from '@/features/effects/ParticleSystem';
 
+/**
+ * 重炮散布（弧度，偏航 / 俯仰各自均匀分布 ±一半）：第一关的教学 Boss 不该“弹无虚发”——
+ * 玩家咬尾时正好落在炮线上，以前几乎每发都中，一场下来可能直接打掉满血。
+ */
+const CANNON_SPREAD = 0.12;
+
 type BossGroup = THREE.Group & {
   bossParts?: THREE.Mesh[];
   engineMeshes?: THREE.Mesh[];
@@ -89,7 +95,7 @@ export class BossAI {
     this.config = config;
     this.health = new HealthSystem(config.health);
 
-    this.missileSystem = new BossMissileSystem(scene, particleSystem);
+    this.missileSystem = new BossMissileSystem(scene, particleSystem, config.missileDamage);
     const bossGroup = mesh as BossGroup;
     this.weakpointMeshes = bossGroup.weakpointMeshes ?? [];
     this.muzzleMeshes = bossGroup.muzzleMeshes ?? [];
@@ -397,6 +403,10 @@ export class BossAI {
     }
 
     const direction = new THREE.Vector3().subVectors(targetPosition, firePosition).normalize();
+    direction.x += (Math.random() - 0.5) * CANNON_SPREAD;
+    direction.y += (Math.random() - 0.5) * CANNON_SPREAD;
+    direction.z += (Math.random() - 0.5) * CANNON_SPREAD;
+    direction.normalize();
 
     this.onFire?.(firePosition, direction, this.config.damage);
   }

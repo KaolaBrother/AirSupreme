@@ -1,3 +1,4 @@
+import { createOutputChain } from '@/core/Audio/AudioKit';
 import { getLogger } from '@/core/utils/Logger';
 
 const log = getLogger('AudioContextHost');
@@ -127,6 +128,22 @@ export function unlockAudioFromUserGesture(): void {
     return;
   }
   resumeContext(context);
+}
+
+const outputNodes = new WeakMap<BaseAudioContext, AudioNode>();
+
+/**
+ * 共享输出总线入口（限幅器 + 软削波 → destination）。
+ * 音效与音乐都汇入同一条链路，密集战斗叠加时总输出也不会削波；每个上下文只建一次。
+ */
+export function getSharedOutputNode(context: BaseAudioContext): AudioNode {
+  const cached = outputNodes.get(context);
+  if (cached) {
+    return cached;
+  }
+  const node = createOutputChain(context, context.destination).input;
+  outputNodes.set(context, node);
+  return node;
 }
 
 /**

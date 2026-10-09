@@ -13,6 +13,31 @@ export interface InputState {
   fire: boolean;
   missile: boolean; // 导弹发射
   throttle: boolean;
+  /** 特殊武器扳机（F 键 / 移动端特殊武器按钮）：按住持续照射 / 蓄力 */
+  special: boolean;
+}
+
+/** 数字键 → 特殊武器槽位（0 基，对应 SPECIAL_WEAPON_IDS 顺序） */
+const WEAPON_SLOT_KEYS: Readonly<Record<string, number>> = {
+  Digit1: 0,
+  Digit2: 1,
+  Digit3: 2,
+  Digit4: 3,
+  Digit5: 4,
+  Numpad1: 0,
+  Numpad2: 1,
+  Numpad3: 2,
+  Numpad4: 3,
+  Numpad5: 4,
+};
+
+/** 焦点在表单控件上时不拦截 Tab（菜单仍可用键盘切换焦点） */
+function isFormControlFocused(): boolean {
+  if (typeof document === 'undefined') return false;
+  const active = document.activeElement;
+  if (!active) return false;
+  const tag = active.tagName;
+  return tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA' || tag === 'BUTTON';
 }
 
 /**
@@ -32,9 +57,35 @@ export class InputHandler {
   private throttlePressed: boolean = false;
   private missilePressed: boolean = false;
   private upgradePressed: boolean = false;
+  /** 桌面 Esc / P 的按住状态（isPauseToggled 取按下沿） */
   private pausePressed: boolean = false;
   private previousPauseState: boolean = false;
+  /** 移动端暂停键的单击锁存：touchstart 置位，游戏消费一次后清除（帧率再低也不丢） */
+  private pauseTapQueued: boolean = false;
   private previousUpgradeState: boolean = false;
+  private specialPressed: boolean = false;
+
+  // 单次触发的按键（按下沿锁存，update 中消费，帧率再低也不会丢）
+  private cameraToggleQueued: boolean = false;
+  private weaponCycleQueued: boolean = false;
+  private weaponSlotQueued: number = -1;
+  private flareQueued: boolean = false;
+  /** F / 特殊武器按钮的按下沿：低帧率下即使按键短于一帧，下一次模拟步也能看到一次扣扳机 */
+  private specialTapQueued: boolean = false;
+
+  /** getState() 复用的结果对象（每个模拟步调用一次，避免逐帧分配） */
+  private readonly state: InputState = {
+    pitchUp: false,
+    pitchDown: false,
+    yawLeft: false,
+    yawRight: false,
+    rollLeft: false,
+    rollRight: false,
+    fire: false,
+    missile: false,
+    throttle: false,
+    special: false,
+  };
 
   private isMobile: boolean;
 
@@ -73,12 +124,31 @@ export class InputHandler {
 
   private readonly handleKeyDown = (event: Event): void => {
     const keyboardEvent = event as KeyboardEvent;
-    this.keys.add(keyboardEvent.code);
-    if (keyboardEvent.code === 'Escape' || keyboardEvent.code === 'KeyP') {
+    const code = keyboardEvent.code;
+    this.keys.add(code);
+    if (code === 'Escape' || code === 'KeyP') {
       this.pausePressed = true;
     }
-    if (keyboardEvent.code === 'KeyU') {
+    if (code === 'KeyU') {
       this.upgradePressed = true;
+    }
+    if (code === 'Tab' && !isFormControlFocused()) {
+      // Tab 用于切换特殊武器，不让浏览器移动焦点
+      keyboardEvent.preventDefault();
+    }
+    if (keyboardEvent.repeat) {
+      return;
+    }
+    if (code === 'KeyV') {
+      this.cameraToggleQueued = true;
+    } else if (code === 'Tab' || code === 'KeyX') {
+      this.weaponCycleQueued = true;
+    } else if (code === 'KeyG') {
+      this.flareQueued = true;
+    } else if (code in WEAPON_SLOT_KEYS) {
+      this.weaponSlotQueued = WEAPON_SLOT_KEYS[code];
+    } else if (code === 'KeyF') {
+      this.specialTapQueued = true;
     }
   };
 
@@ -253,23 +323,53 @@ export class InputHandler {
       this.addTrackedListener(missileButton, 'touchend', handleMissileEnd);
     }
 
-    // 移动端「升级」舱门打开暂停菜单，而非直接进入商店
-    if (upgradeButton) {
-      const handlePauseCabinStart = (e: TouchEvent): void => {
+    // 移动端「升级」舱门打开暂停菜单，而非直接进入商店；单击锁存，短于一帧的轻触也不丢
+    this.bindTapButton(upgradeButton, () => {
+      this.pauseTapQueued = true;
+    });
+
+    // 新增按钮（index.html 中存在时才绑定）：视角切换 / 特殊武器（按住）/ 切换武器 / 热焰弹
+    const cameraButton = document.getElementById('camera-button');
+    const specialButton = document.getElementById('special-button');
+    const cycleButton = document.getElementById('cycle-button');
+    const flareButton = document.getElementById('flare-button');
+    this.bindTapButton(cameraButton, () => {
+      this.cameraToggleQueued = true;
+    });
+    this.bindTapButton(cycleButton, () => {
+      this.weaponCycleQueued = true;
+    });
+    this.bindTapButton(flareButton, () => {
+      this.flareQueued = true;
+    });
+    if (specialButton) {
+      const handleSpecialStart = (e: TouchEvent): void => {
         e.preventDefault();
-        this.pausePressed = true;
+        this.specialPressed = true;
+        this.specialTapQueued = true;
       };
-      const handlePauseCabinEnd = (): void => {
-        this.pausePressed = false;
+      const handleSpecialEnd = (): void => {
+        this.specialPressed = false;
       };
-      this.addTrackedListener(upgradeButton, 'touchstart', handlePauseCabinStart, {
-        passive: false,
-      });
-      this.addTrackedListener(upgradeButton, 'touchend', handlePauseCabinEnd);
+      this.addTrackedListener(specialButton, 'touchstart', handleSpecialStart, { passive: false });
+      this.addTrackedListener(specialButton, 'touchend', handleSpecialEnd);
+      this.addTrackedListener(specialButton, 'touchcancel', handleSpecialEnd);
     }
 
     // 防止页面滚动
     this.addTrackedListener(document, 'touchmove', handlePreventMobileScroll, { passive: false });
+  }
+
+  /** 单击按钮：touchstart 锁存一次动作 */
+  private bindTapButton(button: HTMLElement | null, onTap: () => void): void {
+    if (!button) {
+      return;
+    }
+    const handleTap = (e: TouchEvent): void => {
+      e.preventDefault();
+      onTap();
+    };
+    this.addTrackedListener(button, 'touchstart', handleTap, { passive: false });
   }
 
   private addTrackedListener<T extends Event>(
@@ -301,12 +401,15 @@ export class InputHandler {
     this.firePressed = false;
     this.throttlePressed = false;
     this.missilePressed = false;
+    this.specialPressed = false;
+    this.resetActionQueue();
     this.resetPauseState();
     this.resetUpgradeState();
   }
 
   /**
-   * 获取当前输入状态
+   * 获取当前输入状态。
+   * 返回的是复用对象：每次调用都会覆盖上一次的结果，调用方只在当帧读取；需要跨帧保留请自行复制。
    */
   public getState(): InputState {
     if (this.isMobile) {
@@ -320,45 +423,96 @@ export class InputHandler {
    */
   private getMobileState(): InputState {
     const threshold = 0.3;
-    return {
-      pitchUp: this.joystickY < -threshold,
-      pitchDown: this.joystickY > threshold,
-      yawLeft: this.joystickX < -threshold,
-      yawRight: this.joystickX > threshold,
-      rollLeft: false,
-      rollRight: false,
-      fire: this.firePressed,
-      missile: this.missilePressed,
-      throttle: this.throttlePressed,
-    };
+    const state = this.state;
+    state.pitchUp = this.joystickY < -threshold;
+    state.pitchDown = this.joystickY > threshold;
+    state.yawLeft = this.joystickX < -threshold;
+    state.yawRight = this.joystickX > threshold;
+    state.rollLeft = false;
+    state.rollRight = false;
+    state.fire = this.firePressed;
+    state.missile = this.missilePressed;
+    state.throttle = this.throttlePressed;
+    state.special = this.specialPressed || this.takeSpecialTap();
+    return state;
   }
 
   /**
    * 获取桌面端输入状态
    */
   private getDesktopState(): InputState {
-    return {
-      pitchUp: this.keys.has('KeyW') || this.keys.has('ArrowUp'),
-      pitchDown: this.keys.has('KeyS') || this.keys.has('ArrowDown'),
-      yawLeft: this.keys.has('KeyA'),
-      yawRight: this.keys.has('KeyD'),
-      rollLeft: this.keys.has('KeyQ'),
-      rollRight: this.keys.has('KeyE'),
-      fire: this.keys.has('Space'),
-      missile: this.keys.has('KeyM') || this.keys.has('ShiftRight'), // M键或右Shift发射导弹
-      throttle: this.keys.has('ShiftLeft') || this.keys.has('ControlLeft'),
-    };
+    const keys = this.keys;
+    const state = this.state;
+    state.pitchUp = keys.has('KeyW') || keys.has('ArrowUp');
+    state.pitchDown = keys.has('KeyS') || keys.has('ArrowDown');
+    state.yawLeft = keys.has('KeyA');
+    state.yawRight = keys.has('KeyD');
+    state.rollLeft = keys.has('KeyQ');
+    state.rollRight = keys.has('KeyE');
+    state.fire = keys.has('Space');
+    state.missile = keys.has('KeyM') || keys.has('ShiftRight'); // M键或右Shift发射导弹
+    state.throttle = keys.has('ShiftLeft') || keys.has('ControlLeft');
+    state.special = keys.has('KeyF') || this.takeSpecialTap();
+    return state;
   }
 
+  /** V / 视角按钮：本帧是否请求切换第一 / 第三人称（读取即清除） */
+  public consumeCameraToggle(): boolean {
+    const queued = this.cameraToggleQueued;
+    this.cameraToggleQueued = false;
+    return queued;
+  }
+
+  /** Tab / X / 切换按钮：是否请求切换到下一件特殊武器（读取即清除） */
+  public consumeWeaponCycle(): boolean {
+    const queued = this.weaponCycleQueued;
+    this.weaponCycleQueued = false;
+    return queued;
+  }
+
+  /** 1-5：请求选择的武器槽位（0 基）；无请求返回 -1（读取即清除） */
+  public consumeWeaponSlot(): number {
+    const slot = this.weaponSlotQueued;
+    this.weaponSlotQueued = -1;
+    return slot;
+  }
+
+  /** G / 热焰弹按钮：是否请求投放热焰弹（读取即清除） */
+  public consumeFlareDeploy(): boolean {
+    const queued = this.flareQueued;
+    this.flareQueued = false;
+    return queued;
+  }
+
+  /** 读取并清除 F 的按下沿（getState 每个模拟步调用一次） */
+  private takeSpecialTap(): boolean {
+    const queued = this.specialTapQueued;
+    this.specialTapQueued = false;
+    return queued;
+  }
+
+  /** 清空所有单次动作（暂停 / 剧情卡片 / 换关时调用，避免恢复后误触发） */
+  public resetActionQueue(): void {
+    this.cameraToggleQueued = false;
+    this.weaponCycleQueued = false;
+    this.weaponSlotQueued = -1;
+    this.flareQueued = false;
+    this.specialTapQueued = false;
+  }
+
+  /** 本步是否切换暂停：Esc / P 的按下沿，或一次排队中的移动端暂停键单击（读取即清除） */
   public isPauseToggled(): boolean {
-    const toggled = this.pausePressed && !this.previousPauseState;
+    const keyEdge = this.pausePressed && !this.previousPauseState;
     this.previousPauseState = this.pausePressed;
-    return toggled;
+    const tapped = this.pauseTapQueued;
+    this.pauseTapQueued = false;
+    return keyEdge || tapped;
   }
 
   public resetPauseState(): void {
     this.pausePressed = false;
     this.previousPauseState = false;
+    this.pauseTapQueued = false;
   }
 
   public isUpgradeToggled(): boolean {

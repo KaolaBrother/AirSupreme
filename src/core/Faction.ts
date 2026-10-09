@@ -18,6 +18,12 @@ export enum Faction {
    * 中立阵营 - 玩家单位（玩家）
    */
   NEUTRAL = 'NEUTRAL',
+
+  /**
+   * 平民阵营 - 民航客机、货轮、民用车辆等非战斗单位。
+   * 任何阵营都不会主动与其敌对；误伤由协调器按惩罚规则处理。
+   */
+  CIVILIAN = 'CIVILIAN',
 }
 
 /**
@@ -27,6 +33,11 @@ export enum Faction {
  * @returns 是否敌对（true = 可造成伤害）
  */
 export function areHostile(faction1: Faction, faction2: Faction): boolean {
+  // 平民不与任何阵营敌对
+  if (faction1 === Faction.CIVILIAN || faction2 === Faction.CIVILIAN) {
+    return false;
+  }
+
   // 友军和中立（玩家）不互相伤害
   if ((faction1 === Faction.FRIENDLY && faction2 === Faction.NEUTRAL) ||
       (faction1 === Faction.NEUTRAL && faction2 === Faction.FRIENDLY)) {

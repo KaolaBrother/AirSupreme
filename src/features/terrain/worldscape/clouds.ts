@@ -7,14 +7,17 @@
  */
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { mulberry32 } from './noise';
+import { mulberry32, smoothstep as smoothstepRange } from './noise';
+
+/** 显隐缓动低于该值的云（缩放 < 原尺寸 0.2%，约米级）视为隐藏，不写入实例槽 */
+const CLOUD_MIN_SHOWN = 0.002;
 
 function makeCloudGeometry(rand: () => number): THREE.BufferGeometry {
   const puffs: THREE.BufferGeometry[] = [];
   const n = 6 + Math.floor(rand() * 4);
   let cx = 0;
   for (let i = 0; i < n; i++) {
-    const g = new THREE.SphereGeometry(1, 7, 5);
+    const g = new THREE.SphereGeometry(1, 9, 6);
     const s = 6 + rand() * 9;
     g.scale(s * (1 + rand() * 0.6), s * (0.42 + rand() * 0.22), s * (0.8 + rand() * 0.5));
     g.translate(cx, (rand() - 0.3) * 3.5, (rand() - 0.5) * 10);
@@ -24,12 +27,97 @@ function makeCloudGeometry(rand: () => number): THREE.BufferGeometry {
   const merged = mergeGeometries(puffs);
   merged.center();
   puffs.forEach((g) => g.dispose());
+  merged.computeBoundingBox();
   return merged;
 }
 
+/**
+ * 云团着色（注入 MeshStandardMaterial）：
+ * - uCloudFacet：晴日保留低多边形切面（1），阴沉 / 风暴天气过渡到平滑球面法线（0）；
+ * - uCloudSoft：轮廓柔化——掠射角处淡出，团块边缘与彼此交叠处不再是硬多边形；
+ * - 云底压暗、云顶受光（按团块局部高度），风暴云呈现厚重的暗底与亮边；
+ * - 低频噪声侵蚀透明度，打散整齐的边缘。
+ */
+function injectCloudShading(
+  material: THREE.MeshStandardMaterial,
+  uniforms: {
+    uCloudFacet: { value: number };
+    uCloudSoft: { value: number };
+    uCloudHalfHeight: { value: number };
+  }
+): void {
+  material.onBeforeCompile = (shader) => {
+    Object.assign(shader.uniforms, uniforms);
+    shader.vertexShader = shader.vertexShader
+      .replace(
+        '#include <common>',
+        `#include <common>
+        varying float vCloudLocalY;
+        varying vec3 vCloudWorld;`
+      )
+      .replace(
+        '#include <project_vertex>',
+        `#include <project_vertex>
+        vCloudLocalY = position.y;
+        {
+          vec4 cloudWorld = vec4(transformed, 1.0);
+          #ifdef USE_INSTANCING
+            cloudWorld = instanceMatrix * cloudWorld;
+          #endif
+          vCloudWorld = (modelMatrix * cloudWorld).xyz;
+        }`
+      );
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        '#include <common>',
+        `#include <common>
+        uniform float uCloudFacet;
+        uniform float uCloudSoft;
+        uniform float uCloudHalfHeight;
+        varying float vCloudLocalY;
+        varying vec3 vCloudWorld;
+        float cloudHash(vec2 p) {
+          return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+        }
+        float cloudNoise(vec2 p) {
+          vec2 i = floor(p);
+          vec2 f = fract(p);
+          f = f * f * (3.0 - 2.0 * f);
+          return mix(
+            mix(cloudHash(i), cloudHash(i + vec2(1.0, 0.0)), f.x),
+            mix(cloudHash(i + vec2(0.0, 1.0)), cloudHash(i + vec2(1.0, 1.0)), f.x),
+            f.y
+          );
+        }`
+      )
+      .replace(
+        '#include <color_fragment>',
+        `#include <color_fragment>
+        float cloudHeightT = clamp(vCloudLocalY / max(1.0, uCloudHalfHeight) * 0.5 + 0.5, 0.0, 1.0);
+        // 云底压暗、云顶提亮（阴沉 / 风暴时对比更强，晴日几乎不变）
+        diffuseColor.rgb *= mix(1.0 - 0.45 * uCloudSoft, 1.0 + 0.08 * uCloudSoft, smoothstep(0.0, 0.85, cloudHeightT));`
+      )
+      .replace(
+        '#include <normal_fragment_begin>',
+        `#include <normal_fragment_begin>
+        {
+          vec3 cloudFlat = normalize(cross(dFdx(vViewPosition), dFdy(vViewPosition)));
+          normal = normalize(mix(normal, cloudFlat, uCloudFacet));
+          // 掠射角淡出：边缘柔化成絮状
+          vec3 cloudView = normalize(vViewPosition);
+          float cloudFacing = abs(dot(normal, cloudView));
+          float cloudEdge = smoothstep(0.0, 0.5 + 0.25 * uCloudSoft, cloudFacing);
+          float cloudWisp = cloudNoise(vCloudWorld.xz * 0.045 + vCloudWorld.y * 0.03);
+          diffuseColor.a *= mix(1.0, cloudEdge * (0.78 + 0.22 * cloudWisp), uCloudSoft);
+        }`
+      );
+  };
+  material.customProgramCacheKey = () => 'worldscape-cloud-soft';
+}
+
 interface CloudEntry {
-  mesh: THREE.InstancedMesh;
-  index: number;
+  /** 所属云形变体（meshes 下标） */
+  variant: number;
   x: number;
   z: number;
   y: number;
@@ -71,9 +159,16 @@ export class CloudField {
   private readonly meshes: THREE.InstancedMesh[] = [];
   private readonly geometries: THREE.BufferGeometry[] = [];
   private readonly entries: CloudEntry[] = [];
+  /** 每个变体本帧写入的可见实例数（隐藏的云不占实例槽，不进 draw） */
+  private readonly drawCounts: number[] = [];
   private readonly fieldSize: number;
   private readonly tintColor: THREE.Color;
   private tone = 1;
+  private readonly shading = {
+    uCloudFacet: { value: 1 },
+    uCloudSoft: { value: 0 },
+    uCloudHalfHeight: { value: 8 },
+  };
 
   private readonly _mat4 = new THREE.Matrix4();
   private readonly _quat = new THREE.Quaternion();
@@ -93,11 +188,12 @@ export class CloudField {
     this.group = new THREE.Group();
     this.group.name = 'worldscapeClouds';
     this.group.renderOrder = renderOrder;
+    // 平滑法线由着色器按天气在“低多边形切面 ↔ 柔和球面”之间混合（见 injectCloudShading）
     this.material = new THREE.MeshStandardMaterial({
       color: 0xffffff,
       emissive: 0xffffff,
       emissiveIntensity: 0.42,
-      flatShading: true,
+      flatShading: false,
       roughness: 1,
       transparent: true,
       opacity: options.opacity ?? 0.92,
@@ -105,9 +201,13 @@ export class CloudField {
       depthTest: true,
     });
     this.material.emissive.copy(this.tintColor);
+    injectCloudShading(this.material, this.shading);
 
+    let halfHeight = 1;
     for (let v = 0; v < variants; v++) {
       const geo = makeCloudGeometry(rand);
+      const box = geo.boundingBox;
+      if (box) halfHeight = Math.max(halfHeight, (box.max.y - box.min.y) * 0.5);
       this.geometries.push(geo);
       const im = new THREE.InstancedMesh(geo, this.material, perVariant);
       im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
@@ -118,10 +218,10 @@ export class CloudField {
       this.meshes.push(im);
       this.group.add(im);
 
+      this.drawCounts.push(0);
       for (let i = 0; i < perVariant; i++) {
         this.entries.push({
-          mesh: im,
-          index: i,
+          variant: v,
           x: (rand() - 0.5) * this.fieldSize,
           z: (rand() - 0.5) * this.fieldSize,
           y: options.altitudeMin + rand() * Math.max(1, options.altitudeMax - options.altitudeMin),
@@ -133,6 +233,8 @@ export class CloudField {
         });
       }
     }
+
+    this.shading.uCloudHalfHeight.value = halfHeight;
 
     // 打乱显隐次序，让 coverage 的增减在空间上均匀铺开
     const ranks = this.entries.map((e) => e.rank);
@@ -158,16 +260,21 @@ export class CloudField {
     windSpeed: number,
     stormSag = 0
   ): void {
-    this.tone += (tone - this.tone) * Math.min(1, dt * 1.2);
+    const safeTone = Number.isFinite(tone) ? tone : 1;
+    this.tone += (safeTone - this.tone) * Math.min(1, dt * 1.2);
     // 自发光抬升让云底保持柔和而非死黑；两个通道都跟随天气色调
     const luminance = 0.36 + 0.5 * this.tone;
     this.material.color.copy(this.tintColor).multiplyScalar(luminance);
     this.material.emissiveIntensity = 0.1 + 0.36 * this.tone;
+    // 晴日（tone ≈ 1）保持低多边形切面与硬朗轮廓；阴沉 / 风暴云平滑、轮廓柔化
+    this.shading.uCloudFacet.value = smoothstepRange(0.55, 0.95, this.tone);
+    this.shading.uCloudSoft.value = 1 - smoothstepRange(0.7, 1.0, this.tone) * 0.75;
 
     const dirX = Math.cos(windAngle);
     const dirZ = Math.sin(windAngle);
     const half = this.fieldSize / 2;
 
+    this.drawCounts.fill(0);
     for (const e of this.entries) {
       const drift = windSpeed * e.speed * dt;
       e.x += dirX * drift;
@@ -179,6 +286,8 @@ export class CloudField {
 
       const want = coverage > e.rank ? 1 : 0;
       e.shown += (want - e.shown) * Math.min(1, dt * 0.9);
+      // 覆盖率之外（或刚开始淡入 / 已淡出到米级大小）的云不画：不再以近零缩放占用顶点处理
+      if (e.shown < CLOUD_MIN_SHOWN) continue;
 
       const s = e.baseScale * (0.0001 + e.shown);
       const sag = stormSag * 70 * e.shown;
@@ -188,9 +297,14 @@ export class CloudField {
       this._quat.setFromAxisAngle(this._yAxis, e.rot);
       this._scl.setScalar(s);
       this._mat4.compose(this._pos, this._quat, this._scl);
-      e.mesh.setMatrixAt(e.index, this._mat4);
+      const mesh = this.meshes[e.variant];
+      mesh.setMatrixAt(this.drawCounts[e.variant]++, this._mat4);
     }
-    for (const m of this.meshes) m.instanceMatrix.needsUpdate = true;
+    this.meshes.forEach((mesh, variant) => {
+      mesh.count = this.drawCounts[variant];
+      mesh.visible = mesh.count > 0;
+      mesh.instanceMatrix.needsUpdate = true;
+    });
   }
 
   dispose(): void {

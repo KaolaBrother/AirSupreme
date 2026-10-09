@@ -1,5 +1,10 @@
 import { Quaternion, Vector3 } from 'three';
 import type { Camera, Object3D } from 'three';
+import { Faction } from '@/core/Faction';
+import { BOSS_CONFIGS, BossType, getBossForLevel } from '@/features/boss/BossTypes';
+import { getCampaignChapter } from '@/features/campaign/CampaignData';
+import { ENEMY_CONFIGS, EnemyType } from '@/features/enemy/EnemyTypes';
+import { getLocale, onLocaleChange, tr, type Locale, type LocalizedText } from '@/i18n';
 import { OffscreenChevron } from '@/ui/OffscreenChevron';
 import { HUD_COLORS } from '@/ui/theme/hudTokens';
 
@@ -9,6 +14,165 @@ const TARGET_POSITION_THRESHOLD_SQ = 0.01;
 const CAMERA_ROTATION_THRESHOLD = 0.0025;
 const HEALTH_PERCENT_THRESHOLD = 0.001;
 
+/** 兜底标签（按界面语言取值） */
+const FALLBACK_ENEMY_LABEL: LocalizedText = { en: 'Hostile', zh: '敌方目标' };
+const FALLBACK_FRIENDLY_LABEL: LocalizedText = { en: 'Friendly', zh: '友军' };
+/** 友军敌机型号：“友军” + 型号名 */
+const FRIENDLY_TYPE_LABEL: LocalizedText = { en: 'Allied {type}', zh: '友军{type}' };
+
+/**
+ * Boss 部件网格名前缀 → 标签（第三关的眼睛、第 6-10 关带独立血量的子目标）。
+ * 用语与 CampaignData 的 Boss 简报 / 弱点提示一致。
+ */
+const BOSS_PART_LABELS: ReadonlyArray<readonly [prefix: string, label: LocalizedText]> = [
+  ['boss_eye', { en: 'Tentacle Eye', zh: '触手之眼' }],
+  ['colossus_vent', { en: 'Heat Vent', zh: '散热口' }],
+  ['leviathan_sail', { en: 'Conning Tower', zh: '指挥塔' }],
+  ['leviathan_ballast_tank', { en: 'Ballast Tank', zh: '压载舱' }],
+  ['leviathan_missile_bay', { en: 'Missile Bay', zh: '导弹舱' }],
+  ['zeppelin_gas_cell', { en: 'Gas Cell', zh: '气囊' }],
+  ['zeppelin_hangar', { en: 'Drone Hangar', zh: '无人机舱' }],
+  ['phantom_phase_emitter', { en: 'Phase Emitter', zh: '相位发射器' }],
+  ['oracle_pylon', { en: 'Shield Pylon', zh: '护盾塔' }],
+];
+
+/**
+ * Boss 根节点名（BOSS_<类型>）→ 名称：取战役简报里的 Boss 名（与 Boss 登场简报卡片一致），
+ * 不在战役里的类型退回 BossTypes 配置名（去掉 “Boss” 后缀）。
+ */
+function buildBossLabels(): ReadonlyMap<string, string> {
+  const labels = new Map<string, string>();
+  for (let level = 1; ; level++) {
+    const type = getBossForLevel(level);
+    if (!type) break;
+    const name = tr(getCampaignChapter(level).boss.name);
+    if (name) labels.set(`BOSS_${type}`, name);
+  }
+  for (const type of Object.values(BossType)) {
+    const key = `BOSS_${type}`;
+    if (!labels.has(key)) {
+      labels.set(
+        key,
+        tr(BOSS_CONFIGS[type].name).replace(/\s*Boss$/i, '') || tr(FALLBACK_ENEMY_LABEL)
+      );
+    }
+  }
+  return labels;
+}
+
+/** Boss 名表按语言缓存：切换语言后下一次查询重建 */
+let bossLabels: ReadonlyMap<string, string> | null = null;
+let bossLabelsLocale: Locale | null = null;
+
+function isEnemyType(name: string): name is EnemyType {
+  return Object.prototype.hasOwnProperty.call(ENEMY_CONFIGS, name);
+}
+
+function isLocalizedText(value: unknown): value is LocalizedText {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    typeof (value as LocalizedText).en === 'string' &&
+    typeof (value as LocalizedText).zh === 'string'
+  );
+}
+
+/**
+ * 友军 AI 战机的飞行员呼号（运行时写在 mesh.userData.displayName，双语对象或字符串）。
+ * 每帧调用：只挑字段，不分配。
+ */
+function readDisplayName(mesh: Object3D): string | null {
+  const value: unknown = mesh.userData.displayName;
+  if (isLocalizedText(value)) {
+    return tr(value) || null;
+  }
+  return typeof value === 'string' && value ? value : null;
+}
+
+/**
+ * 解析血条标签：Boss 本体 → 战役名；Boss 部件 → 部件名；敌机（含 Boss 召唤的敌机）→
+ * ENEMY_CONFIGS 型号名（友军加“友军”前缀）；地面 / 海上 / 空中单位（UNIT_*）→ 按阵营的通用名。
+ */
+function resolveTargetLabel(mesh: Object3D, isFriendly: boolean): string {
+  const name = mesh.name || '';
+  if (name.startsWith('BOSS_')) {
+    const locale = getLocale();
+    if (!bossLabels || bossLabelsLocale !== locale) {
+      bossLabels = buildBossLabels();
+      bossLabelsLocale = locale;
+    }
+    return bossLabels.get(name) ?? tr(FALLBACK_ENEMY_LABEL);
+  }
+  for (const [prefix, label] of BOSS_PART_LABELS) {
+    if (name.startsWith(prefix)) return tr(label);
+  }
+  if (isEnemyType(name)) {
+    const typeName = tr(ENEMY_CONFIGS[name].name);
+    return isFriendly ? tr(FRIENDLY_TYPE_LABEL, { type: typeName }) : typeName;
+  }
+  if (name.startsWith('UNIT_') || mesh.userData.unitType !== undefined) {
+    const faction: unknown = mesh.userData.faction;
+    if (isFriendly || faction === Faction.FRIENDLY) {
+      return tr({ en: 'Friendly unit', zh: '友军单位' });
+    }
+    if (faction === Faction.CIVILIAN) return tr({ en: 'Civilian', zh: '民用目标' });
+    return tr({ en: 'Hostile unit', zh: '敌方单位' });
+  }
+  return tr(isFriendly ? FALLBACK_FRIENDLY_LABEL : FALLBACK_ENEMY_LABEL);
+}
+
+function isFiniteVector(v: Vector3): boolean {
+  return Number.isFinite(v.x) && Number.isFinite(v.y) && Number.isFinite(v.z);
+}
+
+/**
+ * 血条种类：Boss 本体（大条 + 名称）、Boss 部件（紧凑小条，名称只标在离准星最近的一个上，
+ * 八只触手之眼 / 六个气囊不再叠出一排同名标签）、其余目标（普通血条 + 名称）。
+ */
+type BarKind = 'boss' | 'part' | 'unit';
+
+interface BarMetrics {
+  width: number;
+  height: number;
+  /** 血条底边离目标投影点的像素距离 */
+  liftPx: number;
+}
+
+const BAR_METRICS: Readonly<Record<BarKind, BarMetrics>> = {
+  boss: { width: 120, height: 10, liftPx: 15 },
+  part: { width: 44, height: 5, liftPx: 8 },
+  unit: { width: 60, height: 6, liftPx: 15 },
+};
+
+/** 部件名称换焦点的滞回：新部件离准星的距离需小于当前焦点的 80% 才切换，避免来回跳 */
+const PART_FOCUS_SWITCH_RATIO_SQ = 0.8 * 0.8;
+
+function getBarKind(name: string): BarKind {
+  if (name.includes('BOSS')) return 'boss';
+  for (const [prefix] of BOSS_PART_LABELS) {
+    if (name.startsWith(prefix)) return 'part';
+  }
+  return 'unit';
+}
+
+interface HealthBarEntry {
+  bar: HTMLDivElement;
+  background: HTMLDivElement;
+  targetName: HTMLSpanElement;
+  chevron: OffscreenChevron | null;
+  screenPos: { x: number; y: number; z: number } | null; // 缓存屏幕位置
+  lastBarWorldPosition: Vector3;
+  lastHealthPercent: number;
+  /** null：上一帧因坐标 / 距离非有限而隐藏，下一帧强制刷新 */
+  wasInView: boolean | null;
+  /** 换语言后名字还没重写（下一次更新即使什么都没动也重写） */
+  labelDirty: boolean;
+  /** 目标网格与阵营（换语言时立即重算名字，暂停中也生效） */
+  mesh: Object3D;
+  isFriendly: boolean;
+  kind: BarKind;
+}
+
 /**
  * 敌人血条管理器
  * 为每个敌人显示血条
@@ -16,19 +180,14 @@ const HEALTH_PERCENT_THRESHOLD = 0.001;
 export class EnemyHealthBars {
   private container: HTMLDivElement;
   private initialized: boolean = false;
-  private healthBars: Map<
-    string,
-    {
-      bar: HTMLDivElement;
-      background: HTMLDivElement;
-      targetName: HTMLSpanElement;
-      chevron: OffscreenChevron | null;
-      screenPos: { x: number; y: number; z: number } | null; // 缓存屏幕位置
-      lastBarWorldPosition: Vector3;
-      lastHealthPercent: number;
-      wasInView: boolean;
-    }
-  > = new Map();
+  private healthBars: Map<string, HealthBarEntry> = new Map();
+  /** 当前显示名称的 Boss 部件（离准星最近）；null 表示没有部件在视野内 */
+  private focusedPartId: string | null = null;
+  private unsubscribeLocale: (() => void) | null = null;
+  /** 网格名 → 血条标签（敌方 / 友军分开缓存；缓存属于 labelLocale，换语言时清空） */
+  private readonly enemyLabelCache = new Map<string, string>();
+  private readonly friendlyLabelCache = new Map<string, string>();
+  private labelLocale: Locale | null = null;
   private readonly textContentCache = new WeakMap<HTMLElement, string>();
   private readonly styleValueCache = new WeakMap<HTMLElement, Map<string, string>>();
   private readonly worldPosition = new Vector3();
@@ -61,6 +220,8 @@ export class EnemyHealthBars {
     }
 
     document.body.appendChild(this.container);
+    // 切换语言立即重写现有血条的名字（暂停时游戏不调用 update，也要换）
+    this.unsubscribeLocale ??= onLocaleChange(() => this.relabelAll());
     this.initialized = true;
   }
 
@@ -86,6 +247,7 @@ export class EnemyHealthBars {
     playerPosition: Vector3
   ): void {
     this.init();
+    this.syncLabelLocale();
 
     const cameraMoved =
       !this.cameraStateInitialized ||
@@ -123,10 +285,91 @@ export class EnemyHealthBars {
       );
     }
 
+    this.updatePartFocus();
+
     this.lastCameraPosition.copy(camera.position);
     this.lastCameraQuaternion.copy(camera.quaternion);
-    this.lastPlayerPosition.copy(playerPosition);
+    // 非有限的玩家坐标不进缓存，否则之后的“玩家是否移动”判断会一直为 false
+    if (isFiniteVector(playerPosition)) {
+      this.lastPlayerPosition.copy(playerPosition);
+    }
     this.cameraStateInitialized = true;
+  }
+
+  /** 界面语言变了：清空标签缓存，并让现有血条在本帧重写名字 */
+  private syncLabelLocale(): void {
+    const locale = getLocale();
+    if (locale === this.labelLocale) {
+      return;
+    }
+    this.labelLocale = locale;
+    this.enemyLabelCache.clear();
+    this.friendlyLabelCache.clear();
+    for (const barData of this.healthBars.values()) {
+      barData.lastHealthPercent = Number.NaN;
+      barData.labelDirty = true;
+    }
+  }
+
+  /** 语言切换：清空标签缓存并立即按新语言重写每个血条的名字 */
+  private relabelAll(): void {
+    this.syncLabelLocale();
+    for (const barData of this.healthBars.values()) {
+      this.writeTargetName(barData, this.getTargetName(barData.mesh, barData.isFriendly));
+      barData.labelDirty = false;
+    }
+  }
+
+  /** 写名字（标签用样式居中在血条上方，不再逐次测量文字宽度） */
+  private writeTargetName(barData: { targetName: HTMLSpanElement }, name: string): void {
+    this.setTextContent(barData.targetName, name);
+  }
+
+  /**
+   * Boss 部件名称只标一个：视野内离准星（屏幕中心）最近的部件显示名称，其余部件只留小血条。
+   * 带滞回，两个部件距离相近时不来回跳。
+   */
+  private updatePartFocus(): void {
+    const width = window.innerWidth;
+    const height = window.innerHeight;
+    let bestId: string | null = null;
+    let bestDistanceSq = Infinity;
+    let currentDistanceSq = Infinity;
+    for (const [id, barData] of this.healthBars) {
+      const screenPos = barData.screenPos;
+      if (barData.kind !== 'part' || barData.wasInView !== true || !screenPos) {
+        continue;
+      }
+      const dx = (screenPos.x - 0.5) * width;
+      const dy = (screenPos.y - 0.5) * height;
+      const distanceSq = dx * dx + dy * dy;
+      if (id === this.focusedPartId) {
+        currentDistanceSq = distanceSq;
+      }
+      if (distanceSq < bestDistanceSq) {
+        bestDistanceSq = distanceSq;
+        bestId = id;
+      }
+    }
+    if (
+      bestId !== this.focusedPartId &&
+      currentDistanceSq !== Infinity &&
+      bestDistanceSq > currentDistanceSq * PART_FOCUS_SWITCH_RATIO_SQ
+    ) {
+      bestId = this.focusedPartId;
+    }
+    if (bestId === this.focusedPartId) {
+      return;
+    }
+    const previous = this.focusedPartId === null ? null : this.healthBars.get(this.focusedPartId);
+    if (previous) {
+      this.setStyleValue(previous.targetName, 'display', 'none');
+    }
+    const next = bestId === null ? null : this.healthBars.get(bestId);
+    if (next) {
+      this.setStyleValue(next.targetName, 'display', 'block');
+    }
+    this.focusedPartId = bestId;
   }
 
   /**
@@ -181,19 +424,31 @@ export class EnemyHealthBars {
     const id = enemy.mesh.uuid;
     let barData = this.healthBars.get(id);
 
-    const name = enemy.mesh.name || '';
-    const isBoss = name.includes('BOSS') || name.includes('boss_eye');
-    const barWidth = isBoss ? 120 : 60;
+    const kind = getBarKind(enemy.mesh.name || '');
+    const metrics = BAR_METRICS[kind];
 
     const worldPos = this.getTargetWorldPosition(enemy.mesh, this.worldPosition);
     this.barWorldPosition.copy(worldPos);
     this.barWorldPosition.y += this.getBarHeightOffset(enemy.mesh);
 
+    // 目标坐标非有限（NaN / Infinity）：本帧隐藏血条与箭头，不创建、不缓存非有限值
+    if (!isFiniteVector(this.barWorldPosition)) {
+      if (barData) {
+        this.setStyleValue(barData.bar, 'display', 'none');
+        if (barData.chevron) {
+          this.resetArrowIndicator(barData.chevron);
+        }
+        barData.wasInView = null;
+      }
+      return;
+    }
+
     if (!barData) {
-      const bar = this.createHealthBar();
-      const background = this.createBackgroundBar(barWidth, isBoss);
-      const targetName = this.createTargetName(isFriendly, isBoss);
-      const chevron = isFriendly ? null : this.createArrowIndicator();
+      const bar = this.createHealthBar(kind);
+      const background = this.createBackgroundBar(kind);
+      const targetName = this.createTargetName(isFriendly, kind);
+      // 部件不单独出屏幕外箭头：Boss 本体的箭头已经指向同一方向
+      const chevron = isFriendly || kind === 'part' ? null : this.createArrowIndicator();
 
       bar.appendChild(background);
       bar.appendChild(targetName);
@@ -211,9 +466,15 @@ export class EnemyHealthBars {
         lastBarWorldPosition: this.barWorldPosition.clone(),
         lastHealthPercent: Number.NaN,
         wasInView: false,
+        labelDirty: false,
+        mesh: enemy.mesh,
+        isFriendly,
+        kind,
       };
       this.healthBars.set(id, barData);
     }
+    barData.mesh = enemy.mesh;
+    barData.isFriendly = isFriendly;
 
     const healthPercent = enemy.currentHealth / enemy.maxHealth;
     const targetMoved =
@@ -244,73 +505,100 @@ export class EnemyHealthBars {
       screenPos.z < 1;
     const visibilityChanged = inView !== barData.wasInView;
     const needsPositionUpdate = inView && (visibilityChanged || cameraMoved || targetMoved);
-    const needsArrowUpdate = !inView && (visibilityChanged || cameraMoved || targetMoved || playerMoved);
+    const needsArrowUpdate =
+      !inView && (visibilityChanged || cameraMoved || targetMoved || playerMoved);
 
-    if (!needsHealthUpdate && !needsPositionUpdate && !needsArrowUpdate && !visibilityChanged) {
+    if (
+      !needsHealthUpdate &&
+      !needsPositionUpdate &&
+      !needsArrowUpdate &&
+      !visibilityChanged &&
+      !barData.labelDirty
+    ) {
       return;
     }
+    // 不在视野内的血条名字不可见：进入视野时（visibilityChanged）会按当前语言重写
+    barData.labelDirty = false;
 
     const color = this.getHealthColor(healthPercent);
+    let distanceHidden = false;
 
     if (inView) {
-      const barWidth = isBoss ? 120 : 60;
-      const barHeight = isBoss ? 10 : 6;
-
       this.setStyleValue(barData.bar, 'display', 'block');
       if (barData.chevron) {
         this.resetArrowIndicator(barData.chevron);
       }
 
       if (needsPositionUpdate) {
-        const { x, y } = this.getBarPositionFromScreen(screenPos, barWidth, barHeight);
+        const { x, y } = this.getBarPositionFromScreen(screenPos, metrics);
         this.setStyleValue(barData.bar, 'left', `${x}px`);
         this.setStyleValue(barData.bar, 'top', `${y}px`);
       }
 
       if (needsHealthUpdate || visibilityChanged) {
         this.setStyleValue(barData.background, 'background', color);
-        this.setStyleValue(barData.background, 'width', `${barWidth * healthPercent}px`);
+        this.setStyleValue(
+          barData.background,
+          'width',
+          `${metrics.width * Math.max(0, Math.min(1, healthPercent))}px`
+        );
       }
 
-      const targetName = this.getTargetName(enemy.mesh, isFriendly);
-      if (this.setTextContent(barData.targetName, targetName)) {
-        const textWidth = barData.targetName.offsetWidth;
-        const centeredLeft = (barWidth - textWidth) / 2;
-        this.setStyleValue(barData.targetName, 'left', `${centeredLeft}px`);
-      }
+      this.writeTargetName(barData, this.getTargetName(enemy.mesh, isFriendly));
     } else {
       this.setStyleValue(barData.bar, 'display', 'none');
       if (barData.chevron) {
-        this.setStyleValue(barData.chevron.element, 'display', 'flex');
-        this.setStyleValue(barData.chevron.element, 'opacity', '1');
-        this.setStyleValue(barData.chevron.element, 'visibility', 'visible');
-        if (needsArrowUpdate) {
-          const distance = playerPosition.distanceTo(worldPos);
-          // 使用相机位置计算方向向量，而不是玩家位置
-          // 因为箭头指示器是相对于相机视野的方向
-          this.cameraLocal.copy(worldPos).sub(camera.position);
-          this.invertedCameraQuaternion.copy(camera.quaternion).invert();
-          this.cameraLocal.applyQuaternion(this.invertedCameraQuaternion);
-          this.updateArrowIndicator(barData.chevron, this.cameraLocal, distance);
+        const distance = playerPosition.distanceTo(worldPos);
+        if (!Number.isFinite(distance)) {
+          // 距离非有限（玩家坐标异常）：本帧隐藏箭头而不是显示 "NaNm"，下一帧强制刷新
+          this.resetArrowIndicator(barData.chevron);
+          distanceHidden = true;
+        } else {
+          this.setStyleValue(barData.chevron.element, 'display', 'flex');
+          this.setStyleValue(barData.chevron.element, 'opacity', '1');
+          this.setStyleValue(barData.chevron.element, 'visibility', 'visible');
+          if (needsArrowUpdate) {
+            // 使用相机位置计算方向向量，而不是玩家位置
+            // 因为箭头指示器是相对于相机视野的方向
+            this.cameraLocal.copy(worldPos).sub(camera.position);
+            this.invertedCameraQuaternion.copy(camera.quaternion).invert();
+            this.cameraLocal.applyQuaternion(this.invertedCameraQuaternion);
+            this.updateArrowIndicator(barData.chevron, this.cameraLocal, distance);
+          }
         }
       }
     }
 
     barData.lastBarWorldPosition.copy(this.barWorldPosition);
     barData.lastHealthPercent = healthPercent;
-    barData.wasInView = inView;
+    barData.wasInView = distanceHidden ? null : inView;
   }
 
   /**
-   * 创建血条容器
+   * 创建血条容器（宽高即整条血槽，名称标签居中在上方）
    */
-  private createHealthBar(): HTMLDivElement {
+  private createHealthBar(kind: BarKind): HTMLDivElement {
+    const { width, height } = BAR_METRICS[kind];
     const bar = document.createElement('div');
     bar.className = 'enemy-health-bar';
+    bar.setAttribute('data-kind', kind);
+    // 部件小条：深色血槽 + 细边框，满血 / 残血都看得出长度
+    const track =
+      kind === 'part'
+        ? `
+      box-sizing: border-box;
+      background: rgba(4, 8, 14, 0.62);
+      border: 1px solid rgba(255, 255, 255, 0.42);
+      border-radius: 3px;
+      box-shadow: 0 0 6px rgba(0, 0, 0, 0.7);
+      overflow: visible;`
+        : '';
     bar.style.cssText = `
       position: absolute;
       display: none;
-      pointer-events: none;
+      width: ${width}px;
+      height: ${height}px;
+      pointer-events: none;${track}
     `;
     return bar;
   }
@@ -318,11 +606,23 @@ export class EnemyHealthBars {
   /**
    * 创建血条背景
    */
-  private createBackgroundBar(width: number, isBoss: boolean = false): HTMLDivElement {
+  private createBackgroundBar(kind: BarKind): HTMLDivElement {
+    const { width, height } = BAR_METRICS[kind];
     const background = document.createElement('div');
     background.className = 'health-bar-background';
-    const height = isBoss ? 10 : 6;
-    background.style.cssText = `
+    // 部件小条：填充在血槽内，不再叠一层粗边框
+    background.style.cssText =
+      kind === 'part'
+        ? `
+      width: ${width}px;
+      height: 100%;
+      position: absolute;
+      top: 0;
+      left: 0;
+      border-radius: 2px;
+      transition: width 0.2s, background 0.2s;
+    `
+        : `
       width: ${width}px;
       height: ${height}px;
       background: rgba(0, 0, 0, 0.6);
@@ -338,24 +638,33 @@ export class EnemyHealthBars {
   }
 
   /**
-   * 创建目标名称标签
+   * 创建目标名称标签：Boss 本体红色大字；部件琥珀色小字、默认隐藏（只标离准星最近的一个）
    */
-  private createTargetName(isFriendly: boolean = false, isBoss: boolean = false): HTMLSpanElement {
+  private createTargetName(isFriendly: boolean, kind: BarKind): HTMLSpanElement {
     const name = document.createElement('span');
     name.className = 'enemy-name';
-    const fontSize = isBoss ? 16 : 12;
-    const color = isBoss ? '#ff4444' : isFriendly ? '#ffff00' : '#ffffff';
+    const fontSize = kind === 'boss' ? 16 : kind === 'part' ? 11 : 12;
+    const color =
+      kind === 'boss'
+        ? '#ff4444'
+        : kind === 'part'
+          ? HUD_COLORS.weapon
+          : isFriendly
+            ? '#ffff00'
+            : '#ffffff';
     name.style.cssText = `
       font-size: ${fontSize}px;
       font-weight: bold;
       white-space: nowrap;
       position: absolute;
       bottom: 100%;
-      left: 0;
-      margin-bottom: 4px;
+      left: 50%;
+      transform: translateX(-50%);
+      margin-bottom: ${kind === 'part' ? 3 : 4}px;
       color: ${color};
       text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.9),
                    -1px -1px 2px rgba(0, 0, 0, 0.8);
+      display: ${kind === 'part' ? 'none' : 'block'};
     `;
     return name;
   }
@@ -474,10 +783,7 @@ export class EnemyHealthBars {
   /**
    * 世界坐标转屏幕坐标
    */
-  private worldToScreen(
-    position: Vector3,
-    camera: Camera
-  ): { x: number; y: number; z: number } {
+  private worldToScreen(position: Vector3, camera: Camera): { x: number; y: number; z: number } {
     this.screenVector.copy(position).project(camera);
 
     // NDC: x, y 范围是 -1 到 1
@@ -509,38 +815,27 @@ export class EnemyHealthBars {
   }
 
   /**
-   * 获取敌人名称
-   */
-  private getEnemyName(mesh: Object3D): string {
-    const name = mesh.name || '';
-    if (name.includes('boss_eye')) return 'Eye';
-    if (name.includes('HEAVY_BOMBER')) return 'Heavy Bomber';
-    if (name.includes('DESERT_FORTRESS')) return 'Desert Fortress';
-    if (name.includes('OCTOPUS_WARSHIP')) return 'Octopus Warship';
-    if (name.includes('MISSILE_DESTROYER')) return 'Missile Destroyer';
-    if (name.includes('SKY_CARRIER')) return 'Sky Carrier';
-    if (name === 'SCOUT' || name.includes('Scout')) return 'Scout';
-    if (name === 'FIGHTER' || name.includes('Fighter')) return 'Fighter';
-    if (name === 'HEAVY' || name.includes('Heavy')) return 'Heavy';
-    if (name === 'SNIPER' || name.includes('Sniper')) return 'Sniper';
-    if (name === 'ACE' || name.includes('Ace')) return 'Ace';
-    return 'Enemy';
-  }
-
-  /**
-   * 获取目标名称（敌人和友军）
+   * 获取目标名称（敌人和友军）；按网格名缓存，逐帧不重复解析
    */
   private getTargetName(mesh: Object3D, isFriendly: boolean): string {
+    // 友军 AI 战机带飞行员呼号时直接显示呼号（僚机可能共用同一网格名，不能按名缓存）
     if (isFriendly) {
-      const name = mesh.name || '';
-      if (name === 'SCOUT' || name.includes('Scout')) return 'Scout';
-      if (name === 'FIGHTER' || name.includes('Fighter')) return 'Fighter';
-      if (name === 'HEAVY' || name.includes('Heavy')) return 'Heavy';
-      if (name === 'SNIPER' || name.includes('Sniper')) return 'Sniper';
-      if (name === 'ACE' || name.includes('Ace')) return 'Ace';
-      return 'Ally';
+      const callsign = readDisplayName(mesh);
+      if (callsign) {
+        return callsign;
+      }
     }
-    return this.getEnemyName(mesh);
+    const key = mesh.name;
+    if (!key) {
+      return resolveTargetLabel(mesh, isFriendly);
+    }
+    const cache = isFriendly ? this.friendlyLabelCache : this.enemyLabelCache;
+    let label = cache.get(key);
+    if (label === undefined) {
+      label = resolveTargetLabel(mesh, isFriendly);
+      cache.set(key, label);
+    }
+    return label;
   }
 
   private getBarHeightOffset(enemyMesh: Object3D): number {
@@ -552,15 +847,11 @@ export class EnemyHealthBars {
 
   private getBarPositionFromScreen(
     screenPos: { x: number; y: number },
-    barWidth: number,
-    barHeight: number
+    metrics: BarMetrics
   ): { x: number; y: number } {
-    const offsetX = barWidth / 2;
-    const offsetY = barHeight + 15;
-
     return {
-      x: screenPos.x * window.innerWidth - offsetX,
-      y: screenPos.y * window.innerHeight - offsetY,
+      x: screenPos.x * window.innerWidth - metrics.width / 2,
+      y: screenPos.y * window.innerHeight - (metrics.height + metrics.liftPx),
     };
   }
 
@@ -569,6 +860,9 @@ export class EnemyHealthBars {
    */
   private removeHealthBar(id: string): void {
     const barData = this.healthBars.get(id);
+    if (id === this.focusedPartId) {
+      this.focusedPartId = null;
+    }
     if (barData) {
       if (barData.chevron) {
         this.resetArrowIndicator(barData.chevron);
@@ -591,9 +885,12 @@ export class EnemyHealthBars {
       barData.bar.remove();
     }
     this.healthBars.clear();
+    this.focusedPartId = null;
   }
 
   public dispose(): void {
+    this.unsubscribeLocale?.();
+    this.unsubscribeLocale = null;
     this.clear();
     if (this.container.parentElement) {
       this.container.remove();

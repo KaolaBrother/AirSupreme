@@ -1,0 +1,459 @@
+import { SPECIAL_WEAPON_IDS, type SpecialWeaponId } from '@/core/CombatContracts';
+import { WINGMEN } from '@/core/campaign/Wingmen';
+import {
+  DEFAULT_START_FLOW_SETTINGS,
+  getLocalStorage,
+  normalizeCameraModeSetting,
+  type CameraModeSetting,
+} from '@/core/SessionSettings';
+import { TOTAL_LEVELS, getCampaignChapter } from '@/features/campaign/CampaignData';
+import { isSpecialWeaponId } from '@/features/weapons/WeaponTypes';
+import type { WeaponSaveState } from '@/features/weapons/WeaponSystem';
+import { format, tr, type Locale, type LocalizedText, type TextParams } from '@/i18n';
+
+/**
+ * 战役存档：中途自动存档（检查点）+ 战役进度记录。
+ *
+ * 只在调用时访问 localStorage（模块导入期不碰 window / document）；
+ * 任何读写失败（无 DOM、隐私模式、配额已满、JSON 损坏）都不会抛出。
+ */
+
+export const CAMPAIGN_SAVE_KEY = 'air-supreme:campaign-save';
+export const CAMPAIGN_PROGRESS_KEY = 'air-supreme:campaign-progress';
+export const CAMPAIGN_SAVE_VERSION = 1;
+
+/**
+ * 检查点类型：入关、波次之间、Boss 战之前、机库（击破上一关 Boss 后、下一章开始之前；
+ * level 是即将开始的那一关，wave 为 0）
+ */
+export type CheckpointKind = 'level-start' | 'wave' | 'boss' | 'hangar';
+
+export interface CampaignRunStats {
+  kills: number;
+  civiliansLost: number;
+  deaths: number;
+  playTimeSeconds: number;
+}
+
+export interface CampaignSaveData {
+  version: typeof CAMPAIGN_SAVE_VERSION;
+  /** 存档时间（Date.now() 毫秒） */
+  savedAt: number;
+  checkpoint: CheckpointKind;
+  /** 关卡号 1..TOTAL_LEVELS */
+  level: number;
+  /** 下一个要进行的波次（从 0 开始）；Boss 检查点通常等于该关总波数 */
+  wave: number;
+  difficulty: number;
+  score: number;
+  lives: number;
+  missiles: number;
+  /** PlayerUpgrades.export() 的原样数据 */
+  upgrades: Record<string, unknown>;
+  /** WeaponSystem.exportState()（无限弹药的热量武器不写 ammo） */
+  weapons: WeaponSaveState;
+  /** 热焰弹剩余发数（CountermeasureSystem.exportState().charges） */
+  flares: number;
+  cameraMode: CameraModeSetting;
+  stats: CampaignRunStats;
+  /**
+   * 本局战役雨燕的入列台词是否已播过（每局只播一次，读档不重播）。
+   * 可选：加入这个字段之前写的存档没有它，按关卡推断（见 isSwiftJoinAnnounced）。
+   */
+  swiftJoined?: boolean;
+}
+
+export type CampaignCheckpointInput = Omit<CampaignSaveData, 'version' | 'savedAt'>;
+
+export interface CampaignProgress {
+  /** 是否至少通关过一次完整战役 */
+  completed: boolean;
+  /** 通关时的最高分 */
+  bestScore: number;
+  /** 到达过的最高关卡（第 1 关总是可选，最小为 1） */
+  highestLevel: number;
+}
+
+const CHECKPOINT_KINDS: readonly CheckpointKind[] = ['level-start', 'wave', 'boss', 'hangar'];
+
+/** 雨燕随队的关卡（与 Wingmen.WINGMEN 的 joinsAtLevel 一致） */
+const SWIFT_JOINS_AT_LEVEL = WINGMEN.find((wingman) => wingman.id === 'swift')?.joinsAtLevel ?? 3;
+
+/** 合理性上限：只用来拒绝离谱值，实际容量由各系统在恢复时自行钳制 */
+const MAX_SAVED_WAVE_INDEX = 16;
+const MAX_SAVED_LIVES = 99;
+const MAX_SAVED_COUNT = 99;
+const MAX_SAVED_AMMO = 9999;
+
+const DEFAULT_PROGRESS: CampaignProgress = {
+  completed: false,
+  bestScore: 0,
+  highestLevel: 1,
+};
+
+type PlainRecord = Record<string, unknown>;
+
+function isPlainRecord(value: unknown): value is PlainRecord {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function clampInt(value: unknown, min: number, max: number, fallback: number): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return fallback;
+  }
+
+  return Math.max(min, Math.min(max, Math.round(value)));
+}
+
+function clampNumber(value: unknown, min: number, max: number, fallback: number): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return fallback;
+  }
+
+  return Math.max(min, Math.min(max, value));
+}
+
+function clampLevel(value: unknown, fallback: number): number {
+  return clampInt(value, 1, TOTAL_LEVELS, fallback);
+}
+
+function clampWave(value: unknown): number {
+  return clampInt(value, 0, MAX_SAVED_WAVE_INDEX, 0);
+}
+
+/** 非法类型时按波次推断：已推进过波次视为波次检查点，否则视为入关检查点 */
+function normalizeCheckpointKind(value: unknown, wave: number): CheckpointKind {
+  return CHECKPOINT_KINDS.find((kind) => kind === value) ?? (wave > 0 ? 'wave' : 'level-start');
+}
+
+function normalizeWeapons(value: unknown): WeaponSaveState {
+  const source = isPlainRecord(value) ? value : {};
+
+  const unlocked: SpecialWeaponId[] = [];
+  if (Array.isArray(source.unlocked)) {
+    for (const id of source.unlocked as unknown[]) {
+      if (isSpecialWeaponId(id) && !unlocked.includes(id)) {
+        unlocked.push(id);
+      }
+    }
+  }
+
+  const selected =
+    isSpecialWeaponId(source.selected) && unlocked.includes(source.selected)
+      ? source.selected
+      : null;
+
+  // 只保留已解锁武器的有限弹药；无限弹药（Infinity）序列化后变成 null，
+  // 这里直接丢弃，由武器系统按满弹恢复
+  const ammo: Partial<Record<SpecialWeaponId, number>> = {};
+  if (isPlainRecord(source.ammo)) {
+    for (const id of SPECIAL_WEAPON_IDS.filter((weapon) => unlocked.includes(weapon))) {
+      const count = source.ammo[id];
+      if (typeof count === 'number' && Number.isFinite(count)) {
+        ammo[id] = Math.max(0, Math.min(MAX_SAVED_AMMO, count));
+      }
+    }
+  }
+
+  return { unlocked, selected, ammo };
+}
+
+function normalizeStats(value: unknown): CampaignRunStats {
+  const source = isPlainRecord(value) ? value : {};
+  return {
+    kills: clampInt(source.kills, 0, Number.MAX_SAFE_INTEGER, 0),
+    civiliansLost: clampInt(source.civiliansLost, 0, Number.MAX_SAFE_INTEGER, 0),
+    deaths: clampInt(source.deaths, 0, Number.MAX_SAFE_INTEGER, 0),
+    playTimeSeconds: clampNumber(source.playTimeSeconds, 0, Number.MAX_SAFE_INTEGER, 0),
+  };
+}
+
+/**
+ * 规范化检查点主体（不含 version / savedAt）。
+ * 关卡号是检查点的身份：缺失或非数字视为损坏，返回 null；其余字段越界钳制、缺失取默认值。
+ * 可选的 swiftJoined 只在是布尔值时保留（旧存档没有它，由 isSwiftJoinAnnounced 按关卡推断）。
+ */
+function normalizeCheckpointBody(source: PlainRecord): CampaignCheckpointInput | null {
+  if (typeof source.level !== 'number' || !Number.isFinite(source.level)) {
+    return null;
+  }
+
+  const wave = clampWave(source.wave);
+  const body: CampaignCheckpointInput = {
+    checkpoint: normalizeCheckpointKind(source.checkpoint, wave),
+    level: clampLevel(source.level, 1),
+    wave,
+    difficulty: clampInt(source.difficulty, 1, 5, DEFAULT_START_FLOW_SETTINGS.difficulty),
+    score: clampInt(source.score, 0, Number.MAX_SAFE_INTEGER, 0),
+    lives: clampInt(source.lives, 1, MAX_SAVED_LIVES, DEFAULT_START_FLOW_SETTINGS.playerLives),
+    missiles: clampInt(source.missiles, 0, MAX_SAVED_COUNT, 0),
+    upgrades: isPlainRecord(source.upgrades) ? { ...source.upgrades } : {},
+    weapons: normalizeWeapons(source.weapons),
+    flares: clampInt(source.flares, 0, MAX_SAVED_COUNT, 0),
+    cameraMode: normalizeCameraModeSetting(source.cameraMode),
+    stats: normalizeStats(source.stats),
+  };
+  if (typeof source.swiftJoined === 'boolean') {
+    body.swiftJoined = source.swiftJoined;
+  }
+  return body;
+}
+
+function removeKey(storage: Storage, key: string): void {
+  try {
+    storage.removeItem(key);
+  } catch {
+    // 删除失败时忽略：下次读取仍会走校验并返回 null
+  }
+}
+
+/**
+ * 读取一条 JSON 记录：键不存在或读取失败返回 null；
+ * JSON 损坏或顶层不是对象（数组 / 字符串 / null 等外来数据）时删除该键并返回 null。
+ */
+function readRecord(storage: Storage, key: string): PlainRecord | null {
+  let raw: string | null;
+  try {
+    raw = storage.getItem(key);
+  } catch {
+    return null;
+  }
+  if (raw === null) {
+    return null;
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    removeKey(storage, key);
+    return null;
+  }
+
+  if (!isPlainRecord(parsed)) {
+    removeKey(storage, key);
+    return null;
+  }
+  return parsed;
+}
+
+function writeJson(storage: Storage, key: string, value: unknown): boolean {
+  try {
+    storage.setItem(key, JSON.stringify(value));
+    return true;
+  } catch {
+    // 配额或隐私模式写入失败时静默忽略
+    return false;
+  }
+}
+
+/**
+ * 写入检查点（覆盖上一个）；写入前同样规范化。
+ * 存储不可用、写入失败或缺少关卡号时返回 false（不抛出）。
+ */
+export function saveCampaignCheckpoint(data: CampaignCheckpointInput): boolean {
+  try {
+    const storage = getLocalStorage();
+    if (!storage || !isPlainRecord(data)) {
+      return false;
+    }
+
+    const body = normalizeCheckpointBody(data as unknown as PlainRecord);
+    if (!body) {
+      return false;
+    }
+
+    const record: CampaignSaveData = {
+      version: CAMPAIGN_SAVE_VERSION,
+      savedAt: Date.now(),
+      ...body,
+    };
+    return writeJson(storage, CAMPAIGN_SAVE_KEY, record);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 读取检查点并校验 / 规范化。
+ * JSON 损坏、不是对象、版本不符或缺少关卡号时删除该键并返回 null；越界字段被钳制，缺失字段取默认值。
+ */
+export function loadCampaignCheckpoint(): CampaignSaveData | null {
+  try {
+    const storage = getLocalStorage();
+    if (!storage) {
+      return null;
+    }
+
+    const parsed = readRecord(storage, CAMPAIGN_SAVE_KEY);
+    if (!parsed) {
+      return null;
+    }
+
+    if (parsed.version !== CAMPAIGN_SAVE_VERSION) {
+      removeKey(storage, CAMPAIGN_SAVE_KEY);
+      return null;
+    }
+
+    const body = normalizeCheckpointBody(parsed);
+    if (!body) {
+      removeKey(storage, CAMPAIGN_SAVE_KEY);
+      return null;
+    }
+
+    return {
+      version: CAMPAIGN_SAVE_VERSION,
+      savedAt: clampNumber(parsed.savedAt, 0, Number.MAX_SAFE_INTEGER, 0),
+      ...body,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function clearCampaignCheckpoint(): void {
+  try {
+    const storage = getLocalStorage();
+    if (storage) {
+      removeKey(storage, CAMPAIGN_SAVE_KEY);
+    }
+  } catch {
+    // 存储不可用时无需清理
+  }
+}
+
+/** 是否存在有效检查点（损坏的存档会在这里被清理） */
+export function hasCampaignCheckpoint(): boolean {
+  return loadCampaignCheckpoint() !== null;
+}
+
+const CHECKPOINT_LABEL: LocalizedText = {
+  en: 'Ch. {level} · {title} · {stage}',
+  zh: '第{level}关 · {title} · {stage}',
+};
+const CHECKPOINT_WAVE: LocalizedText = { en: 'Wave {wave}', zh: '第{wave}波' };
+const CHECKPOINT_BOSS: LocalizedText = { en: 'Boss', zh: 'Boss 战' };
+const CHECKPOINT_HANGAR: LocalizedText = { en: 'Hangar', zh: '机库整备' };
+
+/** 按指定语言取双语文案并填充参数；未指定语言时按当前语言（同 tr） */
+function textIn(text: LocalizedText, locale: Locale | undefined, params?: TextParams): string {
+  if (locale === undefined) {
+    return tr(text, params);
+  }
+  return format(locale === 'zh-CN' ? text.zh : text.en, params);
+}
+
+/**
+ * 检查点的简短描述（默认当前语言，传入 locale 时按该语言），
+ * 如 “Ch. 6 · Heart of the Forge · Wave 3” / “第6关 · 熔炉之心 · 第3波”；Boss 检查点显示 “Boss” / “Boss 战”，
+ * 机库检查点（下一章开始之前）显示 “Hangar” / “机库整备”，如 “Ch. 2 · Sandstorm · Hangar”。
+ * 波次以 1 开始计数（wave 字段是下一波的 0 基序号）。
+ */
+export function describeCheckpoint(data: CampaignSaveData, locale?: Locale): string {
+  const level = clampLevel(data?.level, 1);
+  const title = textIn(getCampaignChapter(level).title, locale);
+  let stage: string;
+  if (data?.checkpoint === 'boss') {
+    stage = textIn(CHECKPOINT_BOSS, locale);
+  } else if (data?.checkpoint === 'hangar') {
+    stage = textIn(CHECKPOINT_HANGAR, locale);
+  } else {
+    stage = textIn(CHECKPOINT_WAVE, locale, { wave: clampWave(data?.wave) + 1 });
+  }
+  return textIn(CHECKPOINT_LABEL, locale, { level, title, stage });
+}
+
+/**
+ * describeCheckpoint 的双语版本（{ en, zh }）：交给 HUD 的提示用它，
+ * 提示仍在显示时切换语言会按新语言重绘。
+ */
+export function describeCheckpointText(data: CampaignSaveData): LocalizedText {
+  return { en: describeCheckpoint(data, 'en'), zh: describeCheckpoint(data, 'zh-CN') };
+}
+
+/**
+ * 本局战役雨燕的入列台词是否已播过。存档里有 swiftJoined 时以它为准；
+ * 旧存档（没有这个字段）按关卡推断：已过雨燕随队的那一关（level > 3）视为已播，
+ * 否则视为未播（她在本局首次升空时报到一次）。
+ */
+export function isSwiftJoinAnnounced(data: CampaignSaveData): boolean {
+  if (typeof data?.swiftJoined === 'boolean') {
+    return data.swiftJoined;
+  }
+  return clampLevel(data?.level, 1) > SWIFT_JOINS_AT_LEVEL;
+}
+
+function normalizeProgress(source: PlainRecord): CampaignProgress {
+  return {
+    completed: source.completed === true,
+    bestScore: clampInt(source.bestScore, 0, Number.MAX_SAFE_INTEGER, 0),
+    highestLevel: clampLevel(source.highestLevel, DEFAULT_PROGRESS.highestLevel),
+  };
+}
+
+function writeProgress(progress: CampaignProgress): void {
+  try {
+    const storage = getLocalStorage();
+    if (!storage) {
+      return;
+    }
+    writeJson(storage, CAMPAIGN_PROGRESS_KEY, {
+      version: CAMPAIGN_SAVE_VERSION,
+      ...progress,
+    });
+  } catch {
+    // 进度记录写入失败不影响游戏
+  }
+}
+
+/**
+ * 战役进度（与检查点独立，清除检查点不会影响它）；不可用或损坏时返回默认值，损坏的记录会被删除。
+ * 未写 version 的记录按当前版本读取，显式的其他版本视为外来数据。
+ */
+export function getCampaignProgress(): CampaignProgress {
+  try {
+    const storage = getLocalStorage();
+    if (!storage) {
+      return { ...DEFAULT_PROGRESS };
+    }
+
+    const parsed = readRecord(storage, CAMPAIGN_PROGRESS_KEY);
+    if (!parsed) {
+      return { ...DEFAULT_PROGRESS };
+    }
+
+    if (parsed.version !== undefined && parsed.version !== CAMPAIGN_SAVE_VERSION) {
+      removeKey(storage, CAMPAIGN_PROGRESS_KEY);
+      return { ...DEFAULT_PROGRESS };
+    }
+
+    return normalizeProgress(parsed);
+  } catch {
+    return { ...DEFAULT_PROGRESS };
+  }
+}
+
+/** 通关：标记完成、刷新最高分、最高关卡记为最终关（不清除检查点，由调用方决定） */
+export function markCampaignCompleted(finalScore: number): void {
+  const previous = getCampaignProgress();
+  writeProgress({
+    completed: true,
+    bestScore: Math.max(previous.bestScore, clampInt(finalScore, 0, Number.MAX_SAFE_INTEGER, 0)),
+    highestLevel: TOTAL_LEVELS,
+  });
+}
+
+/** 记录到达的关卡（只升不降；越界钳制到 1..TOTAL_LEVELS，非法值忽略） */
+export function recordLevelReached(level: number): void {
+  if (typeof level !== 'number' || !Number.isFinite(level)) {
+    return;
+  }
+
+  const previous = getCampaignProgress();
+  const reached = clampLevel(level, previous.highestLevel);
+  if (reached <= previous.highestLevel) {
+    return;
+  }
+
+  writeProgress({ ...previous, highestLevel: reached });
+}

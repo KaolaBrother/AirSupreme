@@ -1,0 +1,1610 @@
+{
+ "version": 1,
+ "format": "mp3",
+ "languages": {
+  "en": {
+   "prologue-1": {
+    "duration": 8.32,
+    "bytes": 151334
+   },
+   "prologue-2": {
+    "duration": 10.8,
+    "bytes": 191041
+   },
+   "prologue-3": {
+    "duration": 8.56,
+    "bytes": 155096
+   },
+   "c01-briefing-1": {
+    "duration": 8.8,
+    "bytes": 158858
+   },
+   "c01-briefing-2": {
+    "duration": 6.08,
+    "bytes": 115390
+   },
+   "c01-briefing-3": {
+    "duration": 4.0,
+    "bytes": 82371
+   },
+   "c01-level-start-hq": {
+    "duration": 6.0,
+    "bytes": 114136
+   },
+   "c01-level-start-wingman": {
+    "duration": 5.52,
+    "bytes": 106613
+   },
+   "c01-wave-start-1-hq": {
+    "duration": 4.72,
+    "bytes": 93656
+   },
+   "c01-wave-start-3-wingman": {
+    "duration": 3.28,
+    "bytes": 70668
+   },
+   "c01-wave-complete-4-hq": {
+    "duration": 5.28,
+    "bytes": 102851
+   },
+   "c01-boss-spawn-oracle": {
+    "duration": 4.48,
+    "bytes": 89894
+   },
+   "c01-boss-spawn-hq": {
+    "duration": 4.16,
+    "bytes": 84879
+   },
+   "c01-boss-low-health-wingman": {
+    "duration": 2.88,
+    "bytes": 64399
+   },
+   "c01-boss-defeated-wingman": {
+    "duration": 3.12,
+    "bytes": 68161
+   },
+   "c01-boss-defeated-hq": {
+    "duration": 5.2,
+    "bytes": 101597
+   },
+   "c02-briefing-1": {
+    "duration": 7.44,
+    "bytes": 137124
+   },
+   "c02-briefing-2": {
+    "duration": 8.56,
+    "bytes": 155096
+   },
+   "c02-briefing-3": {
+    "duration": 9.36,
+    "bytes": 168053
+   },
+   "c02-level-start-hq": {
+    "duration": 5.52,
+    "bytes": 106613
+   },
+   "c02-level-start-scientist": {
+    "duration": 5.36,
+    "bytes": 104105
+   },
+   "c02-wave-start-1-scientist": {
+    "duration": 5.12,
+    "bytes": 99925
+   },
+   "c02-wave-start-3-hq": {
+    "duration": 3.84,
+    "bytes": 79445
+   },
+   "c02-wave-complete-4-scientist": {
+    "duration": 4.8,
+    "bytes": 94910
+   },
+   "c02-boss-spawn-oracle": {
+    "duration": 4.8,
+    "bytes": 94910
+   },
+   "c02-boss-spawn-wingman": {
+    "duration": 4.56,
+    "bytes": 91148
+   },
+   "c02-boss-low-health-scientist": {
+    "duration": 2.72,
+    "bytes": 61891
+   },
+   "c02-boss-defeated-hq": {
+    "duration": 3.84,
+    "bytes": 79445
+   },
+   "c02-boss-defeated-scientist": {
+    "duration": 5.44,
+    "bytes": 105359
+   },
+   "c03-briefing-1": {
+    "duration": 9.76,
+    "bytes": 174322
+   },
+   "c03-briefing-2": {
+    "duration": 6.72,
+    "bytes": 125839
+   },
+   "c03-briefing-3": {
+    "duration": 8.56,
+    "bytes": 155096
+   },
+   "c03-level-start-scientist": {
+    "duration": 5.36,
+    "bytes": 104105
+   },
+   "c03-level-start-hq": {
+    "duration": 4.56,
+    "bytes": 91148
+   },
+   "c03-level-start-wingman2": {
+    "duration": 6.0,
+    "bytes": 114136
+   },
+   "c03-level-start-wingman": {
+    "duration": 4.4,
+    "bytes": 88641
+   },
+   "c03-wave-start-2-wingman2": {
+    "duration": 5.28,
+    "bytes": 102851
+   },
+   "c03-wave-complete-5-scientist": {
+    "duration": 4.32,
+    "bytes": 87387
+   },
+   "c03-boss-spawn-oracle": {
+    "duration": 5.04,
+    "bytes": 98672
+   },
+   "c03-boss-spawn-scientist": {
+    "duration": 3.2,
+    "bytes": 69414
+   },
+   "c03-boss-low-health-wingman": {
+    "duration": 2.24,
+    "bytes": 53950
+   },
+   "c03-boss-defeated-scientist": {
+    "duration": 5.2,
+    "bytes": 101597
+   },
+   "c03-boss-defeated-wingman2": {
+    "duration": 3.84,
+    "bytes": 79445
+   },
+   "c03-boss-defeated-wingman": {
+    "duration": 2.96,
+    "bytes": 65653
+   },
+   "c04-briefing-1": {
+    "duration": 6.48,
+    "bytes": 122077
+   },
+   "c04-briefing-2": {
+    "duration": 7.28,
+    "bytes": 134616
+   },
+   "c04-briefing-3": {
+    "duration": 7.28,
+    "bytes": 134616
+   },
+   "c04-level-start-hq": {
+    "duration": 5.68,
+    "bytes": 109121
+   },
+   "c04-level-start-wingman2": {
+    "duration": 3.68,
+    "bytes": 76938
+   },
+   "c04-level-start-wingman": {
+    "duration": 3.92,
+    "bytes": 81117
+   },
+   "c04-wave-start-1-freighter": {
+    "duration": 2.96,
+    "bytes": 65653
+   },
+   "c04-wave-start-1-frigate": {
+    "duration": 4.96,
+    "bytes": 97418
+   },
+   "c04-wave-complete-5-frigate": {
+    "duration": 5.68,
+    "bytes": 109121
+   },
+   "c04-boss-spawn-oracle": {
+    "duration": 4.64,
+    "bytes": 92402
+   },
+   "c04-boss-spawn-scientist": {
+    "duration": 3.68,
+    "bytes": 76938
+   },
+   "c04-boss-low-health-scientist": {
+    "duration": 3.2,
+    "bytes": 69414
+   },
+   "c04-boss-defeated-hq": {
+    "duration": 4.0,
+    "bytes": 82371
+   },
+   "c04-boss-defeated-frigate": {
+    "duration": 3.84,
+    "bytes": 79445
+   },
+   "c04-boss-defeated-scientist": {
+    "duration": 6.24,
+    "bytes": 117898
+   },
+   "c05-briefing-1": {
+    "duration": 9.52,
+    "bytes": 170561
+   },
+   "c05-briefing-2": {
+    "duration": 6.0,
+    "bytes": 114136
+   },
+   "c05-briefing-3": {
+    "duration": 3.76,
+    "bytes": 78192
+   },
+   "c05-level-start-hq": {
+    "duration": 6.32,
+    "bytes": 119152
+   },
+   "c05-level-start-wingman": {
+    "duration": 4.24,
+    "bytes": 86133
+   },
+   "c05-wave-start-2-awacs": {
+    "duration": 5.68,
+    "bytes": 109121
+   },
+   "c05-wave-start-4-wingman": {
+    "duration": 2.48,
+    "bytes": 57712
+   },
+   "c05-wave-start-4-awacs": {
+    "duration": 5.28,
+    "bytes": 102851
+   },
+   "c05-wave-complete-6-hq": {
+    "duration": 4.24,
+    "bytes": 86133
+   },
+   "c05-boss-spawn-oracle": {
+    "duration": 3.36,
+    "bytes": 71922
+   },
+   "c05-boss-spawn-wingman2": {
+    "duration": 4.0,
+    "bytes": 82371
+   },
+   "c05-boss-low-health-wingman": {
+    "duration": 3.2,
+    "bytes": 69414
+   },
+   "c05-boss-defeated-hq": {
+    "duration": 3.84,
+    "bytes": 79445
+   },
+   "c05-boss-defeated-awacs": {
+    "duration": 5.04,
+    "bytes": 98672
+   },
+   "c05-boss-defeated-scientist": {
+    "duration": 6.16,
+    "bytes": 116644
+   },
+   "c06-briefing-1": {
+    "duration": 7.44,
+    "bytes": 137124
+   },
+   "c06-briefing-2": {
+    "duration": 10.08,
+    "bytes": 179338
+   },
+   "c06-briefing-3": {
+    "duration": 6.88,
+    "bytes": 128347
+   },
+   "c06-level-start-scientist": {
+    "duration": 5.04,
+    "bytes": 98672
+   },
+   "c06-level-start-hq": {
+    "duration": 3.68,
+    "bytes": 76938
+   },
+   "c06-wave-start-1-frigate": {
+    "duration": 4.4,
+    "bytes": 88641
+   },
+   "c06-wave-start-2-wingman2": {
+    "duration": 3.2,
+    "bytes": 69414
+   },
+   "c06-wave-start-4-hq": {
+    "duration": 3.2,
+    "bytes": 69414
+   },
+   "c06-wave-complete-6-scientist": {
+    "duration": 4.24,
+    "bytes": 86133
+   },
+   "c06-boss-spawn-oracle": {
+    "duration": 4.4,
+    "bytes": 88641
+   },
+   "c06-boss-spawn-scientist": {
+    "duration": 4.72,
+    "bytes": 93656
+   },
+   "c06-boss-phase-2-wingman": {
+    "duration": 3.12,
+    "bytes": 68161
+   },
+   "c06-boss-low-health-scientist": {
+    "duration": 4.16,
+    "bytes": 84879
+   },
+   "c06-boss-defeated-wingman": {
+    "duration": 4.0,
+    "bytes": 82371
+   },
+   "c06-boss-defeated-scientist": {
+    "duration": 5.52,
+    "bytes": 106613
+   },
+   "c07-briefing-1": {
+    "duration": 11.76,
+    "bytes": 206505
+   },
+   "c07-briefing-2": {
+    "duration": 7.84,
+    "bytes": 143811
+   },
+   "c07-briefing-3": {
+    "duration": 7.04,
+    "bytes": 130854
+   },
+   "c07-level-start-hq": {
+    "duration": 4.88,
+    "bytes": 96164
+   },
+   "c07-level-start-frigate": {
+    "duration": 5.36,
+    "bytes": 104105
+   },
+   "c07-level-start-wingman2": {
+    "duration": 3.52,
+    "bytes": 74430
+   },
+   "c07-wave-start-2-wingman": {
+    "duration": 3.44,
+    "bytes": 73176
+   },
+   "c07-wave-start-4-frigate": {
+    "duration": 4.72,
+    "bytes": 93656
+   },
+   "c07-wave-start-4-hq": {
+    "duration": 2.88,
+    "bytes": 64399
+   },
+   "c07-wave-complete-4-frigate": {
+    "duration": 4.56,
+    "bytes": 91148
+   },
+   "c07-wave-complete-6-scientist": {
+    "duration": 3.68,
+    "bytes": 76938
+   },
+   "c07-boss-spawn-oracle": {
+    "duration": 4.56,
+    "bytes": 91148
+   },
+   "c07-boss-spawn-scientist": {
+    "duration": 4.16,
+    "bytes": 84879
+   },
+   "c07-boss-phase-2-wingman": {
+    "duration": 3.68,
+    "bytes": 76938
+   },
+   "c07-boss-low-health-hq": {
+    "duration": 4.4,
+    "bytes": 88641
+   },
+   "c07-boss-defeated-scientist": {
+    "duration": 6.32,
+    "bytes": 119152
+   },
+   "c07-boss-defeated-frigate": {
+    "duration": 4.08,
+    "bytes": 83625
+   },
+   "c08-briefing-1": {
+    "duration": 7.2,
+    "bytes": 133362
+   },
+   "c08-briefing-2": {
+    "duration": 5.12,
+    "bytes": 99925
+   },
+   "c08-briefing-3": {
+    "duration": 7.76,
+    "bytes": 142557
+   },
+   "c08-level-start-hq": {
+    "duration": 4.64,
+    "bytes": 92402
+   },
+   "c08-level-start-wingman2": {
+    "duration": 3.2,
+    "bytes": 69414
+   },
+   "c08-level-start-wingman": {
+    "duration": 3.84,
+    "bytes": 79445
+   },
+   "c08-wave-start-1-hq": {
+    "duration": 4.24,
+    "bytes": 86133
+   },
+   "c08-wave-start-4-scientist": {
+    "duration": 3.68,
+    "bytes": 76938
+   },
+   "c08-wave-complete-6-hq": {
+    "duration": 3.68,
+    "bytes": 76938
+   },
+   "c08-boss-spawn-oracle": {
+    "duration": 2.4,
+    "bytes": 56458
+   },
+   "c08-boss-spawn-scientist": {
+    "duration": 4.72,
+    "bytes": 93656
+   },
+   "c08-boss-phase-2-wingman2": {
+    "duration": 4.48,
+    "bytes": 89894
+   },
+   "c08-boss-phase-2-wingman": {
+    "duration": 3.44,
+    "bytes": 73176
+   },
+   "c08-boss-low-health-scientist": {
+    "duration": 2.96,
+    "bytes": 65653
+   },
+   "c08-boss-defeated-hq": {
+    "duration": 5.68,
+    "bytes": 109121
+   },
+   "c08-boss-defeated-wingman2": {
+    "duration": 4.72,
+    "bytes": 93656
+   },
+   "c08-boss-defeated-wingman": {
+    "duration": 3.76,
+    "bytes": 78192
+   },
+   "c08-boss-defeated-scientist": {
+    "duration": 6.4,
+    "bytes": 120405
+   },
+   "c09-briefing-1": {
+    "duration": 10.24,
+    "bytes": 181845
+   },
+   "c09-briefing-2": {
+    "duration": 6.72,
+    "bytes": 125839
+   },
+   "c09-briefing-3": {
+    "duration": 7.6,
+    "bytes": 139632
+   },
+   "c09-level-start-hq": {
+    "duration": 5.68,
+    "bytes": 109121
+   },
+   "c09-level-start-wingman": {
+    "duration": 4.4,
+    "bytes": 88641
+   },
+   "c09-level-start-wingman2": {
+    "duration": 4.24,
+    "bytes": 86133
+   },
+   "c09-wave-start-2-scientist": {
+    "duration": 4.56,
+    "bytes": 91148
+   },
+   "c09-wave-start-2-airliner": {
+    "duration": 4.56,
+    "bytes": 91148
+   },
+   "c09-wave-start-5-awacs": {
+    "duration": 6.0,
+    "bytes": 114136
+   },
+   "c09-wave-complete-6-scientist": {
+    "duration": 4.64,
+    "bytes": 92402
+   },
+   "c09-boss-spawn-oracle": {
+    "duration": 2.88,
+    "bytes": 64399
+   },
+   "c09-boss-phase-2-scientist": {
+    "duration": 3.6,
+    "bytes": 75684
+   },
+   "c09-boss-phase-3-awacs": {
+    "duration": 4.08,
+    "bytes": 83625
+   },
+   "c09-boss-low-health-wingman": {
+    "duration": 2.24,
+    "bytes": 53950
+   },
+   "c09-boss-defeated-scientist": {
+    "duration": 6.32,
+    "bytes": 119152
+   },
+   "c09-boss-defeated-hq": {
+    "duration": 3.28,
+    "bytes": 70668
+   },
+   "c10-briefing-1": {
+    "duration": 9.36,
+    "bytes": 168053
+   },
+   "c10-briefing-2": {
+    "duration": 9.52,
+    "bytes": 170561
+   },
+   "c10-briefing-3": {
+    "duration": 7.28,
+    "bytes": 134616
+   },
+   "c10-level-start-hq": {
+    "duration": 4.4,
+    "bytes": 88641
+   },
+   "c10-level-start-wingman": {
+    "duration": 4.48,
+    "bytes": 89894
+   },
+   "c10-level-start-scientist": {
+    "duration": 4.48,
+    "bytes": 89894
+   },
+   "c10-wave-start-1-awacs": {
+    "duration": 6.24,
+    "bytes": 117898
+   },
+   "c10-wave-start-2-frigate": {
+    "duration": 4.16,
+    "bytes": 84879
+   },
+   "c10-wave-start-3-hq": {
+    "duration": 4.72,
+    "bytes": 93656
+   },
+   "c10-wave-start-6-wingman": {
+    "duration": 2.32,
+    "bytes": 55204
+   },
+   "c10-wave-start-6-wingman2": {
+    "duration": 4.96,
+    "bytes": 97418
+   },
+   "c10-wave-complete-7-scientist": {
+    "duration": 3.76,
+    "bytes": 78192
+   },
+   "c10-boss-spawn-oracle": {
+    "duration": 4.64,
+    "bytes": 92402
+   },
+   "c10-boss-spawn-scientist": {
+    "duration": 3.68,
+    "bytes": 76938
+   },
+   "c10-boss-phase-2-oracle": {
+    "duration": 3.6,
+    "bytes": 75684
+   },
+   "c10-boss-phase-3-oracle": {
+    "duration": 4.16,
+    "bytes": 84879
+   },
+   "c10-boss-phase-3-hq": {
+    "duration": 3.12,
+    "bytes": 68161
+   },
+   "c10-boss-low-health-wingman": {
+    "duration": 1.28,
+    "bytes": 38485
+   },
+   "c10-boss-defeated-oracle": {
+    "duration": 4.32,
+    "bytes": 87387
+   },
+   "c10-boss-defeated-scientist": {
+    "duration": 3.44,
+    "bytes": 73176
+   },
+   "c10-boss-defeated-awacs": {
+    "duration": 4.72,
+    "bytes": 93656
+   },
+   "c10-boss-defeated-wingman": {
+    "duration": 3.6,
+    "bytes": 75684
+   },
+   "c10-boss-defeated-hq": {
+    "duration": 6.48,
+    "bytes": 122077
+   },
+   "contact-tank": {
+    "duration": 5.44,
+    "bytes": 105359
+   },
+   "contact-sam-launcher": {
+    "duration": 3.28,
+    "bytes": 70668
+   },
+   "contact-aa-gun": {
+    "duration": 4.4,
+    "bytes": 88641
+   },
+   "contact-radar-station": {
+    "duration": 4.48,
+    "bytes": 89894
+   },
+   "contact-gunboat": {
+    "duration": 3.84,
+    "bytes": 79445
+   },
+   "contact-frigate": {
+    "duration": 5.68,
+    "bytes": 109121
+   },
+   "contact-submarine": {
+    "duration": 5.28,
+    "bytes": 102851
+   },
+   "contact-attack-helicopter": {
+    "duration": 4.0,
+    "bytes": 82371
+   },
+   "contact-bomber": {
+    "duration": 4.08,
+    "bytes": 83625
+   },
+   "contact-drone": {
+    "duration": 2.72,
+    "bytes": 61891
+   },
+   "contact-ally-convoy": {
+    "duration": 3.52,
+    "bytes": 74430
+   },
+   "contact-ally-frigate": {
+    "duration": 5.68,
+    "bytes": 109121
+   },
+   "contact-ally-awacs": {
+    "duration": 5.2,
+    "bytes": 101597
+   },
+   "contact-civilian-airliner": {
+    "duration": 5.04,
+    "bytes": 98672
+   },
+   "contact-civilian-ship": {
+    "duration": 4.16,
+    "bytes": 84879
+   },
+   "contact-civilian-truck": {
+    "duration": 3.84,
+    "bytes": 79445
+   },
+   "generic-civilian-hit": {
+    "duration": 2.72,
+    "bytes": 61891
+   },
+   "generic-civilian-destroyed": {
+    "duration": 3.68,
+    "bytes": 76938
+   },
+   "generic-ally-unit-destroyed": {
+    "duration": 2.56,
+    "bytes": 58965
+   },
+   "generic-awacs-lost": {
+    "duration": 5.2,
+    "bytes": 101597
+   },
+   "generic-frigate-lost": {
+    "duration": 5.28,
+    "bytes": 102851
+   },
+   "generic-escort-success": {
+    "duration": 2.8,
+    "bytes": 63145
+   },
+   "generic-escort-failed": {
+    "duration": 2.96,
+    "bytes": 65653
+   },
+   "generic-missile-warning": {
+    "duration": 2.4,
+    "bytes": 56458
+   },
+   "generic-low-health": {
+    "duration": 2.48,
+    "bytes": 57712
+   },
+   "generic-weapon-overheat": {
+    "duration": 2.88,
+    "bytes": 64399
+   },
+   "generic-checkpoint": {
+    "duration": 1.52,
+    "bytes": 42665
+   },
+   "epilogue-1": {
+    "duration": 5.84,
+    "bytes": 111628
+   },
+   "epilogue-2": {
+    "duration": 7.28,
+    "bytes": 134616
+   },
+   "epilogue-3": {
+    "duration": 7.44,
+    "bytes": 137124
+   },
+   "epilogue-4": {
+    "duration": 7.04,
+    "bytes": 130854
+   },
+   "epilogue-5": {
+    "duration": 6.08,
+    "bytes": 115390
+   },
+   "generic-swift-joined": {
+    "duration": 4.64,
+    "bytes": 92402
+   },
+   "generic-raven-down-swift": {
+    "duration": 4.8,
+    "bytes": 94910
+   },
+   "generic-raven-down-hq": {
+    "duration": 5.68,
+    "bytes": 109121
+   },
+   "generic-swift-down-raven": {
+    "duration": 4.96,
+    "bytes": 97418
+   },
+   "generic-swift-down-hq": {
+    "duration": 5.04,
+    "bytes": 98672
+   }
+  },
+  "zh": {
+   "prologue-1": {
+    "duration": 8.0,
+    "bytes": 146319
+   },
+   "prologue-2": {
+    "duration": 10.8,
+    "bytes": 191041
+   },
+   "prologue-3": {
+    "duration": 6.72,
+    "bytes": 125839
+   },
+   "c01-briefing-1": {
+    "duration": 8.08,
+    "bytes": 147573
+   },
+   "c01-briefing-2": {
+    "duration": 5.68,
+    "bytes": 109121
+   },
+   "c01-briefing-3": {
+    "duration": 4.4,
+    "bytes": 88641
+   },
+   "c01-level-start-hq": {
+    "duration": 5.12,
+    "bytes": 99925
+   },
+   "c01-level-start-wingman": {
+    "duration": 4.72,
+    "bytes": 93656
+   },
+   "c01-wave-start-1-hq": {
+    "duration": 4.72,
+    "bytes": 93656
+   },
+   "c01-wave-start-3-wingman": {
+    "duration": 3.12,
+    "bytes": 68161
+   },
+   "c01-wave-complete-4-hq": {
+    "duration": 4.64,
+    "bytes": 92402
+   },
+   "c01-boss-spawn-oracle": {
+    "duration": 5.28,
+    "bytes": 102851
+   },
+   "c01-boss-spawn-hq": {
+    "duration": 3.84,
+    "bytes": 79445
+   },
+   "c01-boss-low-health-wingman": {
+    "duration": 2.4,
+    "bytes": 56458
+   },
+   "c01-boss-defeated-wingman": {
+    "duration": 3.04,
+    "bytes": 66907
+   },
+   "c01-boss-defeated-hq": {
+    "duration": 4.96,
+    "bytes": 97418
+   },
+   "c02-briefing-1": {
+    "duration": 8.16,
+    "bytes": 148827
+   },
+   "c02-briefing-2": {
+    "duration": 8.72,
+    "bytes": 157604
+   },
+   "c02-briefing-3": {
+    "duration": 8.08,
+    "bytes": 147573
+   },
+   "c02-level-start-hq": {
+    "duration": 5.2,
+    "bytes": 101597
+   },
+   "c02-level-start-scientist": {
+    "duration": 4.96,
+    "bytes": 97418
+   },
+   "c02-wave-start-1-scientist": {
+    "duration": 5.68,
+    "bytes": 109121
+   },
+   "c02-wave-start-3-hq": {
+    "duration": 3.12,
+    "bytes": 68161
+   },
+   "c02-wave-complete-4-scientist": {
+    "duration": 4.64,
+    "bytes": 92402
+   },
+   "c02-boss-spawn-oracle": {
+    "duration": 3.76,
+    "bytes": 78192
+   },
+   "c02-boss-spawn-wingman": {
+    "duration": 4.96,
+    "bytes": 97418
+   },
+   "c02-boss-low-health-scientist": {
+    "duration": 3.12,
+    "bytes": 68161
+   },
+   "c02-boss-defeated-hq": {
+    "duration": 3.2,
+    "bytes": 69414
+   },
+   "c02-boss-defeated-scientist": {
+    "duration": 6.16,
+    "bytes": 116644
+   },
+   "c03-briefing-1": {
+    "duration": 8.4,
+    "bytes": 152588
+   },
+   "c03-briefing-2": {
+    "duration": 8.0,
+    "bytes": 146319
+   },
+   "c03-briefing-3": {
+    "duration": 9.28,
+    "bytes": 166799
+   },
+   "c03-level-start-scientist": {
+    "duration": 4.88,
+    "bytes": 96164
+   },
+   "c03-level-start-hq": {
+    "duration": 4.08,
+    "bytes": 83625
+   },
+   "c03-level-start-wingman2": {
+    "duration": 6.4,
+    "bytes": 120405
+   },
+   "c03-level-start-wingman": {
+    "duration": 4.64,
+    "bytes": 92402
+   },
+   "c03-wave-start-2-wingman2": {
+    "duration": 5.2,
+    "bytes": 101597
+   },
+   "c03-wave-complete-5-scientist": {
+    "duration": 4.48,
+    "bytes": 89894
+   },
+   "c03-boss-spawn-oracle": {
+    "duration": 4.88,
+    "bytes": 96164
+   },
+   "c03-boss-spawn-scientist": {
+    "duration": 3.52,
+    "bytes": 74430
+   },
+   "c03-boss-low-health-wingman": {
+    "duration": 1.92,
+    "bytes": 48934
+   },
+   "c03-boss-defeated-scientist": {
+    "duration": 6.0,
+    "bytes": 114136
+   },
+   "c03-boss-defeated-wingman2": {
+    "duration": 4.72,
+    "bytes": 93656
+   },
+   "c03-boss-defeated-wingman": {
+    "duration": 3.12,
+    "bytes": 68161
+   },
+   "c04-briefing-1": {
+    "duration": 7.12,
+    "bytes": 132108
+   },
+   "c04-briefing-2": {
+    "duration": 6.96,
+    "bytes": 129601
+   },
+   "c04-briefing-3": {
+    "duration": 6.8,
+    "bytes": 127093
+   },
+   "c04-level-start-hq": {
+    "duration": 4.48,
+    "bytes": 89894
+   },
+   "c04-level-start-wingman2": {
+    "duration": 5.28,
+    "bytes": 102851
+   },
+   "c04-level-start-wingman": {
+    "duration": 3.84,
+    "bytes": 79445
+   },
+   "c04-wave-start-1-freighter": {
+    "duration": 3.2,
+    "bytes": 69414
+   },
+   "c04-wave-start-1-frigate": {
+    "duration": 3.84,
+    "bytes": 79445
+   },
+   "c04-wave-complete-5-frigate": {
+    "duration": 6.0,
+    "bytes": 114136
+   },
+   "c04-boss-spawn-oracle": {
+    "duration": 4.16,
+    "bytes": 84879
+   },
+   "c04-boss-spawn-scientist": {
+    "duration": 3.84,
+    "bytes": 79445
+   },
+   "c04-boss-low-health-scientist": {
+    "duration": 2.96,
+    "bytes": 65653
+   },
+   "c04-boss-defeated-hq": {
+    "duration": 3.36,
+    "bytes": 71922
+   },
+   "c04-boss-defeated-frigate": {
+    "duration": 4.08,
+    "bytes": 83625
+   },
+   "c04-boss-defeated-scientist": {
+    "duration": 6.08,
+    "bytes": 115390
+   },
+   "c05-briefing-1": {
+    "duration": 10.32,
+    "bytes": 183517
+   },
+   "c05-briefing-2": {
+    "duration": 5.92,
+    "bytes": 112882
+   },
+   "c05-briefing-3": {
+    "duration": 3.36,
+    "bytes": 71922
+   },
+   "c05-level-start-hq": {
+    "duration": 6.88,
+    "bytes": 128347
+   },
+   "c05-level-start-wingman": {
+    "duration": 3.28,
+    "bytes": 70668
+   },
+   "c05-wave-start-2-awacs": {
+    "duration": 4.48,
+    "bytes": 89894
+   },
+   "c05-wave-start-4-wingman": {
+    "duration": 2.96,
+    "bytes": 65653
+   },
+   "c05-wave-start-4-awacs": {
+    "duration": 5.36,
+    "bytes": 104105
+   },
+   "c05-wave-complete-6-hq": {
+    "duration": 4.16,
+    "bytes": 84879
+   },
+   "c05-boss-spawn-oracle": {
+    "duration": 3.12,
+    "bytes": 68161
+   },
+   "c05-boss-spawn-wingman2": {
+    "duration": 4.64,
+    "bytes": 92402
+   },
+   "c05-boss-low-health-wingman": {
+    "duration": 2.96,
+    "bytes": 65653
+   },
+   "c05-boss-defeated-hq": {
+    "duration": 3.68,
+    "bytes": 76938
+   },
+   "c05-boss-defeated-awacs": {
+    "duration": 5.04,
+    "bytes": 98672
+   },
+   "c05-boss-defeated-scientist": {
+    "duration": 6.24,
+    "bytes": 117898
+   },
+   "c06-briefing-1": {
+    "duration": 8.08,
+    "bytes": 147573
+   },
+   "c06-briefing-2": {
+    "duration": 9.92,
+    "bytes": 176830
+   },
+   "c06-briefing-3": {
+    "duration": 5.92,
+    "bytes": 112882
+   },
+   "c06-level-start-scientist": {
+    "duration": 5.04,
+    "bytes": 98672
+   },
+   "c06-level-start-hq": {
+    "duration": 3.2,
+    "bytes": 69414
+   },
+   "c06-wave-start-1-frigate": {
+    "duration": 3.28,
+    "bytes": 70668
+   },
+   "c06-wave-start-2-wingman2": {
+    "duration": 3.52,
+    "bytes": 74430
+   },
+   "c06-wave-start-4-hq": {
+    "duration": 3.2,
+    "bytes": 69414
+   },
+   "c06-wave-complete-6-scientist": {
+    "duration": 3.6,
+    "bytes": 75684
+   },
+   "c06-boss-spawn-oracle": {
+    "duration": 3.76,
+    "bytes": 78192
+   },
+   "c06-boss-spawn-scientist": {
+    "duration": 4.16,
+    "bytes": 84879
+   },
+   "c06-boss-phase-2-wingman": {
+    "duration": 2.64,
+    "bytes": 60637
+   },
+   "c06-boss-low-health-scientist": {
+    "duration": 3.04,
+    "bytes": 66907
+   },
+   "c06-boss-defeated-wingman": {
+    "duration": 3.68,
+    "bytes": 76938
+   },
+   "c06-boss-defeated-scientist": {
+    "duration": 5.6,
+    "bytes": 107867
+   },
+   "c07-briefing-1": {
+    "duration": 10.72,
+    "bytes": 189787
+   },
+   "c07-briefing-2": {
+    "duration": 8.72,
+    "bytes": 157604
+   },
+   "c07-briefing-3": {
+    "duration": 5.92,
+    "bytes": 112882
+   },
+   "c07-level-start-hq": {
+    "duration": 4.08,
+    "bytes": 83625
+   },
+   "c07-level-start-frigate": {
+    "duration": 4.48,
+    "bytes": 89894
+   },
+   "c07-level-start-wingman2": {
+    "duration": 4.8,
+    "bytes": 94910
+   },
+   "c07-wave-start-2-wingman": {
+    "duration": 3.28,
+    "bytes": 70668
+   },
+   "c07-wave-start-4-frigate": {
+    "duration": 4.64,
+    "bytes": 92402
+   },
+   "c07-wave-start-4-hq": {
+    "duration": 2.8,
+    "bytes": 63145
+   },
+   "c07-wave-complete-4-frigate": {
+    "duration": 4.24,
+    "bytes": 86133
+   },
+   "c07-wave-complete-6-scientist": {
+    "duration": 4.32,
+    "bytes": 87387
+   },
+   "c07-boss-spawn-oracle": {
+    "duration": 3.84,
+    "bytes": 79445
+   },
+   "c07-boss-spawn-scientist": {
+    "duration": 3.68,
+    "bytes": 76938
+   },
+   "c07-boss-phase-2-wingman": {
+    "duration": 3.52,
+    "bytes": 74430
+   },
+   "c07-boss-low-health-hq": {
+    "duration": 3.6,
+    "bytes": 75684
+   },
+   "c07-boss-defeated-scientist": {
+    "duration": 7.04,
+    "bytes": 130854
+   },
+   "c07-boss-defeated-frigate": {
+    "duration": 4.48,
+    "bytes": 89894
+   },
+   "c08-briefing-1": {
+    "duration": 7.92,
+    "bytes": 145065
+   },
+   "c08-briefing-2": {
+    "duration": 5.04,
+    "bytes": 98672
+   },
+   "c08-briefing-3": {
+    "duration": 7.68,
+    "bytes": 140885
+   },
+   "c08-level-start-hq": {
+    "duration": 4.72,
+    "bytes": 93656
+   },
+   "c08-level-start-wingman2": {
+    "duration": 3.6,
+    "bytes": 75684
+   },
+   "c08-level-start-wingman": {
+    "duration": 4.0,
+    "bytes": 82371
+   },
+   "c08-wave-start-1-hq": {
+    "duration": 3.84,
+    "bytes": 79445
+   },
+   "c08-wave-start-4-scientist": {
+    "duration": 4.32,
+    "bytes": 87387
+   },
+   "c08-wave-complete-6-hq": {
+    "duration": 3.6,
+    "bytes": 75684
+   },
+   "c08-boss-spawn-oracle": {
+    "duration": 2.32,
+    "bytes": 55204
+   },
+   "c08-boss-spawn-scientist": {
+    "duration": 4.56,
+    "bytes": 91148
+   },
+   "c08-boss-phase-2-wingman2": {
+    "duration": 4.96,
+    "bytes": 97418
+   },
+   "c08-boss-phase-2-wingman": {
+    "duration": 4.0,
+    "bytes": 82371
+   },
+   "c08-boss-low-health-scientist": {
+    "duration": 2.48,
+    "bytes": 57712
+   },
+   "c08-boss-defeated-hq": {
+    "duration": 4.72,
+    "bytes": 93656
+   },
+   "c08-boss-defeated-wingman2": {
+    "duration": 5.92,
+    "bytes": 112882
+   },
+   "c08-boss-defeated-wingman": {
+    "duration": 3.52,
+    "bytes": 74430
+   },
+   "c08-boss-defeated-scientist": {
+    "duration": 6.16,
+    "bytes": 116644
+   },
+   "c09-briefing-1": {
+    "duration": 10.48,
+    "bytes": 186025
+   },
+   "c09-briefing-2": {
+    "duration": 7.28,
+    "bytes": 134616
+   },
+   "c09-briefing-3": {
+    "duration": 7.76,
+    "bytes": 142557
+   },
+   "c09-level-start-hq": {
+    "duration": 6.24,
+    "bytes": 117898
+   },
+   "c09-level-start-wingman": {
+    "duration": 4.24,
+    "bytes": 86133
+   },
+   "c09-level-start-wingman2": {
+    "duration": 5.6,
+    "bytes": 107867
+   },
+   "c09-wave-start-2-scientist": {
+    "duration": 4.16,
+    "bytes": 84879
+   },
+   "c09-wave-start-2-airliner": {
+    "duration": 4.96,
+    "bytes": 97418
+   },
+   "c09-wave-start-5-awacs": {
+    "duration": 6.32,
+    "bytes": 119152
+   },
+   "c09-wave-complete-6-scientist": {
+    "duration": 4.56,
+    "bytes": 91148
+   },
+   "c09-boss-spawn-oracle": {
+    "duration": 3.04,
+    "bytes": 66907
+   },
+   "c09-boss-phase-2-scientist": {
+    "duration": 4.56,
+    "bytes": 91148
+   },
+   "c09-boss-phase-3-awacs": {
+    "duration": 4.72,
+    "bytes": 93656
+   },
+   "c09-boss-low-health-wingman": {
+    "duration": 2.32,
+    "bytes": 55204
+   },
+   "c09-boss-defeated-scientist": {
+    "duration": 5.76,
+    "bytes": 110374
+   },
+   "c09-boss-defeated-hq": {
+    "duration": 2.32,
+    "bytes": 55204
+   },
+   "c10-briefing-1": {
+    "duration": 10.0,
+    "bytes": 178084
+   },
+   "c10-briefing-2": {
+    "duration": 10.56,
+    "bytes": 187279
+   },
+   "c10-briefing-3": {
+    "duration": 8.08,
+    "bytes": 147573
+   },
+   "c10-level-start-hq": {
+    "duration": 4.32,
+    "bytes": 87387
+   },
+   "c10-level-start-wingman": {
+    "duration": 3.44,
+    "bytes": 73176
+   },
+   "c10-level-start-scientist": {
+    "duration": 4.4,
+    "bytes": 88641
+   },
+   "c10-wave-start-1-awacs": {
+    "duration": 5.68,
+    "bytes": 109121
+   },
+   "c10-wave-start-2-frigate": {
+    "duration": 4.96,
+    "bytes": 97418
+   },
+   "c10-wave-start-3-hq": {
+    "duration": 4.08,
+    "bytes": 83625
+   },
+   "c10-wave-start-6-wingman": {
+    "duration": 3.2,
+    "bytes": 69414
+   },
+   "c10-wave-start-6-wingman2": {
+    "duration": 7.36,
+    "bytes": 135870
+   },
+   "c10-wave-complete-7-scientist": {
+    "duration": 3.12,
+    "bytes": 68161
+   },
+   "c10-boss-spawn-oracle": {
+    "duration": 4.24,
+    "bytes": 86133
+   },
+   "c10-boss-spawn-scientist": {
+    "duration": 3.68,
+    "bytes": 76938
+   },
+   "c10-boss-phase-2-oracle": {
+    "duration": 3.12,
+    "bytes": 68161
+   },
+   "c10-boss-phase-3-oracle": {
+    "duration": 4.56,
+    "bytes": 91148
+   },
+   "c10-boss-phase-3-hq": {
+    "duration": 3.2,
+    "bytes": 69414
+   },
+   "c10-boss-low-health-wingman": {
+    "duration": 1.52,
+    "bytes": 42665
+   },
+   "c10-boss-defeated-oracle": {
+    "duration": 3.92,
+    "bytes": 81117
+   },
+   "c10-boss-defeated-scientist": {
+    "duration": 3.2,
+    "bytes": 69414
+   },
+   "c10-boss-defeated-awacs": {
+    "duration": 5.6,
+    "bytes": 107867
+   },
+   "c10-boss-defeated-wingman": {
+    "duration": 3.28,
+    "bytes": 70668
+   },
+   "c10-boss-defeated-hq": {
+    "duration": 6.8,
+    "bytes": 127093
+   },
+   "contact-tank": {
+    "duration": 4.96,
+    "bytes": 97418
+   },
+   "contact-sam-launcher": {
+    "duration": 4.08,
+    "bytes": 83625
+   },
+   "contact-aa-gun": {
+    "duration": 4.0,
+    "bytes": 82371
+   },
+   "contact-radar-station": {
+    "duration": 4.96,
+    "bytes": 97418
+   },
+   "contact-gunboat": {
+    "duration": 4.08,
+    "bytes": 83625
+   },
+   "contact-frigate": {
+    "duration": 5.44,
+    "bytes": 105359
+   },
+   "contact-submarine": {
+    "duration": 4.56,
+    "bytes": 91148
+   },
+   "contact-attack-helicopter": {
+    "duration": 3.68,
+    "bytes": 76938
+   },
+   "contact-bomber": {
+    "duration": 3.52,
+    "bytes": 74430
+   },
+   "contact-drone": {
+    "duration": 2.88,
+    "bytes": 64399
+   },
+   "contact-ally-convoy": {
+    "duration": 2.72,
+    "bytes": 61891
+   },
+   "contact-ally-frigate": {
+    "duration": 5.68,
+    "bytes": 109121
+   },
+   "contact-ally-awacs": {
+    "duration": 5.04,
+    "bytes": 98672
+   },
+   "contact-civilian-airliner": {
+    "duration": 4.56,
+    "bytes": 91148
+   },
+   "contact-civilian-ship": {
+    "duration": 3.6,
+    "bytes": 75684
+   },
+   "contact-civilian-truck": {
+    "duration": 3.36,
+    "bytes": 71922
+   },
+   "generic-civilian-hit": {
+    "duration": 2.32,
+    "bytes": 55204
+   },
+   "generic-civilian-destroyed": {
+    "duration": 3.52,
+    "bytes": 74430
+   },
+   "generic-ally-unit-destroyed": {
+    "duration": 2.56,
+    "bytes": 58965
+   },
+   "generic-awacs-lost": {
+    "duration": 5.36,
+    "bytes": 104105
+   },
+   "generic-frigate-lost": {
+    "duration": 4.48,
+    "bytes": 89894
+   },
+   "generic-escort-success": {
+    "duration": 2.32,
+    "bytes": 55204
+   },
+   "generic-escort-failed": {
+    "duration": 2.8,
+    "bytes": 63145
+   },
+   "generic-missile-warning": {
+    "duration": 2.24,
+    "bytes": 53950
+   },
+   "generic-low-health": {
+    "duration": 2.4,
+    "bytes": 56458
+   },
+   "generic-weapon-overheat": {
+    "duration": 2.56,
+    "bytes": 58965
+   },
+   "generic-checkpoint": {
+    "duration": 1.52,
+    "bytes": 42665
+   },
+   "epilogue-1": {
+    "duration": 5.6,
+    "bytes": 107867
+   },
+   "epilogue-2": {
+    "duration": 7.04,
+    "bytes": 130854
+   },
+   "epilogue-3": {
+    "duration": 9.36,
+    "bytes": 168053
+   },
+   "epilogue-4": {
+    "duration": 9.68,
+    "bytes": 173068
+   },
+   "epilogue-5": {
+    "duration": 7.76,
+    "bytes": 142557
+   },
+   "generic-swift-joined": {
+    "duration": 5.12,
+    "bytes": 99925
+   },
+   "generic-raven-down-swift": {
+    "duration": 5.36,
+    "bytes": 104105
+   },
+   "generic-raven-down-hq": {
+    "duration": 6.08,
+    "bytes": 115390
+   },
+   "generic-swift-down-raven": {
+    "duration": 6.24,
+    "bytes": 117898
+   },
+   "generic-swift-down-hq": {
+    "duration": 5.12,
+    "bytes": 99925
+   }
+  }
+ }
+}
