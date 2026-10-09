@@ -168,11 +168,10 @@ describe('RadioComms (§9)', () => {
   });
 
   /**
-   * 与 integration-notes「idle → line shows immediately (synchronous onLineShown)」不符：
-   * 一句播完后的约 0.18 s 间隔里 isBusy() 已经返回 false，但 enqueue 只排队、不同步显示
-   * （RadioComms.enqueue 检查 gap，isBusy() 不看 gap）。
+   * integration-notes「idle → line shows immediately (synchronous onLineShown)」：
+   * 两句之间的短暂间隔也算忙碌（a1e2424），所以 isBusy() 为 false 时 enqueue 必须同步显示。
    */
-  it.fails('shows a line synchronously whenever isBusy() reports idle', () => {
+  it('shows a line synchronously whenever isBusy() reports idle', () => {
     const first = line('第一句。');
     radio.enqueue(first);
     for (let elapsed = 0; radio.isBusy() && elapsed < 60; elapsed += 0.05) {
