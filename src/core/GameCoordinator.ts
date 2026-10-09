@@ -152,32 +152,32 @@ interface CombatRuntimeSystems {
  * 教学目标面板文案：HUD 节流后约 30 Hz 重建目标显示，双语对象提升为模块常量（tr 按当前语言取值）。
  */
 const TUTORIAL_OBJECTIVE_TEXT = {
-  moveTitle: { en: 'Training · Maneuver check', zh: '试玩引导 · 机动确认' },
+  moveTitle: { en: 'Training · Maneuver check', zh: '教程 · 机动确认' },
   moveObjective: {
     en: 'Turn or strafe once to confirm handling.',
     zh: '完成一次转向/横移，确认机动。',
   },
-  speedTitle: { en: 'Training · Build speed', zh: '试玩引导 · 提升速度' },
+  speedTitle: { en: 'Training · Build speed', zh: '教程 · 提升速度' },
   speedObjective: {
     en: 'Speed up and open some distance before contact.',
     zh: '提速建立距离，准备接敌。',
   },
-  fireTitle: { en: 'Training · Suppressing fire', zh: '试玩引导 · 火力压制' },
+  fireTitle: { en: 'Training · Suppressing fire', zh: '教程 · 火力压制' },
   fireObjective: {
     en: 'Keep firing to get a feel for the cannon.',
     zh: '持续开火，校准机炮节奏。',
   },
-  lockTitle: { en: 'Training · Missile lock', zh: '试玩引导 · 导弹锁定' },
+  lockTitle: { en: 'Training · Missile lock', zh: '教程 · 导弹锁定' },
   lockObjective: {
     en: 'Keep the target in your sights; fire when the lock ring closes.',
     zh: '目标稳定入准星，锁定圈闭合后发射。',
   },
-  launchTitle: { en: 'Training · Missile launch', zh: '试玩引导 · 导弹发射' },
+  launchTitle: { en: 'Training · Missile launch', zh: '教程 · 导弹发射' },
   launchObjective: {
     en: 'Fire as soon as you have a lock and watch it hit.',
     zh: '锁定达成后立刻发射，观察命中反馈。',
   },
-  killTitle: { en: 'Training · First kill', zh: '试玩引导 · 击落首个目标' },
+  killTitle: { en: 'Training · First kill', zh: '教程 · 击落首个目标' },
   killObjective: {
     en: 'Down the top threat ahead, then clear its escorts to start the mission.',
     zh: '先击落正前方高威胁，再解护航压力进入常规。',
@@ -2481,7 +2481,7 @@ export class GameCoordinator {
     return [
       {
         icon: '🎮',
-        text: tr({ en: 'Training flight begins', zh: '试玩关开启' }),
+        text: tr({ en: 'Training flight begins', zh: '教程开始' }),
         hideSubtext: true,
       },
       { icon: '🕹️', text: tr({ en: 'Check turning and strafing', zh: '确认转向与横移' }) },
@@ -2728,7 +2728,7 @@ export class GameCoordinator {
     this.tutorialCombatState.active = false;
     this.showTransientObjective(
       {
-        title: { text: { en: 'Training · Complete', zh: '试玩引导 · 完成' } },
+        title: { text: { en: 'Training · Complete', zh: '教程 · 完成' } },
         objective: {
           text: {
             en: 'Training complete. Regular waves incoming.',
