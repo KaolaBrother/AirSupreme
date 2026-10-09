@@ -15,6 +15,7 @@ import {
   type RadioLine,
 } from '@/features/campaign/CampaignData';
 import { LEVELS } from '@/features/terrain/LevelConfig';
+import { expectBilingual } from './i18nTestUtils';
 
 /** api-spec：解锁节奏 L2 rockets · L4 laser · L6 swarm · L7 railgun · L9 emp */
 const UNLOCK_SCHEDULE: ReadonlyArray<[SpecialWeaponId, number]> = [
@@ -45,16 +46,28 @@ describe('CampaignData', () => {
     expect(getCampaignChapter(level).title).toBe(levelConfig?.name);
   });
 
-  it('gives every chapter a complete story card, objectives and debrief', () => {
+  it('gives every chapter a complete story card, objectives and debrief in both languages', () => {
     for (const chapter of CAMPAIGN_CHAPTERS) {
       const where = `chapter ${chapter.level}`;
-      expect(chapter.chapterLabel, where).not.toBe('');
-      expect(chapter.codename, where).not.toBe('');
-      expect(chapter.title, where).not.toBe('');
+      expectBilingual(chapter.chapterLabel, `${where} label`);
+      expect(chapter.codename.trim(), where).not.toBe('');
+      expectBilingual(chapter.title, `${where} title`);
+      expectBilingual(chapter.location, `${where} location`);
+      expectBilingual(chapter.levelBriefingLine, `${where} briefing line`);
       expect(chapter.intro.length, where).toBeGreaterThan(0);
+      chapter.intro.forEach((paragraph, index) =>
+        expectBilingual(paragraph, `${where} intro ${index + 1}`)
+      );
       expect(chapter.objectives.length, where).toBeGreaterThan(0);
-      expect(chapter.boss.name, where).not.toBe('');
-      expect(chapter.debriefSummary, where).not.toBe('');
+      chapter.objectives.forEach((objective, index) =>
+        expectBilingual(objective, `${where} objective ${index + 1}`)
+      );
+      expectBilingual(chapter.boss.name, `${where} boss name`);
+      expectBilingual(chapter.boss.briefingLine, `${where} boss briefing`);
+      expectBilingual(chapter.boss.weakPointHint, `${where} boss weak point`);
+      expectBilingual(chapter.debriefSummary, `${where} debrief`);
+      // 英文界面只显示英文代号，中文界面显示中文行动名
+      expect(chapter.operationName.zh.trim(), `${where} operation name (zh)`).not.toBe('');
       expect(getChapterRadio(chapter.level, 'level-start').length, where).toBeGreaterThan(0);
       expect(getChapterRadio(chapter.level, 'boss-spawn').length, where).toBeGreaterThan(0);
       expect(getChapterRadio(chapter.level, 'boss-defeated').length, where).toBeGreaterThan(0);
@@ -69,8 +82,8 @@ describe('CampaignData', () => {
       ...Object.values(GENERIC_RADIO),
     ];
     for (const line of allLines) {
-      expect(speakers.has(line.speaker), `speaker ${line.speaker}`).toBe(true);
-      expect(line.text.length).toBeGreaterThan(0);
+      expect(speakers.has(line.speaker), `${line.id}: speaker ${line.speaker}`).toBe(true);
+      expectBilingual(line.text, line.id);
     }
 
     for (const chapter of CAMPAIGN_CHAPTERS) {
@@ -121,8 +134,7 @@ describe('CampaignData', () => {
     it('has an unlock line exactly on the chapters that unlock a weapon', () => {
       for (const chapter of CAMPAIGN_CHAPTERS) {
         if (chapter.unlockedWeapons.length > 0) {
-          expect(chapter.unlockLine, `chapter ${chapter.level}`).toEqual(expect.any(String));
-          expect(chapter.unlockLine?.length ?? 0).toBeGreaterThan(0);
+          expectBilingual(chapter.unlockLine, `chapter ${chapter.level} unlock line`);
         } else {
           expect(chapter.unlockLine, `chapter ${chapter.level}`).toBeNull();
         }

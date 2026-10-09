@@ -15,6 +15,8 @@ import {
   type WeaponMuzzle,
 } from '@/features/weapons/WeaponSystem';
 import { SPECIAL_WEAPON_CONFIGS, getSpecialWeaponStats } from '@/features/weapons/WeaponTypes';
+import { setLocale } from '@/i18n';
+import { expectBilingual, resetLocale } from './i18nTestUtils';
 
 const DT = 1 / 30;
 /** 枪口位于 (0, 100, 0)，机头朝 -Z */
@@ -419,6 +421,10 @@ describe('WeaponSystem (scene = null, particleSystem = null)', () => {
   });
 
   describe('HUD state', () => {
+    afterEach(() => {
+      resetLocale();
+    });
+
     it('describes the selected weapon and one slot per unlocked weapon', () => {
       weapons.setUnlocked([...SPECIAL_WEAPON_IDS]);
       weapons.select('swarm');
@@ -427,12 +433,24 @@ describe('WeaponSystem (scene = null, particleSystem = null)', () => {
       expect(hud.selected).toBe('swarm');
       expect(hud.mode).toBe(SPECIAL_WEAPON_CONFIGS.swarm.mode);
       expect(hud.shortCode).toBe('SWM');
-      expect(hud.name).toBe(SPECIAL_WEAPON_CONFIGS.swarm.name);
+      expect(hud.name).toBe(SPECIAL_WEAPON_CONFIGS.swarm.name.en);
+      setLocale('zh-CN');
+      expect(weapons.getHudState().name, 'name follows the interface language').toBe(
+        SPECIAL_WEAPON_CONFIGS.swarm.name.zh
+      );
+      expect(weapons.getHudState().shortCode, 'short codes are the same in both').toBe('SWM');
       expect(hud.slots.map((slot) => slot.id)).toEqual([...SPECIAL_WEAPON_IDS]);
       expect(hud.slots.map((slot) => slot.shortCode)).toEqual(['RKT', 'LSR', 'SWM', 'RLG', 'EMP']);
       expect(hud.slots.filter((slot) => slot.selected).map((slot) => slot.id)).toEqual(['swarm']);
       expect(hud.ready).toBe(true);
       expectHudInRange(hud);
+    });
+
+    it('names and describes every weapon in both languages', () => {
+      for (const id of SPECIAL_WEAPON_IDS) {
+        expectBilingual(SPECIAL_WEAPON_CONFIGS[id].name, `${id} name`);
+        expectBilingual(SPECIAL_WEAPON_CONFIGS[id].description, `${id} description`);
+      }
     });
 
     it('reports heat weapons with infinite ammo', () => {

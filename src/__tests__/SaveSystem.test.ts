@@ -17,6 +17,8 @@ import {
 } from '@/core/save/SaveSystem';
 import { CAMPAIGN_CHAPTERS, TOTAL_LEVELS } from '@/features/campaign/CampaignData';
 import { PlayerUpgrades, UpgradeType } from '@/features/upgrade/UpgradeSystem';
+import { setLocale } from '@/i18n';
+import { resetLocale } from './i18nTestUtils';
 
 type CheckpointInput = Omit<CampaignSaveData, 'version' | 'savedAt'>;
 
@@ -405,30 +407,42 @@ describe('SaveSystem', () => {
   });
 
   describe('describeCheckpoint', () => {
-    it('shows level, chapter title and the 1-based number of the next wave', () => {
+    afterEach(() => {
+      resetLocale();
+    });
+
+    it('shows chapter, title and the 1-based number of the next wave (English by default)', () => {
+      expect(describeCheckpoint(makeSave({ checkpoint: 'wave', level: 6, wave: 2 }))).toBe(
+        'Ch. 6 · Heart of the Forge · Wave 3'
+      );
+      setLocale('zh-CN');
       expect(describeCheckpoint(makeSave({ checkpoint: 'wave', level: 6, wave: 2 }))).toBe(
         '第6关 · 熔炉之心 · 第3波'
       );
     });
 
     it('shows wave 1 for a level-start checkpoint', () => {
-      expect(describeCheckpoint(makeSave({ checkpoint: 'level-start', level: 1, wave: 0 }))).toBe(
-        '第1关 · 湖畔晨曦 · 第1波'
-      );
+      const save = makeSave({ checkpoint: 'level-start', level: 1, wave: 0 });
+      expect(describeCheckpoint(save)).toBe('Ch. 1 · Dawn at the Lake · Wave 1');
+      setLocale('zh-CN');
+      expect(describeCheckpoint(save)).toBe('第1关 · 湖畔晨曦 · 第1波');
     });
 
-    it('labels a boss checkpoint as Boss 战 instead of a wave', () => {
-      expect(describeCheckpoint(makeSave({ checkpoint: 'boss', level: 6, wave: 7 }))).toBe(
-        '第6关 · 熔炉之心 · Boss 战'
-      );
+    it('labels a boss checkpoint as the boss fight instead of a wave', () => {
+      const save = makeSave({ checkpoint: 'boss', level: 6, wave: 7 });
+      expect(describeCheckpoint(save)).toBe('Ch. 6 · Heart of the Forge · Boss');
+      setLocale('zh-CN');
+      expect(describeCheckpoint(save)).toBe('第6关 · 熔炉之心 · Boss 战');
     });
 
-    it.each(CAMPAIGN_CHAPTERS.map((chapter) => [chapter.level, chapter.title] as const))(
-      'uses the chapter title for level %i (%s)',
-      (level, title) => {
-        expect(describeCheckpoint(makeSave({ level, wave: 0, checkpoint: 'level-start' }))).toBe(
-          `第${level}关 · ${title} · 第1波`
-        );
+    it.each(CAMPAIGN_CHAPTERS.map((chapter) => [chapter.level, chapter.title.en] as const))(
+      'uses the chapter title for level %i (%s) in both languages',
+      (level) => {
+        const save = makeSave({ level, wave: 0, checkpoint: 'level-start' });
+        const title = CAMPAIGN_CHAPTERS[level - 1].title;
+        expect(describeCheckpoint(save)).toBe(`Ch. ${level} · ${title.en} · Wave 1`);
+        setLocale('zh-CN');
+        expect(describeCheckpoint(save)).toBe(`第${level}关 · ${title.zh} · 第1波`);
       }
     );
   });

@@ -9,6 +9,7 @@ import { getWaveDeployment, type UnitPlacement } from '@/features/units/UnitDepl
 import { createUnitMesh } from '@/features/units/UnitMeshFactory';
 import { UnitSystem, type UnitInstance, type UnitUpdateContext } from '@/features/units/UnitSystem';
 import { UNIT_CONFIGS, UnitType, type UnitRadarKind } from '@/features/units/UnitTypes';
+import { expectBilingual } from './i18nTestUtils';
 
 const ALL_TYPES = Object.values(UnitType);
 const HOSTILE_TYPES: readonly UnitType[] = [
@@ -97,7 +98,7 @@ describe('UnitTypes', () => {
     for (const type of ALL_TYPES) {
       const config = UNIT_CONFIGS[type];
       expect(config.type, type).toBe(type);
-      expect(config.name.length, type).toBeGreaterThan(0);
+      expectBilingual(config.name, `${type} name`);
       expect(config.health, type).toBeGreaterThan(0);
       expect(config.hitRadius, type).toBeGreaterThan(0);
       expect(config.speed, type).toBeGreaterThanOrEqual(0);

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import * as THREE from 'three';
 import { GameEventType, EventBus } from '@/core/EventBus';
-import { PowerUpType } from '@/features/powerups/PowerUpSystem';
+import { POWER_UP_CONFIGS, PowerUpType } from '@/features/powerups/PowerUpSystem';
 import { ENEMY_CONFIGS, EnemyType } from '@/features/enemy/EnemyTypes';
 
 describe('Game Events Integration', () => {
@@ -80,20 +80,12 @@ describe('Game Events Integration', () => {
       const handler = vi.fn();
       EventBus.on(GameEventType.POWERUP_COLLECTED, handler);
 
-      EventBus.emit(GameEventType.POWERUP_COLLECTED, {
-        type: PowerUpType.HEALTH,
-        config: {
-          type: PowerUpType.HEALTH,
-          name: '生命恢复',
-          description: '恢复生命值',
-          icon: '❤️',
-          color: 0xff0000,
-          duration: 0,
-          value: 0,
-        },
-      });
+      const config = POWER_UP_CONFIGS[PowerUpType.HEALTH];
+      EventBus.emit(GameEventType.POWERUP_COLLECTED, { type: PowerUpType.HEALTH, config });
 
-      expect(handler).toHaveBeenCalled();
+      expect(handler).toHaveBeenCalledWith(
+        expect.objectContaining({ payload: { type: PowerUpType.HEALTH, config } })
+      );
     });
 
     it('should emit SHIELD_ACTIVATED', () => {

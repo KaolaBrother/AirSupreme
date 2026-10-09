@@ -15,8 +15,9 @@ import {
   sampleEnvironmentSurface,
   type TerrainEnvironment,
 } from '@/features/terrain/environments';
+import { expectBilingual } from './i18nTestUtils';
 
-/** api-spec §1 的关卡表 */
+/** api-spec §1 的关卡表（中文名；关卡名现为双语对象，英文名见章节标题） */
 const LEVEL_TABLE: ReadonlyArray<[number, string, TerrainType, number]> = [
   [1, '湖畔晨曦', TerrainType.LAKE, 5],
   [2, '沙漠风暴', TerrainType.DESERT, 5],
@@ -63,14 +64,20 @@ function environmentFor(terrain: TerrainType): TerrainEnvironment {
 
 describe('LEVELS (api-spec §1)', () => {
   it('lists levels 1..10 in order with the spec names, terrains and wave counts', () => {
-    expect(LEVELS.map((level) => [level.id, level.name, level.terrain, level.totalWaves])).toEqual(
-      LEVEL_TABLE
-    );
+    expect(
+      LEVELS.map((level) => [level.id, level.name.zh, level.terrain, level.totalWaves])
+    ).toEqual(LEVEL_TABLE);
   });
 
-  it.each(LEVEL_TABLE)('level %i name equals the campaign chapter title', (id, name) => {
-    expect(getCampaignChapter(id).title).toBe(name);
-    expect(getLevelConfig(id)?.name).toBe(name);
+  it.each(LEVEL_TABLE)('level %i name is the campaign chapter title in both languages', (id) => {
+    const name = getLevelConfig(id)?.name;
+    expect(name, 'same object as the chapter title').toBe(getCampaignChapter(id).title);
+    expectBilingual(name, `level ${id} name`);
+  });
+
+  it('gives every level a distinct English name', () => {
+    const names = LEVELS.map((level) => level.name.en);
+    expect(new Set(names).size).toBe(LEVELS.length);
   });
 
   it('has one positive enemy count per wave', () => {
