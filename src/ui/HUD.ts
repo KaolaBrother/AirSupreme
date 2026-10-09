@@ -1,7 +1,7 @@
 import { GAME_CONSTANTS, GameConfig } from '@/config';
 import { SPECIAL_WEAPON_IDS } from '@/core/CombatContracts';
 import { SPECIAL_WEAPON_CONFIGS } from '@/features/weapons/WeaponTypes';
-import { onLocaleChange, tr, type LocalizedText } from '@/i18n';
+import { onLocaleChange, tr, type LocalizedText, type TextParams } from '@/i18n';
 import { injectHudExtrasStyles } from '@/ui/theme/hudExtrasStyles';
 import {
   GLYPH_CAMERA,
@@ -58,12 +58,48 @@ const TXT_DECK_FIRST_PERSON: LocalizedText = { en: '1ST', zh: '座舱' };
 const TXT_DECK_THIRD_PERSON: LocalizedText = { en: '3RD', zh: '机外' };
 const TXT_BOSS_PHASE: LocalizedText = { en: 'PHASE', zh: '阶段' };
 
+/** 带占位参数的双语文案：{ text: { en: 'Wave {wave}', zh: '第{wave}波' }, params: { wave: 3 } } */
+export interface HudTextWithParams {
+  readonly text: LocalizedText | string;
+  readonly params?: TextParams;
+}
+
+/**
+ * HUD 可本地化文案：纯字符串原样显示（旧调用方不变）；双语对象或 { text, params } 按当前语言取值，
+ * 切换语言时仍在显示的简报卡 / 自动存档提示按新语言重绘。
+ */
+export type HudText = string | LocalizedText | HudTextWithParams;
+
+function isLocalizedText(value: unknown): value is LocalizedText {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    typeof (value as LocalizedText).en === 'string' &&
+    typeof (value as LocalizedText).zh === 'string'
+  );
+}
+
+/** 按当前语言展开 HudText；无法识别的输入（运行时传错类型）返回空串 */
+function resolveHudText(value: HudText | null | undefined): string {
+  if (typeof value === 'string') {
+    return value;
+  }
+  if (typeof value !== 'object' || value === null) {
+    return '';
+  }
+  if ('text' in value) {
+    const { text, params } = value;
+    return typeof text === 'string' || isLocalizedText(text) ? tr(text, params) : '';
+  }
+  return isLocalizedText(value) ? tr(value) : '';
+}
+
 export type BriefingTone = 'sys' | 'threat';
 
 export interface BriefingRequest {
-  kicker: string;
-  title: string;
-  line: string;
+  kicker: HudText;
+  title: HudText;
+  line: HudText;
   tone: BriefingTone;
   durationMs: number;
 }
@@ -208,14 +244,19 @@ export class HUD {
   private eventObjectiveText: HTMLDivElement;
   private eventObjectiveStatus: HTMLDivElement;
   private eventObjectiveTone: EventObjectiveTone = 'default';
+  private eventObjectiveVisible: boolean = false;
   private livesDisplay: HTMLDivElement;
   private missilesDisplay: HTMLDivElement;
   private missileProgressDisplay: HTMLDivElement; // 导弹补给进度条背景
   private missileProgressFill: HTMLDivElement; // 导弹补给进度条填充
+  private statusColumn: HTMLDivElement; // 右上状态列
+  private topStack: HTMLDivElement; // 顶部中央消息栈
+  private topStackObserver: ResizeObserver | null = null;
+  private lastTopStackBottom: string = '';
   private powerUpDisplay: HTMLDivElement;
   private powerUpBigDisplay: HTMLDivElement;
-  private powerUpBigIcon: HTMLDivElement;
-  private powerUpBigText: HTMLDivElement;
+  private powerUpBigIcon: HTMLElement;
+  private powerUpBigText: HTMLElement;
   private powerUpBigSubtext: HTMLDivElement;
   private gameOverDisplay: HTMLDivElement;
   private gameOverTitle: HTMLDivElement;
@@ -269,6 +310,10 @@ export class HUD {
   private exitButton!: HTMLButtonElement;
   private flareLabelText: Text | null = null;
   private autosaveTitle: HTMLSpanElement | null = null;
+  /** 正在显示的简报原文（可本地化，语言切换时重绘）；隐藏后清空 */
+  private briefingSource: Pick<BriefingRequest, 'kicker' | 'title' | 'line'> | null = null;
+  /** 正在显示的自动存档标签原文（可本地化，语言切换时重绘） */
+  private autosaveLabelSource: HudText | null = null;
 
   // 战役 HUD（首次使用时才创建）
   private static readonly AUTOSAVE_TOAST_SECONDS = 2.6;
@@ -321,14 +366,14 @@ export class HUD {
     this.container.setAttribute('data-layout-density', this.layoutDensity);
 
     const isMobile = this.layoutDensity !== 'desktop';
-    const padding = isMobile ? '10px' : '20px';
 
+    // 容器贴合安全区（刘海 / 圆角 / 横握时的左右挖孔）：内部绝对定位的元件都相对安全区排布；
+    // 各元件按布局密度的位置与字号写在 hudExtrasStyles（#hud[data-layout-density]），横竖屏切换即时生效
     this.container.style.cssText = `
       position: fixed;
-      top: 0;
-      left: 0;
-      width: 100%;
-      padding: ${padding};
+      top: env(safe-area-inset-top, 0px);
+      left: env(safe-area-inset-left, 0px);
+      right: env(safe-area-inset-right, 0px);
       pointer-events: none;
       font-family: var(--hud-font, 'Arial', sans-serif);
       color: var(--hud-text, ${HUD_COLORS.text});
@@ -341,32 +386,28 @@ export class HUD {
     this.leftStatusPanel.className = 'hud-cabin';
     this.leftStatusPanel.style.cssText = `
       position: absolute;
-      top: ${isMobile ? '14px' : '18px'};
-      left: ${padding};
       display: flex;
       flex-direction: column;
-      gap: ${isMobile ? '8px' : '10px'};
       width: fit-content;
       max-width: ${this.getCabinMaxWidth()};
       pointer-events: none;
     `;
 
     this.leftPrimaryRow = document.createElement('div');
+    this.leftPrimaryRow.className = 'hud-cabin-primary';
     this.leftPrimaryRow.style.cssText = `
       display: flex;
       flex-direction: column;
-      gap: ${isMobile ? '8px' : '10px'};
       align-items: stretch;
     `;
 
     this.upgradePointsDisplay = document.createElement('div');
+    this.upgradePointsDisplay.id = 'hud-upgrades';
     this.upgradePointsDisplay.style.cssText = `
-      font-size: ${isMobile ? '12px' : '14px'};
       color: #FFD76A;
       background: linear-gradient(135deg, rgba(38, 31, 16, 0.9), rgba(76, 56, 12, 0.78));
       border: 1px solid rgba(255, 215, 106, 0.45);
       border-radius: 12px;
-      padding: ${isMobile ? '6px 10px' : '8px 12px'};
       letter-spacing: 0.08em;
       font-weight: 700;
       text-shadow: 0 0 10px rgba(255, 215, 106, 0.28);
@@ -381,12 +422,10 @@ export class HUD {
     this.setTextContent(this.upgradePointsDisplay, '⭐ 0');
 
     this.scoreDisplay = document.createElement('div');
+    this.scoreDisplay.id = 'hud-score';
     this.scoreDisplay.style.cssText = `
-      font-size: ${isMobile ? '16px' : '19px'};
-      min-height: ${isMobile ? '44px' : '60px'};
       display: flex;
       align-items: center;
-      padding: ${isMobile ? '10px 12px' : '12px 14px'};
       border-radius: 14px;
       background: linear-gradient(160deg, rgba(18, 30, 48, 0.88), rgba(10, 14, 22, 0.76));
       border: 1px solid rgba(118, 204, 255, 0.28);
@@ -403,13 +442,11 @@ export class HUD {
     this.renderScore();
 
     this.speedDisplay = document.createElement('div');
+    this.speedDisplay.id = 'hud-speed';
     this.speedDisplay.style.cssText = `
-      font-size: ${isMobile ? '14px' : '16px'};
-      min-height: ${isMobile ? '44px' : '60px'};
       display: flex;
       align-items: center;
       justify-content: flex-start;
-      padding: ${isMobile ? '10px 10px' : '12px 12px'};
       border-radius: 14px;
       background: linear-gradient(165deg, rgba(17, 22, 34, 0.88), rgba(9, 12, 18, 0.76));
       border: 1px solid rgba(255, 164, 95, 0.26);
@@ -425,15 +462,17 @@ export class HUD {
     `;
     this.renderSpeed();
 
+    // 顶部中央消息栈：Boss 阶段条（竖屏）/ 简报卡 / 事件目标 / 自动存档（竖屏）按顺序纵向排布，互不重叠
+    this.topStack = document.createElement('div');
+    this.topStack.id = 'hud-top-stack';
+    this.topStack.setAttribute('data-hud', 'top-stack');
+
+    // 事件目标（教学 / 波次事件）：标题与进度同一行，正文在下，紧凑占位
     this.eventObjectiveDisplay = document.createElement('div');
+    this.eventObjectiveDisplay.id = 'hud-objective';
+    this.eventObjectiveDisplay.setAttribute('data-hud', 'objective');
     this.eventObjectiveDisplay.style.cssText = `
-      position: absolute;
-      top: ${isMobile ? '56px' : '74px'};
-      left: 50%;
-      transform: translateX(-50%);
-      min-width: ${isMobile ? '220px' : '280px'};
-      max-width: ${isMobile ? '72vw' : '34vw'};
-      padding: ${isMobile ? '8px 12px' : '10px 16px'};
+      box-sizing: border-box;
       border-radius: 14px;
       background: linear-gradient(160deg, rgba(18, 26, 42, 0.88), rgba(8, 12, 20, 0.76));
       border: 1px solid rgba(132, 210, 255, 0.24);
@@ -441,36 +480,37 @@ export class HUD {
       display: none;
       pointer-events: none;
       text-align: center;
+      text-shadow: none;
       backdrop-filter: blur(8px);
     `;
 
+    const objectiveHead = document.createElement('div');
+    objectiveHead.className = 'hud-obj-head';
+
     this.eventObjectiveTitle = document.createElement('div');
+    this.eventObjectiveTitle.className = 'hud-obj-title';
     this.eventObjectiveTitle.style.cssText = `
-      font-size: ${isMobile ? '11px' : '12px'};
       font-weight: 700;
       letter-spacing: 0.14em;
       color: #8fe4ff;
       text-transform: uppercase;
-      margin-bottom: 4px;
     `;
     this.setTextContent(this.eventObjectiveTitle, tr({ en: 'OBJECTIVE', zh: '作战目标' }));
 
     this.eventObjectiveText = document.createElement('div');
+    this.eventObjectiveText.className = 'hud-obj-text';
     this.eventObjectiveText.style.cssText = `
-      font-size: ${isMobile ? '13px' : '15px'};
       font-weight: 700;
       color: #f5fbff;
       text-shadow: 0 0 12px rgba(120, 220, 255, 0.16);
-      line-height: 1.35;
       white-space: normal;
       word-break: break-word;
     `;
     this.setTextContent(this.eventObjectiveText, '');
 
     this.eventObjectiveStatus = document.createElement('div');
+    this.eventObjectiveStatus.className = 'hud-obj-status';
     this.eventObjectiveStatus.style.cssText = `
-      margin-top: 6px;
-      font-size: ${isMobile ? '10px' : '11px'};
       font-weight: 700;
       letter-spacing: 0.08em;
       color: rgba(183, 231, 255, 0.86);
@@ -481,10 +521,10 @@ export class HUD {
     `;
     this.setTextContent(this.eventObjectiveStatus, '');
 
-    this.eventObjectiveDisplay.appendChild(this.eventObjectiveTitle);
+    objectiveHead.appendChild(this.eventObjectiveTitle);
+    objectiveHead.appendChild(this.eventObjectiveStatus);
+    this.eventObjectiveDisplay.appendChild(objectiveHead);
     this.eventObjectiveDisplay.appendChild(this.eventObjectiveText);
-    this.eventObjectiveDisplay.appendChild(this.eventObjectiveStatus);
-    this.container.appendChild(this.eventObjectiveDisplay);
 
     this.briefingDisplay = document.createElement('div');
     this.briefingDisplay.id = 'hud-briefing';
@@ -492,18 +532,10 @@ export class HUD {
     this.briefingDisplay.setAttribute('data-briefing', '');
     this.briefingDisplay.setAttribute('data-tone', 'sys');
     this.briefingDisplay.style.cssText = `
-      position: absolute;
-      top: ${isMobile ? '52px' : '70px'};
-      left: 50%;
-      transform: translateX(-50%);
-      width: min(80vw, 420px);
-      max-width: min(80vw, 420px);
       box-sizing: border-box;
-      padding: ${isMobile ? '10px 14px' : '12px 16px'};
       display: none;
       opacity: 0;
       pointer-events: none;
-      z-index: 4;
       text-align: center;
       background: var(--hud-glass, ${HUD_COLORS.glass});
       border: 1px solid var(--hud-sys, ${HUD_COLORS.sys});
@@ -524,8 +556,8 @@ export class HUD {
     `;
 
     this.briefingKicker = document.createElement('div');
+    this.briefingKicker.className = 'hud-brief-kicker';
     this.briefingKicker.style.cssText = `
-      font-size: ${isMobile ? '10px' : '11px'};
       font-weight: 700;
       letter-spacing: 0.16em;
       color: var(--hud-sys, ${HUD_COLORS.sys});
@@ -533,10 +565,10 @@ export class HUD {
     `;
 
     this.briefingTitle = document.createElement('div');
+    this.briefingTitle.className = 'hud-brief-title';
     // 英文标题更长：允许换行，不撑破卡片
     this.briefingTitle.style.cssText = `
       min-width: 0;
-      font-size: ${isMobile ? '16px' : '18px'};
       font-weight: 700;
       color: var(--hud-text, ${HUD_COLORS.text});
       letter-spacing: 0.04em;
@@ -545,9 +577,9 @@ export class HUD {
     `;
 
     this.briefingLine = document.createElement('div');
+    this.briefingLine.className = 'hud-brief-line';
     this.briefingLine.style.cssText = `
       margin-top: 6px;
-      font-size: ${isMobile ? '12px' : '13px'};
       font-weight: 600;
       color: var(--hud-muted, ${HUD_COLORS.muted});
       line-height: 1.35;
@@ -559,23 +591,25 @@ export class HUD {
     briefingTitleRow.appendChild(this.briefingTitle);
     this.briefingDisplay.appendChild(briefingTitleRow);
     this.briefingDisplay.appendChild(this.briefingLine);
-    this.container.appendChild(this.briefingDisplay);
+    this.topStack.appendChild(this.briefingDisplay);
+    this.topStack.appendChild(this.eventObjectiveDisplay);
+    this.container.appendChild(this.topStack);
     this.leftPrimaryRow.appendChild(this.scoreDisplay);
     this.leftPrimaryRow.appendChild(this.speedDisplay);
     this.leftStatusPanel.appendChild(this.leftPrimaryRow);
     this.leftStatusPanel.appendChild(this.upgradePointsDisplay);
     this.container.appendChild(this.leftStatusPanel);
 
+    // 右上状态列：敌机计数 / 生命 / 导弹 / 导弹补给 / 道具倒计时，纵向排布互不重叠
+    this.statusColumn = document.createElement('div');
+    this.statusColumn.id = 'hud-status';
+    this.statusColumn.setAttribute('data-hud', 'status');
+
+    // 敌机计数：与左侧信息栏同款的深色胶囊底，亮云层上也清晰
     this.enemiesDisplay = document.createElement('div');
-    this.enemiesDisplay.style.cssText = `
-      font-size: ${isMobile ? '12px' : '14px'};
-      position: absolute;
-      top: ${isMobile ? '54px' : '70px'};
-      right: ${padding};
-      color: var(--hud-muted, ${HUD_COLORS.muted});
-      letter-spacing: 0.08em;
-      font-variant-numeric: tabular-nums;
-    `;
+    this.enemiesDisplay.id = 'hud-wave-line';
+    this.enemiesDisplay.setAttribute('data-hud', 'wave-line');
+    this.enemiesDisplay.className = 'hud-chip';
     this.renderWaveLine();
 
     // 生命值显示（几何 pip，非 emoji）
@@ -584,9 +618,6 @@ export class HUD {
     this.livesDisplay.setAttribute('data-hud', 'lives');
     this.livesDisplay.className = 'hud-pip-row';
     this.livesDisplay.style.cssText = `
-      position: absolute;
-      top: ${isMobile ? '76px' : '95px'};
-      right: ${padding};
       display: flex;
       flex-direction: row;
       align-items: center;
@@ -600,9 +631,6 @@ export class HUD {
     this.missilesDisplay.setAttribute('data-hud', 'missiles');
     this.missilesDisplay.className = 'hud-pip-row';
     this.missilesDisplay.style.cssText = `
-      position: absolute;
-      top: ${isMobile ? '98px' : '120px'};
-      right: ${padding};
       display: flex;
       flex-direction: row;
       align-items: center;
@@ -611,15 +639,13 @@ export class HUD {
     this.renderMissilePips(GAME_CONSTANTS.MISSILE.MAX_MISSILES);
 
     // 导弹补给进度条（导弹UI下方）
-    const progressTop = isMobile ? 120 : 144;
     this.missileProgressDisplay = document.createElement('div');
+    this.missileProgressDisplay.id = 'hud-missile-reload';
     this.missileProgressDisplay.style.cssText = `
-      position: absolute;
-      top: ${progressTop}px;
-      right: ${padding};
-      width: ${isMobile ? '100px' : '120px'};
       height: 6px;
-      background: rgba(255, 255, 255, 0.2);
+      flex: none;
+      box-sizing: border-box;
+      background: rgba(8, 14, 24, 0.55);
       border-radius: 3px;
       overflow: hidden;
       border: 1px solid rgba(255, 255, 255, 0.5);
@@ -634,15 +660,12 @@ export class HUD {
     `;
     this.missileProgressDisplay.appendChild(this.missileProgressFill);
 
-    // 道具提示显示（右上角）
+    // 道具倒计时（状态列底部）
     this.powerUpDisplay = document.createElement('div');
+    this.powerUpDisplay.id = 'hud-powerup-timer';
+    this.powerUpDisplay.className = 'hud-chip hud-chip-powerup';
     this.powerUpDisplay.style.cssText = `
-      font-size: ${isMobile ? '14px' : '18px'};
-      position: absolute;
-      top: ${isMobile ? '120px' : '145px'};
-      right: ${padding};
-      color: #ffff00;
-      text-shadow: 0 0 4px rgba(255, 255, 0, 0.5);
+      color: #ffe45c;
       font-weight: bold;
       opacity: 0;
       transition: opacity 0.3s;
@@ -650,70 +673,51 @@ export class HUD {
     `;
     this.setTextContent(this.powerUpDisplay, '');
 
-    // 道具大字提示显示（屏幕中央）
+    // 生命与导弹 pip：桌面 / 横屏上下两行，竖屏并排一行（缩短状态列，给下方消息栈让高度）
+    const pipGroup = document.createElement('div');
+    pipGroup.className = 'hud-pip-group';
+    pipGroup.appendChild(this.livesDisplay);
+    pipGroup.appendChild(this.missilesDisplay);
+
+    this.statusColumn.appendChild(this.enemiesDisplay);
+    this.statusColumn.appendChild(pipGroup);
+    this.statusColumn.appendChild(this.missileProgressDisplay);
+    this.statusColumn.appendChild(this.powerUpDisplay);
+
+    // 中央播报（道具 / 友军 / 教学提示）：锚定在准星上方的横幅，不压住准星与锁定环
     this.powerUpBigDisplay = document.createElement('div');
+    this.powerUpBigDisplay.id = 'hud-callout';
+    this.powerUpBigDisplay.setAttribute('data-hud', 'callout');
+    this.powerUpBigDisplay.setAttribute('data-variant', 'announcement');
+    this.powerUpBigDisplay.setAttribute('data-layout-density', this.layoutDensity);
     this.powerUpBigDisplay.style.cssText = `
       position: fixed;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      display: flex;
-      flex-direction: column;
-      justify-content: center;
-      align-items: center;
       z-index: 80;
       opacity: 0;
       transition: opacity 0.3s;
       pointer-events: none;
     `;
-    this.powerUpBigIcon = document.createElement('div');
-    this.powerUpBigIcon.className = 'powerup-big-icon';
-    this.powerUpBigIcon.style.cssText = `
-      font-size: 48px;
-      max-width: 48px;
-      max-height: 48px;
-      line-height: 1;
-      overflow: hidden;
-      text-shadow: 0 0 30px rgba(255, 215, 0, 0.8), 0 0 60px rgba(255, 215, 0, 0.4);
-      margin-bottom: 20px;
-      animation: bounce 0.5s ease-out;
-    `;
+    const calloutCard = document.createElement('div');
+    calloutCard.className = 'hud-callout-card';
 
-    this.powerUpBigText = document.createElement('div');
-    this.powerUpBigText.className = 'powerup-big-text';
-    // 英文播报比中文长得多：按视口缩放字号并允许换行，不再单行溢出屏幕
-    this.powerUpBigText.style.cssText = `
-      font-size: ${isMobile ? 'clamp(26px, 7.5vw, 48px)' : 'clamp(32px, 4.6vw, 64px)'};
-      font-weight: bold;
-      color: #ffff00;
-      text-shadow: 0 0 20px rgba(255, 215, 0, 0.8), 4px 4px 8px rgba(0, 0, 0, 1);
-      max-width: min(92vw, 1100px);
-      padding: 0 12px;
-      box-sizing: border-box;
-      text-align: center;
-      line-height: 1.15;
-      white-space: normal;
-      overflow-wrap: break-word;
-      text-wrap: balance;
-    `;
-
+    // 道具提示的小标题（“获得道具！”），播报类不显示
     this.powerUpBigSubtext = document.createElement('div');
-    this.powerUpBigSubtext.className = 'powerup-big-subtext';
-    this.powerUpBigSubtext.style.cssText = `
-      font-size: ${isMobile ? '24px' : '32px'};
-      font-weight: bold;
-      color: #ffffff;
-      text-shadow: 2px 2px 4px rgba(0, 0, 0, 1);
-      margin-top: 10px;
-      white-space: nowrap;
-      display: none;
-    `;
+    this.powerUpBigSubtext.className = 'hud-callout-sub';
+    this.powerUpBigSubtext.style.display = 'none';
     this.setTextContent(this.powerUpBigSubtext, '');
 
-    this.powerUpBigDisplay.appendChild(this.powerUpBigIcon);
-    this.powerUpBigDisplay.appendChild(this.powerUpBigText);
-    this.powerUpBigDisplay.appendChild(this.powerUpBigSubtext);
+    const calloutMain = document.createElement('div');
+    calloutMain.className = 'hud-callout-main';
+    this.powerUpBigIcon = document.createElement('span');
+    this.powerUpBigIcon.className = 'hud-callout-icon';
+    this.powerUpBigIcon.setAttribute('aria-hidden', 'true');
+    this.powerUpBigText = document.createElement('span');
+    this.powerUpBigText.className = 'hud-callout-text';
+    calloutMain.appendChild(this.powerUpBigIcon);
+    calloutMain.appendChild(this.powerUpBigText);
+    calloutCard.appendChild(this.powerUpBigSubtext);
+    calloutCard.appendChild(calloutMain);
+    this.powerUpBigDisplay.appendChild(calloutCard);
 
     // 结算覆盖层（失败 / 通关共用）
     this.ensureSettlementStyle();
@@ -874,11 +878,7 @@ export class HUD {
     `;
 
     this.container.appendChild(this.healthBarContainer);
-    this.container.appendChild(this.enemiesDisplay);
-    this.container.appendChild(this.livesDisplay);
-    this.container.appendChild(this.missilesDisplay);
-    this.container.appendChild(this.missileProgressDisplay);
-    this.container.appendChild(this.powerUpDisplay);
+    this.container.appendChild(this.statusColumn);
 
     this.resizeHandler = () => {
       if (!this.densityExplicit) {
@@ -905,6 +905,7 @@ export class HUD {
     this.renderSettlementTitle();
     this.renderSettlementLabels();
     this.applyLayoutDensity();
+    this.observeTopStack();
     this.initialized = true;
   }
 
@@ -912,7 +913,36 @@ export class HUD {
     this.init();
   }
 
-  /** 语言切换：按最近一次的状态重绘 HUD 自己的文案（运行时传入的标题 / 告警原样保留） */
+  /**
+   * 竖屏时无线电面板排在顶部消息栈下方：栈高变化（简报 / 目标 / Boss 阶段条出现或换行）时
+   * 把栈底的视口坐标写到 <html> 的 --hud-stack-bottom（radioStyles 读取）。
+   */
+  private observeTopStack(): void {
+    if (!this.topStackObserver && typeof ResizeObserver !== 'undefined') {
+      this.topStackObserver = new ResizeObserver(() => this.syncTopStackBottom());
+      this.topStackObserver.observe(this.topStack);
+    }
+    this.syncTopStackBottom();
+  }
+
+  private syncTopStackBottom(): void {
+    if (typeof document === 'undefined') {
+      return;
+    }
+    const rect = this.topStack.getBoundingClientRect();
+    // HUD 隐藏（display: none）时矩形全为 0：保留上一次的有效位置
+    if (rect.width <= 0 && rect.height <= 0 && rect.top <= 0) {
+      return;
+    }
+    const value = `${Math.round(rect.bottom)}px`;
+    if (value === this.lastTopStackBottom) {
+      return;
+    }
+    this.lastTopStackBottom = value;
+    document.documentElement.style.setProperty('--hud-stack-bottom', value);
+  }
+
+  /** 语言切换：按最近一次的状态重绘 HUD 自己的文案（运行时传入的纯字符串标题 / 告警原样保留） */
   private refreshLocaleText(): void {
     this.renderScore();
     this.renderSpeed();
@@ -931,6 +961,13 @@ export class HUD {
     }
     if (this.autosaveTitle) {
       this.autosaveTitle.textContent = tr({ en: 'Autosaved', zh: '已自动保存' });
+    }
+    // 运行时传入的简报 / 存档标签：可本地化的原文按新语言重绘（纯字符串原样保留）
+    if (this.briefingTimer > 0) {
+      this.renderBriefingText();
+    }
+    if (this.autosaveTimer > 0) {
+      this.renderAutosaveLabel();
     }
     if (this.cameraMode) {
       this.renderCameraLabels(this.cameraMode);
@@ -993,10 +1030,13 @@ export class HUD {
    */
   private createHealthBar(isMobile: boolean): HTMLDivElement {
     const container = document.createElement('div');
+    container.id = 'hud-health';
+    container.setAttribute('data-hud', 'health');
     const barWidth = isMobile ? '180px' : '250px';
     const barHeight = isMobile ? '20px' : '25px';
 
     container.style.cssText = `
+      box-sizing: border-box;
       position: absolute;
       top: ${isMobile ? '10px' : '15px'};
       left: 50%;
@@ -1169,12 +1209,6 @@ export class HUD {
         background: transparent;
       }
 
-      .powerup-big-icon {
-        max-width: 48px;
-        max-height: 48px;
-        font-size: 48px;
-      }
-
       #hud-briefing {
         max-width: min(80vw, 420px);
         width: min(80vw, 420px);
@@ -1312,6 +1346,8 @@ export class HUD {
       status && status.length > 0 ? 'block' : 'none'
     );
     this.setStyleValue(this.eventObjectiveDisplay, 'display', 'block');
+    this.eventObjectiveVisible = true;
+    this.syncAutosaveDeferral();
   }
 
   public showCompletedEventObjective(title: string, objective: string, status?: string): void {
@@ -1326,6 +1362,8 @@ export class HUD {
       status && status.length > 0 ? 'block' : 'none'
     );
     this.setStyleValue(this.eventObjectiveDisplay, 'display', 'block');
+    this.eventObjectiveVisible = true;
+    this.syncAutosaveDeferral();
   }
 
   public updateEventObjectiveStatus(status: string): void {
@@ -1341,6 +1379,8 @@ export class HUD {
     this.setTextContent(this.eventObjectiveStatus, '');
     this.setStyleValue(this.eventObjectiveStatus, 'display', 'none');
     this.setStyleValue(this.eventObjectiveDisplay, 'display', 'none');
+    this.eventObjectiveVisible = false;
+    this.syncAutosaveDeferral();
   }
 
   private applyEventObjectiveTone(tone: EventObjectiveTone): void {
@@ -1413,17 +1453,24 @@ export class HUD {
 
   private applyLayoutDensity(): void {
     this.container.setAttribute('data-layout-density', this.layoutDensity);
+    // 中央播报挂在 <body> 上（层级高于 HUD），单独标记布局密度供样式定位
+    HUD.setAttr(this.powerUpBigDisplay, 'data-layout-density', this.layoutDensity);
     this.setStyleValue(this.leftStatusPanel, 'maxWidth', this.getCabinMaxWidth());
     this.applyHealthBarLayout();
     this.refreshDeckMode();
     this.applyCameraChipVisibility();
-    this.applyTopStackOffset();
+    if (this.autosaveToast) {
+      this.placeAutosaveToast(this.autosaveToast);
+    }
     if (this.warningUi && this.missileWarningLevel !== 'none') {
       this.renderMissileWarning(this.warningUi);
     }
+    if (this.initialized) {
+      this.syncTopStackBottom();
+    }
   }
 
-  /** 竖屏时血条靠右并收窄，避免压住左上角的得分舱 */
+  /** 竖屏时血条靠右并收窄，避免压住左上角的得分舱（#hud 已让出安全区，这里只留 10px 边距） */
   private applyHealthBarLayout(): void {
     const density = this.layoutDensity;
     const portrait = density === 'touch-portrait';
@@ -1431,11 +1478,7 @@ export class HUD {
       density === 'desktop' ? '250px' : portrait ? 'min(150px, calc(100% - 190px))' : '180px';
     this.setStyleValue(this.healthBarContainer, 'width', width);
     this.setStyleValue(this.healthBarContainer, 'left', portrait ? 'auto' : '50%');
-    this.setStyleValue(
-      this.healthBarContainer,
-      'right',
-      portrait ? 'max(10px, env(safe-area-inset-right))' : 'auto'
-    );
+    this.setStyleValue(this.healthBarContainer, 'right', portrait ? '10px' : 'auto');
     this.setStyleValue(
       this.healthBarContainer,
       'transform',
@@ -1443,16 +1486,31 @@ export class HUD {
     );
   }
 
-  /** Boss 阶段条出现时把简报卡 / 事件目标往下让一行（竖屏阶段条在别处，不需要让） */
-  private applyTopStackOffset(): void {
-    const touch = this.layoutDensity !== 'desktop';
-    let shift = 0;
-    if (this.bossStatusVisible) {
-      shift =
-        this.layoutDensity === 'touch-landscape' ? 22 : this.layoutDensity === 'desktop' ? 8 : 0;
+  /** 自动存档提示：竖屏放进顶部消息栈（与简报 / 目标同列），其余布局挂在驾驶舱信息栏上 */
+  private placeAutosaveToast(toast: HTMLDivElement): void {
+    const host = this.layoutDensity === 'touch-portrait' ? this.topStack : this.leftStatusPanel;
+    if (toast.parentElement !== host) {
+      host.appendChild(toast);
     }
-    this.setStyleValue(this.briefingDisplay, 'top', `${(touch ? 52 : 70) + shift}px`);
-    this.setStyleValue(this.eventObjectiveDisplay, 'top', `${(touch ? 56 : 74) + shift}px`);
+    this.syncAutosaveDeferral();
+  }
+
+  /**
+   * 竖屏顶部消息栈最紧：简报显示时，或 Boss 阶段条与事件目标同时显示时，自动存档提示让位
+   * （样式隐藏、计时暂停），栈空出来后再完整显示，避免把无线电面板挤到准星附近。
+   */
+  private isAutosaveDeferred(): boolean {
+    if (this.layoutDensity !== 'touch-portrait' || !this.autosaveToast) {
+      return false;
+    }
+    if (this.autosaveToast.parentElement !== this.topStack) {
+      return false;
+    }
+    return this.briefingTimer > 0 || (this.bossStatusVisible && this.eventObjectiveVisible);
+  }
+
+  private syncAutosaveDeferral(): void {
+    HUD.setAttr(this.topStack, 'data-defer-autosave', this.isAutosaveDeferred() ? 'on' : 'off');
   }
 
   private renderWaveLine(): void {
@@ -1685,12 +1743,13 @@ export class HUD {
     }
 
     this.applyBriefingTone(briefing.tone);
-    this.setTextContent(this.briefingKicker, briefing.kicker);
-    this.setTextContent(this.briefingTitle, briefing.title);
-    this.setTextContent(this.briefingLine, briefing.line);
+    this.briefingSource = { kicker: briefing.kicker, title: briefing.title, line: briefing.line };
+    this.renderBriefingText();
     this.setStyleValue(this.briefingDisplay, 'display', 'block');
     this.setStyleValue(this.briefingDisplay, 'opacity', '1');
+    HUD.setAttr(this.topStack, 'data-briefing', 'on');
     this.briefingTimer = Math.max(0, briefing.durationMs) / 1000;
+    this.syncAutosaveDeferral();
     if (this.briefingTimer <= 0) {
       this.hideBriefing();
     }
@@ -1698,12 +1757,7 @@ export class HUD {
 
   public hideBriefing(): void {
     this.ensureInitialized();
-    this.briefingTimer = 0;
-    this.setTextContent(this.briefingKicker, '');
-    this.setTextContent(this.briefingTitle, '');
-    this.setTextContent(this.briefingLine, '');
-    this.setStyleValue(this.briefingDisplay, 'opacity', '0');
-    this.setStyleValue(this.briefingDisplay, 'display', 'none');
+    this.hideBriefingWithoutFlush();
     this.flushPendingBigMessage();
   }
 
@@ -1760,7 +1814,7 @@ export class HUD {
   ): void {
     this.applyBigMessageVariant(variant);
     this.setTextContent(this.powerUpBigIcon, icon);
-    this.setStyleValue(this.powerUpBigIcon, 'display', icon ? 'block' : 'none');
+    this.setStyleValue(this.powerUpBigIcon, 'display', icon ? 'inline-block' : 'none');
     this.setTextContent(this.powerUpBigText, name);
     const shouldHideSubtext = variant === 'announcement' ? true : hideSubtext;
     this.setTextContent(
@@ -1789,11 +1843,35 @@ export class HUD {
 
   private hideBriefingWithoutFlush(): void {
     this.briefingTimer = 0;
+    this.briefingSource = null;
     this.setTextContent(this.briefingKicker, '');
     this.setTextContent(this.briefingTitle, '');
     this.setTextContent(this.briefingLine, '');
     this.setStyleValue(this.briefingDisplay, 'opacity', '0');
     this.setStyleValue(this.briefingDisplay, 'display', 'none');
+    HUD.setAttr(this.topStack, 'data-briefing', 'off');
+    this.syncAutosaveDeferral();
+  }
+
+  /** 按当前语言写简报卡三行文字 */
+  private renderBriefingText(): void {
+    const source = this.briefingSource;
+    if (!source) {
+      return;
+    }
+    this.setTextContent(this.briefingKicker, resolveHudText(source.kicker));
+    this.setTextContent(this.briefingTitle, resolveHudText(source.title));
+    this.setTextContent(this.briefingLine, resolveHudText(source.line));
+  }
+
+  /** 按当前语言写自动存档标签；空标签时隐藏 */
+  private renderAutosaveLabel(): void {
+    if (!this.autosaveLabel) {
+      return;
+    }
+    const text = resolveHudText(this.autosaveLabelSource).trim();
+    this.setTextContent(this.autosaveLabel, text);
+    this.setStyleValue(this.autosaveLabel, 'display', text ? 'inline' : 'none');
   }
 
   private applyBriefingTone(tone: BriefingTone): void {
@@ -1814,41 +1892,9 @@ export class HUD {
     this.setTextContent(this.respawnCountdown, String(seconds));
   }
 
+  /** 播报 / 道具两种配色由样式按 data-variant 切换（hudExtrasStyles） */
   private applyBigMessageVariant(variant: BigMessageVariant): void {
-    if (variant === 'powerup') {
-      this.setStyleValue(
-        this.powerUpBigIcon,
-        'textShadow',
-        '0 0 30px rgba(255, 215, 0, 0.8), 0 0 60px rgba(255, 215, 0, 0.4)'
-      );
-      this.setStyleValue(this.powerUpBigText, 'color', '#ffff00');
-      this.setStyleValue(
-        this.powerUpBigText,
-        'textShadow',
-        '0 0 20px rgba(255, 215, 0, 0.8), 4px 4px 8px rgba(0, 0, 0, 1)'
-      );
-      this.setStyleValue(this.powerUpBigSubtext, 'color', '#ffffff');
-      this.setStyleValue(this.powerUpBigSubtext, 'textShadow', '2px 2px 4px rgba(0, 0, 0, 1)');
-      return;
-    }
-
-    this.setStyleValue(
-      this.powerUpBigIcon,
-      'textShadow',
-      '0 0 24px rgba(120, 220, 255, 0.55), 0 0 48px rgba(80, 140, 255, 0.2)'
-    );
-    this.setStyleValue(this.powerUpBigText, 'color', '#f3fbff');
-    this.setStyleValue(
-      this.powerUpBigText,
-      'textShadow',
-      '0 0 18px rgba(120, 220, 255, 0.45), 4px 4px 8px rgba(0, 0, 0, 0.95)'
-    );
-    this.setStyleValue(this.powerUpBigSubtext, 'color', '#d9f4ff');
-    this.setStyleValue(
-      this.powerUpBigSubtext,
-      'textShadow',
-      '0 0 12px rgba(120, 220, 255, 0.25), 2px 2px 4px rgba(0, 0, 0, 0.95)'
-    );
+    HUD.setAttr(this.powerUpBigDisplay, 'data-variant', variant);
   }
 
   // ---------------------------------------------------------------------------
@@ -1970,15 +2016,15 @@ export class HUD {
     }
   }
 
-  /** 自动存档提示：驾驶舱信息栏下方的短暂绿色提示，约 2.6 秒后淡出（由 update 驱动） */
-  public showAutosave(label?: string): void {
+  /**
+   * 自动存档提示：驾驶舱信息栏下方（竖屏在顶部消息栈里）的短暂绿色提示，约 2.6 秒后淡出
+   * （由 update 驱动）。label 可以是纯字符串或可本地化文案（见 HudText）。
+   */
+  public showAutosave(label?: HudText): void {
     this.ensureInitialized();
     const toast = this.ensureAutosaveToast();
-    const text = typeof label === 'string' ? label.trim() : '';
-    if (this.autosaveLabel) {
-      this.setTextContent(this.autosaveLabel, text);
-      this.setStyleValue(this.autosaveLabel, 'display', text ? 'inline' : 'none');
-    }
+    this.autosaveLabelSource = label ?? null;
+    this.renderAutosaveLabel();
     toast.classList.remove('is-leaving');
     this.autosaveSeq = this.autosaveSeq === 'a' ? 'b' : 'a';
     toast.setAttribute('data-seq', this.autosaveSeq);
@@ -2057,7 +2103,9 @@ export class HUD {
         this.setStyleValue(this.bossUi.root, 'display', 'none');
       }
       HUD.setRootMarker('data-hud-boss', null);
-      this.applyTopStackOffset();
+      // 桌面 / 横屏阶段条收起后消息栈上移：尺寸不变，ResizeObserver 不会触发，手动同步栈底
+      this.syncTopStackBottom();
+      this.syncAutosaveDeferral();
       return;
     }
 
@@ -2109,9 +2157,10 @@ export class HUD {
     if (!this.bossStatusVisible) {
       this.bossStatusVisible = true;
       this.setStyleValue(ui.root, 'display', 'flex');
-      // 竖屏时阶段条占一整行，无线电面板据此下移
+      // 桌面 / 横屏：顶部消息栈让出阶段条一行；竖屏阶段条在消息栈里占一整行
       HUD.setRootMarker('data-hud-boss', 'on');
-      this.applyTopStackOffset();
+      this.syncTopStackBottom();
+      this.syncAutosaveDeferral();
     }
     if (phaseAdvanced) {
       ui.root.classList.remove('is-phase-up');
@@ -2170,7 +2219,8 @@ export class HUD {
   }
 
   private updateCampaignTimers(deltaTime: number): void {
-    if (this.autosaveTimer > 0) {
+    // 竖屏消息栈拥挤时存档提示让位：样式隐藏，计时也暂停（见 isAutosaveDeferred）
+    if (this.autosaveTimer > 0 && !this.isAutosaveDeferred()) {
       this.autosaveTimer = Math.max(0, this.autosaveTimer - deltaTime);
       if (!this.autosaveLeaving && this.autosaveTimer <= HUD.AUTOSAVE_LEAVE_SECONDS) {
         this.autosaveLeaving = true;
@@ -2206,6 +2256,7 @@ export class HUD {
   private hideAutosave(): void {
     this.autosaveTimer = 0;
     this.autosaveLeaving = false;
+    this.autosaveLabelSource = null;
     if (this.autosaveToast) {
       this.autosaveToast.classList.remove('is-leaving');
       this.setStyleValue(this.autosaveToast, 'display', 'none');
@@ -2682,7 +2733,7 @@ export class HUD {
     label.className = 'hx-autosave-label';
     label.style.display = 'none';
     toast.append(glyph, title, label);
-    this.leftStatusPanel.appendChild(toast);
+    this.placeAutosaveToast(toast);
     this.autosaveToast = toast;
     this.autosaveLabel = label;
     return toast;
@@ -2729,7 +2780,8 @@ export class HUD {
     const label = document.createElement('span');
     label.className = 'hx-boss-label';
     root.append(tag, pipsHost, phase, label);
-    this.container.appendChild(root);
+    // 放在顶部消息栈最前：竖屏时随栈排成一行；桌面 / 横屏由样式固定在血条下方
+    this.topStack.insertBefore(root, this.topStack.firstChild);
     this.bossUi = { root, pipsHost, pips: [], phase, label };
     return this.bossUi;
   }
@@ -2983,6 +3035,7 @@ export class HUD {
     }
     this.autosaveTimer = 0;
     this.autosaveLeaving = false;
+    this.autosaveLabelSource = null;
     this.flashWarningTimer = 0;
     this.flashWarningText = '';
     this.cameraFlashTimer = 0;
@@ -2994,6 +3047,11 @@ export class HUD {
     this.missileWarningLevel = 'none';
     this.cameraMode = null;
     this.deckRefs = null;
-    this.applyTopStackOffset();
+    this.topStackObserver?.disconnect();
+    this.topStackObserver = null;
+    this.lastTopStackBottom = '';
+    if (typeof document !== 'undefined') {
+      document.documentElement.style.removeProperty('--hud-stack-bottom');
+    }
   }
 }

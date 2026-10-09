@@ -37,12 +37,13 @@ void main() {
   vec2 uv = vUv;
   vec2 centered = uv - 0.5;
 
-  // EMP：水平故障条纹
-  if (uEmp > 0.001) {
+  // EMP：稀疏的水平故障条纹（幅度随脉冲衰减）
+  float emp = clamp(uEmp, 0.0, 1.0);
+  if (emp > 0.001) {
     float frame = floor(uTime * 24.0);
     float band = floor(uv.y * 42.0);
-    float gate = step(0.62, vfxHash(vec2(band * 1.7, frame)));
-    uv.x += (vfxHash(vec2(band, frame)) - 0.5) * 0.045 * uEmp * gate;
+    float gate = step(0.8, vfxHash(vec2(band * 1.7, frame)));
+    uv.x += (vfxHash(vec2(band, frame)) - 0.5) * 0.016 * emp * gate;
   }
 
   vec3 hdr;
@@ -92,9 +93,16 @@ void main() {
   color = mix(color, vec3(0.78, 0.05, 0.03), clamp(vig * uDamage * 0.65, 0.0, 1.0));
   color = mix(color, vec3(0.5, 0.0, 0.0), clamp(vig * uLowHealth * uHeartbeat * 0.32, 0.0, 1.0));
 
-  // EMP 青色闪 + 白闪
-  color += vec3(0.22, 0.8, 1.0) * uEmp * (0.3 + 0.7 * vig) * 0.75;
-  color = mix(color, vec3(0.72, 0.95, 1.0), uEmp * 0.22);
+  // EMP：短促的电光蓝脉冲——画面略偏冷、屏幕边缘电光、一道从准星外向屏幕边缘扫出的环。
+  // 中心不整体提亮、不混向白色，准星区域始终可读。
+  if (emp > 0.001) {
+    color *= mix(vec3(1.0), vec3(0.86, 0.95, 1.06), emp);
+    float empOffset = (length(vc) - (0.15 + (1.0 - emp) * 1.1)) / 0.05;
+    float empRing = exp(-empOffset * empOffset) * emp;
+    color += vec3(0.2, 0.55, 1.0) * (emp * vig * 0.42);
+    color += vec3(0.45, 0.8, 1.0) * (empRing * 0.26);
+  }
+  // 白闪
   color = mix(color, vec3(1.0, 0.97, 0.92), clamp(uFlash, 0.0, 1.0) * 0.82);
 
   // 抖动抑制色带

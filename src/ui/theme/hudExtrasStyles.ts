@@ -1,14 +1,424 @@
 import { HUD_COLORS } from './hudPalette';
 
 /**
- * HUD 新增元件样式：挂载物面板（特殊武器 + 热焰弹）、自动存档提示、视角标签、Boss 阶段条、
+ * HUD 新增元件样式：顶部布局（驾驶舱信息栏 / 右上状态列 / 中央消息栈 / 中央播报）、
+ * 挂载物面板（特殊武器 + 热焰弹）、自动存档提示、视角标签、Boss 阶段条、
  * 导弹告警 / 闪烁告警、屏幕边缘告警，以及第一人称下的仪表板风格。
  *
  * 显隐由 HUD 以内联 display 控制（便于测试与避免重排）；这里只负责外观与按布局密度定位。
+ *
+ * 顶部布局（#hud 已让出安全区，坐标相对安全区）：
+ * - 左上信息栏、右上状态列各占一角；中央消息栈（Boss 阶段条 / 简报 / 事件目标 / 竖屏存档提示）
+ *   纵向排布，桌面与横屏夹在两侧之间，竖屏排在两侧下方整行。
+ * - 中央播报锚定在准星搜索环上方（环半径：桌面 11vmin，竖屏 min(8vmin, 80px)，
+ *   与 LockOnIndicator 一致），向上生长，永不压住准星；横屏高度最紧，接在消息栈下方。
  */
 export const HUD_EXTRAS_STYLE_ID = 'hud-extras-style';
 
 const HUD_EXTRAS_CSS = `
+/* ------------------------------------------------------------ 左上驾驶舱信息栏 */
+#hud .hud-cabin {
+  top: 18px;
+  left: 20px;
+  gap: 10px;
+}
+
+#hud .hud-cabin-primary {
+  gap: 10px;
+}
+
+#hud-score {
+  font-size: 19px;
+  min-height: 60px;
+  padding: 12px 14px;
+}
+
+#hud-speed {
+  font-size: 16px;
+  min-height: 60px;
+  padding: 12px;
+}
+
+#hud-upgrades {
+  font-size: 14px;
+  padding: 8px 12px;
+}
+
+#hud:not([data-layout-density='desktop']) .hud-cabin {
+  top: 10px;
+  left: 10px;
+  gap: 8px;
+}
+
+#hud:not([data-layout-density='desktop']) .hud-cabin-primary {
+  gap: 8px;
+}
+
+#hud:not([data-layout-density='desktop']) #hud-score {
+  font-size: 16px;
+  min-height: 44px;
+  padding: 10px 12px;
+}
+
+#hud:not([data-layout-density='desktop']) #hud-speed {
+  font-size: 14px;
+  min-height: 44px;
+  padding: 10px;
+}
+
+#hud:not([data-layout-density='desktop']) #hud-upgrades {
+  font-size: 12px;
+  padding: 6px 10px;
+}
+
+/* 竖屏：信息栏收紧，给下方整行的消息栈与无线电让出高度 */
+#hud[data-layout-density='touch-portrait'] .hud-cabin,
+#hud[data-layout-density='touch-portrait'] .hud-cabin-primary {
+  gap: 6px;
+}
+
+#hud[data-layout-density='touch-portrait'] #hud-score {
+  font-size: 15px;
+  min-height: 36px;
+  padding: 7px 11px;
+}
+
+#hud[data-layout-density='touch-portrait'] #hud-speed {
+  font-size: 13px;
+  min-height: 36px;
+  padding: 7px 10px;
+}
+
+#hud[data-layout-density='touch-portrait'] #hud-upgrades {
+  font-size: 11px;
+  padding: 5px 9px;
+}
+
+/* ------------------------------------------------------------ 右上状态列（敌机计数 / 生命 / 导弹 / 补给 / 道具） */
+#hud-status {
+  position: absolute;
+  top: 66px;
+  right: 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  pointer-events: none;
+}
+
+/* 横屏：血条居中，右上角空着，状态列贴顶，避免压到右侧按键簇最上方的暂停 / 视角键 */
+#hud[data-layout-density='touch-landscape'] #hud-status {
+  top: 10px;
+  right: 10px;
+  gap: 5px;
+}
+
+/* 竖屏：血条在右上角，状态列排在血条下方 */
+#hud[data-layout-density='touch-portrait'] #hud-status {
+  top: 38px;
+  right: 10px;
+  gap: 5px;
+}
+
+/* 与驾驶舱信息栏同款的深色胶囊：亮云层 / 雪地上也清晰 */
+.hud-chip {
+  box-sizing: border-box;
+  padding: 5px 11px;
+  border-radius: 11px;
+  background: linear-gradient(160deg, rgba(18, 30, 48, 0.86), rgba(10, 14, 22, 0.74));
+  border: 1px solid rgba(118, 204, 255, 0.28);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 6px 14px rgba(0, 0, 0, 0.2);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  text-shadow: none;
+}
+
+#hud-wave-line {
+  color: var(--hud-text, ${HUD_COLORS.text});
+}
+
+.hud-chip-powerup {
+  border-color: rgba(255, 228, 92, 0.4);
+}
+
+#hud:not([data-layout-density='desktop']) .hud-chip {
+  padding: 4px 9px;
+  border-radius: 10px;
+  font-size: 12px;
+}
+
+#hud-status .hud-pip-row {
+  padding: 3px 6px;
+  border-radius: 7px;
+  background: rgba(8, 14, 24, 0.5);
+}
+
+#hud-missile-reload {
+  width: 120px;
+}
+
+#hud:not([data-layout-density='desktop']) #hud-missile-reload {
+  width: 100px;
+}
+
+.hud-pip-group {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+#hud:not([data-layout-density='desktop']) .hud-pip-group {
+  gap: 5px;
+}
+
+/* 竖屏：生命与导弹并排一行，状态列更矮，不压到下方整行的消息栈 */
+#hud[data-layout-density='touch-portrait'] .hud-pip-group {
+  flex-direction: row;
+  align-items: center;
+}
+
+/* ------------------------------------------------------------ 中央消息栈（Boss 阶段条 / 简报 / 事件目标） */
+#hud-top-stack {
+  position: absolute;
+  top: 70px;
+  left: 0;
+  right: 0;
+  margin: 0 auto;
+  width: min(80vw, 460px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  pointer-events: none;
+}
+
+:root[data-hud-boss='on'] #hud[data-layout-density='desktop'] #hud-top-stack {
+  top: 80px;
+}
+
+/* 横屏：夹在左侧信息栏与右侧状态列之间（两侧各让出 196px） */
+#hud[data-layout-density='touch-landscape'] #hud-top-stack {
+  top: 38px;
+  width: min(80vw, 420px, calc(100% - 392px));
+  gap: 6px;
+}
+
+:root[data-hud-boss='on'] #hud[data-layout-density='touch-landscape'] #hud-top-stack {
+  top: 60px;
+}
+
+/* 竖屏：排在信息栏与状态列下方，整行；无线电面板跟在栈底（--hud-stack-bottom） */
+#hud[data-layout-density='touch-portrait'] #hud-top-stack {
+  top: 128px;
+  left: 10px;
+  right: 10px;
+  width: auto;
+  gap: 6px;
+}
+
+/* 简报显示期间（约 1.8 秒）目标卡让位，栈高不会伸进准星区域 */
+#hud-top-stack[data-briefing='on'] #hud-objective {
+  display: none !important;
+}
+
+#hud-briefing {
+  padding: 12px 16px;
+}
+
+.hud-brief-kicker {
+  font-size: 11px;
+}
+
+.hud-brief-title {
+  font-size: 18px;
+}
+
+.hud-brief-line {
+  font-size: 13px;
+}
+
+#hud:not([data-layout-density='desktop']) #hud-briefing {
+  width: 100%;
+  max-width: 100%;
+  padding: 9px 12px;
+}
+
+#hud:not([data-layout-density='desktop']) .hud-brief-kicker {
+  font-size: 10px;
+}
+
+#hud:not([data-layout-density='desktop']) .hud-brief-title {
+  font-size: 16px;
+}
+
+#hud:not([data-layout-density='desktop']) .hud-brief-line {
+  font-size: 12px;
+}
+
+/* 事件目标：标题与进度同一行，正文在下 */
+#hud-objective {
+  width: fit-content;
+  min-width: min(280px, 100%);
+  max-width: 100%;
+  padding: 9px 16px 10px;
+}
+
+.hud-obj-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: center;
+  gap: 3px 10px;
+  margin-bottom: 4px;
+}
+
+.hud-obj-title {
+  font-size: 12px;
+}
+
+.hud-obj-status {
+  font-size: 11px;
+  line-height: 1.5;
+  padding: 0 6px;
+  border: 1px solid currentColor;
+  border-radius: 4px;
+}
+
+.hud-obj-text {
+  font-size: 15px;
+  line-height: 1.3;
+}
+
+#hud:not([data-layout-density='desktop']) #hud-objective {
+  min-width: min(240px, 100%);
+  padding: 7px 12px 8px;
+}
+
+#hud:not([data-layout-density='desktop']) .hud-obj-title {
+  font-size: 11px;
+}
+
+#hud:not([data-layout-density='desktop']) .hud-obj-status {
+  font-size: 10px;
+}
+
+#hud:not([data-layout-density='desktop']) .hud-obj-text {
+  font-size: 13px;
+}
+
+#hud[data-layout-density='touch-portrait'] #hud-objective {
+  width: 100%;
+}
+
+/* 竖屏 360px 宽也让标题与进度标签保持一行 */
+#hud[data-layout-density='touch-portrait'] .hud-obj-head {
+  gap: 2px 8px;
+}
+
+#hud[data-layout-density='touch-portrait'] .hud-obj-title {
+  font-size: 10px;
+  letter-spacing: 0.1em !important;
+}
+
+#hud[data-layout-density='touch-portrait'] .hud-obj-status {
+  padding: 0 5px;
+  letter-spacing: 0.04em !important;
+}
+
+/* ------------------------------------------------------------ 中央播报（准星上方的横幅） */
+#hud-callout {
+  left: 50%;
+  bottom: calc(50% + 11vmin + 14px);
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: min(60vw, 760px, calc(100vw - 600px));
+  display: flex;
+  justify-content: center;
+}
+
+/*
+ * 横屏高度最紧：播报接在顶部消息栈（简报 / 事件目标）下方，夹在两侧信息栏之间，
+ * 与目标卡永不重叠，且位于准星搜索环上方（栈底由 HUD 写入 --hud-stack-bottom）
+ */
+#hud-callout[data-layout-density='touch-landscape'] {
+  left: calc(env(safe-area-inset-left, 0px) + 196px);
+  right: calc(env(safe-area-inset-right, 0px) + 196px);
+  top: calc(var(--hud-stack-bottom, 38px) + 6px);
+  transform: none;
+  width: auto;
+  max-width: none;
+}
+
+#hud-callout[data-layout-density='touch-portrait'] {
+  left: max(10px, env(safe-area-inset-left));
+  right: max(10px, env(safe-area-inset-right));
+  bottom: calc(50% + min(8vmin, 80px) + 12px);
+  transform: none;
+  width: auto;
+  max-width: none;
+}
+
+.hud-callout-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  max-width: 100%;
+  box-sizing: border-box;
+  padding: 6px 30px 8px;
+  background: linear-gradient(90deg, transparent, rgba(6, 12, 22, 0.62) 16%, rgba(6, 12, 22, 0.62) 84%, transparent);
+  text-align: center;
+}
+
+.hud-callout-sub {
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.22em;
+  color: #ffffff;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
+}
+
+.hud-callout-main {
+  max-width: 100%;
+  font-size: clamp(24px, 2.4vw, 38px);
+  font-weight: 800;
+  line-height: 1.18;
+  text-wrap: balance;
+  overflow-wrap: break-word;
+}
+
+.hud-callout-icon {
+  margin-right: 0.35em;
+  font-size: 0.95em;
+}
+
+#hud-callout[data-variant='announcement'] .hud-callout-text {
+  color: #f3fbff;
+  text-shadow: 0 0 14px rgba(120, 220, 255, 0.45), 0 2px 5px rgba(0, 0, 0, 0.95);
+}
+
+#hud-callout[data-variant='powerup'] .hud-callout-text {
+  color: #ffe45c;
+  text-shadow: 0 0 14px rgba(255, 215, 0, 0.55), 0 2px 5px rgba(0, 0, 0, 0.95);
+}
+
+#hud-callout:not([data-layout-density='desktop']) .hud-callout-card {
+  padding: 5px 18px 6px;
+}
+
+#hud-callout:not([data-layout-density='desktop']) .hud-callout-sub {
+  font-size: 11px;
+}
+
+#hud-callout:not([data-layout-density='desktop']) .hud-callout-main {
+  font-size: 18px;
+}
+
 /* ------------------------------------------------------------ 挂载物面板（右下） */
 #hud-stores {
   position: fixed;
@@ -384,6 +794,25 @@ const HUD_EXTRAS_CSS = `
   height: 14px;
 }
 
+/* 竖屏：放进顶部消息栈，与简报 / 目标同列 */
+#hud-top-stack > .hx-autosave {
+  position: static;
+  align-self: center;
+  gap: 6px;
+  padding: 4px 10px 4px 8px;
+  font-size: 11px;
+}
+
+#hud-top-stack > .hx-autosave svg {
+  width: 12px;
+  height: 12px;
+}
+
+/* 竖屏消息栈拥挤时（简报，或阶段条 + 目标）存档提示让位；HUD 同时暂停计时，之后再完整显示 */
+#hud-top-stack[data-defer-autosave='on'] > .hx-autosave {
+  display: none !important;
+}
+
 /* 手机横握：信息栏下方紧贴雷达，改放到雷达右侧 */
 #hud[data-layout-density='touch-landscape'] .hx-autosave {
   position: fixed;
@@ -484,11 +913,10 @@ const HUD_EXTRAS_CSS = `
   font-size: 12px;
 }
 
-/* 竖屏：顶部信息区下方独占一行（无线电面板随 <html data-hud-boss> 下移） */
+/* 竖屏：在顶部消息栈里独占一行（无线电面板跟在栈底） */
 #hud[data-layout-density='touch-portrait'] #hud-boss-status {
-  top: 196px;
-  left: max(10px, env(safe-area-inset-left));
-  right: max(10px, env(safe-area-inset-right));
+  position: static;
+  width: 100%;
   transform: none;
   max-width: none;
   height: 22px;
