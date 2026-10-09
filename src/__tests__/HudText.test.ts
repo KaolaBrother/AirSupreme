@@ -7,6 +7,7 @@ import { resetLocale } from './i18nTestUtils';
  * HUD 可本地化文案（HudText = string | LocalizedText | { text, params }，终验修复 F3）：
  * showBriefing / showAutosave 三种写法都接受；显示中的简报横幅 / 存档提示在 setLocale 切换语言时
  * 立即按新语言重绘（暂停中游戏不调用 update 也一样）；纯字符串照旧原样显示。
+ * 打磨批次 P：flashWarning / setBossStatus / showPowerUp 同样接受三种写法并在切换语言时重绘。
  */
 
 const LEVEL: HudText = { text: { en: 'Level {level}', zh: '第{level}关' }, params: { level: 3 } };
@@ -133,6 +134,116 @@ describe('HUD localizable banner and toast text', () => {
       hud.showAutosave('Checkpoint 7');
       setLocale('zh-CN');
       expect(textOf('hud-autosave')).toContain('Checkpoint 7');
+    });
+  });
+
+  /** 三种写法的同一句话：纯字符串 / 双语对象 / { text, params } */
+  const FORMS: ReadonlyArray<[label: string, text: HudText, en: string, zh: string]> = [
+    ['a bilingual text', { en: 'Arc charging!', zh: '电弧充能！' }, 'Arc charging!', '电弧充能！'],
+    [
+      'a { text, params } entry',
+      {
+        text: { en: 'Civilian hit · -{points} pts', zh: '误伤平民 · 扣除 {points} 分' },
+        params: { points: 250 },
+      },
+      'Civilian hit · -250 pts',
+      '误伤平民 · 扣除 250 分',
+    ],
+  ];
+
+  describe('flashWarning (polish batch P)', () => {
+    const flash = (): string => textOf('hud-flash-warning');
+
+    it.each(FORMS)(
+      'shows %s and redraws it on a language switch while paused',
+      (_l, text, en, zh) => {
+        hud.flashWarning(text, 'threat');
+        expect(isShown(byId('hud-flash-warning'))).toBe(true);
+        expect(flash()).toContain(en);
+
+        setLocale('zh-CN');
+        expect(flash()).toContain(zh);
+        expect(flash()).not.toContain(en);
+        setLocale('en');
+        expect(flash()).toContain(en);
+      }
+    );
+
+    it('keeps a plain string as it is', () => {
+      hud.flashWarning('Overheat', 'sys');
+      setLocale('zh-CN');
+      expect(flash()).toContain('Overheat');
+    });
+
+    it('does not bring back a warning that has gone', () => {
+      hud.flashWarning(FORMS[0][1], 'threat');
+      for (let elapsed = 0; elapsed < 5; elapsed += 0.1) hud.update(0.1);
+      expect(isShown(byId('hud-flash-warning'))).toBe(false);
+      setLocale('zh-CN');
+      expect(isShown(byId('hud-flash-warning'))).toBe(false);
+    });
+  });
+
+  describe('setBossStatus (polish batch P)', () => {
+    const status = (): string => textOf('hud-boss-status');
+
+    it.each(FORMS)(
+      'shows %s and redraws it on a language switch while paused',
+      (_l, text, en, zh) => {
+        hud.setBossStatus(text, { current: 2, total: 3 });
+        expect(isShown(byId('hud-boss-status'))).toBe(true);
+        expect(status()).toContain(en);
+
+        setLocale('zh-CN');
+        expect(status()).toContain(zh);
+        expect(status()).not.toContain(en);
+        setLocale('en');
+        expect(status()).toContain(en);
+      }
+    );
+
+    it('keeps a plain string label as it is', () => {
+      hud.setBossStatus('Core exposed', { current: 1, total: 3 });
+      setLocale('zh-CN');
+      expect(status()).toContain('Core exposed');
+    });
+
+    it('stays hidden after null, whatever the language does', () => {
+      hud.setBossStatus(FORMS[0][1], { current: 1, total: 2 });
+      hud.setBossStatus(null);
+      setLocale('zh-CN');
+      expect(isShown(byId('hud-boss-status'))).toBe(false);
+      expect(status()).not.toContain(FORMS[0][3]);
+    });
+  });
+
+  describe('showPowerUp (polish batch P)', () => {
+    const timer = (): string => textOf('hud-powerup-timer');
+
+    it.each(FORMS)('shows %s in the countdown and redraws it while paused', (_l, text, en, zh) => {
+      hud.showPowerUp(text, '🛡️', 10);
+      expect(timer()).toContain(en);
+      expect(timer()).toContain('10');
+
+      setLocale('zh-CN');
+      expect(timer()).toContain(zh);
+      expect(timer()).not.toContain(en);
+      expect(timer(), 'the countdown is kept').toContain('10');
+      setLocale('en');
+      expect(timer()).toContain(en);
+    });
+
+    it('keeps a plain string name as it is', () => {
+      hud.showPowerUp('Shield', '🛡️', 8);
+      setLocale('zh-CN');
+      expect(timer()).toContain('Shield');
+    });
+
+    it('a power-up that has run out is not brought back by a language switch', () => {
+      hud.showPowerUp({ en: 'Damage boost', zh: '火力增强' }, '⚡', 2);
+      for (let elapsed = 0; elapsed < 4; elapsed += 0.1) hud.update(0.1);
+      setLocale('zh-CN');
+      expect(timer()).not.toContain('火力增强');
     });
   });
 });
