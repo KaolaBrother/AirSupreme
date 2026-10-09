@@ -30,7 +30,7 @@ interface StaticBatchBucket {
   parts: THREE.BufferGeometry[];
 }
 
-/** 合并时保留的顶点属性（其余属性在零件上删除，保证同桶属性集合一致） */
+/** 零件只拷贝这些顶点属性（其余属性丢弃），保证同桶属性集合一致 */
 const KEPT_ATTRIBUTES = ['position', 'normal', 'uv', 'color'] as const;
 const WHITE = new THREE.Color(1, 1, 1);
 
@@ -41,13 +41,6 @@ function usesVertexColors(material: THREE.Material): boolean {
 export class StaticBatcher {
   private readonly buckets = new Map<string, StaticBatchBucket>();
   private readonly materialIds = new Map<THREE.Material, number>();
-
-  /** 已收集、尚未合并的零件数 */
-  public get pendingParts(): number {
-    let count = 0;
-    for (const bucket of this.buckets.values()) count += bucket.parts.length;
-    return count;
-  }
 
   /**
    * 收集一个零件：拷贝 geometry 并按 matrix 烘焙到父空间（原几何不被修改，可继续复用）。
@@ -108,35 +101,41 @@ export class StaticBatcher {
   ): THREE.Object3D[] {
     const skipped: THREE.Object3D[] = [];
     root.updateMatrixWorld(true);
-    root.traverse((child) => {
-      if (child instanceof THREE.Mesh && !(child instanceof THREE.InstancedMesh)) {
-        if (!Array.isArray(child.material)) {
-          this.add(child.geometry, child.material, child.matrixWorld, {
-            castShadow: child.castShadow,
-            receiveShadow: child.receiveShadow,
-            renderOrder: child.renderOrder,
-            color: colorOf?.(child),
-          });
+    const visit = (object: THREE.Object3D): void => {
+      if (
+        object instanceof THREE.Mesh &&
+        !(object instanceof THREE.InstancedMesh) &&
+        !Array.isArray(object.material)
+      ) {
+        this.add(object.geometry, object.material, object.matrixWorld, {
+          castShadow: object.castShadow,
+          receiveShadow: object.receiveShadow,
+          renderOrder: object.renderOrder,
+          color: colorOf?.(object),
+        });
+      } else {
+        const renderable = object as THREE.Object3D & {
+          isMesh?: boolean;
+          isPoints?: boolean;
+          isLine?: boolean;
+          isSprite?: boolean;
+          isLight?: boolean;
+        };
+        if (
+          renderable.isMesh ||
+          renderable.isPoints ||
+          renderable.isLine ||
+          renderable.isSprite ||
+          renderable.isLight
+        ) {
+          // 整棵子树原样交还调用方（不再拆它的子节点，避免同一几何既被合并又被挂回）
+          skipped.push(object);
           return;
         }
       }
-      const renderable = child as THREE.Object3D & {
-        isMesh?: boolean;
-        isPoints?: boolean;
-        isLine?: boolean;
-        isSprite?: boolean;
-        isLight?: boolean;
-      };
-      if (
-        renderable.isMesh ||
-        renderable.isPoints ||
-        renderable.isLine ||
-        renderable.isSprite ||
-        renderable.isLight
-      ) {
-        skipped.push(child);
-      }
-    });
+      for (const child of object.children) visit(child);
+    };
+    visit(root);
     return skipped;
   }
 
