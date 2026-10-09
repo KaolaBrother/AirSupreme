@@ -291,6 +291,8 @@ export function installBalanceHarness(access: DevHookAccess): BalanceHarnessApi 
   const recentCrashes: number[] = [];
   /** 最近的坠毁现场（排查地形 / 复活问题） */
   const crashLog: Array<Record<string, unknown>> = [];
+  /** 最近的复活位姿 */
+  const respawnLog: Array<Record<string, unknown>> = [];
   /** 最近 DEATH_WINDOW 秒内的受击（按来源归因），阵亡时汇总成 deathLog */
   const recentHits: Array<{ t: number; source: string; damage: number }> = [];
   /** 每次阵亡的死因：阵亡前 DEATH_WINDOW 秒内伤害最高的来源 */
@@ -581,6 +583,23 @@ export function installBalanceHarness(access: DevHookAccess): BalanceHarnessApi 
     if (rescuePending) {
       rescuePending = false;
       rescuePlayer();
+    }
+    // 复活位姿（排查“复活即坠毁”循环）：位置、地表、机头方向
+    if (run && !run.done && respawnLog.length < 60) {
+      const player = access.getPlayerAircraft();
+      const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(player.quaternion);
+      respawnLog.push({
+        t: round1(gameTime),
+        level: access.getSession().getLevel(),
+        pos: [
+          Math.round(player.position.x),
+          Math.round(player.position.y),
+          Math.round(player.position.z),
+        ],
+        ground: Math.round(world.groundY(player.position.x, player.position.z)),
+        forward: [round1(forward.x), round1(forward.y), round1(forward.z)],
+        rescued: run.rescues,
+      });
     }
   });
 
@@ -1320,6 +1339,7 @@ export function installBalanceHarness(access: DevHookAccess): BalanceHarnessApi 
       totalDeaths: run.totalDeaths,
       rescues: run.rescues,
       crashLog,
+      respawnLog,
       deathLog,
       passiveSurvival: run.passiveSurvival,
       hangars: run.hangars,
@@ -1351,6 +1371,7 @@ export function installBalanceHarness(access: DevHookAccess): BalanceHarnessApi 
       bossRecord = null;
       recentCrashes.length = 0;
       crashLog.length = 0;
+      respawnLog.length = 0;
       recentHits.length = 0;
       deathLog.length = 0;
       rescuePending = false;
