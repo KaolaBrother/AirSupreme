@@ -73,7 +73,7 @@ Every MP3 in both packs carries the C2PA provenance data (Content Credentials) t
 
 1. Edit the line in the campaign data, both `en` and `zh`. Keep existing ids; give a new line a new id that follows the patterns above.
 2. Take the changed lines from `getVoiceScript()`: id, speaker, kind and the text for the language being recorded.
-3. Generate one take per line and language, using the same voice as the speaker's other lines (see the `voiceId` of that speaker's files in `provenance.json`). The packs need no post-processing: radio filtering, loudness normalisation and music ducking happen at playback.
+3. Generate one take per line and language, using the same voice as the speaker's other lines (see the `voiceId` of that speaker's files in `provenance.json`), as MP3 like the rest of the pack (every current file is 128 kbps, 44.1 kHz, mono). The packs need no post-processing: radio filtering, loudness normalisation and music ducking happen at playback.
 4. Save each take as `public/voice/<en|zh>/<id>.mp3`.
 5. Update `manifest.json` (`duration`, `bytes`) for every changed id, in both languages.
 6. Update `provenance.json`: replace or add the file entries (`sha256`, `voiceId`, `generationId`, `chars`, …) and record the run under `topups`.
