@@ -7,6 +7,7 @@ import type { ICampaignPresentation } from '@/core/campaign/CampaignPresentation
 import { GameSessionState } from '@/core/GameSessionState';
 import {
   CAMPAIGN_SAVE_KEY,
+  describeCheckpoint,
   getCampaignProgress,
   loadCampaignCheckpoint,
   saveCampaignCheckpoint,
@@ -17,6 +18,8 @@ import {
 import { TOTAL_LEVELS } from '@/features/campaign/CampaignData';
 import { getLevelConfig } from '@/features/terrain/LevelConfig';
 import { PlayerStats, UpgradeType } from '@/features/upgrade/UpgradeSystem';
+import { setLocale, tr, type LocalizedText, type TextParams } from '@/i18n';
+import { resetLocale } from './i18nTestUtils';
 
 /**
  * 战役流程（CampaignFlowController，终验修复 F2）：
@@ -442,6 +445,98 @@ describe('campaign flow', () => {
       harness.flow.handleWingmanLaunched('swift');
       expect(joinLines(harness)).toBe(0);
     });
+  });
+
+  describe('autosave toasts are localizable (wave 2)', () => {
+    afterEach(() => {
+      resetLocale();
+    });
+
+    /** 存档提示的原始参数（交给 HUD 的 HudText） */
+    function toastLabels(harness: Harness): unknown[] {
+      return harness.fake.calls
+        .filter(([name]) => name === 'showAutosave')
+        .map(([, args]) => args[0]);
+    }
+
+    function isTextWithParams(
+      value: unknown
+    ): value is { text: LocalizedText; params?: TextParams } {
+      const text = (value as { text?: unknown } | null)?.text as LocalizedText | undefined;
+      return typeof text?.en === 'string' && typeof text?.zh === 'string';
+    }
+
+    /** 按两种语言展开一条 { text, params } 提示 */
+    function render(value: unknown): { en: string; zh: string } {
+      expect(isTextWithParams(value), `a { text, params } label: ${JSON.stringify(value)}`).toBe(
+        true
+      );
+      const { text, params } = value as { text: LocalizedText; params?: TextParams };
+      setLocale('en');
+      const en = tr(text, params);
+      setLocale('zh-CN');
+      const zh = tr(text, params);
+      resetLocale();
+      return { en, zh };
+    }
+
+    it('a wave checkpoint toast is { text, params } naming the level and the next wave', () => {
+      const harness = createHarness();
+      harness.session.setLevel(4);
+      harness.flow.handleWaveComplete(1);
+      const [label] = toastLabels(harness);
+      const { en, zh } = render(label);
+      expect(en).toContain('4');
+      expect(en).toMatch(/Wave 3/);
+      expect(zh).toContain('第4关');
+      expect(zh).toContain('第3波');
+    });
+
+    it('a before-the-boss toast is { text, params } naming the level', () => {
+      const harness = createHarness();
+      harness.session.setLevel(5);
+      harness.flow.handleLevelComplete(5);
+      const [label] = toastLabels(harness);
+      const { en, zh } = render(label);
+      expect(en).toContain('5');
+      expect(zh).toContain('第5关');
+      expect(en).not.toBe(zh);
+    });
+
+    it('the boss-kill toast says "Level N cleared" for the level just beaten, as { text, params }', () => {
+      const harness = createHarness();
+      harness.session.setLevel(3);
+      harness.flow.handleBossDefeated(3, false);
+      const labels = toastLabels(harness);
+      expect(labels).toHaveLength(1);
+      const { en, zh } = render(labels[0]);
+      expect(en).toMatch(/Level 3 cleared/);
+      expect(zh).toContain('第3关');
+      expect(en).not.toMatch(/\b4\b/);
+    });
+
+    it.each<[string, Partial<CampaignCheckpointInput>]>([
+      ['wave', { checkpoint: 'wave', level: 5, wave: 2 }],
+      ['boss', { checkpoint: 'boss', level: 5, wave: 7 }],
+    ])(
+      '"Resumed: …" for a %s checkpoint carries both languages of the checkpoint',
+      async (_kind, overrides) => {
+        saveCampaignCheckpoint(makeSave(overrides));
+        const save = savedCheckpoint();
+        const harness = createHarness();
+        harness.flow.resumeFromCheckpoint(save);
+        await flushPromises();
+
+        const [label] = toastLabels(harness);
+        const text = label as LocalizedText;
+        expect(typeof text?.en, 'a bilingual { en, zh } label').toBe('string');
+        expect(typeof text?.zh).toBe('string');
+        expect(text.en).toContain(describeCheckpoint(save, 'en'));
+        expect(text.en).toMatch(/^Resumed/);
+        expect(text.zh).toContain(describeCheckpoint(save, 'zh-CN'));
+        expect(text.zh).toMatch(/^继续/);
+      }
+    );
   });
 
   describe('boss outro', () => {
