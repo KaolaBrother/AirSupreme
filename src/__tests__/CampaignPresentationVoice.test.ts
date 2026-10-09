@@ -20,6 +20,7 @@ import {
   getCampaignChapter,
   type GenericRadioKey,
 } from '@/features/campaign/CampaignData';
+import { setLocale } from '@/i18n';
 import { RadioComms } from '@/ui/RadioComms';
 import { StoryOverlay } from '@/ui/StoryOverlay';
 import { resetLocale } from './i18nTestUtils';
@@ -267,6 +268,29 @@ describe('campaign presentation voice wiring', () => {
         GENERIC_RADIO.checkpoint.id,
       ]);
       expect(radioText()).toContain(GENERIC_RADIO.checkpoint.text.en);
+    });
+
+    it('after a language switch the line on screen is redrawn and the queue moves on', async () => {
+      presentation.genericRadio('checkpoint');
+      presentation.genericRadio('escort-success');
+      voice.start(3);
+      step(1);
+
+      setLocale('zh-CN');
+      // VoiceSystem 在切换语言时停下正在说的台词（见 VoiceSystem 测试）
+      voice.stop();
+      await settle();
+      expect(radioText()).toContain(GENERIC_RADIO.checkpoint.text.zh);
+      expect(radioText()).not.toContain(GENERIC_RADIO.checkpoint.text.en);
+      expect(playedIds()).toEqual([GENERIC_RADIO.checkpoint.id]);
+
+      // 不再等配音：按“开口 + 时长 + 0.4 秒”收尾，下一句随即出现（新语言）
+      step(3);
+      expect(playedIds()).toEqual([
+        GENERIC_RADIO.checkpoint.id,
+        GENERIC_RADIO['escort-success'].id,
+      ]);
+      expect(radioText()).toContain(GENERIC_RADIO['escort-success'].text.zh);
     });
   });
 
