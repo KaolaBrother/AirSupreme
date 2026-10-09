@@ -7,7 +7,6 @@ type ResolvedQualityPreset = Exclude<QualityPreset, 'auto'>;
 
 type QualityParams = {
   maxPixelRatio: number;
-  maxEnemies: number;
   particleCount: number;
   projectilePoolSize: number;
   targetFPS: number;
@@ -25,11 +24,17 @@ export class GameConfig {
   private static qualityPreset: QualityPreset = 'auto';
   private static runtimeQualityOverride?: ResolvedQualityPreset;
 
+  /**
+   * 同时在场的敌机上限（玩法规则，与画质无关）：以前随画质档 4-14 架浮动，
+   * 导致高画质 / 运行中自动降档会改变难度。桌面与移动端各用一个固定值
+   * （移动端触屏操控更难，少一架）。波次总量见 LevelConfig.enemiesPerWave。
+   */
+  private static readonly MAX_CONCURRENT_ENEMIES = { desktop: 6, mobile: 5 } as const;
+
   private static readonly QUALITY_PRESETS: Record<ResolvedQualityPreset, DeviceQualityParams> = {
     performance: {
       mobile: {
         maxPixelRatio: 1.2,
-        maxEnemies: 4,
         particleCount: 12,
         projectilePoolSize: 80,
         targetFPS: 30,
@@ -38,7 +43,6 @@ export class GameConfig {
       },
       desktop: {
         maxPixelRatio: 1.5,
-        maxEnemies: 6,
         particleCount: 35,
         projectilePoolSize: 160,
         targetFPS: 45,
@@ -49,7 +53,6 @@ export class GameConfig {
     balanced: {
       mobile: {
         maxPixelRatio: 1.5,
-        maxEnemies: 5,
         particleCount: 20,
         projectilePoolSize: 100,
         targetFPS: 30,
@@ -58,7 +61,6 @@ export class GameConfig {
       },
       desktop: {
         maxPixelRatio: 2,
-        maxEnemies: 10,
         particleCount: 50,
         projectilePoolSize: 200,
         targetFPS: 60,
@@ -69,7 +71,6 @@ export class GameConfig {
     quality: {
       mobile: {
         maxPixelRatio: 1.5,
-        maxEnemies: 7,
         particleCount: 30,
         projectilePoolSize: 130,
         targetFPS: 45,
@@ -78,7 +79,6 @@ export class GameConfig {
       },
       desktop: {
         maxPixelRatio: 2,
-        maxEnemies: 14,
         particleCount: 75,
         projectilePoolSize: 260,
         targetFPS: 75,
@@ -177,7 +177,7 @@ export class GameConfig {
 
   // 游戏参数
   public static getMaxEnemies(): number {
-    return this.getQualityProfile().maxEnemies;
+    return this.isMobile ? this.MAX_CONCURRENT_ENEMIES.mobile : this.MAX_CONCURRENT_ENEMIES.desktop;
   }
 
   public static getParticleCount(): number {

@@ -144,7 +144,7 @@ export const BOSS_CONFIGS: Record<BossType, BossConfig> = {
   [BossType.HEAVY_BOMBER]: {
     type: BossType.HEAVY_BOMBER,
     name: '重型轰炸机 Boss',
-    health: 2000,
+    health: 1400,
     speed: 10,
     damage: 15,
     scale: 5,
@@ -159,7 +159,7 @@ export const BOSS_CONFIGS: Record<BossType, BossConfig> = {
   [BossType.DESERT_FORTRESS]: {
     type: BossType.DESERT_FORTRESS,
     name: '沙漠堡垒 Boss',
-    health: 2500,
+    health: 2800,
     speed: 0,
     damage: FLAK_CANNON_CONFIG.DAMAGE,
     scale: 5,
@@ -174,7 +174,7 @@ export const BOSS_CONFIGS: Record<BossType, BossConfig> = {
   [BossType.OCTOPUS_WARSHIP]: {
     type: BossType.OCTOPUS_WARSHIP,
     name: '八爪鱼战舰 Boss',
-    health: 3000,
+    health: 6300,
     speed: 5,
     damage: LASER_SWEEP_CONFIG.DAMAGE,
     scale: 5,
@@ -189,7 +189,7 @@ export const BOSS_CONFIGS: Record<BossType, BossConfig> = {
   [BossType.MISSILE_DESTROYER]: {
     type: BossType.MISSILE_DESTROYER,
     name: '导弹驱逐舰 Boss',
-    health: 3500,
+    health: 1800,
     speed: 10,
     damage: FLAK_CANNON_CONFIG.DAMAGE,
     scale: 5,
@@ -204,7 +204,7 @@ export const BOSS_CONFIGS: Record<BossType, BossConfig> = {
   [BossType.SKY_CARRIER]: {
     type: BossType.SKY_CARRIER,
     name: '空中航空母舰 Boss',
-    health: 4000,
+    health: 2800,
     speed: 8,
     damage: 30,
     scale: 5,
@@ -219,7 +219,7 @@ export const BOSS_CONFIGS: Record<BossType, BossConfig> = {
   [BossType.MAGMA_COLOSSUS]: {
     type: BossType.MAGMA_COLOSSUS,
     name: '熔岩巨像 Boss',
-    health: 5000,
+    health: 8100,
     speed: 6,
     damage: 32,
     scale: 5,
@@ -234,7 +234,7 @@ export const BOSS_CONFIGS: Record<BossType, BossConfig> = {
   [BossType.ABYSSAL_LEVIATHAN]: {
     type: BossType.ABYSSAL_LEVIATHAN,
     name: '深渊利维坦 Boss',
-    health: 5600,
+    health: 5200,
     speed: 10,
     damage: 34,
     scale: 5.5,
@@ -249,7 +249,7 @@ export const BOSS_CONFIGS: Record<BossType, BossConfig> = {
   [BossType.TEMPEST_ZEPPELIN]: {
     type: BossType.TEMPEST_ZEPPELIN,
     name: '雷霆飞艇 Boss',
-    health: 6200,
+    health: 14500,
     speed: 7,
     damage: 30,
     scale: 6,
@@ -264,7 +264,7 @@ export const BOSS_CONFIGS: Record<BossType, BossConfig> = {
   [BossType.PHANTOM_WING]: {
     type: BossType.PHANTOM_WING,
     name: '幻影之翼 Boss',
-    health: 6400,
+    health: 5600,
     speed: 26,
     damage: 36,
     scale: 5,
@@ -279,7 +279,7 @@ export const BOSS_CONFIGS: Record<BossType, BossConfig> = {
   [BossType.ORACLE_PRIME]: {
     type: BossType.ORACLE_PRIME,
     name: '神谕主宰 Boss',
-    health: 9000,
+    health: 8400,
     speed: 4,
     damage: 40,
     scale: 6,

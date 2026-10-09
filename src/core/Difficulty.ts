@@ -8,49 +8,57 @@ export interface DifficultyProfile {
   bossCooldownMultiplier: number;
 }
 
+/**
+ * 难度档（开始菜单的“难度”设置）：在关卡曲线之上整体缩放敌人（敌机、地面 / 海上单位、Boss）。
+ *
+ * 敌机 / 单位的基础数值（EnemyTypes、UnitBehaviors、BossTypes）按“专家”手感编写；
+ * 各档把伤害与开火频率映射到对应的玩家水平。“标准”是默认档：由脚本飞行员
+ * （src/core/dev/BalanceHarness.ts）实测调校为“称职的普通玩家每关最多损失约一条命”。
+ * 伤害 × 冷却共同决定敌方火力：DPS 倍率 ≈ enemyDamageMultiplier / enemyAttackCooldownMultiplier。
+ */
 const DIFFICULTY_PROFILES: Record<DifficultyProfile['level'], DifficultyProfile> = {
   1: {
     level: 1,
     label: '简单',
     enemyHealthMultiplier: 0.8,
-    enemyDamageMultiplier: 0.75,
-    enemyAttackCooldownMultiplier: 1.1,
+    enemyDamageMultiplier: 0.35,
+    enemyAttackCooldownMultiplier: 1.7,
     powerUpDropMultiplier: 1.25,
-    bossCooldownMultiplier: 1.15,
+    bossCooldownMultiplier: 1.2,
   },
   2: {
     level: 2,
     label: '普通',
     enemyHealthMultiplier: 0.9,
-    enemyDamageMultiplier: 0.9,
-    enemyAttackCooldownMultiplier: 1.05,
+    enemyDamageMultiplier: 0.42,
+    enemyAttackCooldownMultiplier: 1.6,
     powerUpDropMultiplier: 1.1,
-    bossCooldownMultiplier: 1.08,
+    bossCooldownMultiplier: 1.1,
   },
   3: {
     level: 3,
     label: '标准',
     enemyHealthMultiplier: 1,
-    enemyDamageMultiplier: 1,
-    enemyAttackCooldownMultiplier: 1,
+    enemyDamageMultiplier: 0.5,
+    enemyAttackCooldownMultiplier: 1.5,
     powerUpDropMultiplier: 1,
     bossCooldownMultiplier: 1,
   },
   4: {
     level: 4,
     label: '困难',
-    enemyHealthMultiplier: 1.15,
-    enemyDamageMultiplier: 1.1,
-    enemyAttackCooldownMultiplier: 0.95,
+    enemyHealthMultiplier: 1.12,
+    enemyDamageMultiplier: 0.62,
+    enemyAttackCooldownMultiplier: 1.35,
     powerUpDropMultiplier: 0.9,
     bossCooldownMultiplier: 0.92,
   },
   5: {
     level: 5,
     label: '专家',
-    enemyHealthMultiplier: 1.3,
-    enemyDamageMultiplier: 1.25,
-    enemyAttackCooldownMultiplier: 0.9,
+    enemyHealthMultiplier: 1.25,
+    enemyDamageMultiplier: 0.78,
+    enemyAttackCooldownMultiplier: 1.2,
     powerUpDropMultiplier: 0.85,
     bossCooldownMultiplier: 0.85,
   },
@@ -90,20 +98,41 @@ export interface LevelScaling {
 /** 战役最高关卡（与 CampaignData.TOTAL_LEVELS 保持一致） */
 export const CAMPAIGN_LEVEL_CAP = 10;
 
+type LevelCurveKey = Exclude<keyof LevelScaling, 'level' | 'progress'>;
+
+/**
+ * 关卡强度曲线：每列对应第 1..10 关，全部逐关平衡数值集中在这一张表里。
+ * 第 1 关恒为基准（倍率 1、加成 0）；逐关单调变难（冷却倍率单调变小）。
+ * 敌方火力（伤害 ÷ 冷却）到第 10 关约为第 1 关的 3 倍，血量涨幅压低以免关卡越拖越长
+ * （玩家火力随升级成长更快，关卡时长主要由敌人数量决定）；
+ * 玩家这一侧的成长见 UpgradeSystem（层级上限随关卡开放）。
+ */
+const LEVEL_CURVE: Readonly<Record<LevelCurveKey, readonly number[]>> = {
+  //                       L1    L2    L3    L4    L5    L6    L7    L8    L9    L10
+  enemyHealthMultiplier: [1.0, 1.04, 1.08, 1.12, 1.16, 1.2, 1.24, 1.28, 1.32, 1.36],
+  enemyDamageMultiplier: [1.0, 1.12, 1.25, 1.38, 1.52, 1.66, 1.8, 1.95, 2.1, 2.25],
+  enemyCooldownMultiplier: [1.0, 0.97, 0.94, 0.91, 0.88, 0.85, 0.82, 0.8, 0.78, 0.76],
+  enemyAccuracyBonus: [0, 0.02, 0.04, 0.06, 0.08, 0.1, 0.12, 0.14, 0.16, 0.18],
+  unitHealthMultiplier: [1.0, 1.03, 1.06, 1.09, 1.12, 1.15, 1.18, 1.21, 1.24, 1.27],
+  bossCooldownMultiplier: [1.0, 0.98, 0.96, 0.94, 0.92, 0.89, 0.87, 0.85, 0.82, 0.8],
+  scoreMultiplier: [1.0, 1.06, 1.11, 1.17, 1.22, 1.28, 1.33, 1.39, 1.44, 1.5],
+};
+
 export function getLevelScaling(level: number): LevelScaling {
   const safeLevel = Number.isFinite(level) ? level : 1;
   const clampedLevel = Math.max(1, Math.min(CAMPAIGN_LEVEL_CAP, Math.round(safeLevel)));
-  const progress = (clampedLevel - 1) / (CAMPAIGN_LEVEL_CAP - 1);
+  const index = clampedLevel - 1;
+  const pick = (key: LevelCurveKey): number => LEVEL_CURVE[key][index];
 
   return {
     level: clampedLevel,
-    progress,
-    enemyHealthMultiplier: 1 + 0.9 * progress,
-    enemyDamageMultiplier: 1 + 0.6 * progress,
-    enemyCooldownMultiplier: 1 - 0.25 * progress,
-    enemyAccuracyBonus: 0.15 * progress,
-    unitHealthMultiplier: 1 + 0.8 * progress,
-    bossCooldownMultiplier: 1 - 0.2 * progress,
-    scoreMultiplier: 1 + 0.5 * progress,
+    progress: index / (CAMPAIGN_LEVEL_CAP - 1),
+    enemyHealthMultiplier: pick('enemyHealthMultiplier'),
+    enemyDamageMultiplier: pick('enemyDamageMultiplier'),
+    enemyCooldownMultiplier: pick('enemyCooldownMultiplier'),
+    enemyAccuracyBonus: pick('enemyAccuracyBonus'),
+    unitHealthMultiplier: pick('unitHealthMultiplier'),
+    bossCooldownMultiplier: pick('bossCooldownMultiplier'),
+    scoreMultiplier: pick('scoreMultiplier'),
   };
 }
