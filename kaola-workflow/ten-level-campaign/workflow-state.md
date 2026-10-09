@@ -9,7 +9,7 @@ phase: adaptive
 workflow_path: adaptive
 runtime: claude
 main_session_role: orchestrator
-step: session 3 — fixing the VFX composer regression and making the real gates runnable; next: round 2
+step: session 3 — final audit done (R1-R16: 13 met, R2/R11/R12 partly); fix round F1-F4b dispatched from c060401; next: separate-custody tests → docs → re-audit → merge to main
 
 ## Selection
 source: user directive (claude.ai project description) — no GitHub issue; all repo issues are closed
@@ -27,7 +27,8 @@ home: session 3 — the git home is the cloud clone /home/claude/airsupreme (pus
   through the device bridge, which has no GitHub/npm route) is synced after each milestone by a git bundle →
   `git fetch <bundle> refs/remotes/origin/*` → fast-forward; never touch the user's uncommitted
   node_modules/.vite/deps edits or untracked .claude/
-remote_branches: workflow/ten-level-campaign (integration), batch/audio, batch/progression, batch/story-ui (WIP)
+remote_branches: workflow/ten-level-campaign (integration); stale WIP batch/audio, batch/progression, batch/story-ui (superseded by the
+  round-3 merges; delete only with the user's OK); fix-round batch branches stay local to the cloud clone
 
 ## Environment Notes
 - npm registry blocked by egress allowlist → `npm install`, vitest, eslint plugins, vite native binaries unavailable
@@ -40,3 +41,7 @@ remote_branches: workflow/ten-level-campaign (integration), batch/audio, batch/p
   vitest 3.2.4, jsdom 27, typescript 5.9.3, vite 5.4.21, rollup 4.57.1, esbuild 0.21.5 JS). Linux natives are
   stood in: esbuild via /home/claude/harness/esbuild-shim.sh (sandbox esbuild 0.28.2), Rollup via a JS stand-in.
   Real-GPU checks: publish the built game as a private artifact and open it in the user's Claude browser pane.
+- Real-GPU look was never possible: the user's Claude browser pane is not signed in to claude.ai and cannot reach the
+  sandbox; all visual checks are headless Chromium (SwiftShader) on the real build. Voice packs were fetched through
+  that pane from ElevenLabs' signed GCS URLs (one take per line, user's credits; never re-run a finished generation).
+- Bundles over 30 MB (voice packs) go to the local clone split into 24 MB parts with sha256, joined in the device VM.
