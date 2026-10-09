@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { getDifficultyProfile } from '@/core/Difficulty';
 import {
   BossType,
   BossCannonPosition,
@@ -28,12 +29,15 @@ describe('BossTypes', () => {
       expect(config.damage).toBe(15);
     });
 
-    it('should have correct DESERT_FORTRESS stats', () => {
+    it('should have correct DESERT_FORTRESS stats (flak base damage 30, still 15 on Normal)', () => {
       const config = BOSS_CONFIGS[BossType.DESERT_FORTRESS];
       expect(config.health).toBe(2800);
       expect(config.speed).toBe(0);
       expect(config.scale).toBe(5);
-      expect(config.damage).toBe(15);
+      // 配置里是未缩放的基础值；Boss 战开始时按难度档的伤害倍率缩放（“普通”档 ×0.5 = 15）
+      expect(config.damage).toBe(30);
+      const normal = getDifficultyProfile(3).enemyDamageMultiplier;
+      expect(Math.round(config.damage * normal)).toBe(15);
     });
 
     // 规范 / 集成说明没有规定 Boss 之间的血量顺序（实测标定后并非随关卡递增），因此不固定顺序

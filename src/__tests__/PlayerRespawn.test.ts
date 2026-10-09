@@ -401,4 +401,169 @@ describe('PlayerSystem respawn safety', () => {
       expect(rig.system.getLives()).toBe(1);
     });
   });
+
+  describe('polish batch P', () => {
+    /** 平地航线：飞 10 秒后坠毁，记下（平地时的）复活点与航向 */
+    function referenceRespawn(): { point: THREE.Vector3; heading: number } {
+      const rig = createRig();
+      fly(rig, 10, 80);
+      diveIntoSurface(rig);
+      waitForRespawn(rig);
+      return { point: rig.mesh.position.clone(), heading: headingOf(rig.mesh.quaternion) };
+    }
+
+    function respawnWith(sampler: Sampler): Rig {
+      const rig = createRig();
+      fly(rig, 10, 80);
+      diveIntoSurface(rig);
+      rig.sampler.current = sampler;
+      waitForRespawn(rig);
+      return rig;
+    }
+
+    /** 航线两侧 halfWidth 米内（每米一条线）直飞 length 米都低于飞行高度 */
+    function swathIsClear(
+      sampler: Sampler,
+      from: THREE.Vector3,
+      heading: number,
+      length: number,
+      halfWidth: number
+    ): boolean {
+      const forward = forwardOf(heading);
+      const right = new THREE.Vector3(-forward.z, 0, forward.x);
+      for (let distance = 0; distance <= length; distance += 1) {
+        for (let lane = -halfWidth; lane <= halfWidth; lane += 1) {
+          const x = from.x + forward.x * distance + right.x * lane;
+          const z = from.z + forward.z * distance + right.z * lane;
+          if (sampler(x, z) >= from.y) return false;
+        }
+      }
+      return true;
+    }
+
+    describe('the clearance probe covers ±24 m of the heading', () => {
+      it.each([
+        [15, 60],
+        [15, 200],
+        [-15, 200],
+        [-15, 390],
+      ])(
+        'an 8 m-wide column %s m off the centre line, %s m ahead, rejects that heading',
+        (offset, ahead) => {
+          const reference = referenceRespawn();
+          const forward = forwardOf(reference.heading);
+          const right = new THREE.Vector3(-forward.z, 0, forward.x);
+          const center = reference.point
+            .clone()
+            .addScaledVector(forward, ahead)
+            .addScaledVector(right, offset);
+          // 8 米见方、600 米高（爬不过去）的立柱，中心离航线 15 米
+          const column: Sampler = (x, z) =>
+            Math.abs(x - center.x) <= 4 && Math.abs(z - center.z) <= 4 ? 600 : GROUND;
+          // 航线本身擦着立柱过（机体中线不撞），但留不出转弯余量
+          expect(straightPathIsClear(column, reference.point, reference.heading, 400)).toBe(true);
+          expect(swathIsClear(column, reference.point, reference.heading, 400, 20)).toBe(false);
+
+          const rig = respawnWith(column);
+          const heading = headingOf(rig.mesh.quaternion);
+          expect(
+            Math.abs(angleBetween(heading, reference.heading)),
+            'the original heading is rejected'
+          ).toBeGreaterThan(0.1);
+          expect(swathIsClear(column, rig.mesh.position, heading, 400, 20)).toBe(true);
+        }
+      );
+    });
+
+    describe('a crash soon after a respawn', () => {
+      function crashAgainAfter(seconds: number): {
+        respawn: THREE.Vector3;
+        heading: number;
+        crash: THREE.Vector3;
+      } {
+        const rig = createRig();
+        fly(rig, 10, 80);
+        diveIntoSurface(rig);
+        waitForRespawn(rig);
+        fly(rig, seconds, 80);
+        const crash = diveIntoSurface(rig);
+        waitForRespawn(rig);
+        return {
+          respawn: rig.mesh.position.clone(),
+          heading: headingOf(rig.mesh.quaternion),
+          crash,
+        };
+      }
+
+      it('within 8 s: the next respawn faces away from the crash', () => {
+        const { respawn, heading, crash } = crashAgainAfter(4);
+        const away = respawn.clone().sub(crash).setY(0).normalize();
+        expect(forwardOf(heading).dot(away)).toBeGreaterThan(0.9);
+      });
+
+      it('later than 8 s: the respawn keeps flying the track toward the crash site', () => {
+        const { respawn, heading, crash } = crashAgainAfter(12);
+        const toward = crash.clone().sub(respawn).setY(0).normalize();
+        expect(forwardOf(heading).dot(toward)).toBeGreaterThan(0.9);
+      });
+    });
+
+    describe('grace-period contact with a vertical wall', () => {
+      /** 复活后宽限期内，正前方 20 米处立起一面 500 米高的崖壁 */
+      function respawnFacingWall(): { rig: Rig; wallZ: number; start: THREE.Vector3 } {
+        const rig = createRig();
+        fly(rig, 10, 80);
+        diveIntoSurface(rig);
+        waitForRespawn(rig);
+        const start = rig.mesh.position.clone();
+        // 航向 0：机头朝 -Z，崖壁在 z < wallZ 一侧
+        expect(Math.abs(angleBetween(headingOf(rig.mesh.quaternion), 0))).toBeLessThan(0.05);
+        const wallZ = start.z - 20;
+        rig.sampler.current = (_x, z) => (z < wallZ ? 500 : GROUND);
+        return { rig, wallZ, start };
+      }
+
+      it('pushes the jet out horizontally and turns it away instead of lifting it up the wall', () => {
+        const { rig, wallZ, start } = respawnFacingWall();
+        hold(rig, 0.5);
+        rig.mesh.position.set(start.x, start.y, wallZ - 1);
+        rig.system.update(DT);
+
+        expect(rig.system.isPlayerRespawning(), 'no crash in the grace').toBe(false);
+        expect(deaths).toEqual([2]);
+        const position = rig.mesh.position;
+        expect(position.y, 'not lifted up the wall').toBeLessThan(start.y + 1);
+        expect(position.y).toBeGreaterThan(start.y - 1);
+        expect(position.z, 'pushed out of the wall').toBeGreaterThan(wallZ);
+        expect(rig.sampler.current(position.x, position.z)).toBeLessThan(position.y);
+        const nose = new THREE.Vector3(0, 0, -1).applyQuaternion(rig.mesh.quaternion);
+        expect(nose.z, 'turned away from the wall (+Z is out)').toBeGreaterThan(0);
+        expect(Math.abs(nose.y), 'level').toBeLessThan(1e-6);
+      });
+
+      it('a glancing contact keeps the jet flying along or away from the wall', () => {
+        const { rig, wallZ, start } = respawnFacingWall();
+        // 机头斜着撞向崖壁（右前方 45°）
+        rig.mesh.quaternion.setFromAxisAngle(UP, -Math.PI / 4);
+        rig.mesh.position.set(start.x, start.y, wallZ - 0.5);
+        rig.system.update(DT);
+
+        expect(rig.system.isPlayerRespawning()).toBe(false);
+        expect(rig.mesh.position.z).toBeGreaterThan(wallZ);
+        const nose = new THREE.Vector3(0, 0, -1).applyQuaternion(rig.mesh.quaternion);
+        expect(nose.z, 'no longer heading into the wall').toBeGreaterThanOrEqual(0);
+        expect(nose.x, 'keeps its sideways motion').toBeGreaterThan(0);
+      });
+
+      it('outside the grace the wall still kills', () => {
+        const { rig, wallZ, start } = respawnFacingWall();
+        hold(rig, 3.5);
+        rig.mesh.position.set(start.x, start.y, wallZ - 1);
+        rig.system.update(DT);
+
+        expect(rig.system.isPlayerRespawning()).toBe(true);
+        expect(rig.system.getLives()).toBe(1);
+      });
+    });
+  });
 });
