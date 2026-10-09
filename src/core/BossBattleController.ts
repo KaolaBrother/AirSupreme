@@ -39,6 +39,7 @@ import type { SkyCarrierAI } from '@/features/boss/SkyCarrierAI';
 import type { BossMinionKind } from '@/features/boss/BossContracts';
 import type { BossMissile } from '@/features/boss/BossMissileSystem';
 import { getCampaignChapter } from '@/features/campaign/CampaignData';
+import { tr } from '@/i18n';
 import {
   BOSS_MISSILE_CONFIG,
   BossConfig,
@@ -534,7 +535,7 @@ export class BossBattleController {
     const fz = flat > 1e-3 ? forward.z / flat : -1;
     const bearing = Math.atan2(dz * fx - dx * fz, dx * fx + dz * fz) / DEG;
     const elevation = Math.atan2(dy, Math.hypot(dx, dz)) / DEG;
-    const chapterBoss = getCampaignChapter(this.currentLevel).boss.name;
+    const chapterBoss = tr(getCampaignChapter(this.currentLevel).boss.name);
     const name =
       this.currentBossType === BossType.ORACLE_PRIME ? `${chapterBoss}（城堡核心）` : chapterBoss;
     return `${name}：${describeDirection(bearing, elevation)} ${Math.round(distance / 10) * 10} 米`;

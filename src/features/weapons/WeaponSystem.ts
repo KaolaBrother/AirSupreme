@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { CombatTarget, SpecialWeaponId } from '@/core/CombatContracts';
 import type { ParticleSystem } from '@/features/effects/ParticleSystem';
+import { tr } from '@/i18n';
 import {
   SPECIAL_WEAPON_CONFIGS,
   SPECIAL_WEAPON_IDS,
@@ -632,7 +633,7 @@ export class WeaponSystem {
     }
     return {
       selected: runtime.id,
-      name: config.name,
+      name: tr(config.name),
       icon: config.icon,
       shortCode: config.shortCode,
       mode: config.mode,

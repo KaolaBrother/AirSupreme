@@ -16,6 +16,7 @@ import {
   type StartFlowSettings,
 } from '@/core/SessionSettings';
 import { TOTAL_LEVELS, getCampaignChapter } from '@/features/campaign/CampaignData';
+import { tr } from '@/i18n';
 import { HUD_COLORS, injectHudTokens } from '@/ui/theme/hudTokens';
 import type { ModelPreview } from './ModelPreview';
 type ModelPreviewModule = typeof import('./ModelPreview');
@@ -765,7 +766,7 @@ export class StartMenu {
   /** 如“第六章 · 熔炉之心” */
   private getChapterCaption(level: number): string {
     const chapter = getCampaignChapter(level);
-    return `${chapter.chapterLabel} · ${chapter.title}`;
+    return `${tr(chapter.chapterLabel)} · ${tr(chapter.title)}`;
   }
 
   private getCameraModeText(mode: CameraModeSetting): string {

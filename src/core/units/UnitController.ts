@@ -17,6 +17,7 @@ import type {
   UnitUpdateContext,
 } from '@/features/units/UnitSystem';
 import type { UnitRadarKind, UnitType } from '@/features/units/UnitTypes';
+import { tr } from '@/i18n';
 
 type UnitMeshModule = typeof import('@/features/units/UnitMeshFactory');
 type UnitBridgeModule = typeof import('@/features/units/UnitEventBridge');
@@ -235,7 +236,7 @@ export class UnitController {
       this.deps.onAssetLost(civilian);
       this.deps.presentation.genericRadio(civilian ? 'civilian-destroyed' : 'ally-unit-destroyed');
       if (byPlayer && config.penalty > 0) {
-        this.deps.applyPenalty(config.penalty, config.name, civilian);
+        this.deps.applyPenalty(config.penalty, tr(config.name), civilian);
       }
     }
     const event: UnitPresentationEvent =

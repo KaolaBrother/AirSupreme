@@ -1,6 +1,9 @@
+import type { LocalizedText } from '@/i18n';
+
 export interface DifficultyProfile {
   level: 1 | 2 | 3 | 4 | 5;
-  label: string;
+  /** 难度名（中英双语）：英文沿用 Very Easy → Expert 的常见档位名，默认档 3 在英文里叫 Normal */
+  label: LocalizedText;
   enemyHealthMultiplier: number;
   enemyDamageMultiplier: number;
   enemyAttackCooldownMultiplier: number;
@@ -19,7 +22,7 @@ export interface DifficultyProfile {
 const DIFFICULTY_PROFILES: Record<DifficultyProfile['level'], DifficultyProfile> = {
   1: {
     level: 1,
-    label: '简单',
+    label: { en: 'Very Easy', zh: '简单' },
     enemyHealthMultiplier: 0.8,
     enemyDamageMultiplier: 0.35,
     enemyAttackCooldownMultiplier: 1.7,
@@ -28,7 +31,7 @@ const DIFFICULTY_PROFILES: Record<DifficultyProfile['level'], DifficultyProfile>
   },
   2: {
     level: 2,
-    label: '普通',
+    label: { en: 'Easy', zh: '普通' },
     enemyHealthMultiplier: 0.9,
     enemyDamageMultiplier: 0.42,
     enemyAttackCooldownMultiplier: 1.6,
@@ -37,7 +40,7 @@ const DIFFICULTY_PROFILES: Record<DifficultyProfile['level'], DifficultyProfile>
   },
   3: {
     level: 3,
-    label: '标准',
+    label: { en: 'Normal', zh: '标准' },
     enemyHealthMultiplier: 1,
     enemyDamageMultiplier: 0.5,
     enemyAttackCooldownMultiplier: 1.5,
@@ -46,7 +49,7 @@ const DIFFICULTY_PROFILES: Record<DifficultyProfile['level'], DifficultyProfile>
   },
   4: {
     level: 4,
-    label: '困难',
+    label: { en: 'Hard', zh: '困难' },
     enemyHealthMultiplier: 1.12,
     enemyDamageMultiplier: 0.62,
     enemyAttackCooldownMultiplier: 1.35,
@@ -55,7 +58,7 @@ const DIFFICULTY_PROFILES: Record<DifficultyProfile['level'], DifficultyProfile>
   },
   5: {
     level: 5,
-    label: '专家',
+    label: { en: 'Expert', zh: '专家' },
     enemyHealthMultiplier: 1.25,
     enemyDamageMultiplier: 0.78,
     enemyAttackCooldownMultiplier: 1.2,

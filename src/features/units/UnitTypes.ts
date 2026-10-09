@@ -1,4 +1,5 @@
 import { Faction } from '@/core/Faction';
+import type { LocalizedText } from '@/i18n';
 
 /**
  * 地面 / 海上 / 空中作战单位类型。
@@ -34,8 +35,8 @@ export type UnitRadarKind = 'enemy-ground' | 'enemy-sea' | 'enemy-air' | 'ally' 
 
 export interface UnitConfig {
   type: UnitType;
-  /** 中文显示名（HUD / 无线电 / 结算） */
-  name: string;
+  /** 显示名（HUD / 血条 / 结算），中英双语 */
+  name: LocalizedText;
   domain: UnitDomain;
   faction: Faction;
   /** 基础血量（关卡强度倍率在 UnitSystem.setLevelScaling 中叠乘） */
@@ -78,7 +79,7 @@ export const UNIT_CONFIGS: Record<UnitType, UnitConfig> = {
   // ───────────────────────── 敌方地面 ─────────────────────────
   [UnitType.TANK]: {
     type: UnitType.TANK,
-    name: '主战坦克',
+    name: { en: 'Main Battle Tank', zh: '主战坦克' },
     domain: 'ground',
     faction: Faction.ENEMY,
     health: 220,
@@ -91,7 +92,7 @@ export const UNIT_CONFIGS: Record<UnitType, UnitConfig> = {
   },
   [UnitType.SAM_LAUNCHER]: {
     type: UnitType.SAM_LAUNCHER,
-    name: '地空导弹车',
+    name: { en: 'SAM Launcher', zh: '地空导弹车' },
     domain: 'ground',
     faction: Faction.ENEMY,
     health: 180,
@@ -104,7 +105,7 @@ export const UNIT_CONFIGS: Record<UnitType, UnitConfig> = {
   },
   [UnitType.AA_GUN]: {
     type: UnitType.AA_GUN,
-    name: '双联高炮',
+    name: { en: 'Twin AA Gun', zh: '双联高炮' },
     domain: 'ground',
     faction: Faction.ENEMY,
     health: 160,
@@ -117,7 +118,7 @@ export const UNIT_CONFIGS: Record<UnitType, UnitConfig> = {
   },
   [UnitType.RADAR_STATION]: {
     type: UnitType.RADAR_STATION,
-    name: '雷达站',
+    name: { en: 'Radar Station', zh: '雷达站' },
     domain: 'ground',
     faction: Faction.ENEMY,
     health: 300,
@@ -131,7 +132,7 @@ export const UNIT_CONFIGS: Record<UnitType, UnitConfig> = {
   // ───────────────────────── 敌方海上 ─────────────────────────
   [UnitType.GUNBOAT]: {
     type: UnitType.GUNBOAT,
-    name: '高速炮艇',
+    name: { en: 'Fast Gunboat', zh: '高速炮艇' },
     domain: 'sea',
     faction: Faction.ENEMY,
     health: 200,
@@ -144,7 +145,7 @@ export const UNIT_CONFIGS: Record<UnitType, UnitConfig> = {
   },
   [UnitType.FRIGATE]: {
     type: UnitType.FRIGATE,
-    name: '导弹护卫舰',
+    name: { en: 'Missile Frigate', zh: '导弹护卫舰' },
     domain: 'sea',
     faction: Faction.ENEMY,
     health: 650,
@@ -157,7 +158,7 @@ export const UNIT_CONFIGS: Record<UnitType, UnitConfig> = {
   },
   [UnitType.SUBMARINE]: {
     type: UnitType.SUBMARINE,
-    name: '攻击潜艇',
+    name: { en: 'Attack Submarine', zh: '攻击潜艇' },
     domain: 'sea',
     faction: Faction.ENEMY,
     health: 380,
@@ -171,7 +172,7 @@ export const UNIT_CONFIGS: Record<UnitType, UnitConfig> = {
   // ───────────────────────── 敌方空中 ─────────────────────────
   [UnitType.ATTACK_HELICOPTER]: {
     type: UnitType.ATTACK_HELICOPTER,
-    name: '武装直升机',
+    name: { en: 'Attack Helicopter', zh: '武装直升机' },
     domain: 'air',
     faction: Faction.ENEMY,
     health: 170,
@@ -184,7 +185,7 @@ export const UNIT_CONFIGS: Record<UnitType, UnitConfig> = {
   },
   [UnitType.BOMBER]: {
     type: UnitType.BOMBER,
-    name: '战略轰炸机',
+    name: { en: 'Strategic Bomber', zh: '战略轰炸机' },
     domain: 'air',
     faction: Faction.ENEMY,
     health: 700,
@@ -197,7 +198,7 @@ export const UNIT_CONFIGS: Record<UnitType, UnitConfig> = {
   },
   [UnitType.DRONE]: {
     type: UnitType.DRONE,
-    name: '自杀无人机',
+    name: { en: 'Kamikaze Drone', zh: '自杀无人机' },
     domain: 'air',
     faction: Faction.ENEMY,
     health: 35,
@@ -211,7 +212,7 @@ export const UNIT_CONFIGS: Record<UnitType, UnitConfig> = {
   // ───────────────────────── 友军 ─────────────────────────
   [UnitType.ALLY_CONVOY]: {
     type: UnitType.ALLY_CONVOY,
-    name: '友军车队',
+    name: { en: 'Allied Convoy', zh: '友军车队' },
     domain: 'ground',
     faction: Faction.FRIENDLY,
     health: 420,
@@ -224,7 +225,7 @@ export const UNIT_CONFIGS: Record<UnitType, UnitConfig> = {
   },
   [UnitType.ALLY_FRIGATE]: {
     type: UnitType.ALLY_FRIGATE,
-    name: '友军护卫舰',
+    name: { en: 'Allied Frigate', zh: '友军护卫舰' },
     domain: 'sea',
     faction: Faction.FRIENDLY,
     health: 1400,
@@ -237,7 +238,7 @@ export const UNIT_CONFIGS: Record<UnitType, UnitConfig> = {
   },
   [UnitType.ALLY_AWACS]: {
     type: UnitType.ALLY_AWACS,
-    name: '友军预警机',
+    name: { en: 'Allied AWACS', zh: '友军预警机' },
     domain: 'air',
     faction: Faction.FRIENDLY,
     health: 700,
@@ -250,7 +251,7 @@ export const UNIT_CONFIGS: Record<UnitType, UnitConfig> = {
   },
   [UnitType.ALLY_TRANSPORT]: {
     type: UnitType.ALLY_TRANSPORT,
-    name: '友军运输机',
+    name: { en: 'Allied Transport', zh: '友军运输机' },
     domain: 'air',
     faction: Faction.FRIENDLY,
     health: 560,
@@ -264,7 +265,7 @@ export const UNIT_CONFIGS: Record<UnitType, UnitConfig> = {
   // ───────────────────────── 平民 ─────────────────────────
   [UnitType.CIVILIAN_AIRLINER]: {
     type: UnitType.CIVILIAN_AIRLINER,
-    name: '民航客机',
+    name: { en: 'Airliner', zh: '民航客机' },
     domain: 'air',
     faction: Faction.CIVILIAN,
     health: 260,
@@ -277,7 +278,7 @@ export const UNIT_CONFIGS: Record<UnitType, UnitConfig> = {
   },
   [UnitType.CIVILIAN_SHIP]: {
     type: UnitType.CIVILIAN_SHIP,
-    name: '民用货轮',
+    name: { en: 'Civilian Freighter', zh: '民用货轮' },
     domain: 'sea',
     faction: Faction.CIVILIAN,
     health: 500,
@@ -290,7 +291,7 @@ export const UNIT_CONFIGS: Record<UnitType, UnitConfig> = {
   },
   [UnitType.CIVILIAN_TRUCK]: {
     type: UnitType.CIVILIAN_TRUCK,
-    name: '民用卡车',
+    name: { en: 'Civilian Truck', zh: '民用卡车' },
     domain: 'ground',
     faction: Faction.CIVILIAN,
     health: 70,

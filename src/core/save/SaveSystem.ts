@@ -8,6 +8,7 @@ import {
 import { TOTAL_LEVELS, getCampaignChapter } from '@/features/campaign/CampaignData';
 import { isSpecialWeaponId } from '@/features/weapons/WeaponTypes';
 import type { WeaponSaveState } from '@/features/weapons/WeaponSystem';
+import { tr, type LocalizedText } from '@/i18n';
 
 /**
  * 战役存档：中途自动存档（检查点）+ 战役进度记录。
@@ -309,15 +310,26 @@ export function hasCampaignCheckpoint(): boolean {
   return loadCampaignCheckpoint() !== null;
 }
 
+const CHECKPOINT_LABEL: LocalizedText = {
+  en: 'Ch. {level} · {title} · {stage}',
+  zh: '第{level}关 · {title} · {stage}',
+};
+const CHECKPOINT_WAVE: LocalizedText = { en: 'Wave {wave}', zh: '第{wave}波' };
+const CHECKPOINT_BOSS: LocalizedText = { en: 'Boss', zh: 'Boss 战' };
+
 /**
- * 检查点的简短描述，如“第6关 · 熔炉之心 · 第3波”；Boss 检查点显示“Boss 战”。
+ * 检查点的简短描述（当前语言），如 “Ch. 6 · Heart of the Forge · Wave 3” /
+ * “第6关 · 熔炉之心 · 第3波”；Boss 检查点显示 “Boss” / “Boss 战”。
  * 波次以 1 开始计数（wave 字段是下一波的 0 基序号）。
  */
 export function describeCheckpoint(data: CampaignSaveData): string {
   const level = clampLevel(data?.level, 1);
-  const title = getCampaignChapter(level).title;
-  const stage = data?.checkpoint === 'boss' ? 'Boss 战' : `第${clampWave(data?.wave) + 1}波`;
-  return `第${level}关 · ${title} · ${stage}`;
+  const title = tr(getCampaignChapter(level).title);
+  const stage =
+    data?.checkpoint === 'boss'
+      ? tr(CHECKPOINT_BOSS)
+      : tr(CHECKPOINT_WAVE, { wave: clampWave(data?.wave) + 1 });
+  return tr(CHECKPOINT_LABEL, { level, title, stage });
 }
 
 function normalizeProgress(source: PlainRecord): CampaignProgress {

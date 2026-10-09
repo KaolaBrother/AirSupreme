@@ -1,6 +1,7 @@
 import { SPECIAL_WEAPON_IDS, type SpecialWeaponId } from '@/core/CombatContracts';
 import { TOTAL_LEVELS, getWeaponUnlockLevel } from '@/features/campaign/CampaignData';
 import { SPECIAL_WEAPON_CONFIGS, isSpecialWeaponId } from '@/features/weapons/WeaponTypes';
+import type { LocalizedText } from '@/i18n';
 
 export enum UpgradeType {
   MAX_HEALTH = 'MAX_HEALTH',
@@ -29,13 +30,14 @@ export type UpgradeCategory = 'core' | 'defense' | 'weapon';
 
 export interface UpgradeConfig {
   type: UpgradeType;
-  name: string;
-  description: string;
+  name: LocalizedText;
+  description: LocalizedText;
   maxLevel: number;
   costs: number[];
   valuePerLevel: number;
   baseValue: number;
-  unit: string;
+  /** 菜单里数值后的单位（符号单位中英相同） */
+  unit: LocalizedText;
   category: UpgradeCategory;
   /** 仅特殊武器强化线：对应的武器 */
   weaponId?: SpecialWeaponId;
@@ -59,13 +61,35 @@ const WEAPON_COSTS: Readonly<Record<SpecialWeaponId, readonly number[]>> = {
   emp: [5, 7, 9, 11, 13],
 };
 
-const WEAPON_UPGRADE_DESCRIPTIONS: Readonly<Record<SpecialWeaponId, string>> = {
-  rockets: '增加每轮齐射的火箭数量与弹头伤害，缩短装填',
-  laser: '提高照射伤害与射程，减缓积热、加快散热',
-  swarm: '增加每轮微型导弹数量与伤害，缩短装填',
-  railgun: '提高穿甲伤害与射程，缩短蓄力与装填',
-  emp: '延长瘫痪时间、扩大脉冲半径，缩短冷却',
+const WEAPON_UPGRADE_DESCRIPTIONS: Readonly<Record<SpecialWeaponId, LocalizedText>> = {
+  rockets: {
+    en: 'More rockets per salvo and heavier warheads; faster reload',
+    zh: '增加每轮齐射的火箭数量与弹头伤害，缩短装填',
+  },
+  laser: {
+    en: 'More beam damage and range; slower heat build-up, faster cooling',
+    zh: '提高照射伤害与射程，减缓积热、加快散热',
+  },
+  swarm: {
+    en: 'More micro-missiles per volley and more damage; faster reload',
+    zh: '增加每轮微型导弹数量与伤害，缩短装填',
+  },
+  railgun: {
+    en: 'More piercing damage and range; faster charge and reload',
+    zh: '提高穿甲伤害与射程，缩短蓄力与装填',
+  },
+  emp: {
+    en: 'Longer stun and a wider pulse radius; shorter cooldown',
+    zh: '延长瘫痪时间、扩大脉冲半径，缩短冷却',
+  },
 };
+
+/** 数值单位：符号单位中英相同；热焰弹在中文里带量词「发」，英文只显示数量 */
+const UNIT_NONE: LocalizedText = { en: '', zh: '' };
+const UNIT_SECONDS: LocalizedText = { en: 's', zh: 's' };
+const UNIT_MULTIPLIER: LocalizedText = { en: 'x', zh: 'x' };
+const UNIT_PERCENT: LocalizedText = { en: '%', zh: '%' };
+const UNIT_FLARES: LocalizedText = { en: '', zh: '发' };
 
 /** 核心属性的层级上限：min(10, 关卡 + 1) */
 const CORE_TIER_LIMIT = 10;
@@ -83,11 +107,11 @@ const STARTING_POINTS_SHARE = 0.75;
 
 function coreConfig(
   type: UpgradeType,
-  name: string,
-  description: string,
+  name: LocalizedText,
+  description: LocalizedText,
   baseValue: number,
   valuePerLevel: number,
-  unit: string
+  unit: LocalizedText
 ): UpgradeConfig {
   return {
     type,
@@ -112,7 +136,7 @@ function weaponConfig(type: UpgradeType, weaponId: SpecialWeaponId): UpgradeConf
     // 数值即强化等级 0..5，实际性能见 getSpecialWeaponStats
     valuePerLevel: 1,
     baseValue: 0,
-    unit: '',
+    unit: UNIT_NONE,
     category: 'weapon',
     weaponId,
   };
@@ -121,67 +145,87 @@ function weaponConfig(type: UpgradeType, weaponId: SpecialWeaponId): UpgradeConf
 export const UPGRADE_CONFIGS: Record<UpgradeType, UpgradeConfig> = {
   [UpgradeType.MAX_HEALTH]: coreConfig(
     UpgradeType.MAX_HEALTH,
-    '最大生命值',
-    '增加最大生命值',
+    { en: 'Max Health', zh: '最大生命值' },
+    { en: 'Raise your maximum health', zh: '增加最大生命值' },
     200,
     20,
-    ''
+    UNIT_NONE
   ),
-  [UpgradeType.DAMAGE]: coreConfig(UpgradeType.DAMAGE, '武器伤害', '增加子弹伤害', 12.5, 1.75, ''),
+  [UpgradeType.DAMAGE]: coreConfig(
+    UpgradeType.DAMAGE,
+    { en: 'Weapon Damage', zh: '武器伤害' },
+    { en: 'Hit harder with every bullet', zh: '增加子弹伤害' },
+    12.5,
+    1.75,
+    UNIT_NONE
+  ),
   [UpgradeType.FIRE_RATE]: coreConfig(
     UpgradeType.FIRE_RATE,
-    '射速',
-    '提高射击速度（降低间隔）',
+    { en: 'Fire Rate', zh: '射速' },
+    { en: 'Fire faster (shorter interval)', zh: '提高射击速度（降低间隔）' },
     0.3,
     -0.02,
-    's'
+    UNIT_SECONDS
   ),
-  [UpgradeType.SPEED]: coreConfig(UpgradeType.SPEED, '飞行速度', '提高最大飞行速度', 45, 4, ''),
+  [UpgradeType.SPEED]: coreConfig(
+    UpgradeType.SPEED,
+    { en: 'Flight Speed', zh: '飞行速度' },
+    { en: 'Raise your top speed', zh: '提高最大飞行速度' },
+    45,
+    4,
+    UNIT_NONE
+  ),
   [UpgradeType.MISSILE_LOCK_TIME]: coreConfig(
     UpgradeType.MISSILE_LOCK_TIME,
-    '导弹锁定速度',
-    '减少导弹锁定所需时间',
+    { en: 'Missile Lock Speed', zh: '导弹锁定速度' },
+    { en: 'Lock on with missiles faster', zh: '减少导弹锁定所需时间' },
     1.5,
     -0.1,
-    's'
+    UNIT_SECONDS
   ),
   [UpgradeType.MISSILE_LOCK_RADIUS]: coreConfig(
     UpgradeType.MISSILE_LOCK_RADIUS,
-    '导弹锁定范围',
-    '扩大锁定圈范围，满级达到当前两倍',
+    { en: 'Missile Lock Radius', zh: '导弹锁定范围' },
+    {
+      en: 'Widen the lock circle, up to double size at max level',
+      zh: '扩大锁定圈范围，满级达到当前两倍',
+    },
     1,
     0.1,
-    'x'
+    UNIT_MULTIPLIER
   ),
   [UpgradeType.MISSILE_RELOAD_TIME]: coreConfig(
     UpgradeType.MISSILE_RELOAD_TIME,
-    '导弹装填速度',
-    '减少导弹补给时间',
+    { en: 'Missile Reload Speed', zh: '导弹装填速度' },
+    { en: 'Resupply missiles faster', zh: '减少导弹补给时间' },
     7.5,
     -0.5,
-    's'
+    UNIT_SECONDS
   ),
   [UpgradeType.ARMOR]: {
     type: UpgradeType.ARMOR,
-    name: '复合装甲',
-    description: '降低受到的伤害，满级减伤 40%',
+    name: { en: 'Composite Armor', zh: '复合装甲' },
+    description: {
+      en: 'Take less damage: 40% less at max level',
+      zh: '降低受到的伤害，满级减伤 40%',
+    },
     maxLevel: ARMOR_COSTS.length,
     costs: [...ARMOR_COSTS],
     // 以百分点存储便于菜单显示；PlayerStats.getArmorReduction() 换算为 0-1
     valuePerLevel: 8,
     baseValue: 0,
-    unit: '%',
+    unit: UNIT_PERCENT,
     category: 'defense',
   },
   [UpgradeType.FLARES]: {
     type: UpgradeType.FLARES,
-    name: '热焰弹挂架',
-    description: '增加热焰弹携带数量（2 → 6 发）',
+    name: { en: 'Flare Rack', zh: '热焰弹挂架' },
+    description: { en: 'Carry more flares (2 → 6)', zh: '增加热焰弹携带数量（2 → 6 发）' },
     maxLevel: FLARE_COSTS.length,
     costs: [...FLARE_COSTS],
     valuePerLevel: 1,
     baseValue: BASE_FLARE_CAPACITY,
-    unit: '发',
+    unit: UNIT_FLARES,
     category: 'defense',
   },
   [UpgradeType.WEAPON_ROCKETS]: weaponConfig(UpgradeType.WEAPON_ROCKETS, 'rockets'),

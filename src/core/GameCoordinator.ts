@@ -64,6 +64,7 @@ import {
   type CheckpointKind,
 } from '@/core/save/SaveSystem';
 import { getCampaignChapter, getUnlockedWeaponsThrough } from '@/features/campaign/CampaignData';
+import { tr } from '@/i18n';
 import {
   DEFAULT_ONBOARDING_BEAT_PROFILE,
   getWaveOnboardingText,
@@ -665,7 +666,7 @@ export class GameCoordinator {
     this.resourceRegistry.addUnsubscriber(
       EventBus.on(GameEventType.POWERUP_COLLECTED, ({ payload }) => {
         this.audioManager.playPowerUp();
-        this.hud.showPowerUp(payload.config.name, payload.config.icon, payload.config.duration);
+        this.hud.showPowerUp(tr(payload.config.name), payload.config.icon, payload.config.duration);
         this.particleSystem?.createPickupBurst(this.playerAircraft.position);
 
         this.handlePowerUpEffect(payload.type, payload.config);
@@ -1192,10 +1193,10 @@ export class GameCoordinator {
       const config = POWER_UP_CONFIGS[type];
       this.audioManager.playBalloonPop();
       this.vfx.pickupBurstAt(balloon);
-      this.hud.showPowerUpBig(config.icon, config.name, 1, false, 'powerup');
+      this.hud.showPowerUpBig(config.icon, tr(config.name), 1, false, 'powerup');
 
       if (config.duration > 0) {
-        this.hud.showPowerUp(config.name, config.icon, config.duration);
+        this.hud.showPowerUp(tr(config.name), config.icon, config.duration);
       }
 
       powerUpSystem.addActivePowerUp(type, config);
@@ -1203,7 +1204,7 @@ export class GameCoordinator {
 
     powerUpSystem.checkPlayerCollisions(this.playerSystem.getPosition(), (_type, config) => {
       this.audioManager.playPowerUp();
-      this.hud.showPowerUp(config.name, config.icon, 0);
+      this.hud.showPowerUp(tr(config.name), config.icon, 0);
     });
   }
 
@@ -1853,7 +1854,7 @@ export class GameCoordinator {
       upgradeMenu.updateDisplay();
       upgradeMenu.show({
         mode: 'hangar',
-        subtitle: `下一站：${chapter.chapterLabel} · ${chapter.title}`,
+        subtitle: `下一站：${tr(chapter.chapterLabel)} · ${tr(chapter.title)}`,
         onContinue: () => {
           this.setStoryHold(false);
           this.syncProgression(level);
@@ -2959,9 +2960,9 @@ export class GameCoordinator {
   private presentLevelBriefing(level: number): void {
     const chapter = getCampaignChapter(level);
     this.hud.showBriefing({
-      kicker: chapter.chapterLabel,
-      title: chapter.title,
-      line: chapter.levelBriefingLine,
+      kicker: tr(chapter.chapterLabel),
+      title: tr(chapter.title),
+      line: tr(chapter.levelBriefingLine),
       tone: 'sys',
       durationMs: 1800,
     });
@@ -2973,8 +2974,8 @@ export class GameCoordinator {
     const boss = getCampaignChapter(level).boss;
     this.hud.showBriefing({
       kicker: 'BOSS',
-      title: boss.name,
-      line: boss.briefingLine,
+      title: tr(boss.name),
+      line: tr(boss.briefingLine),
       tone: 'threat',
       durationMs: 1800,
     });

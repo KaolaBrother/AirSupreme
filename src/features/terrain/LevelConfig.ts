@@ -1,3 +1,6 @@
+import { CHAPTER_TITLES } from '@/features/campaign/ChapterTitles';
+import type { LocalizedText } from '@/i18n';
+
 export interface LevelEnvironmentConfig {
   backgroundGradient: [string, string, string, string];
   fogColor: number;
@@ -197,8 +200,9 @@ export const DEFAULT_LEVEL_SCENE_CONFIG: LevelSceneConfig = {
  */
 export interface LevelConfig {
   id: number;
-  name: string;
-  description: string;
+  /** 关卡名：与战役章节标题是同一个对象（CHAPTER_TITLES） */
+  name: LocalizedText;
+  description: LocalizedText;
 
   // 地形配置
   terrain: TerrainType;
@@ -262,8 +266,11 @@ export enum LevelWaveEventType {
 export const LEVELS: LevelConfig[] = [
   {
     id: 1,
-    name: '湖畔晨曦',
-    description: '在宁静的湖面上空进行首次战斗',
+    name: CHAPTER_TITLES[0],
+    description: {
+      en: 'First battle over a peaceful lake',
+      zh: '在宁静的湖面上空进行首次战斗',
+    },
     terrain: TerrainType.LAKE,
     groundColor: 0x5a9150,
     waterColor: 0x39a08c,
@@ -377,11 +384,13 @@ export const LEVELS: LevelConfig[] = [
     difficulty: 2,
   },
 
-
   {
     id: 2,
-    name: '沙漠风暴',
-    description: '在炎热的沙漠上空迎战敌人',
+    name: CHAPTER_TITLES[1],
+    description: {
+      en: 'Meet the enemy over the scorching desert',
+      zh: '在炎热的沙漠上空迎战敌人',
+    },
     terrain: TerrainType.DESERT,
     groundColor: 0xc8b487,
     fogColor: 0xf4a460,
@@ -491,11 +500,13 @@ export const LEVELS: LevelConfig[] = [
     difficulty: 4,
   },
 
-
   {
     id: 3,
-    name: '雪山之巅',
-    description: '在高耸的雪山上空进行艰苦战斗',
+    name: CHAPTER_TITLES[2],
+    description: {
+      en: 'A hard fight above towering snow peaks',
+      zh: '在高耸的雪山上空进行艰苦战斗',
+    },
     terrain: TerrainType.MOUNTAINS,
     groundColor: 0xf4f8ff,
     fogColor: 0xd9ecf5,
@@ -609,11 +620,13 @@ export const LEVELS: LevelConfig[] = [
     difficulty: 6,
   },
 
-
   {
     id: 4,
-    name: '深海决战',
-    description: '在广阔的海洋上空进行最终决战',
+    name: CHAPTER_TITLES[3],
+    description: {
+      en: 'A decisive battle over the open ocean',
+      zh: '在广阔的海洋上空进行最终决战',
+    },
     terrain: TerrainType.OCEAN,
     groundColor: 0x16406e,
     waterColor: 0x1379a8,
@@ -724,11 +737,13 @@ export const LEVELS: LevelConfig[] = [
     difficulty: 8,
   },
 
-
   {
     id: 5,
-    name: '城市废墟',
-    description: '在废弃的城市上空进行终极挑战',
+    name: CHAPTER_TITLES[4],
+    description: {
+      en: 'The ultimate challenge over a ruined city',
+      zh: '在废弃的城市上空进行终极挑战',
+    },
     terrain: TerrainType.CITY,
     groundColor: 0x4f5d6f,
     fogColor: 0x90a3ba,
@@ -858,8 +873,11 @@ export const LEVELS: LevelConfig[] = [
 
   {
     id: 6,
-    name: '熔炉之心',
-    description: '突入赤炎火山岛的熔岩兵工厂，在火山灰与热浪中熄灭神谕的锻炉',
+    name: CHAPTER_TITLES[5],
+    description: {
+      en: 'Storm Ember Island’s lava arsenal and put out ORACLE’s forge through ash and heat',
+      zh: '突入赤炎火山岛的熔岩兵工厂，在火山灰与热浪中熄灭神谕的锻炉',
+    },
     terrain: TerrainType.VOLCANO,
     groundColor: 0x2a2426,
     waterColor: 0x14262c,
@@ -981,8 +999,11 @@ export const LEVELS: LevelConfig[] = [
 
   {
     id: 7,
-    name: '极光冰海',
-    description: '极夜笼罩的北冰洋，在漂移的浮冰与冰山之间截击破冰上浮的利维坦',
+    name: CHAPTER_TITLES[6],
+    description: {
+      en: 'Under the polar night, catch the Leviathan as it breaks through the drifting ice',
+      zh: '极夜笼罩的北冰洋，在漂移的浮冰与冰山之间截击破冰上浮的利维坦',
+    },
     terrain: TerrainType.ARCTIC,
     groundColor: 0xdfe9f2,
     waterColor: 0x0b2232,
@@ -1103,8 +1124,11 @@ export const LEVELS: LevelConfig[] = [
 
   {
     id: 8,
-    name: '雷霆峡谷',
-    description: '终年雷暴的雷鸣峡谷，贴着崖壁掩护车队并迎击装甲飞艇',
+    name: CHAPTER_TITLES[7],
+    description: {
+      en: 'In the endless storms of Thunder Canyon, hug the cliffs, cover the convoy and meet the armored zeppelin',
+      zh: '终年雷暴的雷鸣峡谷，贴着崖壁掩护车队并迎击装甲飞艇',
+    },
     terrain: TerrainType.CANYON,
     groundColor: 0xa4553a,
     fogColor: 0x47484e,
@@ -1222,8 +1246,11 @@ export const LEVELS: LevelConfig[] = [
 
   {
     id: 9,
-    name: '天梯之巅',
-    description: '两万米高空的燃烧云海之上，沿天梯轨道电梯截断神谕的上传',
+    name: CHAPTER_TITLES[8],
+    description: {
+      en: 'Above a burning sea of cloud, cut ORACLE’s upload along the Sky Ladder',
+      zh: '两万米高空的燃烧云海之上，沿天梯轨道电梯截断神谕的上传',
+    },
     terrain: TerrainType.STRATOSPHERE,
     groundColor: 0xf6e2d2,
     fogColor: 0xd8a088,
@@ -1342,8 +1369,11 @@ export const LEVELS: LevelConfig[] = [
 
   {
     id: 10,
-    name: '神谕核心',
-    description: '陨石坑中央的黑曜城堡，突破全部防线，与神谕进行最后的决战',
+    name: CHAPTER_TITLES[9],
+    description: {
+      en: 'Break every defense line of the Obsidian Citadel for the final battle with ORACLE',
+      zh: '陨石坑中央的黑曜城堡，突破全部防线，与神谕进行最后的决战',
+    },
     terrain: TerrainType.CITADEL,
     groundColor: 0x4c4648,
     fogColor: 0x2a1c44,
