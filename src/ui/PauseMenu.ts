@@ -13,6 +13,8 @@ export interface IPauseMenuOptions {
   onUpgrade: () => void;
   onExitToMenu: () => void;
   applyAudio: (sfx: number, music: number) => void;
+  /** 角色配音音量 0..1（立即生效）；缺省不显示语音一行 */
+  applyVoice?: (voice: number) => void;
   applyQuality: (preset: QualityPreset) => void;
   loadSettings: () => StartFlowSettings;
   saveSettings: (partial: Partial<StartFlowSettings>) => void;
@@ -30,6 +32,14 @@ const EXIT_CONFIRM_COPY: LocalizedText = {
   zh: '返回主菜单？当前进度将丢失。',
 };
 const VOLUME_STEP = 0.1;
+
+type VolumeBus = 'sfx' | 'music' | 'voice';
+
+const VOLUME_LABELS: Readonly<Record<VolumeBus, LocalizedText>> = {
+  sfx: { en: 'Sound effects', zh: '音效' },
+  music: { en: 'Music', zh: '音乐' },
+  voice: { en: 'Voice', zh: '语音' },
+};
 
 enum PauseMenuView {
   Default = 'default',
@@ -208,6 +218,9 @@ export class PauseMenu {
     this.panel.appendChild(this.createTitle(tr({ en: 'Settings', zh: '设置' })));
     this.panel.appendChild(this.createVolumeRow('sfx'));
     this.panel.appendChild(this.createVolumeRow('music'));
+    if (this.options.applyVoice) {
+      this.panel.appendChild(this.createVolumeRow('voice'));
+    }
     this.panel.appendChild(this.createQualityRow());
     this.panel.appendChild(this.createLanguageRow());
     this.panel.appendChild(
@@ -247,22 +260,26 @@ export class PauseMenu {
     this.panel.appendChild(actions);
   }
 
-  private createVolumeRow(bus: 'sfx' | 'music'): HTMLDivElement {
-    const label =
-      bus === 'sfx' ? tr({ en: 'Sound effects', zh: '音效' }) : tr({ en: 'Music', zh: '音乐' });
+  private createVolumeRow(bus: VolumeBus): HTMLDivElement {
     const valueEl = document.createElement('span');
-    valueEl.textContent = this.formatVolume(
-      bus === 'sfx' ? this.settings.sfxVolume : this.settings.musicVolume
-    );
+    valueEl.textContent = this.formatVolume(this.getVolume(bus));
     valueEl.style.cssText =
       'min-width: 5em; text-align: center; font-variant-numeric: tabular-nums;';
 
-    return this.createStepperRow(
-      label,
+    const row = this.createStepperRow(
+      tr(VOLUME_LABELS[bus]),
       valueEl,
       () => this.adjustVolume(bus, -1, valueEl),
       () => this.adjustVolume(bus, 1, valueEl)
     );
+    row.setAttribute('data-setting', bus);
+    return row;
+  }
+
+  private getVolume(bus: VolumeBus): number {
+    if (bus === 'sfx') return this.settings.sfxVolume;
+    if (bus === 'music') return this.settings.musicVolume;
+    return this.settings.voiceVolume;
   }
 
   private createQualityRow(): HTMLDivElement {
@@ -369,17 +386,20 @@ export class PauseMenu {
     return button;
   }
 
-  private adjustVolume(bus: 'sfx' | 'music', direction: 1 | -1, valueEl: HTMLElement): void {
-    const current = bus === 'sfx' ? this.settings.sfxVolume : this.settings.musicVolume;
-    const next = this.clampVolume(current + direction * VOLUME_STEP);
+  private adjustVolume(bus: VolumeBus, direction: 1 | -1, valueEl: HTMLElement): void {
+    const next = this.clampVolume(this.getVolume(bus) + direction * VOLUME_STEP);
     if (bus === 'sfx') {
       this.settings.sfxVolume = next;
       this.options.applyAudio(next, this.settings.musicVolume);
       this.options.saveSettings({ sfxVolume: next });
-    } else {
+    } else if (bus === 'music') {
       this.settings.musicVolume = next;
       this.options.applyAudio(this.settings.sfxVolume, next);
       this.options.saveSettings({ musicVolume: next });
+    } else {
+      this.settings.voiceVolume = next;
+      this.options.applyVoice?.(next);
+      this.options.saveSettings({ voiceVolume: next });
     }
     valueEl.textContent = this.formatVolume(next);
   }

@@ -12,6 +12,9 @@ export interface AudioSettings {
   musicVolume: number;
 }
 
+/** 角色配音音量的缺省值（0..1；0 = 纯文字，不加载语音） */
+export const DEFAULT_VOICE_VOLUME = 0.9;
+
 export interface PresentationSettings {
   qualityPreset: QualityPreset;
   tutorialEnabled: boolean;
@@ -21,6 +24,8 @@ export interface StartFlowSettings {
   difficulty: number;
   sfxVolume: number;
   musicVolume: number;
+  /** 角色配音音量 0..1（旧存档没有该字段时取缺省值） */
+  voiceVolume: number;
   qualityPreset: QualityPreset;
   tutorialEnabled: boolean;
   playerLives: number;
@@ -45,6 +50,7 @@ export const DEFAULT_START_FLOW_SETTINGS: StartFlowSettings = {
   difficulty: 3,
   sfxVolume: 0.7,
   musicVolume: 0.7,
+  voiceVolume: DEFAULT_VOICE_VOLUME,
   qualityPreset: 'auto',
   tutorialEnabled: true,
   playerLives: 3,
@@ -143,6 +149,7 @@ export function normalizeStartFlowSettings(raw?: Partial<StartFlowSettings>): St
     difficulty: clampInt(source.difficulty, 1, 5, DEFAULT_START_FLOW_SETTINGS.difficulty),
     sfxVolume: clampUnit(source.sfxVolume, DEFAULT_START_FLOW_SETTINGS.sfxVolume),
     musicVolume: clampUnit(source.musicVolume, DEFAULT_START_FLOW_SETTINGS.musicVolume),
+    voiceVolume: clampUnit(source.voiceVolume, DEFAULT_START_FLOW_SETTINGS.voiceVolume),
     qualityPreset: normalizeQualityPreset(source.qualityPreset),
     tutorialEnabled:
       typeof source.tutorialEnabled === 'boolean'
