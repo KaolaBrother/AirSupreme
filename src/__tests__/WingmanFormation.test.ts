@@ -2,7 +2,11 @@ import * as THREE from 'three';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EventBus, GameEventType } from '@/core/EventBus';
 import { EnemySystem } from '@/core/systems/EnemySystem';
-import { FriendlyAI } from '@/features/enemy/FriendlyAI';
+import {
+  FriendlyAI,
+  getFormationSlotOffset,
+  type FormationSlotOffset,
+} from '@/features/enemy/FriendlyAI';
 import { ENEMY_CONFIGS, EnemyType } from '@/features/enemy/EnemyTypes';
 
 /**
@@ -370,6 +374,78 @@ describe('wingman formation', () => {
       friendlies.forEach((friendly, index) => {
         const offset = relative(player, friendly.getMesh().position);
         expect(Math.sign(offset.lateral), `friendly ${index}`).toBe(spawnSides[index]);
+      });
+    });
+  });
+
+  describe('getFormationSlotOffset: one source for the slot layout (polish batch P)', () => {
+    function offset(slot: number): FormationSlotOffset {
+      return getFormationSlotOffset(slot, { side: 0, along: 0, lateral: 0, up: 0 });
+    }
+
+    it('writes into and returns the object it is given', () => {
+      const out: FormationSlotOffset = { side: 0, along: 0, lateral: 0, up: 0 };
+      expect(getFormationSlotOffset(3, out)).toBe(out);
+    });
+
+    it('alternates sides, keeps well out to the side and moves each rank further out', () => {
+      for (let slot = 0; slot < 6; slot++) {
+        const slotOffset = offset(slot);
+        expect(slotOffset.side, `slot ${slot}`).toBe(slot % 2 === 0 ? -1 : 1);
+        expect(Math.sign(slotOffset.lateral), `slot ${slot}`).toBe(slotOffset.side);
+        expect(Math.abs(slotOffset.lateral), `slot ${slot}`).toBeGreaterThanOrEqual(35);
+        if (slot >= 2) {
+          expect(Math.abs(slotOffset.lateral), `slot ${slot} vs ${slot - 2}`).toBeGreaterThan(
+            Math.abs(offset(slot - 2).lateral)
+          );
+        }
+      }
+    });
+
+    it.each([-1, 1.5, Number.NaN])('treats slot %s as slot 0', (slot) => {
+      expect(offset(slot)).toEqual(offset(0));
+    });
+
+    it("EnemySystem's spawn pose uses the same slot layout", () => {
+      const player = new THREE.Vector3(30, 140, -10);
+      const forward = new THREE.Vector3(-Math.sin(0.9), 0, -Math.cos(0.9));
+      const track: PlayerTrack = { position: player, heading: 0.9 };
+      for (let slot = 0; slot < 6; slot++) {
+        const position = new THREE.Vector3();
+        enemySystem.getFriendlySpawnPose(player, forward, position, new THREE.Vector3());
+        const expected = offset(slot);
+        const spawned = relative(track, position);
+        expect(spawned.lateral, `slot ${slot}`).toBeCloseTo(expected.lateral, 6);
+        expect(position.y - player.y, `slot ${slot}`).toBeCloseTo(expected.up, 6);
+        expect(spawned.along, `slot ${slot}: at or behind the slot`).toBeLessThanOrEqual(
+          expected.along + 1e-6
+        );
+        expect(spawnFriendly(position).getFormationSlot()).toBe(slot);
+      }
+    });
+
+    it('an idle friendly settles on its getFormationSlotOffset slot', () => {
+      const player: PlayerTrack = { position: new THREE.Vector3(0, 120, 0), heading: 0 };
+      const friendlies = [0, 1, 2].map(() => {
+        const position = new THREE.Vector3();
+        enemySystem.getFriendlySpawnPose(
+          player.position,
+          new THREE.Vector3(0, 0, -1),
+          position,
+          new THREE.Vector3()
+        );
+        return spawnFriendly(position);
+      });
+      flyPlayer(player, 25, 0);
+      friendlies.forEach((friendly, slot) => {
+        const expected = offset(slot);
+        const settled = relative(player, friendly.getMesh().position);
+        expect(Math.abs(settled.lateral - expected.lateral), `slot ${slot} lateral`).toBeLessThan(
+          6
+        );
+        expect(Math.abs(settled.along - expected.along), `slot ${slot} along`).toBeLessThan(8);
+        const height = friendly.getMesh().position.y - player.position.y;
+        expect(Math.abs(height - expected.up), `slot ${slot} height`).toBeLessThan(6);
       });
     });
   });
