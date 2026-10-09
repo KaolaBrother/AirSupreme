@@ -52,6 +52,7 @@ import { CombatVfxController } from '@/core/vfx/CombatVfxController';
 import { CombatHudFeed } from '@/core/hud/CombatHudFeed';
 import { CampaignFlowController } from '@/core/campaign/CampaignFlowController';
 import { resolveLevelStartPose } from '@/core/campaign/LevelStartPose';
+import { WingmanRoster } from '@/core/campaign/Wingmen';
 import {
   DefaultCampaignPresentation,
   type ICampaignPresentation,
@@ -64,7 +65,7 @@ import {
   type CheckpointKind,
 } from '@/core/save/SaveSystem';
 import { getCampaignChapter, getUnlockedWeaponsThrough } from '@/features/campaign/CampaignData';
-import { tr, type LocalizedText } from '@/i18n';
+import { localize, tr, type LocalizedText } from '@/i18n';
 import {
   DEFAULT_ONBOARDING_BEAT_PROFILE,
   getWaveOnboardingText,
@@ -338,6 +339,8 @@ export class GameCoordinator {
   private readonly vfx: CombatVfxController;
   private readonly campaign: CampaignFlowController;
   private readonly hudFeed: CombatHudFeed;
+  /** 具名僚机「渡鸦」「雨燕」：友机入场领取身份，坠毁 / 撤场时归还 */
+  private readonly wingmen = new WingmanRoster();
   private readonly checkpointResumeButton = new CheckpointResumeButton();
   private readonly options: GameCoordinatorOptions;
   private readonly showStartMenu: boolean;
@@ -502,6 +505,7 @@ export class GameCoordinator {
       music: this.musicSystem,
       isBossMode: () => this.sessionState.isBossMode(),
       getListenerPosition: () => this.playerAircraft.position,
+      wingmen: this.wingmen,
     });
     this.units = this.createUnitController();
     this.hudFeed = new CombatHudFeed({
@@ -750,7 +754,17 @@ export class GameCoordinator {
         this.audioManager.playExplosion('friendly', 1.15);
         this.particleSystem?.createExplosion(payload.position, 1.15, 'friendly');
         this.view.addExplosionShake(payload.position, 1.15);
-        this.hud.showPowerUpBig('⚠️', tr({ en: 'Ally down', zh: '友军坠毁' }), 1, true);
+        const wingman = this.wingmen.release(payload.friendlyId);
+        const message = wingman
+          ? tr(
+              { en: '{callsign} is down!', zh: '{callsign}被击落' },
+              { callsign: localize(wingman.callsign) }
+            )
+          : tr({ en: 'Ally down', zh: '友军坠毁' });
+        this.hud.showPowerUpBig('⚠️', message, 1, true);
+        if (wingman) {
+          this.presentation.onWingmanEvent(wingman.id, 'down');
+        }
       })
     );
 
@@ -951,7 +965,18 @@ export class GameCoordinator {
     }
 
     this.gameScene.scene.add(mesh);
-    this.enemySystem?.spawnFriendly(friendly);
+    const enemySystem = this.enemySystem;
+    if (enemySystem) {
+      // 先入场的两架友机是具名僚机（血条显示呼号）；其余为普通友机
+      const wingman = this.wingmen.assign(mesh.uuid, this.sessionState.getLevel());
+      if (wingman) {
+        mesh.userData.displayName = wingman.callsign;
+      }
+      enemySystem.spawnFriendly(friendly);
+      if (wingman) {
+        this.presentation.onWingmanEvent(wingman.id, 'joined');
+      }
+    }
     this.handleTutorialFriendlySupport();
     return friendly;
   }
@@ -1858,6 +1883,7 @@ export class GameCoordinator {
     const levelManager = enemySystem.getLevelManager();
     levelManager.despawnAllEnemies();
     enemySystem.clearFriendlies();
+    this.wingmen.reset();
     enemySystem.setDifficultyProfile(this.getCurrentDifficultyProfile());
     enemySystem.loadLevel(level, startWave);
     this.applyCurrentLevelEnvironment(level);
@@ -3093,6 +3119,7 @@ export class GameCoordinator {
     const level = this.bossBattleController?.getCurrentLevel() ?? this.sessionState.getLevel();
     this.bossBattleController?.clear();
     this.enemySystem?.clearFriendlies();
+    this.wingmen.reset();
     this.weapons.clearInFlight();
     this.retireBossMinions();
 
