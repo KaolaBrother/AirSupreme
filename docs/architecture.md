@@ -45,18 +45,22 @@ Feature modules under `src/features/` own AI, terrain, effects, powerups, bosses
 
 | Controller | File | Owns |
 | ---------- | ---- | ---- |
-| `CampaignFlowController` | `src/core/campaign/CampaignFlowController.ts` | What happens next: new run / resume, chapter → waves → checkpoints → boss → debrief → hangar → next chapter, ending; per-run stats. Concrete work (`prepareLevel`, `startLevelCombat`, `startBossEncounter`, `showHangar`, `syncProgression`, `setStoryHold`, `captureCheckpoint`, …) comes in through `CampaignFlowDeps` |
+| `CampaignFlowController` | `src/core/campaign/CampaignFlowController.ts` | What happens next: new run / resume, chapter → waves → checkpoints → boss → debrief → hangar → next chapter, ending; per-run stats; the hangar checkpoint, the boss outro wait (on game time, from `tick`) and Swift's once-per-run join line (`handleWingmanLaunched`). Concrete work (`prepareLevel`, `startLevelCombat`, `startBossEncounter`, `showHangar`, `syncProgression`, `setStoryHold`, `captureCheckpoint`, …) comes in through `CampaignFlowDeps` |
 | `DefaultCampaignPresentation` (`ICampaignPresentation`) | `src/core/campaign/CampaignPresentation.ts` | Story cards (`StoryOverlay`), radio (`RadioComms`), new HUD panels, radar range, music (`MusicSystem`), SFX routing (`CampaignSfxRouter` in `CampaignSfx.ts`), voice playback and prefetch through the coordinator's `VoiceSystem`, wingman radio (`WINGMAN_EVENT_RADIO`) |
-| `UnitController` | `src/core/units/UnitController.ts` | `UnitSystem` wiring: surface sampler, flare decoys, route provider, level scaling, mesh prewarm, fire bridge, per-wave spawns, wave hold (with a stall release), scoring / penalties, radius-aware bullet and missile hits, EMP, radar blips, boss drones |
+| `UnitController` | `src/core/units/UnitController.ts` | `UnitSystem` wiring: surface sampler, flare decoys, route provider, level scaling, mesh prewarm, fire bridge, per-wave spawns, wave hold (with a stall release), scoring / penalties, radius-aware bullet and missile hits, EMP, radar blips, boss drones; SAM missile-warning and civilian-hit voice budgets (`RadioBudget`) |
 | `SpecialWeaponsController` | `src/core/combat/SpecialWeaponsController.ts` | `WeaponSystem` + `CountermeasureSystem` wiring: F / Tab / X / 1–5 / G input, muzzle, target provider, EMP callback, progression sync, refill, save export / import, HUD polling; implements `IDecoyProvider` |
 | `PlayerViewController` | `src/core/camera/PlayerViewController.ts` | `CameraRig` (first / third person, shake, FOV) and the player afterburner; `onModeChanged` |
 | `CombatVfxController` + `ContrailController` | `src/core/vfx/` | Low-health and speed screen effects, damage smoke, contrails, remote muzzle flashes, pickup bursts, special-weapon effect density from the particle budget |
 | `CombatHudFeed` | `src/core/hud/CombatHudFeed.ts` | Pooled radar blips (20 Hz; unit kinds mapped to radar kinds) and health-bar snapshots (enemies, bosses, octopus eyes, boss sub-targets, wingmen) |
-| `BossBattleController` | `src/core/BossBattleController.ts` | Boss lifecycle for all ten bosses; bosses 1–5 directly (spawn ahead via `resolveLegacyBossSpawn`, part hit spheres via `LegacyBossHitVolumes`); special-weapon / lock targets; EMP |
+| `BossBattleController` | `src/core/BossBattleController.ts` | Boss lifecycle for all ten bosses; bosses 1–5 directly (spawn ahead via `resolveLegacyBossSpawn`, part hit spheres via `LegacyBossHitVolumes`, flare decoys for their missiles via `BossFlareDecoyRedirector`); special-weapon / lock targets; EMP; friendly support jets at the start of a boss fight and every 30 s |
 | `AdvancedBossController` | `src/core/boss/AdvancedBossController.ts` | Bosses 6–10 (`ADVANCED_BOSS_TYPES`): spawn placement (`resolveAdvancedBossSpawn`), ground samplers, death sequences, part hits through `takeDamageAt`, hazards with a per-target cooldown (`HazardCooldownTracker`), flare decoys for boss missiles (`BossFlareDecoyRedirector`), status label / music intensity, citadel core state, cloak hiding from radar and lock |
 | `BossHitFeedback` | `src/core/boss/BossHitFeedback.ts` | Hit / armour / boss-missile feedback shared by both boss paths |
 
-The coordinator also owns a `VoiceSystem` (`src/core/Audio/VoiceSystem.ts`, handed to the presentation as its `voice`) and a `WingmanRoster` (`src/core/campaign/Wingmen.ts`): each friendly AI jet that spawns takes the first identity in formation order — Raven, then Swift (from level 3) — that is neither flying nor shot down this level, or none; the callsign goes on `mesh.userData.displayName` for the health bar, and `FRIENDLY_DEATH` releases the identity and fires `presentation.onWingmanEvent(id, 'down')`; the roster resets whenever a level is prepared and when a boss is destroyed.
+The coordinator also owns a `VoiceSystem` (`src/core/Audio/VoiceSystem.ts`, handed to the presentation as its `voice`) and a `WingmanRoster` (`src/core/campaign/Wingmen.ts`): each friendly AI jet that spawns takes the first identity in formation order — Raven, then Swift (from level 3) — that is neither flying nor shot down this level, or none; the callsign goes on `mesh.userData.displayName` for the health bar, and `FRIENDLY_DEATH` releases the identity and fires `presentation.onWingmanEvent(id, 'down')`; the roster resets whenever a level is prepared and when a boss is destroyed. Wingman launch rules:
+
+- Shortly after every level start, and when a resume starts at a `'boss'` checkpoint, `launchWingmen()` launches the whole named flight (`WingmanRoster.countAvailable`): Raven in levels 1–2, Raven and Swift from level 3. Each launch goes to `CampaignFlowController.handleWingmanLaunched(id)`, which plays Swift's join line the first time she launches in a campaign run (never in Boss mode) and records `swiftJoined` in the checkpoint.
+- Reinforcements, boss-fight support, the Call Wingman pickup and escort jets (`spawnFriendlyAI()`) never play a join line; they take a callsign only if one is free (in practice in Boss mode, where no flight launches).
+- `EnemySystem.spawnFriendly` gives each friendly the lowest free formation slot (0 left, 1 right, then further out and back), and `getFriendlySpawnPose` puts a new friendly on its slot's side, nose along the player's heading. With no target, `FriendlyAI` flies to its slot in the player's heading frame, steering clear of the chase camera's sight corridor, and moves through `EnemyAI.updateKinematic` (no manoeuvre state machine, no firing); with an enemy jet or boss target it fights as before. Numbers: [api.md → Wingmen](api.md#wingmen).
 
 Helpers outside the coordinator: `MenuMusic` (`src/core/campaign/MenuMusic.ts`, owned by `main.ts`), `resolveLevelStartPose` (`src/core/campaign/LevelStartPose.ts`, terrain-checked start heading per level), the `SaveSystem` functions (`src/core/save/SaveSystem.ts`) and `installDevHooks` (`src/core/dev/DevHooks.ts`, dev builds only, exposes `window.__AIR_SUPREME_DEV__`, including the `voice` probes and the `balance` harness).
 
@@ -82,18 +86,18 @@ main.ts ── setLocale(saved language) ── StartMenu ── MenuMusic
 
 ## Data flow
 
-1. Input (`InputHandler`) and session settings feed the player controller. One-shot actions are latched on key-down and consumed once per simulation step: `consumeCameraToggle()` (V) → `PlayerViewController.toggleMode()`; `consumeWeaponCycle()` (Tab / X), `consumeWeaponSlot()` (1–5), `consumeFlareDeploy()` (G) and `InputState.special` (F) → `SpecialWeaponsController.handleInput(...)`.
+1. Input (`InputHandler`) and session settings feed the player controller. One-shot actions are latched on key-down and consumed once per simulation step: `consumeCameraToggle()` (V) → `PlayerViewController.toggleMode()`; `consumeWeaponCycle()` (Tab / X), `consumeWeaponSlot()` (1–5), `consumeFlareDeploy()` (G) and `InputState.special` (F) → `SpecialWeaponsController.handleInput(...)`. `isPauseToggled()` returns the Esc / P key edge or a mobile PAUSE tap, which is latched on `touchstart` until read (`resetPauseState()` clears both).
 2. Systems emit typed `GameEventType` events on `EventBus`. The campaign adds no event types: unit fire is bridged into the existing `ENEMY_FIRED` / `FRIENDLY_FIRED` by `bridgeUnitFireToEventBus`, so `CombatSystem` resolves it in the existing projectile pools.
 3. Combat and presentation subscribe; they must not assume HUD exists before presentation runtime is loaded (`DefaultCampaignPresentation` reads `getHud()` / `getRadar()` lazily and skips pushes until they exist).
 4. Hot objects (projectiles, enemies, particles, unit shots and missiles, contrail points, radar blips, health-bar snapshots) come from pools; per-frame paths reuse preallocated vectors.
-5. Crash: each `PlayerSystem.update` samples crash Y at the player XZ. `GameCoordinator` injects `LevelManager.getCrashSurfaceY` (forwards `TerrainGenerator.getCrashSurfaceY`); missing sampler or terrain falls back to `WORLDSCAPE_WATER_Y` (`-48`). Kill when `Y <=` that surface.
+5. Crash: each `PlayerSystem.update` samples crash Y at the player XZ. `GameCoordinator` injects `LevelManager.getCrashSurfaceY` (forwards `TerrainGenerator.getCrashSurfaceY`); missing sampler or terrain falls back to `WORLDSCAPE_WATER_Y` (`-48`). Kill when `Y <=` that surface (the SHIELD power-up does not prevent it). The same sample feeds a ring buffer of safe track points; a respawn comes back at least 3 s and 150 m along that track before the crash, at least 40 m up, on a heading checked clear for 400 m, and for 3 s afterwards surface contact lifts the jet instead of killing it ([api.md → Crash surface](api.md#crash-surface)).
 6. Surface sampling: `LevelManager.getSurfaceSample(x, z)` (→ `TerrainGenerator.sampleSurface`, `{ y, water }`) feeds `UnitSystem.setSurfaceSampler`, `WeaponSystem.setSurfaceSampler` and the bosses' ground samplers; `getSurfaceKind` picks impact effects and sounds. Levels 6–10 delegate to their environment module (`TerrainGenerator.getEnvironment()`); the canyon convoy and citadel assault routes reach `UnitSystem.setRouteProvider` the same way.
-7. Presentation chrome: `injectHudTokens()` writes `:root` HUD CSS variables once (`style#hud-tokens`). `HUD` / `LockOnIndicator` keep a `HudLayoutDensity` (`desktop | touch-landscape | touch-portrait`). Lock chrome states: `search | track | lock | break | dry`.
-8. Text: data carries `LocalizedText` (`{ en, zh }`) and the code that displays it calls `tr()` / `localize()` at that moment, in the locale from `getLocale()`. The Language rows in the start and pause menus save `language` and call `setLocale()`; `onLocaleChange` subscribers (menus, HUD, health bars, model preview, radio panel, page shell, `VoiceSystem`) redraw or react at once, while story cards and runtime toasts pick the new language up the next time they are produced. Details: [api.md → Localisation](api.md#localisation-i18n).
+7. Presentation chrome: `injectHudTokens()` writes `:root` HUD CSS variables once (`style#hud-tokens`). `HUD` / `LockOnIndicator` keep a `HudLayoutDensity` (`desktop | touch-landscape | touch-portrait`); `#hud` sits inside the safe-area insets, and the status column (`#hud-status`), the centre message stack (`#hud-top-stack`: boss strip, briefing, objective, portrait autosave toast) and the radio panel (following `--hud-stack-bottom`) are laid out per density so they do not overlap on phones. Centre callouts sit above the lock ring. Lock chrome states: `search | track | lock | break | dry`.
+8. Text: data carries `LocalizedText` (`{ en, zh }`) and the code that displays it calls `tr()` / `localize()` at that moment, in the locale from `getLocale()`. The Language rows in the start and pause menus save `language` and call `setLocale()`; `onLocaleChange` subscribers (menus, HUD, health bars, model preview, radio panel, page shell, `VoiceSystem`) redraw or react at once. The HUD's briefing banner and autosave toast take `HudText` (a string, a `LocalizedText` or `{ text, params }`), and the coordinator hands them the bilingual source, so a banner or toast on screen is redrawn in the new language; story cards and other runtime toasts pick the new language up the next time they are produced. Details: [api.md → Localisation](api.md#localisation-i18n).
 
 ### Simulation step (`GameCoordinator.update`)
 
-While a story card, debrief or hangar is up (`setStoryHold(true)`), the step only ticks the presentation and swallows pause / upgrade / one-shot input. Otherwise, in order: camera toggle → player controller, cannon, missiles → `SpecialWeaponsController.handleInput` → `PlayerSystem`, `CombatSystem` → boss (`BossBattleController.update`) or enemy waves → power-ups → `UnitController.update` (after the jets, so allied units can target them) → projectile collisions (enemy fire also hits friendly units) → radius-aware player bullet / missile hits on units → `SpecialWeaponsController.update` → particles → HUD → `presentation.updatePlayerHealth` → `CombatVfxController.update` → `CampaignFlowController.tick` → `presentation.update` (radio timing). The render step interpolates the player, runs `PlayerViewController.update` (camera rig + afterburner) and `CombatVfxController.renderUpdate` (contrails), fades the shield by the first-person blend and renders `GameScene`.
+While a story card, debrief or hangar is up (`setStoryHold(true)`), the step only ticks the presentation and swallows pause / upgrade / one-shot input. Otherwise, in order: camera toggle → player controller, cannon, missiles → `SpecialWeaponsController.handleInput` → `PlayerSystem`, `CombatSystem` → boss (`BossBattleController.update`) or enemy waves → power-ups → `UnitController.update` (after the jets, so allied units can target them) → projectile collisions (enemy fire also hits friendly units) → radius-aware player bullet / missile hits on units → `SpecialWeaponsController.update` → particles → HUD → `presentation.updatePlayerHealth` → `CombatVfxController.update` → `CampaignFlowController.tick` (play time and the boss outro wait) → `presentation.update` (radio timing). The render step interpolates the player, runs `PlayerViewController.update` (camera rig + afterburner) and `CombatVfxController.renderUpdate` (contrails), fades the shield by the first-person blend and renders `GameScene`.
 
 ### Campaign flow
 
@@ -101,21 +105,28 @@ While a story card, debrief or hangar is up (`setStoryHold(true)`), the step onl
 boot → setupNewRun(L): reset upgrades, setCampaignLevel(L), unlock weapons through L,
        starting upgrade points if L > 1, clear the checkpoint (normal mode)
      → beginNewRun(L): L > 1 → hangar first → beginChapter(L) | beginBossStage(L) (Boss mode)
-     (booted with resume: restoreCheckpoint(save) → resumeFromCheckpoint(save))
+     (booted with resume: restoreCheckpoint(save) → resumeFromCheckpoint(save):
+      'hangar' → hangar → Launch → launchChapter(L) · 'level-start' / 'wave' → that wave
+      · 'boss' → boss briefing, with the named flight launching)
 
 beginChapter(L):  prepareLevel(L, 0) → showChapterIntro (prologue before chapter 1 of a new game)
                   → checkpoint 'level-start' (wave 0) → radio 'level-start'
-                  → startLevelCombat → stinger 'chapter-start'
-WAVE_START(k):    UnitController.spawnForWave(L, k) → radio 'wave-start'
+                  → startLevelCombat (named flight launches shortly after:
+                    Raven in L1-2, Raven + Swift from L3; Swift's join line once per run)
+                  → stinger 'chapter-start'
+WAVE_START(k):    UnitController.spawnForWave(L, k) (resets the warning voice budgets) → radio 'wave-start'
                   (LevelManager holds the wave while UnitController.getWaveHoldCount() > 0)
 WAVE_COMPLETE(k): radio 'wave-complete' → checkpoint 'wave' (wave k + 1) when k + 1 < totalWaves
 LEVEL_COMPLETE:   checkpoint 'boss' (wave = totalWaves) → stinger 'level-complete' → boss briefing → boss
-boss destroyed:   stinger 'boss-defeated' → outro (waits for the voiced defeat lines, up to BOSS_OUTRO_MAX_MS)
-                  → debrief → unlockLevel(L + 1) → hangar → beginChapter(L + 1)
-L = 10:           markCampaignCompleted + clearCampaignCheckpoint → debrief → ending → MISSION COMPLETE
+boss destroyed:   stinger 'boss-defeated' → checkpoint 'hangar' (level L + 1, wave 0; toast "Level L cleared")
+                  → outro (game time: ≥ 1.6 s, then until the radio is idle;
+                    ceiling = radio backlog estimate + 6 s, ≤ 75 s)
+                  → debrief → unlockLevel(L + 1) → hangar
+                  → Launch: launchChapter(L + 1) = rewrite 'hangar' silently → beginChapter(L + 1)
+L = 10:           markCampaignCompleted + clearCampaignCheckpoint → outro → debrief → ending → MISSION COMPLETE
 ```
 
-Boss mode skips story cards, debriefs and checkpoints, unlocks weapons through the chosen level and stops at the hangar between bosses. Game over in normal mode with a checkpoint shows `CheckpointResumeButton`.
+Boss mode skips story cards, debriefs and checkpoints, unlocks weapons through the chosen level and stops at the hangar between bosses; no named flight launches (boss-fight support jets can still take a free callsign). Game over in normal mode with a checkpoint shows `CheckpointResumeButton`.
 
 ### Bosses
 
@@ -126,6 +137,8 @@ All bosses satisfy `IBossCore`; bosses 6–10 also implement `IAdvancedBoss` (`s
 - `GameScene` owns the renderer, lights, background and an optional `PostFxPipeline` (`src/features/effects/postfx/`: display-referred `RenderPass` → `UnrealBloomPass` → grade / screen-effects `ShaderPass`). It is on for the `balanced` / `quality` presets and off for `performance` (where `ScreenOverlay` draws the screen effects); `setPostFxEnabled` overrides. Each level's `postFx` grade (exposure, contrast, saturation, bloom, vignette) is applied with the level environment. The final pass keeps `needsSwap = false` so the depth-buffered scene target stays bound every frame (`0db18f2`, pinned by `PostFxPipeline.test.ts`).
 - `ParticleSystem` (`src/features/effects/ParticleSystem.ts`) is a facade over an instanced batch (`particles/ParticleBatch`), solid debris (`particles/DebrisField`) and layered recipes (`particles/recipes/`); its budget follows the quality preset (`getBudget()`).
 - `ContrailSystem` draws all wingtip trails in one draw call; `ShieldRipple` draws the hex shield hit; `updatePlayerAfterburner` (`AircraftMeshFactory`) animates the afterburner.
+- Terrain draw cost: `TerrainGenerator` merges static props per material with `StaticBatcher` (`worldscape/staticBatch.ts`), instances bird flocks, tiles the vegetation into near / far `THREE.LOD` cells whose distance and density follow the quality preset read when the level is generated, and packs only visible clouds into `CloudField`'s instance buffers ([api.md → Terrain detail and static batching](api.md#terrain-detail-and-static-batching)). Measured when the change landed (`IMPLEMENTATION_PLAN.md`): level 5 at `balanced` about 1,126 → 225 draw calls, level 1 at `performance` about 920k → 264k triangles.
+- EMP: the screen pulse (`ScreenEffectsState.empFlash`, 0.5 s) is a capped electric-blue edge plus an outward ring that keeps the reticle area clear; the world-space shock rings and shell fade near the camera so the chase view does not white out.
 - Transparent VFX / environment materials use `transparent: true`, `depthTest: true`, `depthWrite: false`, `renderOrder 0`; everything added to a scene is removed and disposed in `dispose()` / `clear()` (objects flagged `userData.sharedResource === true` are skipped). Large meshes declare `userData.hitRadius` (read with `getDeclaredHitRadius`).
 
 ## Site chrome
@@ -146,11 +159,13 @@ All bosses satisfy `IBossCore`; bosses 6–10 also implement `IAdvancedBoss` (`s
 - `MenuMusic` (created by `main.ts`) owns a page-lifetime `MusicSystem` for the start menu: it starts after the first pointer / key / touch gesture, fades out when a game boots and resumes on return to the menu.
 - Voice: `VoiceSystem` plays one line at a time from the voice pack of the current language (`public/voice/<en|zh>/<lineId>.mp3`, gated by `public/voice/manifest.json`; see [voice-lines.md](voice-lines.md)). Radio lines go through a per-speaker band-pass and static bed, then a shared radio stage (band limit, presence, saturation, compression) and a squelch tail; narration goes through a clean high-pass and light compression; every line is loudness-normalised when decoded. While a line plays, `voiceDuckBridge` (`VoiceDucking.ts`) lowers a voice-duck stage at the end of the music bus and releases it shortly after the line ends.
 - Voice timing is owned by the UI, not the audio: `DefaultCampaignPresentation` plays a radio line's voice from `RadioComms.onLineShown` and reports start / end back through `holdForVoice` / `releaseVoice`, and gives `StoryOverlay` a `StoryNarration` hook that the typewriter waits on. Without a manifest, at volume 0 or on any failure, both fall back to their text-only timing. Pause / resume, clear-radio, game over, mission complete and dispose stop or pause the voice through the presentation; a language switch stops it inside `VoiceSystem`.
+- Urgent radio: `missile-warning`, `low-health` and `civilian-hit` interrupt a line that is only being read, but never one being voiced (`RadioComms.isVoicing()`) — they are skipped (`genericRadio` returns `false`), and the low-health call waits for the voiced line to end. `UnitController` voices the SAM missile warning and the civilian-hit call at most twice per wave or boss fight (`RadioBudget`: 20 s then 45 s, and 15 s then 30 s), while the HUD flash and the warning sound event are sent every time. An interrupted line is replayed at most once.
+- Boss outro: `CampaignFlowController` waits on game time until the radio is idle, with a ceiling from `presentation.getRadioBacklogSeconds()` (current and queued lines, voiced lines at their manifest duration in the current language) plus 6 s, at most 75 s.
 
 ## Persistence
 
 - `START_MENU_STORAGE_KEY = 'air-supreme:start-menu-settings'` — start-flow settings (`SessionSettings`), including `startLevel` 1–10, `cameraMode`, `voiceVolume` and `language` (English unless the player picked Chinese; older saves load as English); camera toggles in game and the pause menu's volume / graphics / language rows are written back.
-- `CAMPAIGN_SAVE_KEY = 'air-supreme:campaign-save'` — the single campaign checkpoint (`CampaignSaveData`, version `CAMPAIGN_SAVE_VERSION`).
+- `CAMPAIGN_SAVE_KEY = 'air-supreme:campaign-save'` — the single campaign checkpoint (`CampaignSaveData`, version `CAMPAIGN_SAVE_VERSION` = 1): kind `'level-start'` / `'wave'` / `'boss'` / `'hangar'` and the optional `swiftJoined` flag; saves written before `'hangar'` and `swiftJoined` existed still load.
 - `CAMPAIGN_PROGRESS_KEY = 'air-supreme:campaign-progress'` — completion flag, best score, highest level reached.
 - All access goes through `getLocalStorage()`; reads and writes never throw, and corrupt records are removed.
 
@@ -158,7 +173,7 @@ All bosses satisfy `IBossCore`; bosses 6–10 also implement `IAdvancedBoss` (`s
 
 - Orchestration: `src/core/GameCoordinator.ts`
 - Events: `src/core/EventBus.ts`
-- Campaign: `src/features/campaign/CampaignData.ts` (import point: chapters, radio, unlock schedule, `getVoiceScript`; data split across `CampaignTypes.ts`, `CampaignCast.ts`, `CampaignChapters.ts`, `CampaignRadio.ts`, `CampaignStory.ts`, `ChapterTitles.ts`), `src/core/campaign/CampaignFlowController.ts`, `src/core/campaign/CampaignPresentation.ts` (`ICampaignPresentation`, `DefaultCampaignPresentation`, `CampaignVoice`), `src/core/campaign/CampaignSfx.ts`, `src/core/campaign/LevelStartPose.ts`, `src/core/campaign/MenuMusic.ts`, `src/core/campaign/Wingmen.ts` (`WINGMEN`, `WingmanRoster`)
+- Campaign: `src/features/campaign/CampaignData.ts` (import point: chapters, radio, unlock schedule, `getVoiceScript`; data split across `CampaignTypes.ts`, `CampaignCast.ts`, `CampaignChapters.ts`, `CampaignRadio.ts`, `CampaignStory.ts`, `ChapterTitles.ts`), `src/core/campaign/CampaignFlowController.ts`, `src/core/campaign/CampaignPresentation.ts` (`ICampaignPresentation`, `DefaultCampaignPresentation`, `CampaignVoice`), `src/core/campaign/CampaignSfx.ts`, `src/core/campaign/LevelStartPose.ts`, `src/core/campaign/MenuMusic.ts`, `src/core/campaign/Wingmen.ts` (`WINGMEN`, `WingmanRoster`), `src/core/campaign/RadioBudget.ts`
 - Localisation: `src/i18n/index.ts` (`LocalizedText`, `tr`, `localize`, `format`, `getLocale` / `setLocale` / `onLocaleChange`, `normalizeLocale`, `DEFAULT_LOCALE`)
 - Voice: `src/core/Audio/VoiceSystem.ts`, `src/core/Audio/VoiceDucking.ts`, `public/voice/` (`en/`, `zh/`, `manifest.json`, `provenance.json`; see [voice-lines.md](voice-lines.md))
 - Save: `src/core/save/SaveSystem.ts`
@@ -166,8 +181,8 @@ All bosses satisfy `IBossCore`; bosses 6–10 also implement `IAdvancedBoss` (`s
 - Units: `src/features/units/` (`UnitTypes.ts`, `UnitDeployments.ts`, `UnitSystem.ts`, `UnitBehaviors.ts`, `UnitBehaviorsAir.ts`, `UnitMeshFactory.ts`, `UnitEventBridge.ts`), `src/core/units/UnitController.ts`
 - Special weapons: `src/features/weapons/` (`WeaponTypes.ts`, `WeaponSystem.ts`, `CountermeasureSystem.ts`), `src/core/combat/SpecialWeaponsController.ts`
 - Camera: `src/features/camera/CameraRig.ts`, `CockpitModel.ts`, `CameraShake.ts`; `src/core/camera/PlayerViewController.ts`
-- Bosses: `src/features/boss/BossTypes.ts`, `BossContracts.ts`, the boss AI / mesh files, `src/core/BossBattleController.ts`, `src/core/boss/`
-- Terrain: `src/features/terrain/LevelConfig.ts`, `TerrainGenerator.ts`, `environments/` (`TerrainEnvironment.ts`, `EnvironmentBase.ts`, one module per level 6–10)
+- Bosses: `src/features/boss/BossTypes.ts`, `BossContracts.ts`, the boss AI / mesh files, `BossMissileSystem.ts` (`BossMissileFlightProfile`), `BossAim.ts` (`TargetLeadTracker`), `src/core/BossBattleController.ts`, `src/core/boss/`
+- Terrain: `src/features/terrain/LevelConfig.ts`, `TerrainGenerator.ts`, `environments/` (`TerrainEnvironment.ts`, `EnvironmentBase.ts`, one module per level 6–10), `worldscape/` (`staticBatch.ts`, `vegetation.ts`, `clouds.ts`)
 - VFX: `src/features/effects/ParticleSystem.ts`, `particles/`, `postfx/`, `ContrailSystem.ts`, `ShieldRipple.ts`; `src/scenes/GameScene.ts`; `src/core/vfx/`
 - Session persist: `src/core/SessionSettings.ts` (`START_MENU_STORAGE_KEY`, `loadStartFlowSettings` / `saveStartFlowSettings`, `DEFAULT_VOICE_VOLUME`, `LANGUAGE_ENDONYMS`, `stepLanguage`)
 - Pause cabin: `src/ui/PauseMenu.ts`
@@ -178,8 +193,8 @@ All bosses satisfy `IBossCore`; bosses 6–10 also implement `IAdvancedBoss` (`s
 - Menus: `src/ui/StartMenu.ts`, `src/ui/UpgradeMenu.ts` (the Language and Voice rows live in `StartMenu` and `PauseMenu`)
 - Audio: `src/core/Audio/AudioContextHost.ts` (`unlockAudioFromUserGesture`, shared `AudioContext`, `getSharedOutputNode`), `src/core/Audio/AudioManager.ts`, `src/core/Audio/MusicSystem.ts`, `src/core/Audio/music/`, `src/core/Audio/sfx/`, `src/core/Audio/VoiceSystem.ts`, `src/core/Audio/VoiceDucking.ts`
 - Config: `src/config.ts`, `public/config/game-config.json`
-- Player: `src/core/systems/PlayerSystem.ts` (`setCrashSurfaceSampler`), `src/features/player/PlayerController.ts`
-- Enemy AI: `src/features/enemy/EnemyAI.ts`
+- Player: `src/core/systems/PlayerSystem.ts` (`setCrashSurfaceSampler`, respawn track and crash grace), `src/features/player/PlayerController.ts`
+- Enemy and friendly AI: `src/features/enemy/EnemyAI.ts` (`setTargetVelocity`, `updateKinematic`), `src/features/enemy/FriendlyAI.ts` (formation slots), `src/core/systems/EnemySystem.ts` (`getFriendlySpawnPose`)
 - Levels / crash surface: `src/features/levels/LevelManager.ts`, `src/features/terrain/TerrainGenerator.ts` (`WORLDSCAPE_WATER_Y`, `getCrashSurfaceY`, `sampleSurface`)
 
 Long-form system notes remain in `TECHNICAL_DOCUMENTATION.md`. Live work ordering is `IMPLEMENTATION_PLAN.md`. Contracts and signatures: [`api.md`](api.md).
