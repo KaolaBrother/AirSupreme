@@ -10,7 +10,7 @@ import {
 } from '@/core/CombatContracts';
 import { BOSS_DECOY_ANCHOR_NAME } from '@/core/boss/AdvancedBossSupport';
 import { isAdvancedBoss } from '@/features/boss/BossContracts';
-import { BOSS_MISSILE_CONFIG, FLAK_CANNON_CONFIG } from '@/features/boss/BossTypes';
+import { BOSS_MISSILE_CONFIG, BossType } from '@/features/boss/BossTypes';
 import {
   UPGRADE_CONFIGS,
   UpgradeType,
@@ -391,8 +391,9 @@ export function installBalanceHarness(access: DevHookAccess): BalanceHarnessApi 
   };
 
   /**
-   * Boss 战里没有对上子弹的伤害：特殊武器（危险区计数上涨）/ Boss 导弹 / 高炮 / 机炮按伤害值归类。
-   * Boss 导弹伤害按当前 Boss 配置（随难度调整）的 missileDamage 匹配；旧版固定值一并识别。
+   * Boss 战里没有对上子弹的伤害：特殊武器（危险区计数上涨）/ Boss 导弹 / 高炮 / 章鱼的激光与
+   * 眼睛光弹 / 机炮按伤害值归类。都按当前 Boss 配置（随难度调整）的伤害匹配：导弹 missileDamage，
+   * 第 2、4 关高炮与第 3 关激光 damage，第 3 关光弹 eyeDamage；导弹旧版固定值一并识别。
    */
   let lastHazardCount = 0;
   const attributeBossHit = (damage: number, armor: number): string => {
@@ -402,11 +403,18 @@ export function installBalanceHarness(access: DevHookAccess): BalanceHarnessApi 
     lastHazardCount = hazards;
     if (hazard) return 'boss-hazard';
     const matches = (base: number): boolean => Math.abs(base * (1 - armor) - damage) < 0.6;
-    const missileDamage = controller?.getCurrentBoss()?.getConfig().missileDamage ?? 0;
+    const config = controller?.getCurrentBoss()?.getConfig() ?? null;
+    const missileDamage = config?.missileDamage ?? 0;
     if ((missileDamage > 0 && matches(missileDamage)) || matches(BOSS_MISSILE_CONFIG.DAMAGE)) {
       return 'boss-missile';
     }
-    if (matches(FLAK_CANNON_CONFIG.DAMAGE)) return 'boss-flak';
+    const type = config?.type ?? null;
+    if (type === BossType.DESERT_FORTRESS || type === BossType.MISSILE_DESTROYER) {
+      if (config && matches(config.damage)) return 'boss-flak';
+    } else if (type === BossType.OCTOPUS_WARSHIP && config) {
+      if (config.eyeDamage !== undefined && matches(config.eyeDamage)) return 'boss-eye';
+      if (matches(config.damage)) return 'boss-laser';
+    }
     return 'boss-gun/other';
   };
 

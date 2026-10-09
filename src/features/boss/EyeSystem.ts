@@ -24,14 +24,17 @@ export class EyeSystem {
   private bullets: LaserBullet[] = [];
   private scene: THREE.Scene;
   private config: typeof EYE_CONFIG;
+  /** 单发光弹伤害：Boss 配置的 eyeDamage（已按难度调整），缺省为 EYE_CONFIG.DAMAGE */
+  private readonly damage: number;
 
   public onEyeDestroyed?: (index: number, position: THREE.Vector3) => void;
   public onEyeDamaged?: (damage: number) => void;
   public onFire?: (position: THREE.Vector3, direction: THREE.Vector3, damage: number) => void;
 
-  constructor(scene: THREE.Scene) {
+  constructor(scene: THREE.Scene, damage: number = EYE_CONFIG.DAMAGE) {
     this.scene = scene;
     this.config = EYE_CONFIG;
+    this.damage = Number.isFinite(damage) && damage >= 0 ? damage : EYE_CONFIG.DAMAGE;
   }
 
   public createEyes(bossMesh: THREE.Group): void {
@@ -175,7 +178,7 @@ export class EyeSystem {
       lifetime: 0,
     });
 
-    this.onFire?.(eyeWorldPos, direction, this.config.DAMAGE);
+    this.onFire?.(eyeWorldPos, direction, this.damage);
   }
 
   private updateBullets(deltaTime: number): void {
@@ -267,7 +270,7 @@ export class EyeSystem {
   }
 
   public getDamage(): number {
-    return this.config.DAMAGE;
+    return this.damage;
   }
 
   public getEyeCount(): number {

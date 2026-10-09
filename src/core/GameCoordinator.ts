@@ -1704,17 +1704,21 @@ export class GameCoordinator {
     const cooldownMultiplier =
       difficultyProfile.bossCooldownMultiplier *
       getLevelScaling(this.sessionState.getLevel()).bossCooldownMultiplier;
-    return {
+    // 武器伤害（主炮 / 高炮 / 激光、导弹、眼睛光弹）都按难度档的伤害倍率缩放
+    const scaleDamage = (base: number): number =>
+      Math.max(1, Math.round(base * difficultyProfile.enemyDamageMultiplier));
+    const adjusted: BossConfig = {
       ...config,
       health: Math.max(1, Math.round(config.health * difficultyProfile.enemyHealthMultiplier)),
-      damage: Math.max(1, Math.round(config.damage * difficultyProfile.enemyDamageMultiplier)),
+      damage: scaleDamage(config.damage),
       cannonFireInterval: config.cannonFireInterval * cooldownMultiplier,
       missileFireInterval: config.missileFireInterval * cooldownMultiplier,
-      missileDamage: Math.max(
-        1,
-        Math.round(config.missileDamage * difficultyProfile.enemyDamageMultiplier)
-      ),
+      missileDamage: scaleDamage(config.missileDamage),
     };
+    if (config.eyeDamage !== undefined) {
+      adjusted.eyeDamage = scaleDamage(config.eyeDamage);
+    }
+    return adjusted;
   }
 
   private getCurrentDifficultyProfile(): ReturnType<typeof getDifficultyProfile> {
