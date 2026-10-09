@@ -266,3 +266,203 @@ describe('RadioComms (§9)', () => {
     expect(panel()).toBeNull();
   });
 });
+
+/**
+ * 配音时序（表现层在 onLineShown 里播放配音，开口时 holdForVoice，说完 / 没出声时 releaseVoice）：
+ * 台词停留 max(阅读时间, 开口时刻 + 配音时长 + 0.4 秒)；配音没说完前下一句等待
+ * （兜底：开口 + 时长 + 0.4 + 2.5 秒）；被打断时配音没说完的台词一定重播（于是再配一次音），
+ * 已说完的算已传达；切换语言时当前台词按新语言重写、不重播。
+ */
+describe('RadioComms voice timing', () => {
+  let radio: RadioComms;
+  let shown: RadioLine[];
+  let clock: number;
+
+  const SHORT = { en: 'Copy that.', zh: '收到。' };
+  const NEXT = { en: 'Next line.', zh: '下一句。' };
+  const LONG = 'This is a much longer radio line that takes quite a while to read on screen.';
+
+  function advanceTo(target: number, dt = 0.05): void {
+    while (clock < target - 1e-9) {
+      const step = Math.min(dt, target - clock);
+      radio.update(step);
+      clock += step;
+    }
+  }
+
+  /** 面板阶段：reveal 逐字、hold 停留、out 淡出、idle 空闲 */
+  function phase(): string | null {
+    return panel()?.getAttribute('data-phase') ?? null;
+  }
+
+  beforeEach(() => {
+    document.body.innerHTML = '';
+    radio = new RadioComms();
+    shown = [];
+    clock = 0;
+    radio.onLineShown = (shownLine) => {
+      shown.push(shownLine);
+    };
+  });
+
+  afterEach(() => {
+    radio.dispose();
+    resetLocale();
+    document.body.innerHTML = '';
+  });
+
+  it('keeps a short line up until 0.4 s after a longer voice ends; the next line waits', () => {
+    const first = line(SHORT.en, 'wingman2', SHORT.zh);
+    const next = line(NEXT.en, 'hq', NEXT.zh);
+    radio.enqueue(first);
+    radio.enqueue(next);
+    advanceTo(0.1);
+    radio.holdForVoice(first, 8);
+
+    advanceTo(8.05);
+    expect(shown, 'reading time is long over, the voice is still speaking').toEqual([first]);
+    expect(phase()).toBe('hold');
+    // 配音在 0.1 + 8 = 8.1 秒说完：台词停到 8.5 秒
+    radio.releaseVoice(first);
+    advanceTo(8.45);
+    expect(phase()).toBe('hold');
+    expect(panelText()).toContain(SHORT.en);
+    advanceTo(8.6);
+    expect(phase()).not.toBe('hold');
+    expect(shown).toEqual([first]);
+
+    advanceTo(9.5);
+    expect(shown).toEqual([first, next]);
+  });
+
+  it('waits for a voice that runs past its expected length', () => {
+    const first = line(SHORT.en, 'hq', SHORT.zh);
+    const next = line(NEXT.en, 'hq', NEXT.zh);
+    radio.enqueue(first);
+    radio.enqueue(next);
+    radio.holdForVoice(first, 4);
+
+    advanceTo(5.5);
+    expect(shown, 'the voice is still speaking at 5.5 s').toEqual([first]);
+    expect(phase()).toBe('hold');
+    radio.releaseVoice(first);
+    advanceTo(5.85);
+    expect(phase()).toBe('hold');
+    advanceTo(6);
+    expect(phase()).not.toBe('hold');
+    advanceTo(6.8);
+    expect(shown).toEqual([first, next]);
+  });
+
+  it('moves on without an end report 2.5 s after the voice should have ended', () => {
+    const first = line(SHORT.en, 'hq', SHORT.zh);
+    const next = line(NEXT.en, 'hq', NEXT.zh);
+    radio.enqueue(first);
+    radio.enqueue(next);
+    radio.holdForVoice(first, 2);
+
+    // 兜底：0 + 2 + 0.4 + 2.5 = 4.9 秒
+    advanceTo(4.8);
+    expect(phase()).toBe('hold');
+    advanceTo(5);
+    expect(phase()).not.toBe('hold');
+    advanceTo(5.6);
+    expect(shown).toEqual([first, next]);
+  });
+
+  it('keeps a long line up for its full reading time when the voice is short', () => {
+    const long = line(LONG, 'hq', LONG);
+    const next = line(NEXT.en, 'hq', NEXT.zh);
+    radio.enqueue(long);
+    radio.enqueue(next);
+    advanceTo(0.1);
+    radio.holdForVoice(long, 1);
+    advanceTo(1.1);
+    radio.releaseVoice(long);
+
+    advanceTo(8);
+    expect(shown, 'still reading the long line').toEqual([long]);
+    advanceTo(9.2);
+    expect(shown).toEqual([long, next]);
+  });
+
+  it('ignores voice reports for a line that is no longer on screen', () => {
+    const first = line(SHORT.en, 'hq', SHORT.zh);
+    const next = line(NEXT.en, 'hq', NEXT.zh);
+    radio.enqueue(first);
+    radio.enqueue(next);
+    advanceTo(3.5);
+    expect(shown).toEqual([first, next]);
+
+    radio.holdForVoice(first, 30);
+    advanceTo(7);
+    expect(radio.isBusy()).toBe(false);
+    expect(() => radio.releaseVoice(first)).not.toThrow();
+  });
+
+  it('replays a line interrupted while its voice is speaking, so it is voiced again', () => {
+    const first = line(SHORT.en, 'hq', SHORT.zh);
+    const urgent = GENERIC_RADIO['missile-warning'];
+    radio.enqueue(first);
+    advanceTo(0.1);
+    radio.holdForVoice(first, 6);
+    // 已停留了大半（按纯文字规则算已传达），但配音还有 1 秒才说完
+    advanceTo(5);
+
+    radio.enqueue(urgent, { priority: 'high' });
+    expect(shown).toEqual([first, urgent]);
+    drain(radio);
+    expect(shown).toEqual([first, urgent, first]);
+  });
+
+  it('does not replay an interrupted line whose voice had finished', () => {
+    const first = line(SHORT.en, 'hq', SHORT.zh);
+    const urgent = GENERIC_RADIO['missile-warning'];
+    radio.enqueue(first);
+    advanceTo(0.1);
+    radio.holdForVoice(first, 0.8);
+    advanceTo(0.9);
+    radio.releaseVoice(first);
+    advanceTo(1);
+
+    radio.enqueue(urgent, { priority: 'high' });
+    drain(radio);
+    expect(shown).toEqual([first, urgent]);
+  });
+
+  it('without a voice an interrupted line is replayed only if it was not yet read', () => {
+    const first = line(SHORT.en, 'hq', SHORT.zh);
+    const urgent = GENERIC_RADIO['missile-warning'];
+    radio.enqueue(first);
+    advanceTo(3);
+    radio.enqueue(urgent, { priority: 'high' });
+    drain(radio);
+    expect(shown).toEqual([first, urgent]);
+  });
+
+  it('redraws the current line in the new language without replaying it', () => {
+    const first = line(
+      'Falcon, you are cleared for takeoff.',
+      'wingman2',
+      '猎鹰，起飞许可已下达。'
+    );
+    radio.enqueue(first);
+    advanceTo(0.2);
+    radio.holdForVoice(first, 3);
+
+    setLocale('zh-CN');
+    expect(panelText()).toContain(CAMPAIGN_SPEAKERS.wingman2.callsign.zh);
+    expect(panelText()).toContain('猎鹰，起飞许可已下达。');
+    expect(panelText()).not.toContain('cleared for takeoff');
+    expect(shown).toEqual([first]);
+
+    // 切换语言时配音被停下（VoiceSystem）：表现层随即 releaseVoice，台词照常收尾
+    radio.releaseVoice(first);
+    setLocale('en');
+    expect(panelText()).toContain(CAMPAIGN_SPEAKERS.wingman2.callsign.en);
+    expect(panelText()).toContain('Falcon, you are cleared for takeoff.');
+    drain(radio);
+    expect(shown).toEqual([first]);
+    expect(radio.isBusy()).toBe(false);
+  });
+});
