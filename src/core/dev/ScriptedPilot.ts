@@ -127,9 +127,16 @@ const MAX_DIVE_SIN = 0.62;
 const SURFACE_MAX_DEPRESSION = 0.55;
 const SURFACE_EXTEND_MIN = GAME_CONSTANTS.PROJECTILE.MAX_DISTANCE * 0.85;
 const SURFACE_SETUP_AGL = 65;
-/** Boss：贴得太近（钻进机体 / 部件间来回打转）时先拉开到再进入距离，再回头射击 */
+/**
+ * Boss：贴得太近（钻进机体 / 部件间来回打转）时先拉开到再进入距离，再回头射击；
+ * 高速 Boss 只拉开 BOSS_EXTEND_MAX 秒——绕玩家盘旋的幻影会一直跟在再进入距离以内。
+ */
 const BOSS_MIN_RANGE = 100;
 const BOSS_REENGAGE_RANGE = 290;
+const BOSS_EXTEND_MAX = 4;
+/** 高速 Boss（米/秒）：与敌机一样按狗斗收油门，转进它的盘旋圈（盘旋半径约 260 米） */
+const AGILE_BOSS_SPEED = 25;
+const AGILE_BOSS_TURN_RANGE = 340;
 /**
  * 狗斗：敌机贴近（< JET_TOO_CLOSE 米）且机头指不过去（> JET_OFF_AXIS）时先直线拉开，
  * 拉到 JET_REENGAGE 米或 JET_EXTEND_MAX 秒后回头对头；近距离转弯缠斗时收油门缩小转弯半径。
@@ -313,6 +320,10 @@ export class ScriptedPilot {
     let distance = Infinity;
     const attackingSurface =
       target !== null && (target.kind === 'unit-ground' || target.kind === 'unit-sea');
+    const agileBoss =
+      target !== null &&
+      target.kind === 'boss' &&
+      target.velocity.lengthSq() > AGILE_BOSS_SPEED * AGILE_BOSS_SPEED;
     this.stats.targetSeconds[target ? target.kind : 'none'] += dt;
     if (target) {
       computeLeadPoint(position, target.position, target.velocity, BULLET_SPEED, tmpAim);
@@ -323,7 +334,7 @@ export class ScriptedPilot {
       if (attackingSurface) {
         this.planSurfaceAttack(position, target.position, agl, forward, tmpDesired);
       } else if (target.kind === 'boss') {
-        this.planStandoff(position, target.position, forward, tmpDesired);
+        this.planStandoff(dt, position, target.position, agileBoss, forward, tmpDesired);
       } else {
         this.planDogfight(dt, position, target.position, forward, tmpDesired);
       }
@@ -395,9 +406,9 @@ export class ScriptedPilot {
     // 油门：平时满油门；近距离缠斗（目标不在机头前方）时收油门缩小转弯半径
     input.throttle = !(
       target &&
-      (target.kind === 'jet' || target.kind === 'unit-air') &&
+      (target.kind === 'jet' || target.kind === 'unit-air' || agileBoss) &&
       !this.extending &&
-      distance < TURN_FIGHT_RANGE &&
+      distance < (agileBoss ? AGILE_BOSS_TURN_RANGE : TURN_FIGHT_RANGE) &&
       angleBetween(forward, tmpToTarget.subVectors(target.position, position)) > 0.6
     );
 
@@ -536,16 +547,22 @@ export class ScriptedPilot {
 
   /** Boss 战的进出：近于 BOSS_MIN_RANGE 时背向目标拉开（高度向目标靠拢），远于再进入距离后回头 */
   private planStandoff(
+    dt: number,
     position: THREE.Vector3,
     target: THREE.Vector3,
+    agile: boolean,
     forward: THREE.Vector3,
     out: THREE.Vector3
   ): void {
     const distance = position.distanceTo(target);
     if (this.extending) {
-      if (distance > BOSS_REENGAGE_RANGE) this.extending = false;
+      this.extendTimer += dt;
+      if (distance > BOSS_REENGAGE_RANGE || (agile && this.extendTimer > BOSS_EXTEND_MAX)) {
+        this.extending = false;
+      }
     } else if (distance < BOSS_MIN_RANGE) {
       this.extending = true;
+      this.extendTimer = 0;
     }
     if (!this.extending) return;
     const awayX = position.x - target.x;
