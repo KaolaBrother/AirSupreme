@@ -1,5 +1,6 @@
 import { type QualityPreset } from '@/config';
 import { unlockAudioFromUserGesture } from '@/core/Audio/AudioContextHost';
+import { getDifficultyProfile } from '@/core/Difficulty';
 import {
   describeCheckpoint,
   loadCampaignCheckpoint,
@@ -22,15 +23,6 @@ import { getLocale, onLocaleChange, setLocale, tr, type LocalizedText } from '@/
 import { HUD_COLORS, injectHudTokens } from '@/ui/theme/hudTokens';
 import type { ModelPreview } from './ModelPreview';
 type ModelPreviewModule = typeof import('./ModelPreview');
-
-/** 难度档名（与 Difficulty.ts 五档的英文 / 中文名一致） */
-const DIFFICULTY_LABELS: readonly LocalizedText[] = [
-  { en: 'Very Easy', zh: '简单' },
-  { en: 'Easy', zh: '普通' },
-  { en: 'Normal', zh: '标准' },
-  { en: 'Hard', zh: '困难' },
-  { en: 'Expert', zh: '专家' },
-];
 
 const QUALITY_LABELS: Readonly<Record<QualityPreset, LocalizedText>> = {
   auto: { en: 'Auto', zh: '自动' },
@@ -921,8 +913,10 @@ export class StartMenu {
     return row;
   }
 
+  /** 难度档名以 Difficulty.ts 的难度档为唯一来源（越界钳到 1..5，非数值按默认档） */
   private getDifficultyText(level: number): string {
-    return tr(DIFFICULTY_LABELS[level - 1] ?? DIFFICULTY_LABELS[2]);
+    const safeLevel = Number.isFinite(level) ? level : DEFAULT_START_FLOW_SETTINGS.difficulty;
+    return tr(getDifficultyProfile(safeLevel).label);
   }
 
   /** 如“第六章 · 熔炉之心” */
