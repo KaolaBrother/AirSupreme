@@ -53,4 +53,15 @@ describe('bilingual data tables', () => {
       expectBilingual(POWER_UP_CONFIGS[type].description, `${type} description`);
     }
   );
+
+  it('describes the Repair Kit by what it does: +1 life and a full repair (both languages)', () => {
+    // 效果（GameCoordinator.handlePowerUpEffect）：生命 +1，并把血量回满
+    const { en, zh } = POWER_UP_CONFIGS[PowerUpType.HEALTH].description;
+    expect(en).toMatch(/extra life|\+\s*1\s*(life|lives)|one more life|additional life/i);
+    expect(en).toMatch(/full(y)?\s+repair|repairs?\b.*\bfully|full health|restores? full/i);
+    expect(en, 'no stale "restores 30 health"').not.toMatch(/\b30\b/);
+    expect(zh).toMatch(/生命\s*[+＋]\s*1|额外.{0,2}(生命|一条命)|多一条命/);
+    expect(zh).toMatch(/完全修复|完全恢复|回满|满血/);
+    expect(zh).not.toMatch(/30/);
+  });
 });
