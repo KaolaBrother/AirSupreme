@@ -56,6 +56,8 @@ export interface PilotWorld {
   secondsSinceHit: number;
   /** 距上次复活的秒数：复活后先沿复活航向飞离（复活点可能紧贴岩壁 / 立柱） */
   secondsSinceRespawn: number;
+  /** Boss 机体（不是部件）的速度估计（米/秒），无 Boss 时为 0；转动的炮塔 / 眼睛不算“高速 Boss” */
+  bossSpeed: number;
 }
 
 export interface PilotDecision {
@@ -129,11 +131,13 @@ const SURFACE_EXTEND_MIN = GAME_CONSTANTS.PROJECTILE.MAX_DISTANCE * 0.85;
 const SURFACE_SETUP_AGL = 65;
 /**
  * Boss：贴得太近（钻进机体 / 部件间来回打转）时先拉开到再进入距离，再回头射击；
- * 高速 Boss 只拉开 BOSS_EXTEND_MAX 秒——绕玩家盘旋的幻影会一直跟在再进入距离以内。
+ * 拉开有时限——绕玩家盘旋的高速 Boss（幻影）会一直跟在再进入距离以内，边界 / 地形折返也可能
+ * 让拉开永远到不了再进入距离（之前整场卡在“拉开”）。
  */
 const BOSS_MIN_RANGE = 100;
 const BOSS_REENGAGE_RANGE = 290;
-const BOSS_EXTEND_MAX = 4;
+const BOSS_EXTEND_MAX = 8;
+const AGILE_BOSS_EXTEND_MAX = 4;
 /** 高速 Boss（米/秒）：与敌机一样按狗斗收油门，转进它的盘旋圈（盘旋半径约 260 米） */
 const AGILE_BOSS_SPEED = 25;
 const AGILE_BOSS_TURN_RANGE = 340;
@@ -321,9 +325,7 @@ export class ScriptedPilot {
     const attackingSurface =
       target !== null && (target.kind === 'unit-ground' || target.kind === 'unit-sea');
     const agileBoss =
-      target !== null &&
-      target.kind === 'boss' &&
-      target.velocity.lengthSq() > AGILE_BOSS_SPEED * AGILE_BOSS_SPEED;
+      target !== null && target.kind === 'boss' && world.bossSpeed > AGILE_BOSS_SPEED;
     this.stats.targetSeconds[target ? target.kind : 'none'] += dt;
     if (target) {
       computeLeadPoint(position, target.position, target.velocity, BULLET_SPEED, tmpAim);
@@ -557,7 +559,8 @@ export class ScriptedPilot {
     const distance = position.distanceTo(target);
     if (this.extending) {
       this.extendTimer += dt;
-      if (distance > BOSS_REENGAGE_RANGE || (agile && this.extendTimer > BOSS_EXTEND_MAX)) {
+      const limit = agile ? AGILE_BOSS_EXTEND_MAX : BOSS_EXTEND_MAX;
+      if (distance > BOSS_REENGAGE_RANGE || this.extendTimer > limit) {
         this.extending = false;
       }
     } else if (distance < BOSS_MIN_RANGE) {

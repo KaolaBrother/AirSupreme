@@ -288,6 +288,8 @@ export function installBalanceHarness(access: DevHookAccess): BalanceHarnessApi 
   let bossActive = false;
   /** 已建档的 Boss 对象（死亡演出期间仍是 currentBoss，避免重复建档） */
   let trackedBoss: unknown = null;
+  /** 正在记录的 Boss 所属关卡档案（关卡号可能在死亡演出期间先跳到下一关） */
+  let bossRecord: LevelRecord | null = null;
   const trace: Array<Record<string, unknown>> = [];
   let nextTraceAt = 0;
   const shots: ShotRecord[] = [];
@@ -314,7 +316,10 @@ export function installBalanceHarness(access: DevHookAccess): BalanceHarnessApi 
     flareCharges: 0,
     secondsSinceHit: Infinity,
     secondsSinceRespawn: Infinity,
+    bossSpeed: 0,
   };
+  const bossBodyPosition = new THREE.Vector3();
+  const bossBodyVelocity = new THREE.Vector3();
 
   /** 开火者标签：敌机按机型，单位按单位类型 */
   const labelShooter = (owner: THREE.Object3D | undefined): string => {
@@ -756,9 +761,10 @@ export function installBalanceHarness(access: DevHookAccess): BalanceHarnessApi 
       wave.forced = true;
       forceClearWave();
     }
-    if (record?.boss && record.boss.end === null) {
-      if (gameTime - record.boss.start > state.options.bossTimeoutSeconds) {
-        record.boss.forced = true;
+    const timedBoss = bossRecord?.boss ?? record?.boss;
+    if (timedBoss && timedBoss.end === null) {
+      if (gameTime - timedBoss.start > state.options.bossTimeoutSeconds) {
+        timedBoss.forced = true;
         forceKillBoss();
       }
     }
@@ -788,6 +794,7 @@ export function installBalanceHarness(access: DevHookAccess): BalanceHarnessApi 
     if (fresh && boss && record && !bossActive) {
       trackedBoss = boss;
       bossActive = true;
+      bossRecord = record;
       lastHazardCount = controller?.getHazardHitCount() ?? 0;
       const health = boss.getHealth();
       pilot?.takeStats();
@@ -807,22 +814,27 @@ export function installBalanceHarness(access: DevHookAccess): BalanceHarnessApi 
         respawnCrashes: 0,
       };
     }
-    if (bossActive && record?.boss && record.boss.end === null) {
+    const tracked = bossRecord;
+    if (bossActive && tracked?.boss && tracked.boss.end === null) {
       const dying = controller?.isBossDying() ?? false;
-      if (!boss || !boss.isAlive() || dying) {
-        record.boss.endReason = !boss ? 'gone' : dying ? 'dying' : 'dead';
-        record.boss.healthAtEnd = boss ? Math.round(boss.getHealth().current) : -1;
-        record.boss.end = gameTime;
-        if (pilot) record.boss.pilot = pilot.takeStats();
-        record.end = gameTime;
-        record.scoreEnd = access.getScore();
+      // 已换成下一只 Boss（Boss 模式连战）也算本只结束
+      const replaced = boss !== null && boss !== trackedBoss;
+      if (!boss || replaced || !boss.isAlive() || dying) {
+        tracked.boss.endReason = !boss || replaced ? 'gone' : dying ? 'dying' : 'dead';
+        tracked.boss.healthAtEnd = boss && !replaced ? Math.round(boss.getHealth().current) : -1;
+        tracked.boss.end = gameTime;
+        if (pilot) tracked.boss.pilot = pilot.takeStats();
+        tracked.end = gameTime;
+        tracked.scoreEnd = access.getScore();
         bossActive = false;
-        if (run && record.level >= run.options.stopAfterLevel) {
-          finish(`boss of level ${record.level} defeated`);
+        bossRecord = null;
+        if (run && tracked.level >= run.options.stopAfterLevel) {
+          finish(`boss of level ${tracked.level} defeated`);
         }
       }
     } else if (bossActive && !boss) {
       bossActive = false;
+      bossRecord = null;
     }
   };
 
@@ -993,7 +1005,13 @@ export function installBalanceHarness(access: DevHookAccess): BalanceHarnessApi 
     }
 
     // Boss 可受伤部件（跳过护盾偏转体 / 隐形）；Boss 导弹只用于告警
+    world.bossSpeed = 0;
     if (inBoss && boss && bossController) {
+      boss.getMesh().getWorldPosition(bossBodyPosition);
+      estimateVelocity(boss.getMesh(), bossBodyPosition, bossBodyVelocity);
+      const bodySpeed = bossBodyVelocity.length();
+      // 瞬移（章鱼）只产生单帧尖峰：超过任何飞行器速度的估计视为 0
+      world.bossSpeed = Number.isFinite(bodySpeed) && bodySpeed < 250 ? bodySpeed : 0;
       const missileSystem = boss.getMissileSystem();
       if (missileSystem) {
         for (const mesh of missileSystem.getMissileMeshes()) {
@@ -1289,6 +1307,7 @@ export function installBalanceHarness(access: DevHookAccess): BalanceHarnessApi 
       lastHitTime = -1e9;
       lastRespawnTime = -1e9;
       trackedBoss = null;
+      bossRecord = null;
       recentCrashes.length = 0;
       crashLog.length = 0;
       recentHits.length = 0;
