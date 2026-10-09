@@ -26,7 +26,8 @@ export interface ScreenEffectsValues {
 /** 各脉冲完全衰减所需时间（秒） */
 const DAMAGE_DECAY_SECONDS = 0.55;
 const FLASH_DECAY_SECONDS = 0.32;
-const EMP_DECAY_SECONDS = 0.75;
+/** EMP 是短促的电光脉冲：约半秒扫完一道环 */
+const EMP_DECAY_SECONDS = 0.5;
 /** 持续量平滑时间常数（秒） */
 const LEVEL_SMOOTHING_SECONDS = 0.18;
 /** 心跳周期（秒）：约 80 bpm 的“咚-咚” */
