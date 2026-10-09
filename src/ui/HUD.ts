@@ -1,7 +1,7 @@
 import { GAME_CONSTANTS, GameConfig } from '@/config';
 import { SPECIAL_WEAPON_IDS } from '@/core/CombatContracts';
 import { SPECIAL_WEAPON_CONFIGS } from '@/features/weapons/WeaponTypes';
-import { onLocaleChange, tr, type LocalizedText } from '@/i18n';
+import { onLocaleChange, tr, type LocalizedText, type TextParams } from '@/i18n';
 import { injectHudExtrasStyles } from '@/ui/theme/hudExtrasStyles';
 import {
   GLYPH_CAMERA,
@@ -58,12 +58,48 @@ const TXT_DECK_FIRST_PERSON: LocalizedText = { en: '1ST', zh: '座舱' };
 const TXT_DECK_THIRD_PERSON: LocalizedText = { en: '3RD', zh: '机外' };
 const TXT_BOSS_PHASE: LocalizedText = { en: 'PHASE', zh: '阶段' };
 
+/** 带占位参数的双语文案：{ text: { en: 'Wave {wave}', zh: '第{wave}波' }, params: { wave: 3 } } */
+export interface HudTextWithParams {
+  readonly text: LocalizedText | string;
+  readonly params?: TextParams;
+}
+
+/**
+ * HUD 可本地化文案：纯字符串原样显示（旧调用方不变）；双语对象或 { text, params } 按当前语言取值，
+ * 切换语言时仍在显示的简报卡 / 自动存档提示按新语言重绘。
+ */
+export type HudText = string | LocalizedText | HudTextWithParams;
+
+function isLocalizedText(value: unknown): value is LocalizedText {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    typeof (value as LocalizedText).en === 'string' &&
+    typeof (value as LocalizedText).zh === 'string'
+  );
+}
+
+/** 按当前语言展开 HudText；无法识别的输入（运行时传错类型）返回空串 */
+function resolveHudText(value: HudText | null | undefined): string {
+  if (typeof value === 'string') {
+    return value;
+  }
+  if (typeof value !== 'object' || value === null) {
+    return '';
+  }
+  if ('text' in value) {
+    const { text, params } = value;
+    return typeof text === 'string' || isLocalizedText(text) ? tr(text, params) : '';
+  }
+  return isLocalizedText(value) ? tr(value) : '';
+}
+
 export type BriefingTone = 'sys' | 'threat';
 
 export interface BriefingRequest {
-  kicker: string;
-  title: string;
-  line: string;
+  kicker: HudText;
+  title: HudText;
+  line: HudText;
   tone: BriefingTone;
   durationMs: number;
 }
@@ -273,6 +309,10 @@ export class HUD {
   private exitButton!: HTMLButtonElement;
   private flareLabelText: Text | null = null;
   private autosaveTitle: HTMLSpanElement | null = null;
+  /** 正在显示的简报原文（可本地化，语言切换时重绘）；隐藏后清空 */
+  private briefingSource: Pick<BriefingRequest, 'kicker' | 'title' | 'line'> | null = null;
+  /** 正在显示的自动存档标签原文（可本地化，语言切换时重绘） */
+  private autosaveLabelSource: HudText | null = null;
 
   // 战役 HUD（首次使用时才创建）
   private static readonly AUTOSAVE_TOAST_SECONDS = 2.6;
@@ -896,7 +936,7 @@ export class HUD {
     document.documentElement.style.setProperty('--hud-stack-bottom', value);
   }
 
-  /** 语言切换：按最近一次的状态重绘 HUD 自己的文案（运行时传入的标题 / 告警原样保留） */
+  /** 语言切换：按最近一次的状态重绘 HUD 自己的文案（运行时传入的纯字符串标题 / 告警原样保留） */
   private refreshLocaleText(): void {
     this.renderScore();
     this.renderSpeed();
@@ -915,6 +955,13 @@ export class HUD {
     }
     if (this.autosaveTitle) {
       this.autosaveTitle.textContent = tr({ en: 'Autosaved', zh: '已自动保存' });
+    }
+    // 运行时传入的简报 / 存档标签：可本地化的原文按新语言重绘（纯字符串原样保留）
+    if (this.briefingTimer > 0) {
+      this.renderBriefingText();
+    }
+    if (this.autosaveTimer > 0) {
+      this.renderAutosaveLabel();
     }
     if (this.cameraMode) {
       this.renderCameraLabels(this.cameraMode);
@@ -1665,9 +1712,8 @@ export class HUD {
     }
 
     this.applyBriefingTone(briefing.tone);
-    this.setTextContent(this.briefingKicker, briefing.kicker);
-    this.setTextContent(this.briefingTitle, briefing.title);
-    this.setTextContent(this.briefingLine, briefing.line);
+    this.briefingSource = { kicker: briefing.kicker, title: briefing.title, line: briefing.line };
+    this.renderBriefingText();
     this.setStyleValue(this.briefingDisplay, 'display', 'block');
     this.setStyleValue(this.briefingDisplay, 'opacity', '1');
     HUD.setAttr(this.topStack, 'data-briefing', 'on');
@@ -1765,12 +1811,34 @@ export class HUD {
 
   private hideBriefingWithoutFlush(): void {
     this.briefingTimer = 0;
+    this.briefingSource = null;
     this.setTextContent(this.briefingKicker, '');
     this.setTextContent(this.briefingTitle, '');
     this.setTextContent(this.briefingLine, '');
     this.setStyleValue(this.briefingDisplay, 'opacity', '0');
     this.setStyleValue(this.briefingDisplay, 'display', 'none');
     HUD.setAttr(this.topStack, 'data-briefing', 'off');
+  }
+
+  /** 按当前语言写简报卡三行文字 */
+  private renderBriefingText(): void {
+    const source = this.briefingSource;
+    if (!source) {
+      return;
+    }
+    this.setTextContent(this.briefingKicker, resolveHudText(source.kicker));
+    this.setTextContent(this.briefingTitle, resolveHudText(source.title));
+    this.setTextContent(this.briefingLine, resolveHudText(source.line));
+  }
+
+  /** 按当前语言写自动存档标签；空标签时隐藏 */
+  private renderAutosaveLabel(): void {
+    if (!this.autosaveLabel) {
+      return;
+    }
+    const text = resolveHudText(this.autosaveLabelSource).trim();
+    this.setTextContent(this.autosaveLabel, text);
+    this.setStyleValue(this.autosaveLabel, 'display', text ? 'inline' : 'none');
   }
 
   private applyBriefingTone(tone: BriefingTone): void {
@@ -1915,15 +1983,15 @@ export class HUD {
     }
   }
 
-  /** 自动存档提示：驾驶舱信息栏下方的短暂绿色提示，约 2.6 秒后淡出（由 update 驱动） */
-  public showAutosave(label?: string): void {
+  /**
+   * 自动存档提示：驾驶舱信息栏下方（竖屏在顶部消息栈里）的短暂绿色提示，约 2.6 秒后淡出
+   * （由 update 驱动）。label 可以是纯字符串或可本地化文案（见 HudText）。
+   */
+  public showAutosave(label?: HudText): void {
     this.ensureInitialized();
     const toast = this.ensureAutosaveToast();
-    const text = typeof label === 'string' ? label.trim() : '';
-    if (this.autosaveLabel) {
-      this.setTextContent(this.autosaveLabel, text);
-      this.setStyleValue(this.autosaveLabel, 'display', text ? 'inline' : 'none');
-    }
+    this.autosaveLabelSource = label ?? null;
+    this.renderAutosaveLabel();
     toast.classList.remove('is-leaving');
     this.autosaveSeq = this.autosaveSeq === 'a' ? 'b' : 'a';
     toast.setAttribute('data-seq', this.autosaveSeq);
@@ -2149,6 +2217,7 @@ export class HUD {
   private hideAutosave(): void {
     this.autosaveTimer = 0;
     this.autosaveLeaving = false;
+    this.autosaveLabelSource = null;
     if (this.autosaveToast) {
       this.autosaveToast.classList.remove('is-leaving');
       this.setStyleValue(this.autosaveToast, 'display', 'none');
@@ -2927,6 +2996,7 @@ export class HUD {
     }
     this.autosaveTimer = 0;
     this.autosaveLeaving = false;
+    this.autosaveLabelSource = null;
     this.flashWarningTimer = 0;
     this.flashWarningText = '';
     this.cameraFlashTimer = 0;
