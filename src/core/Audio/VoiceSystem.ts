@@ -167,6 +167,8 @@ interface VoiceRequest {
   readonly requestedAtMs: number;
   phase: VoiceRequestPhase;
   deadline: ReturnType<typeof setTimeout> | null;
+  /** 播放看门狗（实时）：收不到 onended 时也按说完处理，台词队列不会卡住 */
+  watchdog: ReturnType<typeof setTimeout> | null;
   buffer: AudioBuffer | null;
   gainDb: number;
   /** 已播放的秒数（暂停续播的起点） */
@@ -259,6 +261,8 @@ const FADE_IN_SECONDS = 0.012;
 const STOP_FADE_SECONDS = 0.05;
 const PAUSE_FADE_SECONDS = 0.03;
 const END_EPSILON_SECONDS = 0.05;
+/** 看门狗余量：开口 + 剩余时长 + 余量（实时）后仍未收到 onended 就按说完处理 */
+const WATCHDOG_GRACE_SECONDS = 2.5;
 /** 静噪尾音长度（含释放） */
 const TAIL_SECONDS = 0.26;
 
@@ -657,6 +661,7 @@ export class VoiceSystem {
       requestedAtMs: nowMs(),
       phase: 'loading',
       deadline: null,
+      watchdog: null,
       buffer: null,
       gainDb: 0,
       offset: 0,
@@ -673,7 +678,7 @@ export class VoiceSystem {
       if (this.current) {
         this.cancel(this.current, 'superseded');
       }
-      this.record({ t: nowMs(), event: 'request', lineId: request.lineId, locale, kind });
+      this.trace('request', request);
       if (this.disposed) {
         this.decline(request, 'disposed');
         return handle;
@@ -750,14 +755,7 @@ export class VoiceSystem {
       request.offset = Math.min(request.buffer?.duration ?? 0, request.offset + played);
       this.silence(request, PAUSE_FADE_SECONDS);
       request.phase = 'paused';
-      this.record({
-        t: nowMs(),
-        event: 'pause',
-        lineId: request.lineId,
-        locale: request.locale,
-        kind: request.kind,
-        offset: request.offset,
-      });
+      this.trace('pause', request, { offset: request.offset });
     }
     this.releaseDuck(0);
   }
@@ -773,14 +771,7 @@ export class VoiceSystem {
       return;
     }
     const duration = request.buffer?.duration ?? 0;
-    this.record({
-      t: nowMs(),
-      event: 'resume',
-      lineId: request.lineId,
-      locale: request.locale,
-      kind: request.kind,
-      offset: request.offset,
-    });
+    this.trace('resume', request, { offset: request.offset });
     if (!request.buffer || request.offset >= duration - END_EPSILON_SECONDS) {
       this.finish(request);
       return;
@@ -1198,6 +1189,18 @@ export class VoiceSystem {
 
       source.onended = () => this.handleSourceEnded(request, source);
       source.start(startAt, safeOffset);
+      this.clearWatchdog(request);
+      request.watchdog = setTimeout(
+        () => {
+          request.watchdog = null;
+          if (request.source === source && request.phase === 'playing') {
+            // 没收到 onended（上下文被挂起 / 事件丢失）：按说完处理
+            this.silence(request, STOP_FADE_SECONDS);
+            this.finish(request);
+          }
+        },
+        (lead + buffer.duration - safeOffset + WATCHDOG_GRACE_SECONDS) * 1000
+      );
 
       request.source = source;
       request.lineGain = lineGain;
@@ -1213,12 +1216,7 @@ export class VoiceSystem {
       if (!request.startNotified) {
         request.startNotified = true;
         const info = this.describe(request);
-        this.record({
-          t: nowMs(),
-          event: 'start',
-          lineId: request.lineId,
-          locale: request.locale,
-          kind: request.kind,
+        this.trace('start', request, {
           duration: info.duration,
           gainDb: Math.round(info.gainDb * 10) / 10,
         });
@@ -1264,18 +1262,12 @@ export class VoiceSystem {
       this.current = null;
     }
     this.clearDeadline(request);
+    this.clearWatchdog(request);
     this.scheduleCleanup(request.nodes, (TAIL_SECONDS + 0.15) * 1000);
     request.nodes = [];
     this.releaseDuck(DUCK_RELEASE_DELAY_SECONDS);
     const info = this.describe(request);
-    this.record({
-      t: nowMs(),
-      event: 'end',
-      lineId: request.lineId,
-      locale: request.locale,
-      kind: request.kind,
-      duration: info.duration,
-    });
+    this.trace('end', request, { duration: info.duration });
     const onEnd = request.options.onEnd;
     if (onEnd) {
       defer(() => onEnd(info));
@@ -1308,14 +1300,7 @@ export class VoiceSystem {
   }
 
   private notifySilent(request: VoiceRequest, reason: VoiceSilentReason): void {
-    this.record({
-      t: nowMs(),
-      event: 'silent',
-      lineId: request.lineId,
-      locale: request.locale,
-      kind: request.kind,
-      reason,
-    });
+    this.trace('silent', request, { reason });
     if (reason === 'error') {
       log.debug(`Voice line ${request.language}/${request.lineId} failed to load`);
     }
@@ -1329,6 +1314,7 @@ export class VoiceSystem {
   private silence(request: VoiceRequest, fadeSeconds: number): void {
     const source = request.source;
     request.source = null;
+    this.clearWatchdog(request);
     const context = this.graph?.context;
     if (context && context.state !== 'closed') {
       const now = context.currentTime;
@@ -1389,6 +1375,13 @@ export class VoiceSystem {
     }
   }
 
+  private clearWatchdog(request: VoiceRequest): void {
+    if (request.watchdog !== null) {
+      clearTimeout(request.watchdog);
+      request.watchdog = null;
+    }
+  }
+
   private describe(request: VoiceRequest): VoiceLineInfo {
     return {
       lineId: request.lineId,
@@ -1430,6 +1423,21 @@ export class VoiceSystem {
     if (this.lastPrefetch.length > 0) {
       this.runPrefetch(this.lastPrefetch, getVoicePackLanguage());
     }
+  }
+
+  private trace(
+    event: VoiceDebugEvent['event'],
+    request: VoiceRequest,
+    extra: Partial<VoiceDebugEvent> = {}
+  ): void {
+    this.record({
+      t: nowMs(),
+      event,
+      lineId: request.lineId,
+      locale: request.locale,
+      kind: request.kind,
+      ...extra,
+    });
   }
 
   private record(event: VoiceDebugEvent): void {
