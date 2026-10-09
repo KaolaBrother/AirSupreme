@@ -13,7 +13,7 @@ AirSupreme 是一个基于 Three.js 和 TypeScript 的 3D 飞机战斗游戏。
 - 战斗 runtime、Boss 控制器、升级菜单、presentation runtime，以及相机组、单位、特殊武器、尾迹、剧情界面与第 6-10 关 Boss 都在按需加载路径上
 - `PresentationRuntimeLoader` 负责按需创建 `HUD / EnemyHealthBars / LockOnIndicator / BossMissileIndicator / PresentationController`
 - 普通弹道碰撞链路已支持 `source/tone` 透传，玩家机炮、敌弹、Boss 炮弹、导弹命中可按来源映射不同反馈；对单位与 Boss 部件按命中半径判定
-- 独立终验之后的两波修复已合并（`2e9941d..0cd1735`）：复活沿航迹后退 + 坠毁宽限、移动端暂停锁存、僚机编队整队出击与编队位、Boss 击破即存机库检查点、紧急告警配音限频与 Boss 收尾等完台词、HUD 可本地化文案与手机布局、Boss 导弹伤害随难度、热焰弹诱骗全部 Boss 导弹、关卡曲线与波次重调、地形静态合批与植被分块 LOD（见下文各节与 `CHANGELOG.md` 的「终验修复」）；随后的收尾打磨（`0cd1735..1440f25`）让闪烁告警 / Boss 状态条 / 道具倒计时随语言切换重绘、高炮与八爪鱼眼睛光弹伤害随难度缩放、复活时避开竖直结构（见「收尾打磨」）
+- 独立终验之后的两波修复已合并（`2e9941d..0cd1735`）：复活沿航迹后退 + 坠毁宽限、移动端暂停锁存、僚机编队整队出击与编队位、Boss 击破即存机库检查点、紧急告警配音限频与 Boss 收尾等完台词、HUD 可本地化文案与手机布局、Boss 导弹伤害随难度、热焰弹诱骗全部 Boss 导弹、关卡曲线与波次重调、地形静态合批与植被分块 LOD（见下文各节与 `CHANGELOG.md` 的「终验修复」）；随后的收尾打磨（`0cd1735..f6ce2d3`）让闪烁告警 / Boss 状态条 / 道具倒计时 / 中央大字提示随语言切换重绘、高炮与八爪鱼眼睛光弹伤害随难度缩放、复活时避开竖直结构、Boss 战敌人计数只计在场敌方、模型预览在名称标签上方取景，中文界面的教学改称「教程」（见「收尾打磨」）
 - 测试：位于 `src/__tests__`；测试数量与结果以 `npm run test:run` 的实际输出为准
 
 ### 技术栈
@@ -349,7 +349,7 @@ if (tmpAxis.lengthSq() > 1e-8) {
 - 核心：`src/i18n/index.ts`，导入时不访问 `document` / `window`。`Locale = 'en' | 'zh-CN'`，`DEFAULT_LOCALE = 'en'`；双语文案 `LocalizedText { en, zh }`（两个字段都必填）；`tr(text, params?)` = `localize` + `format`（`{name}` 占位符，未提供的保持原样）；`localize` 对纯字符串原样返回；`normalizeLocale` 把 `zh` / `zh-cn` / `zh-hans…` 规整为 `'zh-CN'`，其余一律回到英文；`setLocale` 语言未变化时不通知，变化时同步 `<html lang>` 并逐个通知 `onLocaleChange` 的订阅者（某个订阅者抛错不影响其余）。
 - 数据约定：文案就地双语，不用键值字符串表（见 `docs/decisions/0002-bilingual-text-and-voice-packs.md`）。`UnitConfig.name`、`BossConfig.name`、`EnemyConfig.name`、`SpecialWeaponConfig.name` / `description`、`UpgradeConfig.name` / `description` / `unit`、`PowerUpConfig.name` / `description`、`LevelConfig.name` / `description`、`DifficultyProfile.label` 与战役剧本的全部面向玩家字段都是 `LocalizedText`，在显示处用 `tr()` 取当前语言；交给 HUD 的快照（如 `WeaponSystem.getHudState().name`）在生成时就是当前语言的字符串。逐帧路径把双语对象提升为模块常量，不做逐帧分配。
 - 设置与启动：`StartFlowSettings.language`（缺省英文，不跟随浏览器；旧存档与无法识别的值按英文读取）随开始流程设置持久化；`main.ts` 在任何界面渲染之前 `setLocale(loadStartFlowSettings().language)`，并写入对应语言的页面标题、加载画面与触控按键文字（含读屏标签）。`index.html` 本身以 `lang="en"` 与英文默认文案发布。
-- 切换：开始菜单与暂停菜单的「Language / 语言」一行（选项名 `LANGUAGE_ENDONYMS`：English / 中文，`stepLanguage` 循环切换）保存设置后调用 `setLocale`。订阅者：开始 / 暂停 / 升级菜单原位重绘，HUD 重写自身文字与结算面板，血条立即改名（暂停中也生效），模型预览重建列表，无线电重写当前台词，`VoiceSystem` 停下当前配音并按新语言重新预取，`main.ts` 改写页面外壳。剧情卡片在显示时按当前语言写成，切换后从下一张起换语言。HUD 的 `showBriefing` / `showAutosave` / `flashWarning` / `setBossStatus` / `showPowerUp` 接受 `HudText`（纯字符串、`LocalizedText` 或 `{ text, params }`），保留原文，显示期间切换语言时原位重绘（不重播动画、不重置计时）：协调器交给 HUD 的有入关 / Boss 简报的双语原文、存档提示的 `{ text, params }` 与「继续：…」的双语对象（`describeCheckpointText`）、道具倒计时的道具名、误伤扣分告警（`{ text, params }`）；Boss 战控制器交出的有「返回作战区域」提示与 Boss 方位播报（双语拼好）；第 6-10 关 Boss 的阶段名与特殊攻击预警经 `IAdvancedBoss.onPhaseChange` / `onHazardWarning` 以 `HudText` 传出。第 6-10 关 Boss 的状态提示由 Boss 按当前语言生成（`getStatusLabel`，按状态与语言缓存），控制器每 0.25 秒推送一次，Boss 在场时还订阅 `onLocaleChange` 立即重推。事件波次 / 教学的完成提示（约 2-3 秒）保留双语原文，每次 HUD 刷新时取当前语言。中央大字提示（`showPowerUpBig`）与单位、武器告警仍在发出时取当前语言。
+- 切换：开始菜单与暂停菜单的「Language / 语言」一行（选项名 `LANGUAGE_ENDONYMS`：English / 中文，`stepLanguage` 循环切换）保存设置后调用 `setLocale`。订阅者：开始 / 暂停 / 升级菜单原位重绘，HUD 重写自身文字与结算面板，血条立即改名（暂停中也生效），模型预览重建列表并按新名称标签重新取景，无线电重写当前台词，`VoiceSystem` 停下当前配音并按新语言重新预取，`main.ts` 改写页面外壳。剧情卡片在显示时按当前语言写成，切换后从下一张起换语言。HUD 的 `showBriefing` / `showAutosave` / `flashWarning` / `setBossStatus` / `showPowerUp` / `showPowerUpBig` 接受 `HudText`（纯字符串、`LocalizedText` 或 `{ text, params }`），保留原文，显示期间切换语言时原位重绘（不重播动画、不重置计时；排在简报之后的大字提示在显示时取语言）：协调器交给 HUD 的有入关 / Boss 简报的双语原文、存档提示的 `{ text, params }` 与「继续：…」的双语对象（`describeCheckpointText`）、道具倒计时的道具名、误伤扣分告警（`{ text, params }`），以及中央大字提示（僚机被击落、拾取道具及其「获得道具！」副标题、升级反馈与升级点、护送结果、教学提示、事件波次播报、「已击坠」等）；Boss 战控制器交出的有「返回作战区域」提示、Boss 方位播报（双语拼好）与友军支援、激光预警的大字提示；`UnitController` 交出停火、导弹来袭与「残余目标脱离战区」告警；`SpecialWeaponsController` 经 `SpecialWeaponsDeps.notify(icon, text: HudText)` 交出「尚无特殊武器」「武器尚未解锁」与切换武器时武器配置里的双语名称；第 6-10 关 Boss 的阶段名与特殊攻击预警经 `IAdvancedBoss.onPhaseChange` / `onHazardWarning` 以 `HudText` 传出。第 6-10 关 Boss 的状态提示由 Boss 按当前语言生成（`getStatusLabel`，按状态与语言缓存），控制器每 0.25 秒推送一次，Boss 在场时还订阅 `onLocaleChange` 立即重推。事件波次 / 教学的完成提示（约 2-3 秒）保留双语原文，每次 HUD 刷新时取当前语言。
 - 英文排版：大字公告与简报标题换行，英文剧情标题字号更小，叙事衬线字体拉丁优先（`:lang(zh)` 时回到 CJK 衬线）；打字机停顿用 Unicode 标点类别，中英文句读都会停顿。
 
 ### 角色配音（VoiceSystem）
@@ -484,12 +484,12 @@ if (tmpAxis.lengthSq() > 1e-8) {
 
 ### HUD、雷达与移动端
 
-- HUD 新面板：`updateWeaponPanel`（特殊武器挂架）、`updateFlares`、`showAutosave`、`setCameraMode`、`setBossStatus`（`null` 收起）、`setMissileWarning`、`flashWarning`；自动存档提示与闪烁告警的计时由 `hud.update(dt)` 推进（暂停时冻结）。`showBriefing(BriefingRequest)`、`showAutosave(label?)`、`flashWarning(text, tone)`、`setBossStatus(label, phase?)` 与 `showPowerUp(name, icon, duration)` 接受 `HudText`（见「界面语言」）；道具倒计时逐帧只读缓存好的文字。
+- HUD 新面板：`updateWeaponPanel`（特殊武器挂架）、`updateFlares`、`showAutosave`、`setCameraMode`、`setBossStatus`（`null` 收起）、`setMissileWarning`、`flashWarning`；自动存档提示与闪烁告警的计时由 `hud.update(dt)` 推进（暂停时冻结）。`showBriefing(BriefingRequest)`、`showAutosave(label?)`、`flashWarning(text, tone)`、`setBossStatus(label, phase?)`、`showPowerUp(name, icon, duration)` 与 `showPowerUpBig(icon, name, minDisplayTime?, hideSubtext?, variant?)` 接受 `HudText`（见「界面语言」）；道具倒计时逐帧只读缓存好的文字。`setEnemyCounterMode(mode: HudEnemyCounterMode)`（`'wave' | 'boss'`）：波次中计数为「敌人 n · 剩余 m」（`ENEMIES n · LEFT m`）；Boss 战（Boss 模式或战役 Boss 关，由 `GameCoordinator.updateUI` 设置）只显示在场的敌方「敌人 n」——存活敌机（含 Boss 放出的）加存活敌方单位（含 Boss 无人机），不显示本关波次的「剩余」。
 - HUD 布局：`#hud` 按 `env(safe-area-inset-*)` 内缩，位置与尺寸按 `HudLayoutDensity` 写在 CSS 里（旋转屏幕即重新布局）。右侧状态列 `#hud-status`：波次、生命、导弹、导弹装填与道具计时（竖屏时生命与导弹点并排）；中央消息栈 `#hud-top-stack`：Boss 条、简报、事件目标与竖屏下的存档提示，手机竖屏时是状态带下方的整行，无线电面板经 `<html>` 上的 `--hud-stack-bottom` 跟在栈底；竖屏下简报显示期间、或 Boss 条与事件目标同在栈里时，存档提示暂缓（隐藏、计时暂停），有空间后完整显示。中央大字提示（`showPowerUpBig`）改为锁定圈上方的横幅（横屏手机上在消息栈下方），不挡准星；ENEMIES / LEFT 计数器与驾驶舱信息栏同样的深色底。
 - 雷达：`RadarBlipKind` 新增 `enemy-ground`（红色方块）、`enemy-sea`（红色菱形）、`ally-unit`（金色三角）、`neutral`（灰色空心圆）；`setRangeMultiplier` 由友军预警机驱动；`CombatHudFeed` 用池化对象生成雷达点（20 Hz）与血条快照（含第 6-10 关 Boss 子目标）。
 - 移动端：`index.html` 拇指弧按键簇新增 `#special-button`、`#flare-button`、`#cycle-button`、`#camera-button`；按键文字默认英文（FIRE / MSL / SPEC / FLARE / BOOST / SWAP / VIEW / PAUSE），`main.ts` 按语言改写（中文为 开火 / 导弹 / 特武 / 热焰 / 加速 / 切换 / 视角 / 暂停）；HUD 写入按钮的武器代号、外圈进度（`--tc-meter`）、空弹 / 告警状态（`data-alert`）与视角状态。暂停键（`#upgrade-button`）与其他单击键一样在 `touchstart` 时锁存，直到 `InputHandler.isPauseToggled()` 读取（`resetPauseState()` 清除），低帧率下短于一个模拟步长的轻触也不会丢；桌面 Esc / P 仍取按下沿。
 - 血条：友军 AI 战机的 `mesh.userData.displayName`（僚机呼号）优先于按名称缓存的标签；敌机显示机型，Boss 显示名称，单位显示阵营标签，都按当前语言，切换语言时所有血条立即改名。三种尺寸：Boss 本体 120 × 10 像素（带名称）、Boss 部件 44 × 5 像素（深色底槽）、其他目标 60 × 6 像素（带名称）；视野内的 Boss 部件只有离准星最近的一个显示名称（带滞回：新部件离准星的距离须小于当前焦点的 80% 才切换），部件不再各自产生屏外箭头；名称标签用样式居中，不再逐次测量文字宽度。
-- 模型预览：`ModelPreview` 经 `Record<BossType, loader>` 按需导入每个 Boss 自己的网格工厂（第 6-10 关来自 `MagmaColossusMesh` / `AbyssalLeviathanMesh` / `TempestZeppelinMesh` / `PhantomWingMesh` / `OraclePrimeMesh`），按可见几何（排除隐藏部件与精灵）的包围体取景并同时适配竖直与水平视场，切换模型时逐一释放几何体、材质与实例缓冲（跳过共享资源）。
+- 模型预览：`ModelPreview` 经 `Record<BossType, loader>` 按需导入每个 Boss 自己的网格工厂（第 6-10 关来自 `MagmaColossusMesh` / `AbyssalLeviathanMesh` / `TempestZeppelinMesh` / `PhantomWingMesh` / `OraclePrimeMesh`），把可见几何（排除隐藏部件与精灵）缩放到固定半径的包围球，切换模型时逐一释放几何体、材质与实例缓冲（跳过共享资源）。取景只用名称标签上方的区域：写入名称后（以及改变窗口大小、切换语言时）`frameCamera()` 从 DOM 读取标签上沿，与标签、画布上沿各留 8 像素（区域至少延伸到画布一半高度），相机后退到包围球放得进区域高度（画布更窄时按画布宽度），再用 `setViewOffset` 把投影中心移到区域中心；画布尚未布局时按整个画布取景。名称标签放得下时单行显示（宽度 600 像素以下字号 18 像素）；横屏且高度不超过 520 像素的视口改为左右两栏：画布在左、按钮列在右。
 
 ---
 
@@ -549,13 +549,14 @@ public/voice/                     # 配音包：en/、zh/（<台词 id>.mp3）�
 
 ### 2026-10: 收尾打磨
 
-**主要变更**（`0cd1735..1440f25`，逐项见 `CHANGELOG.md` 的「收尾打磨」）:
+**主要变更**（`0cd1735..f6ce2d3`，逐项见 `CHANGELOG.md` 的「收尾打磨」）:
 
-1. **界面语言** - `HUD.flashWarning` / `setBossStatus` / `showPowerUp` 接受 `HudText` 并在语言切换时原位重绘；`ICampaignPresentation.flashWarning` / `setBossStatus` / `onBossPhaseChange` 与 `IAdvancedBoss.onPhaseChange` / `onHazardWarning` 改传 `HudText`；第 6-10 关 Boss 状态提示在切换语言时立即重推
+1. **界面语言** - `HUD.flashWarning` / `setBossStatus` / `showPowerUp` / `showPowerUpBig` 接受 `HudText` 并在语言切换时原位重绘；`ICampaignPresentation.flashWarning` / `setBossStatus` / `onBossPhaseChange` 与 `IAdvancedBoss.onPhaseChange` / `onHazardWarning` 改传 `HudText`，`SpecialWeaponsDeps.notify` 与 `UnitController` 的告警也传双语原文；第 6-10 关 Boss 状态提示在切换语言时立即重推；中文界面的教学改称「教程」（开始菜单开关、教学目标标题与开场提示）
 2. **Boss 伤害** - 高炮（`FlakCannonSystem` 的 `damage` 参数，基础值 30）与八爪鱼眼睛光弹（`EyeSystem` 的 `damage` 参数、`BossConfig.eyeDamage`，基础值 40）随难度缩放，普通档 15 / 20
 3. **复活** - 净空探测加宽到航线两侧各 24 米、每 3 米一条线；复活后 8 秒内又撞地时首选航向掉头；宽限期撞上竖直结构时水平推出并转离墙面
 4. **僚机** - `getFormationSlotOffset` 成为编队位布局的唯一来源（`EnemySystem.getFriendlySpawnPose` 也读它）
 5. **开发工具** - 脚本飞行员绕开岩壁与立柱；`window.__AIR_SUPREME_DEV__.grantPowerUp(type)`
+6. **HUD 与模型预览** - `HUD.setEnemyCounterMode(mode: HudEnemyCounterMode)`：Boss 战的敌人计数只计在场敌方、不显示波次剩余；`ModelPreview` 在名称标签上方的区域取景（`setViewOffset`），横屏手机改为左右两栏
 
 ### 2026-10: 终验修复（两波）
 

@@ -272,7 +272,8 @@ The start menu also offers **Boss mode** to fight any of the ten bosses directly
 - Radio panel with a portrait glyph for every speaker and a priority queue (urgent warnings interrupt chatter, but not a voiced line); voiced lines stay up until the voice finishes
 - Health bars label jets by type, bosses by name and units by side (hostile / friendly / civilian), in the current language; your wingmen show their callsigns. Boss parts get compact bars, and only the part nearest your reticle shows its name
 - The layout respects the screen's safe areas and keeps the top of the screen free of overlaps on phones in portrait and landscape: a status column on the right (wave, lives, missiles, reload, power-up timer), a centre message stack (boss strip, briefing, event objective) with the radio panel below it; pickup and event callouts appear above the lock ring, never on the reticle
-- Level and boss briefings, the autosave toast, flashing warnings, the boss status strip and power-up timers switch language on the spot if you change it while they are showing
+- The enemy counter reads `ENEMIES n · LEFT m` during the waves; in a boss fight (Boss mode or a campaign boss) it shows only the hostiles actually present, `ENEMIES n` (boss-launched jets and drones plus any hostile units), with no wave count
+- Level and boss briefings, the autosave toast, flashing warnings (unit warnings included), the boss status strip, power-up timers and the centre callouts (pickups, tutorial hints, wave announcements, special-weapon notices and the rest) switch language on the spot if you change it while they are showing
 - On touch devices the weapon, flare, camera and missile state shows on the touch buttons themselves
 
 ### 🛩️ Aircraft Detail
@@ -297,7 +298,8 @@ Wingmen fly the same airframes in an allied livery, and the player's afterburner
 ### Model Preview
 
 - Openable from the start menu: the player jet, the five enemy jets, all ten bosses (each with its own model), the player missile and the boss missile
-- Framing fits the visible geometry to both the width and the height of the view, so big bosses and narrow portrait screens are not cropped
+- Each model is framed in the area above its name label, sized to that area's width and height, so big bosses, long names and narrow portrait screens do not hide part of the model; the name stays on one line when it fits
+- On a phone held in landscape the preview uses two columns: the model on the left, the buttons on the right
 - Assets are prefetched during idle menu time before first open
 
 ## ⚙️ Settings & Language
@@ -393,7 +395,7 @@ npm run test:run  # vitest, single run (npm run test = watch mode)
 
 - The ten-level campaign (story, levels 6–10, bosses 6–10, units, special weapons, camera rig, autosave, hangar, music and VFX overhaul) is integrated, together with the English-first interface and its Chinese option, the new cast and named wingmen, and English / Mandarin voice acting; see `CHANGELOG.md` → *Unreleased*
 - `GameCoordinator`, combat runtime, boss controllers, presentation/UI runtime and the new campaign systems are all on lazy-init paths; voice lines are fetched on demand (the current chapter's lines are prefetched when it starts)
-- The fixes from an independent final audit (respawn safety, hangar checkpoint, radio warning budget, both wingmen, HUD layout on phones, boss previews, balance curve, terrain performance) are merged, followed by a polish pass (live relabelling of warnings and timers, flak and eye-bolt damage by difficulty, respawn wall escape); see `CHANGELOG.md` → *Unreleased* → *终验修复* (audit fixes) and *收尾打磨* (polish)
+- The fixes from an independent final audit (respawn safety, hangar checkpoint, radio warning budget, both wingmen, HUD layout on phones, boss previews, balance curve, terrain performance) are merged, followed by a polish pass (live relabelling of warnings, timers and centre callouts, flak and eye-bolt damage by difficulty, respawn wall escape, a boss-fight enemy counter, Model Preview framing above the name label, 教程 as the Chinese tutorial label); see `CHANGELOG.md` → *Unreleased* → *终验修复* (audit fixes) and *收尾打磨* (polish)
 - Tests live in `src/__tests__`; run `npm run test:run` for the current count and results
 - Known observations: the `vendor-three` chunk-size warning during build
 
