@@ -23,6 +23,8 @@ const PREVIEW_FIT_RADIUS = 3.1;
 const PREVIEW_FRAME_MARGIN = 1.08;
 /** 相机俯视方向（原先固定在 (0, 2, 8)） */
 const PREVIEW_VIEW_DIRECTION = new Vector3(0, 2, 8).normalize();
+/** 取景区与画布上沿、与名称标签之间留的间距（px） */
+const PREVIEW_REGION_PADDING_PX = 8;
 
 interface AircraftMeshFactoryModule {
   createPlayerMesh: () => Group;
@@ -215,6 +217,8 @@ export class ModelPreview {
     const current = this.aircrafts[this.currentIndex];
     if (current && this.currentMesh) {
       this.nameDisplay.textContent = current.name;
+      // 新语言的名称可能改变标签高度：重新取景
+      this.frameCamera();
     }
   }
 
@@ -248,6 +252,19 @@ export class ModelPreview {
           text-shadow: 0 0 15px rgba(143, 228, 255, 0.45);
         }
 
+        .preview-body,
+        .preview-controls {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+        }
+
+        /* 视口不够高时由画布让出高度（与画布直接放在页面列里时一致） */
+        .preview-body {
+          width: 100%;
+          min-height: 0;
+        }
+
         .preview-canvas-container {
           position: relative;
           width: 80%;
@@ -259,11 +276,20 @@ export class ModelPreview {
           box-shadow: var(--hud-shadow, 0 12px 24px rgba(0, 0, 0, 0.28));
         }
 
+        .preview-canvas-container canvas {
+          display: block;
+        }
+
+        /* 名称标签按内容宽度单行显示（放不下才换行）；相机取景只用标签上方的区域 */
         .aircraft-name {
           position: absolute;
           bottom: 20px;
           left: 50%;
           transform: translateX(-50%);
+          width: max-content;
+          max-width: calc(100% - 24px);
+          box-sizing: border-box;
+          text-align: center;
           font-size: 24px;
           font-weight: bold;
           text-shadow: 0 2px 10px rgba(0, 0, 0, 0.8);
@@ -343,18 +369,89 @@ export class ModelPreview {
         .rotate-toggle:hover {
           border-color: var(--hud-sys, #8fe4ff);
         }
+
+        @media (max-width: 600px) {
+          .aircraft-name {
+            bottom: 12px;
+            font-size: 18px;
+            padding: 6px 16px;
+          }
+        }
+
+        /* 横握手机等矮视口：画布在左、按钮列在右，画布占满标题以下的高度 */
+        @media (orientation: landscape) and (max-height: 520px) {
+          #model-preview {
+            justify-content: flex-start;
+            padding: 10px 16px;
+            box-sizing: border-box;
+          }
+
+          .preview-header {
+            font-size: 22px;
+            margin-bottom: 8px;
+          }
+
+          .preview-body {
+            flex: 1 1 auto;
+            min-height: 0;
+            flex-direction: row;
+            align-items: stretch;
+            justify-content: center;
+            gap: 16px;
+          }
+
+          .preview-canvas-container {
+            flex: 1 1 0;
+            width: auto;
+            max-width: 560px;
+            height: auto;
+            min-height: 0;
+          }
+
+          .preview-controls {
+            flex: 0 0 auto;
+            justify-content: center;
+          }
+
+          .nav-controls {
+            margin-top: 0;
+            gap: 12px;
+          }
+
+          .nav-btn {
+            width: 48px;
+            height: 48px;
+            font-size: 22px;
+          }
+
+          .back-btn {
+            margin-top: 16px;
+            padding: 10px 24px;
+            font-size: 16px;
+          }
+
+          .aircraft-name {
+            bottom: 10px;
+            font-size: 18px;
+            padding: 6px 18px;
+          }
+        }
       </style>
 
       <div class="preview-header" id="preview-header"></div>
-      <div class="preview-canvas-container" id="canvas-container"></div>
-      <div class="nav-controls">
-        <button class="nav-btn" id="prev-btn">◀</button>
-        <div class="page-indicator" id="page-indicator">1 / 9</div>
-        <button class="nav-btn" id="next-btn">▶</button>
+      <div class="preview-body">
+        <div class="preview-canvas-container" id="canvas-container"></div>
+        <div class="preview-controls">
+          <div class="nav-controls">
+            <button class="nav-btn" id="prev-btn">◀</button>
+            <div class="page-indicator" id="page-indicator">1 / 9</div>
+            <button class="nav-btn" id="next-btn">▶</button>
+          </div>
+          <button class="rotate-toggle" id="rotate-toggle"></button>
+          <div class="touch-hint" id="preview-touch-hint"></div>
+          <button class="back-btn" id="back-btn"></button>
+        </div>
       </div>
-      <button class="rotate-toggle" id="rotate-toggle"></button>
-      <div class="touch-hint" id="preview-touch-hint"></div>
-      <button class="back-btn" id="back-btn"></button>
     `;
 
     return container;
@@ -526,16 +623,37 @@ export class ModelPreview {
   }
 
   /**
-   * 包围球取景：模型已缩放到半径 PREVIEW_FIT_RADIUS 的包围球，相机沿固定俯视方向后退到
-   * 纵向与横向视场都能容下整个球（竖屏窄画布时横向视场更小，需要退得更远）。
+   * 包围球取景：模型已缩放到半径 PREVIEW_FIT_RADIUS 的包围球（绕中心自转也不出球），相机沿固定
+   * 俯视方向后退到整个球放得进名称标签上方的取景区（横向为整个画布宽）。投影中心用 setViewOffset
+   * 平移到取景区中心（镜头平移，透视方向不变），模型因此完整显示在标签上方。
+   * 画布尚未布局（隐藏 / 无布局的测试环境）时按整个画布取景。
    */
   private frameCamera(): void {
-    const halfVertical = MathUtils.degToRad(this.camera.fov / 2);
-    const aspect =
-      Number.isFinite(this.camera.aspect) && this.camera.aspect > 0 ? this.camera.aspect : 1;
-    const halfHorizontal = Math.atan(Math.tan(halfVertical) * aspect);
-    const halfAngle = Math.min(halfVertical, halfHorizontal);
-    const distance = (PREVIEW_FIT_RADIUS * PREVIEW_FRAME_MARGIN) / Math.sin(halfAngle);
+    const canvasContainer = this.renderer.domElement.parentElement;
+    const width = canvasContainer?.clientWidth ?? 0;
+    const height = canvasContainer?.clientHeight ?? 0;
+    const tanHalfVertical = Math.tan(MathUtils.degToRad(this.camera.fov / 2));
+    // 包围球轮廓半径对应的视角正切
+    let fitTan: number;
+    if (width > 0 && height > 0) {
+      const pad = PREVIEW_REGION_PADDING_PX;
+      // 标签相对画布容器（定位祖先）的上沿；标签未布局时取画布底边。取景区至少留半个画布
+      const labelTop = this.nameDisplay.offsetHeight > 0 ? this.nameDisplay.offsetTop : height;
+      const regionBottom = Math.min(height - pad, Math.max(height * 0.5, labelTop - pad));
+      const regionHeight = Math.max(1, regionBottom - pad);
+      // 取景区中心在画布上半部：虚拟全画幅以它为中心向下延伸到画布底边，画布是其底部子窗口
+      const centerY = (pad + regionBottom) / 2;
+      const fullHeight = 2 * (height - centerY);
+      this.camera.setViewOffset(width, fullHeight, 0, fullHeight - height, width, height);
+      // 视场角覆盖全画幅高度：取景区的半高 / 半宽（像素）按全画幅换算成视角正切
+      fitTan = (Math.min(regionHeight, width) / fullHeight) * tanHalfVertical;
+    } else {
+      this.camera.clearViewOffset();
+      const aspect =
+        Number.isFinite(this.camera.aspect) && this.camera.aspect > 0 ? this.camera.aspect : 1;
+      fitTan = Math.min(1, aspect) * tanHalfVertical;
+    }
+    const distance = (PREVIEW_FIT_RADIUS * PREVIEW_FRAME_MARGIN) / Math.sin(Math.atan(fitTan));
     this.camera.position.copy(PREVIEW_VIEW_DIRECTION).multiplyScalar(distance);
     this.camera.lookAt(0, 0, 0);
     this.camera.updateProjectionMatrix();
@@ -581,9 +699,9 @@ export class ModelPreview {
 
     this.currentMesh = wrapper;
     this.scene.add(wrapper);
-    this.frameCamera();
-
+    // 先写名称再取景：取景区按标签（可能换行）的实际高度计算
     this.nameDisplay.textContent = aircraft.name;
+    this.frameCamera();
   }
 
   private disposeCurrentMesh(): void {
