@@ -38,6 +38,10 @@ const TXT_CHARGED: LocalizedText = { en: 'Charged · release', zh: '蓄满，松
 const TXT_CHARGE: LocalizedText = { en: 'Charge', zh: '蓄能' };
 const TXT_RELOAD: LocalizedText = { en: 'Reload', zh: '装填' };
 const TXT_RECHARGING: LocalizedText = { en: 'Recharging', zh: '充能中' };
+const TXT_MISSION_FAILED: LocalizedText = { en: 'MISSION FAILED', zh: '任务失败' };
+const TXT_MISSION_COMPLETE: LocalizedText = { en: 'MISSION COMPLETE', zh: '任务完成' };
+const TXT_PLAY_AGAIN: LocalizedText = { en: 'Play Again', zh: '再来一局' };
+const TXT_MAIN_MENU: LocalizedText = { en: 'Main Menu', zh: '返回菜单' };
 const TXT_COOLDOWN: LocalizedText = { en: 'Cooling down', zh: '冷却中' };
 const TXT_HOLD_F_BEAM: LocalizedText = { en: 'Hold F to fire', zh: '按住 F 照射' };
 const TXT_HOLD_BEAM: LocalizedText = { en: 'Hold to fire', zh: '按住照射' };
@@ -259,6 +263,8 @@ export class HUD {
   private lastUpgradePoints: number = 0;
   private lastWeaponState: HudWeaponPanelState | null = null;
   private finalScoreValue: number | null = null;
+  /** 结算面板当前是失败还是通关（语言切换时重写标题） */
+  private settlementKind: 'failed' | 'complete' = 'failed';
   private retryButton!: HTMLButtonElement;
   private exitButton!: HTMLButtonElement;
   private flareLabelText: Text | null = null;
@@ -758,7 +764,7 @@ export class HUD {
       margin-bottom: 30px;
       animation: pulse 1s ease-in-out infinite;
     `;
-    this.setTextContent(this.gameOverTitle, 'MISSION FAILED');
+    this.setTextContent(this.gameOverTitle, tr(TXT_MISSION_FAILED));
 
     this.finalScoreDisplay = document.createElement('div');
     this.finalScoreDisplay.id = 'final-score';
@@ -895,6 +901,9 @@ export class HUD {
     window.addEventListener('resize', this.resizeHandler);
     window.addEventListener('orientationchange', this.resizeHandler);
     this.unsubscribeLocale ??= onLocaleChange(() => this.refreshLocaleText());
+    // HUD 在开始菜单阶段就已创建：之后（init 之前）切换过语言时，结算文案按当前语言补写
+    this.renderSettlementTitle();
+    this.renderSettlementLabels();
     this.applyLayoutDensity();
     this.initialized = true;
   }
@@ -909,6 +918,7 @@ export class HUD {
     this.renderSpeed();
     this.renderWaveLine();
     this.renderUpgradePoints();
+    this.renderSettlementTitle();
     this.renderSettlementLabels();
     this.renderFinalScore();
     if (this.lastWeaponState && this.weaponPanelVisible) {
@@ -951,8 +961,21 @@ export class HUD {
   }
 
   private renderSettlementLabels(): void {
-    this.retryButton.textContent = tr({ en: 'Play Again', zh: '再来一局' });
-    this.exitButton.textContent = tr({ en: 'Main Menu', zh: '返回菜单' });
+    const retry = tr(TXT_PLAY_AGAIN);
+    const exit = tr(TXT_MAIN_MENU);
+    if (this.retryButton.textContent !== retry) {
+      this.retryButton.textContent = retry;
+    }
+    if (this.exitButton.textContent !== exit) {
+      this.exitButton.textContent = exit;
+    }
+  }
+
+  private renderSettlementTitle(): void {
+    this.setTextContent(
+      this.gameOverTitle,
+      tr(this.settlementKind === 'complete' ? TXT_MISSION_COMPLETE : TXT_MISSION_FAILED)
+    );
   }
 
   private renderFinalScore(): void {
@@ -2847,7 +2870,9 @@ export class HUD {
     this.hidePowerUpBig();
     this.hideRespawnOverlay();
     this.hideBriefingWithoutFlush();
-    this.setTextContent(this.gameOverTitle, 'MISSION FAILED');
+    this.settlementKind = 'failed';
+    this.renderSettlementTitle();
+    this.renderSettlementLabels();
     this.setStyleValue(this.gameOverTitle, 'color', '#ff3333');
     this.setStyleValue(
       this.gameOverTitle,
@@ -2872,7 +2897,9 @@ export class HUD {
     this.hidePowerUpBig();
     this.hideRespawnOverlay();
     this.hideBriefingWithoutFlush();
-    this.setTextContent(this.gameOverTitle, 'MISSION COMPLETE');
+    this.settlementKind = 'complete';
+    this.renderSettlementTitle();
+    this.renderSettlementLabels();
     this.setStyleValue(this.gameOverTitle, 'color', '#66ffcc');
     this.setStyleValue(
       this.gameOverTitle,

@@ -4,7 +4,7 @@ import { Faction } from '@/core/Faction';
 import { BOSS_CONFIGS, BossType, getBossForLevel } from '@/features/boss/BossTypes';
 import { getCampaignChapter } from '@/features/campaign/CampaignData';
 import { ENEMY_CONFIGS, EnemyType } from '@/features/enemy/EnemyTypes';
-import { getLocale, tr, type Locale, type LocalizedText } from '@/i18n';
+import { getLocale, onLocaleChange, tr, type Locale, type LocalizedText } from '@/i18n';
 import { OffscreenChevron } from '@/ui/OffscreenChevron';
 import { HUD_COLORS } from '@/ui/theme/hudTokens';
 
@@ -51,7 +51,10 @@ function buildBossLabels(): ReadonlyMap<string, string> {
   for (const type of Object.values(BossType)) {
     const key = `BOSS_${type}`;
     if (!labels.has(key)) {
-      labels.set(key, tr(BOSS_CONFIGS[type].name).replace(/\s*Boss$/i, '') || tr(FALLBACK_ENEMY_LABEL));
+      labels.set(
+        key,
+        tr(BOSS_CONFIGS[type].name).replace(/\s*Boss$/i, '') || tr(FALLBACK_ENEMY_LABEL)
+      );
     }
   }
   return labels;
@@ -141,8 +144,15 @@ export class EnemyHealthBars {
       lastHealthPercent: number;
       /** null：上一帧因坐标 / 距离非有限而隐藏，下一帧强制刷新 */
       wasInView: boolean | null;
+      /** 换语言后名字还没重写（下一次更新即使什么都没动也重写） */
+      labelDirty: boolean;
+      /** 目标网格与阵营（换语言时立即重算名字，暂停中也生效） */
+      mesh: Object3D;
+      isFriendly: boolean;
+      barWidth: number;
     }
   > = new Map();
+  private unsubscribeLocale: (() => void) | null = null;
   /** 网格名 → 血条标签（敌方 / 友军分开缓存；缓存属于 labelLocale，换语言时清空） */
   private readonly enemyLabelCache = new Map<string, string>();
   private readonly friendlyLabelCache = new Map<string, string>();
@@ -179,6 +189,8 @@ export class EnemyHealthBars {
     }
 
     document.body.appendChild(this.container);
+    // 切换语言立即重写现有血条的名字（暂停时游戏不调用 update，也要换）
+    this.unsubscribeLocale ??= onLocaleChange(() => this.relabelAll());
     this.initialized = true;
   }
 
@@ -262,6 +274,28 @@ export class EnemyHealthBars {
     this.friendlyLabelCache.clear();
     for (const barData of this.healthBars.values()) {
       barData.lastHealthPercent = Number.NaN;
+      barData.labelDirty = true;
+    }
+  }
+
+  /** 语言切换：清空标签缓存并立即按新语言重写每个血条的名字 */
+  private relabelAll(): void {
+    this.syncLabelLocale();
+    for (const barData of this.healthBars.values()) {
+      this.writeTargetName(barData, this.getTargetName(barData.mesh, barData.isFriendly));
+      barData.labelDirty = false;
+    }
+  }
+
+  /** 写名字；文字变了时重新居中 */
+  private writeTargetName(
+    barData: { targetName: HTMLSpanElement; barWidth: number },
+    name: string
+  ): void {
+    if (this.setTextContent(barData.targetName, name)) {
+      const textWidth = barData.targetName.offsetWidth;
+      const centeredLeft = (barData.barWidth - textWidth) / 2;
+      this.setStyleValue(barData.targetName, 'left', `${centeredLeft}px`);
     }
   }
 
@@ -359,9 +393,15 @@ export class EnemyHealthBars {
         lastBarWorldPosition: this.barWorldPosition.clone(),
         lastHealthPercent: Number.NaN,
         wasInView: false,
+        labelDirty: false,
+        mesh: enemy.mesh,
+        isFriendly,
+        barWidth,
       };
       this.healthBars.set(id, barData);
     }
+    barData.mesh = enemy.mesh;
+    barData.isFriendly = isFriendly;
 
     const healthPercent = enemy.currentHealth / enemy.maxHealth;
     const targetMoved =
@@ -395,9 +435,17 @@ export class EnemyHealthBars {
     const needsArrowUpdate =
       !inView && (visibilityChanged || cameraMoved || targetMoved || playerMoved);
 
-    if (!needsHealthUpdate && !needsPositionUpdate && !needsArrowUpdate && !visibilityChanged) {
+    if (
+      !needsHealthUpdate &&
+      !needsPositionUpdate &&
+      !needsArrowUpdate &&
+      !visibilityChanged &&
+      !barData.labelDirty
+    ) {
       return;
     }
+    // 不在视野内的血条名字不可见：进入视野时（visibilityChanged）会按当前语言重写
+    barData.labelDirty = false;
 
     const color = this.getHealthColor(healthPercent);
     let distanceHidden = false;
@@ -422,12 +470,7 @@ export class EnemyHealthBars {
         this.setStyleValue(barData.background, 'width', `${barWidth * healthPercent}px`);
       }
 
-      const targetName = this.getTargetName(enemy.mesh, isFriendly);
-      if (this.setTextContent(barData.targetName, targetName)) {
-        const textWidth = barData.targetName.offsetWidth;
-        const centeredLeft = (barWidth - textWidth) / 2;
-        this.setStyleValue(barData.targetName, 'left', `${centeredLeft}px`);
-      }
+      this.writeTargetName(barData, this.getTargetName(enemy.mesh, isFriendly));
     } else {
       this.setStyleValue(barData.bar, 'display', 'none');
       if (barData.chevron) {
@@ -736,6 +779,8 @@ export class EnemyHealthBars {
   }
 
   public dispose(): void {
+    this.unsubscribeLocale?.();
+    this.unsubscribeLocale = null;
     this.clear();
     if (this.container.parentElement) {
       this.container.remove();

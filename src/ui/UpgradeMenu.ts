@@ -76,7 +76,7 @@ export class UpgradeMenu {
   private lastShowOptions: UpgradeMenuShowOptions = {};
   private readonly unsubscribeLocale: () => void;
 
-  private static readonly PAUSE_TITLE = '⚙️ Upgrades';
+  private static readonly PAUSE_TITLE: LocalizedText = { en: '⚙️ Upgrades', zh: '⚙️ 升级' };
   private static readonly HANGAR_TITLE: LocalizedText = { en: 'Refit & Rearm', zh: '机库整备' };
 
   /** 卡片短代号（航电风格，不用 emoji） */
@@ -250,7 +250,7 @@ export class UpgradeMenu {
     const subtitle = options.subtitle ?? (hangar ? this.getDefaultHangarSubtitle() : '');
     if (this.titleDisplay) {
       this.titleDisplay.textContent =
-        options.title ?? (hangar ? tr(UpgradeMenu.HANGAR_TITLE) : UpgradeMenu.PAUSE_TITLE);
+        options.title ?? tr(hangar ? UpgradeMenu.HANGAR_TITLE : UpgradeMenu.PAUSE_TITLE);
     }
     if (this.subtitleDisplay) {
       this.subtitleDisplay.textContent = subtitle;
@@ -793,7 +793,7 @@ export class UpgradeMenu {
 
     this.titleDisplay = document.createElement('div');
     this.titleDisplay.className = 'upgrade-title';
-    this.titleDisplay.textContent = UpgradeMenu.PAUSE_TITLE;
+    this.titleDisplay.textContent = tr(UpgradeMenu.PAUSE_TITLE);
 
     this.subtitleDisplay = document.createElement('div');
     this.subtitleDisplay.className = 'upgrade-subtitle';
