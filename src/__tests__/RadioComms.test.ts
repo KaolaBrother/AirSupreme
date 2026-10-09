@@ -5,19 +5,26 @@ import {
   type CampaignSpeakerId,
   type RadioLine,
 } from '@/features/campaign/CampaignData';
+import { setLocale, type LocalizedText } from '@/i18n';
 import { RadioComms } from '@/ui/RadioComms';
+import { LOCALES, resetLocale, textIn } from './i18nTestUtils';
 
 /**
  * api-spec §9 RadioComms + integration-notes「Story UI + HUD」：
  * 说话人由 CAMPAIGN_SPEAKERS 解析；空闲时立即显示（同步 onLineShown）；普通台词先进先出；
  * 高优先级立即打断，被打断的台词重播；高优先级之间按序排在普通台词前；重复文本忽略；
  * 等待队列上限 6；计时只由 update(dt) 驱动；isBusy / clear / dispose。
+ * 台词与呼号按当前界面语言显示（英文默认）。
  */
 
 const SPEAKER_IDS = Object.keys(CAMPAIGN_SPEAKERS) as CampaignSpeakerId[];
+let lineCount = 0;
 
-function line(text: string, speaker: CampaignSpeakerId = 'hq'): RadioLine {
-  return { trigger: 'wave-start', speaker, text };
+/** 测试台词：两种语言同一文本（队列逻辑与语言无关），或传入独立的中文 */
+function line(text: string, speaker: CampaignSpeakerId = 'hq', zh: string = text): RadioLine {
+  lineCount += 1;
+  const localized: LocalizedText = { en: text, zh };
+  return { id: `test-line-${lineCount}`, trigger: 'wave-start', speaker, text: localized };
 }
 
 function panel(): HTMLElement | null {
@@ -55,33 +62,57 @@ describe('RadioComms (§9)', () => {
 
   afterEach(() => {
     radio.dispose();
+    resetLocale();
     document.body.innerHTML = '';
     vi.useRealTimers();
     vi.restoreAllMocks();
   });
 
   it('shows a line immediately when idle and reports it synchronously', () => {
-    const first = line('猎鹰，起飞许可已下达。');
+    const first = line('Falcon, you are cleared for takeoff.', 'hq', '猎鹰，起飞许可已下达。');
     expect(radio.isBusy()).toBe(false);
     radio.enqueue(first);
     expect(shown).toEqual([first]);
     expect(shown[0]).toBe(first);
     expect(radio.isBusy()).toBe(true);
     expect(panelShown()).toBe(true);
-    expect(panelText()).toContain(CAMPAIGN_SPEAKERS.hq.callsign);
-    expect(panelText()).toContain(first.text);
+    expect(panelText()).toContain(CAMPAIGN_SPEAKERS.hq.callsign.en);
+    expect(panelText()).toContain(first.text.en);
+  });
+
+  it.each(LOCALES)('shows the callsign and line in the interface language (%s)', (locale) => {
+    setLocale(locale);
+    const first = line(
+      'Falcon, you are cleared for takeoff.',
+      'wingman2',
+      '猎鹰，起飞许可已下达。'
+    );
+    radio.enqueue(first);
+    expect(panelText()).toContain(textIn(CAMPAIGN_SPEAKERS.wingman2.callsign, locale));
+    expect(panelText()).toContain(textIn(first.text, locale));
+    const other = locale === 'en' ? first.text.zh : first.text.en;
+    expect(panelText()).not.toContain(other);
   });
 
   it.each(SPEAKER_IDS)('resolves the %s speaker through CAMPAIGN_SPEAKERS', (speaker) => {
+    radio.enqueue(line(`Test line: ${speaker}`, speaker));
+    expect(panelText()).toContain(CAMPAIGN_SPEAKERS[speaker].callsign.en);
+    radio.clear();
+    setLocale('zh-CN');
     radio.enqueue(line(`测试台词：${speaker}`, speaker));
-    expect(panelText()).toContain(CAMPAIGN_SPEAKERS[speaker].callsign);
+    expect(panelText()).toContain(CAMPAIGN_SPEAKERS[speaker].callsign.zh);
   });
 
   it('still shows a line from an unknown speaker id', () => {
-    const odd = { trigger: 'wave-start', speaker: 'ghost', text: '未知频道的信号。' };
+    const odd = {
+      id: 'test-ghost',
+      trigger: 'wave-start',
+      speaker: 'ghost',
+      text: { en: 'Signal on an unknown channel.', zh: '未知频道的信号。' },
+    };
     expect(() => radio.enqueue(odd as unknown as RadioLine)).not.toThrow();
     expect(shown).toHaveLength(1);
-    expect(panelText()).toContain('未知频道的信号。');
+    expect(panelText()).toContain('Signal on an unknown channel.');
   });
 
   it('plays normal lines first-in first-out', () => {
@@ -132,7 +163,7 @@ describe('RadioComms (§9)', () => {
     radio.update(0.1);
     radio.enqueue(urgent, { priority: 'high' });
     expect(shown).toEqual([normal, urgent]);
-    expect(panelText()).toContain(urgent.text);
+    expect(panelText()).toContain(urgent.text.en);
     drain(radio);
     expect(shown).toEqual([normal, urgent, normal]);
   });

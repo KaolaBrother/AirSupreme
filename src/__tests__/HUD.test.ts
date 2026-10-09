@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { GAME_CONSTANTS, GameConfig } from '@/config';
+import { format, getLocale, setLocale, type Locale, type LocalizedText } from '@/i18n';
 import { HUD } from '@/ui/HUD';
 import { HUD_COLORS } from '@/ui/theme/hudTokens';
+import { LOCALES, resetLocale, textIn } from './i18nTestUtils';
 
 type SettlementActions = {
   onRetry: () => void;
@@ -34,11 +36,7 @@ type HUDSettlement = HUD & {
   setSettlementActions: (actions: SettlementActions) => void;
 };
 
-const LAYOUT_DENSITIES: LayoutDensity[] = [
-  'desktop',
-  'touch-landscape',
-  'touch-portrait',
-];
+const LAYOUT_DENSITIES: LayoutDensity[] = ['desktop', 'touch-landscape', 'touch-portrait'];
 
 const FORBIDDEN_LIFE_GLYPHS = /❤️|🖤|♥|❤/u;
 const FORBIDDEN_MISSILE_GLYPHS = /🚀|⬜/u;
@@ -127,6 +125,20 @@ const BOSS_BRIEFINGS: BriefingRequest[] = [
 
 const LIFE_OVERLAY_COPY = /LIFE\s*×\s*(\d+)/u;
 const BRIEFING_MAX_WIDTH = /min\(\s*80vw\s*,\s*420px\s*\)/;
+
+/** HUD 自有文案：英文默认，可切换简体中文 */
+const SCORE_LABEL: LocalizedText = { en: 'SCORE', zh: '得分' };
+const RETRY_LABEL: LocalizedText = { en: 'Play Again', zh: '再来一局' };
+const EXIT_LABEL: LocalizedText = { en: 'Main Menu', zh: '返回菜单' };
+const FINAL_SCORE_COPY: LocalizedText = { en: 'Final score: {score}', zh: '最终得分: {score}' };
+
+function finalScoreText(score: number, locale: Locale): string {
+  return format(textIn(FINAL_SCORE_COPY, locale), { score });
+}
+
+function otherLocale(locale: Locale): Locale {
+  return locale === 'en' ? 'zh-CN' : 'en';
+}
 
 function settlementHud(hud: HUD): HUDSettlement {
   return hud as HUDSettlement;
@@ -315,8 +327,9 @@ function currentPipHost(namedSelector: string, fallback: HTMLElement): HTMLEleme
 }
 
 function findCabinPanel(): HTMLElement {
+  const label = textIn(SCORE_LABEL, getLocale());
   const score = Array.from(document.querySelectorAll('#hud div')).find((element) =>
-    (element.textContent ?? '').startsWith('得分')
+    (element.textContent ?? '').startsWith(label)
   );
   expect(score, 'expected the score cabin readout').toBeTruthy();
 
@@ -449,8 +462,7 @@ function briefingToneMarker(host: HTMLElement): string {
 
   const inline = collectOwnChrome(host);
   const threatHit =
-    inline.toLowerCase().includes(HUD_COLORS.threat.toLowerCase()) ||
-    /--hud-threat/.test(inline);
+    inline.toLowerCase().includes(HUD_COLORS.threat.toLowerCase()) || /--hud-threat/.test(inline);
   const sysHit =
     inline.toLowerCase().includes(HUD_COLORS.sys.toLowerCase()) || /--hud-sys/.test(inline);
   if (threatHit && !sysHit) {
@@ -590,6 +602,7 @@ describe('HUD', () => {
   afterEach(() => {
     vi.useRealTimers();
     hud.dispose();
+    resetLocale();
     GameConfig.isMobile = originalIsMobile;
     Object.defineProperty(window, 'innerWidth', {
       configurable: true,
@@ -673,11 +686,29 @@ describe('HUD', () => {
     instance.dispose();
   });
 
+  it('labels the score readout in the interface language and re-words it live', () => {
+    hud.updateScore(1234);
+    const readout = (): string => {
+      const leaf = Array.from(document.querySelectorAll<HTMLElement>('#hud *')).find(
+        (element) =>
+          element.childElementCount === 0 && (element.textContent ?? '').endsWith('001234')
+      );
+      expect(leaf, 'expected the score readout').toBeTruthy();
+      return leaf?.textContent ?? '';
+    };
+
+    expect(readout()).toBe('SCORE 001234');
+    setLocale('zh-CN');
+    expect(readout()).toBe('得分 001234');
+    setLocale('en');
+    expect(readout()).toBe('SCORE 001234');
+  });
+
   it('shows mission completion without reusing the game over title', () => {
     hud.showMissionComplete(20000);
 
     expect(document.getElementById('game-over-title')?.textContent).toBe('MISSION COMPLETE');
-    expect(document.getElementById('final-score')?.textContent).toBe('最终得分: 20000');
+    expect(document.getElementById('final-score')?.textContent).toBe('Final score: 20000');
 
     hud.hideGameOver();
     hud.showGameOver(0);
@@ -691,18 +722,79 @@ describe('HUD', () => {
     const title = document.getElementById('game-over-title')?.textContent ?? '';
     expect(title).toBe('MISSION FAILED');
     expect(title).not.toContain('GAME OVER');
-    expect(document.getElementById('final-score')?.textContent).toBe('最终得分: 900');
+    expect(document.getElementById('final-score')?.textContent).toBe('Final score: 900');
   });
 
-  it('wires 再来一局 and 返回菜单 to HUD settlement callbacks', () => {
+  function expectSettlementIn(locale: Locale, score: number): void {
+    expect(document.getElementById('final-score')?.textContent).toBe(finalScoreText(score, locale));
+    findLabeledButton(textIn(RETRY_LABEL, locale));
+    findLabeledButton(textIn(EXIT_LABEL, locale));
+
+    const other = otherLocale(locale);
+    const labels = Array.from(document.querySelectorAll('button')).map(
+      (button) => button.textContent ?? ''
+    );
+    expect(labels).not.toContain(textIn(RETRY_LABEL, other));
+    expect(labels).not.toContain(textIn(EXIT_LABEL, other));
+  }
+
+  it.each(LOCALES)('words the settlement panel in the interface language (%s)', (locale) => {
+    // 启动时先应用已保存的语言，再创建 HUD
+    setLocale(locale);
+    hud.dispose();
+    hud = new HUD();
+    settlementHud(hud).setSettlementActions({ onRetry: vi.fn(), onExitToMenu: vi.fn() });
+    hud.showGameOver(900);
+
+    expectSettlementIn(locale, 900);
+  });
+
+  /**
+   * 运行时顺序：开始菜单显示时 HUD 已创建（PresentationRuntimeLoader），init() 要等点了
+   * 开始游戏（GameCoordinator.startInternal → initializeCombatUi）。玩家在开始菜单里切换
+   * 语言后，结算面板应当使用新语言。
+   * 实现：结算按钮文案只在构造函数里渲染一次，onLocaleChange 订阅要到 init() 才建立，
+   * init() 不会补渲染 → 按钮仍是构造时的语言（与最终得分一行的语言不一致）。
+   */
+  it.fails('keeps the settlement panel in a language picked before the HUD is initialised', () => {
+    setLocale('zh-CN');
+    settlementHud(hud).setSettlementActions({ onRetry: vi.fn(), onExitToMenu: vi.fn() });
+    hud.showGameOver(900);
+
+    expectSettlementIn('zh-CN', 900);
+  });
+
+  it('re-words an open settlement panel when the language changes', () => {
+    const onRetry = vi.fn();
+    const onExitToMenu = vi.fn();
+    settlementHud(hud).setSettlementActions({ onRetry, onExitToMenu });
+    hud.showMissionComplete(20000);
+    expect(document.getElementById('final-score')?.textContent).toBe('Final score: 20000');
+
+    setLocale('zh-CN');
+    expect(document.getElementById('final-score')?.textContent).toBe(
+      finalScoreText(20000, 'zh-CN')
+    );
+    findLabeledButton(RETRY_LABEL.zh).click();
+    findLabeledButton(EXIT_LABEL.zh).click();
+    expect(onRetry).toHaveBeenCalledTimes(1);
+    expect(onExitToMenu).toHaveBeenCalledTimes(1);
+
+    setLocale('en');
+    expect(document.getElementById('final-score')?.textContent).toBe('Final score: 20000');
+    findLabeledButton(RETRY_LABEL.en);
+    findLabeledButton(EXIT_LABEL.en);
+  });
+
+  it('wires Play Again and Main Menu to HUD settlement callbacks', () => {
     const onRetry = vi.fn();
     const onExitToMenu = vi.fn();
     expect(typeof settlementHud(hud).setSettlementActions).toBe('function');
     settlementHud(hud).setSettlementActions({ onRetry, onExitToMenu });
 
     hud.showGameOver(12);
-    const retry = findLabeledButton('再来一局');
-    const exitToMenu = findLabeledButton('返回菜单');
+    const retry = findLabeledButton(RETRY_LABEL.en);
+    const exitToMenu = findLabeledButton(EXIT_LABEL.en);
     assertClickableTouchButton(retry);
     assertClickableTouchButton(exitToMenu);
 
@@ -723,8 +815,8 @@ describe('HUD', () => {
     hud.showMissionComplete(20000);
 
     expect(document.getElementById('game-over-title')?.textContent).toBe('MISSION COMPLETE');
-    findLabeledButton('再来一局').click();
-    findLabeledButton('返回菜单').click();
+    findLabeledButton(RETRY_LABEL.en).click();
+    findLabeledButton(EXIT_LABEL.en).click();
 
     expect(onRetry).toHaveBeenCalledTimes(1);
     expect(onExitToMenu).toHaveBeenCalledTimes(1);
@@ -737,8 +829,8 @@ describe('HUD', () => {
     });
     hud.showGameOver(0);
 
-    const retry = findLabeledButton('再来一局');
-    const exitToMenu = findLabeledButton('返回菜单');
+    const retry = findLabeledButton(RETRY_LABEL.en);
+    const exitToMenu = findLabeledButton(EXIT_LABEL.en);
     assertClickableTouchButton(retry);
     assertClickableTouchButton(exitToMenu);
 

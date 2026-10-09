@@ -6,17 +6,23 @@ import {
   getCampaignChapter,
   type CampaignChapter,
 } from '@/features/campaign/CampaignData';
+import { setLocale, type Locale } from '@/i18n';
 import { StoryOverlay, type DebriefData } from '@/ui/StoryOverlay';
+import { LOCALES, resetLocale, textIn } from './i18nTestUtils';
 
 /**
  * api-spec §9 StoryOverlay + integration-notes「Story UI + HUD」：
  * 序章只在 includePrologue 时出现；解锁台词只在传入 unlockLine 时出现；打字机 onTypeTick；
  * skip()/Esc/跳过 结束整段并只回调一次；hide() 与新的 show* 静默取消；结算只在「继续」后回调；
  * 结局 = 尾声 + 片尾字幕（文本来自 CampaignData）；dispose 清理 DOM / 监听 / 定时器。
+ * 卡片按显示时的界面语言渲染（英文默认，中文可切换）。
  * 全程使用 fake timers（覆盖层由自身定时器驱动）；只断言 DOM 文本与状态，不看像素。
  */
 
 type CardKind = 'chapter' | 'debrief' | 'ending';
+
+const SKIP_LABEL = { en: 'Skip', zh: '跳过' };
+const CONTINUE_LABEL = { en: 'Continue', zh: '继续' };
 
 const CHAPTER_ONE = getCampaignChapter(1);
 const CHAPTER_TWO = getCampaignChapter(2);
@@ -89,6 +95,7 @@ describe('StoryOverlay (§9)', () => {
 
   afterEach(() => {
     overlay.dispose();
+    resetLocale();
     vi.useRealTimers();
     document.body.innerHTML = '';
     document.documentElement.removeAttribute('data-story-overlay');
@@ -96,24 +103,33 @@ describe('StoryOverlay (§9)', () => {
   });
 
   describe('chapter intro', () => {
-    it('shows the chapter card once as a "chapter" card and marks the page', () => {
-      const done = vi.fn();
-      expect(overlay.isActive()).toBe(false);
+    it.each(LOCALES)(
+      'shows the chapter card once as a "chapter" card and marks the page (%s)',
+      (locale: Locale) => {
+        setLocale(locale);
+        const done = vi.fn();
+        expect(overlay.isActive()).toBe(false);
 
-      overlay.showChapterIntro(CHAPTER_THREE, done);
+        overlay.showChapterIntro(CHAPTER_THREE, done);
 
-      expect(overlay.isActive()).toBe(true);
-      expect(isOverlayShown()).toBe(true);
-      expect(document.documentElement.hasAttribute('data-story-overlay')).toBe(true);
-      expect(cards).toEqual(['chapter']);
-      pressSpace();
-      const text = overlayText();
-      expect(text).toContain(CHAPTER_THREE.title);
-      expect(text).toContain(CHAPTER_THREE.chapterLabel);
-      expect(text).toContain(CHAPTER_THREE.intro[0]);
-      expect(text).not.toContain(CAMPAIGN_PROLOGUE[0]);
-      expect(done).not.toHaveBeenCalled();
-    });
+        expect(overlay.isActive()).toBe(true);
+        expect(isOverlayShown()).toBe(true);
+        expect(document.documentElement.hasAttribute('data-story-overlay')).toBe(true);
+        expect(cards).toEqual(['chapter']);
+        pressSpace();
+        const text = overlayText();
+        expect(text).toContain(textIn(CHAPTER_THREE.title, locale));
+        expect(text).toContain(textIn(CHAPTER_THREE.chapterLabel, locale));
+        expect(text).toContain(textIn(CHAPTER_THREE.intro[0], locale));
+        expect(text).toContain(textIn(CHAPTER_THREE.objectives[0], locale));
+        expect(text).not.toContain(textIn(CAMPAIGN_PROLOGUE[0], locale));
+        const other: Locale = locale === 'en' ? 'zh-CN' : 'en';
+        expect(text, 'no text from the other language').not.toContain(
+          textIn(CHAPTER_THREE.intro[0], other)
+        );
+        expect(done).not.toHaveBeenCalled();
+      }
+    );
 
     it('never shows the prologue without includePrologue', () => {
       const done = vi.fn();
@@ -125,47 +141,57 @@ describe('StoryOverlay (§9)', () => {
       }
       expect(done).toHaveBeenCalledTimes(1);
       expect(cards).toEqual(['chapter']);
-      expect(seen.some((text) => text.includes(CAMPAIGN_PROLOGUE[0]))).toBe(false);
+      expect(seen.some((text) => text.includes(CAMPAIGN_PROLOGUE[0].en))).toBe(false);
     });
 
-    it('plays the prologue before the chapter card with includePrologue', () => {
-      const done = vi.fn();
-      overlay.showChapterIntro(CHAPTER_ONE, done, { includePrologue: true });
+    it.each(LOCALES)(
+      'plays the prologue before the chapter card with includePrologue (%s)',
+      (locale: Locale) => {
+        setLocale(locale);
+        const done = vi.fn();
+        overlay.showChapterIntro(CHAPTER_ONE, done, { includePrologue: true });
 
-      pressSpace();
-      const prologue = overlayText();
-      for (const line of CAMPAIGN_PROLOGUE) {
-        expect(prologue).toContain(line);
+        pressSpace();
+        const prologue = overlayText();
+        for (const line of CAMPAIGN_PROLOGUE) {
+          expect(prologue).toContain(textIn(line, locale));
+        }
+        expect(cards).toEqual(['chapter']);
+
+        pressSpace();
+        expect(cards).toEqual(['chapter', 'chapter']);
+        pressSpace();
+        expect(overlayText()).toContain(textIn(CHAPTER_ONE.title, locale));
+        expect(overlayText()).toContain(textIn(CHAPTER_ONE.intro[0], locale));
+        expect(done).not.toHaveBeenCalled();
+
+        pressSpace();
+        expect(done).toHaveBeenCalledTimes(1);
+        expect(overlay.isActive()).toBe(false);
       }
-      expect(cards).toEqual(['chapter']);
-
-      pressSpace();
-      expect(cards).toEqual(['chapter', 'chapter']);
-      pressSpace();
-      expect(overlayText()).toContain(CHAPTER_ONE.title);
-      expect(overlayText()).toContain(CHAPTER_ONE.intro[0]);
-      expect(done).not.toHaveBeenCalled();
-
-      pressSpace();
-      expect(done).toHaveBeenCalledTimes(1);
-      expect(overlay.isActive()).toBe(false);
-    });
+    );
 
     it('shows an unlock line only when one is passed', () => {
       const unlock = CHAPTER_TWO.unlockLine;
       expect(unlock, 'chapter 2 carries an unlock line').toBeTruthy();
+      const unlockEn = unlock?.en ?? '';
 
       overlay.showChapterIntro(CHAPTER_TWO, vi.fn());
       pressSpace();
-      expect(overlayText()).not.toContain(unlock as string);
+      expect(overlayText()).not.toContain(unlockEn);
 
       overlay.showChapterIntro(CHAPTER_TWO, vi.fn(), { unlockLine: null });
       pressSpace();
-      expect(overlayText()).not.toContain(unlock as string);
+      expect(overlayText()).not.toContain(unlockEn);
 
-      overlay.showChapterIntro(CHAPTER_TWO, vi.fn(), { unlockLine: unlock });
+      overlay.showChapterIntro(CHAPTER_TWO, vi.fn(), { unlockLine: unlockEn });
       pressSpace();
-      expect(overlayText()).toContain(unlock as string);
+      expect(overlayText()).toContain(unlockEn);
+
+      setLocale('zh-CN');
+      overlay.showChapterIntro(CHAPTER_TWO, vi.fn(), { unlockLine: unlock?.zh ?? '' });
+      pressSpace();
+      expect(overlayText()).toContain(unlock?.zh ?? '');
 
       overlay.showChapterIntro(CHAPTER_THREE, vi.fn(), { unlockLine: '测试专用解锁台词' });
       pressSpace();
@@ -177,7 +203,7 @@ describe('StoryOverlay (§9)', () => {
       overlay.onTypeTick = tick;
       overlay.showChapterIntro(CHAPTER_THREE, vi.fn());
 
-      const firstParagraph = CHAPTER_THREE.intro[0];
+      const firstParagraph = CHAPTER_THREE.intro[0].en;
       expect(overlayText()).not.toContain(firstParagraph);
       expect(tick).not.toHaveBeenCalled();
       const startLength = overlayText().length;
@@ -231,16 +257,20 @@ describe('StoryOverlay (§9)', () => {
       expect(cards).toEqual(['chapter']);
     });
 
-    it('the 跳过 button ends the sequence and calls back exactly once', () => {
-      const done = vi.fn();
-      overlay.showChapterIntro(CHAPTER_TWO, done);
-      const skip = findButton('跳过');
-      expect(skip, 'a 跳过 button').not.toBeNull();
-      skip?.click();
-      skip?.click();
-      vi.advanceTimersByTime(240_000);
-      expect(done).toHaveBeenCalledTimes(1);
-    });
+    it.each(LOCALES)(
+      'the Skip button ends the sequence and calls back exactly once (%s)',
+      (locale: Locale) => {
+        setLocale(locale);
+        const done = vi.fn();
+        overlay.showChapterIntro(CHAPTER_TWO, done);
+        const skip = findButton(textIn(SKIP_LABEL, locale));
+        expect(skip, `a ${textIn(SKIP_LABEL, locale)} button`).not.toBeNull();
+        skip?.click();
+        skip?.click();
+        vi.advanceTimersByTime(240_000);
+        expect(done).toHaveBeenCalledTimes(1);
+      }
+    );
 
     it('hide() cancels silently', () => {
       const done = vi.fn();
@@ -262,7 +292,7 @@ describe('StoryOverlay (§9)', () => {
       overlay.showChapterIntro(CHAPTER_TWO, first);
       overlay.showDebrief(makeDebrief(CHAPTER_TWO), second);
       expect(cards).toEqual(['chapter', 'debrief']);
-      findButton('继续')?.click();
+      findButton(CONTINUE_LABEL.en)?.click();
       vi.advanceTimersByTime(240_000);
       expect(first).not.toHaveBeenCalled();
       expect(second).toHaveBeenCalledTimes(1);
@@ -285,12 +315,14 @@ describe('StoryOverlay (§9)', () => {
   });
 
   describe('debrief', () => {
-    it('shows the chapter and every number', () => {
+    it.each(LOCALES)('shows the chapter and every number (%s)', (locale: Locale) => {
+      setLocale(locale);
       overlay.showDebrief(makeDebrief(CHAPTER_THREE), vi.fn());
       expect(cards).toEqual(['debrief']);
       pressSpace();
       const text = overlayText();
-      expect(text).toContain(CHAPTER_THREE.title);
+      expect(text).toContain(textIn(CHAPTER_THREE.title, locale));
+      expect(text).toContain(textIn(CHAPTER_THREE.debriefSummary, locale));
       expect(text).toContain('全歼奖励');
       for (const value of [4321, 98765, 137, 26, 19, 650]) {
         expect(containsNumber(text, value), `debrief shows ${value}`).toBe(true);
@@ -310,7 +342,7 @@ describe('StoryOverlay (§9)', () => {
       expect(overlayText()).not.toMatch(/NaN|Infinity/);
     });
 
-    it('waits for 继续: time and an early key press never continue', () => {
+    it('waits for Continue: time and an early key press never continue', () => {
       const proceed = vi.fn();
       overlay.showDebrief(makeDebrief(CHAPTER_TWO), proceed);
       pressSpace();
@@ -320,11 +352,12 @@ describe('StoryOverlay (§9)', () => {
       expect(isOverlayShown()).toBe(true);
     });
 
-    it('continues exactly once on 继续', () => {
+    it.each(LOCALES)('continues exactly once on Continue (%s)', (locale: Locale) => {
+      setLocale(locale);
       const proceed = vi.fn();
       overlay.showDebrief(makeDebrief(CHAPTER_TWO), proceed);
-      const button = findButton('继续');
-      expect(button, 'a 继续 button').not.toBeNull();
+      const button = findButton(textIn(CONTINUE_LABEL, locale));
+      expect(button, `a ${textIn(CONTINUE_LABEL, locale)} button`).not.toBeNull();
       button?.click();
       button?.click();
       vi.advanceTimersByTime(10_000);
@@ -334,26 +367,31 @@ describe('StoryOverlay (§9)', () => {
   });
 
   describe('ending', () => {
-    it('shows the epilogue then the credits from CampaignData with the final score', () => {
-      const done = vi.fn();
-      overlay.showEnding({ finalScore: 1_234_567 }, done);
-      expect(cards).toEqual(['ending']);
+    it.each(LOCALES)(
+      'shows the epilogue then the credits from CampaignData with the final score (%s)',
+      (locale: Locale) => {
+        setLocale(locale);
+        const done = vi.fn();
+        overlay.showEnding({ finalScore: 1_234_567 }, done);
+        expect(cards).toEqual(['ending']);
 
-      pressSpace();
-      const epilogue = overlayText();
-      for (const line of CAMPAIGN_EPILOGUE) {
-        expect(epilogue).toContain(line);
-      }
+        pressSpace();
+        const epilogue = overlayText();
+        for (const line of CAMPAIGN_EPILOGUE) {
+          expect(epilogue).toContain(textIn(line, locale));
+        }
 
-      pressSpace();
-      expect(cards).toEqual(['ending', 'ending']);
-      const credits = normalize(overlayText());
-      for (const line of CAMPAIGN_CREDITS) {
-        expect(credits, `credits line "${line}"`).toContain(normalize(line));
+        pressSpace();
+        expect(cards).toEqual(['ending', 'ending']);
+        const credits = normalize(overlayText());
+        for (const line of CAMPAIGN_CREDITS) {
+          const text = textIn(line, locale);
+          expect(credits, `credits line "${text}"`).toContain(normalize(text));
+        }
+        expect(containsNumber(overlayText(), 1_234_567)).toBe(true);
+        expect(done).not.toHaveBeenCalled();
       }
-      expect(containsNumber(overlayText(), 1_234_567)).toBe(true);
-      expect(done).not.toHaveBeenCalled();
-    });
+    );
 
     it('completes on its own and calls back exactly once', () => {
       const done = vi.fn();

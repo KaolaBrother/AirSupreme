@@ -1,9 +1,12 @@
 import { existsSync, readFileSync, statSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { GameConfig } from '@/config';
 import { InputHandler } from '@/core/Input/InputHandler';
+import { saveStartFlowSettings } from '@/core/SessionSettings';
+import type { Locale, LocalizedText } from '@/i18n';
+import { LOCALES, textIn } from './i18nTestUtils';
 
 const PROJECT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const INDEX_HTML_PATH = path.join(PROJECT_ROOT, 'index.html');
@@ -55,6 +58,15 @@ function iconFileCandidates(href: string): string[] {
   const ordered = pathname.startsWith('/') ? [fromPublic, fromRoot] : [fromRoot, fromPublic];
   return [...new Set(ordered.filter(inRoot))];
 }
+
+/** 页面外壳文案：index.html 写英文默认值，main.ts 按语言设置改写 */
+const SHELL_COPY = {
+  title: { en: 'Air Supreme - 3D Air Combat', zh: 'Air Supreme - 3D 空战游戏' },
+  pause: { en: 'PAUSE', zh: '暂停' },
+  pauseLabel: { en: 'Pause', zh: '暂停' },
+  fire: { en: 'FIRE', zh: '开火' },
+  loadFailed: { en: '⚠️ Failed to load', zh: '⚠️ 加载失败' },
+} satisfies Record<string, LocalizedText>;
 
 function resolveShippedIconFile(href: string): string | null {
   if (!isLocalFileHref(href)) {
@@ -126,10 +138,14 @@ describe('site chrome', () => {
     expect(title?.textContent ?? '', 'loading title should not use ✈️').not.toMatch(/✈️|✈/u);
   });
 
-  it('labels the mobile pause control 暂停', () => {
-    const pause = parseShippedDocument().getElementById('upgrade-button');
+  it('ships the page in English: <html lang="en"> and a PAUSE mobile pause control', () => {
+    const shipped = parseShippedDocument();
+    expect(shipped.documentElement.getAttribute('lang')).toBe('en');
+
+    const pause = shipped.getElementById('upgrade-button');
     expect(pause, 'expected #upgrade-button as the mobile pause control').toBeTruthy();
-    expect((pause?.textContent ?? '').trim()).toBe('暂停');
+    expect((pause?.textContent ?? '').trim()).toBe(SHELL_COPY.pause.en);
+    expect(pause?.getAttribute('aria-label')).toBe(SHELL_COPY.pauseLabel.en);
   });
 
   it('does not show .mobile-controls through a pointer:coarse CSS branch', () => {
@@ -203,3 +219,80 @@ describe('mobile-controls visibility', () => {
   });
 });
 
+/**
+ * main.ts 启动时先按保存的语言设置 setLocale，再改写页面外壳文案（标题、触控按键、加载 / 报错画面），
+ * 之后语言切换时实时改写。jsdom 没有 WebGL：入口在 WebGL 检查处报错返回，外壳此时已本地化。
+ */
+describe('page shell language (main.ts)', () => {
+  type I18nModule = typeof import('@/i18n');
+  let originalTitle: string;
+  let originalLang: string | null;
+
+  beforeEach(() => {
+    originalTitle = document.title;
+    originalLang = document.documentElement.getAttribute('lang');
+    window.localStorage.clear();
+    vi.resetModules();
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null);
+    const shipped = parseShippedDocument();
+    document.title = shipped.title;
+    document.documentElement.setAttribute('lang', shipped.documentElement.lang);
+    document.body.innerHTML = shipped.body.innerHTML;
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    window.localStorage.clear();
+    document.body.innerHTML = '';
+    document.title = originalTitle;
+    if (originalLang === null) {
+      document.documentElement.removeAttribute('lang');
+    } else {
+      document.documentElement.setAttribute('lang', originalLang);
+    }
+  });
+
+  /** 载入入口模块（同步跑到 WebGL 检查），返回它所用的 i18n 实例 */
+  async function bootShell(): Promise<I18nModule> {
+    await import('@/main');
+    return import('@/i18n');
+  }
+
+  function expectShellIn(locale: Locale): void {
+    expect(document.documentElement.getAttribute('lang')).toBe(locale);
+    expect(document.title).toBe(textIn(SHELL_COPY.title, locale));
+    const pause = document.getElementById('upgrade-button');
+    expect((pause?.textContent ?? '').trim()).toBe(textIn(SHELL_COPY.pause, locale));
+    expect(pause?.getAttribute('aria-label')).toBe(textIn(SHELL_COPY.pauseLabel, locale));
+    expect((document.getElementById('fire-button')?.textContent ?? '').trim()).toBe(
+      textIn(SHELL_COPY.fire, locale)
+    );
+  }
+
+  it('boots the shell in English when no language was ever saved', async () => {
+    const i18n = await bootShell();
+    expect(i18n.getLocale()).toBe('en');
+    expectShellIn('en');
+  });
+
+  it.each(LOCALES)('applies the saved language (%s) before anything renders', async (locale) => {
+    saveStartFlowSettings({ language: locale });
+    const i18n = await bootShell();
+    expect(i18n.getLocale()).toBe(locale);
+    expectShellIn(locale);
+    // 之后渲染的报错画面也用同一语言
+    const heading = document.querySelector('#loading-screen h1');
+    expect(heading?.textContent).toBe(textIn(SHELL_COPY.loadFailed, locale));
+  });
+
+  it('relabels the shell live when the language changes', async () => {
+    const i18n = await bootShell();
+    expectShellIn('en');
+
+    i18n.setLocale('zh-CN');
+    expectShellIn('zh-CN');
+
+    i18n.setLocale('en');
+    expectShellIn('en');
+  });
+});

@@ -8,7 +8,9 @@ import { SPECIAL_WEAPON_IDS } from '@/core/CombatContracts';
 import { WeaponSystem, type WeaponHudState } from '@/features/weapons/WeaponSystem';
 import { SPECIAL_WEAPON_CONFIGS } from '@/features/weapons/WeaponTypes';
 import { HUD, type HudWeaponPanelState } from '@/ui/HUD';
+import { setLocale } from '@/i18n';
 import { RadarMinimap, type RadarBlipKind } from '@/ui/RadarMinimap';
+import { resetLocale } from './i18nTestUtils';
 
 /**
  * api-spec §9 HUD / RadarMinimap / index.html + integration-notes「Story UI + HUD」：
@@ -141,7 +143,7 @@ function panelState(overrides: Partial<HudWeaponPanelState> = {}): HudWeaponPane
   return {
     visible: true,
     icon: '🚀',
-    name: '集束火箭',
+    name: 'Cluster Rockets',
     shortCode: 'RKT',
     mode: 'salvo',
     ammo: 2,
@@ -157,41 +159,41 @@ function panelState(overrides: Partial<HudWeaponPanelState> = {}): HudWeaponPane
   };
 }
 
-const LASER = { icon: '🔆', name: '脉冲激光', shortCode: 'LSR' };
-const RAILGUN = { icon: '☄️', name: '电磁轨道炮', shortCode: 'RLG' };
-const EMP = { icon: '🌀', name: '电磁脉冲', shortCode: 'EMP' };
+const LASER = { icon: '🔆', name: 'Pulse Laser', shortCode: 'LSR' };
+const RAILGUN = { icon: '☄️', name: 'Railgun', shortCode: 'RLG' };
+const EMP = { icon: '🌀', name: 'EMP', shortCode: 'EMP' };
 
 type ModeCase = [label: string, state: HudWeaponPanelState, expectedText: string[]];
 
+const OVERHEATED_LASER = panelState({
+  ...LASER,
+  mode: 'beam',
+  ammo: Infinity,
+  maxAmmo: Infinity,
+  heat: 1,
+  overheated: true,
+  ready: false,
+});
+/** 过热提示（英文默认，中文可切换） */
+const OVERHEATED_TEXT = { en: 'Overheated', zh: '过热' };
+
 const MODE_CASES: readonly ModeCase[] = [
-  ['salvo (ammo)', panelState({ ammo: 2, maxAmmo: 3 }), ['RKT', '集束火箭', '2/3']],
+  ['salvo (ammo)', panelState({ ammo: 2, maxAmmo: 3 }), ['RKT', 'Cluster Rockets', '2/3']],
   [
     'beam (heat)',
     panelState({ ...LASER, mode: 'beam', ammo: Infinity, maxAmmo: Infinity, heat: 0.45 }),
-    ['LSR', '脉冲激光', '45%'],
+    ['LSR', 'Pulse Laser', '45%'],
   ],
-  [
-    'beam (overheated)',
-    panelState({
-      ...LASER,
-      mode: 'beam',
-      ammo: Infinity,
-      maxAmmo: Infinity,
-      heat: 1,
-      overheated: true,
-      ready: false,
-    }),
-    ['LSR', '过热'],
-  ],
+  ['beam (overheated)', OVERHEATED_LASER, ['LSR', OVERHEATED_TEXT.en]],
   [
     'charge (charging)',
     panelState({ ...RAILGUN, mode: 'charge', ammo: 3, maxAmmo: 4, charge: 0.5 }),
-    ['RLG', '电磁轨道炮', '50%', '3/4'],
+    ['RLG', 'Railgun', '50%', '3/4'],
   ],
   [
     'pulse (cooldown)',
     panelState({ ...EMP, mode: 'pulse', ammo: 2, maxAmmo: 3, cooldown: 0.4, ready: false }),
-    ['EMP', '电磁脉冲', '2/3'],
+    ['EMP', '2/3'],
   ],
 ];
 
@@ -230,6 +232,7 @@ describe('HUD campaign panels on desktop (§9)', () => {
   });
 
   afterEach(() => {
+    resetLocale();
     vi.useRealTimers();
     vi.restoreAllMocks();
   });
@@ -265,6 +268,16 @@ describe('HUD campaign panels on desktop (§9)', () => {
       expect(hudText()).not.toMatch(/NaN|Infinity|undefined/);
     });
 
+    it('words the overheat readout in the interface language', () => {
+      hud.updateWeaponPanel(OVERHEATED_LASER);
+      expect(byId('hud-weapon-panel')?.textContent).toContain(OVERHEATED_TEXT.en);
+      setLocale('zh-CN');
+      hud.updateWeaponPanel(OVERHEATED_LASER);
+      const text = byId('hud-weapon-panel')?.textContent ?? '';
+      expect(text).toContain(OVERHEATED_TEXT.zh);
+      expect(text).not.toContain(OVERHEATED_TEXT.en);
+    });
+
     it('marks the selected weapon among the rack slots', () => {
       hud.updateWeaponPanel(
         panelState({
@@ -296,8 +309,14 @@ describe('HUD campaign panels on desktop (§9)', () => {
         expect(isShown(panel)).toBe(true);
         expect(panel?.getAttribute('data-mode')).toBe(config.mode);
         expect(panel?.textContent).toContain(config.shortCode);
-        expect(panel?.textContent).toContain(config.name);
+        expect(panel?.textContent).toContain(config.name.en);
         expect(hudText()).not.toMatch(/NaN|Infinity|undefined/);
+
+        setLocale('zh-CN');
+        hud.updateWeaponPanel(toWeaponPanel(weapons.getHudState()));
+        expect(panel?.textContent).toContain(config.name.zh);
+        expect(panel?.textContent).toContain(config.shortCode);
+        setLocale('en');
 
         weapons.setUnlocked([]);
         hud.updateWeaponPanel(toWeaponPanel(weapons.getHudState()));
