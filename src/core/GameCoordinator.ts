@@ -1452,14 +1452,20 @@ export class GameCoordinator {
   }
 
   private updateUI(deltaTime: number): void {
-    const totalEnemies = this.enemySystem?.getTotalEnemyCount() ?? 0;
-    const spawnedEnemies = this.enemySystem?.getSpawnedEnemyCount() ?? 0;
     const aliveJets = this.enemySystem?.getAliveEnemyCount() ?? 0;
-    const killedEnemies = spawnedEnemies - aliveJets;
     // 存活的敌方地面 / 海上 / 空中单位同样计入“在场 / 剩余”（波次要两者都清空才完成）
     const aliveUnits = this.units.getAliveHostileCount();
     const aliveEnemies = aliveJets + aliveUnits;
-    const remaining = Math.max(0, totalEnemies - killedEnemies) + aliveUnits;
+    // Boss 战（含 Boss 模式）：计数只显示在场的敌方（Boss 召唤的敌机 / 无人机、敌方单位），
+    // 本关波次花名册的“剩余”与 Boss 战无关，不再显示
+    const bossFight = this.sessionState.isBossMode() || this.sessionState.isInBossBattle();
+    let remaining = aliveEnemies;
+    if (!bossFight) {
+      const totalEnemies = this.enemySystem?.getTotalEnemyCount() ?? 0;
+      const killedEnemies = (this.enemySystem?.getSpawnedEnemyCount() ?? 0) - aliveJets;
+      remaining = Math.max(0, totalEnemies - killedEnemies) + aliveUnits;
+    }
+    this.hud.setEnemyCounterMode(bossFight ? 'boss' : 'wave');
 
     this.hudFeed.updateRadar(deltaTime);
 

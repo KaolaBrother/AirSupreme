@@ -107,6 +107,8 @@ export interface BriefingRequest {
 }
 
 export type HudCameraMode = 'third-person' | 'first-person';
+/** 敌人计数：'wave' 为“敌人 N · 剩余 M”（本关波次）；'boss' 为 Boss 战，只显示在场的敌方数 */
+export type HudEnemyCounterMode = 'wave' | 'boss';
 export type HudMissileWarningLevel = 'none' | 'locking' | 'incoming';
 export type HudWarningTone = 'threat' | 'sys' | 'ally';
 export type HudWeaponMode = 'salvo' | 'beam' | 'charge' | 'pulse';
@@ -298,6 +300,7 @@ export class HUD {
   private densityExplicit: boolean = false;
   private aliveEnemyCount: number = 0;
   private remainingEnemyCount: number = 0;
+  private enemyCounterMode: HudEnemyCounterMode = 'wave';
   private lastLivesFilled: number | null = null;
   private lastMissilesFilled: number | null = null;
   private resizeHandler!: () => void;
@@ -1358,6 +1361,20 @@ export class HUD {
     this.renderWaveLine();
   }
 
+  /**
+   * 敌人计数的显示方式。'boss'（Boss 战 / Boss 模式）只显示在场的敌方（Boss 召唤的敌机、
+   * 无人机与敌方单位），不显示本关波次的“剩余”；'wave' 恢复“敌人 N · 剩余 M”。
+   */
+  public setEnemyCounterMode(mode: HudEnemyCounterMode): void {
+    this.ensureInitialized();
+    const next: HudEnemyCounterMode = mode === 'boss' ? 'boss' : 'wave';
+    if (next === this.enemyCounterMode) {
+      return;
+    }
+    this.enemyCounterMode = next;
+    this.renderWaveLine();
+  }
+
   public showEventObjective(title: string, objective: string, status?: string): void {
     this.ensureInitialized();
     this.applyEventObjectiveTone('default');
@@ -1538,9 +1555,12 @@ export class HUD {
   }
 
   private renderWaveLine(): void {
+    const enemies = `${tr(TXT_ENEMIES)} ${this.aliveEnemyCount}`;
     this.setTextContent(
       this.enemiesDisplay,
-      `${tr(TXT_ENEMIES)} ${this.aliveEnemyCount} · ${tr(TXT_REMAINING)} ${this.remainingEnemyCount}`
+      this.enemyCounterMode === 'boss'
+        ? enemies
+        : `${enemies} · ${tr(TXT_REMAINING)} ${this.remainingEnemyCount}`
     );
   }
 
