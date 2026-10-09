@@ -17,6 +17,7 @@ import type { HUD, HudWeaponPanelState, HudWeaponSlotState } from '@/ui/HUD';
 import type { RadioComms } from '@/ui/RadioComms';
 import type { StoryCardKind, StoryOverlay } from '@/ui/StoryOverlay';
 import { CampaignSfxRouter } from './CampaignSfx';
+import type { WingmanEvent, WingmanId, WingmanStatus } from './Wingmen';
 
 /**
  * 战役表现层（集成第 2 轮）
@@ -141,6 +142,10 @@ export interface ICampaignPresentation {
   ): void;
   genericRadio(key: GenericRadioKey): void;
   unitFirstContact(unitType: string): void;
+  /** 僚机入列 / 被击落：播放 WINGMAN_EVENT_RADIO 登记的通用台词（未登记的事件不出声） */
+  onWingmanEvent(id: WingmanId, event: WingmanEvent): void;
+  /** 某名僚机此刻是否在空中（无线电 / 语音挑选说话人用） */
+  isWingmanFlying(id: WingmanId): boolean;
   /** 无线电正在播放或有排队台词 */
   isRadioBusy(): boolean;
   /** 关卡结束 / 换关 / 失败：清空无线电 */
@@ -206,6 +211,8 @@ export interface DefaultCampaignPresentationDeps {
   getListenerPosition(): THREE.Vector3 | null;
   /** 剧情界面模块加载（缺省为动态导入；测试可注入） */
   loadStoryUi?(): Promise<StoryUiModules>;
+  /** 具名僚机的在空状态（缺省视为都不在空中） */
+  wingmen?: WingmanStatus;
 }
 
 interface StoryUi {
@@ -224,6 +231,13 @@ const HIGH_PRIORITY_RADIO: ReadonlySet<GenericRadioKey> = new Set<GenericRadioKe
   'missile-warning',
   'low-health',
 ]);
+/**
+ * 僚机事件 → 通用台词键（GENERIC_RADIO）。战役数据为渡鸦 / 雨燕补充入列、被击落台词后在此登记；
+ * 未登记的事件不播台词。
+ */
+const WINGMAN_EVENT_RADIO: Readonly<
+  Partial<Record<`${WingmanId}:${WingmanEvent}`, GenericRadioKey>>
+> = {};
 /** 剧情界面加载前最多缓存的台词 */
 const MAX_PENDING_RADIO = 6;
 /** 结束当前音乐的刺激音时长（毫秒，含收尾）：其后才开始胜利曲 */
@@ -486,6 +500,15 @@ export class DefaultCampaignPresentation implements ICampaignPresentation {
     if (this.deps.isBossMode()) return;
     const line = UNIT_FIRST_CONTACT_RADIO[unitType];
     if (line) this.enqueueRadio(line, 'normal');
+  }
+
+  public onWingmanEvent(id: WingmanId, event: WingmanEvent): void {
+    const key = WINGMAN_EVENT_RADIO[`${id}:${event}`];
+    if (key) this.genericRadio(key);
+  }
+
+  public isWingmanFlying(id: WingmanId): boolean {
+    return this.deps.wingmen?.isFlying(id) ?? false;
   }
 
   private enqueueRadio(line: RadioLine, priority: 'normal' | 'high'): void {

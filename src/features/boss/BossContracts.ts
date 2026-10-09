@@ -62,7 +62,10 @@ export interface IAdvancedBoss extends IBossCore {
   takeDamageAt(part: Object3D, amount: number): void;
   /** 对目标位置做一次特殊武器命中检测；无命中返回 null */
   checkHazard(targetPosition: Vector3, targetRadius: number): BossHazardHit | null;
-  /** HUD 状态提示，如“潜航中 · 无敌”“护盾塔 3/4”；无提示返回 null */
+  /**
+   * HUD 状态提示，如“潜航中 · 无敌”“护盾塔 3/4”；无提示返回 null。
+   * 文案在生成时按当前语言取值（tr），切换语言后下一次调用即返回新语言。
+   */
   getStatusLabel(): string | null;
   /** 带独立血量的子目标（可选） */
   getSubTargets?(): BossSubTarget[];
@@ -73,11 +76,14 @@ export interface IAdvancedBoss extends IBossCore {
   onFire?: (position: Vector3, direction: Vector3, damage: number) => void;
   /** 导弹发射提示：控制器播放发射音效 */
   onMissileFired?: () => void;
-  /** 阶段切换：控制器播放剧情台词 / 音乐强调 */
+  /** 阶段切换：控制器播放剧情台词 / 音乐强调；label 已按当前语言取值 */
   onPhaseChange?: (phase: number, label: string) => void;
   /** 召唤小兵 */
   onSpawnMinion?: (position: Vector3, kind: BossMinionKind) => void;
-  /** 特殊武器预警（例如“电弧充能”）：控制器显示 HUD 提示并播放预警音 */
+  /**
+   * 特殊武器预警（例如“电弧充能”）：控制器显示 HUD 提示并播放预警音。
+   * label 在发出时按当前语言取值（tr），表现层原样显示。
+   */
   onHazardWarning?: (label: string) => void;
 }
 

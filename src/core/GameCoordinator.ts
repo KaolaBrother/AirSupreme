@@ -52,6 +52,7 @@ import { CombatVfxController } from '@/core/vfx/CombatVfxController';
 import { CombatHudFeed } from '@/core/hud/CombatHudFeed';
 import { CampaignFlowController } from '@/core/campaign/CampaignFlowController';
 import { resolveLevelStartPose } from '@/core/campaign/LevelStartPose';
+import { WingmanRoster } from '@/core/campaign/Wingmen';
 import {
   DefaultCampaignPresentation,
   type ICampaignPresentation,
@@ -64,7 +65,7 @@ import {
   type CheckpointKind,
 } from '@/core/save/SaveSystem';
 import { getCampaignChapter, getUnlockedWeaponsThrough } from '@/features/campaign/CampaignData';
-import { tr } from '@/i18n';
+import { localize, tr, type LocalizedText } from '@/i18n';
 import {
   DEFAULT_ONBOARDING_BEAT_PROFILE,
   getWaveOnboardingText,
@@ -136,6 +137,105 @@ interface CombatRuntimeSystems {
   powerUpSystem: PowerUpSystem;
 }
 
+/**
+ * 教学目标面板文案：HUD 节流后约 30 Hz 重建目标显示，双语对象提升为模块常量（tr 按当前语言取值）。
+ */
+const TUTORIAL_OBJECTIVE_TEXT = {
+  moveTitle: { en: 'Training · Maneuver check', zh: '试玩引导 · 机动确认' },
+  moveObjective: {
+    en: 'Turn or strafe once to confirm handling.',
+    zh: '完成一次转向/横移，确认机动。',
+  },
+  speedTitle: { en: 'Training · Build speed', zh: '试玩引导 · 提升速度' },
+  speedObjective: {
+    en: 'Speed up and open some distance before contact.',
+    zh: '提速建立距离，准备接敌。',
+  },
+  fireTitle: { en: 'Training · Suppressing fire', zh: '试玩引导 · 火力压制' },
+  fireObjective: {
+    en: 'Keep firing to get a feel for the cannon.',
+    zh: '持续开火，校准机炮节奏。',
+  },
+  lockTitle: { en: 'Training · Missile lock', zh: '试玩引导 · 导弹锁定' },
+  lockObjective: {
+    en: 'Keep the target in your sights; fire when the lock ring closes.',
+    zh: '目标稳定入准星，锁定圈闭合后发射。',
+  },
+  launchTitle: { en: 'Training · Missile launch', zh: '试玩引导 · 导弹发射' },
+  launchObjective: {
+    en: 'Fire as soon as you have a lock and watch it hit.',
+    zh: '锁定达成后立刻发射，观察命中反馈。',
+  },
+  killTitle: { en: 'Training · First kill', zh: '试玩引导 · 击落首个目标' },
+  killObjective: {
+    en: 'Down the top threat ahead, then clear its escorts to start the mission.',
+    zh: '先击落正前方高威胁，再解护航压力进入常规。',
+  },
+  stepStatus: { en: 'S{step}/5 · {done}/5 done', zh: 'S{step}/5 · 已完成 {done}/5' },
+  lockingStatus: { en: 'S4/5 · {done}/5 done · Locking', zh: 'S4/5 · 已完成 {done}/5 · 锁定中' },
+  launchStatus: {
+    en: 'S4/5 · {done}/5 done · Ready to fire',
+    zh: 'S4/5 · 已完成 {done}/5 · 等待发射',
+  },
+} as const satisfies Record<string, LocalizedText>;
+
+/** 波次目标面板文案（同为约 30 Hz 的路径；波次开场与结束的提示复用其中相同的条目） */
+const WAVE_OBJECTIVE_TEXT = {
+  eliteTitle: { en: 'Wave {wave} · Elite hunt', zh: '第 {wave} 波 · 精英歼灭' },
+  eliteObjective: {
+    en: 'Take out heavies and aces first to shorten the danger window.',
+    zh: '优先打穿重型/王牌，压缩高威胁窗口。',
+  },
+  eliteClearedObjective: {
+    en: 'Main threats down. Mop up the rest.',
+    zh: '高威胁主力已清空，继续清理尾场。',
+  },
+  eliteStatus: {
+    en: 'Elites: {elites} · Spawned {spawned}/{total} · Active {alive}',
+    zh: '精英压制：{elites} 架 · 已出 {spawned}/{total} · 在场 {alive} 架',
+  },
+  eliteClearedStatus: {
+    en: 'Mop-up: key targets down · {remaining} left',
+    zh: '尾场清空：重点已打穿 · 剩余 {remaining} 架',
+  },
+  interceptTitle: { en: 'Wave {wave} · Intercept', zh: '第 {wave} 波 · 限时拦截' },
+  interceptObjective: {
+    en: 'Intercept the strike group. Fast movers first.',
+    zh: '拦截突防编队，优先高速目标。',
+  },
+  interceptStatus: {
+    en: 'Intercepting: spawned {spawned}/{total} · {remaining} left',
+    zh: '拦截中：已出 {spawned}/{total} · 剩余 {remaining} 架',
+  },
+  escortTitle: { en: 'Wave {wave} · Escort defense', zh: '第 {wave} 波 · 护送防守' },
+  escortObjective: {
+    en: 'Cover the escort first, then pick off the top threats.',
+    zh: '先护送友军，再点穿护航高威胁。',
+  },
+  escortLostObjective: {
+    en: 'Escort lost. Clear the rest and hold the airspace.',
+    zh: '护送失守，清理残余并稳住空域。',
+  },
+  escortStatus: { en: 'Escort first · {remaining} left', zh: '护送优先 · 剩余 {remaining} 架' },
+  escortLostStatus: { en: 'Clean-up · {remaining} left', zh: '失守后清场 · 剩余 {remaining} 架' },
+  sweepTitle: { en: 'Wave {wave} · Air superiority', zh: '第 {wave} 波 · 空域压制' },
+  sweepObjective: {
+    en: 'Clear this wave. Keep moving and keep firing.',
+    zh: '清空本波目标，维持机动与火力。',
+  },
+  sweepStatus: { en: 'Air superiority: {remaining} left', zh: '空域压制中：剩余 {remaining} 架' },
+  clearedTitle: { en: 'Wave {wave} · Cleared', zh: '第 {wave} 波 · 阶段完成' },
+  clearedObjective: {
+    en: 'Wave cleared. Regroup for the next one.',
+    zh: '本波已清空，整姿态，准备下一波。',
+  },
+  regroupCountdown: {
+    en: 'Regrouping: next wave in {seconds}s',
+    zh: '重整中：{seconds}s 后接续',
+  },
+  regroupReady: { en: 'Regrouping: next wave incoming', zh: '重整中：准备下一波' },
+} as const satisfies Record<string, LocalizedText>;
+
 export class GameCoordinator {
   private static readonly TUTORIAL_STAGE_DURATION_MS = 1800;
   private static readonly TUTORIAL_STAGE_GAP_MS = 240;
@@ -152,21 +252,57 @@ export class GameCoordinator {
   private static readonly WAVE_EVENT_START_COOLDOWN_MS = 1000;
   private static readonly WAVE_EVENT_COMPLETE_COOLDOWN_MS = 900;
   private static readonly RESPAWN_OVERLAY_MS = 2000;
-  private static readonly UPGRADE_FEEDBACK: Record<UpgradeType, { icon: string; label: string }> = {
-    [UpgradeType.MAX_HEALTH]: { icon: '❤️', label: '最大生命值升级' },
-    [UpgradeType.SPEED]: { icon: '⚡', label: '飞行速度升级' },
-    [UpgradeType.FIRE_RATE]: { icon: '🔫', label: '射速升级' },
-    [UpgradeType.DAMAGE]: { icon: '💥', label: '武器伤害升级' },
-    [UpgradeType.MISSILE_LOCK_RADIUS]: { icon: '📡', label: '锁定范围升级' },
-    [UpgradeType.MISSILE_RELOAD_TIME]: { icon: '🚀', label: '导弹装填升级' },
-    [UpgradeType.MISSILE_LOCK_TIME]: { icon: '🎯', label: '导弹锁定升级' },
-    [UpgradeType.ARMOR]: { icon: '🛡️', label: '复合装甲升级' },
-    [UpgradeType.FLARES]: { icon: '🎆', label: '热焰弹挂架升级' },
-    [UpgradeType.WEAPON_ROCKETS]: { icon: '🚀', label: '集束火箭升级' },
-    [UpgradeType.WEAPON_LASER]: { icon: '🔆', label: '脉冲激光升级' },
-    [UpgradeType.WEAPON_SWARM]: { icon: '🐝', label: '蜂群导弹升级' },
-    [UpgradeType.WEAPON_RAILGUN]: { icon: '☄️', label: '电磁轨道炮升级' },
-    [UpgradeType.WEAPON_EMP]: { icon: '🌀', label: '电磁脉冲升级' },
+  private static readonly UPGRADE_FEEDBACK: Record<
+    UpgradeType,
+    { icon: string; label: LocalizedText }
+  > = {
+    [UpgradeType.MAX_HEALTH]: {
+      icon: '❤️',
+      label: { en: 'Max health upgraded', zh: '最大生命值升级' },
+    },
+    [UpgradeType.SPEED]: { icon: '⚡', label: { en: 'Flight speed upgraded', zh: '飞行速度升级' } },
+    [UpgradeType.FIRE_RATE]: { icon: '🔫', label: { en: 'Fire rate upgraded', zh: '射速升级' } },
+    [UpgradeType.DAMAGE]: {
+      icon: '💥',
+      label: { en: 'Weapon damage upgraded', zh: '武器伤害升级' },
+    },
+    [UpgradeType.MISSILE_LOCK_RADIUS]: {
+      icon: '📡',
+      label: { en: 'Lock-on range upgraded', zh: '锁定范围升级' },
+    },
+    [UpgradeType.MISSILE_RELOAD_TIME]: {
+      icon: '🚀',
+      label: { en: 'Missile reload upgraded', zh: '导弹装填升级' },
+    },
+    [UpgradeType.MISSILE_LOCK_TIME]: {
+      icon: '🎯',
+      label: { en: 'Missile lock upgraded', zh: '导弹锁定升级' },
+    },
+    [UpgradeType.ARMOR]: {
+      icon: '🛡️',
+      label: { en: 'Composite armor upgraded', zh: '复合装甲升级' },
+    },
+    [UpgradeType.FLARES]: {
+      icon: '🎆',
+      label: { en: 'Flare rack upgraded', zh: '热焰弹挂架升级' },
+    },
+    [UpgradeType.WEAPON_ROCKETS]: {
+      icon: '🚀',
+      label: { en: 'Cluster rockets upgraded', zh: '集束火箭升级' },
+    },
+    [UpgradeType.WEAPON_LASER]: {
+      icon: '🔆',
+      label: { en: 'Pulse laser upgraded', zh: '脉冲激光升级' },
+    },
+    [UpgradeType.WEAPON_SWARM]: {
+      icon: '🐝',
+      label: { en: 'Swarm missiles upgraded', zh: '蜂群导弹升级' },
+    },
+    [UpgradeType.WEAPON_RAILGUN]: {
+      icon: '☄️',
+      label: { en: 'Railgun upgraded', zh: '电磁轨道炮升级' },
+    },
+    [UpgradeType.WEAPON_EMP]: { icon: '🌀', label: { en: 'EMP upgraded', zh: '电磁脉冲升级' } },
   };
   private static runtimeWarmupPromise: Promise<void> | null = null;
   /** 第 1 轮默认的 Boss 小兵映射（无人机优先使用单位系统的自杀无人机） */
@@ -203,6 +339,8 @@ export class GameCoordinator {
   private readonly vfx: CombatVfxController;
   private readonly campaign: CampaignFlowController;
   private readonly hudFeed: CombatHudFeed;
+  /** 具名僚机「渡鸦」「雨燕」：友机入场领取身份，坠毁 / 撤场时归还 */
+  private readonly wingmen = new WingmanRoster();
   private readonly checkpointResumeButton = new CheckpointResumeButton();
   private readonly options: GameCoordinatorOptions;
   private readonly showStartMenu: boolean;
@@ -367,6 +505,7 @@ export class GameCoordinator {
       music: this.musicSystem,
       isBossMode: () => this.sessionState.isBossMode(),
       getListenerPosition: () => this.playerAircraft.position,
+      wingmen: this.wingmen,
     });
     this.units = this.createUnitController();
     this.hudFeed = new CombatHudFeed({
@@ -615,7 +754,17 @@ export class GameCoordinator {
         this.audioManager.playExplosion('friendly', 1.15);
         this.particleSystem?.createExplosion(payload.position, 1.15, 'friendly');
         this.view.addExplosionShake(payload.position, 1.15);
-        this.hud.showPowerUpBig('⚠️', '友军坠毁', 1, true);
+        const wingman = this.wingmen.release(payload.friendlyId);
+        const message = wingman
+          ? tr(
+              { en: '{callsign} is down!', zh: '{callsign}被击落' },
+              { callsign: localize(wingman.callsign) }
+            )
+          : tr({ en: 'Ally down', zh: '友军坠毁' });
+        this.hud.showPowerUpBig('⚠️', message, 1, true);
+        if (wingman) {
+          this.presentation.onWingmanEvent(wingman.id, 'down');
+        }
       })
     );
 
@@ -816,7 +965,18 @@ export class GameCoordinator {
     }
 
     this.gameScene.scene.add(mesh);
-    this.enemySystem?.spawnFriendly(friendly);
+    const enemySystem = this.enemySystem;
+    if (enemySystem) {
+      // 先入场的两架友机是具名僚机（血条显示呼号）；其余为普通友机
+      const wingman = this.wingmen.assign(mesh.uuid, this.sessionState.getLevel());
+      if (wingman) {
+        mesh.userData.displayName = wingman.callsign;
+      }
+      enemySystem.spawnFriendly(friendly);
+      if (wingman) {
+        this.presentation.onWingmanEvent(wingman.id, 'joined');
+      }
+    }
     this.handleTutorialFriendlySupport();
     return friendly;
   }
@@ -834,7 +994,7 @@ export class GameCoordinator {
       return;
     }
     this.enemySystem.spawnEnemyAt(enemyType, position);
-    this.hud.showPowerUpBig('', '敌机起飞');
+    this.hud.showPowerUpBig('', tr({ en: 'Enemy fighters launching', zh: '敌机起飞' }));
   }
 
   private syncCameraInterpolationState(): void {
@@ -1292,27 +1452,28 @@ export class GameCoordinator {
       this.tutorialCombatState.killHintShown,
     ].filter(Boolean).length;
 
+    const text = TUTORIAL_OBJECTIVE_TEXT;
     if (!this.tutorialCombatState.movementHintShown) {
       return {
-        title: '试玩引导 · 机动确认',
-        objective: '完成一次转向/横移，确认机动。',
-        status: `S1/5 · 已完成 ${completedSteps}/5`,
+        title: tr(text.moveTitle),
+        objective: tr(text.moveObjective),
+        status: tr(text.stepStatus, { step: 1, done: completedSteps }),
       };
     }
 
     if (!this.tutorialCombatState.speedHintShown) {
       return {
-        title: '试玩引导 · 提升速度',
-        objective: '提速建立距离，准备接敌。',
-        status: `S2/5 · 已完成 ${completedSteps}/5`,
+        title: tr(text.speedTitle),
+        objective: tr(text.speedObjective),
+        status: tr(text.stepStatus, { step: 2, done: completedSteps }),
       };
     }
 
     if (!this.tutorialCombatState.fireHintShown) {
       return {
-        title: '试玩引导 · 火力压制',
-        objective: '持续开火，校准机炮节奏。',
-        status: `S3/5 · 已完成 ${completedSteps}/5`,
+        title: tr(text.fireTitle),
+        objective: tr(text.fireObjective),
+        status: tr(text.stepStatus, { step: 3, done: completedSteps }),
       };
     }
 
@@ -1321,9 +1482,9 @@ export class GameCoordinator {
       !this.tutorialCombatState.missileHintShown
     ) {
       return {
-        title: '试玩引导 · 导弹锁定',
-        objective: '目标稳定入准星，锁定圈闭合后发射。',
-        status: `S4/5 · 已完成 ${completedSteps}/5 · 锁定中`,
+        title: tr(text.lockTitle),
+        objective: tr(text.lockObjective),
+        status: tr(text.lockingStatus, { done: completedSteps }),
       };
     }
 
@@ -1332,16 +1493,16 @@ export class GameCoordinator {
       !this.tutorialCombatState.missileHintShown
     ) {
       return {
-        title: '试玩引导 · 导弹发射',
-        objective: '锁定达成后立刻发射，观察命中反馈。',
-        status: `S4/5 · 已完成 ${completedSteps}/5 · 等待发射`,
+        title: tr(text.launchTitle),
+        objective: tr(text.launchObjective),
+        status: tr(text.launchStatus, { done: completedSteps }),
       };
     }
 
     return {
-      title: '试玩引导 · 击落首个目标',
-      objective: '先击落正前方高威胁，再解护航压力进入常规。',
-      status: `S5/5 · 已完成 ${completedSteps}/5`,
+      title: tr(text.killTitle),
+      objective: tr(text.killObjective),
+      status: tr(text.stepStatus, { step: 5, done: completedSteps }),
     };
   }
 
@@ -1356,6 +1517,7 @@ export class GameCoordinator {
       waveProgress?.remainingInWave ??
       Math.max(0, totalEnemies - (spawnedEnemies - aliveEnemies.length));
     const aliveInWave = waveProgress?.aliveInWave ?? aliveEnemies.length;
+    const text = WAVE_OBJECTIVE_TEXT;
 
     switch (this.waveEventState.type) {
       case LevelWaveEventType.ELITE_HUNT: {
@@ -1365,22 +1527,28 @@ export class GameCoordinator {
         }).length;
 
         return {
-          title: `第 ${waveNumber} 波 · 精英歼灭`,
-          objective:
-            eliteAlive > 0
-              ? '优先打穿重型/王牌，压缩高威胁窗口。'
-              : '高威胁主力已清空，继续清理尾场。',
+          title: tr(text.eliteTitle, { wave: waveNumber }),
+          objective: tr(eliteAlive > 0 ? text.eliteObjective : text.eliteClearedObjective),
           status:
             eliteAlive > 0
-              ? `精英压制：${eliteAlive} 架 · 已出 ${spawnedEnemies}/${totalEnemies} · 在场 ${aliveInWave} 架`
-              : `尾场清空：重点已打穿 · 剩余 ${remainingEnemies} 架`,
+              ? tr(text.eliteStatus, {
+                  elites: eliteAlive,
+                  spawned: spawnedEnemies,
+                  total: totalEnemies,
+                  alive: aliveInWave,
+                })
+              : tr(text.eliteClearedStatus, { remaining: remainingEnemies }),
         };
       }
       case LevelWaveEventType.INTERCEPT:
         return {
-          title: `第 ${waveNumber} 波 · 限时拦截`,
-          objective: '拦截突防编队，优先高速目标。',
-          status: `拦截中：已出 ${spawnedEnemies}/${totalEnemies} · 剩余 ${remainingEnemies} 架`,
+          title: tr(text.interceptTitle, { wave: waveNumber }),
+          objective: tr(text.interceptObjective),
+          status: tr(text.interceptStatus, {
+            spawned: spawnedEnemies,
+            total: totalEnemies,
+            remaining: remainingEnemies,
+          }),
         };
       case LevelWaveEventType.ESCORT_DEFENSE: {
         const escortAlive = (this.enemySystem?.getFriendlyAIs() ?? []).some(
@@ -1389,18 +1557,18 @@ export class GameCoordinator {
         );
 
         return {
-          title: `第 ${waveNumber} 波 · 护送防守`,
-          objective: escortAlive
-            ? '先护送友军，再点穿护航高威胁。'
-            : '护送失守，清理残余并稳住空域。',
-          status: `${escortAlive ? '护送优先' : '失守后清场'} · 剩余 ${remainingEnemies} 架`,
+          title: tr(text.escortTitle, { wave: waveNumber }),
+          objective: tr(escortAlive ? text.escortObjective : text.escortLostObjective),
+          status: tr(escortAlive ? text.escortStatus : text.escortLostStatus, {
+            remaining: remainingEnemies,
+          }),
         };
       }
       default:
         return {
-          title: `第 ${waveNumber} 波 · 空域压制`,
-          objective: '清空本波目标，维持机动与火力。',
-          status: `空域压制中：剩余 ${remainingEnemies} 架`,
+          title: tr(text.sweepTitle, { wave: waveNumber }),
+          objective: tr(text.sweepObjective),
+          status: tr(text.sweepStatus, { remaining: remainingEnemies }),
         };
     }
   }
@@ -1412,10 +1580,14 @@ export class GameCoordinator {
     }
 
     const nextWaveDelay = Math.max(0, Math.ceil(waveProgress.nextWaveDelaySeconds));
+    const text = WAVE_OBJECTIVE_TEXT;
     return {
-      title: `第 ${waveProgress.wave + 1} 波 · 阶段完成`,
-      objective: '本波已清空，整姿态，准备下一波。',
-      status: nextWaveDelay > 0 ? `重整中：${nextWaveDelay}s 后接续` : '重整中：准备下一波',
+      title: tr(text.clearedTitle, { wave: waveProgress.wave + 1 }),
+      objective: tr(text.clearedObjective),
+      status:
+        nextWaveDelay > 0
+          ? tr(text.regroupCountdown, { seconds: nextWaveDelay })
+          : tr(text.regroupReady),
     };
   }
 
@@ -1711,6 +1883,7 @@ export class GameCoordinator {
     const levelManager = enemySystem.getLevelManager();
     levelManager.despawnAllEnemies();
     enemySystem.clearFriendlies();
+    this.wingmen.reset();
     enemySystem.setDifficultyProfile(this.getCurrentDifficultyProfile());
     enemySystem.loadLevel(level, startWave);
     this.applyCurrentLevelEnvironment(level);
@@ -1793,7 +1966,12 @@ export class GameCoordinator {
           return;
         }
         this.spawnFriendlyAI();
-        this.hud.showPowerUpBig('✈️', shouldRunTutorialIntro ? '友军编队已入场' : '召唤友军');
+        this.hud.showPowerUpBig(
+          '✈️',
+          shouldRunTutorialIntro
+            ? tr({ en: 'Friendly flight on station', zh: '友军编队已入场' })
+            : tr({ en: 'Allied support inbound', zh: '召唤友军' })
+        );
       },
       shouldRunTutorialIntro
         ? tutorialWaveDelayMs + GameCoordinator.TUTORIAL_FRIENDLY_SPAWN_DELAY_MS
@@ -1854,7 +2032,10 @@ export class GameCoordinator {
       upgradeMenu.updateDisplay();
       upgradeMenu.show({
         mode: 'hangar',
-        subtitle: `下一站：${tr(chapter.chapterLabel)} · ${tr(chapter.title)}`,
+        subtitle: tr(
+          { en: 'Next: {chapter} · {title}', zh: '下一站：{chapter} · {title}' },
+          { chapter: tr(chapter.chapterLabel), title: tr(chapter.title) }
+        ),
         onContinue: () => {
           this.setStoryHold(false);
           this.syncProgression(level);
@@ -2086,11 +2267,21 @@ export class GameCoordinator {
       onExplosion: (position, scale) => this.view.addExplosionShake(position, scale),
       onEscortResult: (success) => {
         if (!success) {
-          this.hud.showPowerUpBig('⚠️', '护送目标被摧毁', 1.2, true);
+          this.hud.showPowerUpBig(
+            '⚠️',
+            tr({ en: 'Escort target destroyed', zh: '护送目标被摧毁' }),
+            1.2,
+            true
+          );
           return;
         }
         this.awardScore(GameCoordinator.ESCORT_WAVE_SCORE_BONUS);
-        this.hud.showPowerUpBig('✅', '护送目标安全抵达', 1.2, true);
+        this.hud.showPowerUpBig(
+          '✅',
+          tr({ en: 'Escort target arrived safely', zh: '护送目标安全抵达' }),
+          1.2,
+          true
+        );
       },
     });
   }
@@ -2113,8 +2304,11 @@ export class GameCoordinator {
       this.gameState.addScore(-deducted);
       this.playerStats.addScore(-deducted);
     }
+    const penalty = { points: Math.round(points) };
     this.presentation.flashWarning(
-      `误伤${civilian ? '平民' : '友军'} · 扣除 ${Math.round(points)} 分`,
+      civilian
+        ? tr({ en: 'Civilian hit · -{points} pts', zh: '误伤平民 · 扣除 {points} 分' }, penalty)
+        : tr({ en: 'Friendly fire · -{points} pts', zh: '误伤友军 · 扣除 {points} 分' }, penalty),
       'threat'
     );
   }
@@ -2192,12 +2386,22 @@ export class GameCoordinator {
 
   private getTutorialStages(): Array<{ icon: string; text: string; hideSubtext?: boolean }> {
     return [
-      { icon: '🎮', text: '试玩关开启', hideSubtext: true },
-      { icon: '🕹️', text: '确认转向与横移' },
-      { icon: '⚡', text: '提速再接敌' },
-      { icon: '🔥', text: '机炮压制，导弹点杀' },
-      { icon: '🚀', text: '锁定后再发射导弹' },
-      { icon: '🎯', text: '击杀首个目标后转常规' },
+      {
+        icon: '🎮',
+        text: tr({ en: 'Training flight begins', zh: '试玩关开启' }),
+        hideSubtext: true,
+      },
+      { icon: '🕹️', text: tr({ en: 'Check turning and strafing', zh: '确认转向与横移' }) },
+      { icon: '⚡', text: tr({ en: 'Build speed, then engage', zh: '提速再接敌' }) },
+      {
+        icon: '🔥',
+        text: tr({ en: 'Guns to suppress, missiles to kill', zh: '机炮压制，导弹点杀' }),
+      },
+      { icon: '🚀', text: tr({ en: 'Lock on before firing missiles', zh: '锁定后再发射导弹' }) },
+      {
+        icon: '🎯',
+        text: tr({ en: 'The first kill ends the training', zh: '击杀首个目标后转常规' }),
+      },
     ];
   }
 
@@ -2233,7 +2437,7 @@ export class GameCoordinator {
     this.scheduleTimeout(() => {
       this.hud.showPowerUpBig(
         '📡',
-        '前方有敌，准备接敌',
+        tr({ en: 'Bandits ahead. Get ready', zh: '前方有敌，准备接敌' }),
         GameCoordinator.TUTORIAL_HINT_MED_MS / 1000
       );
     }, waveReadyDelayMs);
@@ -2285,7 +2489,12 @@ export class GameCoordinator {
 
     return {
       icon: textProfile.icon,
-      text: isComplete ? textProfile.title : `${textProfile.title} · 第${waveNumber}波`,
+      text: isComplete
+        ? textProfile.title
+        : tr(
+            { en: '{title} · Wave {wave}', zh: '{title} · 第{wave}波' },
+            { title: textProfile.title, wave: waveNumber }
+          ),
       durationSeconds: durationMs / 1000,
     };
   }
@@ -2330,7 +2539,7 @@ export class GameCoordinator {
         this.tutorialCombatState.movementHintShown = true;
         this.hud.showPowerUpBig(
           '🕹️',
-          '机动确认，继续提速拉距',
+          tr({ en: 'Handling confirmed. Now build speed', zh: '机动确认，继续提速拉距' }),
           GameCoordinator.TUTORIAL_HINT_MED_MS / 1000
         );
         this.updatePlayerFacingObjective();
@@ -2346,7 +2555,7 @@ export class GameCoordinator {
       this.tutorialCombatState.speedHintShown = true;
       this.hud.showPowerUpBig(
         '⚡',
-        '速度到位，按住开火压制',
+        tr({ en: 'Good speed. Hold fire to suppress', zh: '速度到位，按住开火压制' }),
         GameCoordinator.TUTORIAL_HINT_MED_MS / 1000
       );
       this.updatePlayerFacingObjective();
@@ -2361,7 +2570,7 @@ export class GameCoordinator {
     this.tutorialCombatState.fireHintShown = true;
     this.hud.showPowerUpBig(
       '🔥',
-      '火力确认，准备导弹锁定',
+      tr({ en: 'Guns check. Ready a missile lock', zh: '火力确认，准备导弹锁定' }),
       GameCoordinator.TUTORIAL_HINT_MED_MS / 1000
     );
     this.updatePlayerFacingObjective();
@@ -2375,7 +2584,7 @@ export class GameCoordinator {
     this.tutorialCombatState.lockHintShown = true;
     this.hud.showPowerUpBig(
       '🎯',
-      '稳住准星，等待锁定圈闭合',
+      tr({ en: 'Hold steady until the lock ring closes', zh: '稳住准星，等待锁定圈闭合' }),
       GameCoordinator.TUTORIAL_HINT_MED_MS / 1000
     );
     this.updatePlayerFacingObjective();
@@ -2389,7 +2598,7 @@ export class GameCoordinator {
     this.tutorialCombatState.missileHintShown = true;
     this.hud.showPowerUpBig(
       '🚀',
-      '导弹已发射，优先点杀高威胁',
+      tr({ en: 'Missile away. Prioritize high threats', zh: '导弹已发射，优先点杀高威胁' }),
       GameCoordinator.TUTORIAL_HINT_MED_MS / 1000
     );
     this.updatePlayerFacingObjective();
@@ -2403,7 +2612,7 @@ export class GameCoordinator {
     this.tutorialCombatState.lockCompleteHintShown = true;
     this.hud.showPowerUpBig(
       '✅',
-      '锁定完成，立刻发射',
+      tr({ en: 'Locked. Fire now!', zh: '锁定完成，立刻发射' }),
       GameCoordinator.TUTORIAL_HINT_SHORT_MS / 1000
     );
     this.updatePlayerFacingObjective();
@@ -2417,15 +2626,21 @@ export class GameCoordinator {
     this.tutorialCombatState.killHintShown = true;
     this.hud.showPowerUpBig(
       '🎯',
-      '首杀确认，继续清空本波后正式',
+      tr({
+        en: 'First kill confirmed. Clear the wave to begin the mission',
+        zh: '首杀确认，继续清空本波后正式',
+      }),
       GameCoordinator.TUTORIAL_HINT_LONG_MS / 1000
     );
     this.tutorialCombatState.active = false;
     this.showTransientObjective(
       {
-        title: '试玩引导 · 完成',
-        objective: '首轮引导完成，进入常规波次。',
-        status: '教学完成 · 常规战斗已解锁',
+        title: tr({ en: 'Training · Complete', zh: '试玩引导 · 完成' }),
+        objective: tr({
+          en: 'Training complete. Regular waves incoming.',
+          zh: '首轮引导完成，进入常规波次。',
+        }),
+        status: tr({ en: 'Tutorial done · Full combat unlocked', zh: '教学完成 · 常规战斗已解锁' }),
       },
       GameCoordinator.TUTORIAL_HINT_LONG_MS + 1000
     );
@@ -2439,7 +2654,7 @@ export class GameCoordinator {
     this.tutorialCombatState.hitHintShown = true;
     this.hud.showPowerUpBig(
       '↪️',
-      '被命中后立刻横移或加速脱离',
+      tr({ en: 'Hit! Strafe or boost out of the line of fire', zh: '被命中后立刻横移或加速脱离' }),
       GameCoordinator.TUTORIAL_HINT_SHORT_MS / 1000
     );
     this.updatePlayerFacingObjective();
@@ -2453,7 +2668,7 @@ export class GameCoordinator {
     this.tutorialCombatState.friendlySupportHintShown = true;
     this.hud.showPowerUpBig(
       '🤝',
-      '友军到位，先护航再压制',
+      tr({ en: 'Wingman on station. Cover them, then attack', zh: '友军到位，先护航再压制' }),
       GameCoordinator.TUTORIAL_HINT_MED_MS / 1000
     );
     this.updatePlayerFacingObjective();
@@ -2541,14 +2756,14 @@ export class GameCoordinator {
       this.notifyEarnedUpgradePoints(earnedPoints);
       this.hud.showPowerUpBig(
         '✅',
-        '护送完成，奖励到位',
+        tr({ en: 'Escort complete. Bonus awarded', zh: '护送完成，奖励到位' }),
         GameCoordinator.TUTORIAL_HINT_MED_MS / 1000,
         true
       );
     } else {
       this.hud.showPowerUpBig(
         '⚠️',
-        '护送失利，继续压制',
+        tr({ en: 'Escort lost. Keep up the pressure', zh: '护送失利，继续压制' }),
         GameCoordinator.TUTORIAL_HINT_MED_MS / 1000,
         true
       );
@@ -2573,30 +2788,54 @@ export class GameCoordinator {
     switch (completedEventType) {
       case LevelWaveEventType.ELITE_HUNT:
         completionObjective = {
-          title: `第 ${wave + 1} 波 · 精英歼灭完成`,
-          objective: '高威胁目标已清空，空域压力下降。',
-          status: '结果：高威胁已打穿',
+          title: tr(
+            { en: 'Wave {wave} · Elite hunt complete', zh: '第 {wave} 波 · 精英歼灭完成' },
+            { wave: wave + 1 }
+          ),
+          objective: tr({
+            en: 'High-value threats eliminated. Pressure easing.',
+            zh: '高威胁目标已清空，空域压力下降。',
+          }),
+          status: tr({ en: 'Result: threats eliminated', zh: '结果：高威胁已打穿' }),
         };
         break;
       case LevelWaveEventType.INTERCEPT:
         completionObjective = {
-          title: `第 ${wave + 1} 波 · 拦截完成`,
-          objective: '前锋突防已压制，准备接续下一波。',
-          status: '结果：拦截完成',
+          title: tr(
+            { en: 'Wave {wave} · Intercept complete', zh: '第 {wave} 波 · 拦截完成' },
+            { wave: wave + 1 }
+          ),
+          objective: tr({
+            en: 'Strike group stopped. Get ready for the next wave.',
+            zh: '前锋突防已压制，准备接续下一波。',
+          }),
+          status: tr({ en: 'Result: intercepted', zh: '结果：拦截完成' }),
         };
         break;
       case LevelWaveEventType.ESCORT_DEFENSE: {
         const escortSuccess = this.handleEscortWaveComplete(wave);
         completionObjective = escortSuccess
           ? {
-              title: `第 ${wave + 1} 波 · 护送完成`,
-              objective: '友军守住关键点，护航压力打穿。',
-              status: '结果：护送达成',
+              title: tr(
+                { en: 'Wave {wave} · Escort complete', zh: '第 {wave} 波 · 护送完成' },
+                { wave: wave + 1 }
+              ),
+              objective: tr({
+                en: 'The escort made it through. Pressure broken.',
+                zh: '友军守住关键点，护航压力打穿。',
+              }),
+              status: tr({ en: 'Result: escort succeeded', zh: '结果：护送达成' }),
             }
           : {
-              title: `第 ${wave + 1} 波 · 护送结束`,
-              objective: '护送线受损，清理残余威胁稳局。',
-              status: '结果：护送失利',
+              title: tr(
+                { en: 'Wave {wave} · Escort over', zh: '第 {wave} 波 · 护送结束' },
+                { wave: wave + 1 }
+              ),
+              objective: tr({
+                en: 'Escort lost. Clear the remaining threats.',
+                zh: '护送线受损，清理残余威胁稳局。',
+              }),
+              status: tr({ en: 'Result: escort failed', zh: '结果：护送失利' }),
             };
         break;
       }
@@ -2676,29 +2915,39 @@ export class GameCoordinator {
     eventType: LevelWaveEventType,
     waveNumber: number
   ): WaveObjectiveDisplay {
+    const text = WAVE_OBJECTIVE_TEXT;
     switch (eventType) {
       case LevelWaveEventType.ELITE_HUNT:
         return {
-          title: `第 ${waveNumber} 波 · 精英歼灭`,
-          objective: '优先打穿重型与王牌，切断高威胁线。',
-          status: '优先：重型/王牌',
+          title: tr(text.eliteTitle, { wave: waveNumber }),
+          objective: tr({
+            en: 'Take out heavies and aces first to break their attack.',
+            zh: '优先打穿重型与王牌，切断高威胁线。',
+          }),
+          status: tr({ en: 'Priority: heavies / aces', zh: '优先：重型/王牌' }),
         };
       case LevelWaveEventType.INTERCEPT:
         return {
-          title: `第 ${waveNumber} 波 · 限时拦截`,
-          objective: '拦截突防编队，优先高速目标。',
-          status: '优先：前锋拦截',
+          title: tr(text.interceptTitle, { wave: waveNumber }),
+          objective: tr(text.interceptObjective),
+          status: tr({ en: 'Priority: stop the vanguard', zh: '优先：前锋拦截' }),
         };
       case LevelWaveEventType.ESCORT_DEFENSE:
         return {
-          title: `第 ${waveNumber} 波 · 护送防守`,
-          objective: '先护送友军，再点穿护航关键威胁。',
-          status: '优先：友军防护',
+          title: tr(text.escortTitle, { wave: waveNumber }),
+          objective: tr({
+            en: 'Cover the escort first, then pick off the key threats.',
+            zh: '先护送友军，再点穿护航关键威胁。',
+          }),
+          status: tr({ en: 'Priority: protect the escort', zh: '优先：友军防护' }),
         };
       default:
         return {
-          title: `第 ${waveNumber} 波 · 空域压制`,
-          objective: '清空本波目标，维持机动与火力',
+          title: tr(text.sweepTitle, { wave: waveNumber }),
+          objective: tr({
+            en: 'Clear this wave. Keep moving and keep firing',
+            zh: '清空本波目标，维持机动与火力',
+          }),
         };
     }
   }
@@ -2870,10 +3119,11 @@ export class GameCoordinator {
     const level = this.bossBattleController?.getCurrentLevel() ?? this.sessionState.getLevel();
     this.bossBattleController?.clear();
     this.enemySystem?.clearFriendlies();
+    this.wingmen.reset();
     this.weapons.clearInFlight();
     this.retireBossMinions();
 
-    this.hud.showPowerUpBig('', '已击坠');
+    this.hud.showPowerUpBig('', tr({ en: 'Boss destroyed', zh: '已击坠' }));
     this.campaign.handleBossDefeated(level, isBossMode);
   }
 
@@ -3139,7 +3389,7 @@ export class GameCoordinator {
       this.hud.updateUpgradePoints(this.playerStats.getUpgrades().getAvailablePoints());
       this.audioManager.playPowerUp();
       const feedback = GameCoordinator.UPGRADE_FEEDBACK[type];
-      this.hud.showPowerUpBig(feedback.icon, feedback.label, 1.2, true);
+      this.hud.showPowerUpBig(feedback.icon, tr(feedback.label), 1.2, true);
     }
   }
 
@@ -3148,15 +3398,27 @@ export class GameCoordinator {
       return;
     }
 
-    const pointLabel = earnedPoints > 1 ? `${earnedPoints} 升级点` : '1 升级点';
-    this.hud.showPowerUpBig('⭐', `获得 ${pointLabel}`, 1.1, true);
+    const pointLabel =
+      earnedPoints > 1
+        ? tr(
+            { en: '+{points} upgrade points', zh: '获得 {points} 升级点' },
+            { points: earnedPoints }
+          )
+        : tr({ en: '+1 upgrade point', zh: '获得 1 升级点' });
+    this.hud.showPowerUpBig('⭐', pointLabel, 1.1, true);
 
     if (!this.upgradeMenuHintShown) {
       this.upgradeMenuHintShown = true;
       const isMobile = GameConfig.isMobile;
       const hint = isMobile
-        ? '暂停后打开升级菜单，立即强化机体'
-        : '按 U 或暂停后打开升级菜单，立即强化机体';
+        ? tr({
+            en: 'Pause and open Upgrades to improve your jet',
+            zh: '暂停后打开升级菜单，立即强化机体',
+          })
+        : tr({
+            en: 'Press U or pause to open Upgrades and improve your jet',
+            zh: '按 U 或暂停后打开升级菜单，立即强化机体',
+          });
       this.scheduleTimeout(() => {
         this.hud.showPowerUpBig('🧩', hint, 1.8, true);
       }, 1200);

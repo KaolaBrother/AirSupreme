@@ -4,6 +4,7 @@ import { BossMissileSystem } from './BossMissileSystem';
 import type { BossHazardHit, BossMinionKind, BossSubTarget, IAdvancedBoss } from './BossContracts';
 import { HealthSystem } from '@/features/combat/HealthSystem';
 import type { ParticleSystem } from '@/features/effects/ParticleSystem';
+import { getLocale, tr, type Locale } from '@/i18n';
 import {
   HazardRingPool,
   createGlowSprite,
@@ -332,6 +333,8 @@ export class TempestZeppelinAI implements IAdvancedBoss {
   private fireTimer = 0;
   private statusLabel: string | null = null;
   private statusKey = -1;
+  /** 状态提示按生成时的语言缓存；切换语言后重新生成 */
+  private statusLocale: Locale | null = null;
 
   private readonly playerPos = new THREE.Vector3();
   private readonly playerVel = new THREE.Vector3();
@@ -621,37 +624,60 @@ export class TempestZeppelinAI implements IAdvancedBoss {
     else if (this.hangarAlive && this.hangarOpen >= 0.5) code = 3;
     const key =
       code * 10000 + this.phase * 1000 + (this.lowHealthReached ? 100 : 0) + aliveCells * 10;
-    if (key === this.statusKey) return this.statusLabel;
+    const locale = getLocale();
+    if (key === this.statusKey && locale === this.statusLocale) return this.statusLabel;
     this.statusKey = key;
+    this.statusLocale = locale;
     switch (code) {
       case 9:
-        this.statusLabel = '飞艇坠毁';
+        this.statusLabel = tr({ en: 'Airship going down', zh: '飞艇坠毁' });
         break;
       case 8:
-        this.statusLabel = '电磁瘫痪 · 线圈失效';
+        this.statusLabel = tr({ en: 'EMP stunned · Coils offline', zh: '电磁瘫痪 · 线圈失效' });
         break;
       case 7:
-        this.statusLabel = '雷暴齐射充能 · 远离船体';
+        this.statusLabel = tr({
+          en: 'Storm volley charging · Get clear of the hull',
+          zh: '雷暴齐射充能 · 远离船体',
+        });
         break;
       case 6:
-        this.statusLabel = '线圈短路';
+        this.statusLabel = tr({ en: 'Coils shorted', zh: '线圈短路' });
         break;
       case 5:
-        this.statusLabel = '线圈充能 · 拉开距离';
+        this.statusLabel = tr({
+          en: 'Coils charging · Open the distance',
+          zh: '线圈充能 · 拉开距离',
+        });
         break;
       case 4:
-        this.statusLabel = '雷暴云层 · 云内放电';
+        this.statusLabel = tr({ en: 'Storm cloud · Lightning inside', zh: '雷暴云层 · 云内放电' });
         break;
       case 3:
-        this.statusLabel = '无人机舱开启 · 弱点暴露';
+        this.statusLabel = tr({
+          en: 'Drone bay open · Weak point exposed',
+          zh: '无人机舱开启 · 弱点暴露',
+        });
         break;
       default:
         if (this.phase >= 3) {
           this.statusLabel = this.lowHealthReached
-            ? '浮力不足 · 正在下坠'
-            : `浮力失控 · 风暴核心暴露 · 气囊 ${aliveCells}/${this.cells.length}`;
+            ? tr({ en: 'Losing lift · Going down', zh: '浮力不足 · 正在下坠' })
+            : tr(
+                {
+                  en: 'Lift failing · Storm core exposed · Cells {alive}/{total}',
+                  zh: '浮力失控 · 风暴核心暴露 · 气囊 {alive}/{total}',
+                },
+                { alive: aliveCells, total: this.cells.length }
+              );
         } else {
-          this.statusLabel = `装甲飞艇 · 气囊 ${aliveCells}/${this.cells.length}`;
+          this.statusLabel = tr(
+            {
+              en: 'Armored airship · Cells {alive}/{total}',
+              zh: '装甲飞艇 · 气囊 {alive}/{total}',
+            },
+            { alive: aliveCells, total: this.cells.length }
+          );
         }
     }
     return this.statusLabel;
@@ -1186,7 +1212,7 @@ export class TempestZeppelinAI implements IAdvancedBoss {
     }
     if (started > 0) {
       this.lashTimer = Math.max(this.lashTimer, 4);
-      this.warn('雷暴齐射');
+      this.warn(tr({ en: 'Storm volley', zh: '雷暴齐射' }));
       this.rig.gondola.getWorldPosition(this.tmpA);
       this.emitCue('barrage-charge', this.tmpA, 1);
     }
@@ -1212,7 +1238,7 @@ export class TempestZeppelinAI implements IAdvancedBoss {
     coil.halo.visible = true;
     coil.rig.tip.getWorldPosition(this.tmpA);
     if (!barrage) {
-      this.warn('线圈充能');
+      this.warn(tr({ en: 'Coils charging', zh: '线圈充能' }));
       this.emitCue('coil-charge', this.tmpA, 0.7);
     }
     this.statusKey = -1;
@@ -1483,7 +1509,7 @@ export class TempestZeppelinAI implements IAdvancedBoss {
     if (this.shroudTimer > 0 || this.shroud.isBusy()) return;
     this.shroudTimer = tuning.shroudInterval * this.cadence + tuning.shroudDuration;
     if (this.shroud.start(tuning.shroudDuration)) {
-      this.warn('雷暴云层 · 远离飞艇');
+      this.warn(tr({ en: 'Storm cloud · Keep away from the airship', zh: '雷暴云层 · 远离飞艇' }));
       this.emitCue('shroud', this.mesh.position, 0.8);
     }
   }
@@ -1595,7 +1621,9 @@ export class TempestZeppelinAI implements IAdvancedBoss {
       }
     }
     if (spawned > 0) {
-      if (this.stormWaves % 2 === 0) this.warn('召雷预警');
+      if (this.stormWaves % 2 === 0) {
+        this.warn(tr({ en: 'Lightning strike warning', zh: '召雷预警' }));
+      }
       this.stormWaves++;
       this.emitCue('storm-call', this.tmpA, 0.8);
     }
@@ -1674,7 +1702,7 @@ export class TempestZeppelinAI implements IAdvancedBoss {
     this.hangarPhase = 'opening';
     this.hangarTimer = 0;
     this.dronesQueued = tuning.droneCount;
-    this.warn('无人机舱开启');
+    this.warn(tr({ en: 'Drone bay open', zh: '无人机舱开启' }));
     this.rig.hangar.launchPoint.getWorldPosition(this.tmpA);
     this.emitCue('hangar-open', this.tmpA, 0.8);
     this.statusKey = -1;
@@ -1750,7 +1778,10 @@ export class TempestZeppelinAI implements IAdvancedBoss {
   private enterPhase(phase: number): void {
     this.phase = Math.min(PHASE_COUNT, phase);
     const sf = this.sizeFactor;
-    const label = this.phase === 2 ? '气囊破裂 · 无人机升空' : '浮力失控 · 风暴核心暴露';
+    const label =
+      this.phase === 2
+        ? tr({ en: 'Gas cells ruptured · Drones launching', zh: '气囊破裂 · 无人机升空' })
+        : tr({ en: 'Lift failing · Storm core exposed', zh: '浮力失控 · 风暴核心暴露' });
     this.mesh.getWorldPosition(this.tmpA);
     if (this.phase === 2) {
       this.hangarCycleTimer = 1.5;

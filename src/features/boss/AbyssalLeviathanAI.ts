@@ -4,6 +4,7 @@ import { BossMissileSystem } from './BossMissileSystem';
 import type { BossHazardHit, BossMinionKind, BossSubTarget, IAdvancedBoss } from './BossContracts';
 import { HealthSystem } from '@/features/combat/HealthSystem';
 import type { ParticleSystem } from '@/features/effects/ParticleSystem';
+import { getLocale, tr, type Locale } from '@/i18n';
 import {
   ArcShellPool,
   HazardColumnPool,
@@ -320,6 +321,8 @@ export class AbyssalLeviathanAI implements IAdvancedBoss {
   private alarm = 0;
   private statusLabel: string | null = null;
   private statusKey = -1;
+  /** 状态提示按生成时的语言缓存；切换语言后重新生成 */
+  private statusLocale: Locale | null = null;
 
   private readonly playerPos = new THREE.Vector3();
   private readonly playerVel = new THREE.Vector3();
@@ -607,36 +610,50 @@ export class AbyssalLeviathanAI implements IAdvancedBoss {
                   ? 4
                   : 3;
     const key = stateCode * 10000 + this.phase * 1000 + aliveTanks * 10 + hatchesOpen;
-    if (key === this.statusKey) return this.statusLabel;
+    const locale = getLocale();
+    if (key === this.statusKey && locale === this.statusLocale) return this.statusLabel;
     this.statusKey = key;
+    this.statusLocale = locale;
     switch (stateCode) {
       case 9:
-        this.statusLabel = '艇体断裂';
+        this.statusLabel = tr({ en: 'Hull breaking up', zh: '艇体断裂' });
         break;
       case 8:
-        this.statusLabel = '电磁瘫痪 · 被迫上浮';
+        this.statusLabel = tr({ en: 'EMP stunned · Forced to surface', zh: '电磁瘫痪 · 被迫上浮' });
         break;
       case 7:
-        this.statusLabel = '冲撞突进';
+        this.statusLabel = tr({ en: 'Ramming charge', zh: '冲撞突进' });
         break;
       case 6:
-        this.statusLabel = '即将破冰上浮';
+        this.statusLabel = tr({ en: 'About to breach', zh: '即将破冰上浮' });
         break;
       case 5:
-        this.statusLabel = '潜航中 · 无敌';
+        this.statusLabel = tr({ en: 'Submerged · Invulnerable', zh: '潜航中 · 无敌' });
         break;
       case 4:
-        this.statusLabel = '破冰上浮';
+        this.statusLabel = tr({ en: 'Breaching', zh: '破冰上浮' });
         break;
       default:
         if (this.phase >= 3) {
-          this.statusLabel = '压载舱破裂 · 无法下潜';
+          this.statusLabel = tr({
+            en: 'Ballast ruptured · Cannot dive',
+            zh: '压载舱破裂 · 无法下潜',
+          });
         } else if (hatchesOpen) {
-          this.statusLabel = '导弹舱开启 · 弱点暴露';
+          this.statusLabel = tr({
+            en: 'Missile bay open · Weak point exposed',
+            zh: '导弹舱开启 · 弱点暴露',
+          });
         } else if (aliveTanks === 0) {
-          this.statusLabel = '压载舱全毁 · 无法下潜';
+          this.statusLabel = tr({
+            en: 'Ballast destroyed · Cannot dive',
+            zh: '压载舱全毁 · 无法下潜',
+          });
         } else {
-          this.statusLabel = `上浮 · 压载舱 ${aliveTanks}/${this.rig.tanks.length}`;
+          this.statusLabel = tr(
+            { en: 'Surfaced · Ballast tanks {alive}/{total}', zh: '上浮 · 压载舱 {alive}/{total}' },
+            { alive: aliveTanks, total: this.rig.tanks.length }
+          );
         }
     }
     return this.statusLabel;
@@ -964,7 +981,7 @@ export class AbyssalLeviathanAI implements IAdvancedBoss {
     this.telegraphShown = true;
     this.tmpA.set(this.mesh.position.x, this.seaY, this.mesh.position.z);
     this.breachMarker.show(this.tmpA, 130 * this.sizeFactor);
-    this.onHazardWarning?.('利维坦上浮');
+    this.onHazardWarning?.(tr({ en: 'Leviathan surfacing', zh: '利维坦上浮' }));
     this.sonarTimer = Math.min(this.sonarTimer, 0.2);
   }
 
@@ -1226,7 +1243,7 @@ export class AbyssalLeviathanAI implements IAdvancedBoss {
     if (this.salvoState !== 'idle' || !this.isBayAlive()) return;
     this.salvoState = 'opening';
     this.salvoTimer = 0;
-    this.onHazardWarning?.('垂发导弹齐射');
+    this.onHazardWarning?.(tr({ en: 'VLS missile salvo', zh: '垂发导弹齐射' }));
     this.rig.deck.getWorldPosition(this.tmpA);
     this.emitCue('hatch-open', this.tmpA, 0.7);
   }
@@ -1478,7 +1495,7 @@ export class AbyssalLeviathanAI implements IAdvancedBoss {
           this.ramState = 'telegraph';
           this.ramTimer = 0;
           this.lane.show(this.tmpA, this.yaw, 380 * this.sizeFactor, 48 * this.sizeFactor);
-          this.onHazardWarning?.('冲撞预警');
+          this.onHazardWarning?.(tr({ en: 'Ram warning', zh: '冲撞预警' }));
           this.emitCue('horn', this.tmpA, 1);
         }
         return;
@@ -1576,7 +1593,10 @@ export class AbyssalLeviathanAI implements IAdvancedBoss {
 
   private enterPhase(phase: number): void {
     this.phase = Math.min(PHASE_COUNT, phase);
-    const label = this.phase === 2 ? '布雷开始 · 潜航缩短' : '压载舱破裂 · 冲撞模式';
+    const label =
+      this.phase === 2
+        ? tr({ en: 'Mines deployed · Shorter dives', zh: '布雷开始 · 潜航缩短' })
+        : tr({ en: 'Ballast ruptured · Ramming mode', zh: '压载舱破裂 · 冲撞模式' });
     this.rig.sail.getWorldPosition(this.tmpA);
     if (this.phase >= 3) {
       // 剩余压载舱全部破裂：永久上浮

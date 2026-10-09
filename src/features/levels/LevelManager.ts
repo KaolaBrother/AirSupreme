@@ -256,7 +256,7 @@ export class LevelManager {
     );
 
     if (clampedCenter.x !== rawCenter.x || clampedCenter.z !== rawCenter.z) {
-      log.warn('群中心超出战场，已调整到边界内', {
+      log.warn('Wave group centre outside the battlefield; clamped to the boundary', {
         original: { x: rawCenter.x, z: rawCenter.z },
         clamped: { x: clampedCenter.x, z: clampedCenter.z },
       });

@@ -4,6 +4,7 @@ import { BossMissileSystem } from './BossMissileSystem';
 import type { BossHazardHit, BossMinionKind, BossSubTarget, IAdvancedBoss } from './BossContracts';
 import { HealthSystem } from '@/features/combat/HealthSystem';
 import type { ParticleSystem } from '@/features/effects/ParticleSystem';
+import { getLocale, tr, type Locale } from '@/i18n';
 import {
   createHazardProbe,
   disposeObjectTree,
@@ -313,6 +314,8 @@ export class PhantomWingAI implements IAdvancedBoss {
   private smokeTimer = 0;
   private statusLabel: string | null = null;
   private statusKey = -1;
+  /** 状态提示按生成时的语言缓存；切换语言后重新生成 */
+  private statusLocale: Locale | null = null;
 
   private readonly playerPos = new THREE.Vector3();
   private readonly playerVel = new THREE.Vector3();
@@ -595,35 +598,54 @@ export class PhantomWingAI implements IAdvancedBoss {
     else if (this.cloakPhase === 'cloaking' && this.getCloakCap() < 0.5) code = 4;
     else if (decoys > 0) code = 3;
     const key = code * 1000 + this.phase * 100 + (this.lowHealthReached ? 10 : 0) + decoys;
-    if (key === this.statusKey) return this.statusLabel;
+    const locale = getLocale();
+    if (key === this.statusKey && locale === this.statusLocale) return this.statusLabel;
     this.statusKey = key;
+    this.statusLocale = locale;
     switch (code) {
       case 9:
-        this.statusLabel = '幻影坠落';
+        this.statusLabel = tr({ en: 'Phantom going down', zh: '幻影坠落' });
         break;
       case 8:
-        this.statusLabel = '电磁瘫痪 · 强制现形';
+        this.statusLabel = tr({ en: 'EMP stunned · Forced visible', zh: '电磁瘫痪 · 强制现形' });
         break;
       case 7:
-        this.statusLabel = '激光长矛 · 避开红色航道';
+        this.statusLabel = tr({
+          en: 'Laser lance · Avoid the red lane',
+          zh: '激光长矛 · 避开红色航道',
+        });
         break;
       case 6:
-        this.statusLabel = '隐形中 · 无法锁定';
+        this.statusLabel = tr({ en: 'Cloaked · Cannot lock', zh: '隐形中 · 无法锁定' });
         break;
       case 5:
-        this.statusLabel = '幻影现形';
+        this.statusLabel = tr({ en: 'Phantom decloaking', zh: '幻影现形' });
         break;
       case 4:
-        this.statusLabel = '隐形失败 · 涂层剥落';
+        this.statusLabel = tr({
+          en: 'Cloak failing · Coating stripped',
+          zh: '隐形失败 · 涂层剥落',
+        });
         break;
       case 3:
-        this.statusLabel = `全息诱饵 ×${decoys} · 真身尾焰为红色`;
+        this.statusLabel = tr(
+          {
+            en: 'Holo decoys ×{count} · The real one burns red',
+            zh: '全息诱饵 ×{count} · 真身尾焰为红色',
+          },
+          { count: decoys }
+        );
         break;
       default:
         if (this.phase >= 3) {
-          this.statusLabel = this.lowHealthReached ? '隐形涂层剥落 · 超频' : '超频模式';
+          this.statusLabel = this.lowHealthReached
+            ? tr({ en: 'Cloak coating stripped · Overclocked', zh: '隐形涂层剥落 · 超频' })
+            : tr({ en: 'Overclock mode', zh: '超频模式' });
         } else {
-          this.statusLabel = this.phase === 2 ? '幻影之翼 · 诱饵投射' : '幻影之翼';
+          this.statusLabel =
+            this.phase === 2
+              ? tr({ en: 'Phantom Wing · Decoys deployed', zh: '幻影之翼 · 诱饵投射' })
+              : tr({ en: 'Phantom Wing', zh: '幻影之翼' });
         }
     }
     return this.statusLabel;
@@ -948,7 +970,7 @@ export class PhantomWingAI implements IAdvancedBoss {
   private startDecloak(): void {
     this.cloakPhase = 'decloaking';
     this.cloakTimer = 0;
-    this.warn('幻影现形');
+    this.warn(tr({ en: 'Phantom decloaking', zh: '幻影现形' }));
     this.emitCue('decloak', this.mesh.position, 0.9);
     this.statusKey = -1;
   }
@@ -1411,7 +1433,7 @@ export class PhantomWingAI implements IAdvancedBoss {
       strafe * tuning.lanceFire;
     this.lance.telegraph(this.tmpA, this.lanceDir, this.lanceSpec, tuning.lanceTelegraph);
     this.burstLeft = 0;
-    this.warn('激光长矛预警');
+    this.warn(tr({ en: 'Laser lance warning', zh: '激光长矛预警' }));
     this.emitCue('lance-charge', this.tmpA, 0.9);
   }
 
@@ -1619,7 +1641,7 @@ export class PhantomWingAI implements IAdvancedBoss {
     }
     if (spawned > 0) {
       for (const emitter of this.emitters) if (emitter.alive) emitter.sparkTimer = -0.6;
-      this.warn('全息诱饵');
+      this.warn(tr({ en: 'Holo decoys', zh: '全息诱饵' }));
       this.emitCue('decoys', this.mesh.position, 0.8);
       this.statusKey = -1;
     }
@@ -1807,7 +1829,10 @@ export class PhantomWingAI implements IAdvancedBoss {
 
   private enterPhase(phase: number): void {
     this.phase = Math.min(PHASE_COUNT, phase);
-    const label = this.phase === 2 ? '全息诱饵 · 真假难辨' : '超频 · 长矛连击';
+    const label =
+      this.phase === 2
+        ? tr({ en: 'Holo decoys · Find the real one', zh: '全息诱饵 · 真假难辨' })
+        : tr({ en: 'Overclock · Lance barrage', zh: '超频 · 长矛连击' });
     const tuning = this.tuning();
     this.decoyTimer = Math.min(this.decoyTimer, 1.5);
     this.lanceTimer = Math.min(this.lanceTimer, 4);
