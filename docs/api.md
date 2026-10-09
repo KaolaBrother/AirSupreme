@@ -56,6 +56,66 @@ log.warn('warn');
 log.error('error');
 ```
 
+## Localisation (i18n)
+
+Source: `src/i18n/index.ts` (no `document` / `window` access at import time). English is the default; Simplified Chinese is the one other locale.
+
+```typescript
+export type Locale = 'en' | 'zh-CN';
+export const DEFAULT_LOCALE: Locale = 'en';
+export const SUPPORTED_LOCALES: readonly Locale[] = ['en', 'zh-CN'];
+
+/** 双语文案：en 为英文，zh 为简体中文 */
+export interface LocalizedText {
+  readonly en: string;
+  readonly zh: string;
+}
+export type TextParams = Readonly<Record<string, string | number>>;
+export type LocaleListener = (locale: Locale) => void;
+
+/** 把任意输入规整为受支持的语言；无法识别时回落到默认英文 */
+export function normalizeLocale(value: unknown): Locale;
+export function getLocale(): Locale;
+export function isChinese(): boolean;
+/** 切换语言：同步 <html lang> 并通知订阅者（语言未变化时不通知） */
+export function setLocale(locale: Locale): void;
+/** 订阅语言变化，返回取消订阅函数 */
+export function onLocaleChange(listener: LocaleListener): () => void;
+/** 按当前语言取文案；传入纯字符串时原样返回（便于渐进迁移） */
+export function localize(text: LocalizedText | string): string;
+/** 用 {name} 占位符填充参数；未提供的占位符保持原样 */
+export function format(template: string, params?: TextParams): string;
+/** localize + format 的组合 */
+export function tr(text: LocalizedText | string, params?: TextParams): string;
+```
+
+```typescript
+import { tr } from '@/i18n';
+
+tr({ en: 'Wave {n}', zh: '第{n}波' }, { n: 3 }); // 'Wave 3' | '第3波'
+```
+
+- `normalizeLocale` maps `zh`, `zh-cn` and `zh-hans…` (trimmed, any case) to `'zh-CN'`, `en` and `en-…` to `'en'`, and everything else to `'en'`.
+- `setLocale` normalises its argument, returns early when nothing changes, writes `document.documentElement.lang` when a document exists, then calls every listener once; a listener that throws is logged and does not stop the others.
+
+**Data contract.** Player-facing text is written in place, next to the data it belongs to, as a `LocalizedText` with both languages, and resolved where it is read with `tr()` / `localize()`; there are no string keys or per-language tables ([ADR 0002](decisions/0002-bilingual-text-and-voice-packs.md)). Fields typed `LocalizedText`:
+
+| Type | Fields | Source |
+| ---- | ------ | ------ |
+| `UnitConfig` | `name` | `src/features/units/UnitTypes.ts` |
+| `BossConfig` | `name` | `src/features/boss/BossTypes.ts` |
+| `EnemyConfig` | `name` | `src/features/enemy/EnemyTypes.ts` |
+| `SpecialWeaponConfig` | `name`, `description` | `src/features/weapons/WeaponTypes.ts` |
+| `UpgradeConfig` | `name`, `description`, `unit` | `src/features/upgrade/UpgradeSystem.ts` |
+| `PowerUpConfig` | `name`, `description` | `src/features/powerups/PowerUpSystem.ts` |
+| `LevelConfig` | `name` (the same object as the chapter title in `CHAPTER_TITLES`), `description` | `src/features/terrain/LevelConfig.ts` |
+| `DifficultyProfile` | `label` (Very Easy · Easy · Normal · Hard · Expert) | `src/core/Difficulty.ts` |
+| Campaign data | every player-facing field — see [Campaign data](#campaign-data) | `src/features/campaign/` |
+
+Snapshots handed to the HUD stay `string` and are localised when they are produced (for example `WeaponSystem.getHudState().name` is `tr(config.name)`). Per-frame code keeps its `{ en, zh }` objects as module-level constants, so nothing bilingual is allocated per frame.
+
+**Live switching.** `src/main.ts` calls `setLocale(loadStartFlowSettings().language)` before any UI renders, writes the page shell (title, loading screen, touch-button labels and `aria-label`s) in that language and rewrites it on `onLocaleChange`. Other subscribers: `StartMenu`, `PauseMenu` and `UpgradeMenu` (re-render in place), `HUD` (its own text, the settlement panel), `EnemyHealthBars` (every bar name, also while paused), `ModelPreview`, `RadioComms` (the line on screen) and `VoiceSystem` (stops the current line, re-prefetches in the new language). `StoryOverlay` writes each card in the locale current when the card is shown: a card already on screen keeps its language and the rest of its narration is skipped. Runtime messages — coordinator toasts and objectives, boss status / phase / hazard labels, unit and weapon warnings, checkpoint labels — call `tr()` when they are emitted.
+
 ## Crash surface
 
 Source: `src/features/terrain/TerrainGenerator.ts`, `src/features/levels/LevelManager.ts`, `src/core/systems/PlayerSystem.ts`.
@@ -204,86 +264,145 @@ export interface LevelScaling {
 }
 export const CAMPAIGN_LEVEL_CAP = 10;
 export function getLevelScaling(level: number): LevelScaling;
+
+export interface DifficultyProfile {
+  level: 1 | 2 | 3 | 4 | 5;
+  /** 难度名（中英双语）：英文沿用 Very Easy → Expert 的常见档位名，默认档 3 在英文里叫 Normal */
+  label: LocalizedText;
+  enemyHealthMultiplier: number;
+  enemyDamageMultiplier: number;
+  enemyAttackCooldownMultiplier: number;
+  powerUpDropMultiplier: number;
+  bossCooldownMultiplier: number;
+}
 export function getDifficultyProfile(level: number): DifficultyProfile; // player difficulty 1..5
 ```
 
-The curve values live in `getLevelScaling` itself; `LevelManager` (enemy jets) and `UnitController.setLevel` (units) multiply them by the player's `DifficultyProfile`, and `GameCoordinator` applies `scoreMultiplier` to every score award.
+The per-level values live in one module-private table, `LEVEL_CURVE` (one column per level, level 1 = 1.0), which `getLevelScaling` reads; `LevelManager` (enemy jets) and `UnitController.setLevel` (units) multiply them by the player's `DifficultyProfile`, and `GameCoordinator` applies `scoreMultiplier` to every score award. Difficulty 3 (Normal) is the default; `Difficulty.ts` records that it was tuned with the dev-only scripted-pilot harness (`src/core/dev/BalanceHarness.ts`).
 
 ## Campaign data
 
-Source: `src/features/campaign/CampaignData.ts` (data and pure functions only).
+Source: `src/features/campaign/` (data and pure functions only). `CampaignData.ts` is the single import point: it re-exports the types (`CampaignTypes.ts`), the cast (`CampaignCast.ts`), the chapters (`CampaignChapters.ts`), first-contact and generic radio (`CampaignRadio.ts`), title / prologue / epilogue / credits (`CampaignStory.ts`) and the chapter titles (`ChapterTitles.ts`), and adds the functions below. Every player-facing field is a [`LocalizedText`](#localisation-i18n); read it with `tr()`.
 
 ```typescript
 export const TOTAL_LEVELS = 10;
 
-export type CampaignSpeakerId = 'hq' | 'wingman' | 'scientist' | 'oracle' | 'player' | 'civilian';
+export type CampaignSpeakerId =
+  | 'hq' | 'wingman' | 'wingman2' | 'scientist' | 'awacs' | 'frigate'
+  | 'oracle' | 'player' | 'airliner' | 'freighter';
 export type CampaignSpeakerTone = 'sys' | 'ally' | 'threat' | 'weapon' | 'muted';
+/** 配音选角用的性别（neutral：合成音 / 无配音） */
+export type CampaignSpeakerGender = 'female' | 'male' | 'neutral';
 export interface CampaignSpeaker {
   id: CampaignSpeakerId;
-  callsign: string;
-  name: string;
+  /** 呼号（HUD 无线电标签） */
+  callsign: LocalizedText;
+  /** 角色名（军衔 + 姓名） */
+  name: LocalizedText;
   tone: CampaignSpeakerTone;
+  gender: CampaignSpeakerGender;
+  /** 配音选角说明：年龄、口音、语气（en 用于英文配音，zh 用于中文配音） */
+  voiceDirection: LocalizedText;
 }
 export const CAMPAIGN_SPEAKERS: Readonly<Record<CampaignSpeakerId, CampaignSpeaker>>;
+/** 剧情卡片旁白（章节简报、序章、尾声）的配音者：天穹指挥官瓦尔加上校 */
+export const NARRATION_SPEAKER: CampaignSpeakerId; // 'hq'
 
 export type RadioTriggerKind =
   | 'level-start' | 'wave-start' | 'wave-complete'
   | 'boss-spawn' | 'boss-phase' | 'boss-low-health' | 'boss-defeated';
 export interface RadioLine {
+  /**
+   * 稳定唯一 id，同时是语音文件名（小写字母、数字、连字符）。
+   * 章节台词：c{两位章号}-{触发}[-{序号}]-{说话人}[-{同组第 n 句}]，如 c03-wave-start-2-wingman2；
+   * 首次遭遇：contact-{单位类型}；通用台词：generic-{键}。
+   */
+  id: string;
   trigger: RadioTriggerKind;
   /** 波次序号或 Boss 阶段号；缺省表示不区分序号 */
   index?: number;
   speaker: CampaignSpeakerId;
-  text: string;
+  text: LocalizedText;
+}
+/** 带稳定 id 的配音旁白段落（章节简报 / 序章 / 尾声）；本身就是 LocalizedText，可直接 tr() */
+export interface VoicedText extends LocalizedText {
+  readonly id: string;
 }
 
 export interface CampaignBossBrief {
-  name: string;
+  name: LocalizedText;
+  /** 英文代号（两种语言下相同） */
   codename: string;
-  briefingLine: string;
-  weakPointHint: string;
+  briefingLine: LocalizedText;
+  weakPointHint: LocalizedText;
 }
 export interface CampaignChapter {
   level: number;
-  chapterLabel: string;
+  chapterLabel: LocalizedText;
+  /** 行动代号（英文，两种语言下相同），如 OPERATION FIRST LIGHT */
   codename: string;
-  operationName: string;
-  title: string;
-  location: string;
-  intro: readonly string[];
-  objectives: readonly string[];
-  levelBriefingLine: string;
+  /** 本地化行动名：中文如「破晓行动」；英文界面与 codename 重复，故 en 为空串（卡片只显示代号） */
+  operationName: LocalizedText;
+  /** 关卡标题（与 LevelConfig.name 是同一个对象，见 ChapterTitles） */
+  title: LocalizedText;
+  location: LocalizedText;
+  /** 章节简报（卡片打字机逐段展示；由天穹指挥官配音） */
+  intro: readonly VoicedText[];
+  objectives: readonly LocalizedText[];
+  levelBriefingLine: LocalizedText;
   boss: CampaignBossBrief;
   radio: readonly RadioLine[];
   unlockedWeapons: readonly SpecialWeaponId[];
-  unlockLine: string | null;
-  debriefSummary: string;
+  /** 解锁说明（含按键提示，不配音；无解锁时为 null） */
+  unlockLine: LocalizedText | null;
+  debriefSummary: LocalizedText;
 }
 
-export const CAMPAIGN_TITLE = 'AIR SUPREME · 天穹之战';
-export const CAMPAIGN_PROLOGUE: readonly string[];
-export const CAMPAIGN_EPILOGUE: readonly string[];
-export const CAMPAIGN_CREDITS: readonly string[];
+export const CAMPAIGN_TITLE: LocalizedText; // 'AIR SUPREME · The Skydome War' / 'AIR SUPREME · 天穹之战'
+export const CAMPAIGN_PROLOGUE: readonly VoicedText[];
+export const CAMPAIGN_EPILOGUE: readonly VoicedText[];
+export const CAMPAIGN_CREDITS: readonly LocalizedText[];
 export const CAMPAIGN_CHAPTERS: readonly CampaignChapter[];
+/** 十个章节的标题（关卡 1..10）；章节 title 与 LevelConfig 的 name 引用同一个对象 */
+export const CHAPTER_TITLES: readonly LocalizedText[];
 
 /** 首次遭遇某类单位时的提示台词；键为 UnitType 枚举的字符串值 */
 export const UNIT_FIRST_CONTACT_RADIO: Readonly<Record<string, RadioLine>>;
 export type GenericRadioKey =
-  | 'civilian-hit' | 'civilian-destroyed' | 'ally-unit-destroyed' | 'escort-success'
-  | 'escort-failed' | 'missile-warning' | 'low-health' | 'weapon-overheat' | 'checkpoint';
+  | 'civilian-hit' | 'civilian-destroyed' | 'ally-unit-destroyed' | 'awacs-lost' | 'frigate-lost'
+  | 'escort-success' | 'escort-failed' | 'missile-warning' | 'low-health' | 'weapon-overheat'
+  | 'checkpoint' | 'swift-joined' | 'raven-down-swift' | 'raven-down-hq' | 'swift-down-raven'
+  | 'swift-down-hq';
 export const GENERIC_RADIO: Readonly<Record<GenericRadioKey, RadioLine>>;
+
+/** 配音脚本条目（getVoiceScript 的返回值，供配音批次逐句生成语音） */
+export interface VoiceScriptLine {
+  /** 稳定唯一 id = 语音文件名 */
+  id: string;
+  speaker: CampaignSpeakerId;
+  text: LocalizedText;
+  /** narration：剧情卡片旁白；radio：无线电台词 */
+  kind: 'narration' | 'radio';
+}
 
 export function getCampaignChapter(level: number): CampaignChapter; // clamps to 1..TOTAL_LEVELS
 export function getChapterRadio(level: number, trigger: RadioTriggerKind, index?: number): RadioLine[];
 export function getUnlockedWeaponsThrough(level: number): SpecialWeaponId[];
 export function getWeaponUnlockLevel(weapon: SpecialWeaponId): number | null;
+/**
+ * 全部需要配音的台词（每次返回新数组），按播放顺序：
+ * 序章 → 每章（简报旁白 + 无线电）→ 首次遭遇 → 通用告警 → 尾声。
+ */
+export function getVoiceScript(): VoiceScriptLine[];
 ```
 
 Unlock schedule (`CampaignChapter.unlockedWeapons`): rockets 2 · laser 4 · swarm 6 · railgun 7 · emp 9.
 
+The generic keys `awacs-lost` / `frigate-lost` replace `ally-unit-destroyed` when an `ALLY_AWACS` / `ALLY_FRIGATE` is lost (`ALLY_LOSS_RADIO` in `src/core/units/UnitController.ts`); the five wingman keys (`swift-joined`, and `raven-down-swift`, `raven-down-hq`, `swift-down-raven`, `swift-down-hq`, whose last word names who reports the loss) are played through `ICampaignPresentation.onWingmanEvent`. `getVoiceScript()` is the voiced script the voice packs are recorded from — see [voice-lines.md](voice-lines.md).
+
 ## Campaign presentation (`ICampaignPresentation`)
 
-Source: `src/core/campaign/CampaignPresentation.ts`. Gameplay code tells the story, reports state and makes campaign sounds only through this interface; `DefaultCampaignPresentation` implements it on top of `StoryOverlay`, `RadioComms`, `HUD`, `PresentationController` (radar), `MusicSystem` and `CampaignSfxRouter`. See [ADR 0001](decisions/0001-campaign-presentation-adapter.md).
+Source: `src/core/campaign/CampaignPresentation.ts`. Gameplay code tells the story, reports state and makes campaign sounds only through this interface; `DefaultCampaignPresentation` implements it on top of `StoryOverlay`, `RadioComms`, `HUD`, `PresentationController` (radar), `MusicSystem`, `CampaignSfxRouter` and, when one is supplied, a voice (`VoiceSystem`). See [ADR 0001](decisions/0001-campaign-presentation-adapter.md).
 
 ```typescript
 export interface ICampaignPresentation {
@@ -309,6 +428,10 @@ export interface ICampaignPresentation {
   ): void;
   genericRadio(key: GenericRadioKey): void;
   unitFirstContact(unitType: string): void;
+  /** 僚机入列 / 被击落：播放 WINGMAN_EVENT_RADIO 登记的通用台词（未登记的事件不出声） */
+  onWingmanEvent(id: WingmanId, event: WingmanEvent): void;
+  /** 某名僚机此刻是否在空中（无线电 / 语音挑选说话人用） */
+  isWingmanFlying(id: WingmanId): boolean;
   /** 无线电正在播放或有排队台词 */
   isRadioBusy(): boolean;
   /** 关卡结束 / 换关 / 失败：清空无线电 */
@@ -402,6 +525,16 @@ export interface CampaignWeaponPanelState {
 export interface RadarRangeTarget {
   setRadarRangeMultiplier(multiplier: number): void;
 }
+/** 表现层用到的配音接口（VoiceSystem 的子集，便于测试替身） */
+export interface CampaignVoice {
+  play(lineId: string, options: VoicePlayOptions): number;
+  stop(kind?: VoiceKind): void;
+  stopAll(): void;
+  pause(): void;
+  resume(): void;
+  prefetch(lineIds: readonly string[]): void;
+  loadManifest(): Promise<unknown>;
+}
 export interface DefaultCampaignPresentationDeps {
   getHud(): HUD | null;
   getRadar(): RadarRangeTarget | null;
@@ -413,13 +546,25 @@ export interface DefaultCampaignPresentationDeps {
   getListenerPosition(): THREE.Vector3 | null;
   /** 剧情界面模块加载（缺省为动态导入；测试可注入） */
   loadStoryUi?(): Promise<StoryUiModules>;
+  /** 具名僚机的在空状态（缺省视为都不在空中） */
+  wingmen?: WingmanStatus;
+  /** 角色配音（缺省没有配音：无线电与剧情卡片纯文字） */
+  voice?: CampaignVoice;
 }
 export class DefaultCampaignPresentation implements ICampaignPresentation {
   constructor(deps: DefaultCampaignPresentationDeps);
 }
 ```
 
-Behaviour worth knowing: radio lines enqueued before the story UI loads are buffered (up to 6, duplicates dropped); `civilian-hit`, `missile-warning` and `low-health` are high priority; Boss mode keeps only `boss-spawn` chapter lines and the high-priority generic lines; per-frame HUD pushes are diffed (no call when nothing visible changed).
+Behaviour worth knowing: radio lines enqueued before the story UI loads are buffered (up to 6, duplicates dropped); `civilian-hit`, `missile-warning` and `low-health` are high priority; Boss mode keeps only `boss-spawn` chapter lines and the high-priority generic lines; per-frame HUD pushes are diffed (no call when nothing visible changed). `GameCoordinator` passes its `WingmanRoster` as `wingmen` and its `VoiceSystem` as `voice`.
+
+Voice wiring (all optional — without `voice` the radio and the story cards are text only):
+
+- **Radio.** `RadioComms.onLineShown` plays the line's voice: `voice.play(line.id, { kind: 'radio', speaker: line.speaker, … })`. On start the line is held for the voice (`RadioComms.holdForVoice(line, duration)`); on end or silence it is released (`releaseVoice(line)`). A line replayed after a high-priority interrupt calls `play` again, so its voice starts over.
+- **Narration.** `StoryOverlay.narration` is set to a `StoryNarration` that plays each paragraph id as `kind: 'narration'` with `NARRATION_SPEAKER` and stops with `voice.stop('narration')`.
+- **Prefetch.** `showChapterIntro` prefetches the chapter's lines — prologue (when shown), briefing, level-start lines, the rest of the chapter's radio, then the urgent generic lines (`missile-warning`, `low-health`, `civilian-hit`); `playBossMusic` prefetches the chapter's `boss-*` lines (Boss mode has no chapter card). `preloadStoryUi` also starts loading the voice manifest.
+- **Lifecycle.** `onPause` / `onResume` pause and resume the voice; `clearRadio` stops the radio voice; the debrief card clears the radio queue but lets the line being spoken finish; `onGameOver`, `onMissionComplete` and `dispose` stop all voices. The voice belongs to the coordinator, which disposes it.
+- **Wingman events.** `WINGMAN_EVENT_RADIO` maps `swift:joined` → `swift-joined`, `raven:down` → `raven-down-swift` (Swift reports, if she is flying) or else `raven-down-hq`, and `swift:down` → `swift-down-raven` or else `swift-down-hq`. Raven has no join line; unmapped events are silent.
 
 ## Campaign flow
 
@@ -461,7 +606,45 @@ export class CampaignFlowController {
 }
 ```
 
-The sequence it drives is in [architecture.md → Campaign flow](architecture.md#campaign-flow).
+The sequence it drives is in [architecture.md → Campaign flow](architecture.md#campaign-flow). After a boss dies, `handleBossDefeated` waits `BOSS_OUTRO_MIN_MS` for the explosion, then polls `presentation.isRadioBusy()` until the defeat lines (now voiced) have played, up to `BOSS_OUTRO_MAX_MS`; it gives up if the player dies or leaves meanwhile.
+
+## Wingmen
+
+Source: `src/core/campaign/Wingmen.ts`. Decides which friendly AI jet is which named wingman; flying and fighting stay with `FriendlyAI`.
+
+```typescript
+export type WingmanId = 'raven' | 'swift';
+/** 入列 / 被击落（无线电与语音挂钩） */
+export type WingmanEvent = 'joined' | 'down';
+
+export interface WingmanProfile {
+  readonly id: WingmanId;
+  /** 呼号：友机血条标签（mesh.userData.displayName）与提示文案 */
+  readonly callsign: LocalizedText;
+  /** 从第几关起随队出击（与战役剧情的入队章节一致） */
+  readonly joinsAtLevel: number;
+}
+/** 编队顺序即入列顺序：先渡鸦，后雨燕（雨燕在第 3 章雪山救援中入队） */
+export const WINGMEN: readonly WingmanProfile[]; // raven (level 1), swift (level 3)
+
+/** 只读视图：无线电 / 语音据此判断某名僚机此刻是否在空中 */
+export interface WingmanStatus {
+  isFlying(id: WingmanId): boolean;
+}
+
+export class WingmanRoster implements WingmanStatus {
+  constructor(profiles: readonly WingmanProfile[] = WINGMEN);
+  /** 新友机入场：返回它的僚机身份；null 表示普通友机 */
+  assign(friendlyId: string, level: number): WingmanProfile | null;
+  /** 友机坠毁：是僚机则记为本关被击落并返回其身份；普通友机返回 null */
+  release(friendlyId: string): WingmanProfile | null;
+  /** 友机全部撤场（换关 / 读档 / Boss 击破）：僚机全部归队 */
+  reset(): void;
+  isFlying(id: WingmanId): boolean;
+}
+```
+
+`GameCoordinator` owns one roster. When it spawns a friendly AI jet it calls `assign(mesh.uuid, level)`: the first profile that has joined by that level, is not flying and was not shot down this level wins, the callsign goes to `mesh.userData.displayName` (the health bar label) and `presentation.onWingmanEvent(id, 'joined')` fires. On `FRIENDLY_DEATH` it calls `release(friendlyId)`, names the wingman in the HUD toast and fires `onWingmanEvent(id, 'down')`. `reset()` runs when a level is prepared (new level or checkpoint resume) and when a boss is destroyed. The roster is passed to the presentation as its `WingmanStatus`.
 
 ## Save system
 
@@ -535,23 +718,31 @@ export type GameMode = 'normal' | 'boss';
 /** 视角偏好（与 CameraRig 的 CameraMode 取值一致） */
 export type CameraModeSetting = 'third-person' | 'first-person';
 
+/** 角色配音音量的缺省值（0..1；0 = 纯文字，不加载语音） */
+export const DEFAULT_VOICE_VOLUME = 0.9;
+
 export interface StartFlowSettings {
   difficulty: number;
   sfxVolume: number;
   musicVolume: number;
+  /** 角色配音音量 0..1（旧存档没有该字段时取缺省值） */
+  voiceVolume: number;
   qualityPreset: QualityPreset;
   tutorialEnabled: boolean;
   playerLives: number;
   startLevel: number; // clamped to 1..TOTAL_LEVELS
   gameMode: GameMode;
   testScore: number;
-  cameraMode: CameraModeSetting; // new; default 'third-person'
+  cameraMode: CameraModeSetting; // default 'third-person'
+  /** 界面语言：默认英文（不跟随浏览器语言），可在开始菜单 / 暂停菜单切换为简体中文 */
+  language: Locale;
 }
 
 export const DEFAULT_START_FLOW_SETTINGS: StartFlowSettings = {
   difficulty: 3,
   sfxVolume: 0.7,
   musicVolume: 0.7,
+  voiceVolume: DEFAULT_VOICE_VOLUME,
   qualityPreset: 'auto',
   tutorialEnabled: true,
   playerLives: 3,
@@ -559,8 +750,14 @@ export const DEFAULT_START_FLOW_SETTINGS: StartFlowSettings = {
   gameMode: 'normal',
   testScore: 0,
   cameraMode: 'third-person',
+  language: DEFAULT_LOCALE,
 };
 export const START_MENU_STORAGE_KEY = 'air-supreme:start-menu-settings';
+
+/** 语言设置的选项名：每种语言用它自己的写法（English / 中文），不随界面语言变化 */
+export const LANGUAGE_ENDONYMS: Readonly<Record<Locale, string>>; // { en: 'English', 'zh-CN': '中文' }
+/** 按 SUPPORTED_LOCALES 的顺序循环切换语言（菜单里的 - / +） */
+export function stepLanguage(current: Locale, direction: 1 | -1): Locale;
 
 export function normalizeCameraModeSetting(
   value: unknown,
@@ -573,7 +770,7 @@ export function loadStartFlowSettings(): StartFlowSettings;
 export function saveStartFlowSettings(settings?: Partial<StartFlowSettings>): void;
 ```
 
-`GameCoordinator` writes `cameraMode` back with `saveStartFlowSettings({ cameraMode })` whenever the view is toggled.
+Normalisation: `voiceVolume` is clamped to 0..1 and falls back to `DEFAULT_VOICE_VOLUME` when missing or not a finite number; `language` goes through `normalizeLocale`, so saves from before the field existed, and unknown values, load as English. `saveStartFlowSettings` merges with what is stored before normalising, so a partial save (for example `{ voiceVolume }` from the pause menu) keeps every other field. `GameCoordinator` writes `cameraMode` back with `saveStartFlowSettings({ cameraMode })` whenever the view is toggled, applies `voiceVolume` to its `VoiceSystem` when it is constructed and when it boots with the start settings (the pause menu's Voice row applies it live through `IPauseMenuOptions.applyVoice`), and `src/main.ts` applies `language` with `setLocale` before any UI renders.
 
 ## Upgrades
 
@@ -599,13 +796,13 @@ export enum UpgradeType {
 export type UpgradeCategory = 'core' | 'defense' | 'weapon';
 export interface UpgradeConfig {
   type: UpgradeType;
-  name: string;
-  description: string;
+  name: LocalizedText;
+  description: LocalizedText;
   maxLevel: number;
   costs: number[];
   valuePerLevel: number;
   baseValue: number;
-  unit: string;
+  unit: LocalizedText;
   category: UpgradeCategory;
   /** 仅特殊武器强化线：对应的武器 */
   weaponId?: SpecialWeaponId;
@@ -655,7 +852,8 @@ export type UnitDomain = 'ground' | 'sea' | 'air';
 export type UnitRadarKind = 'enemy-ground' | 'enemy-sea' | 'enemy-air' | 'ally' | 'neutral';
 export interface UnitConfig {
   type: UnitType;
-  name: string;
+  /** 显示名（HUD / 血条 / 结算），中英双语 */
+  name: LocalizedText;
   domain: UnitDomain;
   faction: Faction;
   health: number;
@@ -798,10 +996,11 @@ Source: `src/features/weapons/WeaponTypes.ts`, `WeaponSystem.ts`. Per-tier stat 
 export type SpecialWeaponMode = 'salvo' | 'beam' | 'charge' | 'pulse';
 export interface SpecialWeaponConfig {
   id: SpecialWeaponId;
-  name: string;
-  shortCode: string; // 'RKT' | 'LSR' | 'SWM' | 'RLG' | 'EMP'
+  /** 武器名（HUD 武器面板 / 升级菜单），中英双语 */
+  name: LocalizedText;
+  shortCode: string; // 'RKT' | 'LSR' | 'SWM' | 'RLG' | 'EMP' (same in both languages)
   icon: string;
-  description: string;
+  description: LocalizedText;
   mode: SpecialWeaponMode;
   maxUpgradeLevel: 5;
 }
@@ -837,7 +1036,7 @@ export interface WeaponHudSlot {
 }
 export interface WeaponHudState {
   selected: SpecialWeaponId | null;
-  name: string;
+  name: string; // tr(config.name), in the language current when getHudState() runs
   icon: string;
   shortCode: string;
   mode: SpecialWeaponMode | null;
@@ -1111,9 +1310,159 @@ public getIntensity(): number;
 public playStinger(kind: MusicStinger): void;
 public pauseMusic(): void; // fades and remembers the track
 public resumeMusic(): void;
+/** 配音闪避的当前增益倍数（1 = 未闪避；没有音频图时为 null） */
+public getVoiceDuckLevel(): number | null;
+/** 诊断：在音乐总线出口（音量与配音闪避之后）挂一个 AnalyserNode；不支持时返回 null。调用方负责 disconnect */
+public createOutputAnalyser(): AnalyserNode | null;
 ```
 
-`boss-defeated`, `level-complete`, `game-over` and `campaign-complete` end the current music themselves. Tracks and stingers are compositions under `src/core/Audio/music/tracks/` played by the lookahead `Sequencer`.
+`boss-defeated`, `level-complete`, `game-over` and `campaign-complete` end the current music themselves. Tracks and stingers are compositions under `src/core/Audio/music/tracks/` played by the lookahead `Sequencer`. Bus order: sessions → stinger duck → SFX duck → volume → **voice duck** → sub-bass high-pass → shared output. The voice-duck gain follows `voiceDuckBridge` (see [Voice](#voice)), so a speaking character lowers the whole music bus — stingers and reverb included — and a newly built bus starts at the bridge's current level.
+
+## Voice
+
+Source: `src/core/Audio/VoiceSystem.ts`, `src/core/Audio/VoiceDucking.ts`. Plays the recorded voice packs (`public/voice/`, format and upkeep in [voice-lines.md](voice-lines.md)) through the shared `AudioContext`. Never throws: with no `AudioContext`, no `fetch`, no manifest, a missing line, a failed decode or a slow load, the line is simply silent and the UI shows the text. Callbacks are delivered asynchronously (microtask), so a caller may call back into the system from them.
+
+```typescript
+export type VoiceKind = 'radio' | 'narration';
+export type VoicePackLanguage = 'en' | 'zh';
+
+/** play() 没有出声 / 没有说完的原因 */
+export type VoiceSilentReason =
+  | 'unavailable' // 语音包里没有这句，或没有可用的 AudioContext / 解码能力
+  | 'muted' // 语音音量为 0（纯文字）
+  | 'timeout' // 加载超过 maxStartDelayMs，这一句改为纯文字（缓冲区仍会缓存，下次直接播）
+  | 'error' // 获取或解码失败
+  | 'stopped' // 被 stop / stopAll 打断（跳过、关卡结束、失败、切换语言）
+  | 'superseded' // 被下一句配音顶掉
+  | 'disposed';
+
+export interface VoiceManifestEntry {
+  readonly duration: number;
+  readonly bytes?: number;
+}
+export interface VoiceManifest {
+  readonly version: number;
+  readonly format: string;
+  readonly languages: Partial<
+    Record<VoicePackLanguage, Readonly<Record<string, VoiceManifestEntry>>>
+  >;
+}
+
+/** 一句配音开始 / 说完时回调的信息 */
+export interface VoiceLineInfo {
+  readonly lineId: string;
+  readonly kind: VoiceKind;
+  readonly speaker: string | null;
+  readonly locale: Locale;
+  readonly language: VoicePackLanguage;
+  /** 配音时长（秒，解码后的缓冲区） */
+  readonly duration: number;
+  /** 响度归一化增益（dB） */
+  readonly gainDb: number;
+}
+
+export interface VoicePlayOptions {
+  kind: VoiceKind;
+  /** CampaignSpeakerId：决定电台音色（带宽 / 底噪）；旁白忽略 */
+  speaker?: string | null;
+  /** 配音真正开始播放（缓冲区已就绪） */
+  onStart?: (info: VoiceLineInfo) => void;
+  /** 自然说完（不含被打断 / 暂停） */
+  onEnd?: (info: VoiceLineInfo) => void;
+  /** 没有出声，或开始后被打断（每个请求至多一次；与 onEnd 互斥） */
+  onSilent?: (reason: VoiceSilentReason) => void;
+  /** 等待加载的最长时间（毫秒）；缺省无线电 1500、旁白 2500 */
+  maxStartDelayMs?: number;
+}
+
+/** fetch 的最小子集（便于注入测试替身） */
+export interface VoiceFetchResponse {
+  readonly ok: boolean;
+  json(): Promise<unknown>;
+  arrayBuffer(): Promise<ArrayBuffer>;
+}
+export type VoiceFetch = (url: string) => Promise<VoiceFetchResponse>;
+export interface VoiceSystemOptions {
+  /** 语音包根路径（缺省 `${import.meta.env.BASE_URL}voice/`） */
+  baseUrl?: string;
+  /** 注入 fetch（缺省使用全局 fetch） */
+  fetch?: VoiceFetch;
+}
+
+/** 界面语言 → 语音包语言 */
+export function getVoicePackLanguage(locale: Locale = getLocale()): VoicePackLanguage; // zh-CN → 'zh', else 'en'
+/** 门限 RMS → 归一化增益（dB） */
+export function measureVoiceGainDb(buffer: AudioBuffer): number;
+
+export class VoiceSystem {
+  constructor(options: VoiceSystemOptions = {});
+  /** 加载语音包清单（只请求一次；失败后 20 秒内不重试）；不可用时为 null */
+  public loadManifest(): Promise<VoiceManifest | null>;
+  /** 当前（或指定）语言的语音包里有这句（清单未加载时为 false） */
+  public hasLine(lineId: string, locale: Locale = getLocale()): boolean;
+  /** 清单记录的配音时长（秒）；没有这句 / 清单未加载时为 null */
+  public getLineDuration(lineId: string, locale: Locale = getLocale()): number | null;
+  /** 播放一句配音（顶掉正在说 / 正在加载的那句）。立即返回请求编号，从不抛错 */
+  public play(lineId: string, options: VoicePlayOptions): number;
+  /** 停下当前配音（可只停某一类）；正在加载的那句也作废 */
+  public stop(kind?: VoiceKind): void;
+  /** 停下一切配音（关卡结束、失败、退出、切换语言） */
+  public stopAll(): void;
+  /** 有配音正在说（或暂停中 / 加载中）；可只看某一类 */
+  public isSpeaking(kind?: VoiceKind): boolean;
+  /** 跟随游戏暂停：当前配音淡出并记住断点 */
+  public pause(): void;
+  /** 游戏继续：从断点续播（断点已到结尾则视为说完） */
+  public resume(): void;
+  public isPaused(): boolean;
+  /** 语音音量 0..1（非有限值忽略）；调到 0 时立即停下当前配音，之后的台词纯文字显示 */
+  public setVolume(volume: number): void;
+  public getVolume(): number;
+  /** 预取一批台词（当前语言）：前几句立即获取并解码，其余只取编码数据；清单里没有的 id 跳过 */
+  public prefetch(lineIds: readonly string[]): void;
+  /** 诊断：在人声总线出口（语音音量之后）挂一个 AnalyserNode；不支持时返回 null。调用方负责 disconnect */
+  public createOutputAnalyser(): AnalyserNode | null;
+  /** 诊断快照：当前台词、缓存、闪避目标与最近的事件 */
+  public getDebugState(): VoiceDebugState;
+  public dispose(): void;
+}
+```
+
+`VoiceDebugState` and `VoiceDebugEvent` (same file) describe the diagnostic snapshot: pack language, manifest state, line counts, volume, pause state, the current request, the duck target, cache sizes and the last few events.
+
+Behaviour (constants are at the top of `VoiceSystem.ts`):
+
+- **Packs.** The manifest (`<baseUrl>manifest.json`) is fetched lazily. The pack follows the interface language (`getVoicePackLanguage`); only ids the manifest lists for that language are requested, from `<baseUrl><en|zh>/<id>.<format>`. A failed manifest makes every line silent and is retried after a pause.
+- **One voice at a time.** A new `play` supersedes the current line or load (`onSilent('superseded')`). A request either reaches `onStart` and then `onEnd` or `onSilent('stopped' | …)`, or goes straight to `onSilent(reason)`. Volume 0 declines with `'muted'`; a load that takes longer than `maxStartDelayMs` gives `'timeout'` (the decoded line stays cached).
+- **Radio chain** (`kind: 'radio'`). A per-speaker band-pass and a matching static bed, keyed by `CampaignSpeakerId` (`RADIO_PROFILES`; unknown speakers get a default band), feed a shared radio stage — a fixed telephone-style band, a presence peak, soft saturation and a compressor — and a gated squelch tail closes each naturally finished line. Radio lines start after a short lead so the radio-open blip (`AudioManager.playRadioOpen`) comes first.
+- **Narration chain** (`kind: 'narration'`). A low-cut high-pass and a gentle compressor.
+- **Loudness.** Every decoded line gets a gain from `measureVoiceGainDb` (gated RMS in short blocks, toward a fixed target, clamped), so speakers and languages play at a matched level.
+- **Output.** User voice volume × bus level → the shared output node from `AudioContextHost` (the same limiter as SFX and music).
+- **Ducking.** While a line plays, `voiceDuckBridge.set(level, attack)` lowers the music (radio deeper than narration). After a line it releases with a delay and a slow ramp, so consecutive radio lines do not make the music pump; `stop` / `stopAll` / `pause` release at once.
+- **Pause.** `pause()` fades the line out and remembers its offset; `resume()` continues from there. A real-time watchdog finishes a line if its `onended` never arrives, so the radio queue and the story typewriter cannot wedge.
+- **Language switch.** `onLocaleChange` → `stopAll()` and a re-prefetch of the last batch in the new pack.
+- **Caches and prefetch.** Two LRUs — decoded buffers (count and seconds limits) and encoded bytes (size limit). `prefetch(ids)` dedupes, decodes the first few and only fetches the rest, with a few concurrent workers; a newer prefetch cancels the older one.
+
+```typescript
+// VoiceDucking.ts — hold-type duck between VoiceSystem and MusicSystem (they never import each other)
+export type VoiceDuckListener = (level: number, rampSeconds: number, delaySeconds: number) => void;
+export const voiceDuckBridge = {
+  subscribe(listener: VoiceDuckListener): () => void;
+  /**
+   * 请求音乐增益倍数：level 1 = 不闪避；rampSeconds 为过渡时长；delaySeconds 后才开始过渡。
+   * 非有限值按安全缺省处理（level → 1，时长 → 0）。
+   */
+  set(level: number, rampSeconds: number, delaySeconds: number = 0): void;
+  /** 最近一次请求的目标倍数（新建的音乐总线以此为初值） */
+  getLevel(): number;
+  /** 测试隔离：清空监听者并回到不闪避 */
+  resetForTests(): void;
+};
+```
+
+Unlike the SFX `musicDuckingBridge` (short fixed-length dips), the voice duck holds until released, and every request replaces the one not yet applied.
+
+Ownership: `GameCoordinator` creates one `VoiceSystem`, sets its volume from the saved settings, passes it to `DefaultCampaignPresentation` as `voice` (see [Campaign presentation](#campaign-presentation-icampaignpresentation)) and to the dev hooks, wires the pause menu's `applyVoice` to `setVolume`, and disposes it.
 
 ## SFX
 
@@ -1257,6 +1606,23 @@ export interface ChapterIntroOptions {
   includePrologue?: boolean;
   unlockLine?: string | null;
 }
+/** 旁白配音的回调（每次 play 至多一次 onStart，之后 onEnd 与 onSilent 互斥、至多一次） */
+export interface StoryNarrationEvents {
+  /** 配音开口；durationSeconds 为配音时长 */
+  onStart(durationSeconds: number): void;
+  /** 自然说完 */
+  onEnd(): void;
+  /** 没有配音 / 加载失败 / 超时 / 被打断 */
+  onSilent(): void;
+}
+/**
+ * 旁白配音挂钩（表现层实现，StoryOverlay 不直接接触音频）：
+ * 序章 / 章节简报 / 尾声的每一段开始打字时 play(段落 id)；跳过、翻页、收起时 stop()。
+ */
+export interface StoryNarration {
+  play(voiceId: string, events: StoryNarrationEvents): void;
+  stop(): void;
+}
 export class StoryOverlay {
   showChapterIntro(chapter: CampaignChapter, onComplete: () => void, options?: ChapterIntroOptions): void;
   showDebrief(data: DebriefData, onContinue: () => void): void;
@@ -1267,6 +1633,7 @@ export class StoryOverlay {
   dispose(): void;
   onTypeTick?: () => void;
   onCardShown?: (kind: StoryCardKind) => void;
+  narration: StoryNarration | null; // null = silent cards
 }
 
 // RadioComms — speaker resolved via CAMPAIGN_SPEAKERS; timing only from update(dt)
@@ -1277,14 +1644,21 @@ export interface RadioEnqueueOptions {
 export class RadioComms {
   enqueue(line: RadioLine, options?: RadioEnqueueOptions): void;
   update(deltaTime: number): void;
+  /** 正在播放、有排队台词，或处于两句之间的间隔中（与 enqueue 的立即显示条件一致） */
   isBusy(): boolean;
+  /** 当前台词的配音开口了：台词至少停留到“此刻 + 配音时长 + 尾巴”，并在 releaseVoice 之前不进入淡出（有兜底上限） */
+  holdForVoice(line: RadioLine, durationSeconds: number): void;
+  /** 当前台词的配音说完 / 被停下 / 不可用：解除等待 */
+  releaseVoice(line: RadioLine): void;
   clear(): void;
   dispose(): void;
   onLineShown?: (line: RadioLine) => void;
 }
 ```
 
-`StoryOverlay` sets `data-story-overlay` on `<html>` while a card is up (the HUD, radar, radio, mobile controls and indicator layers hide); callbacks run once per `show*`, after the overlay closes. `RadioComms` shows a line immediately when idle, lets `'high'` interrupt (the interrupted line replays), ignores duplicate text and caps its queue.
+`StoryOverlay` sets `data-story-overlay` on `<html>` while a card is up (the HUD, radar, radio, mobile controls and indicator layers hide); callbacks run once per `show*`, after the overlay closes. With `narration` set, each prologue / briefing / epilogue paragraph asks for its voice by `VoicedText.id` before it types: it waits a short time for the voice to start (otherwise it types as plain text and stops the late voice), paces the typewriter so the text lands just before the voice ends, and waits for the voice to end (with a grace cap) before the next paragraph. A fully narrated card turns the page after a short hold for the objectives instead of the reading-time hold. Space / click (reveal all), the next card, Esc / Skip and `hide()` stop the narration; reduced motion shows the text at once and still narrates; a card written before a language switch is not narrated further.
+
+`RadioComms` shows a line immediately when idle (the short gap between lines counts as busy), lets `'high'` interrupt, ignores duplicate text and caps its queue. Voiced timing: `holdForVoice` keeps the line up until its voice has finished plus a short tail, and the next line waits for `releaseVoice` (or a safety cap); without a voice the reading-time timing is unchanged. An interrupted line whose voice had not finished always replays; one whose voice finished counts as delivered. On a language switch the line on screen (callsign, text, screen-reader text) is rewritten in the new language. Each speaker's portrait glyph comes from `getSpeakerGlyph(speakerId)` (`src/ui/theme/hudGlyphs.ts`), which has an entry for every `CampaignSpeakerId`.
 
 ```typescript
 // RadarMinimap
@@ -1296,8 +1670,26 @@ public getRangeMultiplier(): number;
 // PresentationController passthrough
 public setRadarRangeMultiplier(multiplier: number): void;
 
-// StartMenu — #continue-btn (继续战役) shows describeCheckpoint(save); #camera-row; #level-row 1..TOTAL_LEVELS
+// StartMenu — rows use stable ids #<key>-row / #<key>-value, independent of the interface language:
+// language, difficulty, sfx, music, voice, quality, camera, tutorial, lives, level (1..TOTAL_LEVELS,
+// caption #level-chapter), mode, testscore; #continue-btn shows describeCheckpoint(save)
 public setOnContinue(callback: (save: CampaignSaveData) => void): void;
+// GameSettings (same file) mirrors StartFlowSettings field by field, including voiceVolume and language
+
+// PauseMenu
+export interface IPauseMenuOptions {
+  onContinue: () => void;
+  onUpgrade: () => void;
+  onExitToMenu: () => void;
+  applyAudio: (sfx: number, music: number) => void;
+  /** 角色配音音量 0..1（立即生效）；缺省不显示语音一行 */
+  applyVoice?: (voice: number) => void;
+  applyQuality: (preset: QualityPreset) => void;
+  loadSettings: () => StartFlowSettings;
+  saveSettings: (partial: Partial<StartFlowSettings>) => void;
+}
+// Settings view rows: Sound effects, Music, Voice (only with applyVoice), Graphics, Language.
+// The Language row saves { language }, then setLocale(); every open menu re-renders through onLocaleChange.
 
 // UpgradeMenu
 export type UpgradeMenuMode = 'pause' | 'hangar';
@@ -1311,13 +1703,15 @@ export interface UpgradeMenuShowOptions {
 public show(options?: UpgradeMenuShowOptions): void; // no argument = the old pause behaviour
 public getMode(): UpgradeMenuMode;
 
-// CheckpointResumeButton — "从检查点继续" under the MISSION FAILED settlement
+// CheckpointResumeButton — "Continue from checkpoint" / "从检查点继续" under the MISSION FAILED settlement
 public show(save: CampaignSaveData, onResume: (save: CampaignSaveData) => void): void;
 public hide(): void;
 public dispose(): void;
 ```
 
-Mobile buttons in `index.html`: `#camera-button`, `#special-button`, `#cycle-button`, `#flare-button` (plus the existing `#fire-button`, `#missile-button`, `#throttle-button`, `#upgrade-button`).
+Mobile buttons in `index.html`: `#camera-button`, `#special-button`, `#cycle-button`, `#flare-button` (plus the existing `#fire-button`, `#missile-button`, `#throttle-button`, `#upgrade-button`). The HTML ships English labels (FIRE, MSL, SPEC, FLARE, BOOST, SWAP, VIEW, PAUSE); `src/main.ts` rewrites labels and `aria-label`s for the current language, except the special button's main label while the HUD shows a weapon code there.
+
+Health bars (`src/ui/EnemyHealthBars.ts`) show a friendly AI jet's pilot callsign when its mesh carries `userData.displayName` (`LocalizedText` or string — set from `WingmanProfile.callsign`), ahead of the per-name label cache, and rename every bar at once on a language switch.
 
 ## Input
 
@@ -1400,7 +1794,7 @@ public setLayoutDensity(density: HudLayoutDensity): void;
 
 Source: `src/core/Audio/AudioContextHost.ts`.
 
-`AudioManager` and `MusicSystem` acquire/release the same `AudioContext` as holders. SFX and music gain graphs stay separate.
+`AudioManager`, `MusicSystem` and `VoiceSystem` acquire/release the same `AudioContext` as holders. SFX, music and voice gain graphs stay separate and meet at the shared output node.
 
 ```typescript
 export function getSharedAudioContext(): AudioContext | null;
@@ -1408,6 +1802,8 @@ export function acquireSharedAudioContext(holder: object): AudioContext | null;
 export function releaseSharedAudioContext(holder: object): void;
 export function resumeSharedAudioContext(): void;
 export function unlockAudioFromUserGesture(): void;
+/** 共享输出总线入口（限幅器 + 软削波 → destination）；每个上下文只建一次 */
+export function getSharedOutputNode(context: BaseAudioContext): AudioNode;
 export function resetSharedAudioContextForTests(): void;
 ```
 
@@ -1441,4 +1837,7 @@ public playMissileDry(): void;
 
 When running the game, `window.game` exposes the coordinator for console inspection.
 
-Dev builds only (`import.meta.env.DEV`): `GameCoordinator` dynamically imports `src/core/dev/DevHooks.ts`, whose `installDevHooks(access: DevHookAccess): void` publishes `window.__AIR_SUPREME_DEV__` (state readout, simulation time scale, wave clearing, boss damage, teleports). The production build strips the import.
+Dev builds only (`import.meta.env.DEV`): `GameCoordinator` dynamically imports `src/core/dev/DevHooks.ts` when a game starts, whose `installDevHooks(access: DevHookAccess): void` publishes `window.__AIR_SUPREME_DEV__` (state readout, simulation time scale, wave clearing, boss damage, teleports). The production build strips the import. Two groups were added with the voice and balance work:
+
+- `voice` — `state()` (`VoiceSystem.getDebugState()`), `sample()` (voice and music bus RMS in dBFS, the music's voice-duck level, current line and phase, pack language), `say(lineId, kind = 'radio')`, `radio(key: GenericRadioKey)` and `wingman(id: WingmanId, event: WingmanEvent)`.
+- `balance` — the scripted-pilot balance harness (`installBalanceHarness`, `src/core/dev/BalanceHarness.ts`, with the pilot in `ScriptedPilot.ts`), used to measure the difficulty curve and progression.

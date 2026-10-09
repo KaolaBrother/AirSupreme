@@ -1,10 +1,10 @@
 # Architecture
 
-AirSupreme is a Three.js + TypeScript aerial combat game. Runtime assembly lives in `GameCoordinator`; systems talk through `EventBus`. The ten-level campaign hangs off the coordinator as per-feature controllers under `src/core/<feature>/`, and every story / HUD / music / SFX call made by gameplay code goes through one presentation adapter, `ICampaignPresentation` (see [ADR 0001](decisions/0001-campaign-presentation-adapter.md)).
+AirSupreme is a Three.js + TypeScript aerial combat game. Runtime assembly lives in `GameCoordinator`; systems talk through `EventBus`. The ten-level campaign hangs off the coordinator as per-feature controllers under `src/core/<feature>/`, and every story / HUD / music / SFX / voice call made by gameplay code goes through one presentation adapter, `ICampaignPresentation` (see [ADR 0001](decisions/0001-campaign-presentation-adapter.md)). The interface is English by default with Simplified Chinese as a live setting: player-facing text is bilingual in place (`LocalizedText`, `src/i18n/`), and the radio and story narration play recorded English or Mandarin voice packs through `VoiceSystem` ([ADR 0002](decisions/0002-bilingual-text-and-voice-packs.md)).
 
 ## Boundaries
 
-- Entry: `src/main.ts` keeps one `StartMenu` for the page lifetime (`hide()`, not `dispose()`), installs `MenuMusic`, then dynamically imports `GameCoordinator({ showStartMenu: false, onRetry, onExitToMenu, resume, onContinueFromCheckpoint })` and calls `boot(settings)`
+- Entry: `src/main.ts` first applies the saved language (`setLocale(loadStartFlowSettings().language)`) and writes the page shell in it, then keeps one `StartMenu` for the page lifetime (`hide()`, not `dispose()`), installs `MenuMusic`, then dynamically imports `GameCoordinator({ showStartMenu: false, onRetry, onExitToMenu, resume, onContinueFromCheckpoint })` and calls `boot(settings)`
 - Continue: `StartMenu.setOnContinue` (start menu) and `CheckpointResumeButton` (game-over settlement, via the coordinator's `onContinueFromCheckpoint`) both reach `continueFromCheckpoint(save)` in `main.ts`, which boots a fresh coordinator with `resume: save` and settings taken from the save (difficulty, level, lives, camera mode; audio / quality from local settings)
 - Combat, boss controllers, `PauseMenu`, upgrade menu, and presentation HUD load on demand
 - `PresentationRuntimeLoader` creates `HUD`, health bars, lock-on, and related presentation objects; `warmPresentationRuntimeChunks()` also warms `StoryOverlay` and `RadioComms`
@@ -46,7 +46,7 @@ Feature modules under `src/features/` own AI, terrain, effects, powerups, bosses
 | Controller | File | Owns |
 | ---------- | ---- | ---- |
 | `CampaignFlowController` | `src/core/campaign/CampaignFlowController.ts` | What happens next: new run / resume, chapter → waves → checkpoints → boss → debrief → hangar → next chapter, ending; per-run stats. Concrete work (`prepareLevel`, `startLevelCombat`, `startBossEncounter`, `showHangar`, `syncProgression`, `setStoryHold`, `captureCheckpoint`, …) comes in through `CampaignFlowDeps` |
-| `DefaultCampaignPresentation` (`ICampaignPresentation`) | `src/core/campaign/CampaignPresentation.ts` | Story cards (`StoryOverlay`), radio (`RadioComms`), new HUD panels, radar range, music (`MusicSystem`), SFX routing (`CampaignSfxRouter` in `CampaignSfx.ts`) |
+| `DefaultCampaignPresentation` (`ICampaignPresentation`) | `src/core/campaign/CampaignPresentation.ts` | Story cards (`StoryOverlay`), radio (`RadioComms`), new HUD panels, radar range, music (`MusicSystem`), SFX routing (`CampaignSfxRouter` in `CampaignSfx.ts`), voice playback and prefetch through the coordinator's `VoiceSystem`, wingman radio (`WINGMAN_EVENT_RADIO`) |
 | `UnitController` | `src/core/units/UnitController.ts` | `UnitSystem` wiring: surface sampler, flare decoys, route provider, level scaling, mesh prewarm, fire bridge, per-wave spawns, wave hold (with a stall release), scoring / penalties, radius-aware bullet and missile hits, EMP, radar blips, boss drones |
 | `SpecialWeaponsController` | `src/core/combat/SpecialWeaponsController.ts` | `WeaponSystem` + `CountermeasureSystem` wiring: F / Tab / X / 1–5 / G input, muzzle, target provider, EMP callback, progression sync, refill, save export / import, HUD polling; implements `IDecoyProvider` |
 | `PlayerViewController` | `src/core/camera/PlayerViewController.ts` | `CameraRig` (first / third person, shake, FOV) and the player afterburner; `onModeChanged` |
@@ -56,16 +56,20 @@ Feature modules under `src/features/` own AI, terrain, effects, powerups, bosses
 | `AdvancedBossController` | `src/core/boss/AdvancedBossController.ts` | Bosses 6–10 (`ADVANCED_BOSS_TYPES`): spawn placement (`resolveAdvancedBossSpawn`), ground samplers, death sequences, part hits through `takeDamageAt`, hazards with a per-target cooldown (`HazardCooldownTracker`), flare decoys for boss missiles (`BossFlareDecoyRedirector`), status label / music intensity, citadel core state, cloak hiding from radar and lock |
 | `BossHitFeedback` | `src/core/boss/BossHitFeedback.ts` | Hit / armour / boss-missile feedback shared by both boss paths |
 
-Helpers outside the coordinator: `MenuMusic` (`src/core/campaign/MenuMusic.ts`, owned by `main.ts`), `resolveLevelStartPose` (`src/core/campaign/LevelStartPose.ts`, terrain-checked start heading per level), the `SaveSystem` functions (`src/core/save/SaveSystem.ts`) and `installDevHooks` (`src/core/dev/DevHooks.ts`, dev builds only, exposes `window.__AIR_SUPREME_DEV__`).
+The coordinator also owns a `VoiceSystem` (`src/core/Audio/VoiceSystem.ts`, handed to the presentation as its `voice`) and a `WingmanRoster` (`src/core/campaign/Wingmen.ts`): each friendly AI jet that spawns takes the first identity in formation order — Raven, then Swift (from level 3) — that is neither flying nor shot down this level, or none; the callsign goes on `mesh.userData.displayName` for the health bar, and `FRIENDLY_DEATH` releases the identity and fires `presentation.onWingmanEvent(id, 'down')`; the roster resets whenever a level is prepared and when a boss is destroyed.
+
+Helpers outside the coordinator: `MenuMusic` (`src/core/campaign/MenuMusic.ts`, owned by `main.ts`), `resolveLevelStartPose` (`src/core/campaign/LevelStartPose.ts`, terrain-checked start heading per level), the `SaveSystem` functions (`src/core/save/SaveSystem.ts`) and `installDevHooks` (`src/core/dev/DevHooks.ts`, dev builds only, exposes `window.__AIR_SUPREME_DEV__`, including the `voice` probes and the `balance` harness).
 
 ```
-main.ts ── StartMenu ── MenuMusic
+main.ts ── setLocale(saved language) ── StartMenu ── MenuMusic
    │
    └─ GameCoordinator ─┬─ PlayerSystem / CombatSystem / EnemySystem (LevelManager) / PowerUpSystem
                        ├─ PlayerViewController ── CameraRig ........................... (lazy)
                        ├─ DefaultCampaignPresentation ─┬─ StoryOverlay, RadioComms ........ (lazy)
                        │   (ICampaignPresentation)     ├─ HUD, PresentationController ── RadarMinimap
-                       │                               ├─ MusicSystem
+                       │                               ├─ MusicSystem ◄── voiceDuckBridge ──┐
+                       │                               ├─ VoiceSystem ── public/voice/ ─────┘ (fetched)
+                       │                               ├─ WingmanRoster (WingmanStatus)
                        │                               └─ CampaignSfxRouter ── AudioManager
                        ├─ UnitController ── UnitSystem .................................. (lazy)
                        ├─ SpecialWeaponsController ── WeaponSystem, CountermeasureSystem . (lazy)
@@ -85,6 +89,7 @@ main.ts ── StartMenu ── MenuMusic
 5. Crash: each `PlayerSystem.update` samples crash Y at the player XZ. `GameCoordinator` injects `LevelManager.getCrashSurfaceY` (forwards `TerrainGenerator.getCrashSurfaceY`); missing sampler or terrain falls back to `WORLDSCAPE_WATER_Y` (`-48`). Kill when `Y <=` that surface.
 6. Surface sampling: `LevelManager.getSurfaceSample(x, z)` (→ `TerrainGenerator.sampleSurface`, `{ y, water }`) feeds `UnitSystem.setSurfaceSampler`, `WeaponSystem.setSurfaceSampler` and the bosses' ground samplers; `getSurfaceKind` picks impact effects and sounds. Levels 6–10 delegate to their environment module (`TerrainGenerator.getEnvironment()`); the canyon convoy and citadel assault routes reach `UnitSystem.setRouteProvider` the same way.
 7. Presentation chrome: `injectHudTokens()` writes `:root` HUD CSS variables once (`style#hud-tokens`). `HUD` / `LockOnIndicator` keep a `HudLayoutDensity` (`desktop | touch-landscape | touch-portrait`). Lock chrome states: `search | track | lock | break | dry`.
+8. Text: data carries `LocalizedText` (`{ en, zh }`) and the code that displays it calls `tr()` / `localize()` at that moment, in the locale from `getLocale()`. The Language rows in the start and pause menus save `language` and call `setLocale()`; `onLocaleChange` subscribers (menus, HUD, health bars, model preview, radio panel, page shell, `VoiceSystem`) redraw or react at once, while story cards and runtime toasts pick the new language up the next time they are produced. Details: [api.md → Localisation](api.md#localisation-i18n).
 
 ### Simulation step (`GameCoordinator.update`)
 
@@ -105,7 +110,7 @@ WAVE_START(k):    UnitController.spawnForWave(L, k) → radio 'wave-start'
                   (LevelManager holds the wave while UnitController.getWaveHoldCount() > 0)
 WAVE_COMPLETE(k): radio 'wave-complete' → checkpoint 'wave' (wave k + 1) when k + 1 < totalWaves
 LEVEL_COMPLETE:   checkpoint 'boss' (wave = totalWaves) → stinger 'level-complete' → boss briefing → boss
-boss destroyed:   stinger 'boss-defeated' → outro (waits for the defeat radio lines)
+boss destroyed:   stinger 'boss-defeated' → outro (waits for the voiced defeat lines, up to BOSS_OUTRO_MAX_MS)
                   → debrief → unlockLevel(L + 1) → hangar → beginChapter(L + 1)
 L = 10:           markCampaignCompleted + clearCampaignCheckpoint → debrief → ending → MISSION COMPLETE
 ```
@@ -125,24 +130,26 @@ All bosses satisfy `IBossCore`; bosses 6–10 also implement `IAdvancedBoss` (`s
 
 ## Site chrome
 
-- Entry HTML: `index.html` — `<link rel="icon" href="/favicon.svg" type="image/svg+xml" />` (file `public/favicon.svg`); viewport includes `viewport-fit=cover`.
-- Mobile deck in `index.html`: `#joystick`, `#fire-button`, `#missile-button`, `#special-button`, `#flare-button`, `#throttle-button`, `#cycle-button`, `#camera-button`, `#upgrade-button` (pause). `InputHandler` binds the four new buttons only if they exist; `HUD` writes their labels, meter rings and alert state.
+- Entry HTML: `index.html` — `<html lang="en">` with English loading-screen and touch-button text; `<link rel="icon" href="/favicon.svg" type="image/svg+xml" />` (file `public/favicon.svg`); viewport includes `viewport-fit=cover`. `src/main.ts` rewrites the title, loading screen and touch labels for the saved language and again on every switch.
+- Mobile deck in `index.html`: `#joystick`, `#fire-button`, `#missile-button`, `#special-button`, `#flare-button`, `#throttle-button`, `#cycle-button`, `#camera-button`, `#upgrade-button` (pause). `InputHandler` binds the four new buttons only if they exist; `HUD` writes the special button's weapon code and sub-labels, the meter rings and alert state.
 - `PauseMenu` and HUD settlement overlay pad with `env(safe-area-inset-*)`.
 
 ## Audio
 
-- Shared context: `src/core/Audio/AudioContextHost.ts`. `AudioManager` and `MusicSystem` `acquireSharedAudioContext(this)` / `releaseSharedAudioContext(this)`; last holder close shuts the context.
+- Shared context: `src/core/Audio/AudioContextHost.ts`. `AudioManager`, `MusicSystem` and `VoiceSystem` `acquireSharedAudioContext(this)` / `releaseSharedAudioContext(this)`; last holder close shuts the context. All three feed the shared output node (`getSharedOutputNode`: limiter + soft clip → destination).
 - Unlock on the click stack (no `await` between gesture and unlock): `StartMenu.startGame()` calls `unlockAudioFromUserGesture()` before hiding the menu / `onStart`. `src/main.ts` `bootGame` calls `disposeGame()` then `unlockAudioFromUserGesture()` before `await import('./core/GameCoordinator')`. Retry uses `bootGame`.
 - `unlockAudioFromUserGesture()` creates the shared context if needed and resumes it; unlock itself does not occupy a holder.
 - `AudioManager.beginSound()` calls `this.resume()` before `canPlay()`. `GameCoordinator.startInternal` always `audioManager.resume()` / `musicSystem.resume()`.
-- Gain graphs remain separate: `AudioManager` builds `masterGain` / `sfxGain` / `musicGain`; `MusicSystem` builds its own `masterGain`. Both connect to the shared context destination.
+- Gain graphs remain separate: `AudioManager` builds `masterGain` / `sfxGain` / `musicGain`; `MusicSystem` builds its own `masterGain`; `VoiceSystem` builds a radio and a narration bus behind a voice-volume gain. All of them end at the shared output node.
 - Music: `MusicSystem` plays 23 compositions (`LevelMusic`) and 7 stingers (`MusicStinger`) through a lookahead sequencer (`src/core/Audio/music/`: `Sequencer`, `Instruments`, `Compose`, `Theory`, `tracks/`). `setIntensity(0..1)` adds layers, tempo and filter opening; stingers align to the next beat and transpose to the current key; `boss-defeated`, `level-complete`, `game-over` and `campaign-complete` end the current track.
 - SFX: the campaign sounds live in `src/core/Audio/sfx/` (`SfxKit`, `SfxLibrary`) behind `AudioManager.play…` methods; `CampaignSfxRouter` maps weapon / unit / boss events to them with distance gating and throttles.
 - `MenuMusic` (created by `main.ts`) owns a page-lifetime `MusicSystem` for the start menu: it starts after the first pointer / key / touch gesture, fades out when a game boots and resumes on return to the menu.
+- Voice: `VoiceSystem` plays one line at a time from the voice pack of the current language (`public/voice/<en|zh>/<lineId>.mp3`, gated by `public/voice/manifest.json`; see [voice-lines.md](voice-lines.md)). Radio lines go through a per-speaker band-pass and static bed, then a shared radio stage (band limit, presence, saturation, compression) and a squelch tail; narration goes through a clean high-pass and light compression; every line is loudness-normalised when decoded. While a line plays, `voiceDuckBridge` (`VoiceDucking.ts`) lowers a voice-duck stage at the end of the music bus and releases it shortly after the line ends.
+- Voice timing is owned by the UI, not the audio: `DefaultCampaignPresentation` plays a radio line's voice from `RadioComms.onLineShown` and reports start / end back through `holdForVoice` / `releaseVoice`, and gives `StoryOverlay` a `StoryNarration` hook that the typewriter waits on. Without a manifest, at volume 0 or on any failure, both fall back to their text-only timing. Pause / resume, clear-radio, game over, mission complete and dispose stop or pause the voice through the presentation; a language switch stops it inside `VoiceSystem`.
 
 ## Persistence
 
-- `START_MENU_STORAGE_KEY = 'air-supreme:start-menu-settings'` — start-flow settings (`SessionSettings`), now including `startLevel` 1–10 and `cameraMode`; camera toggles in game are written back.
+- `START_MENU_STORAGE_KEY = 'air-supreme:start-menu-settings'` — start-flow settings (`SessionSettings`), including `startLevel` 1–10, `cameraMode`, `voiceVolume` and `language` (English unless the player picked Chinese; older saves load as English); camera toggles in game and the pause menu's volume / graphics / language rows are written back.
 - `CAMPAIGN_SAVE_KEY = 'air-supreme:campaign-save'` — the single campaign checkpoint (`CampaignSaveData`, version `CAMPAIGN_SAVE_VERSION`).
 - `CAMPAIGN_PROGRESS_KEY = 'air-supreme:campaign-progress'` — completion flag, best score, highest level reached.
 - All access goes through `getLocalStorage()`; reads and writes never throw, and corrupt records are removed.
@@ -151,23 +158,25 @@ All bosses satisfy `IBossCore`; bosses 6–10 also implement `IAdvancedBoss` (`s
 
 - Orchestration: `src/core/GameCoordinator.ts`
 - Events: `src/core/EventBus.ts`
-- Campaign: `src/features/campaign/CampaignData.ts` (chapters, radio, unlock schedule), `src/core/campaign/CampaignFlowController.ts`, `src/core/campaign/CampaignPresentation.ts` (`ICampaignPresentation`, `DefaultCampaignPresentation`), `src/core/campaign/CampaignSfx.ts`, `src/core/campaign/LevelStartPose.ts`, `src/core/campaign/MenuMusic.ts`
+- Campaign: `src/features/campaign/CampaignData.ts` (import point: chapters, radio, unlock schedule, `getVoiceScript`; data split across `CampaignTypes.ts`, `CampaignCast.ts`, `CampaignChapters.ts`, `CampaignRadio.ts`, `CampaignStory.ts`, `ChapterTitles.ts`), `src/core/campaign/CampaignFlowController.ts`, `src/core/campaign/CampaignPresentation.ts` (`ICampaignPresentation`, `DefaultCampaignPresentation`, `CampaignVoice`), `src/core/campaign/CampaignSfx.ts`, `src/core/campaign/LevelStartPose.ts`, `src/core/campaign/MenuMusic.ts`, `src/core/campaign/Wingmen.ts` (`WINGMEN`, `WingmanRoster`)
+- Localisation: `src/i18n/index.ts` (`LocalizedText`, `tr`, `localize`, `format`, `getLocale` / `setLocale` / `onLocaleChange`, `normalizeLocale`, `DEFAULT_LOCALE`)
+- Voice: `src/core/Audio/VoiceSystem.ts`, `src/core/Audio/VoiceDucking.ts`, `public/voice/` (`en/`, `zh/`, `manifest.json`, `provenance.json`; see [voice-lines.md](voice-lines.md))
 - Save: `src/core/save/SaveSystem.ts`
-- Shared combat contracts: `src/core/CombatContracts.ts`, `src/core/Faction.ts` (`Faction.CIVILIAN`), `src/core/Difficulty.ts` (`getLevelScaling`)
+- Shared combat contracts: `src/core/CombatContracts.ts`, `src/core/Faction.ts` (`Faction.CIVILIAN`), `src/core/Difficulty.ts` (`getLevelScaling` over the `LEVEL_CURVE` table, `getDifficultyProfile`)
 - Units: `src/features/units/` (`UnitTypes.ts`, `UnitDeployments.ts`, `UnitSystem.ts`, `UnitBehaviors.ts`, `UnitBehaviorsAir.ts`, `UnitMeshFactory.ts`, `UnitEventBridge.ts`), `src/core/units/UnitController.ts`
 - Special weapons: `src/features/weapons/` (`WeaponTypes.ts`, `WeaponSystem.ts`, `CountermeasureSystem.ts`), `src/core/combat/SpecialWeaponsController.ts`
 - Camera: `src/features/camera/CameraRig.ts`, `CockpitModel.ts`, `CameraShake.ts`; `src/core/camera/PlayerViewController.ts`
 - Bosses: `src/features/boss/BossTypes.ts`, `BossContracts.ts`, the boss AI / mesh files, `src/core/BossBattleController.ts`, `src/core/boss/`
 - Terrain: `src/features/terrain/LevelConfig.ts`, `TerrainGenerator.ts`, `environments/` (`TerrainEnvironment.ts`, `EnvironmentBase.ts`, one module per level 6–10)
 - VFX: `src/features/effects/ParticleSystem.ts`, `particles/`, `postfx/`, `ContrailSystem.ts`, `ShieldRipple.ts`; `src/scenes/GameScene.ts`; `src/core/vfx/`
-- Session persist: `src/core/SessionSettings.ts` (`START_MENU_STORAGE_KEY`, `loadStartFlowSettings` / `saveStartFlowSettings`)
+- Session persist: `src/core/SessionSettings.ts` (`START_MENU_STORAGE_KEY`, `loadStartFlowSettings` / `saveStartFlowSettings`, `DEFAULT_VOICE_VOLUME`, `LANGUAGE_ENDONYMS`, `stepLanguage`)
 - Pause cabin: `src/ui/PauseMenu.ts`
 - Presentation boundary: `src/core/PresentationRuntimeLoader.ts`, `src/core/PresentationController.ts`, `src/core/hud/CombatHudFeed.ts`
-- Story UI: `src/ui/StoryOverlay.ts`, `src/ui/RadioComms.ts`, `src/ui/CheckpointResumeButton.ts`
+- Story UI: `src/ui/StoryOverlay.ts` (`StoryNarration` hook), `src/ui/RadioComms.ts` (`holdForVoice` / `releaseVoice`), `src/ui/CheckpointResumeButton.ts`, speaker glyphs in `src/ui/theme/hudGlyphs.ts`
 - HUD tokens: `src/ui/theme/hudTokens.ts` (`injectHudTokens`, `HUD_COLORS`, `HudLayoutDensity`, `LockOnState`)
 - HUD / lock / radar: `src/ui/HUD.ts`, `src/ui/LockOnIndicator.ts` (`setLayoutDensity`), `src/ui/RadarMinimap.ts`
-- Menus: `src/ui/StartMenu.ts`, `src/ui/UpgradeMenu.ts`
-- Audio: `src/core/Audio/AudioContextHost.ts` (`unlockAudioFromUserGesture`, shared `AudioContext`), `src/core/Audio/AudioManager.ts`, `src/core/Audio/MusicSystem.ts`, `src/core/Audio/music/`, `src/core/Audio/sfx/`
+- Menus: `src/ui/StartMenu.ts`, `src/ui/UpgradeMenu.ts` (the Language and Voice rows live in `StartMenu` and `PauseMenu`)
+- Audio: `src/core/Audio/AudioContextHost.ts` (`unlockAudioFromUserGesture`, shared `AudioContext`, `getSharedOutputNode`), `src/core/Audio/AudioManager.ts`, `src/core/Audio/MusicSystem.ts`, `src/core/Audio/music/`, `src/core/Audio/sfx/`, `src/core/Audio/VoiceSystem.ts`, `src/core/Audio/VoiceDucking.ts`
 - Config: `src/config.ts`, `public/config/game-config.json`
 - Player: `src/core/systems/PlayerSystem.ts` (`setCrashSurfaceSampler`), `src/features/player/PlayerController.ts`
 - Enemy AI: `src/features/enemy/EnemyAI.ts`
