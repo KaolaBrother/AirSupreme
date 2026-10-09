@@ -1,5 +1,6 @@
 import { type QualityPreset } from '@/config';
 import { TOTAL_LEVELS } from '@/features/campaign/CampaignData';
+import { DEFAULT_LOCALE, SUPPORTED_LOCALES, normalizeLocale, type Locale } from '@/i18n';
 
 export type GameMode = 'normal' | 'boss';
 
@@ -27,6 +28,8 @@ export interface StartFlowSettings {
   gameMode: GameMode;
   testScore: number;
   cameraMode: CameraModeSetting;
+  /** 界面语言：默认英文（不跟随浏览器语言），可在开始菜单 / 暂停菜单切换为简体中文 */
+  language: Locale;
 }
 
 export interface SessionSettingsSnapshot {
@@ -49,6 +52,7 @@ export const DEFAULT_START_FLOW_SETTINGS: StartFlowSettings = {
   gameMode: 'normal',
   testScore: 0,
   cameraMode: 'third-person',
+  language: DEFAULT_LOCALE,
 };
 
 /** 开始菜单与暂停设置共用的 localStorage 键 */
@@ -57,6 +61,23 @@ export const START_MENU_STORAGE_KEY = 'air-supreme:start-menu-settings';
 export const TEST_SCORE_OPTIONS = [0, 5000, 10000, 15000, 20000] as const;
 export type TestScoreOption = (typeof TEST_SCORE_OPTIONS)[number];
 export const MAX_TEST_SCORE = TEST_SCORE_OPTIONS[TEST_SCORE_OPTIONS.length - 1];
+
+/**
+ * 语言设置的选项名：每种语言用它自己的写法（English / 中文），不随界面语言变化，
+ * 这样看不懂当前界面语言的玩家也能认出自己的语言。
+ */
+export const LANGUAGE_ENDONYMS: Readonly<Record<Locale, string>> = {
+  en: 'English',
+  'zh-CN': '中文',
+};
+
+/** 按 SUPPORTED_LOCALES 的顺序循环切换语言（菜单里的 - / +） */
+export function stepLanguage(current: Locale, direction: 1 | -1): Locale {
+  const count = SUPPORTED_LOCALES.length;
+  const index = SUPPORTED_LOCALES.indexOf(normalizeLocale(current));
+  const from = index >= 0 ? index : 0;
+  return SUPPORTED_LOCALES[(from + direction + count) % count];
+}
 
 const QUALITY_PRESETS: QualityPreset[] = ['auto', 'performance', 'balanced', 'quality'];
 
@@ -140,6 +161,8 @@ export function normalizeStartFlowSettings(raw?: Partial<StartFlowSettings>): St
       source.cameraMode,
       DEFAULT_START_FLOW_SETTINGS.cameraMode
     ),
+    // 旧存档没有该字段 / 无法识别的值一律回到默认英文
+    language: normalizeLocale(source.language),
   };
 }
 
