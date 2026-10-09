@@ -30,7 +30,7 @@
 - Radio colouring, loudness and ducking can be tuned without regenerating audio, and the recorded files stay byte-identical to the generator's output, so their `sha256` and embedded C2PA data remain valid.
 - The packs add about 38 MB to the repository and the deployed site (200 lines per language at the time of writing). They are fetched on demand — the current chapter's lines are prefetched when it starts — and decoded audio is held in a small LRU.
 - There is no generation tooling in the repository; regenerating lines is a documented manual process ([`docs/voice-lines.md`](../voice-lines.md)).
-- With voiced defeat lines, the wait between a boss kill and the debrief had to grow: `BOSS_OUTRO_MAX_MS` in `CampaignFlowController` went from 6.5 s to 16 s.
+- With voiced defeat lines, the wait between a boss kill and the debrief had to grow: `BOSS_OUTRO_MAX_MS` in `CampaignFlowController` went from 6.5 s to 16 s. *Update (`3b3e0e1`):* 16 s still cut the longer defeat sequences short, so the outro now runs on game time and waits until the radio is idle, with a ceiling of the radio backlog (voiced lines at their manifest duration in the current language) plus 6 s, at most 75 s (`BOSS_OUTRO_MAX_SECONDS`); see [api.md → Campaign flow](../api.md#campaign-flow).
 
 ## References
 
