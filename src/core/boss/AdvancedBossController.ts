@@ -154,22 +154,22 @@ export class AdvancedBossController {
     config: BossConfig,
     isBossMode: boolean
   ): Promise<AdvancedBossInstance> {
-    const playerMesh = this.deps.playerAircraft;
-    const forward = this.hitWorldPosition.set(0, 0, -1).applyQuaternion(playerMesh.quaternion);
-    const placement = resolveAdvancedBossSpawn({
-      type: bossType,
-      playerPosition: playerMesh.position,
-      forwardX: forward.x,
-      forwardZ: forward.z,
-      sample: this.deps.getSurfaceSample,
-      coreArena: bossType === BossType.ORACLE_PRIME ? this.getCitadelArena() : null,
-    });
-
     let mesh: Group;
     let boss: AdvancedBossInstance;
     const scene = this.deps.scene;
     const particles = this.deps.particleSystem;
+    // 出生点在 Boss 模块加载完成之后按玩家当时的位置与朝向计算（加载期间玩家可能已飞出几十米或掉头）
     const place = (group: Group): void => {
+      const playerMesh = this.deps.playerAircraft;
+      const forward = this.hitWorldPosition.set(0, 0, -1).applyQuaternion(playerMesh.quaternion);
+      const placement = resolveAdvancedBossSpawn({
+        type: bossType,
+        playerPosition: playerMesh.position,
+        forwardX: forward.x,
+        forwardZ: forward.z,
+        sample: this.deps.getSurfaceSample,
+        coreArena: bossType === BossType.ORACLE_PRIME ? this.getCitadelArena() : null,
+      });
       group.position.copy(placement.position);
       group.rotation.set(0, placement.yaw, 0);
       scene.add(group);
@@ -247,7 +247,7 @@ export class AdvancedBossController {
   }
 
   /** CITADEL 决战区（神谕主宰锚点）；不是第 10 关地形时为 null */
-  private getCitadelArena(): Vector3 | null {
+  public getCitadelArena(): Vector3 | null {
     const environment = this.deps.getTerrainEnvironment() as
       | (TerrainEnvironment & { getCoreArena?: (target?: Vector3) => Vector3 })
       | null;

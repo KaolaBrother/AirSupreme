@@ -1,5 +1,9 @@
 import { Quaternion, Vector3 } from 'three';
 import type { Camera, Object3D } from 'three';
+import { Faction } from '@/core/Faction';
+import { BOSS_CONFIGS, BossType, getBossForLevel } from '@/features/boss/BossTypes';
+import { getCampaignChapter } from '@/features/campaign/CampaignData';
+import { ENEMY_CONFIGS, EnemyType } from '@/features/enemy/EnemyTypes';
 import { OffscreenChevron } from '@/ui/OffscreenChevron';
 import { HUD_COLORS } from '@/ui/theme/hudTokens';
 
@@ -8,6 +12,79 @@ const PLAYER_POSITION_THRESHOLD_SQ = 0.01;
 const TARGET_POSITION_THRESHOLD_SQ = 0.01;
 const CAMERA_ROTATION_THRESHOLD = 0.0025;
 const HEALTH_PERCENT_THRESHOLD = 0.001;
+
+/** 兜底标签（与其余 HUD 一样以中文为主） */
+const FALLBACK_ENEMY_LABEL = '敌方目标';
+const FALLBACK_FRIENDLY_LABEL = '友军';
+
+/**
+ * Boss 部件网格名前缀 → 标签（第三关的眼睛、第 6-10 关带独立血量的子目标）。
+ * 用语与 CampaignData 的 Boss 简报 / 弱点提示一致。
+ */
+const BOSS_PART_LABELS: ReadonlyArray<readonly [prefix: string, label: string]> = [
+  ['boss_eye', '触手之眼'],
+  ['colossus_vent', '散热口'],
+  ['leviathan_sail', '指挥塔'],
+  ['leviathan_ballast_tank', '压载舱'],
+  ['leviathan_missile_bay', '导弹舱'],
+  ['zeppelin_gas_cell', '气囊'],
+  ['zeppelin_hangar', '无人机舱'],
+  ['phantom_phase_emitter', '相位发射器'],
+  ['oracle_pylon', '护盾塔'],
+];
+
+/**
+ * Boss 根节点名（BOSS_<类型>）→ 名称：取战役简报里的 Boss 名（与 Boss 登场简报卡片一致），
+ * 不在战役里的类型退回 BossTypes 配置名（去掉 “Boss” 后缀）。
+ */
+function buildBossLabels(): ReadonlyMap<string, string> {
+  const labels = new Map<string, string>();
+  for (let level = 1; ; level++) {
+    const type = getBossForLevel(level);
+    if (!type) break;
+    const name = getCampaignChapter(level).boss.name;
+    if (name) labels.set(`BOSS_${type}`, name);
+  }
+  for (const type of Object.values(BossType)) {
+    const key = `BOSS_${type}`;
+    if (!labels.has(key)) {
+      labels.set(key, BOSS_CONFIGS[type].name.replace(/\s*Boss$/i, '') || FALLBACK_ENEMY_LABEL);
+    }
+  }
+  return labels;
+}
+
+let bossLabels: ReadonlyMap<string, string> | null = null;
+
+function isEnemyType(name: string): name is EnemyType {
+  return Object.prototype.hasOwnProperty.call(ENEMY_CONFIGS, name);
+}
+
+/**
+ * 解析血条标签：Boss 本体 → 战役名；Boss 部件 → 部件名；敌机（含 Boss 召唤的敌机）→
+ * ENEMY_CONFIGS 中文名（友军加“友军”前缀）；地面 / 海上 / 空中单位（UNIT_*）→ 按阵营的通用名。
+ */
+function resolveTargetLabel(mesh: Object3D, isFriendly: boolean): string {
+  const name = mesh.name || '';
+  if (name.startsWith('BOSS_')) {
+    bossLabels ??= buildBossLabels();
+    return bossLabels.get(name) ?? FALLBACK_ENEMY_LABEL;
+  }
+  for (const [prefix, label] of BOSS_PART_LABELS) {
+    if (name.startsWith(prefix)) return label;
+  }
+  if (isEnemyType(name)) {
+    const typeName = ENEMY_CONFIGS[name].name;
+    return isFriendly ? `${FALLBACK_FRIENDLY_LABEL}${typeName}` : typeName;
+  }
+  if (name.startsWith('UNIT_') || mesh.userData.unitType !== undefined) {
+    const faction: unknown = mesh.userData.faction;
+    if (isFriendly || faction === Faction.FRIENDLY) return '友军单位';
+    if (faction === Faction.CIVILIAN) return '民用目标';
+    return '敌方单位';
+  }
+  return isFriendly ? FALLBACK_FRIENDLY_LABEL : FALLBACK_ENEMY_LABEL;
+}
 
 function isFiniteVector(v: Vector3): boolean {
   return Number.isFinite(v.x) && Number.isFinite(v.y) && Number.isFinite(v.z);
@@ -34,6 +111,9 @@ export class EnemyHealthBars {
       wasInView: boolean | null;
     }
   > = new Map();
+  /** 网格名 → 血条标签（敌方 / 友军分开缓存） */
+  private readonly enemyLabelCache = new Map<string, string>();
+  private readonly friendlyLabelCache = new Map<string, string>();
   private readonly textContentCache = new WeakMap<HTMLElement, string>();
   private readonly styleValueCache = new WeakMap<HTMLElement, Map<string, string>>();
   private readonly worldPosition = new Vector3();
@@ -536,38 +616,20 @@ export class EnemyHealthBars {
   }
 
   /**
-   * 获取敌人名称
-   */
-  private getEnemyName(mesh: Object3D): string {
-    const name = mesh.name || '';
-    if (name.includes('boss_eye')) return 'Eye';
-    if (name.includes('HEAVY_BOMBER')) return 'Heavy Bomber';
-    if (name.includes('DESERT_FORTRESS')) return 'Desert Fortress';
-    if (name.includes('OCTOPUS_WARSHIP')) return 'Octopus Warship';
-    if (name.includes('MISSILE_DESTROYER')) return 'Missile Destroyer';
-    if (name.includes('SKY_CARRIER')) return 'Sky Carrier';
-    if (name === 'SCOUT' || name.includes('Scout')) return 'Scout';
-    if (name === 'FIGHTER' || name.includes('Fighter')) return 'Fighter';
-    if (name === 'HEAVY' || name.includes('Heavy')) return 'Heavy';
-    if (name === 'SNIPER' || name.includes('Sniper')) return 'Sniper';
-    if (name === 'ACE' || name.includes('Ace')) return 'Ace';
-    return 'Enemy';
-  }
-
-  /**
-   * 获取目标名称（敌人和友军）
+   * 获取目标名称（敌人和友军）；按网格名缓存，逐帧不重复解析
    */
   private getTargetName(mesh: Object3D, isFriendly: boolean): string {
-    if (isFriendly) {
-      const name = mesh.name || '';
-      if (name === 'SCOUT' || name.includes('Scout')) return 'Scout';
-      if (name === 'FIGHTER' || name.includes('Fighter')) return 'Fighter';
-      if (name === 'HEAVY' || name.includes('Heavy')) return 'Heavy';
-      if (name === 'SNIPER' || name.includes('Sniper')) return 'Sniper';
-      if (name === 'ACE' || name.includes('Ace')) return 'Ace';
-      return 'Ally';
+    const key = mesh.name;
+    if (!key) {
+      return resolveTargetLabel(mesh, isFriendly);
     }
-    return this.getEnemyName(mesh);
+    const cache = isFriendly ? this.friendlyLabelCache : this.enemyLabelCache;
+    let label = cache.get(key);
+    if (label === undefined) {
+      label = resolveTargetLabel(mesh, isFriendly);
+      cache.set(key, label);
+    }
+    return label;
   }
 
   private getBarHeightOffset(enemyMesh: Object3D): number {
