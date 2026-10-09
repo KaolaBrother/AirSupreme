@@ -1,6 +1,10 @@
 import { Vector3 } from 'three';
 import type { Object3D, Scene } from 'three';
-import { LevelConfig, LevelWaveEventType, getLevelConfig } from '@/features/terrain/LevelConfig';
+import {
+  LevelConfig,
+  LevelWaveEventType,
+  getLevelConfig,
+} from '@/features/terrain/LevelConfig';
 import {
   EnemyConfig,
   EnemyType,
@@ -9,7 +13,10 @@ import {
   getEnemyTypesForWave,
 } from '@/features/enemy/EnemyTypes';
 import { EnemyAI } from '@/features/enemy/EnemyAI';
-import { WORLDSCAPE_WATER_Y, type TerrainGenerator } from '@/features/terrain/TerrainGenerator';
+import {
+  WORLDSCAPE_WATER_Y,
+  type TerrainGenerator,
+} from '@/features/terrain/TerrainGenerator';
 import type {
   TerrainEnvironment,
   TerrainSurfaceKind,
@@ -58,9 +65,8 @@ export class LevelManager {
   private scene: Scene;
   private terrainGenerator: TerrainGenerator | null = null;
   private terrainGeneratorPromise: Promise<TerrainGenerator> | null = null;
-  private spawnPortalModulePromise: Promise<
-    typeof import('@/features/effects/SpawnPortal')
-  > | null = null;
+  private spawnPortalModulePromise: Promise<typeof import('@/features/effects/SpawnPortal')> | null =
+    null;
   private terrainLoadSequence: number = 0;
   private terrainReadyPromise: Promise<void> = Promise.resolve();
 
@@ -367,7 +373,11 @@ export class LevelManager {
   /**
    * 更新关卡管理器
    */
-  public update(deltaTime: number, playerPosition: Vector3, friendlyMeshes?: Object3D[]): void {
+  public update(
+    deltaTime: number,
+    playerPosition: Vector3,
+    friendlyMeshes?: Object3D[]
+  ): void {
     // 更新传送门动画
     for (let i = this.activePortals.length - 1; i >= 0; i--) {
       const portal = this.activePortals[i];
@@ -403,7 +413,10 @@ export class LevelManager {
       const maxConcurrentEnemies = GameConfig.getMaxEnemies();
 
       // 只要还没达到最大生成数量，就继续生成
-      if (this.enemiesSpawnedThisWave < maxEnemies && aliveEnemies < maxConcurrentEnemies) {
+      if (
+        this.enemiesSpawnedThisWave < maxEnemies &&
+        aliveEnemies < maxConcurrentEnemies
+      ) {
         this.spawnTimer += deltaTime;
         if (this.spawnTimer >= this.spawnInterval) {
           this.spawnTimer = 0;
@@ -938,8 +951,7 @@ export class LevelManager {
       (profile?.enemyAttackCooldownMultiplier ?? 1) * scaling.enemyCooldownMultiplier;
     const providedBonus = this.accuracyBonusProvider?.() ?? 0;
     const accuracyBonus =
-      scaling.enemyAccuracyBonus +
-      (Number.isFinite(providedBonus) ? Math.max(0, providedBonus) : 0);
+      scaling.enemyAccuracyBonus + (Number.isFinite(providedBonus) ? Math.max(0, providedBonus) : 0);
 
     return {
       ...baseConfig,
