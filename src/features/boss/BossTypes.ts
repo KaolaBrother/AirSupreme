@@ -267,7 +267,7 @@ export const BOSS_CONFIGS: Record<BossType, BossConfig> = {
   [BossType.PHANTOM_WING]: {
     type: BossType.PHANTOM_WING,
     name: { en: 'Phantom Wing Boss', zh: '幻影之翼 Boss' },
-    health: 7400,
+    health: 9500,
     speed: 30,
     damage: 36,
     scale: 5,

@@ -17,7 +17,8 @@ export interface DifficultyProfile {
  * 敌机 / 单位的基础数值（EnemyTypes、UnitBehaviors、BossTypes）按“专家”手感编写；
  * 各档把伤害与开火频率映射到对应的玩家水平。“普通”（Normal）是默认档：由脚本飞行员
  * （src/core/dev/BalanceHarness.ts，贪心购买升级）实测调校——每分钟受到的伤害约为最大生命值的
- * 20-25%（第 1 关）逐关升到 35-45%（第 10 关），称职的普通玩家每关（不含坠地）最多损失约两条命。
+ * 20-25%（第 1-2 关）、约 30%（第 3-6 关）逐关升到 35-40%（第 8-10 关），
+ * 不会躲避的脚本飞行员每关（不含坠地）阵亡 0-2 次；单关测量波动约 ±30%，看趋势。
  * 伤害 × 冷却共同决定敌方火力：DPS 倍率 ≈ enemyDamageMultiplier / enemyAttackCooldownMultiplier。
  */
 const DIFFICULTY_PROFILES: Record<DifficultyProfile['level'], DifficultyProfile> = {
@@ -129,10 +130,10 @@ type LevelCurveKey = Exclude<keyof LevelScaling, 'level' | 'progress'>;
 const LEVEL_CURVE: Readonly<Record<LevelCurveKey, readonly number[]>> = {
   //                       L1    L2    L3    L4    L5    L6    L7    L8    L9    L10
   enemyHealthMultiplier: [1.0, 1.03, 1.06, 1.09, 1.12, 1.15, 1.18, 1.21, 1.24, 1.27],
-  enemyDamageMultiplier: [1.0, 1.7, 1.72, 1.98, 2.2, 2.95, 3.6, 3.7, 3.95, 4.6],
-  enemyCooldownMultiplier: [1.0, 0.9, 0.86, 0.8, 0.76, 0.58, 0.55, 0.52, 0.49, 0.47],
+  enemyDamageMultiplier: [1.0, 1.72, 1.76, 1.98, 2.2, 2.95, 3.6, 3.7, 3.95, 4.6],
+  enemyCooldownMultiplier: [1.0, 0.86, 0.86, 0.8, 0.76, 0.58, 0.55, 0.52, 0.49, 0.47],
   enemyAccuracyBonus: [0, 0.03, 0.06, 0.09, 0.12, 0.15, 0.18, 0.21, 0.24, 0.27],
-  enemyAimLead: [0, 0.2, 0.35, 0.5, 0.6, 0.68, 0.76, 0.82, 0.88, 0.94],
+  enemyAimLead: [0, 0.28, 0.38, 0.5, 0.6, 0.68, 0.76, 0.82, 0.88, 0.94],
   concurrentEnemyBonus: [0, 0, 0, 1, 1, 1, 2, 2, 2, 2],
   unitHealthMultiplier: [1.0, 1.02, 1.04, 1.06, 1.08, 1.1, 1.12, 1.14, 1.16, 1.18],
   unitDamageShare: [1.0, 0.9, 0.9, 0.9, 0.87, 0.73, 0.64, 0.64, 0.64, 0.6],
