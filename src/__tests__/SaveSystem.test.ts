@@ -8,6 +8,7 @@ import {
   describeCheckpoint,
   getCampaignProgress,
   hasCampaignCheckpoint,
+  isSwiftJoinAnnounced,
   loadCampaignCheckpoint,
   markCampaignCompleted,
   recordLevelReached,
@@ -22,7 +23,8 @@ import { resetLocale } from './i18nTestUtils';
 
 type CheckpointInput = Omit<CampaignSaveData, 'version' | 'savedAt'>;
 
-const CHECKPOINT_KINDS: readonly CheckpointKind[] = ['level-start', 'wave', 'boss'];
+/** 'hangar'：击破上一关 Boss 之后、下一章开始之前（level = 即将开始的那一关，wave 0） */
+const CHECKPOINT_KINDS: readonly CheckpointKind[] = ['level-start', 'wave', 'boss', 'hangar'];
 const SAVED_AT = 1_700_000_123_000;
 
 function makeCheckpoint(overrides: Partial<CheckpointInput> = {}): CheckpointInput {
@@ -313,6 +315,70 @@ describe('SaveSystem', () => {
     });
   });
 
+  describe('hangar checkpoint and the swiftJoined flag', () => {
+    it('round-trips a hangar checkpoint for the upcoming chapter at wave 0', () => {
+      const input = makeCheckpoint({ checkpoint: 'hangar', level: 4, wave: 0, score: 31_500 });
+      expect(saveCampaignCheckpoint(input)).toBe(true);
+      const save = loadOrFail();
+      expect(save.checkpoint).toBe('hangar');
+      expect(save.level).toBe(4);
+      expect(save.wave).toBe(0);
+      expect(save.score).toBe(31_500);
+    });
+
+    it('normalises a stored hangar checkpoint like any other (kind kept, fields clamped)', () => {
+      writeRawSave(makeSave({ checkpoint: 'hangar', level: 42, wave: 0, lives: -3, flares: -1 }));
+      const save = loadOrFail();
+      expect(save.checkpoint).toBe('hangar');
+      expect(save.level).toBe(TOTAL_LEVELS);
+      expect(save.lives).toBeGreaterThanOrEqual(1);
+      expect(save.flares).toBeGreaterThanOrEqual(0);
+    });
+
+    it('keeps swiftJoined when it is a boolean', () => {
+      saveCampaignCheckpoint(makeCheckpoint({ swiftJoined: true }));
+      expect(loadOrFail().swiftJoined).toBe(true);
+      saveCampaignCheckpoint(makeCheckpoint({ swiftJoined: false }));
+      expect(loadOrFail().swiftJoined).toBe(false);
+    });
+
+    it('still loads an old save that has no swiftJoined field (and does not invent one)', () => {
+      const old: Record<string, unknown> = { ...makeSave({ checkpoint: 'wave', level: 6 }) };
+      delete old.swiftJoined;
+      writeRawSave(old);
+      const save = loadOrFail();
+      expect(save.level).toBe(6);
+      expect(save.checkpoint).toBe('wave');
+      expect(save.swiftJoined).toBeUndefined();
+    });
+
+    it('drops a swiftJoined value that is not a boolean', () => {
+      writeRawSave({ ...makeSave(), swiftJoined: 'yes' });
+      expect(loadOrFail().swiftJoined).toBeUndefined();
+    });
+
+    it('isSwiftJoinAnnounced: the stored flag wins', () => {
+      expect(isSwiftJoinAnnounced(makeSave({ level: 1, swiftJoined: true }))).toBe(true);
+      expect(isSwiftJoinAnnounced(makeSave({ level: 9, swiftJoined: false }))).toBe(false);
+    });
+
+    it.each([
+      [1, false],
+      [2, false],
+      [3, false],
+      [4, true],
+      [7, true],
+      [TOTAL_LEVELS, true],
+    ] as const)(
+      'isSwiftJoinAnnounced: an old save at level %i counts as announced: %s',
+      (level, announced) => {
+        const save = makeSave({ level });
+        delete save.swiftJoined;
+        expect(isSwiftJoinAnnounced(save)).toBe(announced);
+      }
+    );
+  });
+
   describe('corrupt or foreign data → null and the key is removed', () => {
     const withoutField = (field: keyof CampaignSaveData): Record<string, unknown> => {
       const record: Record<string, unknown> = { ...makeSave() };
@@ -433,6 +499,22 @@ describe('SaveSystem', () => {
       expect(describeCheckpoint(save)).toBe('Ch. 6 · Heart of the Forge · Boss');
       setLocale('zh-CN');
       expect(describeCheckpoint(save)).toBe('第6关 · 熔炉之心 · Boss 战');
+    });
+
+    it('labels a hangar checkpoint as the hangar of the upcoming chapter, not a wave', () => {
+      const save = makeSave({ checkpoint: 'hangar', level: 4, wave: 0 });
+      const title = CAMPAIGN_CHAPTERS[3].title;
+      const en = describeCheckpoint(save);
+      expect(en).toContain('Ch. 4');
+      expect(en).toContain(title.en);
+      expect(en).toMatch(/Hangar/);
+      expect(en).not.toMatch(/Wave/);
+      setLocale('zh-CN');
+      const zh = describeCheckpoint(save);
+      expect(zh).toContain('第4关');
+      expect(zh).toContain(title.zh);
+      expect(zh).toMatch(/机库/);
+      expect(zh).not.toMatch(/波/);
     });
 
     it.each(CAMPAIGN_CHAPTERS.map((chapter) => [chapter.level, chapter.title.en] as const))(
