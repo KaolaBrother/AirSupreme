@@ -28,7 +28,9 @@ import { resetLocale } from './i18nTestUtils';
 /**
  * 战役表现层的配音接线（DefaultCampaignPresentation + 真实 RadioComms / StoryOverlay +
  * 假的 CampaignVoice）：无线电台词出现时按 line.id 播放（radio，说话人 = line.speaker），
- * 开口后台词等配音说完，下一句才出；高优先级打断后被打断的台词重播并重新配音；
+ * 开口后台词等配音说完，下一句才出；紧急告警（missile-warning / civilian-hit）在另一句正在配音时
+ * 直接跳过（genericRadio 返回 false），低血量等配音说完再报；没在配音的台词仍可被打断，
+ * 被打断的台词最多重播一次（并重新配音）；
  * 清空无线电 / 暂停 / 继续 / 失败 / 通关 / 释放时停下或暂停配音；入关预取本章台词；
  * 僚机事件台词：雨燕入列由她自己报到；被击落由另一名僚机（在空中时）或天穹指挥部播报。
  */
@@ -246,28 +248,94 @@ describe('campaign presentation voice wiring', () => {
       ]);
     });
 
-    it('an urgent line interrupts, and the interrupted line replays with its voice', async () => {
-      presentation.genericRadio('checkpoint');
-      voice.start(6);
-      step(1);
+    it.each(['missile-warning', 'civilian-hit'] as const)(
+      'skips an urgent %s line while another line is being voiced (genericRadio → false)',
+      async (key) => {
+        presentation.genericRadio('checkpoint');
+        voice.start(6);
+        step(1);
 
-      presentation.genericRadio('missile-warning');
+        expect(presentation.genericRadio(key)).toBe(false);
+        expect(playedIds()).toEqual([GENERIC_RADIO.checkpoint.id]);
+        expect(voice.currentId()).toBe(GENERIC_RADIO.checkpoint.id);
+        expect(radioText()).toContain(GENERIC_RADIO.checkpoint.text.en);
+        expect(radioText()).not.toContain(GENERIC_RADIO[key].text.en);
+
+        // 跳过而不是排队：说完之后也不补播
+        step(4.9);
+        voice.end();
+        await settle();
+        step(10);
+        expect(playedIds()).toEqual([GENERIC_RADIO.checkpoint.id]);
+        expect(presentation.isRadioBusy()).toBe(false);
+      }
+    );
+
+    it('an urgent line still interrupts a line that is not being voiced (returns true)', () => {
+      presentation.genericRadio('checkpoint');
+      // 配音已请求但还没开口（加载中）：不算“正在配音”
+      step(0.5);
+
+      expect(presentation.genericRadio('missile-warning')).toBe(true);
       expect(playedIds()).toEqual([
         GENERIC_RADIO.checkpoint.id,
         GENERIC_RADIO['missile-warning'].id,
       ]);
+      expect(radioText()).toContain(GENERIC_RADIO['missile-warning'].text.en);
+    });
+
+    it('an interrupted line replays with its voice at most once', async () => {
+      const checkpoint = GENERIC_RADIO.checkpoint.id;
+      const missile = GENERIC_RADIO['missile-warning'].id;
+      const civilian = GENERIC_RADIO['civilian-hit'].id;
+      presentation.genericRadio('checkpoint');
+      step(0.5);
+      expect(presentation.genericRadio('missile-warning')).toBe(true);
       await settle();
       voice.start(2);
       step(2.1);
       voice.end();
-      step(3);
+      // 告警句按阅读时间收尾，随后被打断的台词回来
+      for (let elapsed = 0; playedIds().length < 3 && elapsed < 15; elapsed += 0.05) {
+        step(0.05);
+      }
 
-      expect(playedIds()).toEqual([
-        GENERIC_RADIO.checkpoint.id,
-        GENERIC_RADIO['missile-warning'].id,
-        GENERIC_RADIO.checkpoint.id,
-      ]);
+      // 第一次被打断：重播，并重新配音
+      expect(playedIds()).toEqual([checkpoint, missile, checkpoint]);
       expect(radioText()).toContain(GENERIC_RADIO.checkpoint.text.en);
+
+      // 重播时又被打断（配音还没开口）：不再重播第二次
+      step(0.3);
+      expect(presentation.genericRadio('civilian-hit')).toBe(true);
+      await settle();
+      voice.start(2);
+      step(2.1);
+      voice.end();
+      await settle();
+      step(15);
+
+      expect(playedIds()).toEqual([checkpoint, missile, checkpoint, civilian]);
+      expect(presentation.isRadioBusy()).toBe(false);
+    });
+
+    it('low-health waits for the voiced line to end, then goes on the radio', async () => {
+      const lowHealth = (seconds: number, dt = 0.05): void => {
+        for (let elapsed = 0; elapsed < seconds - 1e-9; elapsed += dt) {
+          presentation.updatePlayerHealth(dt, 0.1, true);
+          presentation.update(dt);
+        }
+      };
+      presentation.genericRadio('checkpoint');
+      voice.start(6);
+
+      lowHealth(5);
+      expect(playedIds(), 'not while the line is voiced').toEqual([GENERIC_RADIO.checkpoint.id]);
+
+      voice.end();
+      await settle();
+      lowHealth(1);
+      expect(playedIds()).toEqual([GENERIC_RADIO.checkpoint.id, GENERIC_RADIO['low-health'].id]);
+      expect(radioText()).toContain(GENERIC_RADIO['low-health'].text.en);
     });
 
     it('after a language switch the line on screen is redrawn and the queue moves on', async () => {

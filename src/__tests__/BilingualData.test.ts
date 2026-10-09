@@ -12,7 +12,7 @@ import { expectBilingual } from './i18nTestUtils';
  */
 
 describe('bilingual data tables', () => {
-  it('labels the five difficulty tiers Very Easy → Expert (Chinese labels unchanged)', () => {
+  it('labels the five difficulty tiers Very Easy → Expert, Chinese labels 1:1 with English', () => {
     const labels = [1, 2, 3, 4, 5].map((level) => getDifficultyProfile(level).label);
     expect(labels.map((label) => label.en)).toEqual([
       'Very Easy',
@@ -21,7 +21,8 @@ describe('bilingual data tables', () => {
       'Hard',
       'Expert',
     ]);
-    expect(labels.map((label) => label.zh)).toEqual(['简单', '普通', '标准', '困难', '专家']);
+    // 逐档一一对应：非常简单 = Very Easy、简单 = Easy、普通 = Normal、困难 = Hard、专家 = Expert
+    expect(labels.map((label) => label.zh)).toEqual(['非常简单', '简单', '普通', '困难', '专家']);
   });
 
   it.each(Object.values(BossType))('names the %s boss in both languages', (type) => {
