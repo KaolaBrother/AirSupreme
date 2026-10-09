@@ -1,7 +1,7 @@
 import type { GameSessionState } from '@/core/GameSessionState';
 import {
   clearCampaignCheckpoint,
-  describeCheckpoint,
+  describeCheckpointText,
   isSwiftJoinAnnounced,
   loadCampaignCheckpoint,
   markCampaignCompleted,
@@ -19,7 +19,8 @@ import {
 } from '@/features/campaign/CampaignData';
 import { getLevelConfig } from '@/features/terrain/LevelConfig';
 import { getStartingUpgradePoints, type PlayerStats } from '@/features/upgrade/UpgradeSystem';
-import { tr } from '@/i18n';
+import { format, tr, type LocalizedText } from '@/i18n';
+import type { HudText } from '@/ui/HUD';
 import type { CampaignDebriefInput, ICampaignPresentation } from './CampaignPresentation';
 import type { WingmanId } from './Wingmen';
 
@@ -62,6 +63,24 @@ export interface CampaignFlowDeps {
 const BOSS_OUTRO_MIN_SECONDS = 1.6;
 const BOSS_OUTRO_SLACK_SECONDS = 6;
 const BOSS_OUTRO_MAX_SECONDS = 75;
+
+/**
+ * 存档提示文案：以双语原文（+ 参数）交给 HUD，提示仍在显示时切换语言按新语言重绘。
+ * 'hangar' 检查点写在击破上一关 Boss 时，提示刚完成的那一关。
+ */
+const AUTOSAVE_WAVE: LocalizedText = {
+  en: 'Level {level} · Wave {wave}',
+  zh: '第{level}关 · 第{wave}波',
+};
+const AUTOSAVE_BOSS: LocalizedText = {
+  en: 'Level {level} · Before the boss',
+  zh: '第{level}关 · Boss 战前',
+};
+const AUTOSAVE_LEVEL_CLEARED: LocalizedText = {
+  en: 'Level {level} cleared',
+  zh: '第{level}关完成',
+};
+const RESUMED_FROM: LocalizedText = { en: 'Resumed: {checkpoint}', zh: '继续：{checkpoint}' };
 
 /** 等待中的 Boss 收尾（tick 推进） */
 interface PendingOutro {
@@ -155,10 +174,12 @@ export class CampaignFlowController {
     const startWave = resumeBoss ? Math.max(0, totalWaves - 1) : save.wave;
     void this.deps.prepareLevel(level, startWave).then(() => {
       if (this.disposed) return;
-      const checkpoint = describeCheckpoint(save);
-      this.deps.presentation.showAutosave(
-        tr({ en: 'Resumed: {checkpoint}', zh: '继续：{checkpoint}' }, { checkpoint })
-      );
+      // 检查点描述本身也是双语的：两种语言各自拼好，HUD 切换语言时整句换成另一种
+      const checkpoint = describeCheckpointText(save);
+      this.deps.presentation.showAutosave({
+        en: format(RESUMED_FROM.en, { checkpoint: checkpoint.en }),
+        zh: format(RESUMED_FROM.zh, { checkpoint: checkpoint.zh }),
+      });
       if (resumeBoss) {
         this.deps.startBossEncounter(level, false);
       } else {
@@ -454,23 +475,17 @@ export class CampaignFlowController {
     data.stats = this.getRunStats();
     data.swiftJoined = this.swiftJoined;
     if (!saveCampaignCheckpoint(data) || !announce) return;
-    let label: string;
+    let label: HudText;
     switch (kind) {
       case 'boss':
-        label = tr(
-          { en: 'Level {level} · Before the boss', zh: '第{level}关 · Boss 战前' },
-          { level }
-        );
+        label = { text: AUTOSAVE_BOSS, params: { level } };
         break;
       case 'hangar':
         // 击破上一关 Boss 时写入：提示刚完成的那一关
-        label = tr({ en: 'Level {level} cleared', zh: '第{level}关完成' }, { level: level - 1 });
+        label = { text: AUTOSAVE_LEVEL_CLEARED, params: { level: level - 1 } };
         break;
       default:
-        label = tr(
-          { en: 'Level {level} · Wave {wave}', zh: '第{level}关 · 第{wave}波' },
-          { level, wave: wave + 1 }
-        );
+        label = { text: AUTOSAVE_WAVE, params: { level, wave: wave + 1 } };
         break;
     }
     // 存档提示 + 存档音效；关卡开场、Boss 战前与 Boss 击破分别有 chapter-start / level-complete /

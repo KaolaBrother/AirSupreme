@@ -19,7 +19,7 @@ import { EnemyType, ENEMY_CONFIGS } from '@/features/enemy/EnemyTypes';
 import { PowerUpType, POWER_UP_CONFIGS } from '@/features/powerups/PowerUpSystem';
 import type { UpgradeMenu } from '@/ui/UpgradeMenu';
 import type { PauseMenu } from '@/ui/PauseMenu';
-import type { HUD } from '@/ui/HUD';
+import type { HUD, HudTextWithParams } from '@/ui/HUD';
 import type { GameSettings } from '@/ui/StartMenu';
 import type { EnemyHealthBars } from '@/ui/EnemyHealthBars';
 import type { LockOnIndicator } from '@/ui/LockOnIndicator';
@@ -118,6 +118,16 @@ interface WaveObjectiveDisplay {
   title: string;
   objective: string;
   status?: string;
+}
+
+/**
+ * 短暂停留的完成目标（波次事件完成 / 教学完成，约 2-3 秒）：保存双语原文（+ 参数），
+ * HUD 节流刷新时按当前语言取值——停留期间切换语言也跟着换。
+ */
+interface TransientObjectiveDisplay {
+  title: HudTextWithParams;
+  objective: HudTextWithParams;
+  status: HudTextWithParams;
 }
 
 interface TutorialObjectiveDisplay {
@@ -415,7 +425,7 @@ export class GameCoordinator {
   };
   private lastRenderTimestamp: number = 0;
   private upgradeMenuHintShown: boolean = false;
-  private waveCompletionObjective: WaveObjectiveDisplay | null = null;
+  private waveCompletionObjective: TransientObjectiveDisplay | null = null;
   private lastWaveEventPromptSignature: string = '';
   private lastWaveEventCompleteSignature: string = '';
   private lastWaveEventPromptAt: number = 0;
@@ -435,6 +445,9 @@ export class GameCoordinator {
     quaternion: new THREE.Quaternion(),
   };
   private readonly hitPosition = new THREE.Vector3();
+  /** 友机入场：玩家机头方向（之后复用为 lookAt 目标点）与入场航向 */
+  private readonly friendlySpawnForward = new THREE.Vector3();
+  private readonly friendlySpawnHeading = new THREE.Vector3();
   private lastImpactSoundAt: number = 0;
   /** 读档后的第一次 prepareLevel 保留存档里的弹药 / 热焰弹（不补满） */
   private keepRestoredAmmo: boolean = false;
@@ -979,23 +992,46 @@ export class GameCoordinator {
 
     // 友军僚机使用盟军涂装（同机体 / 同命中半径）
     const mesh = createFriendlyMesh(config);
-    const friendly = new FriendlyAI(mesh, config, this.gameScene.scene);
-    friendly.getEnemy().setTerrainSampler(this.terrainHeightSampler);
+    const enemySystem = this.enemySystem;
 
+    // 入场位姿：玩家身侧、编队位所在一侧（从不落在追尾相机后方的视线走廊里），机头朝玩家航向。
+    // 必须在创建 AI 之前写到网格上：EnemyAI 构造时以网格当前位姿作为插值起点，事后再挪动的话，
+    // 首次更新前的那一帧渲染会把友机拉回构造时的位置（世界原点）。
+    const position = mesh.position;
+    const heading = this.friendlySpawnHeading;
     const playerPos = this.playerSystem.getPosition();
-    const offset = new THREE.Vector3(
-      (Math.random() - 0.5) * 100,
-      (Math.random() - 0.5) * 50,
-      (Math.random() - 0.5) * 100
-    );
-    mesh.position.copy(playerPos).add(offset);
-    const groundY = this.terrainHeightSampler(mesh.position.x, mesh.position.z);
-    if (Number.isFinite(groundY) && mesh.position.y < groundY + 30) {
-      mesh.position.y = groundY + 30;
+    if (enemySystem) {
+      const forward = this.friendlySpawnForward.set(0, 0, -1);
+      forward.applyQuaternion(this.playerAircraft.quaternion);
+      enemySystem.getFriendlySpawnPose(playerPos, forward, position, heading);
+    } else {
+      position.copy(playerPos);
+      heading.set(0, 0, -1);
     }
+    if (
+      !Number.isFinite(position.x) ||
+      !Number.isFinite(position.y) ||
+      !Number.isFinite(position.z)
+    ) {
+      position.set(0, 0, 0);
+    }
+    const groundY = this.terrainHeightSampler(position.x, position.z);
+    if (Number.isFinite(groundY) && position.y < groundY + 30) {
+      position.y = groundY + 30;
+    }
+    // 机体本地 +Z 为机头（EnemyAI 同样以 lookAt 速度方向定姿）
+    mesh.lookAt(this.friendlySpawnForward.copy(position).add(heading));
+
+    const friendly = new FriendlyAI(mesh, config, this.gameScene.scene);
+    const enemy = friendly.getEnemy();
+    enemy.setTerrainSampler(this.terrainHeightSampler);
+    // 初速沿玩家航向、不慢于玩家：直接并入编队，不先掉头或掉队
+    const playerSpeed = this.playerSystem.getSpeed();
+    enemy.velocity
+      .copy(heading)
+      .multiplyScalar(Math.max(config.speed, Number.isFinite(playerSpeed) ? playerSpeed : 0));
 
     this.gameScene.scene.add(mesh);
-    const enemySystem = this.enemySystem;
     let wingman: WingmanProfile | null = null;
     if (enemySystem) {
       // 先入场的两架友机是具名僚机（血条显示呼号）；其余为普通友机
@@ -1427,11 +1463,13 @@ export class GameCoordinator {
   }
 
   private updatePlayerFacingObjective(): void {
-    if (this.waveCompletionObjective) {
+    const completion = this.waveCompletionObjective;
+    if (completion) {
+      // 每次刷新都按当前语言取值（文案不变时 PresentationController 不会重写 DOM）
       this.presentationController.showCompletedEventObjective(
-        this.waveCompletionObjective.title,
-        this.waveCompletionObjective.objective,
-        this.waveCompletionObjective.status
+        tr(completion.title.text, completion.title.params),
+        tr(completion.objective.text, completion.objective.params),
+        tr(completion.status.text, completion.status.params)
       );
       return;
     }
@@ -2682,12 +2720,16 @@ export class GameCoordinator {
     this.tutorialCombatState.active = false;
     this.showTransientObjective(
       {
-        title: tr({ en: 'Training · Complete', zh: '试玩引导 · 完成' }),
-        objective: tr({
-          en: 'Training complete. Regular waves incoming.',
-          zh: '首轮引导完成，进入常规波次。',
-        }),
-        status: tr({ en: 'Tutorial done · Full combat unlocked', zh: '教学完成 · 常规战斗已解锁' }),
+        title: { text: { en: 'Training · Complete', zh: '试玩引导 · 完成' } },
+        objective: {
+          text: {
+            en: 'Training complete. Regular waves incoming.',
+            zh: '首轮引导完成，进入常规波次。',
+          },
+        },
+        status: {
+          text: { en: 'Tutorial done · Full combat unlocked', zh: '教学完成 · 常规战斗已解锁' },
+        },
       },
       GameCoordinator.TUTORIAL_HINT_LONG_MS + 1000
     );
@@ -2831,58 +2873,67 @@ export class GameCoordinator {
     const completedEventType = this.waveEventState.type;
     const onboardingBeat = this.getCurrentWaveOnboardingBeat();
     const now = Date.now();
-    let completionObjective: WaveObjectiveDisplay | null = null;
+    const waveParams = { wave: wave + 1 };
+    let completionObjective: TransientObjectiveDisplay | null = null;
     switch (completedEventType) {
       case LevelWaveEventType.ELITE_HUNT:
         completionObjective = {
-          title: tr(
-            { en: 'Wave {wave} · Elite hunt complete', zh: '第 {wave} 波 · 精英歼灭完成' },
-            { wave: wave + 1 }
-          ),
-          objective: tr({
-            en: 'High-value threats eliminated. Pressure easing.',
-            zh: '高威胁目标已清空，空域压力下降。',
-          }),
-          status: tr({ en: 'Result: threats eliminated', zh: '结果：高威胁已打穿' }),
+          title: {
+            text: { en: 'Wave {wave} · Elite hunt complete', zh: '第 {wave} 波 · 精英歼灭完成' },
+            params: waveParams,
+          },
+          objective: {
+            text: {
+              en: 'High-value threats eliminated. Pressure easing.',
+              zh: '高威胁目标已清空，空域压力下降。',
+            },
+          },
+          status: { text: { en: 'Result: threats eliminated', zh: '结果：高威胁已打穿' } },
         };
         break;
       case LevelWaveEventType.INTERCEPT:
         completionObjective = {
-          title: tr(
-            { en: 'Wave {wave} · Intercept complete', zh: '第 {wave} 波 · 拦截完成' },
-            { wave: wave + 1 }
-          ),
-          objective: tr({
-            en: 'Strike group stopped. Get ready for the next wave.',
-            zh: '前锋突防已压制，准备接续下一波。',
-          }),
-          status: tr({ en: 'Result: intercepted', zh: '结果：拦截完成' }),
+          title: {
+            text: { en: 'Wave {wave} · Intercept complete', zh: '第 {wave} 波 · 拦截完成' },
+            params: waveParams,
+          },
+          objective: {
+            text: {
+              en: 'Strike group stopped. Get ready for the next wave.',
+              zh: '前锋突防已压制，准备接续下一波。',
+            },
+          },
+          status: { text: { en: 'Result: intercepted', zh: '结果：拦截完成' } },
         };
         break;
       case LevelWaveEventType.ESCORT_DEFENSE: {
         const escortSuccess = this.handleEscortWaveComplete(wave);
         completionObjective = escortSuccess
           ? {
-              title: tr(
-                { en: 'Wave {wave} · Escort complete', zh: '第 {wave} 波 · 护送完成' },
-                { wave: wave + 1 }
-              ),
-              objective: tr({
-                en: 'The escort made it through. Pressure broken.',
-                zh: '友军守住关键点，护航压力打穿。',
-              }),
-              status: tr({ en: 'Result: escort succeeded', zh: '结果：护送达成' }),
+              title: {
+                text: { en: 'Wave {wave} · Escort complete', zh: '第 {wave} 波 · 护送完成' },
+                params: waveParams,
+              },
+              objective: {
+                text: {
+                  en: 'The escort made it through. Pressure broken.',
+                  zh: '友军守住关键点，护航压力打穿。',
+                },
+              },
+              status: { text: { en: 'Result: escort succeeded', zh: '结果：护送达成' } },
             }
           : {
-              title: tr(
-                { en: 'Wave {wave} · Escort over', zh: '第 {wave} 波 · 护送结束' },
-                { wave: wave + 1 }
-              ),
-              objective: tr({
-                en: 'Escort lost. Clear the remaining threats.',
-                zh: '护送线受损，清理残余威胁稳局。',
-              }),
-              status: tr({ en: 'Result: escort failed', zh: '结果：护送失利' }),
+              title: {
+                text: { en: 'Wave {wave} · Escort over', zh: '第 {wave} 波 · 护送结束' },
+                params: waveParams,
+              },
+              objective: {
+                text: {
+                  en: 'Escort lost. Clear the remaining threats.',
+                  zh: '护送线受损，清理残余威胁稳局。',
+                },
+              },
+              status: { text: { en: 'Result: escort failed', zh: '结果：护送失利' } },
             };
         break;
       }
@@ -2893,7 +2944,10 @@ export class GameCoordinator {
     this.waveEventState.type = null;
     this.waveEventState.wave = -1;
 
-    const completionSignature = `${wave}|${completionObjective?.title ?? 'unknown'}`;
+    const completionTitle = completionObjective
+      ? tr(completionObjective.title.text, completionObjective.title.params)
+      : 'unknown';
+    const completionSignature = `${wave}|${completionTitle}`;
     const shouldShowCompletion =
       completionSignature !== this.lastWaveEventCompleteSignature ||
       now - this.lastWaveEventCompleteAt >= GameCoordinator.WAVE_EVENT_COMPLETE_COOLDOWN_MS;
@@ -2933,7 +2987,10 @@ export class GameCoordinator {
           return;
         }
 
-        this.showTransientObjective(completionObjective as WaveObjectiveDisplay, objectiveHoldMs);
+        this.showTransientObjective(
+          completionObjective as TransientObjectiveDisplay,
+          objectiveHoldMs
+        );
       }, completionDelayMs);
       return;
     }
@@ -2942,7 +2999,7 @@ export class GameCoordinator {
   }
 
   private showTransientObjective(
-    objective: WaveObjectiveDisplay,
+    objective: TransientObjectiveDisplay,
     holdMs: number = GameCoordinator.OBJECTIVE_COMPLETE_HOLD_MS
   ): void {
     this.waveCompletionObjective = objective;
@@ -3254,26 +3311,29 @@ export class GameCoordinator {
     }
   }
 
-  /** 入关简报（CampaignData：章节 + 关卡标题 + 一句话目标） */
+  /**
+   * 入关简报（CampaignData：章节 + 关卡标题 + 一句话目标）。传双语原文而不是 tr() 的结果：
+   * 简报仍在显示时切换语言，HUD 按新语言重绘。
+   */
   private presentLevelBriefing(level: number): void {
     const chapter = getCampaignChapter(level);
     this.hud.showBriefing({
-      kicker: tr(chapter.chapterLabel),
-      title: tr(chapter.title),
-      line: tr(chapter.levelBriefingLine),
+      kicker: chapter.chapterLabel,
+      title: chapter.title,
+      line: chapter.levelBriefingLine,
       tone: 'sys',
       durationMs: 1800,
     });
     this.audioManager.playWaveStart();
   }
 
-  /** Boss 简报（CampaignData：Boss 名称 + 打法提示），显示完毕后开始 Boss 战 */
+  /** Boss 简报（CampaignData：Boss 名称 + 打法提示，双语原文），显示完毕后开始 Boss 战 */
   private presentBossBriefing(level: number, thenStart: () => void): void {
     const boss = getCampaignChapter(level).boss;
     this.hud.showBriefing({
       kicker: 'BOSS',
-      title: tr(boss.name),
-      line: tr(boss.briefingLine),
+      title: boss.name,
+      line: boss.briefingLine,
       tone: 'threat',
       durationMs: 1800,
     });

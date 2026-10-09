@@ -16,7 +16,7 @@ import {
   type RadioLine,
   type RadioTriggerKind,
 } from '@/features/campaign/CampaignData';
-import type { HUD, HudWeaponPanelState, HudWeaponSlotState } from '@/ui/HUD';
+import type { HUD, HudText, HudWeaponPanelState, HudWeaponSlotState } from '@/ui/HUD';
 import type { RadioComms } from '@/ui/RadioComms';
 import type { StoryCardKind, StoryNarration, StoryOverlay } from '@/ui/StoryOverlay';
 import { CampaignSfxRouter } from './CampaignSfx';
@@ -168,7 +168,11 @@ export interface ICampaignPresentation {
   // ── HUD 新面板 ──
   updateWeaponPanel(state: CampaignWeaponPanelState | null): void;
   updateFlares(charges: number, max: number, rechargeProgress: number): void;
-  showAutosave(label: string): void;
+  /**
+   * 自动存档提示 + 存档音效。label 用双语对象或 { text, params }（见 HudText）时，
+   * 提示仍在显示时切换语言会按新语言重绘；纯字符串原样显示。
+   */
+  showAutosave(label: HudText): void;
   /** announce = false：开局 / 读档同步视角，不播放切换音效 */
   setCameraMode(mode: CameraModeSetting, announce?: boolean): void;
   setBossStatus(label: string | null, phase?: { current: number; total: number }): void;
@@ -841,7 +845,7 @@ export class DefaultCampaignPresentation implements ICampaignPresentation {
     hud.updateFlares(charges, max, progress);
   }
 
-  public showAutosave(label: string): void {
+  public showAutosave(label: HudText): void {
     this.deps.getHud()?.showAutosave(label);
     this.deps.audio.playAutosave();
   }
