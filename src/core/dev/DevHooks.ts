@@ -1,5 +1,9 @@
 import * as THREE from 'three';
 import type { BossBattleController } from '@/core/BossBattleController';
+import type { MusicSystem } from '@/core/Audio/MusicSystem';
+import type { VoiceKind, VoiceSystem } from '@/core/Audio/VoiceSystem';
+import type { WingmanEvent, WingmanId } from '@/core/campaign/Wingmen';
+import type { GenericRadioKey } from '@/features/campaign/CampaignData';
 import type { GameLoop } from '@/core/GameLoop';
 import type { GameSessionState } from '@/core/GameSessionState';
 import type { PlayerViewController } from '@/core/camera/PlayerViewController';
@@ -44,6 +48,11 @@ export interface DevHookAccess {
   /** 战役表现层：剧情卡片 / 无线电是否在显示 */
   isStoryActive(): boolean;
   isRadioBusy(): boolean;
+  /** 配音：状态、电平测量、触发台词 */
+  getVoice(): VoiceSystem;
+  getMusic(): MusicSystem;
+  playGenericRadio(key: GenericRadioKey): void;
+  onWingmanEvent(id: WingmanId, event: WingmanEvent): void;
 }
 
 interface Vec3Like {
@@ -294,8 +303,47 @@ export function installDevHooks(access: DevHookAccess): void {
   };
   requestAnimationFrame(liftPlayer);
 
+  /** 配音探针：人声 / 音乐总线电平（AnalyserNode，dBFS RMS）+ 闪避增益 + 配音状态 */
+  let voiceAnalyser: AnalyserNode | null = null;
+  let musicAnalyser: AnalyserNode | null = null;
+  let meterBuffer: Float32Array<ArrayBuffer> | null = null;
+  const rmsDb = (analyser: AnalyserNode | null): number | null => {
+    if (!analyser) return null;
+    if (!meterBuffer || meterBuffer.length !== analyser.fftSize) {
+      meterBuffer = new Float32Array(new ArrayBuffer(analyser.fftSize * 4));
+    }
+    analyser.getFloatTimeDomainData(meterBuffer);
+    let sum = 0;
+    for (const sample of meterBuffer) sum += sample * sample;
+    const rms = Math.sqrt(sum / meterBuffer.length);
+    return rms > 0 ? Math.round(20 * Math.log10(rms) * 10) / 10 : -120;
+  };
+  const voiceHooks = {
+    state: () => access.getVoice().getDebugState(),
+    /** 一次采样：两条总线的 RMS、音乐上的配音闪避增益、当前台词 */
+    sample: () => {
+      voiceAnalyser ??= access.getVoice().createOutputAnalyser();
+      musicAnalyser ??= access.getMusic().createOutputAnalyser();
+      const state = access.getVoice().getDebugState();
+      return {
+        t: Math.round(performance.now()),
+        voiceDb: rmsDb(voiceAnalyser),
+        musicDb: rmsDb(musicAnalyser),
+        duck: access.getMusic().getVoiceDuckLevel(),
+        line: state.current?.lineId ?? null,
+        phase: state.current?.phase ?? null,
+        language: state.language,
+      };
+    },
+    say: (lineId: string, kind: VoiceKind = 'radio') =>
+      access.getVoice().play(lineId, { kind, speaker: kind === 'radio' ? 'hq' : null }),
+    radio: (key: GenericRadioKey) => access.playGenericRadio(key),
+    wingman: (id: WingmanId, event: WingmanEvent) => access.onWingmanEvent(id, event),
+  };
+
   const hooks = {
     getState,
+    voice: voiceHooks,
     listUnits,
     bossSubTargets,
     setGodMode: (on: boolean) => {

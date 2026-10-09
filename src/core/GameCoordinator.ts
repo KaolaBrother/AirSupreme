@@ -10,6 +10,7 @@ import type { PowerUpSystem } from '@/core/systems/PowerUpSystem';
 import { InputHandler, type InputState } from '@/core/Input/InputHandler';
 import { AudioManager } from '@/core/Audio/AudioManager';
 import { MusicSystem } from '@/core/Audio/MusicSystem';
+import { VoiceSystem } from '@/core/Audio/VoiceSystem';
 import type { ParticleSystem } from '@/features/effects/ParticleSystem';
 import { PlayerStats, UpgradeType } from '@/features/upgrade/UpgradeSystem';
 import { FriendlyAI } from '@/features/enemy/FriendlyAI';
@@ -331,6 +332,8 @@ export class GameCoordinator {
   private inputHandler: InputHandler;
   private audioManager: AudioManager;
   private musicSystem: MusicSystem;
+  /** 角色配音（无线电 + 剧情旁白），经战役表现层驱动 */
+  private voiceSystem: VoiceSystem;
   private particleSystem: ParticleSystem | null = null;
   private readonly view: PlayerViewController;
   private readonly presentation: ICampaignPresentation;
@@ -474,6 +477,8 @@ export class GameCoordinator {
     this.gameState = new GameState();
     this.audioManager = new AudioManager();
     this.musicSystem = new MusicSystem();
+    this.voiceSystem = new VoiceSystem();
+    this.voiceSystem.setVolume(loadStartFlowSettings().voiceVolume);
     this.playerStats = new PlayerStats();
 
     this.playerAircraft = createPlayerMesh();
@@ -506,6 +511,7 @@ export class GameCoordinator {
       isBossMode: () => this.sessionState.isBossMode(),
       getListenerPosition: () => this.playerAircraft.position,
       wingmen: this.wingmen,
+      voice: this.voiceSystem,
     });
     this.units = this.createUnitController();
     this.hudFeed = new CombatHudFeed({
@@ -921,6 +927,7 @@ export class GameCoordinator {
     this.audioManager.setSFXVolume(settings.sfxVolume);
     this.audioManager.setMusicVolume(settings.musicVolume);
     this.musicSystem.setVolume(settings.musicVolume);
+    this.voiceSystem.setVolume(settings.voiceVolume);
     this.sessionState.setWave(0);
     this.gameState.reset();
     this.sessionState.setInBossBattle(false);
@@ -2355,6 +2362,10 @@ export class GameCoordinator {
           }),
           isStoryActive: () => this.presentation.isStoryActive(),
           isRadioBusy: () => this.presentation.isRadioBusy(),
+          getVoice: () => this.voiceSystem,
+          getMusic: () => this.musicSystem,
+          playGenericRadio: (key) => this.presentation.genericRadio(key),
+          onWingmanEvent: (id, event) => this.presentation.onWingmanEvent(id, event),
         });
       });
     }
@@ -3004,6 +3015,7 @@ export class GameCoordinator {
             this.audioManager.setMusicVolume(music);
             this.musicSystem.setVolume(music);
           },
+          applyVoice: (voice) => this.voiceSystem.setVolume(voice),
           applyQuality: (preset) => this.setQualityPreset(preset),
           loadSettings: loadStartFlowSettings,
           saveSettings: saveStartFlowSettings,
@@ -3459,5 +3471,6 @@ export class GameCoordinator {
     this.gameScene.dispose();
     this.audioManager.dispose();
     this.musicSystem.dispose();
+    this.voiceSystem.dispose();
   }
 }
