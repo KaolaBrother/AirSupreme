@@ -808,8 +808,8 @@ const HUD_EXTRAS_CSS = `
   height: 12px;
 }
 
-/* 竖屏简报显示时存档提示让位（HUD 同时暂停它的计时，简报结束后再完整显示） */
-#hud-top-stack[data-briefing='on'] > .hx-autosave {
+/* 竖屏消息栈拥挤时（简报，或阶段条 + 目标）存档提示让位；HUD 同时暂停计时，之后再完整显示 */
+#hud-top-stack[data-defer-autosave='on'] > .hx-autosave {
   display: none !important;
 }
 

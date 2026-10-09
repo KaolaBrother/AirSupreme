@@ -244,6 +244,7 @@ export class HUD {
   private eventObjectiveText: HTMLDivElement;
   private eventObjectiveStatus: HTMLDivElement;
   private eventObjectiveTone: EventObjectiveTone = 'default';
+  private eventObjectiveVisible: boolean = false;
   private livesDisplay: HTMLDivElement;
   private missilesDisplay: HTMLDivElement;
   private missileProgressDisplay: HTMLDivElement; // 导弹补给进度条背景
@@ -1345,6 +1346,8 @@ export class HUD {
       status && status.length > 0 ? 'block' : 'none'
     );
     this.setStyleValue(this.eventObjectiveDisplay, 'display', 'block');
+    this.eventObjectiveVisible = true;
+    this.syncAutosaveDeferral();
   }
 
   public showCompletedEventObjective(title: string, objective: string, status?: string): void {
@@ -1359,6 +1362,8 @@ export class HUD {
       status && status.length > 0 ? 'block' : 'none'
     );
     this.setStyleValue(this.eventObjectiveDisplay, 'display', 'block');
+    this.eventObjectiveVisible = true;
+    this.syncAutosaveDeferral();
   }
 
   public updateEventObjectiveStatus(status: string): void {
@@ -1374,6 +1379,8 @@ export class HUD {
     this.setTextContent(this.eventObjectiveStatus, '');
     this.setStyleValue(this.eventObjectiveStatus, 'display', 'none');
     this.setStyleValue(this.eventObjectiveDisplay, 'display', 'none');
+    this.eventObjectiveVisible = false;
+    this.syncAutosaveDeferral();
   }
 
   private applyEventObjectiveTone(tone: EventObjectiveTone): void {
@@ -1485,6 +1492,25 @@ export class HUD {
     if (toast.parentElement !== host) {
       host.appendChild(toast);
     }
+    this.syncAutosaveDeferral();
+  }
+
+  /**
+   * 竖屏顶部消息栈最紧：简报显示时，或 Boss 阶段条与事件目标同时显示时，自动存档提示让位
+   * （样式隐藏、计时暂停），栈空出来后再完整显示，避免把无线电面板挤到准星附近。
+   */
+  private isAutosaveDeferred(): boolean {
+    if (this.layoutDensity !== 'touch-portrait' || !this.autosaveToast) {
+      return false;
+    }
+    if (this.autosaveToast.parentElement !== this.topStack) {
+      return false;
+    }
+    return this.briefingTimer > 0 || (this.bossStatusVisible && this.eventObjectiveVisible);
+  }
+
+  private syncAutosaveDeferral(): void {
+    HUD.setAttr(this.topStack, 'data-defer-autosave', this.isAutosaveDeferred() ? 'on' : 'off');
   }
 
   private renderWaveLine(): void {
@@ -1723,6 +1749,7 @@ export class HUD {
     this.setStyleValue(this.briefingDisplay, 'opacity', '1');
     HUD.setAttr(this.topStack, 'data-briefing', 'on');
     this.briefingTimer = Math.max(0, briefing.durationMs) / 1000;
+    this.syncAutosaveDeferral();
     if (this.briefingTimer <= 0) {
       this.hideBriefing();
     }
@@ -1823,6 +1850,7 @@ export class HUD {
     this.setStyleValue(this.briefingDisplay, 'opacity', '0');
     this.setStyleValue(this.briefingDisplay, 'display', 'none');
     HUD.setAttr(this.topStack, 'data-briefing', 'off');
+    this.syncAutosaveDeferral();
   }
 
   /** 按当前语言写简报卡三行文字 */
@@ -2077,6 +2105,7 @@ export class HUD {
       HUD.setRootMarker('data-hud-boss', null);
       // 桌面 / 横屏阶段条收起后消息栈上移：尺寸不变，ResizeObserver 不会触发，手动同步栈底
       this.syncTopStackBottom();
+      this.syncAutosaveDeferral();
       return;
     }
 
@@ -2131,6 +2160,7 @@ export class HUD {
       // 桌面 / 横屏：顶部消息栈让出阶段条一行；竖屏阶段条在消息栈里占一整行
       HUD.setRootMarker('data-hud-boss', 'on');
       this.syncTopStackBottom();
+      this.syncAutosaveDeferral();
     }
     if (phaseAdvanced) {
       ui.root.classList.remove('is-phase-up');
@@ -2189,12 +2219,8 @@ export class HUD {
   }
 
   private updateCampaignTimers(deltaTime: number): void {
-    // 竖屏时存档提示与简报同在顶部消息栈：简报显示期间提示被样式隐藏，计时也暂停
-    const autosaveDeferred =
-      this.briefingTimer > 0 &&
-      this.layoutDensity === 'touch-portrait' &&
-      this.autosaveToast?.parentElement === this.topStack;
-    if (this.autosaveTimer > 0 && !autosaveDeferred) {
+    // 竖屏消息栈拥挤时存档提示让位：样式隐藏，计时也暂停（见 isAutosaveDeferred）
+    if (this.autosaveTimer > 0 && !this.isAutosaveDeferred()) {
       this.autosaveTimer = Math.max(0, this.autosaveTimer - deltaTime);
       if (!this.autosaveLeaving && this.autosaveTimer <= HUD.AUTOSAVE_LEAVE_SECONDS) {
         this.autosaveLeaving = true;
