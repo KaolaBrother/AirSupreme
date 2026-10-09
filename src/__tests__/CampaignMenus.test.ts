@@ -414,6 +414,7 @@ describe('UpgradeMenu campaign additions', () => {
     expect(resumeButton().textContent).toBe('▶ Back to battle');
     setLocale('zh-CN');
     expect(menu.isVisible(), 'stays open across a language change').toBe(true);
+    expect(document.querySelector('#upgrade-menu .upgrade-title')?.textContent).toBe('⚙️ 升级');
     expect(resumeButton().textContent).toBe('▶ 返回战斗');
 
     resumeButton().click();
@@ -437,6 +438,19 @@ describe('UpgradeMenu campaign additions', () => {
     expect(onResume).not.toHaveBeenCalled();
     expect(menu.isVisible()).toBe(false);
     expect((document.getElementById('upgrade-menu') as HTMLElement).style.display).toBe('none');
+  });
+
+  it.each(LOCALES)('titles the pause and hangar menus in the interface language (%s)', (locale) => {
+    setLocale(locale);
+    menu.show();
+    expect(document.querySelector('#upgrade-menu .upgrade-title')?.textContent).toBe(
+      textIn({ en: '⚙️ Upgrades', zh: '⚙️ 升级' }, locale)
+    );
+    menu.hide();
+    menu.show({ mode: 'hangar' });
+    expect(document.querySelector('#upgrade-menu .upgrade-title')?.textContent).toBe(
+      textIn({ en: 'Refit & Rearm', zh: '机库整备' }, locale)
+    );
   });
 
   it('hangar mode shows the given title and subtitle', () => {

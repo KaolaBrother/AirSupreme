@@ -131,6 +131,8 @@ const SCORE_LABEL: LocalizedText = { en: 'SCORE', zh: '得分' };
 const RETRY_LABEL: LocalizedText = { en: 'Play Again', zh: '再来一局' };
 const EXIT_LABEL: LocalizedText = { en: 'Main Menu', zh: '返回菜单' };
 const FINAL_SCORE_COPY: LocalizedText = { en: 'Final score: {score}', zh: '最终得分: {score}' };
+const FAILED_TITLE: LocalizedText = { en: 'MISSION FAILED', zh: '任务失败' };
+const COMPLETE_TITLE: LocalizedText = { en: 'MISSION COMPLETE', zh: '任务完成' };
 
 function finalScoreText(score: number, locale: Locale): string {
   return format(textIn(FINAL_SCORE_COPY, locale), { score });
@@ -725,7 +727,8 @@ describe('HUD', () => {
     expect(document.getElementById('final-score')?.textContent).toBe('Final score: 900');
   });
 
-  function expectSettlementIn(locale: Locale, score: number): void {
+  function expectSettlementIn(locale: Locale, score: number, title: LocalizedText): void {
+    expect(document.getElementById('game-over-title')?.textContent).toBe(textIn(title, locale));
     expect(document.getElementById('final-score')?.textContent).toBe(finalScoreText(score, locale));
     findLabeledButton(textIn(RETRY_LABEL, locale));
     findLabeledButton(textIn(EXIT_LABEL, locale));
@@ -745,23 +748,24 @@ describe('HUD', () => {
     hud = new HUD();
     settlementHud(hud).setSettlementActions({ onRetry: vi.fn(), onExitToMenu: vi.fn() });
     hud.showGameOver(900);
+    expectSettlementIn(locale, 900, FAILED_TITLE);
 
-    expectSettlementIn(locale, 900);
+    hud.hideGameOver();
+    hud.showMissionComplete(20000);
+    expectSettlementIn(locale, 20000, COMPLETE_TITLE);
   });
 
   /**
    * 运行时顺序：开始菜单显示时 HUD 已创建（PresentationRuntimeLoader），init() 要等点了
    * 开始游戏（GameCoordinator.startInternal → initializeCombatUi）。玩家在开始菜单里切换
-   * 语言后，结算面板应当使用新语言。
-   * 实现：结算按钮文案只在构造函数里渲染一次，onLocaleChange 订阅要到 init() 才建立，
-   * init() 不会补渲染 → 按钮仍是构造时的语言（与最终得分一行的语言不一致）。
+   * 语言后，结算面板（标题、得分、按钮）应当使用新语言。
    */
-  it.fails('keeps the settlement panel in a language picked before the HUD is initialised', () => {
+  it('keeps the settlement panel in a language picked before the HUD is initialised', () => {
     setLocale('zh-CN');
     settlementHud(hud).setSettlementActions({ onRetry: vi.fn(), onExitToMenu: vi.fn() });
     hud.showGameOver(900);
 
-    expectSettlementIn('zh-CN', 900);
+    expectSettlementIn('zh-CN', 900, FAILED_TITLE);
   });
 
   it('re-words an open settlement panel when the language changes', () => {
@@ -769,21 +773,26 @@ describe('HUD', () => {
     const onExitToMenu = vi.fn();
     settlementHud(hud).setSettlementActions({ onRetry, onExitToMenu });
     hud.showMissionComplete(20000);
-    expect(document.getElementById('final-score')?.textContent).toBe('Final score: 20000');
+    expectSettlementIn('en', 20000, COMPLETE_TITLE);
 
     setLocale('zh-CN');
-    expect(document.getElementById('final-score')?.textContent).toBe(
-      finalScoreText(20000, 'zh-CN')
-    );
+    expectSettlementIn('zh-CN', 20000, COMPLETE_TITLE);
     findLabeledButton(RETRY_LABEL.zh).click();
     findLabeledButton(EXIT_LABEL.zh).click();
     expect(onRetry).toHaveBeenCalledTimes(1);
     expect(onExitToMenu).toHaveBeenCalledTimes(1);
 
     setLocale('en');
-    expect(document.getElementById('final-score')?.textContent).toBe('Final score: 20000');
-    findLabeledButton(RETRY_LABEL.en);
-    findLabeledButton(EXIT_LABEL.en);
+    expectSettlementIn('en', 20000, COMPLETE_TITLE);
+  });
+
+  it('re-titles an open failure panel when the language changes', () => {
+    hud.showGameOver(440);
+    expectSettlementIn('en', 440, FAILED_TITLE);
+    setLocale('zh-CN');
+    expectSettlementIn('zh-CN', 440, FAILED_TITLE);
+    setLocale('en');
+    expectSettlementIn('en', 440, FAILED_TITLE);
   });
 
   it('wires Play Again and Main Menu to HUD settlement callbacks', () => {
