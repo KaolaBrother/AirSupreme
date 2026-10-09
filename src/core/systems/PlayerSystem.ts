@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { GAME_CONSTANTS } from '@/config';
 import { IGameSystem } from '@/core/interfaces/IGameSystem';
 import type { PlayerHitFeedbackMetadata } from '@/core/EventBus';
 import { EventBus, GameEventType } from '@/core/EventBus';
@@ -9,11 +10,42 @@ import { WORLDSCAPE_WATER_Y } from '@/features/terrain/TerrainGenerator';
 import { HUD_COLORS } from '@/ui/theme/hudTokens';
 import { ShieldRipple } from '@/features/effects/ShieldRipple';
 
+/** 复活候选航向（相对首选航向）：原航向优先，再左右交替 ±45° / ±90° / ±135°，最后调头 */
+const RESPAWN_HEADING_OFFSETS: readonly number[] = [
+  0,
+  Math.PI / 4,
+  -Math.PI / 4,
+  Math.PI / 2,
+  -Math.PI / 2,
+  (3 * Math.PI) / 4,
+  (-3 * Math.PI) / 4,
+  Math.PI,
+];
+
 export class PlayerSystem implements IGameSystem {
   readonly name = 'PlayerSystem';
+  /** 航迹样本的最低离地高度（米）：贴地 / 宽限期抬升中的位置不算安全点 */
   private static readonly RESPAWN_ALTITUDE_BUFFER = 10;
   /** 复活点离地高度（米）：峡谷 / 火山等高耸地形上留出改出空间 */
   private static readonly RESPAWN_CLEARANCE = 40;
+  /** 复活点取自坠毁前至少这么久（秒）…… */
+  private static readonly RESPAWN_BACKTRACK_SECONDS = 3;
+  /** ……且离坠毁点水平距离至少这么远（米）的航迹样本 */
+  private static readonly RESPAWN_BACKTRACK_DISTANCE = 150;
+  /** 航迹采样间隔（秒）与环形缓冲容量：约 16 秒的安全航迹，固定大小、无逐帧分配 */
+  private static readonly TRACK_SAMPLE_INTERVAL = 0.25;
+  private static readonly TRACK_CAPACITY = 64;
+  /** 复活净空探测：沿航向 0..400 米（近处步长更细），中线 + 两侧平行线 */
+  private static readonly RESPAWN_PROBE_RANGE = 400;
+  private static readonly RESPAWN_PROBE_SIDE_OFFSET = 10;
+  /** 探测线上表面高于“复活高度 - 该余量”即视为挡路（米） */
+  private static readonly RESPAWN_PROBE_MARGIN = 20;
+  /** 复活后坠毁宽限（秒）：期间触地 / 撞上结构不坠毁，抬到表面之上并拉起机头 */
+  private static readonly RESPAWN_CRASH_GRACE = 3;
+  /** 宽限期触地时抬到表面之上的高度（米） */
+  private static readonly GRACE_LIFT = 3;
+  /** 宽限期触地时拉起到的俯仰角（弧度，约 12°） */
+  private static readonly GRACE_PITCH = 0.21;
 
   private controller: PlayerController;
   private health: HealthSystem;
@@ -24,16 +56,41 @@ export class PlayerSystem implements IGameSystem {
   private isRespawning: boolean = false;
   private respawnTimer: number = 0;
   private respawnDelay: number = 2;
-  private lastSafeRespawnPosition: THREE.Vector3;
   private crashSurfaceSampler: ((x: number, z: number) => number) | null = null;
+
+  /** 安全航迹环形缓冲（世界坐标 + 飞行时钟时间戳）；出生 / 读档 / 复活时从该点重新开始 */
+  private readonly trackX = new Float64Array(PlayerSystem.TRACK_CAPACITY);
+  private readonly trackY = new Float64Array(PlayerSystem.TRACK_CAPACITY);
+  private readonly trackZ = new Float64Array(PlayerSystem.TRACK_CAPACITY);
+  private readonly trackTime = new Float64Array(PlayerSystem.TRACK_CAPACITY);
+  private trackHead: number = 0;
+  private trackCount: number = 0;
+  private trackSampleTimer: number = 0;
+  /** 航迹起点（出生 / 读档 / 复活点）的航向，坠毁信息缺失时复活用 */
+  private trackAnchorHeading: number = 0;
+  /** 飞行时钟（秒）：只在存活飞行时推进，给航迹样本与坠毁打时间戳 */
+  private flightClock: number = 0;
+  private crashGraceTimer: number = 0;
+  private readonly crashPosition = new THREE.Vector3();
+  private crashTime: number = 0;
+  private crashHeading: number = 0;
+  private hasCrashPosition: boolean = false;
+  private readonly respawnPosition = new THREE.Vector3();
+  /** 净空探测结果（复用字段，避免分配） */
+  private probeFirstBlocked: number = Infinity;
+  private probeHighestTop: number = -Infinity;
 
   private shieldActive: boolean = false;
   private shieldGroup?: THREE.Group;
   private readonly shieldMaterials: THREE.MeshBasicMaterial[] = [];
   private shieldRipple?: ShieldRipple;
   private readonly shieldHitDirection = new THREE.Vector3();
-  private readonly respawnForward = new THREE.Vector3();
+  private readonly scratchForward = new THREE.Vector3();
+  private readonly scratchUp = new THREE.Vector3();
+  private readonly attitudeYaw = new THREE.Quaternion();
+  private readonly attitudePitch = new THREE.Quaternion();
   private static readonly UP_AXIS = new THREE.Vector3(0, 1, 0);
+  private static readonly PITCH_AXIS = new THREE.Vector3(1, 0, 0);
   private shieldTime: number = 0;
   private shieldFade: number = 0;
   private shieldFadingOut: boolean = false;
@@ -59,7 +116,7 @@ export class PlayerSystem implements IGameSystem {
     this.stats = stats;
     this.controller = new PlayerController(mesh, scene, stats);
     this.health = new HealthSystem(stats.getMaxHealth());
-    this.lastSafeRespawnPosition = mesh.position.clone();
+    this.resetTrack(mesh.position);
     this.syncVisualState();
   }
 
@@ -88,10 +145,15 @@ export class PlayerSystem implements IGameSystem {
       return;
     }
 
+    const dt = Number.isFinite(deltaTime) && deltaTime > 0 ? deltaTime : 0;
+    this.flightClock += dt;
+    this.crashGraceTimer = Math.max(0, this.crashGraceTimer - dt);
     this.fireCooldown = Math.max(0, this.fireCooldown - deltaTime);
     this.updateShield(deltaTime);
-    this.checkGroundCollision();
-    this.updateLastSafeRespawnPosition();
+    const surfaceY = this.checkGroundCollision();
+    if (!this.isRespawning) {
+      this.recordTrackSample(dt, surfaceY);
+    }
   }
 
   dispose(): void {
@@ -131,6 +193,7 @@ export class PlayerSystem implements IGameSystem {
 
   private handleDeath(): void {
     this.lives--;
+    this.recordCrash();
 
     EventBus.emit(GameEventType.PLAYER_DEATH, {
       position: this.mesh.position.clone(),
@@ -150,59 +213,310 @@ export class PlayerSystem implements IGameSystem {
 
   private respawn(): void {
     this.health.reset();
-    const safeRespawnPosition = this.getSafeRespawnPosition();
+    const heading = this.resolveRespawnPose(this.respawnPosition);
 
-    this.mesh.position.copy(safeRespawnPosition);
-    // 改平姿态（保留航向）：坠毁时多为俯冲，原姿态复活会立刻再次撞地
-    this.respawnForward.set(0, 0, -1).applyQuaternion(this.mesh.quaternion);
-    const heading = Math.atan2(-this.respawnForward.x, -this.respawnForward.z);
-    const safeHeading = this.pickRespawnHeading(
-      safeRespawnPosition,
-      Number.isFinite(heading) ? heading : 0
-    );
-    this.mesh.quaternion.setFromAxisAngle(PlayerSystem.UP_AXIS, safeHeading);
+    this.mesh.position.copy(this.respawnPosition);
+    // 改平姿态（只保留航向）：坠毁时多为俯冲，原姿态复活会立刻再次撞地
+    this.setAttitude(heading, 0);
 
     this.mesh.visible = true;
     this.syncVisualState();
 
+    // 新航迹从复活点开始：坠毁前的样本通向障碍物，不再作为下一次复活的候选
+    this.resetTrack(this.respawnPosition);
+    this.hasCrashPosition = false;
+    this.crashGraceTimer = PlayerSystem.RESPAWN_CRASH_GRACE;
     this.isRespawning = false;
     EventBus.emit(GameEventType.PLAYER_RESPAWN, {
       position: this.mesh.position.clone(),
     });
   }
 
+  /** 记下坠毁 / 被击落的位置、时刻与航向，复活时据此沿航迹回退 */
+  private recordCrash(): void {
+    const { x, y, z } = this.mesh.position;
+    this.hasCrashPosition = Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(z);
+    if (this.hasCrashPosition) {
+      this.crashPosition.set(x, y, z);
+    }
+    this.crashTime = this.flightClock;
+    this.crashHeading = this.headingOf(this.mesh.quaternion, this.trackAnchorHeading);
+  }
+
   /**
-   * 复活航向：原航向前方 400 米内地表高于复活高度（火山坡 / 崖壁）时，
-   * 改为 8 个方向里净空最大的一个，避免复活后几秒内再次撞上同一面山坡。
+   * 复活位姿：沿航迹回退到坠毁前 ≥ 3 秒且离坠毁点 ≥ 150 米的安全样本（航迹太短时由最远样本
+   * 外推到 150 米），再由 0..400 米净空探测定航向与高度。写入 out，返回航向（绕 Y，机头 -Z 为 0）。
    */
-  private pickRespawnHeading(position: THREE.Vector3, heading: number): number {
-    const clearance = (candidate: number): number => {
-      const dirX = -Math.sin(candidate);
-      const dirZ = -Math.cos(candidate);
-      let highest = -Infinity;
-      for (let distance = 50; distance <= 400; distance += 50) {
-        const ground = this.sampleCrashSurfaceY(
-          position.x + dirX * distance,
-          position.z + dirZ * distance
-        );
-        if (Number.isFinite(ground) && ground > highest) highest = ground;
-      }
-      return Number.isFinite(highest) ? position.y - highest : Infinity;
-    };
-    let best = heading;
-    let bestClearance = clearance(heading);
-    if (bestClearance >= PlayerSystem.RESPAWN_CLEARANCE * 0.5) {
-      return heading;
-    }
-    for (let i = 1; i < 8; i++) {
-      const candidate = heading + (i * Math.PI) / 4;
-      const value = clearance(candidate);
-      if (value > bestClearance) {
-        bestClearance = value;
-        best = candidate;
+  private resolveRespawnPose(out: THREE.Vector3): number {
+    let preferredHeading = this.trackAnchorHeading;
+    if (this.trackCount === 0) {
+      out.set(0, 0, 0);
+    } else if (!this.hasCrashPosition) {
+      // 坠毁点缺失（等待复活时被 placeAt 重置）：从航迹最新样本（出生 / 读档点）复活
+      this.readTrackSample(0, out);
+    } else {
+      preferredHeading = this.crashHeading;
+      const k = this.findBacktrackSample();
+      if (k >= 0) {
+        this.readTrackSample(k, out);
+        preferredHeading = this.trackHeadingAt(k, preferredHeading);
+      } else {
+        preferredHeading = this.extrapolateRespawnPoint(out);
       }
     }
-    return best;
+    if (!Number.isFinite(out.x) || !Number.isFinite(out.z)) {
+      out.set(0, out.y, 0);
+    }
+    this.clampToBattlefield(out);
+    return this.chooseRespawnHeading(out, preferredHeading);
+  }
+
+  /** 由新到旧找第一个“坠毁前 ≥ 3 秒且水平距离 ≥ 150 米”的航迹样本，返回其序号 k（无则 -1） */
+  private findBacktrackSample(): number {
+    const minDistanceSq =
+      PlayerSystem.RESPAWN_BACKTRACK_DISTANCE * PlayerSystem.RESPAWN_BACKTRACK_DISTANCE;
+    for (let k = 0; k < this.trackCount; k++) {
+      const i = this.trackIndex(k);
+      if (this.crashTime - this.trackTime[i] < PlayerSystem.RESPAWN_BACKTRACK_SECONDS) {
+        continue;
+      }
+      const dx = this.trackX[i] - this.crashPosition.x;
+      const dz = this.trackZ[i] - this.crashPosition.z;
+      if (dx * dx + dz * dz >= minDistanceSq) {
+        return k;
+      }
+    }
+    return -1;
+  }
+
+  /**
+   * 航迹太短（刚出生 / 刚读档 / 复活后不久又坠毁）：取离坠毁点最远的样本，沿“坠毁点 → 该样本”
+   * 的水平方向外推到 150 米；样本与坠毁点重合时沿坠毁航向反向后退。返回原飞行方向的航向
+   * （由复活点指向坠毁点），是否改向交给净空探测。
+   */
+  private extrapolateRespawnPoint(out: THREE.Vector3): number {
+    const crash = this.crashPosition;
+    let farthest = -1;
+    let farthestSq = -1;
+    for (let k = 0; k < this.trackCount; k++) {
+      const i = this.trackIndex(k);
+      const dx = this.trackX[i] - crash.x;
+      const dz = this.trackZ[i] - crash.z;
+      const distanceSq = dx * dx + dz * dz;
+      if (distanceSq > farthestSq) {
+        farthestSq = distanceSq;
+        farthest = i;
+      }
+    }
+    let dirX: number;
+    let dirZ: number;
+    let baseY = crash.y;
+    if (farthest >= 0 && farthestSq >= 1) {
+      const length = Math.sqrt(farthestSq);
+      dirX = (this.trackX[farthest] - crash.x) / length;
+      dirZ = (this.trackZ[farthest] - crash.z) / length;
+      baseY = this.trackY[farthest];
+    } else {
+      // 机头前向为 (-sinθ, -cosθ)，反向即 (sinθ, cosθ)
+      dirX = Math.sin(this.crashHeading);
+      dirZ = Math.cos(this.crashHeading);
+      if (farthest >= 0) {
+        baseY = Math.max(baseY, this.trackY[farthest]);
+      }
+    }
+    const distance = PlayerSystem.RESPAWN_BACKTRACK_DISTANCE;
+    out.set(crash.x + dirX * distance, baseY, crash.z + dirZ * distance);
+    return Math.atan2(dirX, dirZ);
+  }
+
+  /** 复活点不放到软边界之外（否则一出现就被回推） */
+  private clampToBattlefield(position: THREE.Vector3): void {
+    const limit = GAME_CONSTANTS.WORLD.SOFT_BOUNDARY_RADIUS;
+    const radial = Math.hypot(position.x, position.z);
+    if (radial > limit) {
+      const scale = limit / radial;
+      position.x *= scale;
+      position.z *= scale;
+    }
+  }
+
+  /**
+   * 复活高度与航向：先保证离地 RESPAWN_CLEARANCE；8 个候选航向（首选航向优先、左右交替扩展）里
+   * 取第一个 0..400 米内无遮挡的。全部受阻时爬升到障碍顶最低那条航线之上（软顶界以下），
+   * 爬不过去则取首个障碍最远的航向。写入 position.y，返回航向。
+   */
+  private chooseRespawnHeading(position: THREE.Vector3, preferredHeading: number): number {
+    const surfaceY = this.sampleCrashSurfaceY(position.x, position.z);
+    const minY = surfaceY + PlayerSystem.RESPAWN_CLEARANCE;
+    if (!Number.isFinite(position.y) || position.y < minY) {
+      position.y = minY;
+    }
+    // 软顶界之上无法保持高度（PlayerController 会把飞机压回），按顶界之下的高度探测
+    const ceiling = GAME_CONSTANTS.WORLD.SOFT_CEILING - PlayerSystem.RESPAWN_ALTITUDE_BUFFER;
+    const probeY = Math.min(position.y, ceiling);
+    const base = Number.isFinite(preferredHeading) ? preferredHeading : 0;
+    let lowestTop = Infinity;
+    let lowestTopHeading = base;
+    let farthestBlock = -1;
+    let farthestBlockHeading = base;
+    for (const offset of RESPAWN_HEADING_OFFSETS) {
+      const heading = base + offset;
+      this.probeHeading(position.x, position.z, probeY, heading);
+      if (this.probeFirstBlocked === Infinity) {
+        return heading;
+      }
+      if (this.probeHighestTop < lowestTop) {
+        lowestTop = this.probeHighestTop;
+        lowestTopHeading = heading;
+      }
+      if (this.probeFirstBlocked > farthestBlock) {
+        farthestBlock = this.probeFirstBlocked;
+        farthestBlockHeading = heading;
+      }
+    }
+    const climbTo =
+      lowestTop + PlayerSystem.RESPAWN_PROBE_MARGIN + PlayerSystem.RESPAWN_ALTITUDE_BUFFER;
+    if (climbTo <= ceiling) {
+      position.y = Math.max(position.y, climbTo);
+      return lowestTopHeading;
+    }
+    return farthestBlockHeading;
+  }
+
+  /**
+   * 沿航向探测 0..400 米（40 米内 2 米步长，150 米内 4 米，之后 6 米）的中线与两侧平行线，
+   * 写入 probeFirstBlocked（首个表面高于 y - 余量的距离，无则 Infinity）与 probeHighestTop。
+   */
+  private probeHeading(x: number, z: number, y: number, heading: number): void {
+    const forwardX = -Math.sin(heading);
+    const forwardZ = -Math.cos(heading);
+    // 右侧向量：前向 (fx, fz) → (-fz, fx)
+    const sideX = -forwardZ * PlayerSystem.RESPAWN_PROBE_SIDE_OFFSET;
+    const sideZ = forwardX * PlayerSystem.RESPAWN_PROBE_SIDE_OFFSET;
+    const blockedAbove = y - PlayerSystem.RESPAWN_PROBE_MARGIN;
+    let firstBlocked = Infinity;
+    let highestTop = -Infinity;
+    for (let distance = 0; distance <= PlayerSystem.RESPAWN_PROBE_RANGE; ) {
+      const centerX = x + forwardX * distance;
+      const centerZ = z + forwardZ * distance;
+      for (let lane = -1; lane <= 1; lane++) {
+        const top = this.sampleCrashSurfaceY(centerX + sideX * lane, centerZ + sideZ * lane);
+        if (top > highestTop) {
+          highestTop = top;
+        }
+        if (top > blockedAbove && distance < firstBlocked) {
+          firstBlocked = distance;
+        }
+      }
+      distance += distance < 40 ? 2 : distance < 150 ? 4 : 6;
+    }
+    this.probeFirstBlocked = firstBlocked;
+    this.probeHighestTop = highestTop;
+  }
+
+  /** 第 k 新的航迹样本（k = 0 为最新）在环形缓冲中的下标 */
+  private trackIndex(k: number): number {
+    const capacity = PlayerSystem.TRACK_CAPACITY;
+    return (((this.trackHead - 1 - k) % capacity) + capacity) % capacity;
+  }
+
+  private readTrackSample(k: number, out: THREE.Vector3): void {
+    const i = this.trackIndex(k);
+    out.set(this.trackX[i], this.trackY[i], this.trackZ[i]);
+  }
+
+  /** 第 k 个样本处的飞行方向（指向下一个更新的样本）；样本过近时返回 fallback */
+  private trackHeadingAt(k: number, fallback: number): number {
+    const newer = k > 0 ? k - 1 : k;
+    const older = k > 0 ? k : k + 1;
+    if (older >= this.trackCount) {
+      return fallback;
+    }
+    const from = this.trackIndex(older);
+    const to = this.trackIndex(newer);
+    const dx = this.trackX[to] - this.trackX[from];
+    const dz = this.trackZ[to] - this.trackZ[from];
+    if (dx * dx + dz * dz < 1) {
+      return fallback;
+    }
+    return Math.atan2(-dx, -dz);
+  }
+
+  private pushTrackSample(x: number, y: number, z: number): void {
+    const i = this.trackHead;
+    this.trackX[i] = x;
+    this.trackY[i] = y;
+    this.trackZ[i] = z;
+    this.trackTime[i] = this.flightClock;
+    this.trackHead = (i + 1) % PlayerSystem.TRACK_CAPACITY;
+    this.trackCount = Math.min(this.trackCount + 1, PlayerSystem.TRACK_CAPACITY);
+  }
+
+  /** 航迹从给定点（出生 / 读档 / 复活点，均为已知安全点）重新开始 */
+  private resetTrack(position: THREE.Vector3): void {
+    this.trackHead = 0;
+    this.trackCount = 0;
+    this.trackSampleTimer = 0;
+    this.trackAnchorHeading = this.headingOf(this.mesh.quaternion, 0);
+    const { x, y, z } = position;
+    if (Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(z)) {
+      this.pushTrackSample(x, y, z);
+    }
+  }
+
+  /** 每 0.25 秒把离地 > 10 米的位置记入航迹（与坠毁判定共用同一次表面采样） */
+  private recordTrackSample(deltaTime: number, surfaceY: number): void {
+    this.trackSampleTimer += deltaTime;
+    if (this.trackSampleTimer < PlayerSystem.TRACK_SAMPLE_INTERVAL) {
+      return;
+    }
+    this.trackSampleTimer = 0;
+    const { x, y, z } = this.mesh.position;
+    if (
+      !Number.isFinite(surfaceY) ||
+      !Number.isFinite(x) ||
+      !Number.isFinite(y) ||
+      !Number.isFinite(z) ||
+      y <= surfaceY + PlayerSystem.RESPAWN_ALTITUDE_BUFFER
+    ) {
+      return;
+    }
+    this.pushTrackSample(x, y, z);
+  }
+
+  /** 航向角（绕 Y，机头 -Z 为 0）；机头接近竖直时用机背方向推断（俯冲时机背指向原航向） */
+  private headingOf(quaternion: THREE.Quaternion, fallback: number): number {
+    const forward = this.scratchForward.set(0, 0, -1).applyQuaternion(quaternion);
+    let x = forward.x;
+    let z = forward.z;
+    if (x * x + z * z < 0.04) {
+      const up = this.scratchUp.set(0, 1, 0).applyQuaternion(quaternion);
+      const sign = forward.y < 0 ? 1 : -1;
+      x = up.x * sign;
+      z = up.z * sign;
+    }
+    if (!(x * x + z * z > 1e-8)) {
+      return fallback;
+    }
+    const heading = Math.atan2(-x, -z);
+    return Number.isFinite(heading) ? heading : fallback;
+  }
+
+  /** 机翼水平、只含航向与俯仰的姿态：q = yaw(heading) · pitch(pitch)（俯仰为正时机头向上） */
+  private setAttitude(heading: number, pitch: number): void {
+    this.attitudeYaw.setFromAxisAngle(PlayerSystem.UP_AXIS, heading);
+    this.attitudePitch.setFromAxisAngle(PlayerSystem.PITCH_AXIS, pitch);
+    this.mesh.quaternion.multiplyQuaternions(this.attitudeYaw, this.attitudePitch);
+  }
+
+  /** 复活宽限期内触地：抬到表面之上；机头低于约 12° 时改平机翼并拉起（航向不变） */
+  private recoverFromGraceContact(surfaceY: number): void {
+    this.mesh.position.y = surfaceY + PlayerSystem.GRACE_LIFT;
+    const forward = this.scratchForward.set(0, 0, -1).applyQuaternion(this.mesh.quaternion);
+    if (forward.y < Math.sin(PlayerSystem.GRACE_PITCH)) {
+      const heading = this.headingOf(this.mesh.quaternion, this.trackAnchorHeading);
+      this.setAttitude(heading, PlayerSystem.GRACE_PITCH);
+    }
   }
 
   private updateShield(deltaTime: number): void {
@@ -301,38 +615,26 @@ export class PlayerSystem implements IGameSystem {
     return WORLDSCAPE_WATER_Y;
   }
 
-  private checkGroundCollision(): void {
+  /**
+   * 坠毁判定：世界 Y ≤ 表面即坠毁（护盾道具不防撞地）；复活宽限期内改为抬升 + 拉起。
+   * 返回本帧采样的表面高度（位置非法时为 NaN），供航迹记录复用。
+   */
+  private checkGroundCollision(): number {
     const { x, y, z } = this.mesh.position;
     if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
-      return;
+      return NaN;
     }
 
     const surfaceY = this.sampleCrashSurfaceY(x, z);
-    if (y <= surfaceY) {
-      this.health.takeDamage(1000);
+    if (y > surfaceY) {
+      return surfaceY;
     }
-  }
-
-  private updateLastSafeRespawnPosition(): void {
-    const { x, y, z } = this.mesh.position;
-    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
-      return;
+    if (this.crashGraceTimer > 0) {
+      this.recoverFromGraceContact(surfaceY);
+      return surfaceY;
     }
-
-    const minSafeY = this.sampleCrashSurfaceY(x, z) + PlayerSystem.RESPAWN_ALTITUDE_BUFFER;
-    if (y > minSafeY) {
-      this.lastSafeRespawnPosition.copy(this.mesh.position);
-    }
-  }
-
-  private getSafeRespawnPosition(): THREE.Vector3 {
-    const safeRespawnPosition = this.lastSafeRespawnPosition.clone();
-    const surfaceY = this.sampleCrashSurfaceY(safeRespawnPosition.x, safeRespawnPosition.z);
-    const minSafeY = surfaceY + PlayerSystem.RESPAWN_CLEARANCE;
-    const currentY = Number.isFinite(safeRespawnPosition.y) ? safeRespawnPosition.y : minSafeY;
-    safeRespawnPosition.y = Math.max(currentY, minSafeY);
-
-    return safeRespawnPosition;
+    this.health.takeDamage(1000);
+    return surfaceY;
   }
 
   /** 注入活地形/水面高度采样；未设置时坠毁判定回落到 WORLDSCAPE_WATER_Y */
@@ -341,7 +643,8 @@ export class PlayerSystem implements IGameSystem {
   }
 
   /**
-   * 换关 / 读档：把玩家放到新位置与朝向（四元数），同步插值状态与安全复活点。
+   * 换关 / 读档：把玩家放到新位置与朝向（四元数），同步插值状态；航迹从该点重新开始，
+   * 之前的坠毁记录与复活宽限作废。
    */
   placeAt(position: THREE.Vector3, quaternion: THREE.Quaternion): void {
     const { x, y, z } = position;
@@ -350,7 +653,9 @@ export class PlayerSystem implements IGameSystem {
     }
     this.mesh.position.copy(position);
     this.mesh.quaternion.copy(quaternion);
-    this.lastSafeRespawnPosition.copy(position);
+    this.resetTrack(position);
+    this.hasCrashPosition = false;
+    this.crashGraceTimer = 0;
     this.syncVisualState();
     if (this.shieldGroup) {
       this.shieldGroup.position.copy(position);
