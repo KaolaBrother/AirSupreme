@@ -531,8 +531,10 @@ function createTileMesh(
 }
 
 /**
- * 实例按 tiles × tiles 网格分块：每块一个 THREE.LOD（近景全细节 / 远景替身），
+ * 实例按网格分块：每个（类别, 分块）一个 THREE.LOD（近景全细节 / 远景替身）。
  * LOD 节点放在分块中心（距离判定用），两级子组反向平移回植被组坐标系，实例矩阵无需改写。
+ * 树木与草簇用 lod.tiles 网格；岩石稀疏（每块只有几十块），改用约一半密度的粗网格，
+ * 免得每块一个 draw call 只画二十来块石头。
  */
 function buildLodTiles(
   group: THREE.Group,
@@ -541,7 +543,29 @@ function buildLodTiles(
   lod: VegetationLodProfile,
   disposables: Array<{ dispose(): void }>
 ): void {
-  const tiles = Math.max(1, Math.round(lod.tiles));
+  const baseTiles = Math.max(1, Math.round(lod.tiles));
+  const kinds: Array<ScatterLayer['kind']> = ['trees', 'rocks', 'grass'];
+  for (const kind of kinds) {
+    const kindLayers = layers.filter((layer) => layer.kind === kind);
+    if (kindLayers.length === 0) continue;
+    const tiles = kind === 'rocks' ? Math.max(3, Math.round(baseTiles / 2)) : baseTiles;
+    buildKindTiles(group, kindLayers, half, tiles, lod, disposables);
+  }
+
+  // 整图放置网格只作数据源，不进场景；远景替身几何随植被一起释放
+  for (const layer of layers) {
+    if (layer.far) disposables.push(layer.far);
+  }
+}
+
+function buildKindTiles(
+  group: THREE.Group,
+  layers: ScatterLayer[],
+  half: number,
+  tiles: number,
+  lod: VegetationLodProfile,
+  disposables: Array<{ dispose(): void }>
+): void {
   const size = (half * 2) / tiles;
   // 相机所在分块的中心最远约 0.71 个分块边长：切换距离至少 0.8 个边长，脚下的块永远是近景
   const farDistance = Math.max(lod.farDistance, size * 0.8);
@@ -607,11 +631,6 @@ function buildLodTiles(
       node.addLevel(far, farDistance, 0.06);
       group.add(node);
     }
-  }
-
-  // 整图放置网格只作数据源，不进场景；远景替身几何随植被一起释放
-  for (const layer of layers) {
-    if (layer.far) disposables.push(layer.far);
   }
 }
 

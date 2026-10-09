@@ -130,14 +130,16 @@ interface TerrainDetailProfile {
 }
 
 const TERRAIN_DETAIL_PROFILES: Record<TerrainDetailTier, TerrainDetailProfile> = {
+  // 细网格 + 近切换：只有相机周围一圈是全细节，其余远景替身，树木 / 草稀疏一些
   performance: {
     vegetation: { tiles: 6, farDistance: 700, keep: { trees: 0.8, rocks: 0.75, grass: 0.55 } },
   },
   balanced: {
-    vegetation: { tiles: 6, farDistance: 1000, keep: { grass: 0.85 } },
+    vegetation: { tiles: 5, farDistance: 1000, keep: { grass: 0.85 } },
   },
+  // 全密度，近景覆盖相机周围约 1.8 km
   quality: {
-    vegetation: { tiles: 6, farDistance: 1500 },
+    vegetation: { tiles: 5, farDistance: 1800 },
   },
 };
 
@@ -1441,8 +1443,8 @@ export class TerrainGenerator {
         grass: { count: this.scaleCount(7000), minHeight: 1.5, maxHeight: 30, maxSlope: 0.3 },
         snowWorldY: { start: WORLDSCAPE_WATER_Y + 2, end: WORLDSCAPE_WATER_Y + 12 },
         rockTint: { r: 0.98, g: 1, b: 1.08 },
-        // 实例比湖谷少一半：4×4 分块即可，draw call 更少
-        lod: { ...this.detail.vegetation, tiles: 4 },
+        // 实例比湖谷少一半：最多 4×4 分块，draw call 更少
+        lod: { ...this.detail.vegetation, tiles: Math.min(4, this.detail.vegetation.tiles) },
       },
       this.getWorldscapeUniforms()
     );
