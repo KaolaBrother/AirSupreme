@@ -121,6 +121,13 @@ interface WeatherProfile {
   skyGlow: THREE.ColorRepresentation;
 }
 
+/** 棕榈共享材质（见 createPalmMaterials） */
+interface PalmMaterials {
+  trunk: THREE.MeshStandardMaterial;
+  leaf: THREE.MeshStandardMaterial;
+  coconut: THREE.MeshStandardMaterial;
+}
+
 /** 城市楼群共享材质包（见 createCityBuildingKit） */
 interface CityBuildingKit {
   facade: THREE.MeshStandardMaterial[];
@@ -846,6 +853,7 @@ export class TerrainGenerator {
 
     const cottageCount = 7;
     const smokeAnchors: Array<{ x: number; y: number; z: number }> = [];
+    // 小屋零件（墙 / 屋顶 / 窗 / 烟囱）是静态的：先拼在暂存组里，最后按材质合批（35 → 4 个 draw call）
 
     for (let i = 0; i < cottageCount; i++) {
       const angle = (i / cottageCount) * Math.PI * 2 + Math.random() * 0.4;
@@ -901,7 +909,7 @@ export class TerrainGenerator {
         });
       }
     }
-    this.terrainGroup.add(hamlet);
+    this.flushStaticBatch(hamlet, 'lakesideHamlet');
 
     // 炊烟：细小的点粒子柱，缓慢上升并随风摆动
     for (const anchor of smokeAnchors) {
@@ -1038,6 +1046,8 @@ export class TerrainGenerator {
       flatShading: true,
     });
 
+    // 14 座沙丘 × 两层半环共用两种材质：合批成 2 个网格
+    const staging = new THREE.Group();
     const count = 14;
     for (let i = 0; i < count; i++) {
       const dune = new THREE.Group();
@@ -1072,8 +1082,9 @@ export class TerrainGenerator {
       dune.rotation.y = Math.random() * Math.PI * 2;
       // 拉伸/剪切，使沙丘体型各异
       dune.scale.set(1 + Math.random() * 0.7, 0.8 + Math.random() * 0.5, 1 + Math.random() * 0.4);
-      this.terrainGroup.add(dune);
+      staging.add(dune);
     }
+    this.flushStaticBatch(staging, 'barchanDunes');
   }
 
   /** 干涸河床（旱谷）：深色龟裂土质条带蜿蜒穿越地图 */
@@ -1098,6 +1109,8 @@ export class TerrainGenerator {
     const segments = 30;
     const startX = -1480;
     const endX = 1480;
+    // 30 段河床贴片共用一个材质：合批成 1 个网格
+    const staging = new THREE.Group();
     for (let i = 0; i < segments; i++) {
       const t0 = i / segments;
       const t1 = (i + 1) / segments;
@@ -1120,8 +1133,9 @@ export class TerrainGenerator {
       strip.rotation.z = Math.atan2(-(z1 - z0), x1 - x0);
       strip.position.set(midX, -50 + groundHeight + 1.1, midZ);
       strip.renderOrder = 2;
-      this.terrainGroup.add(strip);
+      staging.add(strip);
     }
+    this.flushStaticBatch(staging, 'desertWadi');
   }
 
   /** 绿洲焦点：小水塘、环绿带与一圈棕榈 */
@@ -1187,11 +1201,13 @@ export class TerrainGenerator {
       pondMaterial.map?.offset.set(time * 0.004, time * 0.0026);
     });
 
-    // 五棵棕榈围绕水塘
+    // 五棵棕榈围绕水塘（共用材质合批：60 个网格 → 3 个）
+    const palmKit = this.createPalmMaterials();
+    const palmStaging = new THREE.Group();
     for (let i = 0; i < 5; i++) {
       const angle = (i / 5) * Math.PI * 2 + Math.random() * 0.5;
       const radius = 32 + Math.random() * 14;
-      const palm = this.createBeautifulPalmTree();
+      const palm = this.createBeautifulPalmTree(palmKit);
       palm.position.set(
         oasisX + Math.cos(angle) * radius,
         groundY,
@@ -1199,36 +1215,47 @@ export class TerrainGenerator {
       );
       palm.scale.setScalar(0.8 + Math.random() * 0.5);
       palm.rotation.y = Math.random() * Math.PI * 2;
-      this.terrainGroup.add(palm);
-      this.trees.push(palm);
+      palmStaging.add(palm);
     }
+    this.flushStaticBatch(palmStaging, 'oasisPalms');
   }
 
   /**
    * 创建仙人掌
    */
   private createCacti(count: number): void {
+    // 全部仙人掌共用茎 / 花两种材质，合批成 2 个网格（原先每株 3-8 个网格各一个材质）
+    const materials = {
+      body: new THREE.MeshStandardMaterial({ color: 0x2d5a27, roughness: 0.8 }),
+      flower: new THREE.MeshStandardMaterial({
+        color: 0xff69b4,
+        emissive: 0xff69b4,
+        emissiveIntensity: 0.2,
+      }),
+    };
+    const staging = new THREE.Group();
     for (let i = 0; i < count; i++) {
       const x = (Math.random() - 0.5) * 3000;
       const z = (Math.random() - 0.5) * 3000;
 
-      const cactus = this.createBeautifulCactus();
+      const cactus = this.createBeautifulCactus(materials);
       cactus.position.set(x, -50 + this.sampleDesertGroundHeight(x, z) - 0.4, z);
       cactus.scale.setScalar(0.5 + Math.random() * 1);
       cactus.rotation.y = Math.random() * Math.PI * 2;
-      this.terrainGroup.add(cactus);
+      staging.add(cactus);
     }
+    this.flushStaticBatch(staging, 'desertCacti');
   }
 
   /**
    * 创建美丽的仙人掌
    */
-  private createBeautifulCactus(): THREE.Group {
+  private createBeautifulCactus(materials: {
+    body: THREE.MeshStandardMaterial;
+    flower: THREE.MeshStandardMaterial;
+  }): THREE.Group {
     const cactus = new THREE.Group();
-    const material = new THREE.MeshStandardMaterial({
-      color: 0x2d5a27,
-      roughness: 0.8,
-    });
+    const material = materials.body;
 
     // 主体
     const bodyHeight = 6 + Math.random() * 4;
@@ -1265,14 +1292,7 @@ export class TerrainGenerator {
 
     // 添加花朵（可选）
     if (Math.random() > 0.6) {
-      const flower = new THREE.Mesh(
-        new THREE.SphereGeometry(0.3, 8, 8),
-        new THREE.MeshStandardMaterial({
-          color: 0xff69b4,
-          emissive: 0xff69b4,
-          emissiveIntensity: 0.2,
-        })
-      );
+      const flower = new THREE.Mesh(new THREE.SphereGeometry(0.3, 8, 8), materials.flower);
       flower.position.y = bodyHeight + 0.3;
       cactus.add(flower);
     }
@@ -1284,15 +1304,17 @@ export class TerrainGenerator {
    * 创建枯木
    */
   private createDeadTrees(count: number): void {
+    // 枯木共用一个材质并合批成 1 个网格
+    const material = new THREE.MeshStandardMaterial({
+      color: 0x4a3c2a,
+      roughness: 1,
+    });
+    const staging = new THREE.Group();
     for (let i = 0; i < count; i++) {
       const x = (Math.random() - 0.5) * 3000;
       const z = (Math.random() - 0.5) * 3000;
 
       const tree = new THREE.Group();
-      const material = new THREE.MeshStandardMaterial({
-        color: 0x4a3c2a,
-        roughness: 1,
-      });
 
       // 主干
       const trunk = new THREE.Mesh(
@@ -1322,8 +1344,9 @@ export class TerrainGenerator {
 
       tree.position.set(x, -50 + this.sampleDesertGroundHeight(x, z) - 0.3, z);
       tree.scale.setScalar(0.5 + Math.random() * 0.5);
-      this.terrainGroup.add(tree);
+      staging.add(tree);
     }
+    this.flushStaticBatch(staging, 'desertDeadTrees');
   }
 
   /**
@@ -1507,6 +1530,9 @@ export class TerrainGenerator {
       metalness: 0,
     });
 
+    // 岛屿岩柱 / 沙洲 / 绿顶 / 棕榈 / 遗迹全是静态零件：先进暂存组，最后按材质合批
+    const staging = new THREE.Group();
+    const palmKit = this.createPalmMaterials();
     const islandCount = 9;
     for (let i = 0; i < islandCount; i++) {
       const angle = (i / islandCount) * Math.PI * 2 + Math.random() * 0.55;
@@ -1565,7 +1591,7 @@ export class TerrainGenerator {
         const palmBaseY = -48 + caySize * 0.3 * 0.72;
         const palmCount = 1 + Math.floor(Math.random() * 3);
         for (let p = 0; p < palmCount; p++) {
-          const palm = this.createBeautifulPalmTree();
+          const palm = this.createBeautifulPalmTree(palmKit);
           palm.position.set(
             x + (Math.random() - 0.5) * caySize * 0.5,
             palmBaseY,
@@ -1573,13 +1599,12 @@ export class TerrainGenerator {
           );
           palm.scale.setScalar(0.6 + Math.random() * 0.5);
           palm.rotation.y = Math.random() * Math.PI * 2;
-          this.terrainGroup.add(palm);
-          this.trees.push(palm);
+          staging.add(palm);
         }
       }
 
       island.position.set(x, 0, z);
-      this.terrainGroup.add(island);
+      staging.add(island);
     }
 
     // 遗迹岛：残破石塔
@@ -1616,8 +1641,9 @@ export class TerrainGenerator {
     }
 
     ruinIsland.position.set(ruinX, 0, ruinZ);
-    this.terrainGroup.add(ruinIsland);
+    staging.add(ruinIsland);
     islandMounds.push({ x: ruinX, z: ruinZ, radius: 44, height: 30 });
+    this.flushStaticBatch(staging, 'oceanIslands');
 
     return islandMounds;
   }
@@ -1625,15 +1651,20 @@ export class TerrainGenerator {
   /**
    * 创建美丽的棕榈树
    */
+  /** 棕榈共享材质（树干 / 叶片 / 椰子），供同一关卡的所有棕榈合批 */
+  private createPalmMaterials(): PalmMaterials {
+    return {
+      trunk: new THREE.MeshStandardMaterial({ color: 0x8b4513, roughness: 0.9 }),
+      leaf: new THREE.MeshStandardMaterial({ color: 0x228b22, side: THREE.DoubleSide }),
+      coconut: new THREE.MeshStandardMaterial({ color: 0x654321 }),
+    };
+  }
 
-  private createBeautifulPalmTree(): THREE.Group {
+  private createBeautifulPalmTree(materials: PalmMaterials): THREE.Group {
     const palm = new THREE.Group();
 
     // 弯曲树干
-    const trunkMaterial = new THREE.MeshStandardMaterial({
-      color: 0x8b4513,
-      roughness: 0.9,
-    });
+    const trunkMaterial = materials.trunk;
 
     const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.4, 8, 8), trunkMaterial);
     trunk.rotation.set((Math.random() - 0.5) * 0.3, 0, (Math.random() - 0.5) * 0.3);
@@ -1642,10 +1673,7 @@ export class TerrainGenerator {
     palm.add(trunk);
 
     // 棕榈叶
-    const leafMaterial = new THREE.MeshStandardMaterial({
-      color: 0x228b22,
-      side: THREE.DoubleSide,
-    });
+    const leafMaterial = materials.leaf;
 
     for (let i = 0; i < 8; i++) {
       const leaf = new THREE.Mesh(new THREE.PlaneGeometry(0.8, 6), leafMaterial);
@@ -1656,10 +1684,7 @@ export class TerrainGenerator {
 
     // 椰子
     for (let i = 0; i < 3; i++) {
-      const coconut = new THREE.Mesh(
-        new THREE.SphereGeometry(0.3, 8, 8),
-        new THREE.MeshStandardMaterial({ color: 0x654321 })
-      );
+      const coconut = new THREE.Mesh(new THREE.SphereGeometry(0.3, 8, 8), materials.coconut);
       coconut.position.set((Math.random() - 0.5) * 0.5, 7.5, (Math.random() - 0.5) * 0.5);
       palm.add(coconut);
     }
@@ -4541,6 +4566,8 @@ export class TerrainGenerator {
       fog: false,
       toneMapped: false,
       side: THREE.DoubleSide,
+      // 水平面片：单遍绘制双面即可（默认透明双面材质拆两遍）
+      forceSinglePass: true,
       map: this.createSoftCircleTexture(),
     });
 
@@ -5347,13 +5374,31 @@ export class TerrainGenerator {
       side: THREE.DoubleSide,
       transparent: true,
       opacity: 0.92,
+      // 薄翼面片 + 米级小机身：单遍双面绘制即可（默认透明双面拆两遍）
+      forceSinglePass: true,
     });
 
+    // 整群实例化：机身一个 InstancedMesh、双翼一个 InstancedMesh（2 个 draw call，
+    // 原先每只鸟 3 个网格各自两遍）。每帧用一套不入场景的 pivot / 翼节点算出矩阵写入实例。
     const count = Math.max(2, this.scaleCount(options.count));
+    const bodies = new THREE.InstancedMesh(bodyGeometry, birdMaterial, count);
+    const wings = new THREE.InstancedMesh(wingGeometry, birdMaterial, count * 2);
+    bodies.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    wings.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    // 实例每帧移动，几何包围球不代表实际位置：关闭视锥剔除（整群只有几十个三角形）
+    bodies.frustumCulled = false;
+    wings.frustumCulled = false;
+    flock.add(bodies);
+    flock.add(wings);
+
+    const pivot = new THREE.Object3D();
+    const rightWing = new THREE.Object3D();
+    const leftWing = new THREE.Object3D();
+    leftWing.rotation.y = Math.PI;
+    pivot.add(rightWing);
+    pivot.add(leftWing);
+
     const birds: Array<{
-      pivot: THREE.Group;
-      leftWing: THREE.Mesh;
-      rightWing: THREE.Mesh;
       baseAngle: number;
       phase: number;
       radius: number;
@@ -5361,21 +5406,7 @@ export class TerrainGenerator {
     }> = [];
 
     for (let i = 0; i < count; i++) {
-      const pivot = new THREE.Group();
-      const body = new THREE.Mesh(bodyGeometry, birdMaterial);
-      pivot.add(body);
-
-      const rightWing = new THREE.Mesh(wingGeometry, birdMaterial);
-      pivot.add(rightWing);
-      const leftWing = new THREE.Mesh(wingGeometry, birdMaterial);
-      leftWing.rotation.y = Math.PI;
-      pivot.add(leftWing);
-
-      flock.add(pivot);
       birds.push({
-        pivot,
-        leftWing,
-        rightWing,
         baseAngle: (i / count) * Math.PI * 2 + Math.random() * 0.5,
         phase: Math.random() * Math.PI * 2,
         radius: options.radius * (0.82 + Math.random() * 0.36),
@@ -5386,25 +5417,32 @@ export class TerrainGenerator {
     this.terrainGroup.add(flock);
 
     const flapSpeed = 5.5 + Math.abs(options.speed) * 6;
+    const directionSign = Math.sign(options.speed) || 1;
     this.animatedProps.push((_deltaTime, time) => {
-      for (const bird of birds) {
+      for (let i = 0; i < birds.length; i++) {
+        const bird = birds[i];
         const angle = bird.baseAngle + time * options.speed;
         const px = options.centerX + Math.cos(angle) * bird.radius;
         const pz = options.centerZ + Math.sin(angle) * bird.radius;
         const py = bird.altitude + Math.sin(time * 0.7 + bird.phase) * 4;
-        bird.pivot.position.set(px, py, pz);
+        pivot.position.set(px, py, pz);
 
         // 朝向飞行切线方向
-        const directionSign = Math.sign(options.speed) || 1;
-        bird.pivot.rotation.y = Math.atan2(
+        pivot.rotation.y = Math.atan2(
           -Math.sin(angle) * directionSign,
           Math.cos(angle) * directionSign
         );
 
         const flap = Math.sin(time * flapSpeed + bird.phase) * 0.55 + 0.08;
-        bird.leftWing.rotation.z = flap;
-        bird.rightWing.rotation.z = flap;
+        leftWing.rotation.z = flap;
+        rightWing.rotation.z = flap;
+        pivot.updateMatrixWorld(true);
+        bodies.setMatrixAt(i, pivot.matrixWorld);
+        wings.setMatrixAt(i * 2, rightWing.matrixWorld);
+        wings.setMatrixAt(i * 2 + 1, leftWing.matrixWorld);
       }
+      bodies.instanceMatrix.needsUpdate = true;
+      wings.instanceMatrix.needsUpdate = true;
     });
   }
 
@@ -5481,7 +5519,8 @@ export class TerrainGenerator {
 
     dock.position.set(dockDirection.x * (shoreRadius - 16), 0, dockDirection.y * (shoreRadius - 16));
     dock.rotation.y = Math.atan2(dockDirection.x, dockDirection.y);
-    this.terrainGroup.add(dock);
+    // 码头桥面 + 10 根木桩合批（11 → 2 个 draw call）
+    this.flushStaticBatch(dock, 'lakeDock');
 
     // 小木船：泊在码头尽头附近，随湖面波浪起伏
     const boat = new THREE.Group();
@@ -5608,14 +5647,16 @@ export class TerrainGenerator {
       { x: -720, z: 280, scale: 1.0 },
       { x: 840, z: -620, scale: 1.35 },
     ];
+    const staging = new THREE.Group();
     for (const spot of archSpots) {
       const arch = new THREE.Mesh(new THREE.TorusGeometry(24, 5, 7, 11, Math.PI), archMaterial);
       arch.position.set(spot.x, -50 + this.sampleDesertGroundHeight(spot.x, spot.z), spot.z);
       arch.rotation.y = Math.random() * Math.PI;
       arch.scale.setScalar(spot.scale);
       arch.castShadow = true;
-      this.terrainGroup.add(arch);
+      staging.add(arch);
     }
+    this.flushStaticBatch(staging, 'desertArches');
   }
 
   /** 游走的尘卷风：双层旋转半透明锥体 */
@@ -5636,6 +5677,8 @@ export class TerrainGenerator {
           transparent: true,
           opacity: 0.15,
           side: THREE.DoubleSide,
+          // 同色同透明度的开口锥：正反面混合顺序不影响结果，单遍绘制
+          forceSinglePass: true,
           depthWrite: false,
         })
       );
@@ -5650,6 +5693,7 @@ export class TerrainGenerator {
           transparent: true,
           opacity: 0.2,
           side: THREE.DoubleSide,
+          forceSinglePass: true,
           depthWrite: false,
         })
       );
@@ -5795,6 +5839,8 @@ export class TerrainGenerator {
       opacity: 0.1,
       blending: THREE.AdditiveBlending,
       side: THREE.DoubleSide,
+      // 加法混合与顺序无关：单遍双面
+      forceSinglePass: true,
       depthWrite: false,
       fog: false,
       toneMapped: false,
@@ -5826,6 +5872,8 @@ export class TerrainGenerator {
       opacity: 0.34,
       depthWrite: false,
       side: THREE.DoubleSide,
+      // 水平浪花面片：单遍双面
+      forceSinglePass: true,
     });
     const caps = new THREE.InstancedMesh(capGeometry, capMaterial, count);
     caps.frustumCulled = false;
