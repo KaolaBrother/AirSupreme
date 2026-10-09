@@ -68,6 +68,10 @@ const CEASE_FIRE_WARNING: LocalizedText = {
   en: 'Cease fire! Those are civilians!',
   zh: '停火！那是平民目标！',
 };
+const TARGETS_LEFT_AREA_WARNING: LocalizedText = {
+  en: 'Remaining targets have left the area',
+  zh: '残余目标脱离战区',
+};
 /**
  * 友军单位被毁时的专属无线电（键为 UnitType 字符串值，如 ALLY_AWACS / ALLY_FRIGATE，
  * 值为 GENERIC_RADIO 的键）；未登记的类型播通用的 'ally-unit-destroyed'。
@@ -203,7 +207,8 @@ export class UnitController {
       if (this.civilianHitRadio.isReady() && this.deps.presentation.genericRadio('civilian-hit')) {
         this.civilianHitRadio.consume();
       }
-      this.deps.presentation.flashWarning(tr(CEASE_FIRE_WARNING), 'threat');
+      // 双语原文交给 HUD：告警显示期间切换语言随之重绘
+      this.deps.presentation.flashWarning(CEASE_FIRE_WARNING, 'threat');
       this.deps.presentation.onUnitEvent('civilian-hit', null);
     };
     system.onEscortResult = (success) => {
@@ -217,7 +222,7 @@ export class UnitController {
       );
       if (phase !== 'launched') return;
       // 每次发射：HUD 闪烁告警（告警音见上）；配音按配额，进了无线电才计数
-      this.deps.presentation.flashWarning(tr(MISSILE_INBOUND_WARNING), 'threat');
+      this.deps.presentation.flashWarning(MISSILE_INBOUND_WARNING, 'threat');
       if (
         this.missileWarningRadio.isReady() &&
         this.deps.presentation.genericRadio('missile-warning')
@@ -392,10 +397,7 @@ export class UnitController {
       this.waveStallTimer += deltaTime;
       if (this.waveStallTimer >= WAVE_STALL_LIMIT_SECONDS) {
         this.waveReleased = true;
-        this.deps.presentation.flashWarning(
-          tr({ en: 'Remaining targets have left the area', zh: '残余目标脱离战区' }),
-          'sys'
-        );
+        this.deps.presentation.flashWarning(TARGETS_LEFT_AREA_WARNING, 'sys');
       }
     } else if (!jetsCleared) {
       this.waveStallTimer = 0;

@@ -611,7 +611,7 @@ export class StartMenu {
     panel.appendChild(
       this.createSettingRow(
         'tutorial',
-        tr({ en: 'Tutorial', zh: '试玩关卡' }),
+        tr({ en: 'Tutorial', zh: '教程' }),
         tr(this.settings.tutorialEnabled ? SWITCH_ON : SWITCH_OFF),
         toggleTutorial,
         toggleTutorial

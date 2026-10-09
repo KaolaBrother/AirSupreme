@@ -13,7 +13,9 @@ import type { ParticleSystem } from '@/features/effects/ParticleSystem';
 import type { PlayerStats } from '@/features/upgrade/UpgradeSystem';
 import type { CountermeasureSystem } from '@/features/weapons/CountermeasureSystem';
 import type { WeaponMuzzle, WeaponSaveState, WeaponSystem } from '@/features/weapons/WeaponSystem';
-import { tr } from '@/i18n';
+import { SPECIAL_WEAPON_CONFIGS } from '@/features/weapons/WeaponTypes';
+import type { LocalizedText } from '@/i18n';
+import type { HudText } from '@/ui/HUD';
 
 export type WeaponSurfaceSampler = (x: number, z: number) => { y: number; water: boolean };
 
@@ -28,8 +30,8 @@ export interface SpecialWeaponsDeps {
   onFired(id: SpecialWeaponId, position: THREE.Vector3, direction: THREE.Vector3): void;
   /** 命中爆炸：镜头震动（scale 为爆炸规模） */
   onImpact(id: SpecialWeaponId, position: THREE.Vector3, scale: number): void;
-  /** 简短提示（第 1 轮用现有 HUD 大字提示） */
-  notify(icon: string, text: string): void;
+  /** 简短提示（HUD 中央大字提示）；双语原文在显示期间切换语言随之重绘 */
+  notify(icon: string, text: HudText): void;
 }
 
 /** 机头挂点偏移（机体局部，前方为 -Z） */
@@ -37,6 +39,8 @@ const MUZZLE_OFFSET = new THREE.Vector3(0, 0.3, -0.5);
 /** HUD 面板轮询间隔（秒）：getHudState 会分配槽位数组，不必每帧调用 */
 const HUD_POLL_INTERVAL = 1 / 12;
 const EMPTY_DECOYS: readonly DecoyPoint[] = [];
+const NO_SPECIAL_WEAPONS: LocalizedText = { en: 'No special weapons yet', zh: '尚无特殊武器' };
+const WEAPON_LOCKED: LocalizedText = { en: 'Weapon not unlocked yet', zh: '武器尚未解锁' };
 
 /**
  * 特殊武器（集束火箭 / 脉冲激光 / 蜂群导弹 / 电磁轨道炮 / 电磁脉冲）与热焰弹的运行时接线：
@@ -209,7 +213,7 @@ export class SpecialWeaponsController implements IDecoyProvider {
       const after = weapons.selectNext();
       if (after && after !== before) this.announceSelection();
       else if (!after) {
-        this.deps.notify('🔒', tr({ en: 'No special weapons yet', zh: '尚无特殊武器' }));
+        this.deps.notify('🔒', NO_SPECIAL_WEAPONS);
       }
     }
     if (slotRequested >= 0) {
@@ -219,7 +223,7 @@ export class SpecialWeaponsController implements IDecoyProvider {
         if (weapons.getSelected() !== before) this.announceSelection();
       } else if (id) {
         this.deps.presentation.onWeaponEvent('dry-fire', id);
-        this.deps.notify('🔒', tr({ en: 'Weapon not unlocked yet', zh: '武器尚未解锁' }));
+        this.deps.notify('🔒', WEAPON_LOCKED);
       }
     }
     if (flareRequested && canFire) {
@@ -236,7 +240,11 @@ export class SpecialWeaponsController implements IDecoyProvider {
     if (!weapons) return;
     const state = weapons.getHudState();
     this.deps.presentation.onWeaponEvent('switch', state.selected);
-    this.deps.notify(state.icon, state.name);
+    // 武器名用配置里的双语原文（HUD 状态里的 name 已按当前语言取值）
+    this.deps.notify(
+      state.icon,
+      state.selected ? SPECIAL_WEAPON_CONFIGS[state.selected].name : state.name
+    );
   }
 
   /** 模拟步长：挂点、武器、热焰弹、HUD 轮询 */
