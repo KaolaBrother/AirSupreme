@@ -482,6 +482,8 @@ export class GameCoordinator {
   // ── 十关战役集成 ──
   /** 剧情卡片 / 结算 / 机库期间冻结模拟（渲染继续） */
   private storyHold: boolean = false;
+  /** 本次转入后台已经存过一次（见 saveCampaignInBackground）；页面重新可见时清除 */
+  private backgroundSaveDone: boolean = false;
   private combatRuntimeConfigured: boolean = false;
   private readonly enemyTargets = new WeakMap<EnemyAI, CombatTarget>();
   private readonly lockTargets: THREE.Object3D[] = [];
@@ -894,6 +896,8 @@ export class GameCoordinator {
         this.handlePowerUpExpired(payload.type);
       })
     );
+
+    this.setupBackgroundSave();
   }
 
   private handlePowerUpEffect(
@@ -1424,8 +1428,8 @@ export class GameCoordinator {
 
   /**
    * 机炮提前量：候选 = 存活敌机 + 敌方空中单位（可显示提前量标记），其后是敌方地面 / 海上单位
-   * （只参与触屏辅助）。触屏设备上把辅助方向交给 PlayerSystem（机炮十字画的是同一个方向，
-   * 见 renderAimHud），桌面不改变弹道。
+   * （只参与机炮辅助）。辅助方向交给 PlayerSystem（机炮十字画的是同一个方向，见 renderAimHud）：
+   * 触屏设备（GameConfig.isMobile）用触屏锥角，键盘用更小的锥角（GAME_CONSTANTS.GUN_ASSIST）。
    */
   private updateGunAim(deltaTime: number): void {
     const targets = this.gunTargets;
@@ -1456,9 +1460,9 @@ export class GameCoordinator {
     const forward = this.gunForward.set(0, 0, -1).applyQuaternion(quaternion);
     // 炮口位置与 PlayerSystem.fire 一致：机体前方 2 米
     const muzzle = this.gunMuzzle.copy(this.playerSystem.getPosition()).addScaledVector(forward, 2);
-    const assist = GameConfig.isMobile;
-    this.gunLeadSolver.update(deltaTime, muzzle, forward, targets, airCount, assist);
-    // 没有辅助（含桌面端）时方向为 null：子弹沿机头方向发射
+    const assistCone = GameConfig.isMobile ? 'touch' : 'keyboard';
+    this.gunLeadSolver.update(deltaTime, muzzle, forward, targets, airCount, true, assistCone);
+    // 没有辅助时方向为 null：子弹沿机头方向发射
     this.playerSystem.setGunAimAssist(
       this.gunLeadSolver.getAssistDirection(),
       this.gunLeadSolver.getAssistWeight()
@@ -2415,6 +2419,61 @@ export class GameCoordinator {
       return null;
     }
     return { detail: describeCheckpointText(save), onRetry: () => onContinue(save) };
+  }
+
+  /**
+   * 后台存档：页面转入后台（切到别的标签页 / 应用、锁屏）或即将关闭时，把此刻的战役进度写进检查点。
+   * 后台标签页可能被浏览器整个丢弃（iPad 的 Safari 常见），丢弃时页面收不到任何事件，
+   * 所以在转入后台的那一刻写。
+   *
+   * 写法就是暂停菜单的“保存并退出”（CampaignFlowController.saveForExit：此刻的快照重写在当前进度的
+   * 检查点位置上，不显示存档提示），只是不退出——对局原样继续，回到页面时什么都没变；之后
+   * “继续战役”与保存并退出之后一样，从那一波 / Boss 战 / 机库重新开始。
+   * 只在“保存并退出”会写的时候写：对局进行中（不在菜单，没有任务失败 / 任务完成），不是 Boss 模式，
+   * 已经到过第一个检查点且战役尚未通关。剧情卡片 / 结算 / 机库期间照样写（机库里买的升级不会丢）。
+   *
+   * 一次转入后台只写一次（visibilitychange 与 pagehide 会前后脚到），页面重新可见后才有下一次。
+   * 不向外抛错：存储不可用（隐私模式）时不能打断页面的事件处理。
+   */
+  public saveCampaignInBackground(): void {
+    if (this.backgroundSaveDone) {
+      return;
+    }
+    this.backgroundSaveDone = true;
+    if (this.isDisposed || !this.sessionState.isPlaying()) {
+      return;
+    }
+    try {
+      this.campaign.saveForExit();
+    } catch (error) {
+      console.error('Background campaign save failed', error);
+    }
+  }
+
+  /**
+   * 后台存档的页面事件。随协调器释放一起解除：每局一个协调器，重试 / 重新开局不会叠加监听。
+   * pagehide 也会记下“已存过”，所以页面再次显示（pageshow，含从往返缓存恢复）时同样清除。
+   */
+  private setupBackgroundSave(): void {
+    const onVisibilityChange = (): void => {
+      if (document.visibilityState === 'hidden') {
+        this.saveCampaignInBackground();
+      } else {
+        this.backgroundSaveDone = false;
+      }
+    };
+    const onPageHide = (): void => this.saveCampaignInBackground();
+    const onPageShow = (): void => {
+      this.backgroundSaveDone = false;
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    window.addEventListener('pagehide', onPageHide);
+    window.addEventListener('pageshow', onPageShow);
+    this.resourceRegistry.addUnsubscriber(() => {
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      window.removeEventListener('pagehide', onPageHide);
+      window.removeEventListener('pageshow', onPageShow);
+    });
   }
 
   // ===========================================================================================

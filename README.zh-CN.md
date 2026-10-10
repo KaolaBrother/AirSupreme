@@ -24,7 +24,7 @@
 - **暂停舱与局内结算**
   - ESC / P 打开暂停舱，外观与主菜单一致；桌面 U 先暂停再开升级商店
   - **保存并退出**离开任务并保留进度（见「自动存档、保存并退出与继续」）
-  - 失败显示 `MISSION FAILED`、通关显示 `MISSION COMPLETE`（中文界面为「任务失败」/「任务完成」），可再来一局或返回菜单——失败时如果有检查点，**从检查点重试**取代**再来一局**
+  - 失败显示 `MISSION FAILED`、通关显示 `MISSION COMPLETE`（中文界面为「任务失败」/「任务完成」），结算面板也是同一套外观；可再来一局或返回菜单——失败时如果有检查点，**从检查点重试**取代**再来一局**
 - **站点 chrome**
   - `index.html`：`<link rel="icon" href="/favicon.svg">`（`public/favicon.svg`）；viewport 含 `viewport-fit=cover`
   - 页面以 `<html lang="en">` 和英文的加载画面、触控按键文字发布；`src/main.ts` 在任何界面渲染之前应用已保存的语言，并保持 `<html lang>` 同步
@@ -227,7 +227,7 @@
 - 普通模式下，入关、每一波结束后、Boss 战之前以及击破 Boss 的那一刻（第 1-9 章：写入下一章的*机库*检查点，在机库点「出击」时再存一次，机库里的购买不会丢）都会写入检查点，HUD 弹出「已自动保存」（Autosaved）提示；提示显示期间切换语言会立即换成新语言
 - 暂停舱（**ESC** / **P**）里的 **保存并退出**（Save & Exit）让你离开任务而不丢进度。确认界面会写明存在哪里——当前这一波、Boss 战或机库——并在离开前把存档读回来核对；浏览器存储不可用或已满时，游戏会如实告知，并给出 **返回**（Back）与 **仍然退出**（Exit Anyway）。存档保留你此刻的分数、生命、导弹与升级，之后 **继续战役** 从这一波或 Boss 战的开头重新开始。无法存档的情况下——Boss 模式、第一个检查点之前、战役已通关——这个按钮显示为 **返回菜单**（Main Menu），退出前会说明原因
 - 存在检查点时，**继续战役**（Continue Campaign）是主菜单的第一个按钮，并标注如 `第6关 · 熔炉之心 · 第3波` 或 `第2关 · 沙漠风暴 · 机库整备`（英文界面为 `Ch. 6 · Heart of the Forge · Wave 3` / `Ch. 2 · Sandstorm · Hangar`），同时显示存档里的分数、难度与生命数，以及一条十章航线进度
-- 普通模式下 `MISSION FAILED` 且有检查点时，结算界面的主按钮是 **从检查点重试**（Retry from checkpoint），按钮下方写明检查点的位置，后面是 **返回菜单**（Main Menu）。这种情况下没有 **再来一局**（Play Again），结算界面上也没有任何操作会删除存档——想从头开始，先 **返回菜单** 再选 **新战役**。没有检查点或在 Boss 模式下，按钮仍是 **再来一局** 与 **返回菜单**
+- 普通模式下 `MISSION FAILED` 且有检查点时，结算界面的主按钮是 **从检查点重试**（Retry from checkpoint），按钮上方的 **检查点** 卡片写明检查点的位置，后面是 **返回菜单**（Main Menu）。这种情况下没有 **再来一局**（Play Again），结算界面上也没有任何操作会删除存档——想从头开始，先 **返回菜单** 再选 **新战役**。没有检查点或在 Boss 模式下，按钮仍是 **再来一局** 与 **返回菜单**。无论失败还是通关，结算界面出现时第一个按钮都已有焦点，**Tab** 在两个按钮之间切换，同一个按钮按多少次都只算一次。阵亡的同一瞬间清波或击破 Boss 时，检查点保持原样
 - 检查点会还原分数、生命、导弹、升级、已解锁武器及其弹药、热焰弹充能、视角与本局统计，并回到存档的波次或 Boss 战前；机库检查点则回到下一章之前的机库，出击后进入该章开场卡片（新的一章补满武器弹药与热焰弹）
 - 普通模式新开一局会清除旧检查点——已有检查点时，**新战役**会先询问，默认选项是 **保留存档**（Keep my save）；打完第 10 章会标记战役通关并清除检查点；Boss 模式不写检查点
 - 存档保存在 `localStorage`（`air-supreme:campaign-save`；通关记录、最高分与到达过的最高关卡在 `air-supreme:campaign-progress`）
@@ -367,8 +367,8 @@
 | A / D              | 偏航（机头左右） |
 | Q / E              | 翻滚（机翼倾斜） |
 | 空格               | 机炮开火         |
-| M / 右 Shift       | 发射导弹——按一下一枚，导引头圆环变绿后发射（见「导弹系统」） |
-| 左 Shift / 左 Ctrl | 加速（按住）     |
+| M / R Shift        | 发射导弹（M 或右 Shift）——按一下一枚，导引头圆环变绿后发射（见「导弹系统」） |
+| L Shift / L Ctrl   | 加速（按住左 Shift 或左 Ctrl） |
 | F                  | 发射当前特殊武器（激光按住照射，轨道炮按住蓄力） |
 | Tab / X            | 切换特殊武器     |
 | 1 – 5              | 选择火箭 / 激光 / 蜂群 / 轨道炮 / EMP（主键盘或小键盘） |
@@ -475,7 +475,6 @@ src/
 │   ├── Input/                    # 输入处理
 │   ├── Audio/                    # 音效、音乐系统、music/ 音序器与曲目、sfx/ 音效库、VoiceSystem 与 VoiceDucking
 │   └── utils/                    # 工具类
-│       ├── ConfigLoader.ts       # 配置加载器
 │       └── Logger.ts             # 日志系统
 │
 ├── features/                     # 游戏功能
@@ -618,7 +617,7 @@ src/
 
 ## 🔧 配置
 
-### 传统配置 (src/config.ts)
+### 游戏配置 (src/config.ts)
 
 修改 `src/config.ts` 调整游戏参数：
 
@@ -633,46 +632,7 @@ PLAYER: {
 }
 ```
 
-### JSON 配置系统
-
-游戏启动时读取一份外部 JSON 配置（`src/main.ts` 里的 `configLoader.load()`），并合并到 `ConfigLoader` 内置的默认值之上：
-
-**配置文件位置**: `public/config/game-config.json`（下面是前两段；文件后面还有相机、世界、道具、关卡、导弹、Boss 武器、敌机、Boss、升级与性能等配置段）
-
-```json
-{
-  "version": "1.0.0",
-  "player": {
-    "pitchSpeed": 2.0,
-    "yawSpeed": 1.5,
-    "rollSpeed": 3.0,
-    "baseSpeed": 45,
-    "maxSpeed": 45,
-    "baseHealth": 200,
-    "baseDamage": 12.5,
-    "baseFireRate": 0.3
-  },
-  "projectile": {
-    "speed": 100,
-    "maxDistance": 500,
-    "poolSize": 200
-  }
-}
-```
-
-**在代码中使用 ConfigLoader**:
-
-```typescript
-import { configLoader } from '@/core/utils/ConfigLoader';
-
-async function initGame() {
-  await configLoader.load();
-  const playerConfig = configLoader.getPlayer();
-  const enemyConfig = configLoader.getEnemy('FIGHTER');
-}
-```
-
-目前游戏里没有任何代码调用这些读取方法——只执行了 `load()`——所以只改 JSON 不会改变实际玩法；生效的数值是源码里的常量，例如 `src/config.ts` 的 `GAME_CONSTANTS`。
+生效的数值是源码里的常量，例如 `src/config.ts` 的 `GAME_CONSTANTS`；没有外部配置文件。
 
 ## 📊 日志系统
 

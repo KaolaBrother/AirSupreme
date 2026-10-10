@@ -340,6 +340,9 @@ describe('retry, play again and main menu from the result screen, through main.t
      * （vitest 的已知限制），那一次拿到的是真模块，真的 GameCoordinator 在 jsdom 里建不出渲染器，
      * 被 bootGame 的 catch 吞掉。于是只同步连按的话，就算没有防重入也只多出一个错误画面，
      * 不会多出一局。把按键铺满整个启动过程，就有按键落在替身生效的那几步里。
+     *
+     * 按在面板按钮上的那两条用例里，同一个键的后几下先被面板自己的“每个动作只交一次”挡掉；
+     * 直接反复调用宿主回调的两条才压到 bootGame 的防重入上。
      */
     async function hammerUntilGame(count: number, press: () => void): Promise<number> {
       let presses = 0;
@@ -413,6 +416,18 @@ describe('retry, play again and main menu from the result screen, through main.t
       expect(readText(playAgain)).toBe(LABELS.playAgain.en);
 
       const presses = await hammerUntilGame(2, () => playAgain.click());
+
+      expect(presses).toBeGreaterThan(3);
+      const second = await expectOneNewGame(first);
+      expect(second.options.resume ?? null).toBeNull();
+    });
+
+    it('the host’s Play Again callback called again and again while the game is being created produces one game', async () => {
+      await loadMain();
+      const first = await startFromMenu();
+      first.die();
+
+      const presses = await hammerUntilGame(2, () => first.options.onRetry?.());
 
       expect(presses).toBeGreaterThan(3);
       const second = await expectOneNewGame(first);

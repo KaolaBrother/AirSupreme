@@ -24,7 +24,7 @@ A 3D air-combat game built with Three.js + TypeScript, playable on desktop and m
 - **Pause pod with in-match settlement**
   - ESC / P opens the pause pod, drawn in the same style as the main menu; on desktop U pauses then opens the upgrade shop
   - **Save & Exit** leaves the mission and keeps the run (see _Autosave, Save & Exit and Continue_)
-  - Failure shows `MISSION FAILED`, victory `MISSION COMPLETE` (任务失败 / 任务完成 in Chinese); play again or return to the main menu — after a failure with a checkpoint, **Retry from checkpoint** takes the place of **Play Again**
+  - Failure shows `MISSION FAILED`, victory `MISSION COMPLETE` (任务失败 / 任务完成 in Chinese) on a result panel in that same style; play again or return to the main menu — after a failure with a checkpoint, **Retry from checkpoint** takes the place of **Play Again**
 - **Site chrome**
   - `index.html`: `<link rel="icon" href="/favicon.svg">` (`public/favicon.svg`); viewport includes `viewport-fit=cover`
   - The page ships as `<html lang="en">` with English loading-screen and touch-button text; `src/main.ts` applies the saved language before any UI renders and keeps `<html lang>` in step
@@ -218,7 +218,7 @@ Tier costs rise with the tier; the current costs live in `UPGRADE_CONFIGS` (`src
 - In normal mode the game saves a checkpoint when a chapter starts, after each wave, right before the boss and the moment a boss falls (chapters 1–9; a *hangar* checkpoint for the next chapter, saved again when you press **Launch** so your hangar purchases are kept); an **Autosaved** toast in the HUD confirms each save, and it follows a language switch while it is on screen
 - **Save & Exit** in the pause pod (**ESC** / **P**) leaves the mission without losing the run. The confirmation names the place it saves at — the wave you are in, the boss fight or the hangar — and the save is read back before you leave; if the browser's storage is unavailable or full, the game says so and offers **Back** or **Exit Anyway**. The save keeps your score, lives, missiles and upgrades as they are at that moment, and **Continue Campaign** starts that wave or boss fight from the beginning. Where nothing can be saved — Boss mode, before the first checkpoint, after the campaign is complete — the button reads **Main Menu** instead and says why before you leave
 - **Continue Campaign** is the first button on the main menu when a checkpoint exists, labelled like `Ch. 6 · Heart of the Forge · Wave 3` or `Ch. 2 · Sandstorm · Hangar` (`第6关 · 熔炉之心 · 第3波` / `第2关 · 沙漠风暴 · 机库整备` in Chinese), with the saved score, difficulty and lives and a ten-chapter route strip
-- After `MISSION FAILED` in normal mode with a checkpoint, the settlement screen's main button is **Retry from checkpoint** (从检查点重试), with the checkpoint's position written under it, followed by **Main Menu**. There is no **Play Again** in that state and nothing on that screen deletes the save — to start over, go to **Main Menu** → **New Campaign**. Without a checkpoint, and in Boss mode, the buttons are **Play Again** and **Main Menu** as before
+- After `MISSION FAILED` in normal mode with a checkpoint, the settlement screen's main button is **Retry from checkpoint** (从检查点重试), with the checkpoint's position on a **Checkpoint** card above it, followed by **Main Menu**. There is no **Play Again** in that state and nothing on that screen deletes the save — to start over, go to **Main Menu** → **New Campaign**. Without a checkpoint, and in Boss mode, the buttons are **Play Again** and **Main Menu** as before. On every settlement screen, failed or complete, the first button is focused when it appears, **Tab** moves between the two buttons, and a button counts once however often it is pressed. If a wave clear or a boss kill lands in the same instant as the death, the checkpoint is left as it was
 - A checkpoint restores score, lives, missiles, upgrades, unlocked weapons and their ammo, flare charges, the camera view and the run statistics, and puts you back at the saved wave or the boss — or, for a hangar checkpoint, in the hangar before the next chapter, then its chapter card (weapons and flares are refilled for the new chapter)
 - Starting a new normal-mode game clears the old checkpoint — **New Campaign** asks first when one exists, and **Keep my save** is the default answer; finishing chapter 10 marks the campaign complete and clears it; Boss mode never writes checkpoints
 - Saves live in `localStorage` (`air-supreme:campaign-save`; completion, best score and highest level reached in `air-supreme:campaign-progress`)
@@ -358,8 +358,8 @@ Settings are saved in `localStorage` (`air-supreme:start-menu-settings`; fields 
 | A / D | yaw (nose left/right) |
 | Q / E | roll (wing tilt) |
 | Space | cannon fire |
-| M / Right Shift | fire a missile — one per press, when the seeker ring is green (see *Missile System*) |
-| Left Shift / Left Ctrl | boost (hold) |
+| M / R Shift | fire a missile (M or right Shift) — one per press, when the seeker ring is green (see *Missile System*) |
+| L Shift / L Ctrl | boost (hold left Shift or left Ctrl) |
 | F | fire the selected special weapon (hold for the laser and to charge the railgun) |
 | Tab / X | cycle special weapons |
 | 1 – 5 | select rockets / laser / swarm / railgun / EMP (number row or numpad) |
@@ -466,7 +466,6 @@ src/
 │   ├── Input/                    # input handling
 │   ├── Audio/                    # SFX, music system, music/ sequencer + tracks, sfx/ library, VoiceSystem + VoiceDucking
 │   └── utils/                    # utilities
-│       ├── ConfigLoader.ts       # config loader
 │       └── Logger.ts             # logging
 │
 ├── features/                     # game features
@@ -609,7 +608,7 @@ Architecture and contracts: [`docs/architecture.md`](docs/architecture.md), [`do
 
 ## 🔧 Configuration
 
-### Legacy config (`src/config.ts`)
+### Game config (`src/config.ts`)
 
 Edit `src/config.ts` to tune game parameters:
 
@@ -624,46 +623,7 @@ PLAYER: {
 }
 ```
 
-### JSON config system
-
-The game fetches an external JSON configuration at start-up (`configLoader.load()` in `src/main.ts`) and merges it over the defaults built into `ConfigLoader`:
-
-**Location**: `public/config/game-config.json` (the first two blocks are shown; the file goes on with camera, world, power-up, level, missile, boss-weapon, enemy, boss, upgrade and performance blocks)
-
-```json
-{
-  "version": "1.0.0",
-  "player": {
-    "pitchSpeed": 2.0,
-    "yawSpeed": 1.5,
-    "rollSpeed": 3.0,
-    "baseSpeed": 45,
-    "maxSpeed": 45,
-    "baseHealth": 200,
-    "baseDamage": 12.5,
-    "baseFireRate": 0.3
-  },
-  "projectile": {
-    "speed": 100,
-    "maxDistance": 500,
-    "poolSize": 200
-  }
-}
-```
-
-**Using ConfigLoader in code**:
-
-```typescript
-import { configLoader } from '@/core/utils/ConfigLoader';
-
-async function initGame() {
-  await configLoader.load();
-  const playerConfig = configLoader.getPlayer();
-  const enemyConfig = configLoader.getEnemy('FIGHTER');
-}
-```
-
-At present nothing in the game calls these getters — only `load()` runs — so editing the JSON does not change gameplay; the numbers in play are the constants in the source, such as `GAME_CONSTANTS` in `src/config.ts`.
+The numbers in play are the constants in the source, such as `GAME_CONSTANTS` in `src/config.ts`; there is no external config file.
 
 ## 📊 Logging
 

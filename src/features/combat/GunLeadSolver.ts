@@ -8,7 +8,7 @@ const PIP_MAX_RANGE = 500;
 const PIP_FRONT_COS = Math.cos((40 * Math.PI) / 180);
 /** 已显示的标记换到另一个目标：新目标必须近这么多（避免两架距离相近的敌机来回跳） */
 const PIP_SWITCH_RATIO = 0.85;
-/** 触屏机炮辅助：偏移量小于这个值（约 0.0006°）且没有辅助目标时直接归零 */
+/** 机炮辅助：偏移量小于这个值（约 0.0006°）且没有辅助目标时直接归零 */
 const ASSIST_OFFSET_EPSILON = 1e-5;
 const ASSIST_WEIGHT_EPSILON = 1e-3;
 /** 十字拉近量小于这个值（米）且没有辅助目标时直接归零 */
@@ -38,16 +38,23 @@ interface TrackState {
 }
 
 /**
+ * 机炮辅助的锥角档位：'touch' 用 GAME_CONSTANTS.GUN_ASSIST 的 FULL_ANGLE / OUTER_ANGLE，
+ * 'keyboard' 用更小的 KEYBOARD_FULL_ANGLE / KEYBOARD_OUTER_ANGLE；其余参数两档共用。
+ */
+export type GunAssistCone = 'touch' | 'keyboard';
+
+/**
  * 机炮提前量解算（纯逻辑）：
  * - 用相邻两步的位置差估计每个目标的速度（指数平滑），不依赖敌机 AI 的内部状态；
  * - 解 |P + V·t| = s·t 得到子弹（速度 s，不继承载机速度）与目标相遇的时间 t，
  *   提前量点 = 目标位置 + V·t；
  * - 给最近的前方空中目标一个提前量标记；
- * - 触屏辅助（参数见 GAME_CONSTANTS.GUN_ASSIST）：瞄准点（提前量点）离机头轴线的夹角 θ 不超过
+ * - 机炮辅助（参数见 GAME_CONSTANTS.GUN_ASSIST）：瞄准点（提前量点）离机头轴线的夹角 θ 不超过
  *   FULL_ANGLE 时，辅助方向正对瞄准点；FULL_ANGLE 到 OUTER_ANGLE 之间偏移平滑减到零；再往外、
  *   超过 MAX_RANGE 或没有可靠解时不偏移。偏移不会超过 FULL_ANGLE。目标出现 / 消失 / 更换时，
  *   偏移在 EASE_TIME 内滑到新值，不会跳变。子弹（PlayerSystem）与机炮十字（LockOnIndicator）
  *   用的是同一个辅助方向；十字画在这个方向上瞄准点的距离处（见 assistNear）。
+ *   键盘档位（GunAssistCone）规则完全相同，只是 FULL_ANGLE / OUTER_ANGLE 换成 KEYBOARD_* 的值。
  * 逐步调用零分配（每个目标的跟踪状态只在第一次见到时创建）。
  */
 export class GunLeadSolver {
@@ -59,7 +66,7 @@ export class GunLeadSolver {
   private pipOnTarget = false;
   private readonly pipVelocity = new Vector3();
 
-  /** 触屏辅助：当前辅助目标（粘滞用） */
+  /** 机炮辅助：当前辅助目标（粘滞用） */
   private assistTarget: Object3D | null = null;
   /** 辅助偏移（世界坐标，垂直于机头方向）：辅助方向 = normalize(机头方向 + 偏移) */
   private readonly assistOffset = new Vector3();
@@ -87,8 +94,10 @@ export class GunLeadSolver {
   /**
    * @param muzzle 炮口世界坐标
    * @param forward 机头方向（单位向量）
-   * @param targets 候选：前 airCount 个是空中目标（可显示提前量标记），其余只参与触屏辅助
-   * @param assistEnabled 是否计算触屏辅助瞄准点
+   * @param targets 候选：前 airCount 个是空中目标（可显示提前量标记），其余只参与机炮辅助
+   * @param assistEnabled 是否计算辅助瞄准点
+   * @param assistCone 辅助的锥角档位（默认触屏）；不是 'keyboard' 的值一律按触屏处理。
+   *   一局之内应保持不变：中途换档时已有的偏移会直接夹到新档位的上限
    */
   public update(
     deltaTime: number,
@@ -96,7 +105,8 @@ export class GunLeadSolver {
     forward: Vector3,
     targets: readonly Object3D[],
     airCount: number,
-    assistEnabled: boolean
+    assistEnabled: boolean,
+    assistCone: GunAssistCone = 'touch'
   ): void {
     // 时间步长不是正的有限数（一帧坏帧）：整步跳过，什么都不改——保持的目标、偏移、强度、
     // 十字距离、速度估计和步号都原样留着，下一个好步接着上一个好步算
@@ -122,10 +132,13 @@ export class GunLeadSolver {
     let previousRange = Infinity;
     let previousTime = 0;
     let previousOnTarget = false;
-    // 触屏辅助候选：离机头轴线最近的一个 / 上一步的辅助目标（仍合格时），循环后按粘滞规则二选一
+    // 机炮辅助候选：离机头轴线最近的一个 / 上一步的辅助目标（仍合格时），循环后按粘滞规则二选一
     const assist = GAME_CONSTANTS.GUN_ASSIST;
+    const keyboardCone = assistCone === 'keyboard';
+    const fullAngle = keyboardCone ? assist.KEYBOARD_FULL_ANGLE : assist.FULL_ANGLE;
+    const outerAngle = keyboardCone ? assist.KEYBOARD_OUTER_ANGLE : assist.OUTER_ANGLE;
     const previousAssist = this.assistTarget;
-    const outerCos = Math.cos(assist.OUTER_ANGLE);
+    const outerCos = Math.cos(outerAngle);
     let bestAssist: Object3D | null = null;
     let bestAngle = Infinity;
     let bestX = 0;
@@ -243,6 +256,8 @@ export class GunLeadSolver {
     this.updateAssist(
       deltaTime,
       forward,
+      fullAngle,
+      outerAngle,
       assistTarget,
       assistAngle,
       bestX,
@@ -252,25 +267,25 @@ export class GunLeadSolver {
     );
 
     // 辅助方向正对提前量点时子弹会朝它飞：标记目标正被这样瞄准也算“压住”
-    if (
-      assistTarget !== null &&
-      assistTarget === this.pipTarget &&
-      assistAngle <= assist.FULL_ANGLE
-    ) {
+    if (assistTarget !== null && assistTarget === this.pipTarget && assistAngle <= fullAngle) {
       this.pipOnTarget = true;
     }
   }
 
   /**
-   * 触屏辅助的偏移量：目标值 g 只由夹角 θ 决定（见 assistPull），同一个目标上 g 连续变化、
+   * 机炮辅助的偏移量：目标值 g 只由夹角 θ 决定（见 assistPull），同一个目标上 g 连续变化、
    * 偏移直接跟随（不滞后）；辅助目标变化（出现 / 消失 / 更换）时 g 会跳变，差值记进 residual，
    * 按 EASE_TIME 指数衰减，偏移因此是滑过去的。强度与十字拉近量按同一个时间常数趋近各自的目标值。
+   * @param fullAngle 这一步所用档位的 FULL_ANGLE（触屏 / 键盘，见 update 的 assistCone）
+   * @param outerAngle 这一步所用档位的 OUTER_ANGLE
    * @param aimX 瞄准点方向（单位向量）的分量；没有辅助目标时不使用
    * @param aimReach 炮口到瞄准点的距离（米）；没有辅助目标时不使用
    */
   private updateAssist(
     deltaTime: number,
     forward: Vector3,
+    fullAngle: number,
+    outerAngle: number,
     target: Object3D | null,
     angle: number,
     aimX: number,
@@ -291,11 +306,11 @@ export class GunLeadSolver {
     let goalWeight = 0;
     let goalNear = 0;
     if (target !== null) {
-      goalWeight = assistPull(angle, assist.FULL_ANGLE, assist.OUTER_ANGLE);
+      goalWeight = assistPull(angle, fullAngle, outerAngle);
       const reach = Math.max(assist.CROSS_MIN_RANGE, Math.min(assist.REFERENCE_RANGE, aimReach));
       // aimReach 非有限数时 reach 为 NaN：不拉近
       goalNear = Number.isFinite(reach) ? (assist.REFERENCE_RANGE - reach) * goalWeight : 0;
-      const shift = angle <= assist.FULL_ANGLE ? angle : assist.FULL_ANGLE * goalWeight;
+      const shift = angle <= fullAngle ? angle : fullAngle * goalWeight;
       const sin = Math.sin(angle);
       if (sin > 1e-6) {
         const cos = Math.cos(angle);
@@ -317,7 +332,7 @@ export class GunLeadSolver {
 
     // 机头方向每步都在变：去掉沿机头方向的分量，并把偏移夹在 FULL_ANGLE 以内
     offset.addScaledVector(forward, -offset.dot(forward));
-    const maxOffset = Math.tan(assist.FULL_ANGLE);
+    const maxOffset = Math.tan(fullAngle);
     const lengthSq = offset.lengthSq();
     if (!Number.isFinite(lengthSq)) {
       offset.set(0, 0, 0);
@@ -347,7 +362,7 @@ export class GunLeadSolver {
     this.step += 2;
   }
 
-  /** 撤掉提前量标记与触屏辅助（偏移直接归零，不做滑动） */
+  /** 撤掉提前量标记与机炮辅助（偏移直接归零，不做滑动） */
   private clearSolution(): void {
     this.pipTarget = null;
     this.pipTime = 0;
@@ -383,7 +398,7 @@ export class GunLeadSolver {
     return Number.isFinite(out.x) && Number.isFinite(out.y) && Number.isFinite(out.z);
   }
 
-  /** 触屏辅助的当前目标；没有时为 null */
+  /** 机炮辅助的当前目标；没有时为 null */
   public getAssistTarget(): Object3D | null {
     return this.assistTarget;
   }

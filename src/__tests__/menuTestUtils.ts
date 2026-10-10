@@ -264,12 +264,26 @@ export async function settle(rounds: number = 6): Promise<void> {
   }
 }
 
+/** 真实的时钟：模块载入时就取下引用，之后哪个用例装了假时钟都不影响它 */
+const realNow: () => number = (() => {
+  const clock = performance;
+  const now = clock.now;
+  return () => now.call(clock);
+})();
+
 /**
- * 让出事件循环直到条件成立（或轮数用完）：第一次 import() 一个大模块要多少轮说不准，
- * 等结果比数轮数可靠。条件始终不成立时照常返回，由随后的断言报错。
+ * 让出事件循环直到条件成立。等的往往是真实的 I/O：第一次 import() 一个模块要经 vite-node 取回、
+ * 转换，而轮数说明不了时间——空转 4000 轮只有几十毫秒，机器一忙就不够（按轮数兜底时，第一次翻到
+ * Boss 模型那一页空闲时就要三千多轮）。所以按时间兜底：至少让出 rounds 轮，并且在 budgetMs 之内
+ * 一直等。条件始终不成立时照常返回，由随后的断言报错。
  */
-export async function settleUntil(done: () => boolean, rounds: number = 500): Promise<void> {
-  for (let i = 0; i < rounds && !done(); i++) {
+export async function settleUntil(
+  done: () => boolean,
+  rounds: number = 500,
+  budgetMs: number = 2000
+): Promise<void> {
+  const deadline = realNow() + budgetMs;
+  for (let i = 0; !done() && (i < rounds || realNow() < deadline); i++) {
     await nextTask();
   }
 }

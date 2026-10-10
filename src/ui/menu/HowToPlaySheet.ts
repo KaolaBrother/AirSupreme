@@ -29,10 +29,16 @@ const MISSILE_NOTE: LocalizedText = {
   zh: '导引头一直在工作。把目标保持在锁定环内，环变绿就是锁定完成。',
 };
 
-/** 触屏机炮的辅助瞄准（GAME_CONSTANTS.GUN_ASSIST，只在触控设备上启用） */
+/** 触屏机炮的辅助瞄准（GAME_CONSTANTS.GUN_ASSIST 的 FULL_ANGLE / OUTER_ANGLE） */
 const GUN_ASSIST_NOTE: LocalizedText = {
   en: 'Aim assist: when a target is close to your nose, the gun cross slides onto it and your shots follow.',
   zh: '辅助瞄准：目标靠近机头时，机炮十字会滑到目标上，子弹跟着十字走。',
+};
+
+/** 键盘机炮的辅助瞄准：同一套机制，锥角是触屏的一半（KEYBOARD_FULL_ANGLE / KEYBOARD_OUTER_ANGLE） */
+const GUN_ASSIST_KEYBOARD_NOTE: LocalizedText = {
+  en: 'Aim assist: when a target is almost dead ahead, the gun cross shifts slightly onto it and your shots follow.',
+  zh: '辅助瞄准：目标几乎正对机头时，机炮十字会小幅移到目标上，子弹跟着十字走。',
 };
 
 const KEYBOARD_GROUPS: readonly KeyGroup[] = [
@@ -49,8 +55,9 @@ const KEYBOARD_GROUPS: readonly KeyGroup[] = [
       { keys: ['A', 'D'], action: { en: 'Yaw (nose left / right)', zh: '偏航（机头左右）' } },
       { keys: ['Q', 'E'], action: { en: 'Roll (bank the wings)', zh: '翻滚（机翼倾斜）' } },
       {
-        // 加速只认左侧的 Shift / Ctrl；右 Shift 是导弹
-        keys: ['Shift'],
+        // 加速只认左侧的 Shift / Ctrl，右 Shift 是导弹：键帽写明左右（两种语言同一写法），
+        // 说明里再用文字说一遍
+        keys: ['L Shift', 'L Ctrl'],
         action: { en: 'Boost: hold left Shift or left Ctrl', zh: '加速：按住左 Shift 或左 Ctrl' },
       },
     ],
@@ -61,12 +68,13 @@ const KEYBOARD_GROUPS: readonly KeyGroup[] = [
       {
         keys: [{ en: 'Space', zh: '空格' }],
         action: { en: 'Fire guns (hold to keep firing)', zh: '开火（按住连射）' },
+        note: GUN_ASSIST_KEYBOARD_NOTE,
       },
       {
-        keys: ['M'],
+        keys: ['M', 'R Shift'],
         action: {
-          en: 'Missile: fire when the ring is green. Right Shift fires too.',
-          zh: '导弹：环变绿后发射，右 Shift 也可以',
+          en: 'Missile: fire when the ring is green (M or right Shift)',
+          zh: '导弹：环变绿后发射（M 或右 Shift）',
         },
         note: MISSILE_NOTE,
       },

@@ -32,7 +32,7 @@ AirSupreme 是一个基于 Three.js 和 TypeScript 的 3D 飞机战斗游戏。
 4. **关卡管理** - 波次生成、敌机生成
 5. **粒子系统** - 尾迹、爆炸效果
 6. **UI系统** - HUD、小地图、血条
-7. **配置系统** - JSON 配置加载、默认值 fallback
+7. **配置系统** - `src/config.ts` 里的运行时常量与设备 / 画质档位
 8. **日志系统** - 结构化日志、模块标记、级别控制
 9. **运行时边界系统** - 动态导入、预热、表现层 runtime loader
 10. **战役流程与表现层** - 章节 → 波次 → 检查点 → Boss → 结算 → 机库；剧情卡片、无线电、HUD 面板、音乐与音效统一经 `ICampaignPresentation`
@@ -322,7 +322,7 @@ if (tmpAxis.lengthSq() > 1e-8) {
 
 ## 十关战役系统（2026-10）
 
-签名与契约见 `docs/api.md`，模块接线、逐帧顺序与数据流见 `docs/architecture.md`；本节是长篇说明。仍在调校的平衡数值（花费、血量、波次规模、强度曲线）以源码为准：`src/core/Difficulty.ts`、`public/config/game-config.json`、`src/config.ts`、`src/features/terrain/LevelConfig.ts`、`src/features/units/UnitDeployments.ts`、`src/features/upgrade/UpgradeSystem.ts`、`src/features/boss/BossTypes.ts`。
+签名与契约见 `docs/api.md`，模块接线、逐帧顺序与数据流见 `docs/architecture.md`；本节是长篇说明。仍在调校的平衡数值（花费、血量、波次规模、强度曲线）以源码为准：`src/core/Difficulty.ts`、`src/config.ts`、`src/features/terrain/LevelConfig.ts`、`src/features/units/UnitDeployments.ts`、`src/features/upgrade/UpgradeSystem.ts`、`src/features/boss/BossTypes.ts`。
 
 ### 战役流程
 
@@ -341,7 +341,7 @@ if (tmpAxis.lengthSq() > 1e-8) {
 - `StoryOverlay`：章节 / 序章 / 解锁卡片（打字机，`onTypeTick` 每字回调用于打字音）、结算卡片（逐行计数音）、尾声 + 片尾字幕；点击 / 轻触 / 空格 / 回车先显示全文再翻页，Esc 或「跳过」结束整段；卡片显示时 `<html data-story-overlay>` 隐藏 HUD、雷达、无线电、移动端按键与指示层。有旁白挂钩（`narration: StoryNarration`）时，序章 / 简报 / 尾声的每一段先按段落 id 请求配音，短暂等待开口（超时则按纯文字打字），按配音时长调整打字节奏，让文字在配音结束前一点打完，再等配音说完（有兜底上限）才进入下一段；整张卡听完后只留看任务目标的时间再自动翻页。显示全文、翻页、Esc / 跳过、收起都会停下旁白；减少动态效果时直接显示全文但照常朗读；卡片写成后切换过语言则不再朗读。
 - `RadioComms`：说话人呼号 / 头像 / 色调来自 `CAMPAIGN_SPEAKERS`（头像图标 `getSpeakerGlyph`，每个说话人都有）；空闲时立即显示（两句之间的短暂间隔也算忙碌），`high` 优先级打断普通台词（被打断且未传达完的台词回到普通队首重播，每句至多一次：重播时再被打断就放弃），重复文本忽略，队列有上限；显示时间只由 `update(dt)` 推进（暂停即停住）。剧情界面加载完成前的台词先缓存。有配音时：开口后 `holdForVoice(line, 时长)` 让台词至少停留到配音结束再加一小段尾巴，下一句等 `releaseVoice(line)`（有兜底上限）；配音没说完就被打断的台词重播时配音从头再说。`isVoicing()` 表示当前台词的配音正在说；`estimateRemainingSeconds(voiceSeconds?)` 估计当前与排队台词全部说完的秒数（有配音的按配音时长计），只用于 Boss 收尾的等待上限。切换语言时当前台词的呼号、正文与读屏文本立即重写。
 - 配音接线：`onLineShown` 播放该句无线电配音（`kind: 'radio'`，按说话人选电台音色）；旁白挂钩以 `NARRATION_SPEAKER`（天穹）朗读；入关（`showChapterIntro`）预取本章台词——序章（显示时）、简报、入关台词、其余章节台词与紧急告警，`playBossMusic` 预取本章 Boss 台词；`onPause` / `onResume` 暂停 / 续播；`clearRadio` 停下无线电配音，结算卡片让正在说的那句说完，失败 / 通关 / 释放停下全部配音。
-- 高优先级通用台词：平民误伤、导弹告警、低血量。它们打断只显示文字的普通台词，但从不打断正在配音的台词——此时 `genericRadio` 跳过这句并返回 `false`（Boss 模式过滤掉的普通台词同样返回 `false`），低血量台词等配音说完再报（低血量蜂鸣照常）。地空导弹每次发射都有 HUD 闪烁告警「Missile inbound · Press G for flares / 导弹来袭 · 按 G 投放热焰弹」与 `sam-launched` 音效事件，误伤平民每次都有「Cease fire! Those are civilians! / 停火！那是平民目标！」与 `civilian-hit` 音效事件；两者的配音由 `UnitController` 的 `RadioBudget`（`src/core/campaign/RadioBudget.ts`）限频：每波（每场 Boss 战，`spawnForWave` 与 `clear()` 时重新计数）最多 2 次，导弹告警冷却 20 秒、之后 45 秒，误伤平民 15 秒、之后 30 秒；`genericRadio` 返回 `true` 时才计数。告警文案按当前语言发出。
+- 高优先级通用台词：平民误伤、导弹告警、低血量。它们打断只显示文字的普通台词，但从不打断正在配音的台词——此时 `genericRadio` 跳过这句并返回 `false`（Boss 模式过滤掉的普通台词同样返回 `false`），低血量台词等配音说完再报（低血量蜂鸣照常）。地空导弹每次发射都有 HUD 闪烁告警「Missile inbound · Press G for flares / 导弹来袭 · 按 G 投放热焰弹」（触屏设备即 `GameConfig.isMobile` 时改为「Missile inbound · Tap FLARE / 导弹来袭 · 点「热焰」键」，指向屏幕上的热焰键）与 `sam-launched` 音效事件，误伤平民每次都有「Cease fire! Those are civilians! / 停火！那是平民目标！」与 `civilian-hit` 音效事件；两者的配音由 `UnitController` 的 `RadioBudget`（`src/core/campaign/RadioBudget.ts`）限频：每波（每场 Boss 战，`spawnForWave` 与 `clear()` 时重新计数）最多 2 次，导弹告警冷却 20 秒、之后 45 秒，误伤平民 15 秒、之后 30 秒；`genericRadio` 返回 `true` 时才计数。告警文案按当前语言发出。
 - 无线电积压：`getRadioBacklogSeconds()` 用 `RadioComms.estimateRemainingSeconds` 与配音的 `getLineDuration`（当前语言的清单时长）估计无线电说完还要多少秒；剧情界面加载前的缓存台词按配音时长或 6.5 秒、每句再加 1.5 秒粗估。
 - HUD 推送做差分：数值不变时不调用 HUD、不分配对象；导弹告警合并单位（SAM）与 Boss 导弹两路，取最高级（`none` / `locking` / `incoming`）。
 
@@ -475,7 +475,9 @@ if (tmpAxis.lengthSq() > 1e-8) {
 - `SaveSystem`（`src/core/save/SaveSystem.ts`）：单个检查点 `air-supreme:campaign-save`（`CAMPAIGN_SAVE_VERSION = 1`）+ 战役进度 `air-supreme:campaign-progress`；只在调用时访问 `localStorage`，读写失败不抛出；读取时校验并规范化（损坏或外来数据删除键并返回 null；越界钳制、缺失取默认）。
 - 检查点类型：`level-start`（章节卡片之后，wave 0）、`wave`（第 k 波结束后，wave = k + 1，最后一波除外）、`boss`（全部波次清空后，wave = 总波数）、`hangar`（第 1-9 关击破 Boss 时，level 为下一关、wave 为 0；机库「出击」时静默重写一次）；只在正常模式写入。`describeCheckpoint(data, locale?)` 默认按当前语言（传入 locale 时按该语言）生成「第6关 · 熔炉之心 · 第3波」「… · Boss 战」或「第2关 · 沙漠风暴 · 机库整备」（英文为 `Ch. 6 · Heart of the Forge · Wave 3` / `… · Boss` / `Ch. 2 · Sandstorm · Hangar`）；`describeCheckpointText(data)` 返回双语版本。
 - 内容：关卡、波次、难度、分数、生命、导弹、`PlayerUpgrades.export()`、`WeaponSystem.exportState()`、热焰弹、视角、本局统计（击落、平民损失、阵亡、游戏时间），以及可选的 `swiftJoined`（本局雨燕的入列台词是否已播；没有这个字段的旧存档由 `isSwiftJoinAnnounced` 按关卡推断：level > 3 视为已播）。`hangar` 检查点的快照把升级上限（`campaignLevel`）与武器解锁改写为下一关的值。加入 `hangar` 与 `swiftJoined` 之前的存档照常读取（`CAMPAIGN_SAVE_VERSION` 仍为 1）。
-- 失败结算：正常模式任务失败且存储里有检查点时，`GameCoordinator.resolveCheckpointRetry()` 把 `SettlementCheckpointRetry`（检查点位置的双语描述 `describeCheckpointText` + 重试回调）交给 `HUD.showGameOver(finalScore, checkpointRetry)`，结算面板的主按钮变成「从检查点重试」，下方写明检查点位置，后面是「返回菜单」；这种情况下没有「再来一局」，面板上也没有任何操作会删除存档（想从头开始：返回菜单 →「新战役」，有存档时会先确认）。Boss 模式或没有检查点时仍是「再来一局 / 返回菜单」。原先浮在结算面板下方的 `CheckpointResumeButton` 已删除。「再来一局」与检查点重试都经 `main.ts` 的 `bootGame`，上一次启动还没完成时再来的请求会被忽略。
+- 失败结算：正常模式任务失败且存储里有检查点时，`GameCoordinator.resolveCheckpointRetry()` 把 `SettlementCheckpointRetry`（检查点位置的双语描述 `describeCheckpointText` + 重试回调）交给 `HUD.showGameOver(finalScore, checkpointRetry)`，结算面板的主按钮变成「从检查点重试」，按钮上方的卡片（小标题「检查点」）写明检查点位置，后面是「返回菜单」；这种情况下没有「再来一局」，面板上也没有任何操作会删除存档（想从头开始：返回菜单 →「新战役」，有存档时会先确认）。Boss 模式或没有检查点时仍是「再来一局 / 返回菜单」。原先浮在结算面板下方的 `CheckpointResumeButton` 已删除。「再来一局」与检查点重试都经 `main.ts` 的 `bootGame`，上一次启动还没完成时再来的请求会被忽略。
+- 结算面板的外观与操作：失败 / 通关共用的结算面板（`#hud-settlement-overlay`）与暂停菜单一样复用主菜单的样式片段（`rescopeMenuCss(menuKitCss() + sheetKitCss(), '#hud-settlement-overlay')`），标题上方是小标签「战后简报」（Debrief）；失败用红色点缀，通关是冰蓝色。面板一出现（失败有 / 无检查点、通关都一样）第一个动作就拿到焦点，Tab / Shift+Tab 只在面板的两个动作之间循环，每个动作在一次结算里只交出一次回调。
+- 本局结束后不再动存储：阵亡可能与清波、清关或击破 Boss 落在同一个模拟步里。任务失败一经判定（`CampaignFlowController.isRunOver()`），`writeCheckpoint` 不再写入，第 10 关击破 Boss 的分支不记通关也不清除检查点，雨燕的入列标记也不再补写——面板上写的检查点位置与存储里的那一份保持一致；`GameCoordinator` 的 `LEVEL_COMPLETE` 处理在对局不处于进行状态（`isPlaying()` 为假）时直接返回，不会在结算面板底下开始 Boss 战。
 - 继续：主菜单「继续战役」/ 失败结算「从检查点重试」→ `main.ts` 用存档的难度 / 关卡 / 生命 / 视角重新开局（`resume`）→ `restoreCheckpoint`（reset → import → 关卡上限 → 武器解锁 → 武器等级 → importState → 分数 / 生命 / 导弹 / 视角）→ `resumeFromCheckpoint` 回到存档波次或 Boss 战前；`hangar` 检查点回到机库，「出击」后与刚打完上一关一样进入章节卡片与战斗（不播序章与教学，弹药与热焰弹在章节开始时补满；其余检查点读档后的第一次 `prepareLevel` 保留存档里的弹药）。
 - 保存并退出：每次写检查点时 `CampaignFlowController` 同时记下本局的退出点（`{ kind, level, wave }`；最后一波清空后退出点先移到 Boss，第一个检查点之前与战役通关之后为空）。暂停菜单用 `describeExitSave()`（只读）决定显示「保存并退出」还是「返回菜单」并写出确认文案——结果 `CampaignExitSave` 为 `saved`（附存档位置）/ `no-save-mode`（Boss 模式）/ `not-started` / `complete`；确认后 `saveForExit()` 用此刻的快照在退出点重写检查点（不弹存档提示），再读回核对，存储里不是刚写的那份时返回 `failed`，菜单给出「返回 / 仍然退出」。从这份存档继续时回到该波或 Boss 战的开头（`hangar` 退出点回到机库），分数、生命、导弹与升级是退出时的值；存档格式没有新增字段。
 - 清除：普通模式新开一局、通关第 10 章；`recordLevelReached` / `markCampaignCompleted` 维护进度记录。
@@ -507,14 +509,14 @@ if (tmpAxis.lengthSq() > 1e-8) {
 - 关卡地图（`RadarLevelMap`，`#radar-map`，由 `RadarMinimap` 持有）：点击 / 轻触雷达或按 N 键开合，Esc 关闭（被雷达截获，不会同时暂停）；换关或雷达停止更新 1.5 秒后自动收起；打开时游戏不暂停。地图北向朝上、比例固定：战场边界圆、以玩家为圆心的 500 / 1000 米距离环、按航向旋转的玩家箭头、全部雷达目标（与雷达盘共用 `radarGlyphs.ts` 的符号，画得更大）、图例，以及每关采样一次的 64 × 64 陆地 / 水面底图（`CombatHudFeed` 把 `UnitController.getSurfaceSampler()` 交给 `PresentationController.setRadarTerrainSource`；没有采样器时只画网格）。面板为视口短边的 72%（200-560 像素），20 Hz 重绘。
 - 移动端：`index.html` 拇指弧按键簇新增 `#special-button`、`#flare-button`、`#cycle-button`、`#camera-button`；按键文字默认英文（FIRE / MSL / SPEC / FLARE / BOOST / SWAP / VIEW / PAUSE），`main.ts` 按语言改写（中文为 开火 / 导弹 / 特武 / 热焰 / 加速 / 切换 / 视角 / 暂停）；HUD 写入按钮的武器代号、外圈进度（`--tc-meter`）、空弹 / 告警状态（`data-alert`）与视角状态，以及导弹键的余量（`data-count`）与装填外圈；`LockOnIndicator` 把锁定状态写成导弹键的样式类。摇杆是浮动式的（触摸区 `#touch-stick-zone`，见「操控、瞄准与导弹」）；BOOST（`#throttle-button`）是开关式锁存，带 `aria-pressed`。视口宽高都不小于 700 像素时（与 `GameConfig.isTablet` 同一阈值）摇杆与按键簇放大并抬离底边，尺寸都是 `:root` 上的 CSS 变量（`--touch-stick-size`、`--touch-deck-scale` 等）。暂停键（`#upgrade-button`）与其他单击键一样在 `touchstart` 时锁存，直到 `InputHandler.isPauseToggled()` 读取（`resetPauseState()` 清除），低帧率下短于一个模拟步长的轻触也不会丢；桌面 Esc / P 仍取按下沿。
 - 血条：友军 AI 战机的 `mesh.userData.displayName`（僚机呼号）优先于按名称缓存的标签；敌机显示机型，Boss 显示名称，单位显示自己的型号名（`UnitMeshFactory` 写入的 `userData.displayName`，没有时退回阵营通用名），都按当前语言，切换语言时所有血条立即改名。三种尺寸：Boss 本体 120 × 10 像素（带名称）、Boss 部件 44 × 5 像素（深色底槽）、其他目标 60 × 6 像素（带名称）；视野内的 Boss 部件只有离准星最近的一个显示名称（带滞回：新部件离准星的距离须小于当前焦点的 80% 才切换），部件不再各自产生屏外箭头；名称标签用样式居中，不再逐次测量文字宽度。可命中的敌方地面 / 海上 / 空中单位也进入血条（`CombatHudFeed` 经 `UnitController.forEachHostileMarker`）：在屏幕上小于约 22 像素时加一个威胁色的目标角标并标出距离（取整到 10 米，大于 28 像素时收起）；快照带 `objective` 时换成目标样式——角标常显、加粗并脉动，屏外箭头闪烁（减少动态效果时不做动画）。屏外箭头（`OffscreenChevron`）的距离文字保持水平；敌方目标箭头与 Boss 导弹箭头（`BossMissileIndicator`）各持有一个 `ChevronAvoidance`（`src/ui/ChevronAvoidance.ts`），用同一套避让规则：避开雷达盘与 HUD 面板（得分 / 速度 / 强化 / 右上状态 / 生命条，以及顶部消息栈里正在显示的每一块），触屏布局下还避开摇杆与每个可见的触控按键。
-- 机库（模型预览）：主菜单的「机库」就是 `ModelPreview`（`#model-preview`）。它经 `Record<BossType, loader>` 按需导入每个 Boss 自己的网格工厂（第 6-10 关来自 `MagmaColossusMesh` / `AbyssalLeviathanMesh` / `TempestZeppelinMesh` / `PhantomWingMesh` / `OraclePrimeMesh`），把可见几何（排除隐藏部件与精灵）缩放到固定半径的包围球（球心取可见包围盒的中心，半径取离它最远的可见顶点，模型怎么转都不出球），切换模型时逐一释放几何体、材质与实例缓冲（跳过共享资源）。战机工厂按包围盒摆放的信号灯小球（`navLightPort` / `navLightStarboard` / `strobeLight` / `beaconLight`）先由 `hideSignalLights()`（`src/ui/menu/modelDisposal.ts`）隐藏，不显示也不参与取景；标题画面的战机同样处理。取景只用名称标签上方的区域：写入名称后（以及改变窗口大小、切换语言时）`frameCamera()` 从 DOM 读取标签上沿，与标签、画布上沿各留 8 像素（区域至少延伸到画布一半高度），相机后退到包围球的轮廓直径等于画布短边的 70%（各个模型大小一致），区域放不下这个直径时缩到放得进区域的高与宽并留边，再用 `setViewOffset` 把投影中心移到区域中心；画布尚未布局时按整个画布取景。模型的工厂或代码块加载失败时，名称标签写明「无法加载：{name}」（英文 `Could not load: {name}`），其余模型与返回照常可用；`show()` 创建不了渲染器（浏览器不给 WebGL 上下文）时调用 `hide()`（经 `setOnBack` 的回调让主菜单回来）并照常抛出错误。名称标签放得下时单行显示（宽度 600 像素以下字号 18 像素）；横屏且高度不超过 520 像素的视口压缩页眉并隐藏提示行，把高度留给展台。左右箭头按钮、左 / 右方向键或横向滑动切换模型，鼠标拖动旋转，`#rotate-toggle` 开关自动旋转，Esc 或返回按钮回到主菜单。渲染器只在显示期间存在（`show()` 创建，`hide()` 连同 WebGL 上下文一起释放）。
+- 机库（模型预览）：主菜单的「机库」就是 `ModelPreview`（`#model-preview`）。它经 `Record<BossType, loader>` 按需导入每个 Boss 自己的网格工厂（第 6-10 关来自 `MagmaColossusMesh` / `AbyssalLeviathanMesh` / `TempestZeppelinMesh` / `PhantomWingMesh` / `OraclePrimeMesh`），把可见几何（排除隐藏部件与精灵）缩放到固定半径的包围球（球心取可见包围盒的中心，半径取离它最远的可见顶点，模型怎么转都不出球），切换模型时逐一释放几何体、材质与实例缓冲（跳过共享资源）。战机工厂按包围盒摆放的信号灯小球（`navLightPort` / `navLightStarboard` / `strobeLight` / `beaconLight`）先由 `hideSignalLights()`（`src/ui/menu/modelDisposal.ts`）隐藏，不显示也不参与取景；标题画面的战机同样处理。取景只用名称标签上方的区域：写入名称后（以及改变窗口大小、切换语言时）`frameCamera()` 从 DOM 读取标签上沿，与标签、画布上沿各留 8 像素（区域至少延伸到画布一半高度），相机后退到包围球的轮廓直径等于画布短边的 70%（各个模型大小一致），区域放不下这个直径时缩到放得进区域的高与宽并留边，再用 `setViewOffset` 把投影中心移到区域中心；画布尚未布局时按整个画布取景。模型的工厂或代码块加载失败时，名称标签写明「无法加载：{name}」（英文 `Could not load: {name}`），其余模型与返回照常可用，战机工厂模块导入失败的那一次不保留，下次翻到这一页会重新导入；`show()` 创建不了渲染器（浏览器不给 WebGL 上下文）时调用 `hide()`（经 `setOnBack` 的回调让主菜单回来，焦点落回「机库」按钮）并照常抛出错误。名称标签放得下时单行显示（宽度 600 像素以下字号 18 像素）；横屏且高度不超过 520 像素的视口压缩页眉并隐藏提示行，把高度留给展台。左右箭头按钮、左 / 右方向键或横向滑动切换模型，鼠标拖动旋转，`#rotate-toggle` 开关自动旋转，Esc 或返回按钮回到主菜单。渲染器只在显示期间存在（`show()` 创建，`hide()` 连同 WebGL 上下文一起释放）。
 
 ### 主菜单
 
 - 结构：`StartMenu`（`src/ui/StartMenu.ts`，`#start-menu`）是一层外壳，界面由 `src/ui/menu/` 下的模块组成——`TitleScreen`（标题画面：继续战役 / 新战役 / 机库 / 设置 / 操作说明）、`SettingsSheet`（设置面板）、`HowToPlaySheet`（操作说明，键盘 / 触屏两个标签页）、`MenuSheet`（三者共用的面板容器；「新战役」会覆盖存档时的确认对话框也用它，默认按钮是「保留存档」）、`MenuBackdrop`（CSS 与 2D 画布绘制的背景）与 `MenuHero`（按需加载 `MenuHeroScene`，在标题后面实时渲染玩家战机）。有检查点时才显示「继续战役」，并作为默认高亮的按钮。
 - 设置面板：分「游戏」（难度、生命、视角、教程）、「音频」（音效 / 音乐 / 语音音量）、「显示」（画质、语言）、「高级」（起始关卡、游戏模式、测试分数）四组，每次改动立即保存（`StartFlowSettings`）；「高级」每次打开面板时折叠，其中任一项不是默认值时显示「已修改」标记。
 - WebGL 上下文：菜单隐藏或机库打开时，标题画面的战机场景停止；机库（`ModelPreview`，同样按需加载）的渲染器只在显示期间存在——菜单任何时候至多持有一个 WebGL 上下文，游戏运行时不持有。
-- 暂停菜单的外观：`PauseMenu` 与主菜单用同一套视觉语言——它把主菜单自己的样式片段换到 `#pause-menu` 下复用（`src/ui/menu/menuStyles.ts` 的 `rescopeMenuCss` / `menuKitCss`，`sheetStyles.ts` 的 `sheetKitCss`），行为不变。「离开」确认页把存档位置显示成一张卡片；会存档时主按钮「保存并退出」是冰蓝色，琥珀色只用在会丢进度的退出（不存档的模式、没有接存档）与「保存失败」页上。
+- 暂停菜单的外观（结算面板同样处理，见「存档」一节的「结算面板的外观与操作」）：`PauseMenu` 与主菜单用同一套视觉语言——它把主菜单自己的样式片段换到 `#pause-menu` 下复用（`src/ui/menu/menuStyles.ts` 的 `rescopeMenuCss` / `menuKitCss`，`sheetStyles.ts` 的 `sheetKitCss`），行为不变。「离开」确认页把存档位置显示成一张卡片；会存档时主按钮「保存并退出」是冰蓝色，琥珀色只用在会丢进度的退出（不存档的模式、没有接存档）与「保存失败」页上。
 - 进入战场：`StartMenu.launch()` 在点击的调用栈上同步解锁音频并触发 `onStart` / `onContinue`；`main.ts` 的 `launchFromMenu` 立即显示进入战场的画面，等 `startMenu.whenLaunched()`（约 0.3 秒的过场；减少动态效果时立即完成）之后再启动游戏。
 
 ---
@@ -546,7 +548,7 @@ src/
 │   ├── systems/                  # PlayerSystem、CombatSystem、EnemySystem、PowerUpSystem
 │   ├── Input/                    # InputHandler
 │   ├── Audio/                    # AudioManager、MusicSystem、VoiceSystem、VoiceDucking、AudioContextHost、AudioKit、music/、sfx/
-│   └── utils/                    # ConfigLoader、Logger
+│   └── utils/                    # Logger
 ├── features/
 │   ├── campaign/                 # CampaignData（导入入口）、CampaignTypes、CampaignCast、CampaignChapters、CampaignRadio、CampaignStory、ChapterTitles
 │   ├── enemy/                    # EnemyAI、FriendlyAI、EnemyTypes、EnemyFSM（旧版，已废弃）
@@ -582,8 +584,8 @@ public/voice/                     # 配音包：en/、zh/（<台词 id>.mp3）�
 3. **机炮** - `GunLeadSolver`：提前量标记与触屏瞄准辅助（`GAME_CONSTANTS.GUN_ASSIST`、`PlayerSystem.setGunAimAssist`），机炮十字每个渲染帧对准弹道
 4. **目标与雷达** - 敌方单位的血条、目标角标与「当前目标」提示，波次放行时限 150 → 60 秒且击伤敌方单位即重新计时；雷达改为机头朝上（修正左右画反）、盘缘标记量程外目标；关卡地图 `RadarLevelMap`（N 键 / 点雷达）
 5. **座舱与视角** - 座舱压低、遮光罩与立柱变细，第一人称下自己的武器特效减弱，竖屏保持约 70° 水平视场，大字提示与告警栏按视角避开准星
-6. **菜单与存档** - 主菜单重做为 `StartMenu` 外壳 + `src/ui/menu/`（标题画面、设置 / 操作说明面板、实时战机场景），模型预览改为「机库」（`ModelPreview`），`StartMenu.whenLaunched()`；暂停菜单「保存并退出」（`CampaignFlowController.describeExitSave` / `saveForExit`、`IPauseMenuOptions.getSaveStatus` / `onSaveAndExit`），暂停菜单改用主菜单的样式片段；失败结算保留检查点——主按钮「从检查点重试」（`HUD.showGameOver(finalScore, checkpointRetry)`、`SettlementCheckpointRetry`、`GameCoordinator.resolveCheckpointRetry()`），`CheckpointResumeButton` 删除
-7. **修复** - 第 1 关的坦克没有标记、波次迟迟不结束；雷达左右颠倒；任务失败后「再来一局」会清掉检查点；屏外箭头被 HUD 面板挡住（`ChevronAvoidance`）；机库里模型大小不一
+6. **菜单与存档** - 主菜单重做为 `StartMenu` 外壳 + `src/ui/menu/`（标题画面、设置 / 操作说明面板、实时战机场景），模型预览改为「机库」（`ModelPreview`），`StartMenu.whenLaunched()`；暂停菜单「保存并退出」（`CampaignFlowController.describeExitSave` / `saveForExit`、`IPauseMenuOptions.getSaveStatus` / `onSaveAndExit`），暂停菜单与结算面板改用主菜单的样式片段；失败结算保留检查点——主按钮「从检查点重试」（`HUD.showGameOver(finalScore, checkpointRetry)`、`SettlementCheckpointRetry`、`GameCoordinator.resolveCheckpointRetry()`），`CheckpointResumeButton` 删除；结算面板的第一个动作自动获得焦点、Tab 在面板内循环、每个动作只生效一次
+7. **修复** - 第 1 关的坦克没有标记、波次迟迟不结束；雷达左右颠倒；任务失败后「再来一局」会清掉检查点；任务失败之后同一步里到来的清波 / 击破不再改写或清除检查点（`CampaignFlowController.isRunOver()`）；屏外箭头被 HUD 面板挡住（`ChevronAvoidance`）；机库里模型大小不一；触屏设备上的导弹告警不再提示按 G 键
 
 ### 2026-10: 收尾打磨
 
@@ -902,29 +904,9 @@ npm run test:run   # Vitest 单次运行（npm run test 为监听模式）
 
 ---
 
-## 配置系统 (ConfigLoader)
+## 配置系统
 
-### 配置文件
-
-位置: `public/config/game-config.json`
-
-包含玩家、敌人、Boss、导弹、升级等配置段。启动时 `src/main.ts` 调用 `configLoader.load()` 读取它，并合并到 `ConfigLoader` 内置的默认值之上。
-
-**现状**：除了这次 `load()`，运行时代码没有调用 `configLoader` 的任何读取方法，所以这份 JSON 目前没有运行时读取方——只改 JSON 不会改变实际玩法。以 `missile` 段为例：玩家导弹的数值来自 `GAME_CONSTANTS.MISSILE`（`src/config.ts`），基础锁定时间与补给时间来自升级线（`UPGRADE_CONFIGS`）；`getMissile()` 返回的只是 JSON 里的值，没有系统使用它。
-
-### 使用方式
-
-```typescript
-import { configLoader } from '@/core/utils/ConfigLoader';
-
-// 异步加载配置
-await configLoader.load();
-
-// 读取方法（目前没有运行时调用方，见上）
-const playerConfig = configLoader.getPlayer();
-const enemyConfig = configLoader.getEnemy('FIGHTER');
-const bossConfig = configLoader.getBoss('HEAVY_BOMBER');
-```
+运行时常量在 `src/config.ts`：`GAME_CONSTANTS`（玩家、子弹、机炮辅助、相机、世界、道具、关卡、导弹）与 `GameConfig`（设备 / 画质档位）。没有外部配置文件，启动时也不请求任何配置文件：敌机、Boss、关卡、升级等数值表都在各自的 TypeScript 源文件里（如 `EnemyTypes.ts`、`BossTypes.ts`、`LevelConfig.ts`、`UpgradeSystem.ts`）。
 
 ---
 

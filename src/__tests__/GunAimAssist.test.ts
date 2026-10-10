@@ -13,7 +13,7 @@ import { GunLeadSolver } from '@/features/combat/GunLeadSolver';
  * - θ ≥ 5°、超过 480 米、没有可靠解、不是触屏：不偏移；
  * - 目标出现 / 消失 / 更换时滑过去（约 0.1 秒到 95%），压住一个目标时不滞后；
  * - 另一个目标要比当前目标离机头近出 0.75° 才接手；reset() 回到机头轴线；
- * - 输入（位置、方向、距离）不是有限数：不辅助；时间步长不是有限数的一帧坏帧则是跳过去。
+ * - 输入（位置、方向、距离）不是有限数：不辅助；时间步长不是正的有限数的一帧坏帧则是整步跳过。
  *
  * 只走公开接口：update / reset / getAssistDirection / getAssistWeight / getAssistTarget /
  * getRenderAssistDirection / getRenderAssistDistance。没有辅助时 getAssistDirection 可以是 null，
@@ -977,10 +977,13 @@ describe('gun aim assist', () => {
       }
     );
 
-    // 时间步长不是有限数（裁定）：“输入不是有限数：不辅助”说的是空间量（位置、方向、距离）。
-    // 时间步长坏掉只是一帧坏帧：解算器应当把这一步跳过去——不衰减、不前进——下一步照常；
+    // 时间步长不是正的有限数（裁定；7723114 已修）：“输入不是有限数：不辅助”说的是空间量
+    // （位置、方向、距离）。时间步长坏掉——NaN、±Infinity、0、负数——只是一帧坏帧：解算器把这一步
+    // 整个跳过去，保持的目标、偏移、强度、十字的距离都原样留着，下一个好步接着上一个好步算。
     // 游戏循环本身不会给出这样的步长。
-    describe('a time step that is not a finite number', () => {
+    // 曾经的缺陷：NaN / -Infinity / 0 / 负数的一步会把目标放掉，之后两个好步按“目标消失”处理
+    // （十字和子弹离开目标最多 1.26°，前后约 0.15 秒）；+Infinity 被当成一步无限长的好步。
+    describe('a time step that is not a positive finite number', () => {
       interface Scene {
         rig: Rig;
         mover: Mover;
@@ -994,7 +997,13 @@ describe('gun aim assist', () => {
         weight: number;
         /** 十字画在多远 */
         range: number;
+        /** 辅助是否压着这个目标 */
+        holdsTarget: boolean;
+        /** 提前量标记是否给了这个目标 */
+        marksTarget: boolean;
       }
+
+      const BAD_STEPS = [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, 0, -DT];
 
       const SCENES: Record<string, () => Scene> = {
         // 静止目标，辅助已经滑到位
@@ -1026,47 +1035,83 @@ describe('gun aim assist', () => {
         },
       };
 
-      function outputs(rig: Rig): Outputs {
+      const CASES = Object.keys(SCENES).flatMap((scene) =>
+        BAD_STEPS.map((dt): [number, string] => [dt, scene])
+      );
+
+      function outputs({ rig, mover }: Scene): Outputs {
         return {
           bullet: assisted(rig),
           cross: rendered(rig, 1),
           weight: rig.solver.getAssistWeight(),
           range: rig.solver.getRenderAssistDistance(1),
+          holdsTarget: rig.solver.getAssistTarget() === mover.object,
+          marksTarget: rig.solver.getPipTarget() === mover.object,
         };
       }
 
-      function expectUnchanged(now: Outputs, before: Outputs, label: string): void {
-        expect(toDeg(angleBetween(now.bullet, before.bullet)), `${label}: bullet`).toBeLessThan(
+      function expectSame(now: Outputs, reference: Outputs, label: string): void {
+        expect(now.holdsTarget, `${label}: held target`).toBe(reference.holdsTarget);
+        expect(now.marksTarget, `${label}: lead marker`).toBe(reference.marksTarget);
+        expect(toDeg(angleBetween(now.bullet, reference.bullet)), `${label}: bullet`).toBeLessThan(
           1e-9
         );
-        expect(toDeg(angleBetween(now.cross, before.cross)), `${label}: cross`).toBeLessThan(1e-9);
-        expect(Math.abs(now.weight - before.weight), `${label}: strength`).toBeLessThan(1e-9);
-        expect(Math.abs(now.range - before.range), `${label}: cross range`).toBeLessThan(1e-6);
+        expect(toDeg(angleBetween(now.cross, reference.cross)), `${label}: cross`).toBeLessThan(
+          1e-9
+        );
+        expect(Math.abs(now.weight - reference.weight), `${label}: strength`).toBeLessThan(1e-9);
+        expect(Math.abs(now.range - reference.range), `${label}: cross range`).toBeLessThan(1e-6);
       }
 
-      it.each([
-        [Number.NaN, 'a held target'],
-        [Number.POSITIVE_INFINITY, 'a held target'],
-        [Number.NEGATIVE_INFINITY, 'a held target'],
-        [Number.NaN, 'a target the assist is still sliding onto'],
-        [Number.NEGATIVE_INFINITY, 'a target the assist is still sliding onto'],
-        [Number.NaN, 'a crossing target'],
-        [Number.NEGATIVE_INFINITY, 'a crossing target'],
-      ])('one step of %s changes nothing with %s', (dt, scene) => {
-        const { rig } = SCENES[scene]();
-        const before = outputs(rig);
-        expect(toDeg(angleBetween(before.bullet, rig.forward))).toBeGreaterThan(0.05);
+      it.each(CASES)('one step of %s changes nothing with %s', (dt, name) => {
+        const scene = SCENES[name]();
+        const before = outputs(scene);
+        expect(before.holdsTarget).toBe(true);
+        expect(toDeg(angleBetween(before.bullet, scene.rig.forward))).toBeGreaterThan(0.01);
 
-        observe(rig, dt);
+        observe(scene.rig, dt);
 
-        // 子弹与十字的方向、辅助强度、十字的距离都原样留着：既不衰减，也不前进
-        expectUnchanged(outputs(rig), before, 'the bad step');
+        // 压着的目标、子弹与十字的方向、辅助强度、十字的距离都原样留着：既不衰减，也不前进
+        expectSame(outputs(scene), before, 'the bad step');
       });
 
-      it.each(
-        Object.keys(SCENES).flatMap((scene) => BAD.map((dt): [number, string] => [dt, scene]))
-      )('lets no bad number out after one step of %s with %s', (dt, scene) => {
-        const { rig, mover } = SCENES[scene]();
+      it.each(CASES)(
+        'carries on after one step of %s with %s as if that step had never happened',
+        (dt, name) => {
+          const disturbed = SCENES[name]();
+          const undisturbed = SCENES[name]();
+
+          observe(disturbed.rig, dt);
+
+          // 之后的每个好步都与没有坏步的那一份一模一样：没有松开目标，也没有多走或少走
+          for (let i = 0; i < 30; i += 1) {
+            step(disturbed.rig);
+            step(undisturbed.rig);
+            expectSame(outputs(disturbed), outputs(undisturbed), `good step ${i}`);
+            expect(outputs(disturbed).holdsTarget, `good step ${i}`).toBe(true);
+          }
+        }
+      );
+
+      it('skips a run of bad steps the same way', () => {
+        const disturbed = SCENES['a crossing target']();
+        const undisturbed = SCENES['a crossing target']();
+        const before = outputs(disturbed);
+
+        for (const dt of [...BAD_STEPS, ...BAD_STEPS]) {
+          observe(disturbed.rig, dt);
+          expectSame(outputs(disturbed), before, `bad step of ${dt}`);
+        }
+
+        for (let i = 0; i < 30; i += 1) {
+          step(disturbed.rig);
+          step(undisturbed.rig);
+          expectSame(outputs(disturbed), outputs(undisturbed), `good step ${i}`);
+        }
+      });
+
+      it.each(CASES)('lets no bad number out after one step of %s with %s', (dt, name) => {
+        const { rig, mover } = SCENES[name]();
 
         observe(rig, dt);
 
@@ -1092,56 +1137,6 @@ describe('gun aim assist', () => {
         expect(errorDeg(rig, leadPointOf(rig, mover))).toBeLessThan(1e-4);
         expect(rig.solver.getAssistWeight()).toBeCloseTo(1, 6);
       });
-
-      /** 坏掉的一步之后接着走好步：每一步都还压着目标，输出与坏步之前一样 */
-      function expectCarriesOn(dt: number): void {
-        const { rig, mover } = SCENES['a held target']();
-        const before = outputs(rig);
-
-        observe(rig, dt);
-
-        for (let i = 0; i < 6; i += 1) {
-          step(rig);
-          expect(rig.solver.getAssistTarget(), `good step ${i}`).toBe(mover.object);
-          expectUnchanged(outputs(rig), before, `good step ${i}`);
-        }
-      }
-
-      it('carries straight on with the held target after one step of Infinity', () => {
-        expectCarriesOn(Number.POSITIVE_INFINITY);
-      });
-
-      // FINDING（裁定里的“下一步照常”）：坏步是 NaN / -Infinity 时，坏步本身什么都没变，但解算器在
-      // 这一步把目标放掉了（getAssistTarget() 为 null，提前量标记也消失），接下来的两个好步按
-      // “目标消失”处理：静止目标压在 2° 处时，偏移 2° → 1.21° → 0.74°，强度 1 → 0.61 → 0.37，
-      // 十字的距离 300 → 418 → 490 米；第三个好步才重新接上，再用约 0.1 秒滑回去——
-      // 一帧坏帧让十字和子弹离开目标最多 1.26°，前后约 0.15 秒。没有 NaN 漏出来，最后也回到目标上
-      // （上面那条用例）。步长为 0 或负数时表现相同。
-      // 期望：坏步被跳过，下一个好步仍然压着同一个目标，偏移、强度、十字距离与坏步之前一样。
-      // 如果坏帧之后短暂松开再接上是可以接受的，删掉这条即可。
-      it.fails.each([Number.NaN, Number.NEGATIVE_INFINITY])(
-        'carries straight on with the held target after one step of %s',
-        (dt) => {
-          expectCarriesOn(dt);
-        }
-      );
-
-      // FINDING（裁定里的“坏的一步什么都不改变”）：+Infinity 没有被跳过，而是被当成一步无限长的
-      // 好步——滑动在这一步里直接走完（滑到一半时：偏移 1.26° → 2°，强度 0.63 → 1，十字距离
-      // 410 → 300 米）；横穿的目标速度估计被这一步拉低（位移 ÷ ∞ = 0），提前量点朝机体缩回去
-      // 约三分之一：子弹与十字在这一步里离开提前量点 0.8°，之后几步才追回来。
-      // 期望：与 NaN / -Infinity 一样，这一步不衰减也不前进，输出原样留着。
-      it.fails.each(['a target the assist is still sliding onto', 'a crossing target'])(
-        'one step of Infinity changes nothing with %s',
-        (scene) => {
-          const { rig } = SCENES[scene]();
-          const before = outputs(rig);
-
-          observe(rig, Number.POSITIVE_INFINITY);
-
-          expectUnchanged(outputs(rig), before, 'the bad step');
-        }
-      );
     });
 
     it.each([0, -DT, Number.NaN, Number.POSITIVE_INFINITY])(
