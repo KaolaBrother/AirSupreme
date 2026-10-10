@@ -1289,11 +1289,16 @@ export class EnemyAI {
         continue;
       }
       if (child instanceof THREE.Mesh) {
-        child.geometry.dispose();
-        if (Array.isArray(child.material)) {
-          child.material.forEach((m) => m.dispose());
-        } else if (child.material instanceof THREE.Material) {
-          child.material.dispose();
+        // 本机自己的几何体随机体释放；按机型缓存的材质 / 共享几何体（userData.sharedResource）
+        // 同型号的其它飞机还在用，不释放
+        if (child.geometry.userData.sharedResource !== true) child.geometry.dispose();
+        const materials: THREE.Material[] = Array.isArray(child.material)
+          ? child.material
+          : child.material instanceof THREE.Material
+            ? [child.material]
+            : [];
+        for (const material of materials) {
+          if (material.userData.sharedResource !== true) material.dispose();
         }
       }
     }

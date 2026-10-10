@@ -54,6 +54,11 @@ export class MissileRack {
     return this.state !== 'ready';
   }
 
+  /** 锁定已完成、齐射打到一半（第一发已出去，后面的还没打完） */
+  public isFiring(): boolean {
+    return this.state === 'salvo';
+  }
+
   /** 锁定进度 0..1（未在锁定时为 0） */
   public getLockProgress(): number {
     return this.state === 'locking' ? Math.min(1, this.lockTime / this.tuning.LOCK_SECONDS) : 0;

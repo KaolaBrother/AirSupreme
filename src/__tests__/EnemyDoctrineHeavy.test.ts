@@ -330,15 +330,9 @@ describe('HEAVY tail gun (spec §3)', () => {
     expect(without.current.shots.filter((shot) => shot.weapon === 'heavy-shell').length).toBe(0);
   });
 
-  // FINDING: spec §3a — "Player not targetable (respawning, story hold, dead): no enemy weapon of
-  // any kind fires — token-free weapons such as the Heavy's tail gun included — and no lock or
-  // charge starts." The token-free tail gun (d90d661) is documented to keep the rule
-  // ("防御性射击也只在这时打出", DoctrineContext.weaponsFree), but weaponsFree is derived only from
-  // "a player position was passed in", and LevelManager always passes one. So a Heavy keeps
-  // shooting its tail gun at a respawning player parked astern. Reproduce: SystemRig (real
-  // EnemySystem) at level 1, one HEAVY, player held 200 m directly astern, playerTargetable = false
-  // for 15 s: 12 tail-gun rounds are fired (0 token holders).
-  it.fails('the tail gun stays silent while the player cannot be attacked (respawning)', () => {
+  // 规格 §3a：玩家不可被攻击（复活中 / 剧情停顿 / 阵亡）时任何敌方武器都不开火——不需要令牌的
+  // 重型机尾炮也一样。（此前的缺陷：尾炮对停在正后方 200 米、正在复活的玩家 15 秒打出 12 发。）
+  it('the tail gun stays silent while the player cannot be attacked (respawning, spec §3a)', () => {
     const randomSpy = vi.spyOn(Math, 'random').mockImplementation(seededGameRandom(5));
     const system = new SystemRig({ level: 1, difficulty: 3 });
     try {

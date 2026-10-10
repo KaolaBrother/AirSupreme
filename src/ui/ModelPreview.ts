@@ -804,7 +804,7 @@ export class ModelPreview {
       },
     });
 
-    // 友军僚机：专用机体，与传入的敌机配置无关（战斗里僚机借用任意一种敌机的数值）
+    // 友军僚机：专用机体，与传入的敌机配置无关（战斗里僚机用自己固定的一份数值 WINGMAN_CONFIG）
     this.aircrafts.push({
       id: 'allied_wingman',
       name: tr({ en: 'Allied Wingman', zh: '友军僚机' }),

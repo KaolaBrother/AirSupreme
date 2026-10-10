@@ -414,48 +414,33 @@ describe('SNIPER standoff (spec §3: orbits 380-520 m out)', () => {
     }
   });
 
-  // FINDING: spec §3a — "Sniper standoff: while it is neither fleeing nor charging nor outside the
-  // leash, a Sniper is inside 380–520 m for at least 60 % of the time against a player flying
-  // straight at cruise speed or turning gently. It may use the full throttle range to keep
-  // station." The band is not held. The Sniper orbits at 1.0x of its base speed (45 m/s, the same
-  // as the player's cruise speed) and does not use its throttle to keep station, so against a
-  // player who simply flies straight it either happens to orbit the right way round (seeds 5-7:
-  // in the band all the time) or falls behind and trails at 507-673 m (seed 4: in the band 3 % of
-  // the counted time, 5 lances in 70 s instead of about 15). Against a gentle turn of 0.1 rad/s it
-  // is in the band 53 %, 11 %, 56 % and 57 % of the time (seeds 4-7). Reproduce:
-  // FleetRig({ capacity: 2, seed }), one SNIPER 450 m out at 70 degrees off the nose, player at
-  // 45 m/s for 80 s; from t = 10 s count the steps on which it is not charging (no beam shown),
-  // not fleeing (from the player coming inside 220 m until the range is back to 380 m) and not
-  // beyond 900 m, and take the share of those with the range inside 380-520 m.
-  it.fails(
-    'is inside 380-520 m at least 60 % of the time against a straight or gently turning player',
-    () => {
-      for (const seed of [4, 5, 6, 7]) {
-        for (const yaw of [0, 0.1]) {
-          const current = makeRig({ capacity: 2, seed });
-          const sniper = current.addJet(
-            EnemyType.SNIPER,
-            pointAround(current.player, 450, 70 * DEG)
-          );
-          current.pilot = (active) => active.turnPlayer(yaw * DT);
-          let counted = 0;
-          let inBand = 0;
-          let fleeing = false;
-          current.run(80, () => {
-            if (current.time < 10) return;
-            const distance = current.distanceTo(sniper);
-            if (distance < FLEE_DISTANCE) fleeing = true;
-            else if (distance >= 380) fleeing = false;
-            if (fleeing || sniper.isTelegraphing() || distance > SPEC.LEASH) return;
-            counted++;
-            if (distance >= 380 && distance <= 520) inBand++;
-          });
-          expect(counted, `steps that count, seed ${seed}, turn ${yaw} rad/s`).toBeGreaterThan(600);
-          expect(inBand / counted, `seed ${seed}, turn ${yaw} rad/s`).toBeGreaterThanOrEqual(0.6);
-        }
+  // 规格 §3a：既不在逃离、也不在蓄力、也没出拴绳时，面对直飞（巡航速度）或缓转的玩家，狙击机
+  // 至少 60% 的时间在 380–520 米内（可以用满油门范围保持站位）。从第 10 秒起数：不在蓄力（没有
+  // 瞄准光束）、不在逃离（玩家进到 220 米内起、到距离回到 380 米为止）、不超出 900 米的步数里，
+  // 距离在 380–520 米的比例。
+  it('is inside 380-520 m at least 60 % of the time against a straight or gently turning player (spec §3a)', () => {
+    for (const seed of [4, 5, 6, 7]) {
+      for (const yaw of [0, 0.1]) {
+        const current = makeRig({ capacity: 2, seed });
+        const sniper = current.addJet(EnemyType.SNIPER, pointAround(current.player, 450, 70 * DEG));
+        current.pilot = (active) => active.turnPlayer(yaw * DT);
+        let counted = 0;
+        let inBand = 0;
+        let fleeing = false;
+        current.run(80, () => {
+          if (current.time < 10) return;
+          const distance = current.distanceTo(sniper);
+          if (distance < FLEE_DISTANCE) fleeing = true;
+          else if (distance >= 380) fleeing = false;
+          if (fleeing || sniper.isTelegraphing() || distance > SPEC.LEASH) return;
+          counted++;
+          if (distance >= 380 && distance <= 520) inBand++;
+        });
+        expect(counted, `steps that count, seed ${seed}, turn ${yaw} rad/s`).toBeGreaterThan(600);
+        expect(inBand / counted, `seed ${seed}, turn ${yaw} rad/s`).toBeGreaterThanOrEqual(0.6);
       }
     }
-  );
+  });
 });
 
 describe('SNIPER flees a player who closes inside 220 m (spec §3)', () => {

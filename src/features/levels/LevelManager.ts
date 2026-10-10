@@ -31,10 +31,12 @@ import {
   type OnboardingWaveBeatProfile,
 } from '@/ui/OnboardingManager';
 import {
+  SPAWN_PORTAL_SECONDS,
   TRAIL_SPAWN_INTERVAL,
   WAVE_GROUP_DISTANCE_RANGE,
   WAVE_GROUP_MIN_DISTANCE,
   planWaveGroupCenters,
+  waveDrawOffset,
   type IWaveGroupCenter,
 } from './WaveArrival';
 
@@ -46,6 +48,11 @@ const SPAWN_TERRAIN_CLEARANCE = 45;
 const WAVE_GROUP_SPREAD = 60;
 /** 玩家位置单步变化折算速度超过该值（米/秒）视为瞬移，不用于提前量 */
 const PLAYER_TELEPORT_SPEED = 250;
+/** 规划夹击时估计的出场间隔（秒）：普通波次的出场间隔（开波时本波的事件还没定下来） */
+const PINCER_PLAN_SPAWN_INTERVAL = 0.5;
+/** 玩家转弯角速度的平滑时间常数（秒） */
+const PLAYER_TURN_SMOOTHING = 0.5;
+const tmpPlayerOffset = new Vector3();
 /** 条令开火节奏倍率（难度档 × 关卡曲线的冷却倍率）的允许范围 */
 const MIN_CADENCE_SCALE = 0.5;
 const MAX_CADENCE_SCALE = 2.5;
@@ -144,6 +151,9 @@ export class LevelManager {
   private readonly lastPlayerPosition = new Vector3();
   private readonly playerStep = new Vector3();
   private hasLastPlayerPosition = false;
+  /** 玩家水平航向（弧度，atan2(x, z)；NaN = 还没有）与它的平滑转动角速度（弧度/秒） */
+  private playerHeading = Number.NaN;
+  private playerTurnRate = 0;
 
   // 回调
   public onWaveStart?: (wave: number) => void;
@@ -265,16 +275,34 @@ export class LevelManager {
   /**
    * 按本波的到场方式算出各路群中心（WaveArrival）：距玩家 600-800 米，
    * 整群（含 60 米散布）落在战场范围内；夹击的两路从玩家看相隔 90-150°。
+   * 夹击从敌机现身时玩家大约在的位置来规划：开波后按出场间隔一架架开传送门，传送门
+   * SPAWN_PORTAL_SECONDS 秒后敌机才现身，这段时间玩家一直在飞——按当前速度与转弯角速度外推到
+   * 本波各架现身的平均时刻（出场间隔按缺省的 PINCER_PLAN_SPAWN_INTERVAL 估计）。
    */
   private planWaveGroups(playerPosition: Vector3): void {
-    const arrival = this.getCurrentWaveConfig()?.arrival ?? 'group';
+    const wave = this.getCurrentWaveConfig();
+    const arrival = wave?.arrival ?? 'group';
+    let x = playerPosition.x;
+    let z = playerPosition.z;
+    if (arrival === 'pincer' && this.hasLastPlayerPosition) {
+      const lead =
+        SPAWN_PORTAL_SECONDS + (PINCER_PLAN_SPAWN_INTERVAL * ((wave?.lineup.length ?? 0) + 1)) / 2;
+      this.predictPlayerOffset(lead, tmpPlayerOffset);
+      const aheadX = x + tmpPlayerOffset.x;
+      const aheadZ = z + tmpPlayerOffset.z;
+      if (Number.isFinite(aheadX) && Number.isFinite(aheadZ)) {
+        x = this.clampToBattlefield(aheadX);
+        z = this.clampToBattlefield(aheadZ);
+      }
+    }
     this.waveGroupCount = planWaveGroupCenters(
       arrival,
-      playerPosition.x,
-      playerPosition.z,
+      x,
+      z,
       this.BATTLEFIELD_MAX - WAVE_GROUP_SPREAD,
       Math.random,
-      this.waveGroupCenters
+      this.waveGroupCenters,
+      waveDrawOffset(this.currentLevel?.id ?? 0, this.currentWave)
     );
   }
 
@@ -479,8 +507,32 @@ export class LevelManager {
   }
 
   /**
-   * 玩家速度估计：位置逐步差分，按约 0.1 秒时间常数平滑；
-   * 瞬移（复活 / 读档 / 开发工具摆位）或非有限值时清零重来。
+   * 玩家 seconds 秒后的水平位移估计（写入 out.x / out.z）：按当前速度与转弯角速度沿圆弧外推，
+   * 几乎不转弯时就是直线
+   */
+  private predictPlayerOffset(seconds: number, out: Vector3): Vector3 {
+    const speed = Math.hypot(this.playerVelocity.x, this.playerVelocity.z);
+    const turn = this.playerTurnRate * seconds;
+    out.set(0, 0, 0);
+    if (!(speed > 1e-3) || !Number.isFinite(this.playerHeading)) {
+      out.x = this.playerVelocity.x * seconds;
+      out.z = this.playerVelocity.z * seconds;
+    } else if (Math.abs(turn) < 1e-3) {
+      out.x = Math.sin(this.playerHeading) * speed * seconds;
+      out.z = Math.cos(this.playerHeading) * speed * seconds;
+    } else {
+      // 航向 h 以角速度 w 匀速转：∫ v·(sin(h + w·t), cos(h + w·t)) dt
+      const radius = speed / this.playerTurnRate;
+      const heading = this.playerHeading;
+      out.x = radius * (Math.cos(heading) - Math.cos(heading + turn));
+      out.z = radius * (Math.sin(heading + turn) - Math.sin(heading));
+    }
+    return out;
+  }
+
+  /**
+   * 玩家速度估计：位置逐步差分，按约 0.1 秒时间常数平滑；转弯角速度由平滑后速度的航向逐步差分，
+   * 按 PLAYER_TURN_SMOOTHING 秒平滑。瞬移（复活 / 读档 / 开发工具摆位）或非有限值时清零重来。
    */
   private trackPlayerVelocity(deltaTime: number, playerPosition: Vector3): void {
     if (
@@ -498,14 +550,34 @@ export class LevelManager {
       } else {
         this.playerVelocity.set(0, 0, 0);
       }
+      this.trackPlayerTurn(deltaTime);
     }
     this.lastPlayerPosition.copy(playerPosition);
     this.hasLastPlayerPosition = true;
   }
 
+  private trackPlayerTurn(deltaTime: number): void {
+    if (!(Math.hypot(this.playerVelocity.x, this.playerVelocity.z) > 1)) {
+      this.playerHeading = Number.NaN;
+      this.playerTurnRate = 0;
+      return;
+    }
+    const heading = Math.atan2(this.playerVelocity.x, this.playerVelocity.z);
+    if (Number.isFinite(this.playerHeading)) {
+      let delta = heading - this.playerHeading;
+      if (delta > Math.PI) delta -= Math.PI * 2;
+      else if (delta < -Math.PI) delta += Math.PI * 2;
+      const k = 1 - Math.exp(-deltaTime / PLAYER_TURN_SMOOTHING);
+      this.playerTurnRate += (delta / deltaTime - this.playerTurnRate) * k;
+    }
+    this.playerHeading = heading;
+  }
+
   private resetPlayerVelocity(): void {
     this.playerVelocity.set(0, 0, 0);
     this.hasLastPlayerPosition = false;
+    this.playerHeading = Number.NaN;
+    this.playerTurnRate = 0;
   }
 
   /** 同时在场的敌机上限：设备基础值（GameConfig）+ 关卡曲线加成（后期同时来袭更多） */

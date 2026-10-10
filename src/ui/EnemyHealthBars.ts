@@ -156,7 +156,7 @@ function ensureTargetMarkerStyle(): void {
 /** 兜底标签（按界面语言取值） */
 const FALLBACK_ENEMY_LABEL: LocalizedText = { en: 'Hostile', zh: '敌方目标' };
 const FALLBACK_FRIENDLY_LABEL: LocalizedText = { en: 'Friendly', zh: '友军' };
-/** 没有呼号的友军僚机（机体借用敌机机型的数值，名字与机库展示的一致，不显示借来的型号名） */
+/** 没有呼号的友军僚机（固定数值 WINGMAN_CONFIG，不随敌机机型变；名字与机库展示的一致，不显示型号名） */
 const FRIENDLY_WINGMAN_LABEL: LocalizedText = { en: 'Allied Wingman', zh: '友军僚机' };
 
 /**

@@ -3,7 +3,7 @@ import type { WaveArrival } from '@/features/terrain/LevelConfig';
 /**
  * 波次到场编排（纯函数，随机数由调用方传入）：
  * 按到场方式算出本波各路敌机群的中心——一群同来 / 鱼贯而入是一个中心，
- * 两路夹击是两个中心，从玩家看相隔 90–150°。
+ * 两路夹击是两个中心，从玩家看相隔 90–150°（调用方按敌机现身时玩家大约在的位置来规划）。
  */
 
 /** 群中心距玩家的距离（米）：600–800 */
@@ -12,6 +12,13 @@ export const WAVE_GROUP_DISTANCE_RANGE = 200;
 /** 夹击两路从玩家看的夹角范围（度） */
 export const PINCER_MIN_ANGLE_DEG = 90;
 export const PINCER_MAX_ANGLE_DEG = 150;
+/**
+ * 规划夹角时两头各留出的余量（度）：只在 105–135° 之间取。规划的是敌机现身时玩家大约在的位置，
+ * 玩家转弯、各架现身有先后，现身时看到的夹角会偏开一些，仍要落在 90–150° 以内
+ */
+export const PINCER_PLAN_MARGIN_DEG = 15;
+/** 传送门打开到敌机现身的时间（秒）：SpawnPortal 的生成时间，规划夹击时据此估计玩家的位置 */
+export const SPAWN_PORTAL_SECONDS = 5;
 /** 鱼贯而入：相邻两架的出场间隔（秒）——敌机一架接一架到场，而不是一起出现 */
 export const TRAIL_SPAWN_INTERVAL = 2.5;
 
@@ -75,7 +82,18 @@ function placeSingleCenter(
 }
 
 /**
- * 夹击的两个群中心：两路从玩家看相隔 90–150°，都在界内。
+ * 某一关某一波的夹角抽签偏移（0..1，只由关卡号与波次决定）：加到随机数上再取小数部分。
+ * 随机数状态相同的两波（例如每次跳关前都重置成同一个种子）也抽到不同的夹角，同一波仍抽到同一个
+ */
+export function waveDrawOffset(levelId: number, waveIndex: number): number {
+  const key =
+    (Number.isFinite(levelId) ? levelId : 0) * 37 + (Number.isFinite(waveIndex) ? waveIndex : 0);
+  const value = (key * 0.6180339887498949) % 1;
+  return value < 0 ? value + 1 : value;
+}
+
+/**
+ * 夹击的两个群中心：两路从玩家看相隔 90–150°（规划时取 105–135°），都在界内。
  * 先随机取；玩家贴着边 / 角、随机取不到时扫一圈方位，取夹角最接近 120° 的一对
  * （角落里界内的扇面不足 90° 时退而取能做到的最大夹角）。
  */
@@ -84,13 +102,17 @@ function placePincerCenters(
   pz: number,
   limit: number,
   rng: () => number,
+  drawOffset: number,
   first: IWaveGroupCenter,
   second: IWaveGroupCenter
 ): void {
-  const spread = PINCER_MAX_ANGLE_DEG - PINCER_MIN_ANGLE_DEG;
+  const low = PINCER_MIN_ANGLE_DEG + PINCER_PLAN_MARGIN_DEG;
+  const spread = PINCER_MAX_ANGLE_DEG - PINCER_PLAN_MARGIN_DEG - low;
+  const offset = Number.isFinite(drawOffset) ? drawOffset : 0;
   for (let attempt = 0; attempt < PINCER_ATTEMPTS; attempt++) {
     const bearing = rng() * Math.PI * 2;
-    const separation = (PINCER_MIN_ANGLE_DEG + rng() * spread) * DEG_TO_RAD;
+    const draw = (rng() + offset) % 1;
+    const separation = (low + (draw < 0 ? draw + 1 : draw) * spread) * DEG_TO_RAD;
     const otherBearing = bearing + (rng() < 0.5 ? separation : -separation);
     const firstDistance = randomDistance(rng);
     const secondDistance = randomDistance(rng);
@@ -163,8 +185,10 @@ function placePincerCenters(
 
 /**
  * 算出本波各路的群中心，写入 out（至少两个元素），返回路数：夹击 2，其余 1。
+ * @param playerX 玩家的位置（夹击时传入敌机现身时玩家大约在的位置）
  * @param limit 群中心坐标绝对值的上限（战场半边长减去群内散布半径）
  * @param rng 返回 [0, 1) 的随机数
+ * @param drawOffset 夹角抽签的偏移（waveDrawOffset，缺省 0）
  */
 export function planWaveGroupCenters(
   arrival: WaveArrival,
@@ -172,12 +196,13 @@ export function planWaveGroupCenters(
   playerZ: number,
   limit: number,
   rng: () => number,
-  out: IWaveGroupCenter[]
+  out: IWaveGroupCenter[],
+  drawOffset: number = 0
 ): number {
   const px = Number.isFinite(playerX) ? playerX : 0;
   const pz = Number.isFinite(playerZ) ? playerZ : 0;
   if (arrival === 'pincer') {
-    placePincerCenters(px, pz, limit, rng, out[0], out[1]);
+    placePincerCenters(px, pz, limit, rng, drawOffset, out[0], out[1]);
     return 2;
   }
   placeSingleCenter(px, pz, limit, rng, out[0]);

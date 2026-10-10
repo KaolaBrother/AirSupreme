@@ -533,29 +533,35 @@ describe('GameCoordinator: jamming, cloak and jet missiles', () => {
         }
       });
 
-      // FINDING（与规格差一步）：规格 §3 JAMMER 写的是“范围内最后一架干扰机被击毁时，效果立即
-      // 结束”。实际晚一个模拟步（1/60 秒）：update() 里先推进导引头（读的是上一步的干扰判定），
-      // 然后 EnemySystem 复核干扰，最后才做命中结算——机炮、导弹、特殊武器的伤害都在判定之后。
-      // 击毁因此总是落在本步的判定之后：下一步的导引头读到的仍是“受干扰”，锁定照旧半速，标签
-      // 也还在；再下一步才恢复。飞出 800 米没有这个问题（敌机的移动在同一步的判定之前）。
-      it.fails('goes back to the normal lock rate on the step after the kill', () => {
+      // 规格 §3a：“立即”= 最后一架干扰机被击毁后一个模拟步之内（导引头读的是上一步的干扰判定，
+      // 接受一步的滞后）。update() 里先推进导引头，再复核干扰，最后做命中结算——击毁落在本步的判定
+      // 之后，所以击毁后的第一步可以还是半速 / 还有标签，第二步起必须恢复。
+      it('goes back to the normal lock rate within one step of the kill (spec §3a)', () => {
         const fighter = fighterOnNose();
         const jammer = rig.spawn(EnemyType.JAMMER, rig.at(200, 0, -300));
         trackTo(fighter, 0.1);
 
         rig.kill(jammer);
 
+        // 第一步：上一步的判定（受干扰）或已经恢复，二者之一；不会更慢，也不会停住
+        const first = rig.progressStep();
+        const lagged = Math.abs(first - DT / (2 * LOCK_TIME)) < 1e-9;
+        const recovered = Math.abs(first - DT / LOCK_TIME) < 1e-9;
+        expect(lagged || recovered, `progress on the first step: ${first}`).toBe(true);
+        // 第二步：一定已经恢复
         expect(rig.progressStep()).toBeCloseTo(DT / LOCK_TIME, 9);
       });
 
-      // FINDING：同上——击毁后的那一步，捕获环上还写着 “JAMMED”
-      it.fails('takes the tag away on the step after the kill', () => {
+      it('takes the tag away within one step of the kill (spec §3a)', () => {
         fighterOnNose();
         const jammer = rig.spawn(EnemyType.JAMMER, rig.at(200, 0, -300));
         rig.step(3);
         expect(jamTagText()).toBe('JAMMED');
 
         rig.kill(jammer);
+        rig.step();
+        // 第一步：标签可以还在（一步滞后），但只能是 “JAMMED” 或已经收起
+        expect([null, 'JAMMED']).toContain(jamTagText());
         rig.step();
 
         expect(jamTagText()).toBeNull();
@@ -655,20 +661,81 @@ describe('GameCoordinator: jamming, cloak and jet missiles', () => {
       });
     });
 
-    // 规格没有单独写“被 EMP 瘫痪的干扰机”：§2.7 列出的瘫痪效果是不转向、不开火、交还令牌、
-    // 取消蓄力、现形，没有“停止干扰”；JAMMER 的条件只有“存活、在 800 米内”。按字面，它仍在干扰。
-    it('keeps jamming while the Jammer is stunned by an EMP (it is alive and in range)', () => {
-      const fighter = fighterOnNose();
-      const jammer = rig.spawn(EnemyType.JAMMER, rig.at(200, 0, -300));
-      trackTo(fighter, 0.05);
-
-      jammer.applyStun(5);
-      expect(jammer.isStunned()).toBe(true);
-
-      for (let i = 0; i < 20; i += 1) {
-        expect(rig.progressStep(), `step ${i}`).toBeCloseTo(DT / (2 * LOCK_TIME), 9);
-        expect(jamTagText()).toBe('JAMMED');
+    // 规格 §3a：被 EMP 瘫痪的干扰机不干扰——瘫痪期间它不计入锁定减速和 “JAMMED” 标签；瘫痪结束后
+    // 恢复干扰。瘫痪和击毁一样落在两步之间，所以同样接受一步的滞后。
+    describe('a Jammer stunned by an EMP (spec §3a)', () => {
+      /**
+       * 测试台里 LevelManager.update 是替身，敌机自己不走时钟：每一步在“敌机更新”的时刻让这架
+       * 干扰机原地走一步（只推进它的瘫痪计时，位置放回原处）。
+       */
+      function tickInPlace(jammer: EnemyAI, steps: number): void {
+        for (let i = 0; i < steps; i += 1) {
+          rig.duringEnemyUpdate(() => {
+            const at = jammer.getMesh().position.clone();
+            jammer.velocity.set(0, 0, 0);
+            jammer.updateKinematic(DT);
+            jammer.getMesh().position.copy(at);
+          });
+        }
       }
+
+      it('does not jam while the stun lasts: the lock fills at the normal rate, no tag', () => {
+        const fighter = fighterOnNose();
+        const jammer = rig.spawn(EnemyType.JAMMER, rig.at(200, 0, -300));
+        trackTo(fighter, 0.05);
+        expect(jamTagText()).toBe('JAMMED');
+
+        jammer.applyStun(5);
+        expect(jammer.isStunned()).toBe(true);
+        expect(jammer.isAlive(), 'it is alive and in range').toBe(true);
+        rig.step();
+
+        for (let i = 0; i < 20; i += 1) {
+          expect(rig.progressStep(), `step ${i}`).toBeCloseTo(DT / LOCK_TIME, 9);
+          expect(jamTagText()).toBeNull();
+        }
+        expect(jammer.isStunned(), 'still stunned (its own clock has not run)').toBe(true);
+      });
+
+      it('jams again once the stun has ended', () => {
+        const fighter = fighterOnNose();
+        const jammer = rig.spawn(EnemyType.JAMMER, rig.at(200, 0, -300));
+        rig.step(3);
+        expect(jamTagText()).toBe('JAMMED');
+
+        jammer.applyStun(0.5);
+        tickInPlace(jammer, 15);
+        rig.step(15);
+        expect(jammer.isStunned(), 'halfway through the stun').toBe(true);
+        expect(jamTagText()).toBeNull();
+
+        // 剩下的瘫痪时间走完（多走一步把滞后算进去）
+        tickInPlace(jammer, 17);
+        rig.step(17);
+        expect(jammer.isStunned(), 'the stun is over').toBe(false);
+        expect(jammer.getMesh().position.distanceTo(rig.aircraft.position)).toBeLessThan(JAM_RANGE);
+        expect(jamTagText()).toBe('JAMMED');
+
+        trackTo(fighter, 0.05);
+        for (let i = 0; i < 20; i += 1) {
+          expect(rig.progressStep(), `step ${i}`).toBeCloseTo(DT / (2 * LOCK_TIME), 9);
+          expect(jamTagText()).toBe('JAMMED');
+        }
+      });
+
+      it('keeps jamming while another Jammer in range is not stunned', () => {
+        const fighter = fighterOnNose();
+        const stunned = rig.spawn(EnemyType.JAMMER, rig.at(200, 0, -300));
+        rig.spawn(EnemyType.JAMMER, rig.at(-200, 0, -300));
+        trackTo(fighter, 0.05);
+
+        stunned.applyStun(5);
+
+        for (let i = 0; i < 20; i += 1) {
+          expect(rig.progressStep(), `step ${i}`).toBeCloseTo(DT / (2 * LOCK_TIME), 9);
+          expect(jamTagText()).toBe('JAMMED');
+        }
+      });
     });
 
     describe('nothing else about the seeker changes', () => {

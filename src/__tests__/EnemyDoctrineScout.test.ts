@@ -273,17 +273,10 @@ describe('SCOUT pairs (spec §3)', () => {
     expect(checked, 'steps with both Scouts holding tokens').toBeGreaterThan(1000);
   });
 
-  // FINDING: spec §3a — "Scout pairs: when two Scouts hold tokens together, the second one's attack
-  // run starts from a bearing more than 90° away from the first one's, as seen from the player; it
-  // repositions to its assigned bearing before it turns in." The director does assign the pair
-  // bearings 180 degrees apart (test above), but the second Scout does not fly to its side: after
-  // about 5 s of positioning it runs in from wherever it happens to be. Reproduce:
-  // FleetRig({ capacity: 2 }), two SCOUTs at 400 m / 20 degrees and 420 m / 40 degrees off the
-  // nose, 90 s. Take each Scout's attack runs (bursts more than 2.5 s after its previous burst
-  // open a new run) and pair runs of the two Scouts that open within 3 s of each other; the angle
-  // between the two opening positions as seen from the player is 25 degrees (seed 6, straight),
-  // 42 degrees (seed 5, turning 0.3 rad/s) and 89 degrees (seed 72, turning 0.3 rad/s).
-  it.fails('their attack runs start from bearings more than 90 degrees apart', () => {
+  // 规格 §3a：两架侦察机同时持令牌时，第二架的进入从玩家看与第一架相隔 90° 以上——它先飞到
+  // 指派的方位再转进来。每架侦察机每次进入取第一发（距上一次点射超过 2.5 秒算新的一次进入），
+  // 两架在 3 秒内先后开始的进入配成一对，比较两个开火点从玩家看的方位差。
+  it('their attack runs start from bearings more than 90 degrees apart (spec §3a)', () => {
     let pairs = 0;
     const tooClose: string[] = [];
     for (const seed of [5, 6, 71, 72]) {
