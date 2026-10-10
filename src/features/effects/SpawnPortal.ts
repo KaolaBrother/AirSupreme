@@ -15,6 +15,7 @@ import {
   SpriteMaterial,
   Vector3,
 } from 'three';
+import { SPAWN_PORTAL_SECONDS } from '@/features/levels/WaveArrival';
 import { getVfxTextures } from './ParticleSystem';
 
 /** 漩涡/光环层动画参数 */
@@ -70,7 +71,7 @@ export class SpawnPortal {
   private readonly particleColor = new Color();
 
   private lifetime: number = 0;
-  private maxLifetime: number = 5; // 5秒生成时间
+  private maxLifetime: number = SPAWN_PORTAL_SECONDS; // 5 秒生成时间（夹击按它规划群中心）
   private isComplete: boolean = false;
 
   private onComplete?: () => void;

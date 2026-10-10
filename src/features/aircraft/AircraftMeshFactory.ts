@@ -42,6 +42,17 @@ interface CachedMaterials {
 
 const materialsCache: Map<EnemyType, CachedMaterials> = new Map();
 
+/**
+ * 把一组按机型缓存、跨机体共享的材质标记为 userData.sharedResource：销毁单架飞机
+ * （EnemyAI.dispose、机库预览的 disposeModelTree）时跳过它们，同型号的其它飞机照常使用
+ */
+function markSharedMaterials(materials: CachedMaterials): CachedMaterials {
+  for (const material of Object.values(materials) as THREE.Material[]) {
+    material.userData.sharedResource = true;
+  }
+  return materials;
+}
+
 function createAircraftMaterial(
   color: number,
   metalness: number,
@@ -210,7 +221,7 @@ function getOrCreateMaterials(
     weapon: createAircraftMaterial(HOSTILE_LIVERY.weapon, 0.5, 0.45, 0.03),
   };
 
-  materialsCache.set(type, materials);
+  materialsCache.set(type, markSharedMaterials(materials));
   return materials;
 }
 
@@ -418,6 +429,21 @@ const enemyCavityMaterial = new THREE.MeshStandardMaterial({
 });
 // 王牌机的精英白热灯条（只有王牌机使用，模块级共享）
 const eliteTrimMaterial = new THREE.MeshBasicMaterial({ color: HOSTILE_LIVERY.eliteTrim });
+// 以上模块级材质跨所有机体共享：标记 sharedResource，单机销毁时不释放
+for (const material of [
+  nozzleMetalMaterial,
+  nozzleThroatMaterial,
+  canopyFrameMaterial,
+  canopyRimMaterial,
+  afterburnerCoreMaterial,
+  afterburnerHaloMaterial,
+  hostileBurnerCoreMaterial,
+  hostileBurnerHaloMaterial,
+  enemyCavityMaterial,
+  eliteTrimMaterial,
+]) {
+  material.userData.sharedResource = true;
+}
 
 /**
  * 信号灯的指定挂点（机体本地坐标；wingtip 给 +X 侧，另一侧镜像）。包围盒推算在后掠尖翼尖、
@@ -3219,7 +3245,7 @@ function getOrCreateAlliedMaterials(): CachedMaterials {
     }),
     weapon: createAircraftMaterial(ALLIED_LIVERY.weapon, 0.86, 0.26, 0.01),
   };
-  return alliedMaterials;
+  return markSharedMaterials(alliedMaterials);
 }
 
 /**

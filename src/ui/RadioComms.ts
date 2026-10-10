@@ -188,7 +188,10 @@ export function radioFollowOffset(
     const lastAt = startHold + started * perLine;
     lines += started - held - 1 + followSlideProgress(elapsedSeconds - lastAt, slide);
   }
-  return lines * lineHeight;
+  // 行数 × 行高不超过内容高（整行数向上取整也只多出不到半行，而面板至少一行）：正常尺寸下
+  // 不起作用；内容高接近双精度上限时防止乘法溢出成 Infinity
+  const offset = lines * lineHeight;
+  return offset < contentHeight ? offset : contentHeight;
 }
 
 /**

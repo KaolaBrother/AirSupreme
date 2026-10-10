@@ -6,7 +6,7 @@ import {
   type DoctrineCommand,
   type DoctrineContext,
 } from './DoctrineTypes';
-import { angleBetween, horizontalRight } from './DoctrineMath';
+import { angleBetween, angularDistance, horizontalRight, wrapAngle } from './DoctrineMath';
 
 const DEG = Math.PI / 180;
 
@@ -29,8 +29,28 @@ export const WRAITH_TUNING = {
   /** 现形位置：玩家后方四分之一圆（离正后方这个夹角以内）、这个距离以内 */
   REAR_QUARTER: 45 * DEG,
   ATTACK_DISTANCE: 200,
-  /** 隐形时飞向的咬尾位：玩家身后这么远（米） */
+  /**
+   * 隐形时飞向的咬尾位：玩家身后这么远（米）。离咬尾位 SLOT_NEAR 米以内时按玩家的速度、
+   * 外加每米 SLOT_CLOSE_GAIN 米/秒飞，把剩下的距离也收掉（只配平速度会一直吊在咬尾位外面）
+   */
   SLOT_DISTANCE: 150,
+  SLOT_NEAR: 60,
+  SLOT_CLOSE_GAIN: 0.8,
+  /**
+   * 进入方位：离玩家正后方 ATTACK_OFFSET（弧度），在开始隐形时自己所在的那一侧。两架同时持
+   * 令牌时导演按规格 §2.2 把方位错开 ≥ 60°：各占正后方的一侧，都还在后方四分之一圆里。
+   * 指派的方位离自己想要的偏开 SIDE_FLIP_ANGLE 以上（这一侧已被先领到令牌的那架占了）时，
+   * 这次持令牌期间换到另一侧一次；咬尾位的方位不超出后方四分之一圆 − REAR_MARGIN
+   */
+  ATTACK_OFFSET: 44 * DEG,
+  SIDE_FLIP_ANGLE: 10 * DEG,
+  REAR_MARGIN: 1 * DEG,
+  /**
+   * 持令牌时，要在咬尾位那一侧、离正后方不少于“咬尾位的偏角 − SLOT_READY_ANGLE”（弧度）才现形：
+   * 现形预警的 0.7 秒里机头压向玩家，方位会朝正后方滑十来度，离正后方太近就现形，两架就挤到
+   * 一起了（隐形满 5 秒照样现形）
+   */
+  SLOT_READY_ANGLE: 8 * DEG,
   /** 可见、等待下一次隐形时的侧后方待命位：距离（米）与偏离正后方的角度（弧度） */
   FLANK_DISTANCE: 220,
   FLANK_ANGLE: 60 * DEG,
@@ -76,6 +96,9 @@ export class WraithDoctrine extends JetDoctrine {
   private readonly cloak: CloakState = { opacity: 1, hidden: false, flare: 0 };
   private rolled = false;
   private flankSide = 0;
+  /** 这次进攻从正后方的哪一侧进入（1 / -1；0 = 还没选），以及这次持令牌期间是否已经换过边 */
+  private attackSide = 0;
+  private sideFlipped = false;
   /** 本次完全可见已经持续的时间（秒） */
   private visibleTime = 0;
   /** 再次隐形前至少要可见这么久（秒）：平时是 VISIBLE_MIN_SECONDS，生成后第一次是随机的短等待 */
@@ -99,6 +122,7 @@ export class WraithDoctrine extends JetDoctrine {
     this.visibleTime = 0;
     this.visibleNeeded = WRAITH_TUNING.VISIBLE_MIN_SECONDS;
     this.flankSide = 0;
+    this.attackSide = 0;
     this.breaking = false;
   }
 
@@ -111,6 +135,11 @@ export class WraithDoctrine extends JetDoctrine {
     this.visibleNeeded = WRAITH_TUNING.VISIBLE_MIN_SECONDS;
     this.request.wants = false;
     this.setPhase('stagger');
+  }
+
+  /** 不开火的一步：只让机炮的休息计时走（此时没有进行中的点射） */
+  private restGun(context: DoctrineContext): void {
+    this.gun.tick(context.dt, context.cadenceScale, false, false);
   }
 
   private showFully(): void {
@@ -126,8 +155,9 @@ export class WraithDoctrine extends JetDoctrine {
         WRAITH_TUNING.FIRST_CLOAK_MIN +
         context.rng() * (WRAITH_TUNING.FIRST_CLOAK_MAX - WRAITH_TUNING.FIRST_CLOAK_MIN);
     }
-    // 想要的进入方位：玩家的正后方
-    this.request.desiredBearing = Math.atan2(-context.playerForward.x, -context.playerForward.z);
+    this.chooseAttackBearing(context);
+    // 不在进攻阶段时机炮也照常休息：上一次现形打完的那轮的休息时间不留到下一次现形
+    if (this.phase !== 'attack') this.restGun(context);
 
     switch (this.phase) {
       case 'fade':
@@ -159,19 +189,80 @@ export class WraithDoctrine extends JetDoctrine {
     return angleBetween(tmpBack, tmpToSelf) < WRAITH_TUNING.REAR_QUARTER;
   }
 
-  /** 飞向玩家身后的咬尾位（带前置量） */
-  private steerToSlot(context: DoctrineContext, command: DoctrineCommand): void {
-    const length = Math.hypot(context.playerForward.x, context.playerForward.z);
-    if (length > 1e-6) {
-      tmpBack.set(-context.playerForward.x / length, 0, -context.playerForward.z / length);
-    } else {
-      tmpBack.set(0, 0, 1);
+  /**
+   * 想要的进入方位：玩家正后方偏向自己那一侧 ATTACK_OFFSET。持令牌时指派的方位被挤开（这一侧
+   * 已有先到的一架）就换到另一侧，每次持令牌最多换一次
+   */
+  private chooseAttackBearing(context: DoctrineContext): void {
+    const tail = Math.atan2(-context.playerForward.x, -context.playerForward.z);
+    if (this.attackSide === 0) {
+      const own = Math.atan2(
+        context.position.x - context.playerPosition.x,
+        context.position.z - context.playerPosition.z
+      );
+      const off = wrapAngle(own - tail);
+      this.attackSide = off > 0 ? 1 : off < 0 ? -1 : context.rng() < 0.5 ? -1 : 1;
+      this.sideFlipped = false;
     }
+    let desired = wrapAngle(tail + this.attackSide * WRAITH_TUNING.ATTACK_OFFSET);
+    if (!context.hasToken) {
+      this.sideFlipped = false;
+    } else if (
+      !this.sideFlipped &&
+      Number.isFinite(context.attackBearing) &&
+      angularDistance(context.attackBearing, desired) > WRAITH_TUNING.SIDE_FLIP_ANGLE
+    ) {
+      this.sideFlipped = true;
+      this.attackSide = -this.attackSide;
+      desired = wrapAngle(tail + this.attackSide * WRAITH_TUNING.ATTACK_OFFSET);
+    }
+    this.request.desiredBearing = desired;
+  }
+
+  /**
+   * 咬尾位的方位：持令牌时用指派的方位，否则用自己想要的；都限制在后方四分之一圆以内
+   */
+  private slotBearing(context: DoctrineContext): number {
+    const tail = Math.atan2(-context.playerForward.x, -context.playerForward.z);
+    const wanted =
+      context.hasToken && Number.isFinite(context.attackBearing)
+        ? context.attackBearing
+        : this.request.desiredBearing;
+    const limit = WRAITH_TUNING.REAR_QUARTER - WRAITH_TUNING.REAR_MARGIN;
+    let off = Number.isFinite(wanted) ? wrapAngle(wanted - tail) : 0;
+    off = off > limit ? limit : off < -limit ? -limit : off;
+    return tail + off;
+  }
+
+  /** 离正后方至少有咬尾位那么远（差 SLOT_READY_ANGLE 以内也算），且在咬尾位的那一侧 */
+  private isOutAtSlotBearing(context: DoctrineContext): boolean {
+    const tail = Math.atan2(-context.playerForward.x, -context.playerForward.z);
+    const own = Math.atan2(
+      context.position.x - context.playerPosition.x,
+      context.position.z - context.playerPosition.z
+    );
+    const slot = wrapAngle(this.slotBearing(context) - tail);
+    const side = slot >= 0 ? 1 : -1;
+    return side * (wrapAngle(own - tail) - slot) >= -WRAITH_TUNING.SLOT_READY_ANGLE;
+  }
+
+  /** 飞向玩家身后、自己进入方位上的咬尾位（带前置量） */
+  private steerToSlot(context: DoctrineContext, command: DoctrineCommand): void {
+    const bearing = this.slotBearing(context);
+    tmpBack.set(Math.sin(bearing), 0, Math.cos(bearing));
     tmpPoint.copy(context.playerPosition).addScaledVector(tmpBack, WRAITH_TUNING.SLOT_DISTANCE);
     const gap = tmpPoint.distanceTo(context.position);
     tmpPoint.addScaledVector(context.playerVelocity, Math.min(1.5, gap / 120));
     this.steerToward(context, command, tmpPoint);
-    command.throttle = gap > 60 ? DOCTRINE_RULES.MAX_THROTTLE : this.throttleToMatch(context);
+    if (gap > WRAITH_TUNING.SLOT_NEAR || !(context.baseSpeed > 0)) {
+      command.throttle = DOCTRINE_RULES.MAX_THROTTLE;
+      return;
+    }
+    const speed = context.playerVelocity.length() + gap * WRAITH_TUNING.SLOT_CLOSE_GAIN;
+    command.throttle = Math.min(
+      DOCTRINE_RULES.MAX_THROTTLE,
+      Math.max(DOCTRINE_RULES.MIN_THROTTLE, speed / context.baseSpeed)
+    );
   }
 
   /** 可见时被锁定 / 导弹来袭：垂直于视线急转并俯冲 / 爬升；返回 true 表示本步已接管飞行 */
@@ -217,6 +308,9 @@ export class WraithDoctrine extends JetDoctrine {
     this.request.wants = false;
     if (context.hasToken) command.releaseToken = true;
     if (rested) {
+      // 新的一次进攻：从开始隐形时所在的那一侧进入
+      this.attackSide = 0;
+      this.chooseAttackBearing(context);
       this.setPhase('fade');
       this.decideFade(context, command);
       return;
@@ -271,7 +365,10 @@ export class WraithDoctrine extends JetDoctrine {
     }
   }
 
-  /** 隐形（1.5–5 秒）：飞向玩家身后；到位且持令牌、或隐形满 5 秒，就开始现形预警 */
+  /**
+   * 隐形（1.5–5 秒）：飞向玩家身后；持令牌、在后方四分之一圆里且到了咬尾位的方位上，或隐形满
+   * 5 秒，就开始现形预警
+   */
   private decideCloaked(context: DoctrineContext, command: DoctrineCommand): void {
     this.request.wants = true;
     this.cloak.opacity = WRAITH_TUNING.CLOAK_OPACITY;
@@ -281,7 +378,8 @@ export class WraithDoctrine extends JetDoctrine {
     const inPosition =
       this.phaseTime >= WRAITH_TUNING.CLOAK_MIN_SECONDS &&
       context.hasToken &&
-      this.isInAttackPosition(context);
+      this.isInAttackPosition(context) &&
+      this.isOutAtSlotBearing(context);
     if (inPosition || this.phaseTime >= WRAITH_TUNING.CLOAK_MAX_SECONDS) {
       this.cloak.hidden = false;
       command.cue = 'decloak';
@@ -333,6 +431,8 @@ export class WraithDoctrine extends JetDoctrine {
         this.setPhase('stalk');
         this.flyFlank(context, command);
       } else {
+        this.attackSide = 0;
+        this.chooseAttackBearing(context);
         this.setPhase('fade');
         this.decideFade(context, command);
       }
@@ -344,6 +444,7 @@ export class WraithDoctrine extends JetDoctrine {
       // 打完了 / 没领到令牌：拉到侧后方，等可见时间走完
       if (spent && context.hasToken) command.releaseToken = true;
       this.gun.cancel();
+      this.restGun(context);
       this.flyFlank(context, command);
       return;
     }
