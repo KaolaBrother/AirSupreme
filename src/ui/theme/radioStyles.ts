@@ -277,30 +277,15 @@ ${toneBlock('muted', '195, 204, 214')}
 }
 
 /*
- * 矮一些的手机（如 360×800；底部有安全区的 375×812 上按键簇跟着安全区抬高，第二行下沿到按键簇
- * 只剩 24px）：收小的面板去掉上下内边距（约 19px 高），离按键簇只留 2px
- */
-@media (orientation: portrait) and (max-width: 699.98px) and (max-height: 819.98px) {
-  :root[data-hud-warning-rows='2']:not([data-hud-camera='first-person']) #radio-comms[data-density='touch-portrait'] {
-    bottom: calc(max(20px, env(safe-area-inset-bottom)) + var(--touch-deck-h, 240px) + 2px);
-  }
-
-  :root[data-hud-warning-rows='2']:not([data-hud-camera='first-person']) #radio-comms[data-density='touch-portrait'] .rc-panel {
-    padding-top: 0;
-    padding-bottom: 0;
-  }
-}
-
-/*
- * 更矮的竖屏手机（视口不到 790px 高：360×740、375×667，以及带着地址栏的手机浏览器）：
- * 告警通道到按键簇之间放不下面板——完整大小的面板连第一行（导弹告警）都盖住，第二行的下沿
- * 已经贴着、甚至伸进按键簇。这一档不管告警通道显示几行，面板都收小（不显示头像和呼号行），
- * 放到按键簇左侧、静止摇杆的上方（平板竖屏的面板也在这一处）；这一栏很窄，正文放到四行，
- * 上沿仍在第二行告警之下。
+ * 矮一些的竖屏手机（视口不到 830px 高：360×800、375×812、360×740、375×667，以及带着地址栏的
+ * 手机浏览器）：告警通道到按键簇之间放不下面板——只有一行告警时，完整大小的面板带两行正文就
+ * 压住导弹告警（360×800 上约 12px，更矮的整行盖住）；两行告警时第二行的下沿贴着、甚至伸进
+ * 按键簇。这一档不管告警通道显示几行，面板都收小（不显示头像和呼号行），放到按键簇左侧、
+ * 静止摇杆的上方（平板竖屏的面板也在这一处）；这一栏很窄，正文放到四行，上沿仍在第二行告警之下。
  * 每条规则多写一个带 data-hud-warning-rows='2' 的选择器，只为压过上面两行告警时的收小规则
  * （优先级相同，后写的生效）
  */
-@media (orientation: portrait) and (max-width: 699.98px) and (max-height: 789.98px) {
+@media (orientation: portrait) and (max-width: 699.98px) and (max-height: 829.98px) {
   :root:not([data-hud-camera='first-person']) #radio-comms[data-density='touch-portrait'],
   :root[data-hud-warning-rows='2']:not([data-hud-camera='first-person']) #radio-comms[data-density='touch-portrait'] {
     right: calc(max(20px, env(safe-area-inset-right)) + var(--touch-deck-w, 210px) + 14px);
