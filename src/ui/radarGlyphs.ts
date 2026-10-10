@@ -54,6 +54,12 @@ const RIM_BOSS_RADIUS = 4.2;
 const RIM_TICK_GAP = 1.4;
 const RIM_TICK_LENGTH = 3.2;
 
+/**
+ * 量程外符号从中心到短线末端的最大长度（scale 为 1 时的像素，取最大的 Boss 符号）：
+ * 调用方把符号放在离画布边至少这么远的地方，朝外的短线才不会被裁掉。
+ */
+export const RADAR_RIM_MARKER_REACH = RIM_BOSS_RADIUS + RIM_TICK_GAP + RIM_TICK_LENGTH;
+
 /** 未知类型按敌机处理 */
 export function normalizeRadarKind(kind: string): RadarBlipKind {
   return KNOWN_KINDS.has(kind) ? (kind as RadarBlipKind) : 'enemy';
