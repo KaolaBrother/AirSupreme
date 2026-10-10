@@ -861,15 +861,21 @@ ${SETTING_ROW_CSS}
   border-bottom: 1px solid rgba(143, 228, 255, 0.1);
 }
 
+/*
+ * 列宽按最宽的一组键帽定（L Shift / L Ctrl 约 132px，留一点余量）。键帽不收缩（文字不会被挤到边框上），
+ * 一行放不下时换行——窄面板上这一列只有 104px，两个长键帽上下排
+ */
 #start-menu .hp-row-keys {
   flex: none;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 4px;
-  width: 124px;
+  width: 142px;
 }
 
 #start-menu .hp-key {
+  flex: none;
   display: inline-flex;
   align-items: center;
   justify-content: center;

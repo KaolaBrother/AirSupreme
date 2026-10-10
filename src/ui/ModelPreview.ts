@@ -851,9 +851,20 @@ export class ModelPreview {
     });
   }
 
+  /**
+   * 载入成功（或还在路上）的那一次留着共用；失败的那一次不留，下次翻到这一页会再 import() 一遍
+   * （与 StartMenu 载入机库模块的做法一致）。
+   * 注意浏览器自己的模块表也可能记住下载失败（Chrome 如此），那种情况要刷新页面才会重新下载
+   */
   private loadAircraftMeshFactory(): Promise<AircraftMeshFactoryModule> {
     if (!this.aircraftMeshFactoryPromise) {
-      this.aircraftMeshFactoryPromise = import('@/features/aircraft/AircraftMeshFactory');
+      const modulePromise = import('@/features/aircraft/AircraftMeshFactory');
+      this.aircraftMeshFactoryPromise = modulePromise;
+      modulePromise.catch(() => {
+        if (this.aircraftMeshFactoryPromise === modulePromise) {
+          this.aircraftMeshFactoryPromise = null;
+        }
+      });
     }
 
     return this.aircraftMeshFactoryPromise;
