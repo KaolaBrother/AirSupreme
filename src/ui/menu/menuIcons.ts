@@ -45,6 +45,10 @@ export const MENU_ICONS = {
       'a5.4 5.4 0 01-4.5-2.4l-2.6-4a1.6 1.6 0 012.6-1.9L9 14"/>'
   ),
   rotate: stroke('<path d="M19.5 12a7.5 7.5 0 11-2.4-5.5"/><path d="M19.6 4.2v3.6H16"/>'),
+  /** 升级：两道向上的折线 */
+  upgrade: stroke('<path d="M5.5 12.5L12 6l6.5 6.5M5.5 18.5L12 12l6.5 6.5"/>'),
+  /** 退出：门框 + 向外的箭头 */
+  exit: stroke('<path d="M13.5 4.5H5.5v15h8"/><path d="M10 12h10.5M16.8 8.2l3.8 3.8-3.8 3.8"/>'),
 } as const;
 
 export type MenuIconName = keyof typeof MENU_ICONS;

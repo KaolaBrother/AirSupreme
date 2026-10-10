@@ -7,11 +7,13 @@ import {
 } from '@/core/SessionSettings';
 import { type QualityPreset } from '@/config';
 import { TOTAL_LEVELS } from '@/features/campaign/CampaignData';
-import { SUPPORTED_LOCALES, tr, type Locale, type LocalizedText } from '@/i18n';
+import { SUPPORTED_LOCALES, tr, type Locale } from '@/i18n';
 import { el, icon } from './dom';
 import { MENU_ICONS } from './menuIcons';
 import {
   CAMERA_LABELS,
+  DECREASE_LABEL,
+  INCREASE_LABEL,
   MODE_LABELS,
   QUALITY_LABELS,
   QUALITY_PRESETS,
@@ -50,9 +52,6 @@ export interface SettingsSheetHost {
 }
 
 type VolumeKey = 'sfxVolume' | 'musicVolume' | 'voiceVolume';
-
-const DECREASE: LocalizedText = { en: 'Decrease {name}', zh: '降低{name}' };
-const INCREASE: LocalizedText = { en: 'Increase {name}', zh: '提高{name}' };
 
 export interface SettingsSheetOptions {
   reducedMotion: boolean;
@@ -200,8 +199,8 @@ export class SettingsSheet {
 
   private stepperLabels(name: string): { decreaseLabel: string; increaseLabel: string } {
     return {
-      decreaseLabel: tr(DECREASE, { name }),
-      increaseLabel: tr(INCREASE, { name }),
+      decreaseLabel: tr(DECREASE_LABEL, { name }),
+      increaseLabel: tr(INCREASE_LABEL, { name }),
     };
   }
 

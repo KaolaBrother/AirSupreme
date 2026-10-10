@@ -290,7 +290,8 @@ export class StartMenu {
   // ───────────────────────────── 动作 ─────────────────────────────
 
   private handleAction(action: TitleAction): void {
-    if (this.launching || this.isDisposed) {
+    // 菜单不在屏幕上时（已进入对局 / 机库开着）按钮还留着焦点：再来的点击、Enter 都不算
+    if (!this.visible || this.launching || this.isDisposed) {
       return;
     }
     switch (action) {
@@ -328,7 +329,7 @@ export class StartMenu {
   }
 
   /**
-   * 开新局。正常模式的新局一启动就会清掉战役检查点（CampaignController.setupNewRun），
+   * 开新局。正常模式的新局一启动就会清掉战役检查点（CampaignFlowController.setupNewRun），
    * 从高级选项里选关 / 带测试分数开局也一样；所以只要有存档且是正常模式，就先确认。
    * Boss 模式不读也不写战役存档，直接开始。
    */
@@ -491,7 +492,7 @@ export class StartMenu {
     confirm.type = 'button';
     confirm.id = 'new-campaign-confirm-btn';
     confirm.addEventListener('click', () => {
-      if (this.launching) {
+      if (!this.visible || this.launching) {
         return;
       }
       sheet.close(false);
@@ -629,7 +630,8 @@ export class StartMenu {
     this.title.setBusy('hangar');
     try {
       const preview = await this.ensureModelPreview();
-      if (this.isDisposed || !this.visible || this.launching) {
+      // 模块下载期间玩家可能已经开了一张面板：机库不盖到面板上面，这次就不进了（模块已就绪，再点即开）
+      if (this.isDisposed || !this.visible || this.launching || this.openSheets().length > 0) {
         return;
       }
       this.inHangar = true;

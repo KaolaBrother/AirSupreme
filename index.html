@@ -151,12 +151,17 @@
         text-align: center;
       }
 
-      /* 字标：AIR 小号宽字距，SUPREME 倾斜的重磅金属渐变字 */
+      /*
+       * 字标：AIR 小号宽字距，SUPREME 倾斜的重磅金属渐变字。
+       * 没有 Arial Black 的系统（iPadOS / Android）用系统界面字体的最粗一档；font-stretch 让有宽度轴的
+       * 系统字体（苹果的 SF）取加宽的那一档，字宽与 Arial Black 接近（与标题画面的标志同一写法）。
+       */
       #loading-screen h1 {
         display: flex;
         flex-direction: column;
         align-items: center;
         font-family: 'Arial Black', system-ui, 'Arial', sans-serif;
+        font-stretch: 115%;
         font-weight: 900;
         line-height: 0.92;
         text-transform: uppercase;

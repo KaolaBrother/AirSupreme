@@ -4,7 +4,7 @@ import {
   updateAircraftSignals,
   updatePlayerAfterburner,
 } from '@/features/aircraft/AircraftMeshFactory';
-import { disposeModelTree, releaseRenderer } from './modelDisposal';
+import { disposeModelTree, hideSignalLights, releaseRenderer } from './modelDisposal';
 
 /**
  * 标题画面的实时 3D 主机：玩家自己的战机（与对局同一个模型工厂）在云层上方缓缓压坡度飞行，
@@ -58,8 +58,6 @@ const CAMERA_TARGET = new THREE.Vector3(0, 0.05, -0.15);
 const TRAIL_POINTS = 26;
 /** 尾迹回溯的时间跨度（秒）：长度 = AIRSPEED × 该值 */
 const TRAIL_SECONDS = 0.5;
-/** 机体上的航行灯 / 频闪灯 / 防撞灯（AircraftMeshFactory 里的命名） */
-const SIGNAL_LIGHT_NAMES = ['navLightPort', 'navLightStarboard', 'strobeLight', 'beaconLight'];
 /** 玩家机翼尖航行灯小球的半径上限（工厂里是 0.05） */
 const WINGTIP_LIGHT_RADIUS = 0.06;
 const WISP_COUNT = 13;
@@ -343,12 +341,7 @@ export class MenuHeroScene {
     // 主机：与对局同一个工厂
     this.jet = createPlayerMesh();
     // 航行灯是按包围盒摆放的小球：对局里是远处的光点，特写镜头下会像悬在机体外的圆点，这里不显示
-    for (const name of SIGNAL_LIGHT_NAMES) {
-      const light = this.jet.getObjectByName(name);
-      if (light) {
-        light.visible = false;
-      }
-    }
+    hideSignalLights(this.jet);
     // 机体自带的翼尖航行灯同理：没有命名，按“很小的球”认（机鼻传感器半径 0.1，不受影响）
     this.jet.traverse((object) => {
       const geometry = (object as THREE.Mesh).geometry as THREE.SphereGeometry | undefined;

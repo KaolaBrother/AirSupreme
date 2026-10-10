@@ -1,14 +1,13 @@
 import { HUD_COLORS, HUD_SERIF_STACK } from '@/ui/theme/hudTokens';
 
 /**
- * 标题画面样式：背景层（天空 / 云 / 航电点缀）、标志、动作列表、入场与出场动画。
- * 面板与设置控件的样式在 sheetStyles.ts。
- *
- * 版式：横屏时标志与动作在左栏，主机在右；竖屏时标志在上、动作在下（拇指区），主机居中；
- * 矮横屏（手机横握）压缩字号，次级动作排成两列。
- * 动画只用 transform / opacity；.is-reduced（或系统的“减少动态效果”）下全部关掉。
+ * 标题画面的容器选择器。下面几段“共用片段”（暂停菜单也用）里的选择器都以它开头，
+ * 换到别的容器下用时由 rescopeMenuCss 整体替换。
  */
-export const MENU_CSS = `
+const MENU_SCOPE = '#start-menu';
+
+/** 共用片段：颜色 / 字体变量 */
+const TOKEN_CSS = `
 #start-menu {
   --tm-ice: var(--hud-sys, ${HUD_COLORS.sys});
   --tm-amber: var(--hud-weapon, ${HUD_COLORS.weapon});
@@ -20,31 +19,23 @@ export const MENU_CSS = `
   --tm-font: var(--hud-font, 'Arial', sans-serif);
   --tm-mono: var(--hud-mono, 'Consolas', 'Arial Black', monospace);
   --tm-serif: var(--hud-serif, ${HUD_SERIF_STACK});
-  /* 标志字：Arial Black；没有这款字体的系统（iOS / Android）退到系统界面字体的最粗一档 */
+  /*
+   * 标志字：Arial Black；没有这款字体的系统（iOS / iPadOS / Android）退到系统界面字体的最粗一档。
+   * 用到它的地方同时写 font-stretch: 115%：系统字体有宽度轴时（苹果的 SF）取加宽的那一档，
+   * 字宽就和 Arial Black 接近（SUPREME 约为字号的 5.35 倍，Arial Black 是 5.45 倍）；
+   * Arial Black 自己没有宽度变体，不受影响。
+   */
   --tm-display: 'Arial Black', system-ui, 'Arial', sans-serif;
   --tm-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
-  /* 地平线高度与太阳的横向位置（云带、光晕都以它们为基准） */
-  --tm-hz: 62%;
-  --tm-sun-x: 71%;
-  --tm-gutter: clamp(28px, 6vw, 116px);
-  /* SUPREME 的宽度约为字号的 5.45 倍：字号上限 × 5.45 必须放得进左栏（各断点同理） */
-  --tm-col: clamp(330px, 36vw, 640px);
-  --tm-logo-size: clamp(40px, min(6.5vw, 12.5vh), 112px);
-  --tm-px: 0;
-  --tm-py: 0;
-  position: fixed;
-  inset: 0;
-  z-index: 1000;
-  overflow: hidden;
-  background: #050b16;
-  color: var(--tm-text);
-  font-family: var(--tm-font);
-  -webkit-tap-highlight-color: transparent;
-  -webkit-user-select: none;
-  user-select: none;
-  touch-action: manipulation;
+  /* 面板底色：深海军蓝，顶部一抹冰蓝 */
+  --tm-panel:
+    linear-gradient(180deg, rgba(143, 228, 255, 0.07) 0%, rgba(143, 228, 255, 0) 180px),
+    linear-gradient(180deg, rgba(9, 18, 32, 0.97) 0%, rgba(5, 11, 21, 0.97) 100%);
 }
+`;
 
+/** 共用片段：盒模型、按钮重置、图标、焦点环 */
+const BASE_CSS = `
 #start-menu,
 #start-menu *,
 #start-menu *::before,
@@ -79,6 +70,357 @@ export const MENU_CSS = `
   outline: 2px solid #ffffff;
   outline-offset: 3px;
 }
+`;
+
+/** 共用片段：切角的主按钮 */
+const PRIMARY_CSS = `
+/* 主按钮：切角的亮色实块（切角画在 ::before 上，按钮自身不裁剪，焦点环与投影都完整） */
+#start-menu .tm-primary {
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  min-height: 78px;
+  padding: 12px 16px 12px 16px;
+  border: 0;
+  background: none;
+  color: var(--tm-ink);
+  text-align: left;
+  cursor: pointer;
+  filter: drop-shadow(0 12px 22px rgba(0, 0, 0, 0.42)) drop-shadow(0 0 16px rgba(143, 228, 255, 0.3));
+  transition: transform 0.16s var(--tm-ease), filter 0.2s ease;
+}
+
+#start-menu .tm-primary::before,
+#start-menu .tm-primary::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  clip-path: polygon(
+    0 0,
+    calc(100% - 18px) 0,
+    100% 18px,
+    100% 100%,
+    18px 100%,
+    0 calc(100% - 18px)
+  );
+}
+
+#start-menu .tm-primary::before {
+  background: linear-gradient(180deg, #dcf7ff 0%, #9fe8ff 46%, #72d0f1 100%);
+}
+
+/* 每隔几秒扫过一次的高光 */
+#start-menu .tm-primary::after {
+  background: linear-gradient(
+    105deg,
+    rgba(255, 255, 255, 0) 42%,
+    rgba(255, 255, 255, 0.8) 50%,
+    rgba(255, 255, 255, 0) 58%
+  ) 140% 0 / 260% 100% no-repeat;
+  animation: tm-sheen 6.5s ease-in-out 1.6s infinite;
+}
+
+@keyframes tm-sheen {
+  0% { background-position: 140% 0; }
+  22% { background-position: -40% 0; }
+  100% { background-position: -40% 0; }
+}
+
+#start-menu .tm-primary-icon {
+  width: 44px;
+  height: 44px;
+  padding: 11px;
+  font-size: 22px;
+  color: #a6ebff;
+  background: var(--tm-ink);
+  clip-path: polygon(0 0, calc(100% - 9px) 0, 100% 9px, 100% 100%, 9px 100%, 0 calc(100% - 9px));
+}
+
+#start-menu .tm-primary-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+#start-menu .tm-primary-label {
+  font-size: 19px;
+  font-weight: 800;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  line-height: 1.15;
+}
+
+#start-menu .tm-primary-label:lang(zh) {
+  font-size: 21px;
+  letter-spacing: 0.3em;
+}
+`;
+
+/** 共用片段：次级动作行（含主按钮 / 动作行的悬停态） */
+const ACTION_CSS = `
+#start-menu .tm-go {
+  font-size: 22px;
+  transition: transform 0.2s var(--tm-ease), opacity 0.18s ease;
+}
+
+#start-menu .tm-primary:active {
+  transform: scale(0.982);
+  filter: drop-shadow(0 6px 12px rgba(0, 0, 0, 0.42)) drop-shadow(0 0 26px rgba(143, 228, 255, 0.6))
+    brightness(1.08);
+}
+
+/* 次级动作：发丝线分隔的文字行 */
+#start-menu .tm-secondary {
+  display: flex;
+  flex-direction: column;
+  margin-top: 12px;
+}
+
+#start-menu .tm-action {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  height: 54px;
+  padding: 0 12px 0 8px;
+  border: 0;
+  border-bottom: 1px solid rgba(143, 228, 255, 0.17);
+  background: none;
+  color: rgba(238, 248, 255, 0.9);
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+  transition: color 0.16s ease;
+}
+
+#start-menu .tm-action::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    rgba(143, 228, 255, 0.24),
+    rgba(143, 228, 255, 0.06) 55%,
+    rgba(143, 228, 255, 0)
+  );
+  opacity: 0;
+  transform: translate3d(-10%, 0, 0);
+  transition: opacity 0.18s ease, transform 0.24s var(--tm-ease);
+}
+
+#start-menu .tm-action::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 3px;
+  height: 24px;
+  margin-top: -12px;
+  background: var(--tm-ice);
+  box-shadow: 0 0 10px rgba(143, 228, 255, 0.85);
+  transform: scaleY(0);
+  transition: transform 0.18s var(--tm-ease);
+}
+
+#start-menu .tm-action-inner {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+  transition: transform 0.22s var(--tm-ease);
+}
+
+#start-menu .tm-action-icon {
+  font-size: 21px;
+  color: var(--tm-ice);
+}
+
+#start-menu .tm-action-label {
+  font-size: 15.5px;
+  font-weight: 700;
+  letter-spacing: 0.17em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.55);
+}
+
+#start-menu .tm-action-label:lang(zh) {
+  font-size: 17px;
+  letter-spacing: 0.32em;
+}
+
+#start-menu .tm-action-note {
+  padding: 2px 7px;
+  border: 1px solid rgba(255, 179, 71, 0.55);
+  border-radius: 2px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--tm-amber);
+  white-space: nowrap;
+}
+
+#start-menu .tm-action .tm-go {
+  position: relative;
+  font-size: 18px;
+  color: var(--tm-ice);
+  opacity: 0;
+  transform: translate3d(-8px, 0, 0);
+}
+
+#start-menu .tm-action:focus-visible {
+  color: #ffffff;
+}
+
+#start-menu .tm-action:focus-visible::before,
+#start-menu .tm-action:active::before {
+  opacity: 1;
+  transform: none;
+}
+
+#start-menu .tm-action:focus-visible::after,
+#start-menu .tm-action:active::after {
+  transform: scaleY(1);
+}
+
+#start-menu .tm-action:focus-visible .tm-action-inner {
+  transform: translate3d(10px, 0, 0);
+}
+
+#start-menu .tm-action:focus-visible .tm-go {
+  opacity: 1;
+  transform: none;
+}
+
+#start-menu .tm-action:active .tm-action-inner {
+  transform: translate3d(14px, 0, 0);
+}
+
+#start-menu .tm-action:disabled {
+  cursor: progress;
+  color: var(--tm-muted);
+}
+
+/* 悬停只在真的有悬停能力的指针上生效（触屏点按后不会“粘”在悬停态） */
+@media (hover: hover) {
+  #start-menu .tm-primary:hover {
+    transform: translate3d(4px, 0, 0);
+    filter: drop-shadow(0 12px 22px rgba(0, 0, 0, 0.42)) drop-shadow(0 0 26px rgba(143, 228, 255, 0.55));
+  }
+
+  #start-menu .tm-primary:hover .tm-go {
+    transform: translate3d(5px, 0, 0);
+  }
+
+  #start-menu .tm-primary:hover:active {
+    transform: scale(0.982);
+  }
+
+  #start-menu .tm-action:hover:not(:disabled) {
+    color: #ffffff;
+  }
+
+  #start-menu .tm-action:hover:not(:disabled)::before {
+    opacity: 1;
+    transform: none;
+  }
+
+  #start-menu .tm-action:hover:not(:disabled)::after {
+    transform: scaleY(1);
+  }
+
+  #start-menu .tm-action:hover:not(:disabled) .tm-action-inner {
+    transform: translate3d(10px, 0, 0);
+  }
+
+  #start-menu .tm-action:hover:not(:disabled) .tm-go {
+    opacity: 1;
+    transform: none;
+  }
+}
+`;
+
+/** 共用片段：减少动态效果 */
+const REDUCED_MOTION_CSS = `
+/* ================================================================ 减少动态效果 */
+#start-menu.is-reduced *,
+#start-menu.is-reduced *::before,
+#start-menu.is-reduced *::after,
+#start-menu.is-reduced {
+  animation: none !important;
+  transition: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #start-menu,
+  #start-menu *,
+  #start-menu *::before,
+  #start-menu *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+`;
+
+/**
+ * 把一段菜单样式换到别的容器下：替换容器选择器，并去掉注释——注释只给读源码的人看，
+ * 而容器里 <style> 的文字会算进容器的 textContent。
+ */
+export function rescopeMenuCss(css: string, scope: string): string {
+  return css
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .split(MENU_SCOPE)
+    .join(scope);
+}
+
+/** 标题画面之外也用的部分（选择器仍以 #start-menu 开头）：变量、基础重置、主按钮、动作行 */
+export function menuKitCss(): string {
+  return TOKEN_CSS + BASE_CSS + PRIMARY_CSS + ACTION_CSS + REDUCED_MOTION_CSS;
+}
+
+/**
+ * 标题画面样式：背景层（天空 / 云 / 航电点缀）、标志、动作列表、入场与出场动画。
+ * 面板与设置控件的样式在 sheetStyles.ts。
+ *
+ * 版式：横屏时标志与动作在左栏，主机在右；竖屏时标志在上、动作在下（拇指区），主机居中；
+ * 矮横屏（手机横握）压缩字号，次级动作排成两列。
+ * 动画只用 transform / opacity；.is-reduced（或系统的“减少动态效果”）下全部关掉。
+ */
+export const MENU_CSS = `
+${TOKEN_CSS}
+#start-menu {
+  /* 地平线高度与太阳的横向位置（云带、光晕都以它们为基准） */
+  --tm-hz: 62%;
+  --tm-sun-x: 71%;
+  --tm-gutter: clamp(28px, 6vw, 116px);
+  /* SUPREME 的宽度约为字号的 5.45 倍：字号上限 × 5.45 必须放得进左栏（各断点同理） */
+  --tm-col: clamp(330px, 36vw, 640px);
+  --tm-logo-size: clamp(40px, min(6.5vw, 12.5vh), 112px);
+  --tm-px: 0;
+  --tm-py: 0;
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  overflow: hidden;
+  background: #050b16;
+  color: var(--tm-text);
+  font-family: var(--tm-font);
+  -webkit-tap-highlight-color: transparent;
+  -webkit-user-select: none;
+  user-select: none;
+  touch-action: manipulation;
+}
+
+${BASE_CSS}
 
 /* ================================================================ 背景层 */
 #start-menu .tm-backdrop {
@@ -542,6 +884,7 @@ export const MENU_CSS = `
 #start-menu .tm-logo {
   margin: 0;
   font-family: var(--tm-display);
+  font-stretch: 115%;
   font-weight: 900;
   line-height: 0.88;
   text-transform: uppercase;
@@ -672,92 +1015,7 @@ export const MENU_CSS = `
   flex-direction: column;
 }
 
-/* 主按钮：切角的亮色实块（切角画在 ::before 上，按钮自身不裁剪，焦点环与投影都完整） */
-#start-menu .tm-primary {
-  position: relative;
-  isolation: isolate;
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  width: 100%;
-  min-height: 78px;
-  padding: 12px 16px 12px 16px;
-  border: 0;
-  background: none;
-  color: var(--tm-ink);
-  text-align: left;
-  cursor: pointer;
-  filter: drop-shadow(0 12px 22px rgba(0, 0, 0, 0.42)) drop-shadow(0 0 16px rgba(143, 228, 255, 0.3));
-  transition: transform 0.16s var(--tm-ease), filter 0.2s ease;
-}
-
-#start-menu .tm-primary::before,
-#start-menu .tm-primary::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  z-index: -1;
-  clip-path: polygon(
-    0 0,
-    calc(100% - 18px) 0,
-    100% 18px,
-    100% 100%,
-    18px 100%,
-    0 calc(100% - 18px)
-  );
-}
-
-#start-menu .tm-primary::before {
-  background: linear-gradient(180deg, #dcf7ff 0%, #9fe8ff 46%, #72d0f1 100%);
-}
-
-/* 每隔几秒扫过一次的高光 */
-#start-menu .tm-primary::after {
-  background: linear-gradient(
-    105deg,
-    rgba(255, 255, 255, 0) 42%,
-    rgba(255, 255, 255, 0.8) 50%,
-    rgba(255, 255, 255, 0) 58%
-  ) 140% 0 / 260% 100% no-repeat;
-  animation: tm-sheen 6.5s ease-in-out 1.6s infinite;
-}
-
-@keyframes tm-sheen {
-  0% { background-position: 140% 0; }
-  22% { background-position: -40% 0; }
-  100% { background-position: -40% 0; }
-}
-
-#start-menu .tm-primary-icon {
-  width: 44px;
-  height: 44px;
-  padding: 11px;
-  font-size: 22px;
-  color: #a6ebff;
-  background: var(--tm-ink);
-  clip-path: polygon(0 0, calc(100% - 9px) 0, 100% 9px, 100% 100%, 9px 100%, 0 calc(100% - 9px));
-}
-
-#start-menu .tm-primary-text {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-
-#start-menu .tm-primary-label {
-  font-size: 19px;
-  font-weight: 800;
-  letter-spacing: 0.15em;
-  text-transform: uppercase;
-  line-height: 1.15;
-}
-
-#start-menu .tm-primary-label:lang(zh) {
-  font-size: 21px;
-  letter-spacing: 0.3em;
-}
+${PRIMARY_CSS}
 
 #start-menu .tm-primary-detail {
   font-size: 13.5px;
@@ -809,189 +1067,7 @@ export const MENU_CSS = `
   50% { opacity: 0.45; }
 }
 
-#start-menu .tm-go {
-  font-size: 22px;
-  transition: transform 0.2s var(--tm-ease), opacity 0.18s ease;
-}
-
-#start-menu .tm-primary:active {
-  transform: scale(0.982);
-  filter: drop-shadow(0 6px 12px rgba(0, 0, 0, 0.42)) drop-shadow(0 0 26px rgba(143, 228, 255, 0.6))
-    brightness(1.08);
-}
-
-/* 次级动作：发丝线分隔的文字行 */
-#start-menu .tm-secondary {
-  display: flex;
-  flex-direction: column;
-  margin-top: 12px;
-}
-
-#start-menu .tm-action {
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  width: 100%;
-  height: 54px;
-  padding: 0 12px 0 8px;
-  border: 0;
-  border-bottom: 1px solid rgba(143, 228, 255, 0.17);
-  background: none;
-  color: rgba(238, 248, 255, 0.9);
-  text-align: left;
-  cursor: pointer;
-  overflow: hidden;
-  transition: color 0.16s ease;
-}
-
-#start-menu .tm-action::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(
-    90deg,
-    rgba(143, 228, 255, 0.24),
-    rgba(143, 228, 255, 0.06) 55%,
-    rgba(143, 228, 255, 0)
-  );
-  opacity: 0;
-  transform: translate3d(-10%, 0, 0);
-  transition: opacity 0.18s ease, transform 0.24s var(--tm-ease);
-}
-
-#start-menu .tm-action::after {
-  content: '';
-  position: absolute;
-  left: 0;
-  top: 50%;
-  width: 3px;
-  height: 24px;
-  margin-top: -12px;
-  background: var(--tm-ice);
-  box-shadow: 0 0 10px rgba(143, 228, 255, 0.85);
-  transform: scaleY(0);
-  transition: transform 0.18s var(--tm-ease);
-}
-
-#start-menu .tm-action-inner {
-  position: relative;
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  min-width: 0;
-  transition: transform 0.22s var(--tm-ease);
-}
-
-#start-menu .tm-action-icon {
-  font-size: 21px;
-  color: var(--tm-ice);
-}
-
-#start-menu .tm-action-label {
-  font-size: 15.5px;
-  font-weight: 700;
-  letter-spacing: 0.17em;
-  text-transform: uppercase;
-  white-space: nowrap;
-  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.55);
-}
-
-#start-menu .tm-action-label:lang(zh) {
-  font-size: 17px;
-  letter-spacing: 0.32em;
-}
-
-#start-menu .tm-action-note {
-  padding: 2px 7px;
-  border: 1px solid rgba(255, 179, 71, 0.55);
-  border-radius: 2px;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  color: var(--tm-amber);
-  white-space: nowrap;
-}
-
-#start-menu .tm-action .tm-go {
-  position: relative;
-  font-size: 18px;
-  color: var(--tm-ice);
-  opacity: 0;
-  transform: translate3d(-8px, 0, 0);
-}
-
-#start-menu .tm-action:focus-visible {
-  color: #ffffff;
-}
-
-#start-menu .tm-action:focus-visible::before,
-#start-menu .tm-action:active::before {
-  opacity: 1;
-  transform: none;
-}
-
-#start-menu .tm-action:focus-visible::after,
-#start-menu .tm-action:active::after {
-  transform: scaleY(1);
-}
-
-#start-menu .tm-action:focus-visible .tm-action-inner {
-  transform: translate3d(10px, 0, 0);
-}
-
-#start-menu .tm-action:focus-visible .tm-go {
-  opacity: 1;
-  transform: none;
-}
-
-#start-menu .tm-action:active .tm-action-inner {
-  transform: translate3d(14px, 0, 0);
-}
-
-#start-menu .tm-action:disabled {
-  cursor: progress;
-  color: var(--tm-muted);
-}
-
-/* 悬停只在真的有悬停能力的指针上生效（触屏点按后不会“粘”在悬停态） */
-@media (hover: hover) {
-  #start-menu .tm-primary:hover {
-    transform: translate3d(4px, 0, 0);
-    filter: drop-shadow(0 12px 22px rgba(0, 0, 0, 0.42)) drop-shadow(0 0 26px rgba(143, 228, 255, 0.55));
-  }
-
-  #start-menu .tm-primary:hover .tm-go {
-    transform: translate3d(5px, 0, 0);
-  }
-
-  #start-menu .tm-primary:hover:active {
-    transform: scale(0.982);
-  }
-
-  #start-menu .tm-action:hover:not(:disabled) {
-    color: #ffffff;
-  }
-
-  #start-menu .tm-action:hover:not(:disabled)::before {
-    opacity: 1;
-    transform: none;
-  }
-
-  #start-menu .tm-action:hover:not(:disabled)::after {
-    transform: scaleY(1);
-  }
-
-  #start-menu .tm-action:hover:not(:disabled) .tm-action-inner {
-    transform: translate3d(10px, 0, 0);
-  }
-
-  #start-menu .tm-action:hover:not(:disabled) .tm-go {
-    opacity: 1;
-    transform: none;
-  }
-}
+${ACTION_CSS}
 
 /* ---------------------------------------------------------------- 底部提示 */
 #start-menu .tm-footer {
@@ -1277,22 +1353,5 @@ export const MENU_CSS = `
   }
 }
 
-/* ================================================================ 减少动态效果 */
-#start-menu.is-reduced *,
-#start-menu.is-reduced *::before,
-#start-menu.is-reduced *::after,
-#start-menu.is-reduced {
-  animation: none !important;
-  transition: none !important;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  #start-menu,
-  #start-menu *,
-  #start-menu *::before,
-  #start-menu *::after {
-    animation: none !important;
-    transition: none !important;
-  }
-}
+${REDUCED_MOTION_CSS}
 `;
