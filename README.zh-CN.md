@@ -475,7 +475,6 @@ src/
 │   ├── Input/                    # 输入处理
 │   ├── Audio/                    # 音效、音乐系统、music/ 音序器与曲目、sfx/ 音效库、VoiceSystem 与 VoiceDucking
 │   └── utils/                    # 工具类
-│       ├── ConfigLoader.ts       # 配置加载器
 │       └── Logger.ts             # 日志系统
 │
 ├── features/                     # 游戏功能
@@ -618,7 +617,7 @@ src/
 
 ## 🔧 配置
 
-### 传统配置 (src/config.ts)
+### 游戏配置 (src/config.ts)
 
 修改 `src/config.ts` 调整游戏参数：
 
@@ -633,46 +632,7 @@ PLAYER: {
 }
 ```
 
-### JSON 配置系统
-
-游戏启动时读取一份外部 JSON 配置（`src/main.ts` 里的 `configLoader.load()`），并合并到 `ConfigLoader` 内置的默认值之上：
-
-**配置文件位置**: `public/config/game-config.json`（下面是前两段；文件后面还有相机、世界、道具、关卡、导弹、Boss 武器、敌机、Boss、升级与性能等配置段）
-
-```json
-{
-  "version": "1.0.0",
-  "player": {
-    "pitchSpeed": 2.0,
-    "yawSpeed": 1.5,
-    "rollSpeed": 3.0,
-    "baseSpeed": 45,
-    "maxSpeed": 45,
-    "baseHealth": 200,
-    "baseDamage": 12.5,
-    "baseFireRate": 0.3
-  },
-  "projectile": {
-    "speed": 100,
-    "maxDistance": 500,
-    "poolSize": 200
-  }
-}
-```
-
-**在代码中使用 ConfigLoader**:
-
-```typescript
-import { configLoader } from '@/core/utils/ConfigLoader';
-
-async function initGame() {
-  await configLoader.load();
-  const playerConfig = configLoader.getPlayer();
-  const enemyConfig = configLoader.getEnemy('FIGHTER');
-}
-```
-
-目前游戏里没有任何代码调用这些读取方法——只执行了 `load()`——所以只改 JSON 不会改变实际玩法；生效的数值是源码里的常量，例如 `src/config.ts` 的 `GAME_CONSTANTS`。
+生效的数值是源码里的常量，例如 `src/config.ts` 的 `GAME_CONSTANTS`；没有外部配置文件。
 
 ## 📊 日志系统
 

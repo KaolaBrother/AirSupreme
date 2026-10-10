@@ -34,15 +34,7 @@ The controls and weapons round (touch flight, unit markers, always-on seeker, Sa
 ## Config
 
 - Runtime constants: `src/config.ts` (`GAME_CONSTANTS` — `PLAYER`, `PROJECTILE`, `GUN_ASSIST`, `CAMERA`, `WORLD`, `POWERUP`, `LEVEL`, `MISSILE`; `GameConfig` device / quality profiles)
-- External JSON: `public/config/game-config.json` via `src/core/utils/ConfigLoader.ts`. `src/main.ts` loads it at start-up (`configLoader.load()`, merged over the loader's built-in defaults), but no runtime code calls the getters below, so none of its blocks reaches the game. Its `missile` block is one example: the player's missile takes its numbers from `GAME_CONSTANTS.MISSILE`, and the base lock and reload times come from the upgrade tracks (`UPGRADE_CONFIGS`)
-
-```typescript
-import { configLoader } from '@/core/utils/ConfigLoader';
-
-await configLoader.load();
-const playerConfig = configLoader.getPlayer();
-const enemyConfig = configLoader.getEnemy('FIGHTER');
-```
+- There is no external config file and no config is fetched at start-up: every tuning value lives in the TypeScript source
 
 Enemy type tables live in `src/features/enemy/EnemyTypes.ts`. Level terrain params live in `src/features/terrain/LevelConfig.ts`. Quality presets (`QualityPreset = 'auto' | 'performance' | 'balanced' | 'quality'`) and their per-device parameters live in `GameConfig` (`src/config.ts`).
 

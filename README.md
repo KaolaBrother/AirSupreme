@@ -466,7 +466,6 @@ src/
 │   ├── Input/                    # input handling
 │   ├── Audio/                    # SFX, music system, music/ sequencer + tracks, sfx/ library, VoiceSystem + VoiceDucking
 │   └── utils/                    # utilities
-│       ├── ConfigLoader.ts       # config loader
 │       └── Logger.ts             # logging
 │
 ├── features/                     # game features
@@ -609,7 +608,7 @@ Architecture and contracts: [`docs/architecture.md`](docs/architecture.md), [`do
 
 ## 🔧 Configuration
 
-### Legacy config (`src/config.ts`)
+### Game config (`src/config.ts`)
 
 Edit `src/config.ts` to tune game parameters:
 
@@ -624,46 +623,7 @@ PLAYER: {
 }
 ```
 
-### JSON config system
-
-The game fetches an external JSON configuration at start-up (`configLoader.load()` in `src/main.ts`) and merges it over the defaults built into `ConfigLoader`:
-
-**Location**: `public/config/game-config.json` (the first two blocks are shown; the file goes on with camera, world, power-up, level, missile, boss-weapon, enemy, boss, upgrade and performance blocks)
-
-```json
-{
-  "version": "1.0.0",
-  "player": {
-    "pitchSpeed": 2.0,
-    "yawSpeed": 1.5,
-    "rollSpeed": 3.0,
-    "baseSpeed": 45,
-    "maxSpeed": 45,
-    "baseHealth": 200,
-    "baseDamage": 12.5,
-    "baseFireRate": 0.3
-  },
-  "projectile": {
-    "speed": 100,
-    "maxDistance": 500,
-    "poolSize": 200
-  }
-}
-```
-
-**Using ConfigLoader in code**:
-
-```typescript
-import { configLoader } from '@/core/utils/ConfigLoader';
-
-async function initGame() {
-  await configLoader.load();
-  const playerConfig = configLoader.getPlayer();
-  const enemyConfig = configLoader.getEnemy('FIGHTER');
-}
-```
-
-At present nothing in the game calls these getters — only `load()` runs — so editing the JSON does not change gameplay; the numbers in play are the constants in the source, such as `GAME_CONSTANTS` in `src/config.ts`.
+The numbers in play are the constants in the source, such as `GAME_CONSTANTS` in `src/config.ts`; there is no external config file.
 
 ## 📊 Logging
 

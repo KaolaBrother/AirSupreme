@@ -1,6 +1,5 @@
 import { unlockAudioFromUserGesture } from './core/Audio/AudioContextHost';
 import { getLogger } from './core/utils/Logger';
-import { configLoader } from './core/utils/ConfigLoader';
 import type { GameCoordinator } from './core/GameCoordinator';
 import { loadStartFlowSettings } from './core/SessionSettings';
 import type { CampaignSaveData } from './core/save/SaveSystem';
@@ -212,7 +211,7 @@ function warmGameCoordinatorChunk(): void {
   globalThis.setTimeout(preload, 200);
 }
 
-async function main(): Promise<void> {
+function main(): void {
   // 先确定界面语言（默认英文），之后渲染的一切（包括错误提示）都按它取文案
   setLocale(loadStartFlowSettings().language);
   localizeShell();
@@ -224,7 +223,6 @@ async function main(): Promise<void> {
   }
 
   try {
-    await configLoader.load();
     const startMenu = new StartMenu();
     // 菜单音乐：第一次用户手势后开始，进入战斗淡出，回到菜单恢复
     const menuMusic = new MenuMusic();
