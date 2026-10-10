@@ -170,7 +170,7 @@
 - [done] `X1`（`6a598ed`，合并入集成分支）：触控 / 辅助飞行 / 平板档 / 版式契约 414 个测试全过，变异检查 117 个杀 115 个
 - [active] `X - 测试`（独立测试作者，实现者不写测试）：`X1` 触控输入 / 辅助飞行 / 平板档 / 版式契约；`X2` 目标标记 / 雷达 / 地图 / 座舱 / 第一人称特效（含 5 个按新规格重写的过期测试）；`X3` 锁定与武器（含 11 个按新规格重写的过期测试）— owned：`src/__tests__/**`、`*.test.ts`
 - [active] `U1 - 主菜单重做`（用户追加：“主入口太业余、满屏选项；要惊艳、好看、有动态”）：电影感标题页（即时可见的 CSS / canvas 动态背景 + 懒加载淡入的 3D 主机实时画面）、只留 继续 / 新战役 / 机库 / 设置 / 玩法 几个动作；全部设置收进分组抽屉（游戏 / 音频 / 显示 / 高级，一项不删、持久化与接线不变）；玩法说明分键盘 / 触控；新战役覆盖存档前确认；加载与“进入战场”过场同一视觉语言 — owned：`src/ui/StartMenu.ts`（合并时整文件取本批版本，`W` 只改了一行图例文案且已并入本批规格）、新目录 `src/ui/menu/**`、`src/ui/ModelPreview.ts`、`src/main.ts`（加载壳）、`index.html`（仅 `#loading-screen`）
-- [active] `U2 - 保存并退出`（用户追加：“没有保存并退出”）：实测暂停菜单只有“返回菜单”，确认文案写“当前进度将丢失”，退出时也确实不写档（波次中买的升级会丢）。改为“保存并退出”——退出瞬间按当前状态写检查点、继续时重打当前波，文案只说真实发生的事；不存档的模式如实说明 — owned：`src/ui/PauseMenu.ts`、`src/core/campaign/CampaignFlowController.ts`、`src/ui/CheckpointResumeButton.ts`；`GameCoordinator.ensurePauseMenu()` 的接线等 `W` 合并后由 `P2` 落
+- [done] `U2 - 保存并退出`（`7058278`，已合并；`CampaignFlowController.saveForExit()` / `describeExitSave()` + 暂停菜单按真实结果措辞；`GameCoordinator.ensurePauseMenu()` 两行接线交给 `P2`；确认页回车键行为修正中。遗留给收尾批：结算页“再来一局”会静默删掉检查点，而旁边就是“从检查点继续”——`src/main.ts` `onRetry` / `src/ui/HUD.ts`）（用户追加：“没有保存并退出”）：实测暂停菜单只有“返回菜单”，确认文案写“当前进度将丢失”，退出时也确实不写档（波次中买的升级会丢）。改为“保存并退出”——退出瞬间按当前状态写检查点、继续时重打当前波，文案只说真实发生的事；不存档的模式如实说明 — owned：`src/ui/PauseMenu.ts`、`src/core/campaign/CampaignFlowController.ts`、`src/ui/CheckpointResumeButton.ts`；`GameCoordinator.ensurePauseMenu()` 的接线等 `W` 合并后由 `P2` 落
 - [next] `D - 文档`：README / README.zh-CN、CHANGELOG、`docs/**`
 - 验收：`tsc` / `lint` / `test:run` / `build` 全绿；真实浏览器里 iPad 尺寸下复测——第 1 关第 1 波能找到并击毁坦克、第三人称机头对准即可锁定并点按发射、雷达可点开、座舱视野、触控布局。
 - 待用户决定（本轮不做）：敌机攻击方式多样化（五种敌机目前共用同一种单发子弹；第 5 关之后没有新的波次敌人）。
