@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { WINGMEN, WingmanRoster, type WingmanProfile } from '@/core/campaign/Wingmen';
 import { CAMPAIGN_CHAPTERS, CAMPAIGN_SPEAKERS } from '@/features/campaign/CampaignData';
 import { ENEMY_CONFIGS, EnemyType } from '@/features/enemy/EnemyTypes';
-import { setLocale } from '@/i18n';
+import { setLocale, type LocalizedText } from '@/i18n';
 import { EnemyHealthBars } from '@/ui/EnemyHealthBars';
 import { LOCALES, resetLocale, textIn } from './i18nTestUtils';
 
@@ -171,14 +171,21 @@ describe('WingmanRoster', () => {
   });
 });
 
+/**
+ * 友军血条的名字（敌机舰队 M3，计划 E-B 第 6 项；机库“友军僚机”页同名）：带呼号的僚机显示呼号；
+ * 没有呼号的友军喷气机一律叫 “Allied Wingman” / “友军僚机”，不再显示它借来的敌机机型名
+ * （以前是 “Allied Fighter” / “友军战斗机”）。
+ */
+const ALLIED_WINGMAN: LocalizedText = { en: 'Allied Wingman', zh: '友军僚机' };
+
 describe('wingman callsign on the friendly health bar', () => {
   let bars: EnemyHealthBars;
   let camera: THREE.PerspectiveCamera;
   const player = new THREE.Vector3(0, 0, 80);
 
-  function friendlyJet(x: number): THREE.Object3D {
+  function friendlyJet(x: number, name: string = EnemyType.FIGHTER): THREE.Object3D {
     const mesh = new THREE.Object3D();
-    mesh.name = EnemyType.FIGHTER;
+    mesh.name = name;
     mesh.position.set(x, 0, 0);
     return mesh;
   }
@@ -204,27 +211,68 @@ describe('wingman callsign on the friendly health bar', () => {
     document.body.innerHTML = '';
   });
 
-  it.each(LOCALES)('labels a wingman with the callsign, others with the type (%s)', (locale) => {
-    setLocale(locale);
-    const raven = friendlyJet(-10);
-    raven.userData.displayName = RAVEN.callsign;
-    const ordinary = friendlyJet(10);
+  it.each(LOCALES)(
+    'labels a wingman with the callsign, a friendly without one "Allied Wingman" (%s)',
+    (locale) => {
+      setLocale(locale);
+      const raven = friendlyJet(-10);
+      raven.userData.displayName = RAVEN.callsign;
+      const ordinary = friendlyJet(10);
 
-    bars.update(
-      [],
-      [
-        { mesh: raven, currentHealth: 100, maxHealth: 100 },
-        { mesh: ordinary, currentHealth: 100, maxHealth: 100 },
-      ],
-      camera,
-      player
-    );
+      bars.update(
+        [],
+        [
+          { mesh: raven, currentHealth: 100, maxHealth: 100 },
+          { mesh: ordinary, currentHealth: 100, maxHealth: 100 },
+        ],
+        camera,
+        player
+      );
 
-    const [ravenLabel, ordinaryLabel] = barLabels();
-    expect(ravenLabel).toBe(textIn(RAVEN.callsign, locale));
-    expect(ordinaryLabel).not.toBe(textIn(RAVEN.callsign, locale));
-    expect(ordinaryLabel).toContain(textIn(ENEMY_CONFIGS[EnemyType.FIGHTER].name, locale));
-  });
+      const [ravenLabel, ordinaryLabel] = barLabels();
+      expect(ravenLabel).toBe(textIn(RAVEN.callsign, locale));
+      expect(ordinaryLabel).toBe(textIn(ALLIED_WINGMAN, locale));
+      // 不显示借来的机型名
+      expect(ordinaryLabel).not.toContain(textIn(ENEMY_CONFIGS[EnemyType.FIGHTER].name, locale));
+    }
+  );
+
+  it.each(LOCALES)(
+    'calls every friendly jet without a callsign "Allied Wingman", whatever airframe name it carries (%s)',
+    (locale) => {
+      setLocale(locale);
+      const types = Object.values(EnemyType);
+      const friendlies = types.map((type, index) => ({
+        mesh: friendlyJet(-30 + index * 8, type),
+        currentHealth: 100,
+        maxHealth: 100,
+      }));
+
+      bars.update([], friendlies, camera, player);
+
+      expect(barLabels()).toEqual(types.map(() => textIn(ALLIED_WINGMAN, locale)));
+    }
+  );
+
+  it.each(LOCALES)(
+    'still names an enemy jet by its type: only friendlies are relabelled (%s)',
+    (locale) => {
+      setLocale(locale);
+      const enemy = friendlyJet(-10);
+      const friendly = friendlyJet(10);
+
+      bars.update(
+        [{ mesh: enemy, currentHealth: 100, maxHealth: 100 }],
+        [{ mesh: friendly, currentHealth: 100, maxHealth: 100 }],
+        camera,
+        player
+      );
+
+      const labels = barLabels();
+      expect(labels).toContain(textIn(ENEMY_CONFIGS[EnemyType.FIGHTER].name, locale));
+      expect(labels).toContain(textIn(ALLIED_WINGMAN, locale));
+    }
+  );
 
   it('re-labels the bars in the new language when they are next redrawn', () => {
     const swift = friendlyJet(-10);
@@ -234,7 +282,6 @@ describe('wingman callsign on the friendly health bar', () => {
       { mesh: swift, currentHealth: 80, maxHealth: 100 },
       { mesh: ordinary, currentHealth: 100, maxHealth: 100 },
     ];
-    const fighter = ENEMY_CONFIGS[EnemyType.FIGHTER].name;
     // 运行中镜头每帧都在动（暂停时不更新血条）：挪一下镜头模拟恢复后的下一帧
     const nextFrame = (): void => {
       camera.position.x += 1;
@@ -243,19 +290,15 @@ describe('wingman callsign on the friendly health bar', () => {
     };
 
     bars.update([], friendlies, camera, player);
-    expect(barLabels()[0]).toBe('Swift');
-    expect(barLabels()[1]).toContain(fighter.en);
+    expect(barLabels()).toEqual(['Swift', ALLIED_WINGMAN.en]);
 
     setLocale('zh-CN');
     nextFrame();
-    expect(barLabels()[0]).toBe('雨燕');
-    expect(barLabels()[1]).toContain(fighter.zh);
-    expect(barLabels()[1]).not.toContain(fighter.en);
+    expect(barLabels()).toEqual(['雨燕', ALLIED_WINGMAN.zh]);
 
     setLocale('en');
     nextFrame();
-    expect(barLabels()[0]).toBe('Swift');
-    expect(barLabels()[1]).toContain(fighter.en);
+    expect(barLabels()).toEqual(['Swift', ALLIED_WINGMAN.en]);
   });
 
   it('re-labels the bars at once on a language switch, even while paused', () => {
@@ -266,22 +309,18 @@ describe('wingman callsign on the friendly health bar', () => {
       { mesh: raven, currentHealth: 100, maxHealth: 100 },
       { mesh: ordinary, currentHealth: 100, maxHealth: 100 },
     ];
-    const fighter = ENEMY_CONFIGS[EnemyType.FIGHTER].name;
     bars.update([], friendlies, camera, player);
-    expect(barLabels()[0]).toBe('Raven');
+    expect(barLabels()).toEqual(['Raven', ALLIED_WINGMAN.en]);
 
     // 暂停菜单里切换语言：游戏不再调用 update，名字也要立即换
     setLocale('zh-CN');
-    expect(barLabels()[0]).toBe('渡鸦');
-    expect(barLabels()[1]).toContain(fighter.zh);
+    expect(barLabels()).toEqual(['渡鸦', ALLIED_WINGMAN.zh]);
 
     // 恢复后镜头没动的一帧也保持新语言
     bars.update([], friendlies, camera, player);
-    expect(barLabels()[0]).toBe('渡鸦');
-    expect(barLabels()[1]).toContain(fighter.zh);
+    expect(barLabels()).toEqual(['渡鸦', ALLIED_WINGMAN.zh]);
 
     setLocale('en');
-    expect(barLabels()[0]).toBe('Raven');
-    expect(barLabels()[1]).toContain(fighter.en);
+    expect(barLabels()).toEqual(['Raven', ALLIED_WINGMAN.en]);
   });
 });

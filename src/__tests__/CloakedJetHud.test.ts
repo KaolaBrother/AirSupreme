@@ -592,7 +592,8 @@ describe('a cloaked jet and the combat HUD', () => {
             expect(readBar(bar as HTMLElement).fill).toBeCloseTo(health.current / health.max, 5);
           }
           expect(readBar(hudRig.barOf(named.getMesh()) as HTMLElement).name).toBe(tr(CALLSIGN));
-          expect(readBar(hudRig.barOf(plain.getMesh()) as HTMLElement).name).toBe('Allied Fighter');
+          // 没有呼号的僚机叫“友军僚机”（敌机舰队 M3：不再显示借来的机型名 “Allied Fighter”）
+          expect(readBar(hudRig.barOf(plain.getMesh()) as HTMLElement).name).toBe('Allied Wingman');
           // 那架敌机自己：不管是哪个机型，报告隐形就没有血条和光点
           expect(hudRig.barOf(jet.getMesh()) !== null, 'the bar of the jet itself').toBe(!hidden);
           expect(hudRig.blipAt(placeOf(jet)) !== undefined, 'its radar contact').toBe(!hidden);
