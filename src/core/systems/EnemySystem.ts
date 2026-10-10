@@ -68,8 +68,9 @@ export class EnemySystem implements IGameSystem {
   private missileLockWarning = false;
   /** 干扰：玩家导弹锁定时间的倍数（1 = 没有干扰；有存活的干扰机在范围内时为 2，不叠加） */
   private lockTimeScale = 1;
-  /** 逐步复用：非干扰机敌机的平均位置（干扰机躲在它们身后） */
+  /** 逐步复用：干扰机自己那一路 / 场上全部非干扰机敌机的平均位置（干扰机躲在它们身后） */
   private readonly groupCenter = new THREE.Vector3();
+  private readonly fleetCenter = new THREE.Vector3();
 
   constructor(scene: THREE.Scene, sessionState?: GameSessionState) {
     this.levelManager = new LevelManager(scene);
@@ -205,7 +206,7 @@ export class EnemySystem implements IGameSystem {
   /**
    * 敌机更新之前的一步：把战场态势（玩家机头方向、玩家对每架敌机的威胁、关卡、是否 Boss 战）
    * 写给每架敌机，再由导演发放 / 收回攻击令牌并指派进入方位。玩家不可被攻击（复活中）时
-   * 令牌数为 0：所有敌机停火。
+   * 令牌数为 0，并且每架敌机都被告知“不许开火”：不需要令牌的武器（重型机尾炮）也停火。
    */
   private directEnemies(deltaTime: number, playerPosition: THREE.Vector3): void {
     const enemies = this.levelManager.getEnemies();
@@ -231,7 +232,8 @@ export class EnemySystem implements IGameSystem {
         lockedTarget === mesh,
         provider !== null && targetable && provider.isMissileInbound(mesh),
         level,
-        bossFight
+        bossFight,
+        targetable
       );
     }
 
@@ -255,37 +257,44 @@ export class EnemySystem implements IGameSystem {
   }
 
   /**
-   * 干扰机的站位参照：其余（非干扰机）存活敌机的平均位置；场上只剩干扰机时没有参照
-   * （它们改为在远处盘旋）。场上没有干扰机时不做任何事。
+   * 干扰机的站位参照：和它同一路到场（编组号相同）的非干扰机存活敌机的平均位置；
+   * 自己那一路已经没有别的敌机（或它不属于任何编组）时，退回到场上其余非干扰机敌机的平均位置；
+   * 场上只剩干扰机时没有参照（它们改为在远处盘旋）。场上没有干扰机时不做任何事。
    */
   private assignJammerGroup(enemies: ReturnType<LevelManager['getEnemies']>): void {
-    let jammers = 0;
-    let others = 0;
-    const center = this.groupCenter.set(0, 0, 0);
     for (let i = 0; i < enemies.length; i++) {
-      const enemy = enemies[i];
-      if (!enemy.isAlive()) continue;
-      if (enemy.getConfig().type === EnemyType.JAMMER) {
-        jammers++;
-      } else {
-        center.add(enemy.getMesh().position);
+      const jammer = enemies[i];
+      if (jammer.getConfig().type !== EnemyType.JAMMER || !jammer.isAlive()) continue;
+      const groupId = jammer.getGroupId();
+      const ownCenter = this.groupCenter.set(0, 0, 0);
+      const fleetCenter = this.fleetCenter.set(0, 0, 0);
+      let own = 0;
+      let others = 0;
+      for (let j = 0; j < enemies.length; j++) {
+        const mate = enemies[j];
+        if (!mate.isAlive() || mate.getConfig().type === EnemyType.JAMMER) continue;
+        const position = mate.getMesh().position;
+        fleetCenter.add(position);
         others++;
+        if (groupId !== 0 && mate.getGroupId() === groupId) {
+          ownCenter.add(position);
+          own++;
+        }
       }
-    }
-    if (jammers === 0) return;
-    if (others > 0) center.multiplyScalar(1 / others);
-    for (let i = 0; i < enemies.length; i++) {
-      const enemy = enemies[i];
-      if (enemy.getConfig().type === EnemyType.JAMMER) {
-        enemy.setGroupCenter(others > 0 ? center : null);
+      if (own > 0) {
+        jammer.setGroupCenter(ownCenter.multiplyScalar(1 / own));
+      } else if (others > 0) {
+        jammer.setGroupCenter(fleetCenter.multiplyScalar(1 / others));
+      } else {
+        jammer.setGroupCenter(null);
       }
     }
   }
 
   /**
    * 敌机更新之后的一步：汇总“有没有敌机正在用导弹锁定玩家”（HUD 的“锁定中”预警），
-   * 以及干扰状态——至少一架存活的干扰机在玩家 800 米内时，玩家导弹锁定时间 ×2（不叠加）；
-   * 范围内最后一架干扰机被击毁的那一步立即恢复。
+   * 以及干扰状态——至少一架存活且没有被 EMP 瘫痪的干扰机在玩家 800 米内时，玩家导弹锁定时间
+   * ×2（不叠加）；范围内最后一架干扰机被击毁（或被瘫痪）的那一步立即恢复，瘫痪结束后继续干扰。
    */
   private reviewEnemies(playerPosition: THREE.Vector3): void {
     const enemies = this.levelManager.getEnemies();
@@ -299,6 +308,7 @@ export class EnemySystem implements IGameSystem {
       if (
         !jammed &&
         enemy.getConfig().type === EnemyType.JAMMER &&
+        !enemy.isStunned() &&
         enemy.getMesh().position.distanceToSquared(playerPosition) <= jamRangeSq
       ) {
         jammed = true;

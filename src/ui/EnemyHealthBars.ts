@@ -156,8 +156,8 @@ function ensureTargetMarkerStyle(): void {
 /** 兜底标签（按界面语言取值） */
 const FALLBACK_ENEMY_LABEL: LocalizedText = { en: 'Hostile', zh: '敌方目标' };
 const FALLBACK_FRIENDLY_LABEL: LocalizedText = { en: 'Friendly', zh: '友军' };
-/** 友军敌机型号：“友军” + 型号名 */
-const FRIENDLY_TYPE_LABEL: LocalizedText = { en: 'Allied {type}', zh: '友军{type}' };
+/** 没有呼号的友军僚机（机体借用敌机机型的数值，名字与机库展示的一致，不显示借来的型号名） */
+const FRIENDLY_WINGMAN_LABEL: LocalizedText = { en: 'Allied Wingman', zh: '友军僚机' };
 
 /**
  * Boss 部件网格名前缀 → 标签（第三关的眼睛、第 6-10 关带独立血量的子目标）。
@@ -248,8 +248,7 @@ function resolveTargetLabel(mesh: Object3D, isFriendly: boolean): string {
     if (name.startsWith(prefix)) return tr(label);
   }
   if (isEnemyType(name)) {
-    const typeName = tr(ENEMY_CONFIGS[name].name);
-    return isFriendly ? tr(FRIENDLY_TYPE_LABEL, { type: typeName }) : typeName;
+    return isFriendly ? tr(FRIENDLY_WINGMAN_LABEL) : tr(ENEMY_CONFIGS[name].name);
   }
   if (name.startsWith('UNIT_') || mesh.userData.unitType !== undefined) {
     const unitName = readDisplayName(mesh);

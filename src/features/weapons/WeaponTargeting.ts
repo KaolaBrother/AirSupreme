@@ -55,6 +55,16 @@ export function isTargetAlive(target: CombatTarget): boolean {
   }
 }
 
+/** 自动索敌能不能选这个目标（没有声明 isSeekable 的目标都可以；包装层抛错时按可以处理） */
+export function isTargetSeekable(target: CombatTarget): boolean {
+  if (!target.isSeekable) return true;
+  try {
+    return target.isSeekable() !== false;
+  } catch {
+    return true;
+  }
+}
+
 /**
  * 安全地对目标造成伤害：包装层抛错时吞掉异常，避免一次命中打断整帧武器更新。
  * 返回是否成功调用。
@@ -96,6 +106,8 @@ export interface TargetSnapshot {
   damageable: boolean;
   /** ENEMY：可被自动索敌与瘫痪 */
   hostile: boolean;
+  /** 自动索敌可以选它（隐形中的敌机为 false；瘫痪、近炸、范围伤害不看这一项） */
+  seekable: boolean;
 }
 
 export class TargetSnapshotBuffer {
@@ -120,6 +132,7 @@ export class TargetSnapshotBuffer {
           radius: DEFAULT_TARGET_HIT_RADIUS,
           damageable: true,
           hostile: false,
+          seekable: true,
         };
         this.entries.push(entry);
       }
@@ -130,6 +143,7 @@ export class TargetSnapshotBuffer {
       entry.radius = resolveTargetHitRadius(target);
       entry.damageable = true;
       entry.hostile = isHostileFaction(target.faction);
+      entry.seekable = isTargetSeekable(target);
       this.count++;
     }
     this.seen.clear();
@@ -209,7 +223,7 @@ export function segmentPointDistanceSq(
 }
 
 /**
- * 前向锥形索敌：从快照里挑出 ENEMY 目标，按“距离 × 偏角”评分排序后写入 out。
+ * 前向锥形索敌：从快照里挑出 ENEMY 目标（隐形中的除外），按“距离 × 偏角”评分排序后写入 out。
  * 返回写入数量（不超过 maxCount）。
  */
 export function acquireConeTargets(
@@ -226,7 +240,7 @@ export function acquireConeTargets(
   scores.length = 0;
   for (let i = 0; i < snapshot.size(); i++) {
     const entry = snapshot.get(i);
-    if (!entry.hostile) continue;
+    if (!entry.hostile || !entry.seekable) continue;
     const dx = entry.position.x - origin.x;
     const dy = entry.position.y - origin.y;
     const dz = entry.position.z - origin.z;

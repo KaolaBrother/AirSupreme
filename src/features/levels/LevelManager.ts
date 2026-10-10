@@ -1,12 +1,16 @@
 import { Vector3 } from 'three';
 import type { Object3D, Scene } from 'three';
-import { LevelConfig, LevelWaveEventType, getLevelConfig } from '@/features/terrain/LevelConfig';
+import {
+  LevelConfig,
+  LevelWaveEventType,
+  getLevelConfig,
+  type LevelWaveConfig,
+} from '@/features/terrain/LevelConfig';
 import {
   EnemyConfig,
   EnemyType,
   ENEMY_CONFIGS,
-  getRandomEnemyType,
-  getEnemyTypesForWave,
+  isEliteEnemyType,
 } from '@/features/enemy/EnemyTypes';
 import { EnemyAI } from '@/features/enemy/EnemyAI';
 import { createJetDoctrine } from '@/features/enemy/doctrine/createJetDoctrine';
@@ -26,17 +30,20 @@ import {
   getWaveOnboardingBeat,
   type OnboardingWaveBeatProfile,
 } from '@/ui/OnboardingManager';
+import {
+  TRAIL_SPAWN_INTERVAL,
+  WAVE_GROUP_DISTANCE_RANGE,
+  WAVE_GROUP_MIN_DISTANCE,
+  planWaveGroupCenters,
+  type IWaveGroupCenter,
+} from './WaveArrival';
 
 const log = getLogger('LevelManager');
 
 /** 敌机出生点相对地表的最小高度（米），避免在峡谷岩壁 / 火山 / 天梯立柱内部生成 */
 const SPAWN_TERRAIN_CLEARANCE = 45;
-/** 波次敌机群中心距玩家的距离（米）：600-800 */
-const WAVE_GROUP_MIN_DISTANCE = 600;
-const WAVE_GROUP_DISTANCE_RANGE = 200;
 /** 群内散布半径（米，与 getSpawnPosition 一致）：群中心离边界至少这么远 */
 const WAVE_GROUP_SPREAD = 60;
-const WAVE_GROUP_CENTER_ATTEMPTS = 12;
 /** 玩家位置单步变化折算速度超过该值（米/秒）视为瞬移，不用于提前量 */
 const PLAYER_TELEPORT_SPEED = 250;
 /** 条令开火节奏倍率（难度档 × 关卡曲线的冷却倍率）的允许范围 */
@@ -108,7 +115,14 @@ export class LevelManager {
   private spawnTimer: number = 0;
   private spawnInterval: number = 0.5; // 敌人生成间隔（秒）
   private waveDelayTimer: number = 0; // 波次延迟计时器
-  private waveGroupCenter?: Vector3; // 当前波次的敌人群中心
+  /** 当前波次各路敌机群的中心（一群 / 鱼贯是一个，夹击是两个）；waveGroupCount = 0 表示还没算过 */
+  private readonly waveGroupCenters: IWaveGroupCenter[] = [
+    { x: 0, z: 0 },
+    { x: 0, z: 0 },
+  ];
+  private waveGroupCount: number = 0;
+  /** 已经点名出场、还在传送门里没有现身的“精英歼灭”名单敌机数 */
+  private pendingEliteDeploys: number = 0;
   private currentWaveEvent: LevelWaveEventType | null = null;
   private difficultyProfile: DifficultyProfile | null = null;
   private currentWaveBeatProfile: OnboardingWaveBeatProfile = DEFAULT_ONBOARDING_BEAT_PROFILE;
@@ -249,42 +263,33 @@ export class LevelManager {
   }
 
   /**
-   * 计算敌人群中心：距玩家 600-800 米，且整群（含 60 米散布）落在战场范围内。
-   * 玩家靠近战场边缘时，朝外的随机方向会落到界外——以前直接钳制到边界，
-   * 群中心可能被压到玩家身边（朝外飞时只剩一两百米）。现在只在界内的方向里选，
-   * 都不行时改为朝战场中心方向。
+   * 按本波的到场方式算出各路群中心（WaveArrival）：距玩家 600-800 米，
+   * 整群（含 60 米散布）落在战场范围内；夹击的两路从玩家看相隔 90-150°。
    */
-  private calculateWaveGroupCenter(playerPosition: Vector3): Vector3 {
-    const px = Number.isFinite(playerPosition.x) ? playerPosition.x : 0;
-    const pz = Number.isFinite(playerPosition.z) ? playerPosition.z : 0;
-    const y = Number.isFinite(playerPosition.y) ? playerPosition.y : 0;
-    const limit = this.BATTLEFIELD_MAX - WAVE_GROUP_SPREAD;
-
-    for (let attempt = 0; attempt < WAVE_GROUP_CENTER_ATTEMPTS; attempt++) {
-      const angle = Math.random() * Math.PI * 2;
-      const distance = WAVE_GROUP_MIN_DISTANCE + Math.random() * WAVE_GROUP_DISTANCE_RANGE;
-      const x = px + Math.cos(angle) * distance;
-      const z = pz + Math.sin(angle) * distance;
-      if (Math.abs(x) <= limit && Math.abs(z) <= limit) {
-        return new Vector3(x, y, z);
-      }
-    }
-
-    // 兜底：从玩家朝战场中心方向（玩家在中心附近时任选方向）
-    const toCenter = Math.hypot(px, pz);
-    const dirX = toCenter > 1 ? -px / toCenter : 1;
-    const dirZ = toCenter > 1 ? -pz / toCenter : 0;
-    const distance = WAVE_GROUP_MIN_DISTANCE + WAVE_GROUP_DISTANCE_RANGE / 2;
-    const center = new Vector3(
-      Math.max(-limit, Math.min(limit, px + dirX * distance)),
-      y,
-      Math.max(-limit, Math.min(limit, pz + dirZ * distance))
+  private planWaveGroups(playerPosition: Vector3): void {
+    const arrival = this.getCurrentWaveConfig()?.arrival ?? 'group';
+    this.waveGroupCount = planWaveGroupCenters(
+      arrival,
+      playerPosition.x,
+      playerPosition.z,
+      this.BATTLEFIELD_MAX - WAVE_GROUP_SPREAD,
+      Math.random,
+      this.waveGroupCenters
     );
-    log.debug('Wave group centre placed toward the battlefield centre', {
-      player: { x: px, z: pz },
-      center: { x: center.x, z: center.z },
-    });
-    return center;
+  }
+
+  /** 当前波次的编成（谁来、怎么来）；关卡未加载或波次越界时为 null */
+  public getCurrentWaveConfig(): LevelWaveConfig | null {
+    return this.currentLevel?.waves[this.currentWave] ?? null;
+  }
+
+  /** 当前波次各路群中心的副本（开发钩子 / 验收用；尚未开场时为空） */
+  public getWaveGroupCenters(): IWaveGroupCenter[] {
+    const centers: IWaveGroupCenter[] = [];
+    for (let i = 0; i < this.waveGroupCount; i++) {
+      centers.push({ x: this.waveGroupCenters[i].x, z: this.waveGroupCenters[i].z });
+    }
+    return centers;
   }
 
   /**
@@ -297,15 +302,15 @@ export class LevelManager {
 
     // 第一次调用：设置第一波（读档时可能从第 N 波开始）
     if (this.state === LevelState.IDLE && playerPosition && !isNextWave) {
-      // 计算并保存第一波的敌人群中心（确保在战场内）
-      this.waveGroupCenter = this.calculateWaveGroupCenter(playerPosition);
+      // 计算并保存第一波各路的敌人群中心（确保在战场内）
+      this.planWaveGroups(playerPosition);
 
       this.state = LevelState.WAVE_ACTIVE;
       this.enemiesSpawnedThisWave = 0;
       this.currentWaveEvent = this.resolveWaveEvent();
       this.currentWaveBeatProfile = getWaveOnboardingBeat(this.currentWave, this.currentWaveEvent);
-      this.spawnTimer = 0;
       this.spawnInterval = this.getWaveSpawnInterval();
+      this.spawnTimer = this.getInitialSpawnTimer();
       this.onWaveStart?.(this.currentWave);
       if (this.currentWaveEvent) {
         this.onWaveEventStart?.(this.currentWaveEvent, this.currentWave);
@@ -330,8 +335,8 @@ export class LevelManager {
     this.enemiesSpawnedThisWave = 0;
     this.currentWaveEvent = this.resolveWaveEvent();
     this.currentWaveBeatProfile = getWaveOnboardingBeat(this.currentWave, this.currentWaveEvent);
-    this.spawnTimer = 0;
     this.spawnInterval = this.getWaveSpawnInterval();
+    this.spawnTimer = this.getInitialSpawnTimer();
     this.onWaveStart?.(this.currentWave);
     if (this.currentWaveEvent) {
       this.onWaveEventStart?.(this.currentWaveEvent, this.currentWave);
@@ -348,47 +353,49 @@ export class LevelManager {
   }
 
   /**
-   * 生成敌人（保留传送门，但完成后立即出现）
+   * 生成敌人（保留传送门，但完成后立即出现）：
+   * 机型取本波编成里的下一架（不随机选型），出生在它那一路的群中心附近。
    */
   private spawnEnemy(playerPosition: Vector3): void {
     if (!this.currentLevel) return;
 
+    const slot = this.enemiesSpawnedThisWave;
     // 立即递增生成计数（防止重复生成）
     this.enemiesSpawnedThisWave++;
     this.totalEnemiesSpawned++; // 总已生成敌人计数
 
-    // 获取当前波次可用的敌人类型
-    const availableTypes = this.getAvailableEnemyTypes();
-    if (availableTypes.length === 0) {
-      // 如果没有特定配置，默认使用SCOUT
-      availableTypes.push(EnemyType.SCOUT);
-    }
-
-    // 随机选择一个敌人类型
-    const enemyType = getRandomEnemyType(availableTypes);
+    const waveConfig = this.getCurrentWaveConfig();
+    // 编成里没有这一架（配置缺失）时退回侦察机
+    const enemyType = waveConfig?.lineup[slot] ?? EnemyType.SCOUT;
+    const side = waveConfig?.arrival === 'pincer' ? (waveConfig.sides?.[slot] ?? 0) : 0;
+    // 同一路的敌机共用一个编组号（干扰机据此找“自己那一路”）
+    const groupId = this.currentWave * 2 + side + 1;
 
     // 获取生成位置
-    const spawnPosition = this.getSpawnPosition(playerPosition);
+    const spawnPosition = this.getSpawnPosition(playerPosition, side);
+
+    const elite = isEliteEnemyType(enemyType);
+    if (elite) this.pendingEliteDeploys++;
+
+    const deploy = (): void => {
+      if (elite) this.pendingEliteDeploys = Math.max(0, this.pendingEliteDeploys - 1);
+      const enemy = this.getOrCreateEnemy(enemyType);
+      enemy.reset(spawnPosition);
+      enemy.setGroupId(groupId);
+      enemy.getMesh().visible = true;
+      this.onEnemySpawned?.(enemy);
+    };
 
     void this.ensureSpawnPortalModule()
       .then(({ SpawnPortal }) => {
-        const portal = new SpawnPortal(spawnPosition, () => {
-          const enemy = this.getOrCreateEnemy(enemyType);
-          enemy.reset(spawnPosition);
-          enemy.getMesh().visible = true;
-          this.onEnemySpawned?.(enemy);
-        });
+        const portal = new SpawnPortal(spawnPosition, deploy);
 
         this.scene.add(portal.getMesh());
         this.activePortals.push(portal);
       })
       .catch((error: unknown) => {
         log.error('Spawn portal module load failed', { error });
-
-        const enemy = this.getOrCreateEnemy(enemyType);
-        enemy.reset(spawnPosition);
-        enemy.getMesh().visible = true;
-        this.onEnemySpawned?.(enemy);
+        deploy();
       });
   }
 
@@ -396,8 +403,9 @@ export class LevelManager {
    * 更新关卡管理器
    */
   public update(deltaTime: number, playerPosition: Vector3, friendlyMeshes?: Object3D[]): void {
-    // 更新传送门动画
-    for (let i = this.activePortals.length - 1; i >= 0; i--) {
+    // 更新传送门动画（开发钩子暂停波次时一并冻结：已经打开的传送门不再放出敌机）
+    const portalCount = this.waveSpawningHeld ? 0 : this.activePortals.length;
+    for (let i = portalCount - 1; i >= 0; i--) {
       const portal = this.activePortals[i];
       portal.update(deltaTime);
 
@@ -679,6 +687,21 @@ export class LevelManager {
     };
   }
 
+  /**
+   * 本波还没现身的敌机里有多少架属于“精英歼灭”名单：编成里尚未点名的 + 还在传送门里的。
+   * 目标面板用它加上在场的精英数，开场第一秒就显示本波要打掉的精英总数。
+   */
+  public countEliteJetsToCome(): number {
+    const lineup = this.getCurrentWaveConfig()?.lineup;
+    let count = this.pendingEliteDeploys;
+    if (lineup && this.state === LevelState.WAVE_ACTIVE) {
+      for (let slot = this.enemiesSpawnedThisWave; slot < lineup.length; slot++) {
+        if (isEliteEnemyType(lineup[slot])) count++;
+      }
+    }
+    return count;
+  }
+
   public getCurrentWaveOnboardingBeat(): OnboardingWaveBeatProfile {
     return { ...this.currentWaveBeatProfile };
   }
@@ -696,6 +719,7 @@ export class LevelManager {
       portal.dispose();
     }
     this.activePortals = [];
+    this.pendingEliteDeploys = 0;
     this.enemiesSpawnedThisWave = 0;
     this.resetPlayerVelocity();
   }
@@ -714,6 +738,7 @@ export class LevelManager {
       portal.dispose();
     }
     this.activePortals = [];
+    this.pendingEliteDeploys = 0;
     return removed;
   }
 
@@ -744,6 +769,7 @@ export class LevelManager {
       portal.dispose();
     }
     this.activePortals = [];
+    this.pendingEliteDeploys = 0;
 
     // 重置波次
     this.enemiesSpawnedThisWave = 0;
@@ -760,8 +786,8 @@ export class LevelManager {
     // 增加波次
     this.currentWave++;
 
-    // 计算并保存新波次的敌人群中心（确保在战场内）
-    this.waveGroupCenter = this.calculateWaveGroupCenter(playerPosition);
+    // 计算并保存新波次各路的敌人群中心（确保在战场内）
+    this.planWaveGroups(playerPosition);
 
     // 调用 startWave 完成状态设置和事件触发
     this.startWave(undefined, true); // isNextWave = true
@@ -769,9 +795,9 @@ export class LevelManager {
 
   /**
    * 获取生成位置，确保敌人批量生成在群内
-   * 使用当前波次的固定群中心（waveGroupCenter），所有敌人在群中心60m半径内分布
+   * 使用当前波次这一路的固定群中心（waveGroupCenters[side]），敌机在群中心60m半径内分布
    */
-  private getSpawnPosition(playerPosition: Vector3): Vector3 {
+  private getSpawnPosition(playerPosition: Vector3, side: number = 0): Vector3 {
     const minGroupDistanceFromPlayer = WAVE_GROUP_MIN_DISTANCE; // 群中心最小距离
     const maxGroupDistanceFromPlayer = WAVE_GROUP_MIN_DISTANCE + WAVE_GROUP_DISTANCE_RANGE; // 群中心最大距离
     const distributionRadius = WAVE_GROUP_SPREAD; // 敌人在群内分布半径
@@ -789,7 +815,7 @@ export class LevelManager {
 
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       // 使用保存的群中心（在startNextWave中计算）
-      if (!this.waveGroupCenter) {
+      if (this.waveGroupCount === 0) {
         log.warn('No group center set, using fallback position');
         // 降级：如果没有群中心，使用玩家位置作为参考
         const fallbackDistance =
@@ -834,8 +860,8 @@ export class LevelManager {
         break;
       }
 
-      // 使用群中心
-      const groupCenter = this.waveGroupCenter;
+      // 使用这一路的群中心
+      const groupCenter = this.waveGroupCenters[Math.min(side, this.waveGroupCount - 1)];
       const distAngle = Math.random() * Math.PI * 2;
       const distFromCenter = Math.random() * distributionRadius;
 
@@ -938,6 +964,8 @@ export class LevelManager {
   ): EnemyAI | null {
     const enemy = this.getOrCreateEnemy(type);
     enemy.reset(position);
+    // Boss 召唤 / 开发钩子生成的敌机不属于任何波次编组
+    enemy.setGroupId(0);
     enemy.getMesh().visible = true;
     if (counted) this.totalEnemiesSpawned++;
 
@@ -955,33 +983,6 @@ export class LevelManager {
     this.enemies = [];
   }
 
-  private getAvailableEnemyTypes(): EnemyType[] {
-    if (!this.currentLevel) {
-      return getEnemyTypesForWave(1, this.currentWave);
-    }
-
-    const weightedTypes: EnemyType[] = [];
-    const waveNumber = this.currentWave + 1;
-
-    for (const entry of this.currentLevel.enemyTypes) {
-      if (waveNumber < entry.minWave) {
-        continue;
-      }
-
-      const type = entry.type as EnemyType;
-      for (let i = 0; i < entry.maxCount; i++) {
-        weightedTypes.push(type);
-      }
-    }
-
-    const baseTypes =
-      weightedTypes.length === 0
-        ? getEnemyTypesForWave(this.currentLevel.id, this.currentWave)
-        : weightedTypes;
-
-    return this.filterEnemyTypesForWaveEvent(baseTypes);
-  }
-
   private resolveWaveEvent(): LevelWaveEventType | null {
     const eventTemplates = this.currentLevel?.eventTemplates;
     if (!eventTemplates || eventTemplates.length === 0) {
@@ -995,7 +996,8 @@ export class LevelManager {
     return eventTemplates[(this.currentWave - 1) % eventTemplates.length] ?? null;
   }
 
-  private getWaveSpawnInterval(): number {
+  /** 波次事件决定的出场间隔（秒） */
+  private getEventSpawnInterval(): number {
     switch (this.currentWaveEvent) {
       case LevelWaveEventType.ELITE_HUNT:
         return 0.8;
@@ -1008,20 +1010,17 @@ export class LevelManager {
     }
   }
 
-  private filterEnemyTypesForWaveEvent(weightedTypes: EnemyType[]): EnemyType[] {
-    if (this.currentWaveEvent === null) {
-      return weightedTypes;
-    }
+  /** 本波的出场间隔：鱼贯而入的波次拉开到 TRAIL_SPAWN_INTERVAL，其余用事件的间隔 */
+  private getWaveSpawnInterval(): number {
+    const eventInterval = this.getEventSpawnInterval();
+    return this.getCurrentWaveConfig()?.arrival === 'trail'
+      ? Math.max(eventInterval, TRAIL_SPAWN_INTERVAL)
+      : eventInterval;
+  }
 
-    const preferredTypes =
-      this.currentWaveEvent === LevelWaveEventType.ELITE_HUNT
-        ? [EnemyType.HEAVY, EnemyType.ACE, EnemyType.SNIPER, EnemyType.FIGHTER]
-        : this.currentWaveEvent === LevelWaveEventType.INTERCEPT
-          ? [EnemyType.SCOUT, EnemyType.FIGHTER, EnemyType.SNIPER]
-          : [EnemyType.FIGHTER, EnemyType.HEAVY, EnemyType.SCOUT];
-    const filteredTypes = weightedTypes.filter((type) => preferredTypes.includes(type));
-
-    return filteredTypes.length > 0 ? filteredTypes : weightedTypes;
+  /** 开场计时器的起点：第一架总是按事件的间隔出场（鱼贯而入只拉开后面各架） */
+  private getInitialSpawnTimer(): number {
+    return Math.max(0, this.spawnInterval - this.getEventSpawnInterval());
   }
 
   /**

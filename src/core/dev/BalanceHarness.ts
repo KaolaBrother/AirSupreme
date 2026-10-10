@@ -400,8 +400,11 @@ export function installBalanceHarness(access: DevHookAccess): BalanceHarnessApi 
     wrappedUnitSystem = system;
     const original = system.onPlayerDamaged;
     system.onPlayerDamaged = (damage, cause, position, source) => {
-      // 敌机导弹带发射者标签（'jet:<机型>'），与机炮伤害记在同一个机型名下
-      pendingUnitCause = source ?? `unit-${cause}`;
+      // 敌机导弹带发射者标签（'jet:<机型>'）：记成 'jet-missile:<机型>'，与同机型的机炮伤害分开看
+      pendingUnitCause =
+        cause === 'jet-missile' && source
+          ? source.replace(/^jet:/, 'jet-missile:')
+          : (source ?? `unit-${cause}`);
       try {
         original?.(damage, cause, position, source);
       } finally {

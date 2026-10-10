@@ -1,4 +1,5 @@
-import { LevelWaveEventType } from '@/features/terrain/LevelConfig';
+import { EnemyType } from '@/features/enemy/EnemyTypes';
+import { LevelWaveEventType, getIntroducedEnemyTypes } from '@/features/terrain/LevelConfig';
 import { tr, type LocalizedText } from '@/i18n';
 
 export type OnboardingPhase = 'first-wave' | 'event-start' | 'event-complete';
@@ -67,8 +68,8 @@ const DEFAULT_EVENT_TEXT: Record<LevelWaveEventType, OnboardingMessageSource> = 
     icon: '💠',
     title: { en: 'Elite hunt wave', zh: '精英歼灭波次' },
     text: {
-      en: 'Take out the high-threat targets first and punch through the heavy and ace armor',
-      zh: '优先处理高威胁目标，打穿重装与王牌护甲',
+      en: 'Take out the high-threat targets first: hunt down every elite jet',
+      zh: '优先处理高威胁目标，把精英敌机逐个打掉',
     },
     durationMs: 1800,
   },
@@ -217,6 +218,57 @@ export const ONBOARDING_TEXT_LIBRARY: OnboardingWaveTextProfile = {
   eventStart: DEFAULT_EVENT_TEXT,
   eventComplete: DEFAULT_EVENT_COMPLETE_TEXT,
 };
+
+/**
+ * 首次遭遇提示：某机型在战役里第一次出现的那一波开场时显示的一行文字（当前界面语言，无语音）。
+ * 侦察机没有提示——第 1 关第 1 波属于原有的入门引导。
+ */
+export const FIRST_CONTACT_HINTS: Readonly<Partial<Record<EnemyType, LocalizedText>>> = {
+  [EnemyType.FIGHTER]: {
+    en: 'Fighters go for your tail. Turn into them to shake them off.',
+    zh: '战斗机会咬你的尾巴，朝它转过去就能甩开。',
+  },
+  [EnemyType.SNIPER]: {
+    en: 'Red beam: a sniper is charging. When the beam freezes, change direction.',
+    zh: '红色光束是狙击机在蓄力，光束定住的瞬间立刻转向。',
+  },
+  [EnemyType.HEAVY]: {
+    en: 'Gunships fire slow shell fans. Attack from the side or below, not from behind.',
+    zh: '炮艇机打出慢速弹幕，从侧面或下方进攻，别跟在正后方。',
+  },
+  [EnemyType.ACE]: {
+    en: 'Aces fire seeking missiles. On a missile warning, drop a flare and break.',
+    zh: '王牌机会发射追踪导弹，出现导弹警告就放干扰弹并急转。',
+  },
+  [EnemyType.STRIKER]: {
+    en: 'Strikers launch missile pairs from far out. Close in while they reload.',
+    zh: '打击机在远处成对发射导弹，趁它装填时贴上去。',
+  },
+  [EnemyType.JAMMER]: {
+    en: 'A Jammer slows your missile lock. Shoot it down first — guns still work.',
+    zh: '干扰机会拖慢导弹锁定，先把它打掉——机炮不受影响。',
+  },
+  [EnemyType.WRAITH]: {
+    en: 'Wraiths cloak and strike from behind. Watch for the red flash, then turn.',
+    zh: '幽灵机隐身后从背后偷袭，看到红色闪光就立刻转向。',
+  },
+};
+
+/** 一条首次遭遇提示在屏幕上停留的时间（毫秒）：一整句话，比波次提示久 */
+export const FIRST_CONTACT_HINT_HOLD_MS = 5000;
+
+/**
+ * 这一波（波次从 0 起）开场要显示的首次遭遇提示。
+ * 只跟关卡和波次有关：读档重打这一波照样显示，别的波次永远没有。
+ */
+export function getFirstContactHints(level: number, waveIndex: number): LocalizedText[] {
+  const hints: LocalizedText[] = [];
+  for (const type of getIntroducedEnemyTypes(level, waveIndex)) {
+    const hint = FIRST_CONTACT_HINTS[type];
+    if (hint) hints.push(hint);
+  }
+  return hints;
+}
 
 /** 按当前界面语言展开节拍配置（每次返回新对象） */
 function resolveBeat(source: BeatSource): OnboardingWaveBeatProfile {

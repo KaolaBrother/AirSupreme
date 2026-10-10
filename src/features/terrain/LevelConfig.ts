@@ -1,4 +1,5 @@
 import { CHAPTER_TITLES } from '@/features/campaign/ChapterTitles';
+import { EnemyType } from '@/features/enemy/EnemyTypes';
 import type { LocalizedText } from '@/i18n';
 
 export interface LevelEnvironmentConfig {
@@ -218,7 +219,8 @@ export interface LevelConfig {
   // 敌人配置
   totalWaves: number;
   enemiesPerWave: number[];
-  enemyTypes: EnemyTypeConfig[];
+  /** 逐波写定的编成（谁来、怎么来）；与 enemiesPerWave 等长，每波的架数也与之相等 */
+  waves: LevelWaveConfig[];
   waveInterval: number; // 波次间隔（秒）
   eventTemplates?: LevelWaveEventType[];
 
@@ -248,16 +250,60 @@ export enum TerrainType {
   CITADEL = 'CITADEL',
 }
 
-export interface EnemyTypeConfig {
-  type: string;
-  minWave: number;
-  maxCount: number;
+/**
+ * 一波敌机的到场方式：
+ * - group：一群同来（群中心距玩家 600–800 米）
+ * - pincer：两路夹击，从玩家看两路相隔 90–150°
+ * - trail：同一方位鱼贯而入，一架接一架到场
+ */
+export type WaveArrival = 'group' | 'pincer' | 'trail';
+
+/**
+ * 一波的编成。同一关的同一波永远是这一份：不随机选型，波次事件也不再改写它
+ * （事件只决定目标面板与出场间隔）。
+ */
+export interface LevelWaveConfig {
+  /** 本波敌机，按出场顺序排列 */
+  lineup: readonly EnemyType[];
+  arrival: WaveArrival;
+  /** 仅 pincer：每架敌机所在的一路（0 / 1），与 lineup 等长 */
+  sides?: readonly number[];
 }
 
 export enum LevelWaveEventType {
   ELITE_HUNT = 'ELITE_HUNT',
   INTERCEPT = 'INTERCEPT',
   ESCORT_DEFENSE = 'ESCORT_DEFENSE',
+}
+
+const { SCOUT, FIGHTER, HEAVY, SNIPER, ACE, JAMMER, STRIKER, WRAITH } = EnemyType;
+
+/** 一群同来 */
+function group(...lineup: EnemyType[]): LevelWaveConfig {
+  return { lineup, arrival: 'group' };
+}
+
+/** 同一方位鱼贯而入（按书写顺序一架接一架） */
+function trail(...lineup: EnemyType[]): LevelWaveConfig {
+  return { lineup, arrival: 'trail' };
+}
+
+/** 两路夹击：两路交替出场，最先到场的两架分属两路 */
+function pincer(first: EnemyType[], second: EnemyType[]): LevelWaveConfig {
+  const lineup: EnemyType[] = [];
+  const sides: number[] = [];
+  const longest = Math.max(first.length, second.length);
+  for (let i = 0; i < longest; i++) {
+    if (i < first.length) {
+      lineup.push(first[i]);
+      sides.push(0);
+    }
+    if (i < second.length) {
+      lineup.push(second[i]);
+      sides.push(1);
+    }
+  }
+  return { lineup, arrival: 'pincer', sides };
 }
 
 /**
@@ -373,9 +419,12 @@ export const LEVELS: LevelConfig[] = [
     totalWaves: 5,
     // 教学关：敌机数逐波缓升（16 架），第 2 关起再按关卡曲线加密
     enemiesPerWave: [2, 3, 3, 4, 4],
-    enemyTypes: [
-      { type: 'SCOUT', minWave: 1, maxCount: 2 },
-      { type: 'FIGHTER', minWave: 3, maxCount: 2 },
+    waves: [
+      group(SCOUT, SCOUT),
+      pincer([SCOUT, SCOUT], [SCOUT]),
+      group(SCOUT, SCOUT, FIGHTER),
+      pincer([SCOUT, FIGHTER], [SCOUT, FIGHTER]),
+      trail(SCOUT, FIGHTER, SCOUT, FIGHTER),
     ],
     waveInterval: 15,
     eventTemplates: [LevelWaveEventType.INTERCEPT],
@@ -484,10 +533,12 @@ export const LEVELS: LevelConfig[] = [
     },
     totalWaves: 5,
     enemiesPerWave: [3, 4, 5, 5, 5],
-    enemyTypes: [
-      { type: 'SCOUT', minWave: 1, maxCount: 2 },
-      { type: 'FIGHTER', minWave: 1, maxCount: 3 },
-      { type: 'SNIPER', minWave: 3, maxCount: 1 },
+    waves: [
+      group(SCOUT, SCOUT, FIGHTER),
+      group(FIGHTER, FIGHTER, SCOUT, SNIPER),
+      pincer([FIGHTER, FIGHTER, SCOUT], [SNIPER, SNIPER]),
+      group(HEAVY, FIGHTER, FIGHTER, SCOUT, SCOUT),
+      pincer([HEAVY, FIGHTER, SCOUT], [SNIPER, FIGHTER]),
     ],
     waveInterval: 12,
     eventTemplates: [
@@ -604,10 +655,13 @@ export const LEVELS: LevelConfig[] = [
     },
     totalWaves: 6,
     enemiesPerWave: [3, 4, 4, 4, 5, 5],
-    enemyTypes: [
-      { type: 'FIGHTER', minWave: 1, maxCount: 3 },
-      { type: 'HEAVY', minWave: 2, maxCount: 2 },
-      { type: 'SNIPER', minWave: 3, maxCount: 2 },
+    waves: [
+      group(FIGHTER, FIGHTER, SCOUT),
+      group(HEAVY, FIGHTER, FIGHTER, SNIPER),
+      pincer([SCOUT, SCOUT], [SCOUT, SCOUT]),
+      group(FIGHTER, FIGHTER, SCOUT, ACE),
+      pincer([ACE, FIGHTER], [HEAVY, SNIPER, FIGHTER]),
+      pincer([ACE, SCOUT, SCOUT], [FIGHTER, FIGHTER]),
     ],
     waveInterval: 10,
     eventTemplates: [
@@ -720,11 +774,13 @@ export const LEVELS: LevelConfig[] = [
     },
     totalWaves: 6,
     enemiesPerWave: [4, 4, 5, 5, 5, 5],
-    enemyTypes: [
-      { type: 'FIGHTER', minWave: 1, maxCount: 4 },
-      { type: 'HEAVY', minWave: 2, maxCount: 2 },
-      { type: 'SNIPER', minWave: 3, maxCount: 2 },
-      { type: 'ACE', minWave: 5, maxCount: 1 },
+    waves: [
+      pincer([FIGHTER, SCOUT], [FIGHTER, SCOUT]),
+      group(FIGHTER, FIGHTER, SCOUT, STRIKER),
+      group(HEAVY, FIGHTER, FIGHTER, SNIPER, STRIKER),
+      trail(SCOUT, FIGHTER, HEAVY, FIGHTER, HEAVY),
+      pincer([STRIKER, STRIKER], [SCOUT, SCOUT, FIGHTER]),
+      pincer([ACE, FIGHTER, FIGHTER], [STRIKER, SNIPER]),
     ],
     waveInterval: 8,
     eventTemplates: [
@@ -849,12 +905,14 @@ export const LEVELS: LevelConfig[] = [
     },
     totalWaves: 7,
     enemiesPerWave: [4, 4, 4, 5, 5, 5, 5],
-    enemyTypes: [
-      { type: 'SCOUT', minWave: 1, maxCount: 3 },
-      { type: 'FIGHTER', minWave: 1, maxCount: 4 },
-      { type: 'HEAVY', minWave: 2, maxCount: 3 },
-      { type: 'SNIPER', minWave: 3, maxCount: 2 },
-      { type: 'ACE', minWave: 6, maxCount: 2 },
+    waves: [
+      group(FIGHTER, FIGHTER, SCOUT, SCOUT),
+      group(HEAVY, FIGHTER, FIGHTER, JAMMER),
+      pincer([SCOUT, SCOUT], [SCOUT, SNIPER]),
+      group(FIGHTER, FIGHTER, SCOUT, STRIKER, JAMMER),
+      pincer([ACE, FIGHTER, FIGHTER], [SNIPER, JAMMER]),
+      pincer([STRIKER, STRIKER, JAMMER], [SCOUT, SCOUT]),
+      trail(FIGHTER, FIGHTER, ACE, HEAVY, JAMMER),
     ],
     waveInterval: 6,
     eventTemplates: [
@@ -977,12 +1035,14 @@ export const LEVELS: LevelConfig[] = [
     },
     totalWaves: 7,
     enemiesPerWave: [5, 5, 5, 5, 6, 6, 6],
-    enemyTypes: [
-      { type: 'SCOUT', minWave: 1, maxCount: 3 },
-      { type: 'FIGHTER', minWave: 1, maxCount: 4 },
-      { type: 'HEAVY', minWave: 2, maxCount: 3 },
-      { type: 'SNIPER', minWave: 3, maxCount: 2 },
-      { type: 'ACE', minWave: 5, maxCount: 2 },
+    waves: [
+      pincer([FIGHTER, FIGHTER, SCOUT], [FIGHTER, SCOUT]),
+      group(FIGHTER, FIGHTER, SCOUT, SNIPER, SNIPER),
+      group(FIGHTER, FIGHTER, STRIKER, STRIKER, JAMMER),
+      pincer([SNIPER, SCOUT, SCOUT], [SNIPER, SCOUT]),
+      trail(SCOUT, FIGHTER, FIGHTER, HEAVY, HEAVY, JAMMER),
+      pincer([ACE, FIGHTER, SCOUT], [SNIPER, SNIPER, FIGHTER]),
+      pincer([ACE, HEAVY, FIGHTER], [STRIKER, STRIKER, JAMMER]),
     ],
     waveInterval: 6,
     // 第六章目标：拦截向外输送机甲的运输编队
@@ -1103,12 +1163,14 @@ export const LEVELS: LevelConfig[] = [
     },
     totalWaves: 7,
     enemiesPerWave: [4, 4, 5, 5, 5, 5, 6],
-    enemyTypes: [
-      { type: 'FIGHTER', minWave: 1, maxCount: 4 },
-      { type: 'HEAVY', minWave: 1, maxCount: 2 },
-      { type: 'SNIPER', minWave: 2, maxCount: 3 },
-      { type: 'SCOUT', minWave: 3, maxCount: 2 },
-      { type: 'ACE', minWave: 4, maxCount: 2 },
+    waves: [
+      group(FIGHTER, FIGHTER, SCOUT, SCOUT),
+      group(FIGHTER, FIGHTER, SCOUT, WRAITH),
+      pincer([SCOUT, SCOUT, FIGHTER], [SNIPER, WRAITH]),
+      group(HEAVY, FIGHTER, FIGHTER, ACE, WRAITH),
+      pincer([FIGHTER, FIGHTER, WRAITH], [STRIKER, JAMMER]),
+      pincer([SNIPER, SCOUT, WRAITH], [SNIPER, SCOUT]),
+      pincer([ACE, WRAITH, FIGHTER], [STRIKER, JAMMER, FIGHTER]),
     ],
     waveInterval: 5.5,
     // 第七章目标：保护友军破冰护卫舰「北辰」
@@ -1224,12 +1286,14 @@ export const LEVELS: LevelConfig[] = [
     },
     totalWaves: 7,
     enemiesPerWave: [4, 5, 5, 5, 5, 6, 6],
-    enemyTypes: [
-      { type: 'FIGHTER', minWave: 1, maxCount: 4 },
-      { type: 'SCOUT', minWave: 1, maxCount: 3 },
-      { type: 'HEAVY', minWave: 2, maxCount: 2 },
-      { type: 'SNIPER', minWave: 3, maxCount: 3 },
-      { type: 'ACE', minWave: 4, maxCount: 3 },
+    waves: [
+      group(FIGHTER, FIGHTER, WRAITH, WRAITH),
+      pincer([ACE, FIGHTER, SCOUT], [ACE, FIGHTER]),
+      group(HEAVY, SNIPER, WRAITH, WRAITH, JAMMER),
+      pincer([STRIKER, STRIKER, JAMMER], [FIGHTER, FIGHTER]),
+      pincer([ACE, SCOUT, SCOUT], [ACE, SCOUT]),
+      pincer([SNIPER, FIGHTER, WRAITH], [SNIPER, FIGHTER, WRAITH]),
+      pincer([ACE, ACE, WRAITH], [STRIKER, JAMMER, WRAITH]),
     ],
     waveInterval: 5.5,
     // 第八章目标：护送友军车队「长弓」穿越峡谷
@@ -1348,12 +1412,14 @@ export const LEVELS: LevelConfig[] = [
     },
     totalWaves: 7,
     enemiesPerWave: [4, 5, 5, 5, 6, 6, 6],
-    enemyTypes: [
-      { type: 'FIGHTER', minWave: 1, maxCount: 4 },
-      { type: 'SNIPER', minWave: 1, maxCount: 4 },
-      { type: 'SCOUT', minWave: 1, maxCount: 2 },
-      { type: 'ACE', minWave: 2, maxCount: 3 },
-      { type: 'HEAVY', minWave: 3, maxCount: 2 },
+    waves: [
+      pincer([ACE, FIGHTER], [ACE, FIGHTER]),
+      pincer([SNIPER, SCOUT, WRAITH], [SNIPER, SCOUT]),
+      group(HEAVY, FIGHTER, STRIKER, STRIKER, JAMMER),
+      pincer([ACE, WRAITH, JAMMER], [ACE, WRAITH]),
+      pincer([SCOUT, SCOUT, SCOUT], [SNIPER, SNIPER, WRAITH]),
+      trail(ACE, HEAVY, HEAVY, STRIKER, STRIKER, JAMMER),
+      pincer([ACE, ACE, SNIPER], [WRAITH, WRAITH, STRIKER]),
     ],
     waveInterval: 5,
     // 第九章目标：保护友军预警机，民航客机正在撤离
@@ -1469,13 +1535,17 @@ export const LEVELS: LevelConfig[] = [
       vignetteStrength: 0.3,
     },
     totalWaves: 8,
-    enemiesPerWave: [3, 3, 4, 4, 4, 4, 5, 5],
-    enemyTypes: [
-      { type: 'FIGHTER', minWave: 1, maxCount: 4 },
-      { type: 'HEAVY', minWave: 1, maxCount: 2 },
-      { type: 'SCOUT', minWave: 1, maxCount: 2 },
-      { type: 'SNIPER', minWave: 2, maxCount: 3 },
-      { type: 'ACE', minWave: 2, maxCount: 4 },
+    // 终局关：每一波都不少于第 9 关同一波
+    enemiesPerWave: [4, 5, 5, 5, 6, 6, 6, 6],
+    waves: [
+      pincer([ACE, FIGHTER], [ACE, FIGHTER]),
+      group(HEAVY, SNIPER, WRAITH, WRAITH, JAMMER),
+      pincer([SCOUT, SCOUT, SCOUT], [SNIPER, SNIPER]),
+      pincer([STRIKER, STRIKER, JAMMER], [FIGHTER, FIGHTER]),
+      pincer([ACE, WRAITH, HEAVY], [ACE, WRAITH, JAMMER]),
+      trail(HEAVY, HEAVY, SNIPER, STRIKER, STRIKER, JAMMER),
+      pincer([SNIPER, SCOUT, WRAITH], [SNIPER, SCOUT, WRAITH]),
+      pincer([ACE, ACE, WRAITH], [STRIKER, JAMMER, WRAITH]),
     ],
     waveInterval: 4.5,
     eventTemplates: [
@@ -1495,4 +1565,43 @@ export const LEVELS: LevelConfig[] = [
  */
 export function getLevelConfig(levelId: number): LevelConfig | undefined {
   return LEVELS.find((l) => l.id === levelId);
+}
+
+/** 某关某波（波次从 0 起）的编成；关卡或波次不存在时返回 undefined */
+export function getWaveConfig(levelId: number, waveIndex: number): LevelWaveConfig | undefined {
+  return getLevelConfig(levelId)?.waves[waveIndex];
+}
+
+let introductionWaves: Map<string, EnemyType[]> | null = null;
+const NO_INTRODUCTIONS: readonly EnemyType[] = [];
+
+/** 按 LEVELS 的关卡、波次、出场顺序统计每个机型第一次出现在哪一波 */
+function buildIntroductionWaves(): Map<string, EnemyType[]> {
+  const introductions = new Map<string, EnemyType[]>();
+  const seen = new Set<EnemyType>();
+  for (const level of LEVELS) {
+    for (let index = 0; index < level.waves.length; index++) {
+      for (const type of level.waves[index].lineup) {
+        if (seen.has(type)) continue;
+        seen.add(type);
+        const key = `${level.id}:${index}`;
+        const introduced = introductions.get(key);
+        if (introduced) {
+          introduced.push(type);
+        } else {
+          introductions.set(key, [type]);
+        }
+      }
+    }
+  }
+  return introductions;
+}
+
+/**
+ * 战役里第一次出现在这一波（波次从 0 起）的机型，结果缓存。
+ * 首次遭遇提示以它为准：只跟关卡和波次有关，所以读档重打这一波时照样成立。
+ */
+export function getIntroducedEnemyTypes(levelId: number, waveIndex: number): readonly EnemyType[] {
+  introductionWaves ??= buildIntroductionWaves();
+  return introductionWaves.get(`${levelId}:${waveIndex}`) ?? NO_INTRODUCTIONS;
 }

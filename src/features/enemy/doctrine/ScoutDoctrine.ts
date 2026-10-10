@@ -34,18 +34,48 @@ export const SCOUT_TUNING = {
   /** 开火条件：距离，以及机头与机炮瞄准线（带提前量）的夹角 */
   GUN_RANGE: 300,
   GUN_CONE: 18 * DEG,
-  /** 截击航线的最长前置时间（秒） */
-  RUN_LEAD_SECONDS: 2.5,
-  /** 一次冲刺最长时间（秒）；在射程内尾追玩家超过 TAIL_CHASE_SECONDS 也立刻脱离 */
-  RUN_MAX_SECONDS: 7,
-  TAIL_CHASE_SECONDS: 2,
+  /** 冲刺油门 */
+  RUN_THROTTLE: 1.2,
   /**
-   * 就位（绕到指派方位那一侧）：与指派方位相差超过 ENTER 才绕，绕到 DONE 以内或超过
-   * MAX 秒就开始冲刺（绕不到位也不再等，令牌不能一直占着不打）
+   * 冲刺只从“切得进去”的位置开始：按截击航线算出的接近速率不低于这个值（米/秒）。
+   * 对以巡航速度直线飞行的玩家，正后方只有十几米/秒——那不是切入，是尾追；
+   * 这个值大约对应离玩家正后方 60° 以外。玩家转弯、迎面飞来或悬停时到处都满足。
    */
-  POSITION_MAX_SECONDS: 5,
-  POSITION_ENTER_ANGLE: 60 * DEG,
-  POSITION_DONE_ANGLE: 45 * DEG,
+  RUN_MIN_CLOSING: 20,
+  /** 一次冲刺最长时间（秒） */
+  RUN_MAX_SECONDS: 7,
+  /**
+   * 离脱离距离太近时不再开始新的点射：按当前接近速率，打完三发需要这么多秒的余量
+   * （否则刚把机头压过去就该脱离了，点射被拦腰打断）
+   */
+  BURST_ROOM_SECONDS: 0.45,
+  /**
+   * 尾追判定：在玩家正后方 TAIL_CONE 半角之内、TAIL_RANGE 之内、航向与玩家基本一致。
+   * 冲刺中持续超过 TAIL_CHASE_SECONDS 就脱离（规则：不在玩家身后 30° 锥内、250 米内
+   * 连续停留超过 4 秒）。
+   */
+  TAIL_CONE: 50 * DEG,
+  TAIL_RANGE: 420,
+  TAIL_SAME_WAY_COS: 0.8,
+  TAIL_CHASE_SECONDS: 2.5,
+  /**
+   * 绕向侧面（玩家后方切不进去时）：在随玩家移动的参照系里朝近的一侧绕。还在玩家后方
+   * FLANK_REAR_CONE 扇面里时保持在 FLANK_REAR_RADIUS 之外（不贴在尾后），出了扇面再收回到
+   * 冲刺起点的距离。
+   */
+  FLANK_REAR_CONE: 52 * DEG,
+  FLANK_REAR_RADIUS: 415,
+  FLANK_BAND: 60,
+  FLANK_THROTTLE: 1.3,
+  /**
+   * 就位（绕到指派方位那一侧）：与指派方位相差超过 ENTER 才绕，绕到 DONE 以内才开始冲刺；
+   * 超过 MAX 秒还没到位就让出令牌（不从错的一侧打，也不一直占着令牌）。
+   */
+  POSITION_MAX_SECONDS: 10,
+  POSITION_ENTER_ANGLE: 40 * DEG,
+  POSITION_DONE_ANGLE: 30 * DEG,
+  /** 点射只在本机方位与指派方位相差不超过这个角度时开始：双机各守玩家的一侧 */
+  SIDE_TOLERANCE: 40 * DEG,
   /** 拉开阶段最长时间（秒） */
   EXTEND_MAX_SECONDS: 6,
   /** 玩家机头对准本机（夹角内、距离内）时蛇形摆动 */
@@ -62,18 +92,19 @@ export const SCOUT_TUNING = {
   EVADE_LINGER_SECONDS: 0.6,
 } as const;
 
-const tmpPoint = new Vector3();
 const tmpAim = new Vector3();
 const tmpToSelf = new Vector3();
 const tmpToPlayer = new Vector3();
 const tmpRight = new Vector3();
+const tmpTrack = new Vector3();
 
 /**
  * SCOUT — 袭扰机：从侧面高速切入、三连发点射、近距离脱离、拉开、再来。从不尾追。
  *
- * 阶段：hold（没有令牌，在约 350 米外盘旋）→ position（飞到导演指派的进入方位）→
- * run（冲向玩家的前置位置并点射）→ break（转 60–90° 并改变高度）→ extend（拉开到
- * 300–400 米）→ hold。被锁定或有导弹来袭时进入 evade（猛烈摆动 + 俯冲 / 爬升）。
+ * 阶段：hold（没有令牌：在约 350 米外盘旋；落在玩家身后切不进去时改为绕向侧面）→
+ * position（飞到导演指派的进入方位，到位才冲刺）→ run（沿截击航线冲向玩家并点射）→
+ * break（转 60–90° 并改变高度）→ extend（拉开到 300–400 米）→ hold。
+ * 被锁定或有导弹来袭时进入 evade（猛烈摆动 + 俯冲 / 爬升）。
  */
 export class ScoutDoctrine extends JetDoctrine {
   public readonly id = 'scout';
@@ -88,6 +119,8 @@ export class ScoutDoctrine extends JetDoctrine {
   private heightOffset = 0;
   private extendDistance: number = SCOUT_TUNING.RUN_START_DISTANCE;
   private tailChaseTime = 0;
+  /** 绕向侧面时走玩家航迹的哪一侧（1 = 右、-1 = 左；0 = 还没选） */
+  private flankSide = 0;
   private jinkVertical = 1;
   private jinkSide = 1;
   private calmTime = 0;
@@ -99,6 +132,7 @@ export class ScoutDoctrine extends JetDoctrine {
   protected cancelAttack(): void {
     this.gun.cancel();
     this.tailChaseTime = 0;
+    this.flankSide = 0;
     this.calmTime = 0;
   }
 
@@ -144,20 +178,89 @@ export class ScoutDoctrine extends JetDoctrine {
     }
   }
 
-  /** 没有令牌：在冲刺起点的距离上盘旋待命；领到令牌后就位或直接冲刺 */
+  /** 本机相对玩家的方位角（从玩家看，世界坐标） */
+  private ownBearing(context: DoctrineContext): number {
+    return bearingBetween(
+      context.playerPosition.x,
+      context.playerPosition.z,
+      context.position.x,
+      context.position.z
+    );
+  }
+
+  /** 从这里冲刺切得进去：按截击航线的接近速率够快（玩家直线飞行时，正后方不够） */
+  private canSlash(context: DoctrineContext): boolean {
+    return (
+      this.interceptClosingSpeed(context, context.baseSpeed * SCOUT_TUNING.RUN_THROTTLE) >=
+      SCOUT_TUNING.RUN_MIN_CLOSING
+    );
+  }
+
+  /** 玩家的航迹方向（水平）：有速度用速度，悬停时用机头；写入 tmpTrack */
+  private playerTrack(context: DoctrineContext): Vector3 {
+    const velocity = context.playerVelocity;
+    if (velocity.x * velocity.x + velocity.z * velocity.z > 25) {
+      return tmpTrack.set(velocity.x, 0, velocity.z);
+    }
+    return tmpTrack.set(context.playerForward.x, 0, context.playerForward.z);
+  }
+
+  /**
+   * 绕行半径：切不进去、且还在玩家后方扇面里时留在 415 米之外（不贴在尾后），
+   * 否则回到冲刺起点的距离。
+   */
+  private flankRadius(context: DoctrineContext, canSlash: boolean): number {
+    if (canSlash) return SCOUT_TUNING.RUN_START_DISTANCE;
+    tmpToSelf.subVectors(context.position, context.playerPosition).setY(0);
+    const astern = angleBetween(tmpToSelf, this.playerTrack(context).negate());
+    return astern < SCOUT_TUNING.FLANK_REAR_CONE
+      ? SCOUT_TUNING.FLANK_REAR_RADIUS
+      : SCOUT_TUNING.RUN_START_DISTANCE;
+  }
+
+  /**
+   * 绕向侧面：玩家直线飞行、本机落在后方切不进去时，在随玩家移动的参照系里朝本机所在的
+   * 一侧绕开正后方，绕到切得进去的位置为止。
+   */
+  private steerFlank(context: DoctrineContext, command: DoctrineCommand): void {
+    tmpToSelf.subVectors(context.position, context.playerPosition).setY(0);
+    horizontalRight(this.playerTrack(context), tmpRight);
+    const lateral = tmpToSelf.dot(tmpRight);
+    if (this.flankSide === 0 || Math.abs(lateral) > 40) {
+      this.flankSide = Math.abs(lateral) > 1 ? Math.sign(lateral) : this.orbitSign;
+    }
+    // horizontalRight 指向方位角减小的一侧；从正后方绕到右侧是方位角增大，即 steerOrbit 的 sign = -1
+    this.steerOrbitMoving(
+      context,
+      command,
+      this.flankRadius(context, false),
+      -this.flankSide,
+      this.heightOffset,
+      SCOUT_TUNING.FLANK_THROTTLE,
+      SCOUT_TUNING.FLANK_BAND
+    );
+  }
+
+  /**
+   * 待命：切得进去的位置上在冲刺起点的距离盘旋并申请令牌，领到后就位或直接冲刺；
+   * 切不进去（落在直线飞行的玩家身后）时不申请令牌，先绕向侧面。
+   */
   private decideHold(context: DoctrineContext, command: DoctrineCommand): void {
-    this.request.wants = true;
     this.request.desiredBearing = Number.NaN;
+    const canSlash = this.canSlash(context);
+    this.request.wants = canSlash;
+    if (!canSlash) {
+      // 令牌留给打得到的敌机
+      if (context.hasToken) command.releaseToken = true;
+      this.steerFlank(context, command);
+      return;
+    }
+    this.flankSide = 0;
     if (context.hasToken) {
-      const actual = bearingBetween(
-        context.playerPosition.x,
-        context.playerPosition.z,
-        context.position.x,
-        context.position.z
-      );
       const offBearing =
         Number.isFinite(context.attackBearing) &&
-        angularDistance(actual, context.attackBearing) > SCOUT_TUNING.POSITION_ENTER_ANGLE;
+        angularDistance(this.ownBearing(context), context.attackBearing) >
+          SCOUT_TUNING.POSITION_ENTER_ANGLE;
       if (offBearing) {
         this.setPhase('position');
         this.decidePosition(context, command);
@@ -176,7 +279,10 @@ export class ScoutDoctrine extends JetDoctrine {
     );
   }
 
-  /** 沿冲刺起点的圆周绕到指派方位那一侧（双机时与僚机分居玩家两侧）；绕着走，不从玩家身上穿过去 */
+  /**
+   * 就位：绕到指派方位那一侧（双机时与僚机分居玩家两侧）再冲刺；绕着走，不从玩家身上穿过去。
+   * 太久绕不到位就让出令牌，回去待命时接着朝同一边绕。
+   */
   private decidePosition(context: DoctrineContext, command: DoctrineCommand): void {
     this.request.wants = true;
     if (!context.hasToken) {
@@ -184,33 +290,45 @@ export class ScoutDoctrine extends JetDoctrine {
       this.decideHold(context, command);
       return;
     }
-    const actual = bearingBetween(
-      context.playerPosition.x,
-      context.playerPosition.z,
-      context.position.x,
-      context.position.z
-    );
-    if (
-      !Number.isFinite(context.attackBearing) ||
-      angularDistance(actual, context.attackBearing) < SCOUT_TUNING.POSITION_DONE_ANGLE ||
-      this.phaseTime > SCOUT_TUNING.POSITION_MAX_SECONDS
-    ) {
+    const canSlash = this.canSlash(context);
+    const bearing = context.attackBearing;
+    if (!Number.isFinite(bearing)) {
+      this.setPhase('hold');
+      this.decideHold(context, command);
+      return;
+    }
+    const actual = this.ownBearing(context);
+    if (canSlash && angularDistance(actual, bearing) < SCOUT_TUNING.POSITION_DONE_ANGLE) {
       this.startRun();
       this.decideRun(context, command);
       return;
     }
     // steerOrbit 的 sign = 1 朝方位角减小的方向绕：选近的那一边
-    const sign = wrapAngle(context.attackBearing - actual) > 0 ? -1 : 1;
-    this.steerOrbit(context, command, SCOUT_TUNING.RUN_START_DISTANCE, sign, this.heightOffset);
-    command.throttle = 1.3;
+    const sign = wrapAngle(bearing - actual) > 0 ? -1 : 1;
+    if (this.phaseTime > SCOUT_TUNING.POSITION_MAX_SECONDS) {
+      command.releaseToken = true;
+      this.request.wants = false;
+      this.orbitSign = sign;
+      this.setPhase('hold');
+    }
+    this.steerOrbitMoving(
+      context,
+      command,
+      this.flankRadius(context, canSlash),
+      sign,
+      this.heightOffset,
+      SCOUT_TUNING.FLANK_THROTTLE,
+      SCOUT_TUNING.FLANK_BAND
+    );
   }
 
   private startRun(): void {
     this.setPhase('run');
     this.tailChaseTime = 0;
+    this.flankSide = 0;
   }
 
-  /** 冲刺：飞向玩家的前置位置，对上就三连发；到 120 米、尾追或超时就脱离 */
+  /** 冲刺：沿截击航线冲向玩家，对上就三连发；到 120 米、尾追或超时就脱离 */
   private decideRun(context: DoctrineContext, command: DoctrineCommand): void {
     this.request.wants = true;
     if (!context.hasToken) {
@@ -220,21 +338,30 @@ export class ScoutDoctrine extends JetDoctrine {
       return;
     }
 
-    // 航迹：平时飞向“玩家将要到的位置”（截击航线）；进入射程且机炮就绪（或正在点射）时
+    // 双机各守一侧：本机不在指派方位那一侧时不开始新的点射
+    const onSide =
+      !Number.isFinite(context.attackBearing) ||
+      angularDistance(this.ownBearing(context), context.attackBearing) <=
+        SCOUT_TUNING.SIDE_TOLERANCE;
+
+    // 航迹：平时沿截击航线（恒定方位）接近；进入射程且机炮就绪（或正在点射）时
     // 把机头压到机炮瞄准点上，打完这一轮再回到截击航线
     const inRange = context.distance < SCOUT_TUNING.GUN_RANGE;
+    const closing = this.steerIntercept(
+      context,
+      command,
+      context.baseSpeed * SCOUT_TUNING.RUN_THROTTLE
+    );
+    // 还来得及在脱离前打完一轮
+    const canOpen =
+      inRange &&
+      onSide &&
+      context.distance - SCOUT_TUNING.BREAK_DISTANCE > closing * SCOUT_TUNING.BURST_ROOM_SECONDS;
     this.gunAimPoint(context, tmpAim);
-    if (inRange && (this.gun.isBursting() || this.gun.isReady())) {
+    if (this.gun.isBursting() || (canOpen && this.gun.isReady())) {
       this.steerToward(context, command, tmpAim);
-    } else {
-      const closeTime = Math.min(
-        SCOUT_TUNING.RUN_LEAD_SECONDS,
-        context.distance / Math.max(context.speed, 1)
-      );
-      tmpPoint.copy(context.playerPosition).addScaledVector(context.playerVelocity, closeTime);
-      this.steerToward(context, command, tmpPoint);
     }
-    command.throttle = 1.2;
+    command.throttle = SCOUT_TUNING.RUN_THROTTLE;
 
     // 开火条件看机头与机炮瞄准线的夹角：子弹基本沿机头方向出膛
     tmpToPlayer.subVectors(tmpAim, context.position);
@@ -242,16 +369,19 @@ export class ScoutDoctrine extends JetDoctrine {
     const rounds = this.gun.tick(
       context.dt,
       context.cadenceScale,
-      inRange && noseAngle < SCOUT_TUNING.GUN_CONE,
+      canOpen && noseAngle < SCOUT_TUNING.GUN_CONE,
       inRange && noseAngle < SCOUT_TUNING.GUN_CONE * 2
     );
     for (let i = 0; i < rounds; i++) this.fireGunRound(context, command);
 
-    // 尾追判定：进了射程、在玩家身后、与玩家同向飞（从后方追上来的途中不算）
+    // 尾追判定：在玩家正后方的扇面里、离得不远、与玩家同向飞
     tmpToSelf.subVectors(context.position, context.playerPosition);
-    const behind = tmpToSelf.dot(context.playerForward) < 0;
-    const sameWay = context.forward.dot(context.playerForward) > 0.8;
-    this.tailChaseTime = inRange && behind && sameWay ? this.tailChaseTime + context.dt : 0;
+    tmpTrack.copy(context.playerForward).negate();
+    const chasing =
+      context.distance < SCOUT_TUNING.TAIL_RANGE &&
+      context.forward.dot(context.playerForward) > SCOUT_TUNING.TAIL_SAME_WAY_COS &&
+      angleBetween(tmpToSelf, tmpTrack) < SCOUT_TUNING.TAIL_CONE;
+    this.tailChaseTime = chasing ? this.tailChaseTime + context.dt : 0;
 
     // 到了脱离距离立刻脱离；超时 / 尾追则等这一轮点射打完
     const spent =

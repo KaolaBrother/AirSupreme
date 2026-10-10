@@ -370,7 +370,7 @@ export class ProjectileController {
     let bestScore = Infinity;
     for (let i = 0; i < snapshot.size(); i++) {
       const entry = snapshot.get(i);
-      if (!entry.hostile) continue;
+      if (!entry.hostile || !entry.seekable) continue;
       this.tmpB.subVectors(entry.position, missile.position);
       const distance = this.tmpB.length();
       if (distance < 1e-3 || distance > SWARM_SEEKER_RANGE + entry.radius) continue;

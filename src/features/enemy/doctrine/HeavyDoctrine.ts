@@ -41,8 +41,11 @@ export const HEAVY_TUNING = {
   MAX_FANS_PER_RUN: 3,
   MAX_RUN_SECONDS: 12,
   REST_SECONDS: 2,
-  /** 进入这个距离才申请令牌（米） */
+  /** 进入这个距离才申请令牌（米）；还在射程外时，要正在以至少 ENGAGE_MIN_CLOSING 接近才申请 */
   ENGAGE_DISTANCE: 480,
+  ENGAGE_MIN_CLOSING: 5,
+  /** 持令牌却打不出去（射程外 / 玩家不在炮塔射界 / 方位被占）超过这么久就让出令牌（秒） */
+  TOKEN_IDLE_SECONDS: 3,
   /** 贴近到这个距离就不再转向、直线穿过；拉开到这个距离后再回头（米） */
   PASS_NEAR_DISTANCE: 110,
   PASS_FAR_DISTANCE: 240,
@@ -75,6 +78,8 @@ export class HeavyDoctrine extends JetDoctrine {
   private fansThisRun = 0;
   private runTime = 0;
   private restTime = 0;
+  /** 持令牌但打不出去已经多久（秒） */
+  private idleTime = 0;
   private passing = false;
   /** 这次接近从玩家的哪一侧压过去（1 / -1；0 = 还没选） */
   private passSide = 0;
@@ -86,6 +91,7 @@ export class HeavyDoctrine extends JetDoctrine {
   protected cancelAttack(): void {
     this.fansThisRun = 0;
     this.runTime = 0;
+    this.idleTime = 0;
     this.passing = false;
     this.passSide = 0;
   }
@@ -101,7 +107,12 @@ export class HeavyDoctrine extends JetDoctrine {
     if (context.weaponsFree) this.fireTailGun(context, command);
 
     this.request.desiredBearing = Number.NaN;
-    this.request.wants = this.restTime <= 0 && context.distance < HEAVY_TUNING.ENGAGE_DISTANCE;
+    // 追不上的玩家不占令牌：射程内随时申请；射程外要正在接近才申请
+    this.request.wants =
+      this.restTime <= 0 &&
+      context.distance < HEAVY_TUNING.ENGAGE_DISTANCE &&
+      (context.distance <= HEAVY_TUNING.FAN_RANGE ||
+        this.closingSpeed(context) > HEAVY_TUNING.ENGAGE_MIN_CLOSING);
 
     if (!context.hasToken || !this.request.wants) {
       if (context.hasToken) command.releaseToken = true;
@@ -110,6 +121,7 @@ export class HeavyDoctrine extends JetDoctrine {
         this.runTime = 0;
         this.fansThisRun = 0;
       }
+      this.idleTime = 0;
       this.setPhase(this.passing ? 'pass' : 'advance');
       return;
     }
@@ -121,18 +133,56 @@ export class HeavyDoctrine extends JetDoctrine {
     this.runTime += dt;
     this.setPhase(this.passing ? 'pass' : 'barrage');
 
-    this.fireFan(context, command);
+    const canFire = this.canFireFan(context);
+    this.idleTime = canFire ? 0 : this.idleTime + dt;
+    if (canFire && this.fanCooldown <= 0) this.fireFan(context, command);
 
     if (
       this.fansThisRun >= HEAVY_TUNING.MAX_FANS_PER_RUN ||
-      this.runTime > HEAVY_TUNING.MAX_RUN_SECONDS
+      this.runTime > HEAVY_TUNING.MAX_RUN_SECONDS ||
+      this.idleTime > HEAVY_TUNING.TOKEN_IDLE_SECONDS
     ) {
+      // 打完了 / 打不出去：让出令牌，休息一下再来
       command.releaseToken = true;
       this.request.wants = false;
       this.restTime = HEAVY_TUNING.REST_SECONDS;
       this.runTime = 0;
       this.fansThisRun = 0;
+      this.idleTime = 0;
     }
+  }
+
+  /** 沿视线接近玩家的速率（米/秒；负值 = 正在被拉开） */
+  private closingSpeed(context: DoctrineContext): number {
+    tmpToPlayer.subVectors(context.playerPosition, context.position);
+    const length = tmpToPlayer.length();
+    if (!(length > 1e-3)) return 0;
+    const velocity = context.playerVelocity;
+    return (
+      (tmpToPlayer.x * (context.forward.x * context.speed - velocity.x) +
+        tmpToPlayer.y * (context.forward.y * context.speed - velocity.y) +
+        tmpToPlayer.z * (context.forward.z * context.speed - velocity.z)) /
+      length
+    );
+  }
+
+  /** 现在打得出扇面：射程内、玩家在炮塔射界里、本机在指派的方位上 */
+  private canFireFan(context: DoctrineContext): boolean {
+    if (context.distance > HEAVY_TUNING.FAN_RANGE) return false;
+    tmpToPlayer.subVectors(context.playerPosition, context.position);
+    if (angleBetween(context.forward, tmpToPlayer) > HEAVY_TUNING.FAN_ARC) return false;
+    if (Number.isFinite(context.attackBearing)) {
+      const actual = bearingBetween(
+        context.playerPosition.x,
+        context.playerPosition.z,
+        context.position.x,
+        context.position.z
+      );
+      if (angularDistance(actual, context.attackBearing) > HEAVY_TUNING.BEARING_TOLERANCE) {
+        return false;
+      }
+    }
+    return true;
   }
 
   /** 朝玩家的前置位置飞；贴得太近时保持航向穿过，拉开后再回头（转向慢，不做机动） */
@@ -171,21 +221,8 @@ export class HeavyDoctrine extends JetDoctrine {
     command.throttle = context.distance > HEAVY_TUNING.FAN_RANGE ? 1.2 : 0.85;
   }
 
-  /** 高炮弹扇面：瞄准玩家的前置位置，绕竖轴在 ±8° 内均匀展开 */
+  /** 高炮弹扇面：瞄准玩家的前置位置，绕竖轴在 ±8° 内均匀展开（调用前已确认打得出去） */
   private fireFan(context: DoctrineContext, command: DoctrineCommand): void {
-    if (this.fanCooldown > 0 || context.distance > HEAVY_TUNING.FAN_RANGE) return;
-    tmpToPlayer.subVectors(context.playerPosition, context.position);
-    if (angleBetween(context.forward, tmpToPlayer) > HEAVY_TUNING.FAN_ARC) return;
-    if (Number.isFinite(context.attackBearing)) {
-      const actual = bearingBetween(
-        context.playerPosition.x,
-        context.playerPosition.z,
-        context.position.x,
-        context.position.z
-      );
-      if (angularDistance(actual, context.attackBearing) > HEAVY_TUNING.BEARING_TOLERANCE) return;
-    }
-
     leadPoint(
       context.position,
       context.playerPosition,
