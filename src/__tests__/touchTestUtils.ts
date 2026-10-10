@@ -51,6 +51,29 @@ export function releaseKey(code: string): void {
   window.dispatchEvent(new KeyboardEvent('keyup', { code, key: code, bubbles: true }));
 }
 
+/** 把页面标成“在后台”（jsdom 的 visibilityState 恒为 visible）；用完必须 showPage() 还原 */
+export function hidePage(): void {
+  Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
+  Object.defineProperty(document, 'hidden', { configurable: true, get: () => true });
+}
+
+export function showPage(): void {
+  Reflect.deleteProperty(document, 'visibilityState');
+  Reflect.deleteProperty(document, 'hidden');
+}
+
+/** 失焦 / 切到后台：两种都应松开全部按住的输入 */
+export const RELEASE_TRIGGERS: Array<[string, () => void]> = [
+  ['window blur', () => window.dispatchEvent(new Event('blur'))],
+  [
+    'visibilitychange to hidden',
+    () => {
+      hidePage();
+      document.dispatchEvent(new Event('visibilitychange'));
+    },
+  ],
+];
+
 interface Finger {
   identifier: number;
   target: EventTarget;

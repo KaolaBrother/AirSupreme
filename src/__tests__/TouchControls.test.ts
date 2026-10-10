@@ -10,7 +10,9 @@ import {
   elementById,
   pressKey,
   releaseKey,
+  RELEASE_TRIGGERS,
   seedShippedMobileControls,
+  showPage,
   TouchScreen,
 } from './touchTestUtils';
 
@@ -113,28 +115,6 @@ const STEERING_KEYS = [
   'ArrowUp',
   'ArrowDown',
 ] as const;
-
-function hidePage(): void {
-  Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
-  Object.defineProperty(document, 'hidden', { configurable: true, get: () => true });
-}
-
-function showPage(): void {
-  Reflect.deleteProperty(document, 'visibilityState');
-  Reflect.deleteProperty(document, 'hidden');
-}
-
-/** 失焦 / 切到后台：两种都应松开全部按住的输入 */
-const RELEASE_TRIGGERS: Array<[string, () => void]> = [
-  ['window blur', () => window.dispatchEvent(new Event('blur'))],
-  [
-    'visibilitychange to hidden',
-    () => {
-      hidePage();
-      document.dispatchEvent(new Event('visibilitychange'));
-    },
-  ],
-];
 
 describe('touch controls (InputHandler)', () => {
   let handler: InputHandler | null = null;
