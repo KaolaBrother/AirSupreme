@@ -34,11 +34,11 @@ export const WRAITH_TUNING = {
   /** 可见、等待下一次隐形时的侧后方待命位：距离（米）与偏离正后方的角度（弧度） */
   FLANK_DISTANCE: 220,
   FLANK_ANGLE: 60 * DEG,
-  /** 五连发：发间隔 / 两轮之间的间隔（秒）；一次现形最多打几轮 */
+  /** 五连发：发间隔 / 两轮之间的间隔（秒）；一次现形最多打几轮（规格：一轮） */
   BURST_ROUNDS: 5,
   ROUND_INTERVAL: 0.1,
   BURST_INTERVAL: 1.6,
-  MAX_BURSTS: 2,
+  MAX_BURSTS: 1,
   /** 开火条件：距离，以及机头与机炮瞄准线的夹角 */
   GUN_RANGE: 260,
   GUN_CONE: 14 * DEG,
