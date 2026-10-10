@@ -1424,8 +1424,8 @@ export class GameCoordinator {
 
   /**
    * 机炮提前量：候选 = 存活敌机 + 敌方空中单位（可显示提前量标记），其后是敌方地面 / 海上单位
-   * （只参与触屏辅助）。触屏设备上把辅助方向交给 PlayerSystem（机炮十字画的是同一个方向，
-   * 见 renderAimHud），桌面不改变弹道。
+   * （只参与机炮辅助）。辅助方向交给 PlayerSystem（机炮十字画的是同一个方向，见 renderAimHud）：
+   * 触屏设备（GameConfig.isMobile）用触屏锥角，键盘用更小的锥角（GAME_CONSTANTS.GUN_ASSIST）。
    */
   private updateGunAim(deltaTime: number): void {
     const targets = this.gunTargets;
@@ -1456,9 +1456,9 @@ export class GameCoordinator {
     const forward = this.gunForward.set(0, 0, -1).applyQuaternion(quaternion);
     // 炮口位置与 PlayerSystem.fire 一致：机体前方 2 米
     const muzzle = this.gunMuzzle.copy(this.playerSystem.getPosition()).addScaledVector(forward, 2);
-    const assist = GameConfig.isMobile;
-    this.gunLeadSolver.update(deltaTime, muzzle, forward, targets, airCount, assist);
-    // 没有辅助（含桌面端）时方向为 null：子弹沿机头方向发射
+    const assistCone = GameConfig.isMobile ? 'touch' : 'keyboard';
+    this.gunLeadSolver.update(deltaTime, muzzle, forward, targets, airCount, true, assistCone);
+    // 没有辅助时方向为 null：子弹沿机头方向发射
     this.playerSystem.setGunAimAssist(
       this.gunLeadSolver.getAssistDirection(),
       this.gunLeadSolver.getAssistWeight()

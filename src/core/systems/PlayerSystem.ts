@@ -24,7 +24,7 @@ const RESPAWN_HEADING_OFFSETS: readonly number[] = [
 
 export class PlayerSystem implements IGameSystem {
   readonly name = 'PlayerSystem';
-  /** 机炮基础散布（度，总张角）：未辅助时 / 触屏辅助强度为 1 时；两者之间按辅助强度线性过渡 */
+  /** 机炮基础散布（度，总张角）：未辅助时 / 机炮辅助强度为 1 时；两者之间按辅助强度线性过渡 */
   private static readonly BASE_SPREAD_DEG = 3;
   private static readonly ASSISTED_BASE_SPREAD_DEG = 1.2;
   /** 航迹样本的最低离地高度（米）：贴地 / 宽限期抬升中的位置不算安全点 */
@@ -134,7 +134,7 @@ export class PlayerSystem implements IGameSystem {
   private pendingDamageOptions: PlayerHitFeedbackMetadata | null = null;
 
   private fireCooldown: number = 0;
-  /** 触屏机炮辅助方向（世界坐标单位向量，与机炮十字显示的是同一个）；null 时子弹沿机头方向发射 */
+  /** 机炮辅助方向（世界坐标单位向量，与机炮十字显示的是同一个）；null 时子弹沿机头方向发射 */
   private gunAimAssistDirection: THREE.Vector3 | null = null;
   /** 辅助强度 0..1：基础散布随它从 BASE_SPREAD_DEG 收窄到 ASSISTED_BASE_SPREAD_DEG */
   private gunAimAssistWeight: number = 0;
@@ -864,7 +864,7 @@ export class PlayerSystem implements IGameSystem {
     const baseFireRate = this.stats.getFireRate();
     this.fireCooldown = baseFireRate / this.stats.getRapidFireMultiplier();
 
-    // 触屏辅助：子弹沿辅助方向发射（机炮十字画的就是这个方向），基础散布随辅助强度收窄
+    // 机炮辅助：子弹沿辅助方向发射（机炮十字画的就是这个方向），基础散布随辅助强度收窄
     const assistDirection = this.gunAimAssistDirection;
     let assistWeight = 0;
     if (assistDirection) {
@@ -891,9 +891,9 @@ export class PlayerSystem implements IGameSystem {
   }
 
   /**
-   * 触屏机炮辅助瞄准：给出辅助方向（世界坐标单位向量）后，下一次开火沿它发射；传 null 关闭。
-   * 方向与强度由 GunLeadSolver 解算（偏移不超过 GAME_CONSTANTS.GUN_ASSIST.FULL_ANGLE），
-   * 机炮十字画的是同一个方向；桌面端始终传 null。传入的向量按引用保存，调用方每步刷新。
+   * 机炮辅助瞄准：给出辅助方向（世界坐标单位向量）后，下一次开火沿它发射；传 null 关闭。
+   * 方向与强度由 GunLeadSolver 解算（偏移不超过 GAME_CONSTANTS.GUN_ASSIST 的 FULL_ANGLE，
+   * 键盘是 KEYBOARD_FULL_ANGLE），机炮十字画的是同一个方向。传入的向量按引用保存，调用方每步刷新。
    * @param weight 辅助强度 0..1：1 时基础散布收到最窄，0 时与未辅助相同
    */
   setGunAimAssist(direction: THREE.Vector3 | null, weight: number = 1): void {
