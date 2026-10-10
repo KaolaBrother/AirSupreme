@@ -16,7 +16,10 @@ import { PlayerStats, UpgradeType } from '@/features/upgrade/UpgradeSystem';
 import { FriendlyAI, WINGMAN_CONFIG } from '@/features/enemy/FriendlyAI';
 import type { EnemyAI } from '@/features/enemy/EnemyAI';
 import { EnemyType } from '@/features/enemy/EnemyTypes';
+import { JET_MISSILE_SPEC } from '@/features/enemy/EnemyWeapons';
 import type { IJetThreatProvider } from '@/features/enemy/JetThreat';
+import type { IJetMissileLauncher } from '@/features/enemy/MissileDirector';
+import type { ILockJamProvider } from '@/features/combat/MissileSeeker';
 import { PowerUpType, POWER_UP_CONFIGS } from '@/features/powerups/PowerUpSystem';
 import type { UpgradeMenu } from '@/ui/UpgradeMenu';
 import type { PauseMenu } from '@/ui/PauseMenu';
@@ -520,6 +523,38 @@ export class GameCoordinator {
     isPlayerTargetable: () =>
       this.playerAircraft.visible && !this.playerSystem.isPlayerRespawning(),
   };
+  /** 敌机导弹的飞行参数（复用同一个对象；发射者标签逐发写入） */
+  private readonly jetMissileOptions = {
+    maxSpeed: JET_MISSILE_SPEC.MAX_SPEED,
+    turnRate: JET_MISSILE_SPEC.TURN_RATE,
+    life: JET_MISSILE_SPEC.LIFE,
+    launchSpeed: JET_MISSILE_SPEC.LAUNCH_SPEED,
+    source: '',
+  };
+  /**
+   * 敌机导弹的发射通道（交给 EnemySystem）：导弹进单位导弹池，HUD 的“锁定中 → 来袭”预警、
+   * 热焰弹、EMP、近防炮照常生效；伤害来源记为发射它的机型（jet:<机型>）。
+   */
+  private readonly jetMissileLauncher: IJetMissileLauncher = {
+    isAvailable: () => this.units.isReady(),
+    launch: (position, direction, source) => {
+      this.jetMissileOptions.source = source;
+      return this.units.launchJetMissile(
+        position,
+        direction,
+        JET_MISSILE_SPEC.DAMAGE,
+        this.jetMissileOptions
+      );
+    },
+    countInFlight: () => this.units.countJetMissilesInFlight(),
+    setLockWarning: (active) => this.units.setJetMissileLock(active),
+  };
+  /** 导引头受到的干扰（交给锁定指示器的导引头）：敌方干扰机在范围内时锁定时间加倍 */
+  private readonly lockJamProvider: ILockJamProvider = {
+    getLockTimeScale: () => this.enemySystem?.getLockTimeScale() ?? 1,
+  };
+  /** 画凝结尾的敌机（隐形中的除外），逐步复用 */
+  private readonly contrailEnemyBuffer: THREE.Object3D[] = [];
   /** 友机入场：玩家机头方向（之后复用为 lookAt 目标点）与入场航向 */
   private readonly friendlySpawnForward = new THREE.Vector3();
   private readonly friendlySpawnHeading = new THREE.Vector3();
@@ -661,6 +696,7 @@ export class GameCoordinator {
           this.lockOnIndicator.setLockCircleScale(
             this.playerStats.getMissileLockRadiusMultiplier()
           );
+          this.lockOnIndicator.setLockJamProvider(this.lockJamProvider);
           this.hud.setSettlementActions({
             onRetry: () => this.options.onRetry?.(),
             onExitToMenu: () => this.options.onExitToMenu?.(),
@@ -720,6 +756,7 @@ export class GameCoordinator {
         enemySystem.init();
         enemySystem.setDifficultyProfile(getDifficultyProfile(this.sessionState.getDifficulty()));
         enemySystem.setThreatProvider(this.jetThreatProvider);
+        enemySystem.setMissileLauncher(this.jetMissileLauncher);
         this.enemySystem = enemySystem;
         return enemySystem;
       });
@@ -820,6 +857,8 @@ export class GameCoordinator {
       EventBus.on(GameEventType.ENEMY_TELL, ({ payload }) => {
         if (payload.kind === 'lance-charge') {
           this.audioManager.playLanceCharge(payload.duration);
+        } else if (payload.kind === 'decloak') {
+          this.audioManager.playDecloak(payload.duration);
         }
       })
     );
@@ -1322,7 +1361,7 @@ export class GameCoordinator {
       deltaTime,
       this.playerSystem.getHealth().getHealthPercent(),
       this.enemySystem?.getEnemies() ?? GameCoordinator.NO_ENEMIES,
-      enemyMeshes,
+      this.collectContrailEnemyMeshes(),
       friendlyMeshes
     );
     this.campaign.tick(deltaTime);
@@ -1353,6 +1392,16 @@ export class GameCoordinator {
     return buffer;
   }
 
+  /** 画凝结尾的敌机：存活、没有隐形的（隐形机隐形时只留一条稀疏的粒子淡尾迹） */
+  private collectContrailEnemyMeshes(): THREE.Object3D[] {
+    const buffer = this.contrailEnemyBuffer;
+    buffer.length = 0;
+    for (const enemy of this.enemySystem?.getEnemies() ?? GameCoordinator.NO_ENEMIES) {
+      if (enemy.isAlive() && !enemy.isCloaked()) buffer.push(enemy.getMesh());
+    }
+    return buffer;
+  }
+
   /** 存活友军僚机网格（复用数组；之后还会追加友军单位） */
   private collectFriendlyMeshes(): THREE.Object3D[] {
     const buffer = this.friendlyMeshBuffer;
@@ -1373,7 +1422,10 @@ export class GameCoordinator {
     this.view.setFlightState(speedRatio, boosting);
   }
 
-  /** 锁定候选：Boss 可受伤部件（隐形 / 护盾偏转体除外）与 Boss 导弹 → 敌机 → 敌方单位瞄准点 */
+  /**
+   * 锁定候选：Boss 可受伤部件（隐形 / 护盾偏转体除外）与 Boss 导弹 → 敌机（隐形中的除外：
+   * 隐形机一隐形就不在表里，已有的锁定随之丢弃）→ 敌方单位瞄准点
+   */
   private collectLockCandidates(): THREE.Object3D[] {
     const targetMeshes = this.lockTargets;
     targetMeshes.length = 0;
@@ -1385,7 +1437,7 @@ export class GameCoordinator {
       bossController.appendLockTargets(targetMeshes);
     }
     for (const enemy of this.enemySystem?.getEnemies() ?? []) {
-      if (enemy.isAlive()) targetMeshes.push(enemy.getMesh());
+      if (enemy.isAlive() && !enemy.isCloaked()) targetMeshes.push(enemy.getMesh());
     }
     this.units.collectLockTargets(targetMeshes);
     return targetMeshes;
@@ -1469,7 +1521,8 @@ export class GameCoordinator {
 
   /**
    * 机炮提前量：候选 = 存活敌机 + 敌方空中单位（可显示提前量标记），其后是敌方地面 / 海上单位
-   * （只参与机炮辅助）。辅助方向交给 PlayerSystem（机炮十字画的是同一个方向，见 renderAimHud）：
+   * （只参与机炮辅助）。隐形中的敌机不在候选里：没有提前量标记，机炮辅助也不会吸过去。
+   * 辅助方向交给 PlayerSystem（机炮十字画的是同一个方向，见 renderAimHud）：
    * 触屏设备（GameConfig.isMobile）用触屏锥角，键盘用更小的锥角（GAME_CONSTANTS.GUN_ASSIST）。
    */
   private updateGunAim(deltaTime: number): void {
@@ -1478,7 +1531,7 @@ export class GameCoordinator {
     targets.length = 0;
     surfaceTargets.length = 0;
     for (const enemy of this.enemySystem?.getEnemies() ?? []) {
-      if (enemy.isAlive()) targets.push(enemy.getMesh());
+      if (enemy.isAlive() && !enemy.isCloaked()) targets.push(enemy.getMesh());
     }
     const unitSystem = this.units.getSystem();
     if (unitSystem) {

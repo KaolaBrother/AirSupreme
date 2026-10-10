@@ -60,7 +60,8 @@ const tmpRight = new Vector3();
 
 /**
  * HEAVY — 炮艇：又大又慢，不躲避。稳稳地朝玩家压过来，每 2.6 秒向玩家的前置位置打出一个
- * 慢速高炮弹扇面（3 发，第 6 关起 5 发）；玩家坐到它正后方 250 米内会吃尾炮的单发瞄准射击。
+ * 慢速高炮弹扇面（3 发，第 6 关起 5 发）；玩家坐到它正后方 250 米内会吃尾炮的单发瞄准射击
+ * （尾炮是防御武器，不占攻击令牌）。
  * 从侧面或下方接近是安全的。对锁定和来袭导弹没有反应。
  *
  * 阶段：advance（接近，没有令牌或还在准备）→ barrage（持令牌齐射）→ advance；
@@ -96,6 +97,8 @@ export class HeavyDoctrine extends JetDoctrine {
     this.restTime = Math.max(0, this.restTime - dt);
 
     this.fly(context, command);
+    // 尾炮是防御武器：不需要攻击令牌，玩家坐到正后方就挨打
+    if (context.weaponsFree) this.fireTailGun(context, command);
 
     this.request.desiredBearing = Number.NaN;
     this.request.wants = this.restTime <= 0 && context.distance < HEAVY_TUNING.ENGAGE_DISTANCE;
@@ -119,7 +122,6 @@ export class HeavyDoctrine extends JetDoctrine {
     this.setPhase(this.passing ? 'pass' : 'barrage');
 
     this.fireFan(context, command);
-    this.fireTailGun(context, command);
 
     if (
       this.fansThisRun >= HEAVY_TUNING.MAX_FANS_PER_RUN ||
@@ -226,7 +228,7 @@ export class HeavyDoctrine extends JetDoctrine {
     if (!(tmpShot.lengthSq() > 1e-8)) return;
     tmpShot.normalize();
     scatterDirection(tmpShot, Math.max(0, 1 - context.accuracy) * 0.08, context.rng);
-    this.pushShot(command, 'bullet', tmpShot, HEAVY_TUNING.TAIL_DAMAGE_SCALE, false);
+    this.pushShot(command, 'bullet', tmpShot, HEAVY_TUNING.TAIL_DAMAGE_SCALE, false, true);
     this.tailCooldown =
       HEAVY_TUNING.TAIL_INTERVAL * (context.cadenceScale > 0 ? context.cadenceScale : 1);
   }

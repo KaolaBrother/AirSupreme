@@ -366,8 +366,7 @@ export function installDevHooks(access: DevHookAccess): void {
         distance: round(mesh.position.distanceTo(player.position)),
         phase: enemy.getDoctrinePhase(),
         hasAttackToken: enemy.hasAttackToken(),
-        // 隐形机（WRAITH）的隐形周期在后续里程碑加入；在那之前没有敌机会隐形
-        cloaked: false,
+        cloaked: enemy.isCloaked(),
       });
     }
     return jets;

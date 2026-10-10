@@ -272,7 +272,7 @@ export const ENEMY_CONFIGS: Record<EnemyType, EnemyConfig> = {
     name: { en: 'Striker', zh: '导弹攻击机' },
     health: 140,
     speed: 46,
-    damage: 24, // 单枚导弹伤害（没有机炮）
+    damage: 24, // 没有机炮，这个值用不到；导弹伤害见 EnemyWeapons 的 JET_MISSILE_SPEC
     detectionRange: 300,
     attackRange: 120,
     attackCooldown: 1.0,

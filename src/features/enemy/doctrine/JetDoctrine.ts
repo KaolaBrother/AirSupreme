@@ -3,6 +3,7 @@ import { ENEMY_WEAPON_SPECS, type EnemyWeaponKind } from '../EnemyWeapons';
 import {
   DOCTRINE_RULES,
   type AttackRequest,
+  type CloakState,
   type DoctrineCommand,
   type DoctrineContext,
   type DoctrineTell,
@@ -42,7 +43,13 @@ const tmpRight = new Vector3();
 export function createDoctrineCommand(): DoctrineCommand {
   const shots: ShotRequest[] = [];
   for (let i = 0; i < MAX_SHOTS_PER_STEP; i++) {
-    shots.push({ weapon: 'bullet', direction: new Vector3(0, 0, 1), damageScale: 1, quiet: false });
+    shots.push({
+      weapon: 'bullet',
+      direction: new Vector3(0, 0, 1),
+      damageScale: 1,
+      quiet: false,
+      defensive: false,
+    });
   }
   return {
     direction: new Vector3(),
@@ -50,6 +57,8 @@ export function createDoctrineCommand(): DoctrineCommand {
     turnScale: 1,
     shots,
     shotCount: 0,
+    missileLock: false,
+    missileLaunch: 0,
     releaseToken: false,
     cue: null,
     cueDuration: 0,
@@ -61,6 +70,8 @@ export function resetDoctrineCommand(command: DoctrineCommand): void {
   command.throttle = 1;
   command.turnScale = 1;
   command.shotCount = 0;
+  command.missileLock = false;
+  command.missileLaunch = 0;
   command.releaseToken = false;
   command.cue = null;
   command.cueDuration = 0;
@@ -185,6 +196,18 @@ export abstract class JetDoctrine implements IEnemyDoctrine {
     return null;
   }
 
+  public getMissileRequest(): number {
+    return 0;
+  }
+
+  public getCloak(): Readonly<CloakState> | null {
+    return null;
+  }
+
+  public notifyHit(): void {
+    // 大多数机型挨打没有特别反应
+  }
+
   public update(context: DoctrineContext, command: DoctrineCommand): void {
     const dt = context.dt > 0 ? context.dt : 0;
     this.clock += dt;
@@ -259,6 +282,13 @@ export abstract class JetDoctrine implements IEnemyDoctrine {
   protected noseToPlayerAngle(context: DoctrineContext): number {
     tmpToSelf.subVectors(context.playerPosition, context.position);
     return angleBetween(context.forward, tmpToSelf);
+  }
+
+  /** 与玩家同速所需的油门（钳制在规则范围内） */
+  protected throttleToMatch(context: DoctrineContext): number {
+    const speed = context.playerVelocity.length();
+    const throttle = context.baseSpeed > 0 ? speed / context.baseSpeed : 1;
+    return Math.min(DOCTRINE_RULES.MAX_THROTTLE, Math.max(DOCTRINE_RULES.MIN_THROTTLE, throttle));
   }
 
   // -------------------------------------------------------------------------------------------
@@ -347,13 +377,17 @@ export abstract class JetDoctrine implements IEnemyDoctrine {
   // 射击
   // -------------------------------------------------------------------------------------------
 
-  /** 追加一次射击请求（direction 会被复制并归一化）；超出上限时忽略 */
+  /**
+   * 追加一次射击请求（direction 会被复制并归一化）；超出上限时忽略。
+   * defensive = 防御性射击：没有攻击令牌也会打出（只有重型机尾炮使用）。
+   */
   protected pushShot(
     command: DoctrineCommand,
     weapon: EnemyWeaponKind,
     direction: Vector3,
     damageScale: number,
-    quiet: boolean
+    quiet: boolean,
+    defensive = false
   ): void {
     if (command.shotCount >= command.shots.length) return;
     const lengthSq = direction.lengthSq();
@@ -363,6 +397,7 @@ export abstract class JetDoctrine implements IEnemyDoctrine {
     shot.direction.copy(direction).multiplyScalar(1 / Math.sqrt(lengthSq));
     shot.damageScale = damageScale;
     shot.quiet = quiet;
+    shot.defensive = defensive;
   }
 
   /** 机炮瞄准点：按关卡给的提前量系数瞄准拦截点，写入 out */
