@@ -82,7 +82,7 @@
 - Comments/JSDoc: Chinese when useful; identifiers English. Semicolons, single quotes, trailing commas, ~100 print width.
 - Use `EventBus` for decoupled communication. Runtime systems implement `IGameSystem`. Hot paths reuse pools (projectiles, enemies, particles, indicators). Aircraft rotation uses quaternions, not Euler. Guard positions against `NaN` / `Infinity`.
 - Healing/respawn: call `playerSystem.syncMaxHealth()` before healing to full. Powerups must not be collectible during respawn.
-- Runtime settings shown in menus must be wired to actual gameplay. Prefer config-driven balance when config already exists (`public/config/game-config.json`, `src/config.ts`).
+- Runtime settings shown in menus must be wired to actual gameplay. Prefer config-driven balance when config already exists (`src/config.ts`).
 - Priority: correctness, then performance/lifecycle, then visual/audio polish. Prefer low-risk testable changes over broad rewrites.
 
 ## Key Files
