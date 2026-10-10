@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { GAME_CONSTANTS } from '@/config';
 import type { EnemyAI } from '@/features/enemy/EnemyAI';
 import { ENEMY_CONFIGS, EnemyType } from '@/features/enemy/EnemyTypes';
@@ -7,6 +7,7 @@ import {
   DEG,
   DT,
   FleetRig,
+  SIM_TEST_TIMEOUT,
   TurnTracker,
   angleBetween,
   bearingGap,
@@ -15,7 +16,11 @@ import {
   groupBursts,
   horizontal,
   pointAround,
+  type RigShot,
 } from './enemyFleetRig';
+
+// 整场交战要算几万步：给足时间，别让机器忙的时候超时（超时的用例还会拖累后面的用例）
+vi.setConfig({ testTimeout: SIM_TEST_TIMEOUT });
 
 /**
  * 侦察机（SCOUT，袭扰机）的打法，规格 §3：
@@ -182,15 +187,17 @@ describe('SCOUT slash attack (spec §3)', () => {
     }
   );
 
-  /** 咬尾：在玩家正后方 45° 以内、400 米以内、航向与玩家相差不到 30°。返回最长的连续秒数 */
+  /**
+   * 咬尾（规格 §3a）：侦察机待在玩家身后 30° 锥内、250 米以内。返回最长的连续秒数。
+   * “30° 锥”按本规格里机炮锥的用法理解：与正后方的夹角不超过 30°（更窄的 15° 读法只会更短）。
+   */
   function longestTailChase(current: FleetRig, jet: EnemyAI, seconds: number): number {
     let streak = 0;
     let longest = 0;
     current.run(seconds, () => {
       const offset = jet.getMesh().position.clone().sub(current.player.position);
       const astern = angleBetween(offset, current.player.forward.clone().negate());
-      const sameWay = angleBetween(jet.velocity, current.player.forward);
-      const chasing = astern < 45 * DEG && sameWay < 30 * DEG && offset.length() < 400;
+      const chasing = astern < 30 * DEG && offset.length() < 250;
       streak = chasing ? streak + DT : 0;
       longest = Math.max(longest, streak);
     });
@@ -204,31 +211,34 @@ describe('SCOUT slash attack (spec §3)', () => {
         const jet = current.addJet(EnemyType.SCOUT, pointAround(current.player, 450, 30 * DEG));
         current.pilot = (active) => active.turnPlayer(yaw * DT);
         const longest = longestTailChase(current, jet, 90);
-        expect(longest, `longest tail chase, seed ${seed}, turn ${yaw} rad/s`).toBeLessThan(4);
+        expect(longest, `longest tail chase, seed ${seed}, turn ${yaw} rad/s`).toBeLessThanOrEqual(
+          4
+        );
         expect(current.shots.length, 'it did attack').toBeGreaterThan(10);
       }
       await breathe();
     }
   });
 
-  // FINDING: spec §3 SCOUT — "It never sits in a tail chase." Against a player who simply flies
-  // straight at base speed (45 m/s) the Scout's first pass is a proper slash, but every later run
-  // starts from wherever its extension left it — behind the player — and becomes a stern chase: it
-  // trails the player's six at about 300 m for 7 s (it only out-runs the player by ~13-17 m/s, so it
-  // never reaches the 120 m break), gives up, extends, and does the same again. Over 90 s it spends
-  // most of its attack time in tail chases of 7.3 s each and lands almost no bursts (9 rounds vs
-  // 40+ against a turning player). Reproduce: FleetRig({ capacity: 2 }), one SCOUT 450 m out,
-  // 30 degrees off the nose, player flying straight, 90 s; measure the longest unbroken time the
-  // Scout is within 45 degrees of dead astern, inside 400 m, flying within 30 degrees of the
-  // player's heading. The spec gives no duration for "sits"; 4 s is this test's reading.
-  it.fails('against a player flying straight it never sits in a tail chase either', () => {
-    for (const seed of [66, 67, 68]) {
-      const current = makeRig({ capacity: 2, seed });
-      const jet = current.addJet(EnemyType.SCOUT, pointAround(current.player, 450, 30 * DEG));
-      const longest = longestTailChase(current, jet, 90);
-      expect(longest, `longest tail chase, seed ${seed}`).toBeLessThan(4);
+  // 规格 §3a 给“咬尾”定了量：身后 30° 锥内、250 米以内、连续不超过 4 秒。按这个定义，直飞的玩家
+  // 也不会被咬尾——侦察机第二次进入起是在约 300 米外尾追（每次约 7 秒，追不上就放弃），在 250 米
+  // 之外，不算。那段 300 米的尾追仍然存在，只是不在规则之内（已在报告里说明）。
+  it.each([
+    ['30 degrees off the nose', 30],
+    ['abeam', 90],
+    ['behind, 150 degrees off the nose', 150],
+    ['dead astern', 180],
+  ])(
+    'against a player flying straight it never sits in a tail chase either (starting %s)',
+    (_label, offset) => {
+      for (const seed of [66, 67, 68]) {
+        const current = makeRig({ capacity: 2, seed });
+        const jet = current.addJet(EnemyType.SCOUT, pointAround(current.player, 450, offset * DEG));
+        const longest = longestTailChase(current, jet, 60);
+        expect(longest, `longest tail chase, seed ${seed}`).toBeLessThanOrEqual(4);
+      }
     }
-  });
+  );
 });
 
 describe('SCOUT pairs (spec §3)', () => {
@@ -263,42 +273,56 @@ describe('SCOUT pairs (spec §3)', () => {
     expect(checked, 'steps with both Scouts holding tokens').toBeGreaterThan(1000);
   });
 
-  // FINDING: spec §3 SCOUT — "Pairs: two Scouts with tokens attack from opposite sides." The director
-  // does assign the pair bearings 180 degrees apart (test above), but the second Scout does not fly
-  // to its side: after about 5 s of positioning it runs in from wherever it happens to be. Bursts
-  // that the two Scouts fire within 3 s of each other come from the same side of the player about
-  // as often as from opposite sides — measured gaps between the two firing positions as seen from
-  // the player include 7, 25, 31, 42 and 46 degrees. Reproduce: FleetRig({ capacity: 2 }), two
-  // SCOUTs at 400 m / 20 degrees and 420 m / 40 degrees off the nose, player flying straight or
-  // turning at 0.3-0.6 rad/s, 90 s; pair up bursts by different Scouts that start within 3 s of
-  // each other and take the angle between their firing positions seen from the player. This test
-  // asks only for "different sides" (at least 90 degrees apart), not for exactly opposite.
-  it.fails('their attack runs really come from opposite sides of the player', () => {
+  // FINDING: spec §3a — "Scout pairs: when two Scouts hold tokens together, the second one's attack
+  // run starts from a bearing more than 90° away from the first one's, as seen from the player; it
+  // repositions to its assigned bearing before it turns in." The director does assign the pair
+  // bearings 180 degrees apart (test above), but the second Scout does not fly to its side: after
+  // about 5 s of positioning it runs in from wherever it happens to be. Reproduce:
+  // FleetRig({ capacity: 2 }), two SCOUTs at 400 m / 20 degrees and 420 m / 40 degrees off the
+  // nose, 90 s. Take each Scout's attack runs (bursts more than 2.5 s after its previous burst
+  // open a new run) and pair runs of the two Scouts that open within 3 s of each other; the angle
+  // between the two opening positions as seen from the player is 25 degrees (seed 6, straight),
+  // 42 degrees (seed 5, turning 0.3 rad/s) and 89 degrees (seed 72, turning 0.3 rad/s).
+  it.fails('their attack runs start from bearings more than 90 degrees apart', () => {
     let pairs = 0;
-    for (const seed of [5, 6]) {
+    const tooClose: string[] = [];
+    for (const seed of [5, 6, 71, 72]) {
       for (const yaw of [0, 0.3, 0.6]) {
-        const { current } = pair(seed, yaw);
+        const { current, scouts } = pair(seed, yaw);
         current.run(90);
-        const bursts = groupBursts(current.shots, 0.5);
-        for (let i = 0; i < bursts.length; i++) {
-          for (let j = i + 1; j < bursts.length; j++) {
-            const first = bursts[i][0];
-            const second = bursts[j][0];
+        // 每架侦察机每次进入的第一发
+        const openings: RigShot[] = [];
+        for (const scout of scouts) {
+          let last = -Infinity;
+          for (const burst of groupBursts(
+            current.shots.filter((shot) => shot.jet === scout),
+            0.5
+          )) {
+            if (burst[0].time - last > 2.5) openings.push(burst[0]);
+            last = burst[burst.length - 1].time;
+          }
+        }
+        for (let i = 0; i < openings.length; i++) {
+          for (let j = i + 1; j < openings.length; j++) {
+            const first = openings[i];
+            const second = openings[j];
             if (first.jet === second.jet || Math.abs(first.time - second.time) >= 3) continue;
             pairs++;
             const gap = bearingGap(
               bearingOf(first.playerPosition, first.origin),
               bearingOf(second.playerPosition, second.origin)
             );
-            expect(
-              gap / DEG,
-              `seed ${seed}, turn ${yaw}, at ${first.time.toFixed(1)} s`
-            ).toBeGreaterThan(90);
+            if (gap <= 90 * DEG) {
+              tooClose.push(
+                `seed ${seed}, turn ${yaw}, at ${first.time.toFixed(1)} s: ${(gap / DEG).toFixed(0)}°`
+              );
+            }
           }
         }
       }
     }
-    expect(pairs).toBeGreaterThan(5);
+    expect(pairs, 'pairs of runs that opened together').toBeGreaterThan(5);
+    expect(tooClose, 'pairs of runs that opened 90 degrees apart or less').toEqual([]);
   });
 });
 

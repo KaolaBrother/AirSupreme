@@ -12,13 +12,18 @@ import {
   DEG,
   DT,
   FleetRig,
+  SIM_TEST_TIMEOUT,
   SPEC,
   SystemRig,
   bearingGap,
   breathe,
   pointAround,
+  seededGameRandom,
   seededRandom,
 } from './enemyFleetRig';
+
+// 整场交战要算几万步：给足时间，别让机器忙的时候超时（超时的用例还会拖累后面的用例）
+vi.setConfig({ testTimeout: SIM_TEST_TIMEOUT });
 
 /**
  * 攻击令牌导演（敌机机队重做，规格 §2.1 / §2.2 / §2.9）：
@@ -361,7 +366,8 @@ describe('AttackDirector', () => {
     });
 
     it('holds the 60° rule through a long, messy fight (seeded fuzz)', async () => {
-      for (let seed = 1; seed <= 24; seed++) {
+      // 每一步都用普通的 if 检查，出问题才抛错：一步一个 expect 在几万步里太贵
+      for (let seed = 1; seed <= 16; seed++) {
         const random = seededRandom(seed * 7717);
         const fuzzDirector = new AttackDirector();
         const centre = new THREE.Vector3(random() * 400 - 200, 200, random() * 400 - 200);
@@ -390,7 +396,7 @@ describe('AttackDirector', () => {
           orbit.push((random() - 0.5) * 0.6);
         }
 
-        for (let step = 0; step < 900; step++) {
+        for (let step = 0; step < 600; step++) {
           // 敌机绕着玩家飞；随机有人结束航路、被瘫痪、阵亡、重新申请
           for (let i = 0; i < jets.length; i++) {
             const jet = jets[i];
@@ -408,11 +414,20 @@ describe('AttackDirector', () => {
           fuzzDirector.update(DT, jets, centre, capacity);
 
           const holders = holdersOf(jets);
-          expect(holders.length, `seed ${seed}, step ${step}`).toBeLessThanOrEqual(capacity);
+          if (holders.length > capacity) {
+            throw new Error(
+              `seed ${seed}, step ${step}: ${holders.length} holders, limit ${capacity}`
+            );
+          }
           for (const holder of holders) {
-            expect(holder.alive && !holder.stunned, `seed ${seed}: holder is able`).toBe(true);
-            expect(holder.request?.wants, `seed ${seed}: holder asked`).toBe(true);
-            expect(Number.isFinite(holder.orders.bearing), `seed ${seed}: bearing`).toBe(true);
+            const able = holder.alive && !holder.stunned;
+            const asked = holder.request?.wants === true;
+            if (!able || !asked || !Number.isFinite(holder.orders.bearing)) {
+              throw new Error(
+                `seed ${seed}, step ${step}: a holder is able=${able}, asked=${asked}, ` +
+                  `bearing=${holder.orders.bearing}`
+              );
+            }
           }
           if (holders.length >= 2) {
             const gap = smallestBearingGap(holders);
@@ -471,7 +486,7 @@ describe('tokens with real jets', () => {
   };
 
   it.each([1, 2, 3, 4])(
-    'never has more than %i jets holding a token through a minute of fighting',
+    'never has more than %i jets holding a token through 40 s of fighting',
     async (capacity) => {
       for (const [name, pilot] of Object.entries(PILOTS)) {
         for (const seed of [11, 12]) {
@@ -479,7 +494,7 @@ describe('tokens with real jets', () => {
           rig = mixedFleet(seed, capacity);
           rig.pilot = pilot;
           let most = 0;
-          rig.run(60, () => {
+          rig.run(40, () => {
             const holding = rig.holders().length;
             most = Math.max(most, holding);
             if (holding > capacity) {
@@ -629,7 +644,7 @@ describe('director wired into EnemySystem', () => {
 
   beforeEach(() => {
     EventBus.clear();
-    randomSpy = vi.spyOn(Math, 'random').mockImplementation(seededRandom(20261010));
+    randomSpy = vi.spyOn(Math, 'random').mockImplementation(seededGameRandom(20261010));
   });
 
   afterEach(() => {

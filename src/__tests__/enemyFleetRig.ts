@@ -34,6 +34,12 @@ import { createJetDoctrine } from '@/features/enemy/doctrine/createJetDoctrine';
 export const DT = 1 / 60;
 export const DEG = Math.PI / 180;
 
+/**
+ * 用到这个测试台的测试文件的单例超时（毫秒）：整场交战要算几万步，机器上同时跑着别的测试时
+ * 会慢上十几倍。各文件开头用 vi.setConfig({ testTimeout: SIM_TEST_TIMEOUT }) 设置。
+ */
+export const SIM_TEST_TIMEOUT = 60_000;
+
 /** 规格 §2 里写死的规则数值（不是可调的起始值） */
 export const SPEC = {
   /** 拴绳距离（米） */
@@ -59,6 +65,55 @@ export function seededRandom(seed: number): () => number {
     t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
+}
+
+/**
+ * 替换 Math.random 用的可复现随机数：游戏逻辑一条序列，three.js 给新对象生成 id
+ * （generateUUID，每个 id 取四个随机数）另一条序列。
+ *
+ * 不分开的话，一场交战拿到的随机数取决于这之前已经建过多少 three.js 对象——共享的几何体 /
+ * 材质只在第一次用到时创建，于是同一个种子在“本文件第一场”和“后面几场”打出来的不一样，
+ * 单跑一个用例和整个文件一起跑也不一样。按调用栈区分：栈里有 generateUUID 的走 id 序列。
+ */
+export function seededGameRandom(seed: number): () => number {
+  const game = seededRandom(seed);
+  const ids = seededRandom((seed ^ 0x5bd1e995) >>> 0);
+  return () => (calledFromIdGenerator() ? ids() : game());
+}
+
+/** V8 的调用栈接口（不在标准类型里） */
+interface StackSite {
+  getFunctionName(): string | null;
+}
+type StackAwareError = ErrorConstructor & {
+  stackTraceLimit?: number;
+  prepareStackTrace?: (error: Error, sites: StackSite[]) => unknown;
+};
+
+/**
+ * 当前调用是不是来自 three.js 的 generateUUID。只取最近几层的原始调用点、不生成栈文本
+ * （生成文本要走源码映射，很慢；粒子系统每帧要取上百个随机数）。
+ */
+function calledFromIdGenerator(): boolean {
+  const errors = Error as StackAwareError;
+  const limit = errors.stackTraceLimit;
+  const prepare = errors.prepareStackTrace;
+  let fromIds = false;
+  errors.stackTraceLimit = 8;
+  errors.prepareStackTrace = (_error, sites) => {
+    for (const site of sites) {
+      if (site.getFunctionName() === 'generateUUID') fromIds = true;
+    }
+    return '';
+  };
+  try {
+    // 读 stack 才会触发上面的回调
+    void new Error().stack;
+  } finally {
+    errors.prepareStackTrace = prepare;
+    errors.stackTraceLimit = limit;
+  }
+  return fromIds;
 }
 
 /** 方位角（弧度，绕世界 Y）：从 from 看 to；0 = +Z，π/2 = +X */
@@ -250,6 +305,7 @@ export class FleetRig {
 
   private readonly seed: number;
   private added = 0;
+  private disposed = false;
   private readonly holdersThisStep = new Set<EnemyAI>();
 
   constructor(options: FleetRigOptions = {}) {
@@ -335,6 +391,8 @@ export class FleetRig {
 
   /** 推进一步 */
   public step(): void {
+    // 超时的异步用例会在后台继续跑：测试台已经销毁就让它立刻停下，不去打扰下一个用例
+    if (this.disposed) throw new Error('FleetRig stepped after dispose');
     this.pilot?.(this);
     const { player } = this;
     player.velocity.copy(player.forward).multiplyScalar(player.speed);
@@ -400,6 +458,8 @@ export class FleetRig {
   }
 
   public dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
     for (const jet of this.jets) jet.dispose();
     this.jets.length = 0;
     this.director.reset();
@@ -666,7 +726,7 @@ export interface SystemRigOptions {
  * 真实的 EnemySystem：敌机走 Boss 召唤小兵的那条生成路径（spawnEnemyAt），每步调用
  * updateWithPlayer；玩家威胁通过 setThreatProvider 喂进去，开火 / 预警从 EventBus 上收，
  * 敌机导弹交给 RigMissileChannel（setMissileLauncher）。
- * 敌机条令用的是 Math.random——需要可复现时由测试自己替换 Math.random。
+ * 敌机条令用的是 Math.random——需要可复现时由测试自己用 seededGameRandom 替换 Math.random。
  */
 export class SystemRig {
   public readonly scene = new THREE.Scene();
@@ -685,6 +745,7 @@ export class SystemRig {
 
   private readonly unsubscribe: Array<() => void> = [];
   private readonly holdersLastStep = new Set<EnemyAI>();
+  private disposed = false;
 
   constructor(options: SystemRigOptions = {}) {
     this.session.setLevel(options.level ?? 1);
@@ -752,6 +813,8 @@ export class SystemRig {
   }
 
   public step(): void {
+    // 超时的异步用例会在后台继续跑：测试台已经销毁就让它立刻停下，不去打扰下一个用例
+    if (this.disposed) throw new Error('SystemRig stepped after dispose');
     this.pilot?.(this);
     const { player } = this;
     player.velocity.copy(player.forward).multiplyScalar(player.speed);
@@ -773,6 +836,8 @@ export class SystemRig {
   }
 
   public dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
     for (const off of this.unsubscribe) off();
     this.unsubscribe.length = 0;
     this.system.dispose();
