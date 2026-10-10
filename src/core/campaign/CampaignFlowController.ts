@@ -1,5 +1,6 @@
 import type { GameSessionState } from '@/core/GameSessionState';
 import {
+  CAMPAIGN_SAVE_VERSION,
   clearCampaignCheckpoint,
   describeCheckpointText,
   isSwiftJoinAnnounced,
@@ -90,6 +91,19 @@ interface PendingOutro {
 }
 
 /**
+ * 暂停菜单“保存并退出”的去向（describeExitSave 的预告与 saveForExit 的实际结果同一形状）：
+ * - saved：检查点写在 position（stage 是它的类型）；“继续战役”从那一波 / Boss 战 / 机库重新开始，
+ *   带着退出时的分数、生命、升级与弹药；
+ * - no-save-mode：本局不存档（Boss 模式）；
+ * - not-started：本局还没到第一个检查点（第一章开场卡片之前），没有可存的进度；
+ * - complete：战役已通关，检查点已清除；
+ * - failed：写入失败（隐私模式 / 配额已满），只出现在 saveForExit 的结果里。
+ */
+export type CampaignExitSave =
+  | { kind: 'saved'; stage: CheckpointKind; position: LocalizedText }
+  | { kind: 'no-save-mode' | 'not-started' | 'complete' | 'failed' };
+
+/**
  * 十关战役流程（api-spec §10）：
  * 正常模式：章节开场 → 简报 + 无线电 → 波次（单位随波部署，敌机与敌方单位全清才过波）
  * → 自动存档 'wave' → … → 自动存档 'boss' → Boss → 击破即存 'hangar'（下一关之前的机库）
@@ -109,6 +123,11 @@ export class CampaignFlowController {
   /** 本局雨燕的入列台词已播过（每局一次；写进检查点，读档不重播） */
   private swiftJoined = false;
   private outro: PendingOutro | null = null;
+  /**
+   * 当前进度所在的检查点位置（最近一次检查点时机；读档时取自存档）：“保存并退出”把此刻的快照
+   * 重写在这里。null：本局还没到第一个检查点，或战役已通关（检查点已清除）。
+   */
+  private exitPoint: { kind: CheckpointKind; level: number; wave: number } | null = null;
 
   constructor(private readonly deps: CampaignFlowDeps) {}
 
@@ -158,6 +177,7 @@ export class CampaignFlowController {
     this.firstLevelOfSession = false;
     this.stats = { ...save.stats };
     this.swiftJoined = isSwiftJoinAnnounced(save);
+    this.exitPoint = { kind: save.checkpoint, level: save.level, wave: save.wave };
     this.levelStartScore = save.score;
     this.levelKills = 0;
     this.levelCiviliansLost = 0;
@@ -257,6 +277,9 @@ export class CampaignFlowController {
     const totalWaves = getLevelConfig(level)?.totalWaves ?? 0;
     if (wave + 1 < totalWaves) {
       this.writeCheckpoint('wave', level, wave + 1);
+    } else {
+      // 最后一波已清空、Boss 检查点还没写（波次间隔之后才写）：此刻退出应回到 Boss 战前，不重打这一波
+      this.exitPoint = { kind: 'boss', level, wave: totalWaves };
     }
   }
 
@@ -292,6 +315,7 @@ export class CampaignFlowController {
         // 立即记录通关并清除检查点（结局演出中途退出也不会留下过期存档）
         markCampaignCompleted(finalScore);
         clearCampaignCheckpoint();
+        this.exitPoint = null;
       }
       this.afterBossOutro(() => {
         const finish = (): void => {
@@ -444,6 +468,42 @@ export class CampaignFlowController {
     this.victory = false;
     this.swiftJoined = false;
     this.outro = null;
+    this.exitPoint = null;
+  }
+
+  // ───────────────────────────── 保存并退出 ─────────────────────────────
+
+  /** “保存并退出”的预告（只读，不写存档）：会存到哪里，或者为什么不存 */
+  public describeExitSave(): CampaignExitSave {
+    if (this.deps.session.isBossMode()) return { kind: 'no-save-mode' };
+    const point = this.exitPoint;
+    if (!point) return { kind: this.victory ? 'complete' : 'not-started' };
+    const data = this.deps.captureCheckpoint(point.kind, point.level, point.wave);
+    return {
+      kind: 'saved',
+      stage: point.kind,
+      position: describeCheckpointText({
+        ...data,
+        version: CAMPAIGN_SAVE_VERSION,
+        savedAt: Date.now(),
+      }),
+    };
+  }
+
+  /**
+   * 暂停菜单“保存并退出”：把此刻的快照（分数 / 生命 / 导弹 / 升级 / 特殊武器与弹药 / 热焰弹 /
+   * 视角 / 统计）重写在当前进度的检查点位置上——“继续战役”从那一波 / Boss 战 / 机库重新开始。
+   * 不显示存档提示（紧接着就退出）。写入后读回确认；写不进去或读不回来返回 'failed'。
+   */
+  public saveForExit(): CampaignExitSave {
+    const point = this.exitPoint;
+    if (!point || this.deps.session.isBossMode()) return this.describeExitSave();
+    if (!this.writeCheckpoint(point.kind, point.level, point.wave, false)) {
+      return { kind: 'failed' };
+    }
+    const stored = loadCampaignCheckpoint();
+    if (!stored) return { kind: 'failed' };
+    return { kind: 'saved', stage: stored.checkpoint, position: describeCheckpointText(stored) };
   }
 
   private buildDebrief(level: number): CampaignDebriefInput {
@@ -462,19 +522,22 @@ export class CampaignFlowController {
   /**
    * 写检查点（正常模式）。announce：显示存档提示（HUD + 存档音效）；机库“出击”时的重写不提示
    * （紧接着就是章节卡片）。'hangar' 的 level 是即将开始的那一关。
+   * 返回是否真的写进了存储（Boss 模式、存储不可用或已满时为 false）。
    */
   private writeCheckpoint(
     kind: CheckpointKind,
     level: number,
     wave: number,
     announce: boolean = true
-  ): void {
+  ): boolean {
     const session = this.deps.session;
-    if (session.isBossMode()) return;
+    if (session.isBossMode()) return false;
+    this.exitPoint = { kind, level, wave };
     const data = this.deps.captureCheckpoint(kind, level, wave);
     data.stats = this.getRunStats();
     data.swiftJoined = this.swiftJoined;
-    if (!saveCampaignCheckpoint(data) || !announce) return;
+    if (!saveCampaignCheckpoint(data)) return false;
+    if (!announce) return true;
     let label: HudText;
     switch (kind) {
       case 'boss':
@@ -494,6 +557,7 @@ export class CampaignFlowController {
     if (kind === 'wave') {
       this.deps.presentation.playStinger('checkpoint');
     }
+    return true;
   }
 
   public dispose(): void {
