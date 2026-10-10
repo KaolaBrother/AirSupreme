@@ -1,4 +1,5 @@
 import { Vector3 } from 'three';
+import { GAME_CONSTANTS } from '@/config';
 import { ENEMY_WEAPON_SPECS } from '../EnemyWeapons';
 import { JetDoctrine } from './JetDoctrine';
 import {
@@ -7,7 +8,13 @@ import {
   type DoctrineContext,
   type DoctrineTell,
 } from './DoctrineTypes';
-import { angularDistance, bearingBetween, leadPoint } from './DoctrineMath';
+import {
+  angleBetween,
+  angularDistance,
+  bearingBetween,
+  interceptTime,
+  leadPoint,
+} from './DoctrineMath';
 
 const DEG = Math.PI / 180;
 
@@ -38,11 +45,17 @@ export const SNIPER_TUNING = {
   /** 站位半径误差的归一化宽度（米）：比通用的盘旋更紧，站位带只有 140 米宽 */
   STANDOFF_BAND: 80,
   /**
-   * 玩家机头对着它（夹角 CHASED_NOSE_ANGLE 以内）= 玩家在追它：这时不为了保持距离而后退得比
-   * 玩家还快，追得近；机头偏开到 PASSING_NOSE_ANGLE 以外 = 玩家只是路过：全程保持距离
+   * 玩家机头对着它、或对着它的机炮提前量点（夹角 CHASED_NOSE_ANGLE 以内）= 玩家在追它：这时
+   * 不为了保持距离而后退得比玩家还快，追得近；两者都偏开到 PASSING_NOSE_ANGLE 以外 = 玩家只是
+   * 路过：全程保持距离
    */
   CHASED_NOSE_ANGLE: 6 * DEG,
   PASSING_NOSE_ANGLE: 12 * DEG,
+  /**
+   * 提前量点只在拦截距离（子弹要飞的路程）这么远以内才算数（米）：比机炮射程（500 米）宽一些，
+   * 刚出射程、照着提前量逼近的玩家也算在追；玩家直飞、本机在前方同向远离时拦截距离很长，不算
+   */
+  GUN_LEAD_MAX_RANGE: 700,
   /** 本机当前方位与指派方位相差超过这个角度时不蓄力（弧度）；持令牌空等超过这么久就让出 */
   BEARING_TOLERANCE: 25 * DEG,
   TOKEN_IDLE_SECONDS: 2.5,
@@ -59,6 +72,7 @@ export const SNIPER_TUNING = {
 } as const;
 
 const tmpDirection = new Vector3();
+const tmpGunLead = new Vector3();
 
 /**
  * SNIPER — 长枪手：在 380–520 米外盘旋。领到令牌后蓄力 1.3 秒：一条细红色瞄准光束指向玩家的
@@ -175,7 +189,7 @@ export class SniperDoctrine extends JetDoctrine {
    * 返回蓄力时该用的油门：收到与“要跟的那部分玩家速度”同速，最低 0.6×。
    */
   private steerStandoff(context: DoctrineContext, command: DoctrineCommand): number {
-    const noseOff = this.playerNoseAngle(context);
+    const noseOff = Math.min(this.playerNoseAngle(context), this.playerGunLeadAngle(context));
     const passing =
       (noseOff - SNIPER_TUNING.CHASED_NOSE_ANGLE) /
       (SNIPER_TUNING.PASSING_NOSE_ANGLE - SNIPER_TUNING.CHASED_NOSE_ANGLE);
@@ -193,6 +207,28 @@ export class SniperDoctrine extends JetDoctrine {
     );
     const match = context.baseSpeed > 0 ? followed / context.baseSpeed : 0;
     return Math.min(DOCTRINE_RULES.MAX_THROTTLE, Math.max(SNIPER_TUNING.CHARGE_THROTTLE, match));
+  }
+
+  /**
+   * 玩家机头与本机“机炮提前量点”的夹角（弧度）。提前量点与 HUD 的提前量标记（GunLeadSolver）
+   * 同一解法：玩家子弹弹速、本机当前速度。照着标记追本机的玩家机头压在提前量点上，离本机身
+   * 二三十度（100 米/秒的子弹打四百米外横穿的目标），这也是在追它。没有拦截解、或拦截距离超过
+   * GUN_LEAD_MAX_RANGE 时返回 π。
+   */
+  private playerGunLeadAngle(context: DoctrineContext): number {
+    const { position, forward, speed, playerPosition } = context;
+    const vx = forward.x * speed;
+    const vy = forward.y * speed;
+    const vz = forward.z * speed;
+    const dx = position.x - playerPosition.x;
+    const dy = position.y - playerPosition.y;
+    const dz = position.z - playerPosition.z;
+    const time = interceptTime(dx, dy, dz, vx, vy, vz, GAME_CONSTANTS.PROJECTILE.SPEED);
+    if (!(time > 0) || time * GAME_CONSTANTS.PROJECTILE.SPEED > SNIPER_TUNING.GUN_LEAD_MAX_RANGE) {
+      return Math.PI;
+    }
+    tmpGunLead.set(dx + vx * time, dy + vy * time, dz + vz * time);
+    return angleBetween(context.playerForward, tmpGunLead);
   }
 
   /** 盘旋待机；可以开火时申请令牌，领到且方位合适就开始蓄力 */
