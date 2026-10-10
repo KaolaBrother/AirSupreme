@@ -855,7 +855,7 @@ export class HUD {
         this.settlementActions?.onRetry();
       }
     });
-    // 这个键在有检查点时自动获得焦点，而 Space 是开火键：按住不放带来的按键重复、
+    // 面板一出现这个键就自动获得焦点，而 Space 是开火键：按住不放带来的按键重复、
     // 以及面板刚出现那一瞬间的按键都不算数，免得替玩家点下去
     this.retryButton.addEventListener('keydown', (event) => {
       if (event.key !== ' ' && event.key !== 'Enter') {
@@ -3196,11 +3196,7 @@ export class HUD {
     this.setStyleValue(this.settlementActionsRow, 'display', 'flex');
     this.setStyleValue(this.gameOverDisplay, 'opacity', '1');
     this.setStyleValue(this.gameOverDisplay, 'pointerEvents', 'auto');
-    if (checkpointRetry) {
-      // 主动作拿到焦点：键盘上 Enter / Space 直接重试，Tab 可以走到“返回菜单”
-      this.settlementShownAt = performance.now();
-      this.retryButton.focus({ preventScroll: true });
-    }
+    this.focusSettlement();
   }
 
   /**
@@ -3229,13 +3225,46 @@ export class HUD {
     this.setStyleValue(this.settlementActionsRow, 'display', 'flex');
     this.setStyleValue(this.gameOverDisplay, 'opacity', '1');
     this.setStyleValue(this.gameOverDisplay, 'pointerEvents', 'auto');
+    this.focusSettlement();
   }
+
+  /**
+   * 结算面板出现（失败 / 通关，有没有检查点都一样）：第一个动作拿到焦点，Enter / Space 由按钮
+   * 自己响应；面板显示期间 Tab / Shift+Tab 只在面板的动作之间循环，焦点走不到盖在下面的控件上
+   */
+  private focusSettlement(): void {
+    this.settlementShownAt = performance.now();
+    document.addEventListener('keydown', this.handleSettlementKeydown, true);
+    this.retryButton.focus({ preventScroll: true });
+  }
+
+  /**
+   * 挂在 document 的捕获阶段，自己移动焦点：InputHandler 在焦点不在表单控件上时会吞掉 Tab
+   * （切换特殊武器），而浏览器默认的 Tab 顺序走完面板的动作之后会走到面板外面去
+   */
+  private readonly handleSettlementKeydown = (event: KeyboardEvent): void => {
+    if (event.key !== 'Tab' || event.ctrlKey || event.metaKey) {
+      return;
+    }
+    const actions = [this.retryButton, this.exitButton];
+    const current = actions.findIndex((action) => action === document.activeElement);
+    const last = actions.length - 1;
+    let next: number;
+    if (event.shiftKey) {
+      next = current <= 0 ? last : current - 1;
+    } else {
+      next = current < 0 || current === last ? 0 : current + 1;
+    }
+    event.preventDefault();
+    actions[next].focus({ preventScroll: true });
+  };
 
   /**
    * 隐藏游戏结束
    */
   public hideGameOver(): void {
     this.ensureInitialized();
+    document.removeEventListener('keydown', this.handleSettlementKeydown, true);
     this.settlementCheckpoint = null;
     this.setStyleValue(this.settlementActionsRow, 'display', 'none');
     this.setStyleValue(this.gameOverDisplay, 'opacity', '0');
@@ -3250,6 +3279,7 @@ export class HUD {
     }
     this.unsubscribeLocale?.();
     this.unsubscribeLocale = null;
+    document.removeEventListener('keydown', this.handleSettlementKeydown, true);
     if (this.container.parentElement) {
       this.container.remove();
     }
