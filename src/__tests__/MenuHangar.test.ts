@@ -8,6 +8,8 @@ import { LOCALES, resetLocale, textIn } from './i18nTestUtils';
 import {
   byId,
   click,
+  CONFIRM_SHEET,
+  HOWTO_SHEET,
   installAnimationFrames,
   isDialogShowing,
   isOperable,
@@ -17,6 +19,7 @@ import {
   prepareMenuEnvironment,
   readableText,
   resetMenuEnvironment,
+  seedCheckpoint,
   SETTINGS_SHEET,
   settle,
   settleUntil,
@@ -402,6 +405,36 @@ describe('Hangar (batch X5, spec 9)', () => {
       press('Enter', {}, document.body);
       expect(onStart).not.toHaveBeenCalled();
       expect(isHangarOpen()).toBe(true);
+    });
+
+    it('activation events that still reach the hidden title start nothing behind the Hangar', async () => {
+      seedCheckpoint();
+      const startMenu = createMenu();
+      const onStart = vi.fn();
+      const onContinue = vi.fn();
+      startMenu.setOnStart(onStart);
+      startMenu.setOnContinue(onContinue);
+      await openHangar();
+
+      // 藏起来的按钮上仍可能来 click（留着焦点的按钮上的 Enter 连发、脚本）
+      for (const id of ['continue-btn', 'start-btn', 'settings-btn', 'howto-btn', 'preview-btn']) {
+        document.getElementById(id)?.click();
+      }
+      document.getElementById('new-campaign-confirm-btn')?.click();
+      await settle();
+
+      expect(onStart).not.toHaveBeenCalled();
+      expect(onContinue).not.toHaveBeenCalled();
+      expect(isHangarOpen()).toBe(true);
+      expect(liveRenderers()).toHaveLength(1);
+
+      // 回到标题画面时没有哪张面板被悄悄打开
+      press('Escape');
+      expect(isTitleShowing()).toBe(true);
+      for (const sheet of [SETTINGS_SHEET, HOWTO_SHEET, CONFIRM_SHEET]) {
+        expect(isDialogShowing(sheet), sheet).toBe(false);
+      }
+      expect(document.activeElement).toBe(byId('preview-btn'));
     });
   });
 
@@ -1060,168 +1093,467 @@ describe('Hangar (batch X5, spec 9)', () => {
       expect(onStart).toHaveBeenCalledTimes(1);
     });
 
-    // FINDING: the Hangar takes over the screen on top of a sheet that was opened while it loaded.
-    // Sequence: activate Hangar (its module is still downloading, the button says "Loading…"),
-    // activate Settings, the Hangar arrives, go back. Expected: the two do not overlap — the Hangar
-    // does not open over an open sheet, or the sheet is closed when it does — and afterwards focus
-    // is on something the player can use. Observed: StartMenu.openHangar only checks disposed /
-    // visible / launching before hiding the menu (src/ui/StartMenu.ts:632-637), so the Hangar opens
-    // with Settings still open; on return the sheet is showing again and resumeFromHangar focuses
-    // #preview-btn (src/ui/StartMenu.ts:659-660), which sits in the inert title behind the sheet:
-    // keyboard focus is outside the open dialog (on <body> in a real browser).
-    it.fails(
-      'a sheet opened while the Hangar was loading does not end up under the Hangar',
-      async () => {
+    // 机库模块还在下载（按钮写着“加载中”）时玩家开了一张面板：机库不盖到面板上面，这一次就不进了——
+    // 面板留着、焦点在面板里；关掉面板之后再点“机库”照常打开。
+    // （最初是 FINDING：openHangar 只看 disposed / visible / launching，机库会盖在开着的面板上，
+    // 返回后焦点落在面板背后 inert 的 #preview-btn 上。已在 src/ui/StartMenu.ts:634 修复。）
+    describe.each([
+      { name: 'Settings', opener: 'settings-btn', sheet: SETTINGS_SHEET, needsSave: false },
+      { name: 'How to Play', opener: 'howto-btn', sheet: HOWTO_SHEET, needsSave: false },
+      {
+        name: 'the New Campaign confirmation',
+        opener: 'start-btn',
+        sheet: CONFIRM_SHEET,
+        needsSave: true,
+      },
+    ])('$name opened while the Hangar was loading', ({ opener, sheet, needsSave }) => {
+      /** 点“机库”，趁模块还没到点开面板，再等到机库模块早该到了 */
+      async function openSheetDuringLoad(): Promise<void> {
+        if (needsSave) {
+          seedCheckpoint();
+        }
         createMenu();
-
+        useMenuFakeTimers();
         click('preview-btn');
-        click('settings-btn');
-        await settle();
-        if (isHangarOpen()) {
-          press('Escape');
-        }
-
-        const focused = document.activeElement;
-        if (isDialogShowing(SETTINGS_SHEET)) {
-          expect(byId(SETTINGS_SHEET).contains(focused), 'focus is inside the open dialog').toBe(
-            true
-          );
-        } else {
-          expect(isOperable(focused), `focus is on a usable control (#${focused?.id})`).toBe(true);
-        }
+        click(opener);
+        expect(isDialogShowing(sheet)).toBe(true);
+        await settle(30);
       }
-    );
+
+      it('keeps the screen: the Hangar does not appear and takes no WebGL context', async () => {
+        await openSheetDuringLoad();
+
+        expect(isHangarOpen()).toBe(false);
+        expect(fakeRenderers()).toHaveLength(0);
+        expect(models.created).toEqual([]);
+        expect(isTitleShowing()).toBe(true);
+        expect(isDialogShowing(sheet), 'the sheet is still up').toBe(true);
+        expect(byId(sheet).contains(document.activeElement), 'focus is inside the open sheet').toBe(
+          true
+        );
+        expect(consoleError).not.toHaveBeenCalled();
+      });
+
+      it('the sheet still works: Escape closes it and focus goes back to its opener', async () => {
+        await openSheetDuringLoad();
+
+        press('Escape');
+        vi.advanceTimersByTime(600);
+
+        expect(isDialogShowing(sheet)).toBe(false);
+        expect(isHangarOpen(), 'the Hangar does not pop up late either').toBe(false);
+        expect(document.activeElement).toBe(byId(opener));
+        for (const id of ['start-btn', 'preview-btn', 'settings-btn', 'howto-btn']) {
+          expect(isOperable(byId(id)), `#${id}`).toBe(true);
+        }
+      });
+
+      it('a later Hangar activation, after closing the sheet, opens it', async () => {
+        await openSheetDuringLoad();
+        press('Escape');
+        vi.advanceTimersByTime(600);
+
+        await openHangar();
+
+        expect(isTitleShowing()).toBe(false);
+        expect(liveRenderers()).toHaveLength(1);
+        expect(modelName()).toBe(COPY.firstModel.en);
+        expect(stageModels()).toHaveLength(1);
+        press('Escape');
+        expect(isTitleShowing()).toBe(true);
+        expect(document.activeElement).toBe(byId('preview-btn'));
+        expect(isDialogShowing(sheet), 'and the sheet does not come back').toBe(false);
+      });
+    });
 
     describe('the Hangar cannot get a WebGL context (the browser refuses to create one)', () => {
+      // 渲染器建不出来时机库自己收起、标题画面回来（焦点在“机库”按钮上），不留下一个没有模型、
+      // 按键也没接上的空机库；WebGL 恢复之后再点照常打开。
+      // （最初是 FINDING：菜单已经隐藏、机库显示之后才抛错，Esc 与方向键都是死的，只有“主菜单”
+      // 按钮能出去。已在 src/ui/ModelPreview.ts:1122-1130 修复。）
       async function openWithoutContext(): Promise<void> {
         gl.failNextRenderer = true;
         click('preview-btn');
-        await settleUntil(() => consoleError.mock.calls.length > 0);
-        await settle();
+        await settleUntil(() => !gl.failNextRenderer);
         expect(gl.failNextRenderer, 'a renderer was attempted').toBe(false);
+        await settle(12);
         frames.run();
       }
 
-      it('"Main Menu" still leads back to a working title, and the next visit works', async () => {
+      function documentListeners(ledger: { snapshot: () => string[] }): string[] {
+        return ledger.snapshot().filter((key) => key.startsWith('document:'));
+      }
+
+      it('brings the player straight back to a working title', async () => {
         const startMenu = createMenu();
         const onStart = vi.fn();
         startMenu.setOnStart(onStart);
+
         await openWithoutContext();
 
-        expect(unhandled).toEqual([]);
-        expect(liveRenderers()).toHaveLength(0);
-        if (isHangarOpen()) {
-          click('back-btn');
-        }
         expect(isHangarOpen()).toBe(false);
         expect(isTitleShowing()).toBe(true);
         for (const id of ['start-btn', 'preview-btn', 'settings-btn', 'howto-btn']) {
           expect(isOperable(byId(id)), `#${id}`).toBe(true);
         }
-
-        await openHangar();
-        expect(liveRenderers()).toHaveLength(1);
-        expect(stageModels()).toHaveLength(1);
-        expect(modelName()).toBe(COPY.firstModel.en);
-        press('Escape');
-        expect(isTitleShowing()).toBe(true);
-
         click('start-btn');
         expect(onStart).toHaveBeenCalledTimes(1);
       });
 
-      // FINDING: when the Hangar's renderer cannot be created the player is left on a dead Hangar.
-      // Expected: the player ends up somewhere that works — back on the title, or in a Hangar whose
-      // advertised controls work ("Esc to go back" is printed on that screen). Observed:
-      // StartMenu.openHangar hides the menu and sets inHangar before preview.show()
-      // (src/ui/StartMenu.ts:635-637); ModelPreview.show() displays the Hangar, then throws from
-      // ensureRenderer() before it registers its key handler or loads a model
-      // (src/ui/ModelPreview.ts:1037-1041). Result: an empty stage with a blank name label and the
-      // placeholder "1 / 9" page count (there are 18 models), Escape and the arrow keys dead;
-      // Previous / Next change the labels but nothing is ever drawn. Only the "Main Menu" button
-      // gets the player out (test above).
-      it.fails('does not leave the player on a Hangar whose Escape key is dead', async () => {
+      // FINDING: after a refused Hangar the title comes back with keyboard focus on <body>, not on
+      // the Hangar button. Sequence: focus / activate #preview-btn, the browser refuses the WebGL
+      // context, the title returns. Expected: focus on #preview-btn, as after every other way out
+      // of the Hangar ("Main Menu", Escape). Observed: ModelPreview.show() closes itself and calls
+      // back (src/ui/ModelPreview.ts:1123-1130) while StartMenu.openHangar is still inside its
+      // try block, so resumeFromHangar's focus() (src/ui/StartMenu.ts:661-662) lands on a button
+      // that is still disabled for "Loading…" (set at src/ui/StartMenu.ts:630, disabled at
+      // src/ui/menu/TitleScreen.ts:168-170) and does nothing; the button is only re-enabled
+      // afterwards in the finally block (src/ui/StartMenu.ts:644-648), which does not focus it.
+      // A keyboard player has to Tab from the top of the page again.
+      it.fails('puts keyboard focus back on the Hangar button', async () => {
+        createMenu();
+        byId('preview-btn').focus();
+
+        await openWithoutContext();
+
+        expect(isTitleShowing()).toBe(true);
+        expect(document.activeElement).toBe(byId('preview-btn'));
+      });
+
+      it('leaves nothing behind: no renderer, canvas, frame, listener or rejection', async () => {
+        const ledger = trackGlobalListeners();
+        createMenu();
+        const onTitle = documentListeners(ledger);
+
+        await openWithoutContext();
+
+        expect(liveRenderers()).toHaveLength(0);
+        expect(document.querySelectorAll('canvas')).toHaveLength(0);
+        expect(frames.pending()).toBe(0);
+        expect(models.created, 'no model was built for a Hangar that never opened').toEqual([]);
+        expect(documentListeners(ledger)).toEqual(onTitle);
+        expect(unhandled).toEqual([]);
+      });
+
+      it('the keys the Hangar would have taken do nothing: no dead Hangar is listening', async () => {
         createMenu();
         await openWithoutContext();
 
-        if (isHangarOpen()) {
-          press('Escape');
+        for (const key of ['Escape', 'ArrowLeft', 'ArrowRight']) {
+          press(key);
         }
+        await settle();
 
         expect(isHangarOpen()).toBe(false);
         expect(isTitleShowing()).toBe(true);
+        expect(models.created).toEqual([]);
       });
+
+      it('a later attempt works once WebGL is available again', async () => {
+        createMenu();
+        await openWithoutContext();
+
+        await openHangar();
+
+        expect(isTitleShowing()).toBe(false);
+        expect(liveRenderers()).toHaveLength(1);
+        expect(page().index).toBe(1);
+        expect(modelName()).toBe(COPY.firstModel.en);
+        expect(stageModels()).toHaveLength(1);
+        expect(press('ArrowRight').defaultPrevented, 'its keys are wired this time').toBe(true);
+        await modelLoaded();
+        expect(page().index).toBe(2);
+        press('Escape');
+        expect(isTitleShowing()).toBe(true);
+        expect(document.activeElement).toBe(byId('preview-btn'));
+        expect(liveRenderers()).toHaveLength(0);
+      });
+
+      it('refused several times in a row: the title comes back every time, nothing piles up', async () => {
+        const ledger = trackGlobalListeners();
+        createMenu();
+        await openWithoutContext();
+        const afterFirst = ledger.snapshot();
+
+        for (let attempt = 0; attempt < 3; attempt++) {
+          await openWithoutContext();
+          expect(isHangarOpen(), `attempt ${attempt}`).toBe(false);
+          expect(isTitleShowing(), `attempt ${attempt}`).toBe(true);
+          expect(isOperable(byId('preview-btn')), `attempt ${attempt}`).toBe(true);
+          expect(ledger.snapshot(), `listeners after attempt ${attempt}`).toEqual(afterFirst);
+        }
+
+        expect(document.querySelectorAll('#model-preview')).toHaveLength(1);
+        expect(liveRenderers()).toHaveLength(0);
+        expect(unhandled).toEqual([]);
+        await openHangar();
+        expect(stageModels()).toHaveLength(1);
+      });
+
+      it.each(LOCALES)(
+        'the title that comes back is in the chosen language (%s)',
+        async (locale) => {
+          setLocale(locale);
+          createMenu();
+          await openWithoutContext();
+
+          const label = readableText(byId('preview-btn'));
+          expect(label).toContain(textIn(COPY.hangarButton, locale));
+          expect(label, 'not left saying "Loading"').not.toMatch(/loading|加载/i);
+          expect(isOperable(byId('preview-btn'))).toBe(true);
+        }
+      );
     });
 
     describe('a model that cannot be loaded (its chunk fails to download, or its factory throws)', () => {
+      // 载入失败的那一页写明“无法加载：{名称}”、错误记到控制台、没有未处理的 Promise 拒绝；
+      // 其余模型与返回照常可用。
+      // （最初是 FINDING：showAircraft 等 createMesh() 时没有 catch，标签一直停在“加载中”，失败只以
+      // 未处理的 Promise 拒绝的形式冒出来。已在 src/ui/ModelPreview.ts:1037-1047 修复。）
       type MissileModule = { createBossMissileVisualMesh: () => unknown };
+      const FAILED = { en: 'Could not load: {name}', zh: '无法加载：{name}' } as const;
       let missiles: MissileModule;
       let original: MissileModule['createBossMissileVisualMesh'];
       let failing: ReturnType<typeof vi.fn>;
+      const buildError = new Error('model failed to build');
 
       beforeEach(async () => {
-        // 最后一页是 Boss 导弹：让它的工厂抛错
         missiles = (await import('@/features/boss/BossMissileSystem')) as unknown as MissileModule;
         original = missiles.createBossMissileVisualMesh;
         failing = vi.fn(() => {
-          throw new Error('model failed to build');
+          throw buildError;
         });
-        missiles.createBossMissileVisualMesh = failing;
       });
 
       afterEach(() => {
         missiles.createBossMissileVisualMesh = original;
       });
 
+      /** 最后一页是 Boss 导弹：从现在起它的工厂抛错 */
+      function breakLastModel(): void {
+        missiles.createBossMissileVisualMesh = failing;
+      }
+
+      function repairLastModel(): void {
+        missiles.createBossMissileVisualMesh = original;
+      }
+
+      /** 工厂还正常时翻到最后一页看一眼它的名字，再回到第一页 */
+      async function nameOfLastModel(): Promise<string> {
+        click('prev-btn');
+        await modelLoaded();
+        const name = modelName();
+        expect(name).toMatch(/\S/);
+        click('next-btn');
+        await modelLoaded();
+        expect(page().index).toBe(1);
+        return name;
+      }
+
       /** 翻到坏掉的那一页（第一页往前一页），等它失败 */
       async function goToBrokenModel(): Promise<number> {
         const { total } = page();
+        const attemptsBefore = failing.mock.calls.length;
         click('prev-btn');
-        await settleUntil(() => failing.mock.calls.length > 0);
+        await settleUntil(() => failing.mock.calls.length > attemptsBefore);
         await settle();
-        expect(failing).toHaveBeenCalled();
+        expect(failing.mock.calls.length).toBeGreaterThan(attemptsBefore);
         expect(page().index).toBe(total);
         return total;
       }
 
-      it('does not take the Hangar down with it: the other models and the way back still work', async () => {
+      it.each(LOCALES)('says which model could not be loaded (%s)', async (locale) => {
+        setLocale(locale);
         createMenu();
         await openHangar();
+        const name = await nameOfLastModel();
+        breakLastModel();
+
         await goToBrokenModel();
-        // 这次失败目前会以未处理的 Promise 拒绝的形式冒出来（见下面的 FINDING）；这里只看其余功能
-        unhandled.length = 0;
+
+        expect(modelName()).toBe(textIn(FAILED, locale).replace('{name}', name));
+        expect(modelName()).not.toMatch(/loading|加载中/i);
+        expect(readableText(byId('aircraft-type')), 'the kind of model is still named').toMatch(
+          /\S/
+        );
+      });
+
+      it('lets no rejection escape and reports the underlying error to the console', async () => {
+        breakLastModel();
+        createMenu();
+        await openHangar();
+        expect(consoleError).not.toHaveBeenCalled();
+
+        await goToBrokenModel();
+
+        expect(unhandled).toEqual([]);
+        expect(consoleError).toHaveBeenCalledTimes(1);
+        expect(consoleError.mock.calls[0]).toContain(buildError);
+      });
+
+      it('does not leave the previous model on the stage under the failed label', async () => {
+        breakLastModel();
+        createMenu();
+        await openHangar();
+        expect(stageModels()).toHaveLength(1);
+
+        await goToBrokenModel();
+
+        expect(stageModels()).toHaveLength(0);
+      });
+
+      it('does not take the Hangar down with it: the other models and the way back still work', async () => {
+        breakLastModel();
+        createMenu();
+        await openHangar();
+        const total = await goToBrokenModel();
 
         click('next-btn');
         await modelLoaded();
-        expect(page().index).toBe(1);
+        expect(page()).toEqual({ index: 1, total });
         expect(modelName()).toBe(COPY.firstModel.en);
+        expect(stageModels()).toHaveLength(1);
+
+        // 往另一个方向翻过坏的那一页
+        click('prev-btn');
+        click('prev-btn');
+        await modelLoaded();
+        expect(page().index).toBe(total - 1);
+        expect(modelName()).not.toMatch(/could not load|无法加载|loading|加载中/i);
         expect(stageModels()).toHaveLength(1);
 
         click('back-btn');
         expect(isTitleShowing()).toBe(true);
         expect(document.activeElement).toBe(byId('preview-btn'));
         expect(liveRenderers()).toHaveLength(0);
+        expect(unhandled).toEqual([]);
       });
 
-      // FINDING: a model that fails to load is never reported. Expected: the Hangar handles the
-      // failure (the name label stops saying "Loading: …" — an error text, a retry, anything — and
-      // no promise rejection escapes). Observed: ModelPreview.showAircraft awaits createMesh()
-      // without a catch and every caller discards its promise (src/ui/ModelPreview.ts:966, 1008,
-      // 1013, 1041), so the label reads "Loading: Boss missile" for as long as the page is shown
-      // and the failure surfaces only as an unhandled promise rejection. The player can still
-      // switch models and leave (see the test above).
-      it.fails(
-        'says so instead of showing "Loading" forever, and lets no rejection escape',
-        async () => {
+      it('the arrow keys and Escape still work on the failed page', async () => {
+        breakLastModel();
+        createMenu();
+        await openHangar();
+        const total = await goToBrokenModel();
+
+        expect(press('ArrowLeft').defaultPrevented).toBe(true);
+        await modelLoaded();
+        expect(page().index).toBe(total - 1);
+
+        // 回到坏的那一页，在它上面按 Esc
+        const attempts = failing.mock.calls.length;
+        expect(press('ArrowRight').defaultPrevented).toBe(true);
+        await settleUntil(() => failing.mock.calls.length > attempts);
+        await settle();
+        expect(page().index).toBe(total);
+        press('Escape');
+        expect(isHangarOpen()).toBe(false);
+        expect(isTitleShowing()).toBe(true);
+        expect(document.activeElement).toBe(byId('preview-btn'));
+      });
+
+      it('shows the model on a later visit to its page once it can be loaded again', async () => {
+        createMenu();
+        await openHangar();
+        const name = await nameOfLastModel();
+        breakLastModel();
+        await goToBrokenModel();
+        expect(modelName()).toContain('Could not load');
+
+        repairLastModel();
+        click('next-btn');
+        await modelLoaded();
+        click('prev-btn');
+        await modelLoaded();
+
+        expect(modelName()).toBe(name);
+        expect(stageModels()).toHaveLength(1);
+        expect(consoleError, 'only the one failure was reported').toHaveBeenCalledTimes(1);
+      });
+
+      it('the next visit to the Hangar opens on the first model, not on the failure', async () => {
+        breakLastModel();
+        createMenu();
+        await openHangar();
+        await goToBrokenModel();
+        click('back-btn');
+
+        await openHangar();
+
+        expect(page().index).toBe(1);
+        expect(modelName()).toBe(COPY.firstModel.en);
+        expect(stageModels()).toHaveLength(1);
+      });
+
+      describe('a failure that arrives late', () => {
+        let fail: () => void;
+        let pending: ReturnType<typeof vi.fn>;
+
+        beforeEach(() => {
+          fail = () => undefined;
+          pending = vi.fn(
+            () =>
+              new Promise((_resolve, reject) => {
+                fail = () => reject(buildError);
+              })
+          );
+          missiles.createBossMissileVisualMesh = pending;
+        });
+
+        /** 翻到那一页，它的模型还在路上 */
+        async function goToPendingModel(): Promise<void> {
+          click('prev-btn');
+          await settleUntil(() => pending.mock.calls.length > 0);
+          expect(pending).toHaveBeenCalledTimes(1);
+          expect(modelName()).toMatch(/loading/i);
+        }
+
+        it('after the player moved on: the model now showing keeps its own label', async () => {
           createMenu();
           await openHangar();
-          await goToBrokenModel();
-          const escaped = unhandled.splice(0);
+          await goToPendingModel();
+          click('next-btn');
+          await modelLoaded();
 
-          expect(modelName()).not.toMatch(/loading|加载中/i);
-          expect(escaped).toEqual([]);
-        }
-      );
+          fail();
+          await settle();
+
+          expect(page().index).toBe(1);
+          expect(modelName()).toBe(COPY.firstModel.en);
+          expect(stageModels()).toHaveLength(1);
+          expect(unhandled).toEqual([]);
+        });
+
+        it('after the Hangar was closed: nothing is written, nothing escapes', async () => {
+          createMenu();
+          await openHangar();
+          await goToPendingModel();
+          press('Escape');
+          expect(isTitleShowing()).toBe(true);
+
+          fail();
+          await settle();
+
+          expect(isHangarOpen()).toBe(false);
+          expect(unhandled).toEqual([]);
+          expect(modelName()).not.toMatch(/could not load|无法加载/i);
+
+          await openHangar();
+          expect(modelName()).toBe(COPY.firstModel.en);
+          expect(stageModels()).toHaveLength(1);
+        });
+
+        it('while the player is still on that page: the label says so', async () => {
+          createMenu();
+          await openHangar();
+          await goToPendingModel();
+
+          fail();
+          await settle();
+
+          expect(modelName()).toMatch(/^Could not load: \S/);
+          expect(unhandled).toEqual([]);
+        });
+      });
     });
   });
 
