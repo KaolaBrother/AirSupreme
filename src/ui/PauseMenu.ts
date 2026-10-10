@@ -203,7 +203,6 @@ export class PauseMenu {
     this.renderDefaultView();
     // 语言切换后按新语言重绘当前视图（停留在原来的页面）
     this.unsubscribeLocale = onLocaleChange(() => this.renderView(this.view));
-    document.addEventListener('keydown', this.handleKeyDown);
   }
 
   public show(): void {
@@ -243,38 +242,7 @@ export class PauseMenu {
   public dispose(): void {
     this.visible = false;
     this.unsubscribeLocale();
-    document.removeEventListener('keydown', this.handleKeyDown);
     this.overlay.remove();
-  }
-
-  /**
-   * 确认页按回车 = 主按钮（保存并退出 / 退出），焦点停在“取消”上也一样；按住不放的重复按键不算，
-   * 免得打开确认页的那一下回车顺带确认。存档失败页不接管回车：焦点在“返回”上，“仍然退出”要明确点选。
-   * 确认页被别的界面盖住时（按 U 打开的升级菜单、剧情卡片）也不接管：玩家看到的不是这一页。
-   */
-  private readonly handleKeyDown = (event: KeyboardEvent): void => {
-    if (
-      event.key !== 'Enter' ||
-      event.repeat ||
-      !this.visible ||
-      this.view !== PauseMenuView.Confirm ||
-      this.isCovered()
-    ) {
-      return;
-    }
-    event.preventDefault();
-    event.stopPropagation();
-    this.confirmExit();
-  };
-
-  /** 面板中心是否被别的界面盖住（点不到暂停菜单）；环境不支持命中测试时按没盖住处理 */
-  private isCovered(): boolean {
-    if (typeof document.elementFromPoint !== 'function') {
-      return false;
-    }
-    const rect = this.panel.getBoundingClientRect();
-    const top = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
-    return top !== null && !this.overlay.contains(top);
   }
 
   private renderView(view: PauseMenuView): void {
@@ -334,7 +302,10 @@ export class PauseMenu {
     );
   }
 
-  /** 退出确认：先如实说明会发生什么（存到哪里 / 不存档），焦点落在“取消”上 */
+  /**
+   * 退出确认：先如实说明会发生什么（存到哪里 / 不存档）。焦点落在不丢东西的那个按钮上：
+   * 会存档时是“保存并退出”，不存档时是“取消”。回车 / 空格激活的就是有焦点的按钮。
+   */
   private renderConfirmView(): void {
     const status = this.readSaveStatus();
     if (status?.kind === 'failed') {
@@ -356,7 +327,7 @@ export class PauseMenu {
       () => this.confirmExit()
     );
     this.panel.appendChild(this.createConfirmActions(cancel, primary));
-    cancel.focus();
+    (this.confirmPromisesSave ? primary : cancel).focus();
   }
 
   /** 存档失败：如实告知，并说明此刻退出后“继续战役”还剩什么；焦点落在“返回”上 */
@@ -447,7 +418,10 @@ export class PauseMenu {
     return message;
   }
 
-  /** 确认页的一排两个按钮：安全的选择在前 */
+  /**
+   * 确认页的一排两个按钮：返回 / 取消在左，主操作在右。左右方向键（和 Tab）在两个按钮之间移动焦点；
+   * 回车 / 空格不接管，交给按钮自己。
+   */
   private createConfirmActions(
     safe: HTMLButtonElement,
     primary: HTMLButtonElement
@@ -461,6 +435,12 @@ export class PauseMenu {
       width: 100%;
     `;
     actions.append(safe, primary);
+    actions.addEventListener('keydown', (event) => {
+      if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+        event.preventDefault();
+        (event.key === 'ArrowLeft' ? safe : primary).focus();
+      }
+    });
     return actions;
   }
 
