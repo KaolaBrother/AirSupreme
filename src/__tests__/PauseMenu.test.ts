@@ -29,7 +29,6 @@ const LABELS = {
   settings: { en: 'Settings', zh: '设置' },
   mainMenu: { en: 'Main Menu', zh: '返回菜单' },
   cancel: { en: 'Cancel', zh: '取消' },
-  confirm: { en: 'Confirm', zh: '确定' },
   sfx: { en: 'Sound effects', zh: '音效' },
   music: { en: 'Music', zh: '音乐' },
   graphics: { en: 'Graphics', zh: '画质' },
@@ -46,10 +45,24 @@ const FORBIDDEN_PAUSE_SETTINGS: readonly LocalizedText[] = [
   { en: 'Test score', zh: '测试分数' },
 ];
 
-const EXIT_CONFIRM_COPY: LocalizedText = {
-  en: 'Return to the main menu? Your current progress will be lost.',
-  zh: '返回主菜单？当前进度将丢失。',
+/**
+ * 退出确认页（这里的菜单没有接“保存并退出”）：如实说明现在退出不会保存，以及存储里没有检查点。
+ * 只取关键短语，整句微调不必改测试。接了“保存并退出”的各种情形见 PauseMenuSaveExit.test.ts。
+ */
+const EXIT_DOES_NOT_SAVE: Record<Locale, RegExp> = {
+  en: /does not save/i,
+  'zh-CN': /不.{0,2}保存/,
 };
+const NO_STORED_CHECKPOINT: Record<Locale, RegExp> = {
+  en: /no campaign checkpoint is stored/i,
+  'zh-CN': /没有.{0,8}检查点/,
+};
+/** 旧文案（“进度将丢失”+“确定”按钮）不得再出现 */
+const OLD_EXIT_COPY: Record<Locale, RegExp> = {
+  en: /progress will be lost/i,
+  'zh-CN': /进度将丢失/,
+};
+const OLD_CONFIRM_LABELS: readonly string[] = ['Confirm', '确定'];
 
 function collectRelatedCss(element: HTMLElement): string {
   const chunks: string[] = [];
@@ -227,7 +240,8 @@ describe.each(LOCALES)('PauseMenu (%s)', (locale: Locale) => {
 
     expect(settingsButton).toBeTruthy();
     expect(exitButton).toBeTruthy();
-    expect(document.body.textContent).not.toContain(textIn(EXIT_CONFIRM_COPY, locale));
+    expect(document.body.textContent).not.toMatch(EXIT_DOES_NOT_SAVE[locale]);
+    expect(document.body.textContent).not.toMatch(OLD_EXIT_COPY[locale]);
   });
 
   it('covers mobile controls with z-index 200', () => {
@@ -386,23 +400,38 @@ describe.each(LOCALES)('PauseMenu (%s)', (locale: Locale) => {
   });
 
   it(`confirms ${textIn(LABELS.mainMenu, locale)} before calling onExitToMenu`, () => {
+    window.localStorage.clear();
     createMenu().show();
     findLabeledButton(label('mainMenu')).click();
 
     expect(onExitToMenu).not.toHaveBeenCalled();
-    expect(getPauseRoot().textContent).toContain(textIn(EXIT_CONFIRM_COPY, locale));
+    const confirmText = getPauseRoot().textContent ?? '';
+    expect(confirmText).toMatch(EXIT_DOES_NOT_SAVE[locale]);
+    expect(confirmText).toMatch(NO_STORED_CHECKPOINT[locale]);
+    expect(confirmText).not.toMatch(OLD_EXIT_COPY[locale]);
 
-    const cancel = findLabeledButton(label('cancel'));
-    const confirm = findLabeledButton(label('confirm'));
+    // 一排两个按钮：取消在左，退出在右（规格只给了英文的 “Exit”，中文下按位置找）
+    const confirmButtons = (): HTMLButtonElement[] =>
+      Array.from(getPauseRoot().querySelectorAll('button'));
+    expect(confirmButtons()).toHaveLength(2);
+    const [cancel, exit] = confirmButtons();
+    expect(cancel).toBe(findLabeledButton(label('cancel')));
+    if (locale === 'en') {
+      expect(exit.textContent?.trim()).toBe('Exit');
+    }
+    for (const oldLabel of OLD_CONFIRM_LABELS) {
+      expect(confirmButtons().map((button) => button.textContent?.trim())).not.toContain(oldLabel);
+    }
     assertClickableTouchButton(cancel);
-    assertClickableTouchButton(confirm);
+    assertClickableTouchButton(exit);
 
     cancel.click();
     expect(onExitToMenu).not.toHaveBeenCalled();
-    expect(getPauseRoot().textContent).not.toContain(textIn(EXIT_CONFIRM_COPY, locale));
+    expect(getPauseRoot().textContent).not.toMatch(EXIT_DOES_NOT_SAVE[locale]);
+    expect(findLabeledButton(label('resume'))).toBeTruthy();
 
     findLabeledButton(label('mainMenu')).click();
-    findLabeledButton(label('confirm')).click();
+    confirmButtons()[1].click();
     expect(onExitToMenu).toHaveBeenCalledTimes(1);
   });
 
