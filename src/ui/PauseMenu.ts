@@ -1,4 +1,10 @@
 import type { QualityPreset } from '@/config';
+import type { CampaignExitSave } from '@/core/campaign/CampaignFlowController';
+import {
+  describeCheckpoint,
+  loadCampaignCheckpoint,
+  type CheckpointKind,
+} from '@/core/save/SaveSystem';
 import {
   DEFAULT_START_FLOW_SETTINGS,
   LANGUAGE_ENDONYMS,
@@ -11,7 +17,19 @@ import { HUD_COLORS, injectHudTokens } from '@/ui/theme/hudTokens';
 export interface IPauseMenuOptions {
   onContinue: () => void;
   onUpgrade: () => void;
+  /** 回到主菜单（菜单在存档成功、无需存档或玩家选择“仍然退出”之后调用） */
   onExitToMenu: () => void;
+  /**
+   * “保存并退出”的预告（只读，不写存档）：会存到哪里，或者本局为什么不存。
+   * 与 onSaveAndExit 成对提供才启用；缺一个时菜单自己不存档，按钮仍叫“返回菜单”，
+   * 确认页只读已有检查点、如实说明“继续战役”会从哪里开始。
+   */
+  getSaveStatus?: () => CampaignExitSave;
+  /**
+   * 执行存档并返回真实结果。'failed' 时菜单停在失败页，由玩家选择仍然退出或返回；
+   * 其余结果随即调用 onExitToMenu（预告说会存、结果却没存时回到确认页重新说明，不退出）。
+   */
+  onSaveAndExit?: () => CampaignExitSave;
   applyAudio: (sfx: number, music: number) => void;
   /** 角色配音音量 0..1（立即生效）；缺省不显示语音一行 */
   applyVoice?: (voice: number) => void;
@@ -27,9 +45,61 @@ const QUALITY_LABELS: Record<QualityPreset, LocalizedText> = {
   balanced: { en: 'Balanced', zh: '平衡' },
   quality: { en: 'High', zh: '高质量' },
 };
-const EXIT_CONFIRM_COPY: LocalizedText = {
-  en: 'Return to the main menu? Your current progress will be lost.',
-  zh: '返回主菜单？当前进度将丢失。',
+const SAVE_AND_EXIT_LABEL: LocalizedText = { en: 'Save & Exit', zh: '保存并退出' };
+const MAIN_MENU_LABEL: LocalizedText = { en: 'Main Menu', zh: '返回菜单' };
+const EXIT_LABEL: LocalizedText = { en: 'Exit', zh: '退出' };
+
+/**
+ * 退出确认文案：只陈述真实会发生的事。{position} 是 describeCheckpoint 的检查点描述，
+ * 如 “Ch. 1 · First Sortie · Wave 2”。
+ */
+const SAVES_AT_COPY: LocalizedText = { en: 'Saves at {position}.', zh: '存档位置：{position}。' };
+const WAVE_CONTINUE_COPY: LocalizedText = {
+  en: 'Continue Campaign starts that wave from the beginning, with your score, lives and upgrades.',
+  zh: '“继续战役”将从该波次的开头重新开始，保留分数、生命和升级。',
+};
+const CONTINUE_COPY: Readonly<Record<CheckpointKind, LocalizedText>> = {
+  'level-start': WAVE_CONTINUE_COPY,
+  wave: WAVE_CONTINUE_COPY,
+  boss: {
+    en:
+      'Continue Campaign starts the boss fight from the beginning, ' +
+      'with your score, lives and upgrades.',
+    zh: '“继续战役”将从 Boss 战的开头重新开始，保留分数、生命和升级。',
+  },
+  hangar: {
+    en: 'Continue Campaign returns to the hangar with your score, lives and upgrades.',
+    zh: '“继续战役”将回到机库整备，保留分数、生命和升级。',
+  },
+};
+const NO_SAVE_MODE_COPY: LocalizedText = {
+  en: 'This mode does not save progress. Exit to the main menu?',
+  zh: '此模式不保存进度。返回主菜单？',
+};
+const NOT_STARTED_COPY: LocalizedText = {
+  en: 'Nothing to save yet: the mission has not started. Exit to the main menu?',
+  zh: '任务尚未开始，暂无可保存的进度。返回主菜单？',
+};
+const CAMPAIGN_COMPLETE_COPY: LocalizedText = {
+  en: 'The campaign is complete: there is no checkpoint to save. Exit to the main menu?',
+  zh: '战役已通关，没有需要保存的检查点。返回主菜单？',
+};
+const SAVE_FAILED_COPY: LocalizedText = {
+  en: "Could not save: this browser's storage is unavailable or full.",
+  zh: '保存失败：浏览器存储不可用或已满。',
+};
+/** 菜单自己不存档时（游戏侧没有接“保存并退出”）：任何模式下都成立的说法 */
+const UNSAVED_EXIT_COPY: LocalizedText = {
+  en: 'Exiting now does not save.',
+  zh: '现在退出不会保存。',
+};
+const STORED_CHECKPOINT_COPY: LocalizedText = {
+  en: 'Continue Campaign resumes from the last checkpoint: {position}.',
+  zh: '“继续战役”将从上一个检查点开始：{position}。',
+};
+const NO_CHECKPOINT_COPY: LocalizedText = {
+  en: 'No campaign checkpoint is stored.',
+  zh: '当前没有战役检查点。',
 };
 const VOLUME_STEP = 0.1;
 
@@ -45,10 +115,11 @@ enum PauseMenuView {
   Default = 'default',
   Settings = 'settings',
   Confirm = 'confirm',
+  SaveFailed = 'save-failed',
 }
 
 /**
- * 暂停菜单：继续 / 升级 / 运行时音画与语言设置 / 返回主菜单确认
+ * 暂停菜单：继续 / 升级 / 运行时音画与语言设置 / 保存并退出（不存档的对局：返回主菜单）确认
  */
 export class PauseMenu {
   private readonly options: IPauseMenuOptions;
@@ -58,6 +129,8 @@ export class PauseMenu {
   private view: PauseMenuView = PauseMenuView.Default;
   private settings: StartFlowSettings = { ...DEFAULT_START_FLOW_SETTINGS };
   private readonly unsubscribeLocale: () => void;
+  /** 当前确认页是否承诺了存档（主按钮是“保存并退出”） */
+  private confirmPromisesSave = false;
 
   constructor(options: IPauseMenuOptions) {
     this.options = options;
@@ -130,6 +203,7 @@ export class PauseMenu {
     this.renderDefaultView();
     // 语言切换后按新语言重绘当前视图（停留在原来的页面）
     this.unsubscribeLocale = onLocaleChange(() => this.renderView(this.view));
+    document.addEventListener('keydown', this.handleKeyDown);
   }
 
   public show(): void {
@@ -151,14 +225,14 @@ export class PauseMenu {
   }
 
   /**
-   * ESC 处理：确认/设置页返回默认视图并消费按键；默认视图交由协调器继续游戏。
+   * ESC 处理：确认 / 存档失败 / 设置页返回默认视图并消费按键；默认视图交由协调器继续游戏。
    */
   public handleEscape(): boolean {
     if (!this.visible) {
       return false;
     }
 
-    if (this.view === PauseMenuView.Confirm || this.view === PauseMenuView.Settings) {
+    if (this.view !== PauseMenuView.Default) {
       this.renderDefaultView();
       return true;
     }
@@ -169,7 +243,38 @@ export class PauseMenu {
   public dispose(): void {
     this.visible = false;
     this.unsubscribeLocale();
+    document.removeEventListener('keydown', this.handleKeyDown);
     this.overlay.remove();
+  }
+
+  /**
+   * 确认页按回车 = 主按钮（保存并退出 / 退出），焦点停在“取消”上也一样；按住不放的重复按键不算，
+   * 免得打开确认页的那一下回车顺带确认。存档失败页不接管回车：焦点在“返回”上，“仍然退出”要明确点选。
+   * 确认页被别的界面盖住时（按 U 打开的升级菜单、剧情卡片）也不接管：玩家看到的不是这一页。
+   */
+  private readonly handleKeyDown = (event: KeyboardEvent): void => {
+    if (
+      event.key !== 'Enter' ||
+      event.repeat ||
+      !this.visible ||
+      this.view !== PauseMenuView.Confirm ||
+      this.isCovered()
+    ) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    this.confirmExit();
+  };
+
+  /** 面板中心是否被别的界面盖住（点不到暂停菜单）；环境不支持命中测试时按没盖住处理 */
+  private isCovered(): boolean {
+    if (typeof document.elementFromPoint !== 'function') {
+      return false;
+    }
+    const rect = this.panel.getBoundingClientRect();
+    const top = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+    return top !== null && !this.overlay.contains(top);
   }
 
   private renderView(view: PauseMenuView): void {
@@ -177,6 +282,8 @@ export class PauseMenu {
       this.renderSettingsView();
     } else if (view === PauseMenuView.Confirm) {
       this.renderConfirmView();
+    } else if (view === PauseMenuView.SaveFailed) {
+      this.renderSaveFailedView();
     } else {
       this.renderDefaultView();
     }
@@ -204,11 +311,10 @@ export class PauseMenu {
     actions.appendChild(
       this.createActionButton(tr({ en: 'Settings', zh: '设置' }), () => this.renderSettingsView())
     );
-    actions.appendChild(
-      this.createActionButton(tr({ en: 'Main Menu', zh: '返回菜单' }), () =>
-        this.renderConfirmView()
-      )
-    );
+    // 只有这一局真的会存档时才叫“保存并退出”；不存档的对局仍是“返回菜单”
+    const exitLabel =
+      this.readSaveStatus()?.kind === 'saved' ? SAVE_AND_EXIT_LABEL : MAIN_MENU_LABEL;
+    actions.appendChild(this.createActionButton(tr(exitLabel), () => this.renderConfirmView()));
     this.panel.appendChild(actions);
   }
 
@@ -228,21 +334,124 @@ export class PauseMenu {
     );
   }
 
+  /** 退出确认：先如实说明会发生什么（存到哪里 / 不存档），焦点落在“取消”上 */
   private renderConfirmView(): void {
+    const status = this.readSaveStatus();
+    if (status?.kind === 'failed') {
+      // 游戏侧预告就说存不了：直接进失败页（“仍然退出”不会再尝试存档）
+      this.renderSaveFailedView();
+      return;
+    }
     this.view = PauseMenuView.Confirm;
+    this.confirmPromisesSave = status?.kind === 'saved';
     this.panel.replaceChildren();
     this.panel.appendChild(this.createTitle(tr({ en: 'Leave Mission', zh: '离开' })));
+    this.panel.appendChild(this.createMessage(this.describeExit(status)));
 
+    const cancel = this.createActionButton(tr({ en: 'Cancel', zh: '取消' }), () =>
+      this.renderDefaultView()
+    );
+    const primary = this.createActionButton(
+      tr(this.confirmPromisesSave ? SAVE_AND_EXIT_LABEL : EXIT_LABEL),
+      () => this.confirmExit()
+    );
+    this.panel.appendChild(this.createConfirmActions(cancel, primary));
+    cancel.focus();
+  }
+
+  /** 存档失败：如实告知，并说明此刻退出后“继续战役”还剩什么；焦点落在“返回”上 */
+  private renderSaveFailedView(): void {
+    this.view = PauseMenuView.SaveFailed;
+    this.panel.replaceChildren();
+    this.panel.appendChild(this.createTitle(tr({ en: 'Save Failed', zh: '保存失败' })));
+    this.panel.appendChild(
+      this.createMessage([tr(SAVE_FAILED_COPY), this.describeStoredCheckpoint()])
+    );
+
+    const back = this.createActionButton(tr({ en: 'Back', zh: '返回' }), () =>
+      this.renderDefaultView()
+    );
+    const exitAnyway = this.createActionButton(tr({ en: 'Exit Anyway', zh: '仍然退出' }), () =>
+      this.options.onExitToMenu()
+    );
+    this.panel.appendChild(this.createConfirmActions(back, exitAnyway));
+    back.focus();
+  }
+
+  /** 游戏侧的“保存并退出”预告；两个回调缺一时为 null：菜单自己不存档 */
+  private readSaveStatus(): CampaignExitSave | null {
+    const { getSaveStatus, onSaveAndExit } = this.options;
+    return getSaveStatus && onSaveAndExit ? getSaveStatus() : null;
+  }
+
+  /**
+   * 确认退出：接了“保存并退出”就先存档——失败停在失败页；确认页说过会存、结果却没存时回到确认页
+   * 按最新状态重新说明。只有存档成功或本来就不存档时才真的退出。
+   */
+  private confirmExit(): void {
+    const { getSaveStatus, onSaveAndExit } = this.options;
+    if (getSaveStatus && onSaveAndExit) {
+      const result = onSaveAndExit();
+      if (result.kind === 'failed') {
+        this.renderSaveFailedView();
+        return;
+      }
+      if (this.confirmPromisesSave && result.kind !== 'saved') {
+        this.renderConfirmView();
+        return;
+      }
+    }
+    this.options.onExitToMenu();
+  }
+
+  /** 确认页的说明（一到两行）：按真实的存档去向写 */
+  private describeExit(status: CampaignExitSave | null): string[] {
+    switch (status?.kind) {
+      case 'saved':
+        return [
+          tr(SAVES_AT_COPY, { position: tr(status.position) }),
+          tr(CONTINUE_COPY[status.stage]),
+        ];
+      case 'no-save-mode':
+        return [tr(NO_SAVE_MODE_COPY)];
+      case 'not-started':
+        return [tr(NOT_STARTED_COPY)];
+      case 'complete':
+        return [tr(CAMPAIGN_COMPLETE_COPY)];
+      default:
+        return [tr(UNSAVED_EXIT_COPY), this.describeStoredCheckpoint()];
+    }
+  }
+
+  /** 存储里现有的检查点：菜单没有存档（没接线 / 存档失败）时，“继续战役”就从这里开始 */
+  private describeStoredCheckpoint(): string {
+    const stored = loadCampaignCheckpoint();
+    return stored
+      ? tr(STORED_CHECKPOINT_COPY, { position: describeCheckpoint(stored) })
+      : tr(NO_CHECKPOINT_COPY);
+  }
+
+  private createMessage(lines: readonly string[]): HTMLDivElement {
     const message = document.createElement('div');
-    message.textContent = tr(EXIT_CONFIRM_COPY);
     message.style.cssText = `
       font-size: 16px;
       line-height: 1.5;
       text-align: center;
       color: var(--hud-text, ${HUD_COLORS.text});
     `;
-    this.panel.appendChild(message);
+    for (const line of lines) {
+      const lineEl = document.createElement('div');
+      lineEl.textContent = line;
+      message.appendChild(lineEl);
+    }
+    return message;
+  }
 
+  /** 确认页的一排两个按钮：安全的选择在前 */
+  private createConfirmActions(
+    safe: HTMLButtonElement,
+    primary: HTMLButtonElement
+  ): HTMLDivElement {
     const actions = document.createElement('div');
     actions.className = 'pause-actions';
     actions.style.cssText = `
@@ -251,13 +460,8 @@ export class PauseMenu {
       gap: 12px;
       width: 100%;
     `;
-    actions.appendChild(
-      this.createActionButton(tr({ en: 'Cancel', zh: '取消' }), () => this.renderDefaultView())
-    );
-    actions.appendChild(
-      this.createActionButton(tr({ en: 'Confirm', zh: '确定' }), () => this.options.onExitToMenu())
-    );
-    this.panel.appendChild(actions);
+    actions.append(safe, primary);
+    return actions;
   }
 
   private createVolumeRow(bus: VolumeBus): HTMLDivElement {
