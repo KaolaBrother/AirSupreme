@@ -13,7 +13,7 @@ import { CockpitModel } from './CockpitModel';
  * - 切换：0.55 s 的 smootherstep 位置/姿态混合，路径带轻微上拱；混合接近座舱时
  *   才隐藏机体外壳（PLAYER_EXTERIOR_LAYER）并显示座舱模型。
  * - 震动：trauma（0..1，累加、衰减）驱动平移 + 旋转噪声，第一/第三人称各自的幅度。
- * - FOV：随速度比与加力平滑放大。
+ * - FOV：随速度比与加力平滑放大；竖屏时抬高竖直 FOV，保住约 70° 的水平视场（封顶 95°）。
  * - 所有每帧计算复用预分配对象；目标位姿含 NaN/Infinity 时保持上一帧。
  */
 
@@ -124,6 +124,12 @@ const FOV_RISE_SECONDS = 0.28;
 const FOV_FALL_SECONDS = 0.55;
 const MIN_FOV = 20;
 const MAX_FOV = 120;
+/**
+ * 竖屏（aspect < 1）补偿：抬高竖直 FOV，使水平视场不低于约 70°；竖直 FOV（含速度/加力增量）
+ * 封顶 95°。横屏不受影响。相机的 aspect 由 GameScene 的 resize 维护，FOV 只在这里写。
+ */
+const PORTRAIT_MIN_HORIZONTAL_HALF_TAN = Math.tan(THREE.MathUtils.degToRad(70 / 2));
+const PORTRAIT_MAX_FOV = 95;
 
 /** 加力时的持续机身抖动幅度（叠加在 trauma² 上） */
 const BOOST_RUMBLE = 0.05;
@@ -620,7 +626,15 @@ export class CameraRig {
     const kick =
       (SPEED_FOV_KICK * speedRatio * speedRatio + (boosting ? BOOST_FOV_KICK : 0)) *
       (1 + (FIRST_PERSON_FOV_KICK_SCALE - 1) * w);
-    const targetFov = Math.min(MAX_FOV, Math.max(MIN_FOV, this.baseFov + kick));
+    let wantedFov = this.baseFov + kick;
+    const aspect = this.camera.aspect;
+    if (Number.isFinite(aspect) && aspect > 0 && aspect < 1) {
+      // 竖屏：按当前宽高比求出“水平 70°”对应的竖直 FOV，再叠加增量，封顶 95°
+      const portraitFov =
+        2 * THREE.MathUtils.radToDeg(Math.atan(PORTRAIT_MIN_HORIZONTAL_HALF_TAN / aspect));
+      wantedFov = Math.max(wantedFov, Math.min(PORTRAIT_MAX_FOV, portraitFov + kick));
+    }
+    const targetFov = Math.min(MAX_FOV, Math.max(MIN_FOV, wantedFov));
     if (snap || !this.initialized) {
       this.fov = targetFov;
     } else if (dt > 0) {

@@ -12,9 +12,17 @@ import type { DisplayRegion } from './CockpitDisplays';
  * 第一人称驾驶舱（轻量）：遮光罩 + 仪表板（三块 MFD、UFC、两块圆表、告警灯）
  * + HUD 组合玻璃 + 风挡立柱 + 座舱沿/侧壁。
  *
- * 坐标系：content 以飞行员眼点为原点（机头 -Z、上 +Y、右 +X），尺寸按真实座舱比例，
- * 所有几何距眼点 ≥ 0.3 m（相机 near = 0.1 时不会被近裁剪面切掉）；
- * 遮光罩上沿位于视线下方约 16°，组合玻璃上沿约 5°，屏幕中心（准星/HUD）保持通透。
+ * 坐标系：content 以飞行员眼点为原点（机头 -Z、上 +Y、右 +X）。座舱结构在“座舱坐标系”中建模，
+ * 整体绕眼点低头 4°（COCKPIT_PITCH）后烘焙到眼点坐标；HUD 组合玻璃直接放在眼点坐标里。
+ * 所有几何距眼点 ≥ 0.4 m（相机 near = 0.1 时不会被近裁剪面切掉）。
+ *
+ * 视野（75° 竖直 FOV 下的实测值，中线仰角以视轴为 0°、向下为负）：
+ * - 遮光罩是一道薄檐：可见上沿 -19.0°，唇口下沿约 -22°；其下依次是 UFC / 告警灯（约 -22°…-26°）
+ *   与三块 MFD 的上半部（上沿约 -28°，屏幕下缘 -37.5° 处被裁掉一小截）。
+ * - 座舱沿上表面在眼点下方 0.20 m，屏幕上从遮光罩两端向外下方斜出；风挡立柱截面 10 × 8 mm。
+ * - 不透明部分约占屏幕 22%（16:9）/ 26%（4:3），上半屏遮挡 < 2%（4:3）。
+ * - 组合玻璃 0.30 × 0.30 m，中心在视轴上、距眼点 0.6 m：通光范围水平 ±14.1°、竖直 +13.8° / -13.7°，
+ *   框住 DOM 层的准星与导引头圆环；支杆与描边都在该范围之外。
  * 静态部件按材质合并为 7 个网格；动态部件（扫描线、地平线、油门条、指针、告警灯）单独驱动。
  */
 
@@ -28,12 +36,30 @@ interface ScreenSpec {
   height: number;
 }
 
-/** 仪表板中心（眼点坐标）与后仰角：面板法线指向眼点 */
-const PANEL_CENTER = new THREE.Vector3(0, -0.4, -0.655);
+const AXIS_X = new THREE.Vector3(1, 0, 0);
+const AXIS_Y = new THREE.Vector3(0, 1, 0);
+const UNIT_SCALE = new THREE.Vector3(1, 1, 1);
+const IDENTITY = new THREE.Quaternion();
+
+/**
+ * 座舱坐标系 → 眼点坐标系：整个座舱结构绕眼点低头（机头方向下沉），
+ * 座舱纵向线条汇聚在准星下方，把视野让给前方。HUD 组合玻璃不随之转动（始终对准视轴）。
+ */
+const COCKPIT_PITCH = -THREE.MathUtils.degToRad(4);
+const COCKPIT_FRAME = new THREE.Matrix4().makeRotationX(COCKPIT_PITCH);
+
+/** 仪表板中心（座舱坐标）与后仰角：面板法线指向眼点 */
+const PANEL_CENTER = new THREE.Vector3(0, -0.386, -0.655);
 const PANEL_TILT = -0.21;
 const PANEL_WIDTH = 0.76;
-const PANEL_HEIGHT = 0.52;
+/** 面板沿板面的上下沿（v）：上沿收在遮光罩内，不再高出 UFC 一大截 */
+const PANEL_TOP = 0.18;
+const PANEL_BOTTOM = -0.26;
 const PANEL_THICKNESS = 0.02;
+/** 仪表板局部坐标 (u, v, n) → 眼点坐标 */
+const PANEL_MATRIX = new THREE.Matrix4()
+  .compose(PANEL_CENTER, new THREE.Quaternion().setFromAxisAngle(AXIS_X, PANEL_TILT), UNIT_SCALE)
+  .premultiply(COCKPIT_FRAME);
 /** 面板正面在面板局部坐标中的 n 值 */
 const PANEL_FACE = PANEL_THICKNESS / 2;
 const BEZEL_DEPTH = 0.012;
@@ -61,22 +87,50 @@ const GAUGES: ReadonlyArray<{ u: number; v: number }> = [
   { u: 0.312, v: 0.03 },
 ];
 const GAUGE_RADIUS = 0.03;
-/** HUD 组合玻璃支杆（+X 侧）：根部在投影仪上，顶端向眼点后仰；玻璃上沿约在视线下 5° */
-const COMBINER_POST_BASE: THREE.Vector3Tuple = [0.068, -0.124, -0.562];
-const COMBINER_POST_TOP: THREE.Vector3Tuple = [0.068, -0.05, -0.544];
 const LAMPS: ReadonlyArray<{ u: number; v: number }> = [
   { u: -0.118, v: 0.135 },
   { u: 0.118, v: 0.135 },
 ];
 
+/**
+ * 遮光罩（座舱坐标）：薄檐，上表面向机头下倾，几乎与视线平行——从眼点看只是一道
+ * 压在 UFC 上方的暗边，而不是一大片挡住前方的平台。
+ */
+const GLARE_HALF_WIDTH = 0.335;
+/** 前缘 / 唇口中点到眼点的前向距离 */
+const GLARE_FAR = 0.745;
+const GLARE_LIP = 0.605;
+/** 前缘上表面高度与上表面下倾角 */
+const GLARE_FAR_TOP_Y = -0.2;
+const GLARE_SLOPE = THREE.MathUtils.degToRad(11.5);
+const GLARE_EXTRUDE = 0.016;
+const GLARE_BEVEL = 0.005;
+
+/** 座舱沿（舱盖导轨）上表面高度（座舱坐标）；侧壁、侧操纵台都以它为基准向下排布 */
+const SILL_TOP_Y = -0.2;
+/** 风挡立柱（+X 侧，座舱坐标）：细截面，根部落在座舱沿前端，向外上方伸出屏幕 */
+const PILLAR_BASE: THREE.Vector3Tuple = [0.36, SILL_TOP_Y, -0.655];
+const PILLAR_TOP: THREE.Vector3Tuple = [0.44, 0.46, -0.14];
+const PILLAR_WIDTH = 0.01;
+const PILLAR_DEPTH = 0.008;
+
+/**
+ * HUD 组合玻璃（眼点坐标，不随座舱低头）：上沿向眼点后仰 10°，中心略低于视轴以抵消后仰带来的
+ * 上下不对称。通光范围约 ±14°，比 DOM 准星的导引头圆环（半径 = 视口短边的 13%：75° FOV 下
+ * ≈ ±11.3°，速度 + 加力把 FOV 推到 82.65° 时 ≈ ±12.9°）略大。
+ */
+const COMBINER_CENTER = new THREE.Vector3(0, -0.006, -0.6);
+const COMBINER_WIDTH = 0.3;
+const COMBINER_HEIGHT = 0.3;
+const COMBINER_TILT = THREE.MathUtils.degToRad(10);
+/** 支杆：沿玻璃两侧边向下延伸到遮光罩，只托住玻璃下部，不进入中央瞄准区 */
+const COMBINER_POST_WIDTH = 0.006;
+const COMBINER_POST_BOTTOM = -0.236;
+const COMBINER_POST_TOP = -0.07;
+
 /** 指针：0 在左下（+135°），满量程在右下（-135°） */
 const NEEDLE_ZERO = (3 * Math.PI) / 4;
 const NEEDLE_SPAN = (3 * Math.PI) / 2;
-
-const AXIS_X = new THREE.Vector3(1, 0, 0);
-const AXIS_Y = new THREE.Vector3(0, 1, 0);
-const UNIT_SCALE = new THREE.Vector3(1, 1, 1);
-const IDENTITY = new THREE.Quaternion();
 
 const SYMBOL_GREEN = new THREE.Color(0x7dffb4);
 const SYMBOL_AMBER = new THREE.Color(0xffb347);
@@ -91,35 +145,24 @@ function clamp(value: number, min: number, max: number): number {
   return value < min ? min : value > max ? max : value;
 }
 
-/** 静态几何收集器：变换烘焙后按材质桶合并 */
+/** 静态几何收集器：变换烘焙（到眼点坐标）后按材质桶合并 */
 class StaticGeometryBuilder {
   private readonly buckets = new Map<StaticBucket, THREE.BufferGeometry[]>();
-  private readonly panelMatrix = new THREE.Matrix4();
   private readonly localMatrix = new THREE.Matrix4();
   private readonly position = new THREE.Vector3();
-  private readonly scale = new THREE.Vector3();
 
-  constructor() {
-    this.panelMatrix.compose(
-      PANEL_CENTER,
-      new THREE.Quaternion().setFromAxisAngle(AXIS_X, PANEL_TILT),
-      UNIT_SCALE
-    );
-  }
-
-  /** 眼点坐标系中放置 */
+  /** 座舱坐标系中放置（随座舱低头）；eyeSpace = true 时直接按眼点坐标放置 */
   public add(
     bucket: StaticBucket,
     geometry: THREE.BufferGeometry,
     position: THREE.Vector3Tuple,
     quaternion: THREE.Quaternion = IDENTITY,
-    scale: THREE.Vector3Tuple = [1, 1, 1]
+    eyeSpace: boolean = false
   ): void {
-    this.localMatrix.compose(
-      this.position.fromArray(position),
-      quaternion,
-      this.scale.fromArray(scale)
-    );
+    this.localMatrix.compose(this.position.fromArray(position), quaternion, UNIT_SCALE);
+    if (!eyeSpace) {
+      this.localMatrix.premultiply(COCKPIT_FRAME);
+    }
     this.push(bucket, geometry, this.localMatrix);
   }
 
@@ -133,7 +176,7 @@ class StaticGeometryBuilder {
     quaternion: THREE.Quaternion = IDENTITY
   ): void {
     this.localMatrix.compose(this.position.set(u, v, n), quaternion, UNIT_SCALE);
-    this.localMatrix.premultiply(this.panelMatrix);
+    this.localMatrix.premultiply(PANEL_MATRIX);
     this.push(bucket, geometry, this.localMatrix);
   }
 
@@ -143,7 +186,8 @@ class StaticGeometryBuilder {
     from: THREE.Vector3Tuple,
     to: THREE.Vector3Tuple,
     width: number,
-    depth: number
+    depth: number,
+    eyeSpace: boolean = false
   ): void {
     const start = new THREE.Vector3().fromArray(from);
     const end = new THREE.Vector3().fromArray(to);
@@ -157,7 +201,13 @@ class StaticGeometryBuilder {
       direction.multiplyScalar(1 / length)
     );
     const middle = start.add(end).multiplyScalar(0.5);
-    this.add(bucket, new THREE.BoxGeometry(width, length, depth), middle.toArray(), quaternion);
+    this.add(
+      bucket,
+      new THREE.BoxGeometry(width, length, depth),
+      middle.toArray(),
+      quaternion,
+      eyeSpace
+    );
   }
 
   public build(bucket: StaticBucket): THREE.BufferGeometry | null {
@@ -205,27 +255,32 @@ class StaticGeometryBuilder {
   }
 }
 
-/** 遮光罩平面形（俯视：x 向右、y 向前），后缘为弧形唇口 */
+/** 遮光罩平面形（俯视：x 向右、y 向前），后缘为弧形唇口；上表面绕前缘向机头下倾 */
 function createGlareShieldGeometry(): THREE.BufferGeometry {
+  const corner = GLARE_HALF_WIDTH - 0.023;
   const shape = new THREE.Shape();
-  shape.moveTo(-0.335, 0.745);
-  shape.lineTo(0.335, 0.745);
-  shape.lineTo(0.335, 0.6);
-  shape.lineTo(0.312, 0.565);
-  shape.quadraticCurveTo(0, 0.445, -0.312, 0.565);
-  shape.lineTo(-0.335, 0.6);
+  shape.moveTo(-GLARE_HALF_WIDTH, GLARE_FAR);
+  shape.lineTo(GLARE_HALF_WIDTH, GLARE_FAR);
+  shape.lineTo(GLARE_HALF_WIDTH, GLARE_LIP + 0.055);
+  shape.lineTo(corner, GLARE_LIP + 0.03);
+  // 二次曲线中点落在 GLARE_LIP
+  shape.quadraticCurveTo(0, GLARE_LIP - 0.03, -corner, GLARE_LIP + 0.03);
+  shape.lineTo(-GLARE_HALF_WIDTH, GLARE_LIP + 0.055);
   shape.closePath();
   const geometry = new THREE.ExtrudeGeometry(shape, {
-    depth: 0.024,
+    depth: GLARE_EXTRUDE,
     bevelEnabled: true,
-    bevelThickness: 0.006,
-    bevelSize: 0.006,
+    bevelThickness: GLARE_BEVEL,
+    bevelSize: GLARE_BEVEL,
     bevelSegments: 2,
     curveSegments: 18,
   });
   // 平面形 y（向前）→ -Z，拉伸方向 → +Y（厚度向上）
   geometry.rotateX(-Math.PI / 2);
-  geometry.translate(0, -0.175, 0);
+  // 以前缘上棱为轴下倾：唇口（靠近眼点一侧）抬高
+  geometry.translate(0, -(GLARE_EXTRUDE + GLARE_BEVEL), GLARE_FAR);
+  geometry.rotateX(-GLARE_SLOPE);
+  geometry.translate(0, GLARE_FAR_TOP_Y, -GLARE_FAR);
   return geometry;
 }
 
@@ -270,8 +325,7 @@ export class CockpitModel {
     this.content.position.copy(eyeOffset);
     this.root.add(this.content);
     this.panelSpace = new THREE.Group();
-    this.panelSpace.position.copy(PANEL_CENTER);
-    this.panelSpace.rotation.x = PANEL_TILT;
+    this.panelSpace.applyMatrix4(PANEL_MATRIX);
     this.content.add(this.panelSpace);
 
     const glare = this.track(
@@ -313,7 +367,7 @@ export class CockpitModel {
       new THREE.MeshBasicMaterial({
         color: 0x8ff0c8,
         transparent: true,
-        opacity: 0.08,
+        opacity: 0.06,
         depthTest: true,
         depthWrite: false,
         side: THREE.DoubleSide,
@@ -465,54 +519,86 @@ export class CockpitModel {
     mesh.updateMatrix();
   }
 
-  /** 遮光罩、HUD 投影仪、风挡立柱、座舱沿、侧壁与侧操纵台 */
+  /** 遮光罩、HUD 组合玻璃支杆、风挡立柱、座舱沿、侧壁与侧操纵台 */
   private buildStructure(builder: StaticGeometryBuilder): void {
     builder.add('glare', createGlareShieldGeometry(), [0, 0, 0]);
-    // HUD 投影仪壳体（遮光罩中央）+ 组合玻璃支杆
-    builder.add('glare', new THREE.BoxGeometry(0.15, 0.022, 0.085), [0, -0.134, -0.588]);
+    // 组合玻璃支杆（眼点坐标）：位于玻璃平面内、紧贴两侧边，根部插入遮光罩
+    const postX = COMBINER_WIDTH / 2 + COMBINER_POST_WIDTH / 2;
+    const glassZ = (y: number): number =>
+      COMBINER_CENTER.z + (y - COMBINER_CENTER.y) * Math.tan(COMBINER_TILT);
     for (const side of [1, -1] as const) {
       builder.addBeam(
         'frame',
-        [side * COMBINER_POST_BASE[0], COMBINER_POST_BASE[1], COMBINER_POST_BASE[2]],
-        [side * COMBINER_POST_TOP[0], COMBINER_POST_TOP[1], COMBINER_POST_TOP[2]],
-        0.007,
-        0.007
+        [side * postX, COMBINER_POST_BOTTOM, glassZ(COMBINER_POST_BOTTOM)],
+        [side * postX, COMBINER_POST_TOP, glassZ(COMBINER_POST_TOP)],
+        COMBINER_POST_WIDTH,
+        COMBINER_POST_WIDTH,
+        true
       );
     }
 
     for (const side of [1, -1] as const) {
-      // 风挡立柱：从遮光罩后角斜向外上方延伸到屏幕上角之外
+      // 风挡立柱：从座舱沿前端斜向外上方延伸到屏幕之外
       builder.addBeam(
         'frame',
-        [side * 0.31, -0.148, -0.598],
-        [side * 0.406, 0.458, -0.115],
-        0.017,
-        0.013
+        [side * PILLAR_BASE[0], PILLAR_BASE[1], PILLAR_BASE[2]],
+        [side * PILLAR_TOP[0], PILLAR_TOP[1], PILLAR_TOP[2]],
+        PILLAR_WIDTH,
+        PILLAR_DEPTH
       );
       // 立柱根部整流块
-      builder.add('frame', new THREE.BoxGeometry(0.05, 0.03, 0.06), [side * 0.322, -0.142, -0.6]);
+      builder.add('frame', new THREE.BoxGeometry(0.04, 0.02, 0.05), [
+        side * PILLAR_BASE[0],
+        SILL_TOP_Y + 0.004,
+        PILLAR_BASE[2],
+      ]);
       // 座舱沿（舱盖导轨）
-      builder.add('frame', new THREE.BoxGeometry(0.05, 0.034, 1.12), [side * 0.372, -0.128, -0.1]);
+      builder.add('frame', new THREE.BoxGeometry(0.05, 0.034, 1.12), [
+        side * 0.372,
+        SILL_TOP_Y - 0.017,
+        -0.1,
+      ]);
       // 侧壁：填满视野下角；两条横向分缝 + 一道竖向加强筋打破大面积平面
-      builder.add('panel', new THREE.BoxGeometry(0.012, 0.64, 1.25), [side * 0.392, -0.45, -0.11]);
-      for (const y of [-0.2, -0.29]) {
-        builder.add('bezel', new THREE.BoxGeometry(0.006, 0.01, 1.0), [side * 0.384, y, -0.12]);
+      builder.add('panel', new THREE.BoxGeometry(0.012, 0.64, 1.25), [
+        side * 0.392,
+        SILL_TOP_Y - 0.339,
+        -0.11,
+      ]);
+      for (const drop of [0.089, 0.179]) {
+        builder.add('bezel', new THREE.BoxGeometry(0.006, 0.01, 1.0), [
+          side * 0.384,
+          SILL_TOP_Y - drop,
+          -0.12,
+        ]);
       }
-      builder.add('frame', new THREE.BoxGeometry(0.008, 0.2, 0.022), [side * 0.383, -0.25, -0.5]);
+      builder.add('frame', new THREE.BoxGeometry(0.008, 0.2, 0.022), [
+        side * 0.383,
+        SILL_TOP_Y - 0.139,
+        -0.5,
+      ]);
       // 侧操纵台 + 旋钮 + 指示灯
-      builder.add('bezel', new THREE.BoxGeometry(0.16, 0.035, 0.9), [side * 0.305, -0.37, -0.08]);
+      const consoleY = SILL_TOP_Y - 0.259;
+      builder.add('bezel', new THREE.BoxGeometry(0.16, 0.035, 0.9), [
+        side * 0.305,
+        consoleY,
+        -0.08,
+      ]);
       for (let i = 0; i < 4; i += 1) {
         builder.add('frame', new THREE.CylinderGeometry(0.011, 0.012, 0.018, 10), [
           side * (0.285 + (i % 2) * 0.04),
-          -0.344,
+          consoleY + 0.026,
           -0.32 + i * 0.09,
         ]);
       }
-      builder.add('marking', new THREE.BoxGeometry(0.05, 0.004, 0.012), [side * 0.3, -0.351, 0.08]);
+      builder.add('marking', new THREE.BoxGeometry(0.05, 0.004, 0.012), [
+        side * 0.3,
+        consoleY + 0.019,
+        0.08,
+      ]);
       for (let i = 0; i < 3; i += 1) {
         builder.add('indicator', new THREE.BoxGeometry(0.014, 0.004, 0.009), [
           side * (0.33 - i * 0.022),
-          -0.351,
+          consoleY + 0.019,
           -0.42,
         ]);
       }
@@ -523,9 +609,9 @@ export class CockpitModel {
   private buildPanel(builder: StaticGeometryBuilder): void {
     builder.addOnPanel(
       'panel',
-      new THREE.BoxGeometry(PANEL_WIDTH, PANEL_HEIGHT, PANEL_THICKNESS),
+      new THREE.BoxGeometry(PANEL_WIDTH, PANEL_TOP - PANEL_BOTTOM, PANEL_THICKNESS),
       0,
-      0,
+      (PANEL_TOP + PANEL_BOTTOM) / 2,
       0
     );
 
@@ -636,25 +722,37 @@ export class CockpitModel {
     builder.addOnPanel('screen', geometry, screen.u, screen.v, SCREEN_N);
   }
 
-  /** HUD 组合玻璃：后仰玻璃 + 上沿微光（两根支杆已并入 frame 网格） */
+  /**
+   * HUD 组合玻璃：对准视轴的后仰玻璃 + 上沿 / 两侧边微光（两根支杆已并入 frame 网格）。
+   * 玻璃只是瞄准框：准星与导引头圆环由 DOM 层绘制，这里不画任何符号。
+   */
   private buildCombiner(glass: THREE.Material, glassEdge: THREE.Material): void {
-    // 玻璃：上沿向眼点后仰（与支杆一致）
-    const tilt = Math.atan2(
-      COMBINER_POST_TOP[2] - COMBINER_POST_BASE[2],
-      COMBINER_POST_TOP[1] - COMBINER_POST_BASE[1]
-    );
-    const pane = new THREE.Mesh(new THREE.PlaneGeometry(0.128, 0.07), glass);
+    const pane = new THREE.Mesh(new THREE.PlaneGeometry(COMBINER_WIDTH, COMBINER_HEIGHT), glass);
     pane.name = 'cockpit-combiner-glass';
-    pane.position.set(0, -0.087, -0.553);
-    pane.rotation.x = tilt;
+    pane.position.copy(COMBINER_CENTER);
+    pane.rotation.x = COMBINER_TILT;
     pane.renderOrder = 0;
     this.prepareStatic(pane);
     this.content.add(pane);
 
-    const edge = new THREE.Mesh(new THREE.BoxGeometry(0.128, 0.0016, 0.0016), glassEdge);
+    // 微光描边（玻璃局部坐标）：上沿 + 支杆以上的两侧边
+    const strip = 0.0016;
+    const top = new THREE.BoxGeometry(COMBINER_WIDTH, strip, strip);
+    top.translate(0, COMBINER_HEIGHT / 2, 0);
+    const sideBottom = (COMBINER_POST_TOP - COMBINER_CENTER.y) / Math.cos(COMBINER_TILT);
+    const sideLength = COMBINER_HEIGHT / 2 - sideBottom;
+    const strips = [top];
+    for (const side of [1, -1] as const) {
+      const edgeStrip = new THREE.BoxGeometry(strip, sideLength, strip);
+      edgeStrip.translate((side * COMBINER_WIDTH) / 2, sideBottom + sideLength / 2, 0);
+      strips.push(edgeStrip);
+    }
+    const edgeGeometry = mergeGeometries(strips, false);
+    strips.forEach((part) => part.dispose());
+    const edge = new THREE.Mesh(edgeGeometry, glassEdge);
     edge.name = 'cockpit-combiner-edge';
-    edge.position.set(0, -0.0525, -0.5445);
-    edge.rotation.x = tilt;
+    edge.position.copy(COMBINER_CENTER);
+    edge.rotation.x = COMBINER_TILT;
     edge.renderOrder = 0;
     this.prepareStatic(edge);
     this.content.add(edge);

@@ -46,7 +46,10 @@ export class WeaponFxParticles {
   private readonly basisW = new THREE.Vector3();
   /** 枪口特效缩放（第一人称 0.35） */
   public muzzleScale = 1;
-  /** 第一人称：省略贴近镜头的枪口辉光 */
+  /**
+   * 第一人称（WeaponFx.setFirstPerson 写入，弹体控制器也读它）：省略贴近镜头的枪口辉光，
+   * 减弱火箭近段尾烟与刚离架的喷口光点
+   */
   public firstPerson = false;
 
   constructor(smoke: WeaponParticleField, glow: WeaponParticleField) {
@@ -71,6 +74,14 @@ export class WeaponFxParticles {
     const spacing = (isRocket ? 1.5 : 0.95) / this.smoke.getDensity();
     const distance = from.distanceTo(to);
     const spec = this.spec;
+    // 火箭尾烟：末端直径 3.6–5.0 m、不透明度 0.34。第一人称时，离机不久的那段烟会被载机追上、
+    // 横掠过座舱 —— 减到 2.2–3.0 m、0.18；飞远之后（nearSmoke → 0）恢复原样
+    const nearSmoke = this.firstPerson
+      ? 1 - THREE.MathUtils.smoothstep(age, FIRST_PERSON_TRAIL_NEAR_AGE, FIRST_PERSON_TRAIL_FAR_AGE)
+      : 0;
+    const rocketSmokeSize = THREE.MathUtils.lerp(3.6, 2.2, nearSmoke);
+    const rocketSmokeSpread = THREE.MathUtils.lerp(1.4, 0.8, nearSmoke);
+    const rocketSmokeAlpha = THREE.MathUtils.lerp(0.34, 0.18, nearSmoke);
     if (distance > 1e-4 && Number.isFinite(distance)) {
       let travelled = carry.value;
       while (travelled < distance) {
@@ -86,9 +97,9 @@ export class WeaponFxParticles {
         if (isRocket) {
           spec.life = 1.3 + Math.random() * 0.7;
           spec.size0 = 1.5;
-          spec.size1 = 3.6 + Math.random() * 1.4;
+          spec.size1 = rocketSmokeSize + Math.random() * rocketSmokeSpread;
           spec.color.copy(COLORS.rocketSmoke).multiplyScalar(0.88 + Math.random() * 0.2);
-          spec.alpha = 0.34;
+          spec.alpha = rocketSmokeAlpha;
           spec.heat = 0.14;
         } else {
           spec.life = 0.85 + Math.random() * 0.45;
@@ -117,8 +128,13 @@ export class WeaponFxParticles {
       spec.velocity.copy(velocity);
       spec.delay = 0;
       spec.life = 0.06;
-      const ignition = Math.min(1, age * 8);
-      spec.size0 = (isRocket ? 2.2 : 1.0) * (0.85 + Math.random() * 0.3) * (0.6 + ignition * 0.4);
+      // 点火渐亮：第一人称时弹体刚离架还在镜头旁，光点起步更小、亮起更慢（约 0.25 s 后与第三人称一致）
+      const ignition = Math.min(1, age * (this.firstPerson ? 4 : 8));
+      const ignitionFloor = this.firstPerson ? 0.3 : 0.6;
+      spec.size0 =
+        (isRocket ? 2.2 : 1.0) *
+        (0.85 + Math.random() * 0.3) *
+        (ignitionFloor + ignition * (1 - ignitionFloor));
       spec.size1 = spec.size0 * 0.7;
       spec.color.copy(isRocket ? COLORS.rocketExhaust : COLORS.swarmExhaust);
       spec.alpha = 0.95;
@@ -663,6 +679,12 @@ export class WeaponFxParticles {
 const COLORS = FX_COLORS;
 /** EMP 中心外晕（比冲击波电光色暗一档） */
 const EMP_HALO = FX_COLORS.emp.clone().multiplyScalar(0.45);
+/**
+ * 第一人称火箭尾烟减弱的弹龄窗口（秒）：0.6 s 内（离机约 105 m）发出的烟会在消散前被载机追上，
+ * 全额减弱；到 1.2 s 平滑恢复，远处的尾迹与第三人称一致。
+ */
+const FIRST_PERSON_TRAIL_NEAR_AGE = 0.6;
+const FIRST_PERSON_TRAIL_FAR_AGE = 1.2;
 
 /** 由期望数量（可为小数）随机取整：期望值不变，低帧率 / 高帧率下发射率一致 */
 function randomCount(expected: number): number {
