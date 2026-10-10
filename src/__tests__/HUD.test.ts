@@ -831,12 +831,10 @@ describe('HUD', () => {
       instance.dispose();
     });
 
-    // FINDING（缺陷）：HUD 在开始菜单阶段就已创建（PresentationRuntimeLoader），进入战斗时才
-    // init()。标签只在构造函数里和“init 之后的语言切换”时写入：玩家在开始菜单里切换语言再开局，
-    // 生命 / 导弹读数的标签停在创建时的语言（例：界面已是中文，状态列仍显示 LIVES / MSL），
-    // 直到下一次切换语言。HUD.init() 已经为结算文案补写过一次（renderSettlementLabels），
-    // 状态列标签漏了。修复后去掉 .fails。
-    it.fails('uses the language picked in the start menu before the HUD first comes up', () => {
+    // 曾经的缺陷（b35f8e1 已修）：HUD 在开始菜单阶段就已创建（PresentationRuntimeLoader），
+    // 进入战斗时才 init()。玩家在开始菜单里切换语言再开局，生命 / 导弹读数的标签停在创建时的
+    // 语言（界面已是中文，状态列仍显示 LIVES / MSL），直到下一次切换语言。
+    it('uses the language picked in the start menu before the HUD first comes up', () => {
       // hud 在 beforeEach 里以英文创建，尚未 init
       setLocale('zh-CN');
       hud.init();
