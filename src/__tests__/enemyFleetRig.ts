@@ -222,6 +222,8 @@ export class RigMissileChannel implements IJetMissileLauncher {
   public readonly launches: RigMissile[] = [];
   /** 敌机系统最近一次写入的“锁定中”预警状态 */
   public lockWarning = false;
+  /** 每次发射时调用（测试台用它把发射记进 launchLog） */
+  public onLaunch: ((missile: RigMissile) => void) | null = null;
   private readonly landings: number[] = [];
 
   constructor(private readonly clock: () => number) {}
@@ -232,14 +234,21 @@ export class RigMissileChannel implements IJetMissileLauncher {
 
   public launch(position: THREE.Vector3, direction: THREE.Vector3, source: string): boolean {
     const time = this.clock();
-    this.launches.push({
+    const missile: RigMissile = {
       time,
       source,
       position: position.clone(),
       direction: direction.clone(),
-    });
+    };
+    this.launches.push(missile);
     this.landings.push(time + this.flightSeconds);
+    this.onLaunch?.(missile);
     return true;
+  }
+
+  /** 把在飞的导弹全部清掉（玩家放了热焰弹 / 导弹都打完了） */
+  public clearInFlight(): void {
+    this.landings.length = 0;
   }
 
   public countInFlight(): number {
@@ -253,6 +262,76 @@ export class RigMissileChannel implements IJetMissileLauncher {
 
   public setLockWarning(active: boolean): void {
     this.lockWarning = active;
+  }
+}
+
+/** 一次导弹发射，连同发射那一步之前的锁定情况（两个测试台都记） */
+export interface RigLaunch {
+  time: number;
+  /** 发射者标签：'jet:<机型>' */
+  source: string;
+  /** 发射的敌机（EnemySystem 测试台按机型 + 位置找；找不到为 null） */
+  jet: EnemyAI | null;
+  /** 本步导演发完令牌之后，它手里有没有攻击令牌 */
+  hadToken: boolean;
+  /** 到上一步为止，它已经连续报告“锁定中”多少秒（0 = 上一步没有在锁定） */
+  lockedFor: number;
+  /** 到上一步为止，发射通道上的“锁定中”预警已经连续亮了多少秒 */
+  warnedFor: number;
+  /** 这次锁定开始的那一步，它离玩家多远（没有在锁定时为 NaN） */
+  lockStartDistance: number;
+  /** 发射点到玩家的距离 */
+  distance: number;
+  origin: THREE.Vector3;
+  direction: THREE.Vector3;
+  /** 发射瞬间敌机自己的位置 */
+  jetPosition: THREE.Vector3 | null;
+  /** 发射瞬间玩家的位置 */
+  playerPosition: THREE.Vector3;
+}
+
+/** 记每架敌机从哪一步开始连续“锁定中”，以及通道上的预警从哪一步开始亮 */
+class LockClock {
+  private readonly since = new Map<EnemyAI, number>();
+  private readonly startDistance = new Map<EnemyAI, number>();
+  private warningSince = Number.NaN;
+
+  /** 每步敌机更新之后调用；time 是这一步开始的时刻 */
+  public observe(
+    time: number,
+    jets: readonly EnemyAI[],
+    warning: boolean,
+    playerPosition: THREE.Vector3
+  ): void {
+    for (const jet of jets) {
+      if (jet.isMissileLocking()) {
+        if (!this.since.has(jet)) {
+          this.since.set(jet, time);
+          this.startDistance.set(jet, jet.getMesh().position.distanceTo(playerPosition));
+        }
+      } else {
+        this.since.delete(jet);
+      }
+    }
+    for (const jet of this.since.keys()) {
+      if (!jets.includes(jet)) this.since.delete(jet);
+    }
+    if (!warning) this.warningSince = Number.NaN;
+    else if (Number.isNaN(this.warningSince)) this.warningSince = time;
+  }
+
+  public lockedFor(jet: EnemyAI | null, now: number): number {
+    const since = jet ? this.since.get(jet) : undefined;
+    return since === undefined ? 0 : now - since;
+  }
+
+  public lockStartDistance(jet: EnemyAI | null): number {
+    const distance = jet && this.since.has(jet) ? this.startDistance.get(jet) : undefined;
+    return distance === undefined ? Number.NaN : distance;
+  }
+
+  public warnedFor(now: number): number {
+    return Number.isNaN(this.warningSince) ? 0 : now - this.warningSince;
   }
 }
 
@@ -287,6 +366,8 @@ export class FleetRig {
   public readonly tells: RigTell[] = [];
   /** 敌机导弹的发射通道（缺省可用，和游戏里一样） */
   public readonly missiles = new RigMissileChannel(() => this.time);
+  /** 每一次导弹发射，连同它之前的锁定情况 */
+  public readonly launchLog: RigLaunch[] = [];
 
   public capacity: number;
   public level: number;
@@ -307,6 +388,7 @@ export class FleetRig {
   private added = 0;
   private disposed = false;
   private readonly holdersThisStep = new Set<EnemyAI>();
+  private readonly lockClock = new LockClock();
 
   constructor(options: FleetRigOptions = {}) {
     this.capacity = options.capacity ?? 2;
@@ -364,7 +446,22 @@ export class FleetRig {
       this.tells.push({ time: this.time, jet, kind: cue, duration });
     };
     jet.onMissileLaunch = (origin, direction) => {
-      this.missiles.launch(origin, direction, `jet:${type}`);
+      const source = `jet:${type}`;
+      this.launchLog.push({
+        time: this.time,
+        source,
+        jet,
+        hadToken: this.holdersThisStep.has(jet),
+        lockedFor: this.lockClock.lockedFor(jet, this.time),
+        warnedFor: this.lockClock.warnedFor(this.time),
+        lockStartDistance: this.lockClock.lockStartDistance(jet),
+        distance: origin.distanceTo(this.player.position),
+        origin: origin.clone(),
+        direction: direction.clone(),
+        jetPosition: jet.getMesh().position.clone(),
+        playerPosition: this.player.position.clone(),
+      });
+      this.missiles.launch(origin, direction, source);
     };
     this.jets.push(jet);
     return jet;
@@ -430,6 +527,7 @@ export class FleetRig {
       jet.update(DT, player.position, undefined, player.position);
     }
     this.missiles.setLockWarning(this.jets.some((jet) => jet.isMissileLocking()));
+    this.lockClock.observe(this.time, this.jets, this.missiles.lockWarning, this.player.position);
     this.time += DT;
     this.stepIndex++;
   }
@@ -678,6 +776,112 @@ export class LiveFire {
   }
 }
 
+/** 带材质的可渲染对象（网格 / 精灵 / 线 / 点） */
+export type Renderable = THREE.Object3D & { material: THREE.Material | THREE.Material[] };
+
+/** 机体下所有带材质的可渲染对象 */
+export function renderablesOf(root: THREE.Object3D): Renderable[] {
+  const found: Renderable[] = [];
+  root.traverse((object) => {
+    const candidate = object as Partial<Renderable> & {
+      isMesh?: boolean;
+      isSprite?: boolean;
+      isLine?: boolean;
+      isPoints?: boolean;
+    };
+    if (!candidate.material) return;
+    if (candidate.isMesh || candidate.isSprite || candidate.isLine || candidate.isPoints) {
+      found.push(object as Renderable);
+    }
+  });
+  return found;
+}
+
+function materialsOf(object: Renderable): THREE.Material[] {
+  return Array.isArray(object.material) ? [...object.material] : [object.material];
+}
+
+/**
+ * 盯着一架敌机的机体材质：构造时记下每个部件用的材质和不透明度，之后可以问“现在比那时淡了多少”
+ * “是不是还用着原来那一份材质”“多出来了什么”。用来从外面看隐形机的淡出 / 淡入，不读条令内部状态。
+ *
+ * 不透明度的比值只在共享材质不做动画时可靠（FleetRig；EnemySystem 每步会驱动共享的信号灯闪烁）。
+ */
+export class HullWatch {
+  public readonly parts: Array<{
+    object: Renderable;
+    materials: THREE.Material[];
+    opacities: number[];
+    wasArray: boolean;
+  }>;
+
+  constructor(public readonly root: THREE.Object3D) {
+    this.parts = renderablesOf(root).map((object) => {
+      const materials = materialsOf(object);
+      return {
+        object,
+        materials,
+        opacities: materials.map((material) => material.opacity),
+        wasArray: Array.isArray(object.material),
+      };
+    });
+  }
+
+  /** 生成时的全部材质（去重） */
+  public originals(): THREE.Material[] {
+    return [...new Set(this.parts.flatMap((part) => part.materials))];
+  }
+
+  /**
+   * 现在的不透明度 ÷ 生成时的不透明度，各部件里最小与最大的比值
+   * （生成时不透明度不到 0.05 的部件不算：比值没有意义）。
+   */
+  public opacityRange(): { min: number; max: number } {
+    let min = Infinity;
+    let max = -Infinity;
+    for (const part of this.parts) {
+      const now = materialsOf(part.object);
+      for (let i = 0; i < part.opacities.length; i++) {
+        if (!(part.opacities[i] > 0.05)) continue;
+        const ratio = (now[i] ?? now[0]).opacity / part.opacities[i];
+        if (ratio < min) min = ratio;
+        if (ratio > max) max = ratio;
+      }
+    }
+    return { min, max };
+  }
+
+  /** 每个部件现在挂的是不是生成时那一份材质（同一个对象，数组还是数组） */
+  public usesOriginalMaterials(): boolean {
+    return this.parts.every((part) => {
+      const now = materialsOf(part.object);
+      return (
+        Array.isArray(part.object.material) === part.wasArray &&
+        now.length === part.materials.length &&
+        now.every((material, index) => material === part.materials[index])
+      );
+    });
+  }
+
+  /** 现在挂在这些部件上、但不是生成时那一份的材质（淡出用的克隆） */
+  public foreignMaterials(): THREE.Material[] {
+    const originals = new Set(this.originals());
+    const foreign = new Set<THREE.Material>();
+    for (const part of this.parts) {
+      for (const material of materialsOf(part.object)) {
+        if (!originals.has(material)) foreign.add(material);
+      }
+    }
+    return [...foreign];
+  }
+
+  /** 生成之后才挂上机体、现在可见的可渲染对象（现形眼灯等） */
+  public addedVisible(): Renderable[] {
+    const known = new Set<THREE.Object3D>(this.parts.map((part) => part.object));
+    return renderablesOf(this.root).filter((object) => !known.has(object) && object.visible);
+  }
+}
+
 /** 玩家前方 distance 米、方位偏 bearingOffset（弧度，正 = 右侧）处的一点，高度差 height */
 export function pointAround(
   player: RigPlayer,
@@ -737,6 +941,8 @@ export class SystemRig {
   public readonly tells: Array<{ time: number; payload: EnemyTellPayload }> = [];
   /** 敌机导弹的发射通道（缺省可用，和游戏里一样） */
   public readonly missiles = new RigMissileChannel(() => this.time);
+  /** 每一次导弹发射，连同它之前的锁定情况 */
+  public readonly launchLog: RigLaunch[] = [];
   public playerTargetable = true;
   public lockedMesh: THREE.Object3D | null = null;
   public readonly missileTargets = new Set<THREE.Object3D>();
@@ -745,6 +951,7 @@ export class SystemRig {
 
   private readonly unsubscribe: Array<() => void> = [];
   private readonly holdersLastStep = new Set<EnemyAI>();
+  private readonly lockClock = new LockClock();
   private disposed = false;
 
   constructor(options: SystemRigOptions = {}) {
@@ -772,6 +979,34 @@ export class SystemRig {
     };
     this.system.setThreatProvider(provider);
     this.system.setMissileLauncher(this.missiles);
+    this.missiles.onLaunch = (missile) => {
+      // 发射者：标签里那个机型的敌机里，离发射点最近的一架（导弹从机头前方几米处离架）
+      const type = missile.source.replace(/^jet:/, '');
+      let jet: EnemyAI | null = null;
+      let nearest = 40;
+      for (const candidate of this.system.getEnemies()) {
+        if (candidate.getConfig().type !== type) continue;
+        const gap = candidate.getMesh().position.distanceTo(missile.position);
+        if (gap < nearest) {
+          nearest = gap;
+          jet = candidate;
+        }
+      }
+      this.launchLog.push({
+        time: this.time,
+        source: missile.source,
+        jet,
+        hadToken: jet ? jet.hasAttackToken() || this.holdersLastStep.has(jet) : false,
+        lockedFor: this.lockClock.lockedFor(jet, this.time),
+        warnedFor: this.lockClock.warnedFor(this.time),
+        lockStartDistance: this.lockClock.lockStartDistance(jet),
+        distance: missile.position.distanceTo(this.player.position),
+        origin: missile.position.clone(),
+        direction: missile.direction.clone(),
+        jetPosition: jet ? jet.getMesh().position.clone() : null,
+        playerPosition: this.player.position.clone(),
+      });
+    };
 
     this.unsubscribe.push(
       EventBus.on(GameEventType.ENEMY_FIRED, ({ payload }) => {
@@ -824,6 +1059,7 @@ export class SystemRig {
     for (const jet of this.jets) {
       if (jet.hasAttackToken()) this.holdersLastStep.add(jet);
     }
+    this.lockClock.observe(this.time, this.jets, this.missiles.lockWarning, this.player.position);
     this.time += DT;
   }
 

@@ -15,7 +15,7 @@ AirSupreme 是一个基于 Three.js 和 TypeScript 的 3D 飞机战斗游戏。
 - 普通弹道碰撞链路已支持 `source/tone` 透传，玩家机炮、敌弹、Boss 炮弹、导弹命中可按来源映射不同反馈；对单位与 Boss 部件按命中半径判定
 - 独立终验之后的两波修复已合并（`2e9941d..0cd1735`）：复活沿航迹后退 + 坠毁宽限、移动端暂停锁存、僚机编队整队出击与编队位、Boss 击破即存机库检查点、紧急告警配音限频与 Boss 收尾等完台词、HUD 可本地化文案与手机布局、Boss 导弹伤害随难度、热焰弹诱骗全部 Boss 导弹、关卡曲线与波次重调、地形静态合批与植被分块 LOD（见下文各节与 `CHANGELOG.md` 的「终验修复」）；随后的收尾打磨（`0cd1735..f6ce2d3`）让闪烁告警 / Boss 状态条 / 道具倒计时 / 中央大字提示随语言切换重绘、高炮与八爪鱼眼睛光弹伤害随难度缩放、复活时避开竖直结构、Boss 战敌人计数只计在场敌方、模型预览在名称标签上方取景，中文界面的教学改称「教程」（见「收尾打磨」）
 - 操控与武器体验一轮已合并（分支 `workflow/ipad-controls-weapons`）：触屏浮动摇杆、飞行辅助与平板档位，常开的导弹导引头（按一下发射一枚）与继承载机速度的导弹，机炮提前量标记与触屏瞄准辅助，敌方单位的目标标记与「当前目标」提示，机头朝上的雷达与关卡地图，压低的第一人称座舱，暂停菜单「保存并退出」，以及新的主菜单（标题画面、设置与操作说明面板、机库）（见下文「操控、瞄准与导弹」「HUD、雷达与移动端」「主菜单」与 `CHANGELOG.md` 的「操控与武器体验」）
-- 其后已完成的几项（分支 `workflow/enemy-fleet`）：键盘端也有机炮辅助瞄准（锥角是触屏的一半）；页面转入后台或关闭时写一次检查点（后台存档）；手机竖屏追尾视角的无线电面板改为按键簇左侧、摇杆上方的紧凑小框，屏外箭头在手机竖屏时避开它；没有任何代码读取的 JSON 配置（`public/config/game-config.json`、`ConfigLoader`）已删除（见下文「操控、瞄准与导弹」「存档」「HUD、雷达与移动端」「配置系统」与 `CHANGELOG.md`）
+- 其后已完成的几项（分支 `workflow/enemy-fleet`）：敌机舰队重做——八种敌机（新增电子干扰机、导弹攻击机、幽灵机）各有机体、大小与命中半径，每种一套条令，攻击令牌限制同时进攻的敌机数，王牌与导弹攻击机发射追踪导弹（全队上限），电子干扰拖慢玩家锁定，幽灵机周期性隐形，僚机换成自己的机体与固定数值（见上文「敌人AI系统」）；键盘端也有机炮辅助瞄准（锥角是触屏的一半）；页面转入后台或关闭时写一次检查点（后台存档）；手机竖屏追尾视角的无线电面板改为按键簇左侧、摇杆上方的紧凑小框，放不下的台词像字幕一样逐行上移，屏外箭头在手机竖屏时避开它；没有任何代码读取的 JSON 配置（`public/config/game-config.json`、`ConfigLoader`）已删除（见下文「操控、瞄准与导弹」「存档」「HUD、雷达与移动端」「配置系统」与 `CHANGELOG.md`）
 - 测试：位于 `src/__tests__`；测试数量与结果以 `npm run test:run` 的实际输出为准
 
 ### 技术栈
@@ -28,7 +28,7 @@ AirSupreme 是一个基于 Three.js 和 TypeScript 的 3D 飞机战斗游戏。
 ### 核心系统
 
 1. **玩家控制系统** - 飞机飞行控制
-2. **敌人AI系统** - 基于导弹设计的敌机AI
+2. **敌人AI系统** - 基于导弹设计的飞行模型；敌机按机型条令决策，攻击令牌与全队导弹令牌限制同时进攻（僚机沿用旧三状态 AI）
 3. **战斗系统** - 子弹、导弹、碰撞检测
 4. **关卡管理** - 波次生成、敌机生成
 5. **粒子系统** - 尾迹、爆炸效果
@@ -51,273 +51,97 @@ AirSupreme 是一个基于 Three.js 和 TypeScript 的 3D 飞机战斗游戏。
 
 ## 敌人AI系统
 
-### 设计理念
+敌机与友军僚机共用 `EnemyAI`（`src/features/enemy/EnemyAI.ts`）的飞行模型。敌机由**机型条令**（doctrine）决策，每种机型一套；僚机不带条令，沿用旧的三状态 AI（见下文「旧三状态 AI（僚机）」）。签名与契约见 `docs/api.md` 的「Enemy AI」，逐步顺序与数据流见 `docs/architecture.md` 的「Enemy fleet」。
+
+### 运动模型
 
 敌机AI采用**基于导弹的运动系统**：
 
 - 使用 `velocity` 向量控制运动方向和速度
-- 通过 `turnSpeed` 限制转向速度
+- 通过 `turnSpeed` 限制转向速度（条令可以再乘一个转向倍数，钳制在 0.2-2）
 - **只能向前飞**，通过转向调整方向
 - 使用四元数平滑朝向更新
+- 条令飞行时：油门是机型基础速度的 0.6-1.3 倍，空速以每秒 0.9 × 基础速度的加速度趋近；俯仰不超过约 44°（方向的竖直分量 ≤ 0.7）
 
-### 三种行为状态
+### 机型条令
 
-#### 1. 追逐状态 (CHASE)
+- `LevelManager` 生成的每架敌机都带一份自己机型的条令：`createJetDoctrine(type)`（`src/features/enemy/doctrine/`，每架一个实例，条令带状态）。条令实现 `IEnemyDoctrine`，各机型继承 `JetDoctrine`（拴绳、令牌请求、机炮瞄准与散布、射击请求的公共部分），导弹挂架的时序在 `MissileRack`。
+- 每步：`EnemyAI` 填写战场快照 `DoctrineContext`（本机状态，玩家位置 / 速度估计 / 机头方向，是否被玩家锁定、是否有玩家导弹飞来，攻击令牌与指派方位，导弹令牌，干扰机的编队中心，关卡，是否 Boss 战，精度 / 提前量 / 开火节奏倍率）→ 条令写 `DoctrineCommand`（期望方向、油门、转向倍数、射击请求、导弹锁定 / 发射、交还令牌、提示音）→ `EnemyAI` 按转向与油门限制执行、积分运动（地形避让与贴地兜底同旧路径），再发出射击。条令不接触渲染器、不读系统时钟，随机数只取 `context.rng`，可以脱离场景单独测试。
+- 硬性保证（`EnemyAI`）：没有攻击令牌的敌机不对玩家开火、不锁定、不发射导弹。唯一例外是防御性射击（重型轰炸机尾炮）：不需要令牌，但同样要有可攻击的玩家（玩家可见且不在复活中）。
+- 公共规则 `DOCTRINE_RULES`：拴绳——离玩家超过 900 米就交还令牌、中断攻击，全速直线飞回，回到 850 米以内才交还条令；招牌攻击（光束、锁定、蓄力、现形）至少 0.7 秒预警；主动交还令牌后 1.5 秒内不会再领到。
+- 机炮：瞄准按关卡曲线 `aimLead` 计算的拦截点（按子弹速度求一阶拦截，预测上限 4 秒），再叠加散布 `(1 - accuracy) × GUN_SPREAD`（0.16 弧度，偏航与俯仰各自独立均匀分布）。点射 / 齐射 / 蓄力之间的间隔乘以 `cadenceScale`（`LevelManager` 生成时取难度档 × 关卡曲线的冷却倍率，钳制在 0.5-2.5），预警时长不变。伤害 = 机型 damage（已按难度与关卡缩放）× 射击的 `damageScale`；无武装机型的 damage 保持 0。
+- EMP 瘫痪（`applyStun`，最长 6 秒）：不决策、不转向、不开火，保持惯性滑行；交还攻击令牌，条令回到初始阶段（取消蓄力与点射），隐形机立刻现形。
 
-**行为**: 主动追踪玩家位置
-**特点**:
+### 攻击令牌（AttackDirector）
 
-- 持续转向玩家方向（受转向速度限制）
-- **只有机头朝向玩家时才能射击**（30°圆锥内）
-- 攻击性最强的状态
+- `EnemySystem` 每步在敌机更新之前运行 `AttackDirector.update`：同一时刻只有持令牌的敌机可以对玩家发动攻击。
+- 令牌数 `getAttackTokenCount(level, difficulty, bossFight)`：第 1-2 关 2 个，3-5 关 3 个，6-8 关 4 个，9-10 关 5 个；难度档 ≤ 2（非常简单 / 简单）−1、至少 1 个，≥ 4（困难 / 专家）+1；Boss 战（Boss 模式或战役 Boss 战）固定 2 个；上限 6 个。玩家不可攻击（不可见或复活中）时为 0，全部收回。
+- 发放：条令经 `getAttackRequest()` 申请；等得最久的先领（一样久时离玩家近的先领），冷却中、瘫痪、阵亡或在拴绳距离之外的不发。令牌数变少时从最晚领到的开始收回；阵亡、瘫痪或条令不再申请（航路结束）时交还。
+- 方位：持令牌的敌机被指派两两相隔至少 60° 的进入方位（从玩家看的世界方位角），放不下时均匀分布。原地开火的机型（狙击机、重型轰炸机，`bearingPriority` 0）首选自己当前所在的方位，并且只有这个方位与已有持令牌者错开足够远时才领得到；两架侦察机同时持令牌时尽量从玩家两侧对向进入（`pairsOpposite`）。
 
-#### 2. 固定方向飞行状态 (FIXED_DIRECTION)
+### 威胁感知（IJetThreatProvider）
 
-**行为**: 平滑转向虚拟追踪点（距离玩家100-300米）直线飞行
-**特点**:
+`GameCoordinator` 实现一个窄接口交给 `EnemySystem`：导引头已锁定的目标、是否有在飞的玩家导弹飞向某架敌机（`MissileSystem.hasActiveMissileToward`）、玩家机头方向、玩家是否可被攻击。`EnemySystem` 每步把结果写进每架敌机（`setCombatSituation`）；条令不接触 HUD、锁定指示器或导弹系统。
 
-- 在战场范围内生成虚拟追踪点（距离玩家位置100-300米）
-- 通过转向速度限制平滑转向追踪点
-- **不射击**
-- 用于"休息"，降低游戏压力
+### 敌机武器与导弹
 
-#### 3. 盘旋状态 (CIRCLE)
+- 弹种 `EnemyWeaponKind`（`src/features/enemy/EnemyWeapons.ts`，数值唯一来源 `ENEMY_WEAPON_SPECS`）：
+  - `bullet`：普通机炮弹（点射 / 尾炮）
+  - `heavy-shell`：重型轰炸机的高炮弹，60 米/秒、射程 380 米、弹体半径 1.2 米；外观是直径约 4.6 米的红橙色发光球
+  - `lance`：狙击机的长枪弹，320 米/秒、射程 700 米、弹体半径 0.5 米，按本步扫过的线段判定命中
+- 射击经 `ENEMY_FIRED` 进共享的敌方子弹池（`ProjectilePool`），弹体半径叠加到目标命中半径上；池满时回收飞过射程比例最大的那一发。同一扇面的后续弹带 `quiet`，只响一声、只闪一次。
+- 追踪导弹（王牌 / 导弹攻击机）走单位导弹池（`IJetMissileLauncher` → `UnitSystem.launchJetMissile`）：`JET_MISSILE_SPEC` 基础伤害 30（再乘与地空导弹相同的伤害倍率），最大速度 88 米/秒，转向 1.4 弧度/秒，寿命 9 秒，离架初速 55 米/秒；HUD「锁定中 → 来袭」告警、热焰弹、EMP、近防炮照常生效，伤害来源记为 `jet:<机型>`。
+- 全队导弹令牌（`MissileDirector`）：上限 `getJetMissileCap` 第 1-5 关 1 枚、第 6-10 关 2 枚、Boss 战 0；`grantJetMissiles` 每步保证「在飞的敌机导弹 + 各机手里的令牌 ≤ 上限」，单位系统未就绪或玩家不可攻击时上限为 0。有敌机正在锁定时 `EnemySystem` 写 `setLockWarning(true)`，玩家的告警状态为 `locking`。
 
-**行为**: 围绕目标的大圆周水平飞行
-**特点**:
+### 电子干扰与隐形
 
-- **智能目标选择**: 判断玩家和友军哪个更近，围绕更近的目标
-  - 敌人：围绕玩家或友军中更近的
-  - 友军：围绕最近的敌方敌人
-- **参数随机性**: 每次进入盘旋状态时重新生成
-  - 半径：配置值 + 随机20-60米
-  - 高度：0-50米随机高度差
-- **重型轰炸机可以射击**（侧向火力）
-- 其他类型盘旋时不射击
-- 用于观察和保持距离
+- 干扰：`EnemySystem` 每步检查存活的干扰机是否在玩家 800 米内（`JAMMER_TUNING`），是则 `getLockTimeScale()` 为 2；协调器经 `ILockJamProvider` 交给导引头，只有锁定计时变慢（捕获环、保持环、衰减、宽限与已完成的锁定不变），`LockOnIndicator` 在捕获环内侧上沿显示紫色「受干扰」（JAMMED）标签。判定在敌机更新之后，导引头读到的是上一步的结果。
+- 隐形：幽灵机条令给出 `CloakState`（不透明度、是否对传感器隐形、现形眼灯强度）；`EnemyAI.isCloaked()` 只在完全隐形期间为真。隐形中的敌机不进锁定候选（已有锁定随之丢弃）、机炮提前量 / 辅助候选、雷达光点与血条快照、翼尖凝结尾迹，也不作为僚机的目标；碰撞照常，子弹打得中。淡出 / 淡入由 `CloakFade`（`src/features/enemy/effects/`）给每架隐形机克隆一份材质完成，共享材质不受影响；隐形时引擎粒子尾迹每 4 个点才留 1 个。
+- 狙击机的瞄准光束与蓄力光球由 `LanceBeam`（同目录）画出；蓄力开始与现形预警经 `ENEMY_TELL` 触发音效。
 
-### 状态机机制
+### 机型一览
 
-```
-┌─────────────────────────────────────┐
-│         状态持续时间 (4-8秒)          │
-│                                     │
-┌─────────┐    ┌─────────┐    ┌─────────┐
-│  追逐   │    │固定方向 │    │  盘旋   │
-└────┬────┘    └────┬────┘    └────┬────┘
-     │              │              │
-     └──────────────┴──────────────┘
-                    │
-              概率随机选择
-                 (每4-8秒)
-```
+命中半径 = 2.5 米 × 机体缩放（`createEnemyMesh` 写入 `userData.hitRadius`）。下表数值为基础配置（`ENEMY_CONFIGS`）与条令参数（各 `*Doctrine.ts` 的 `*_TUNING`）；血量 / 伤害 / 节奏再按难度档与关卡曲线缩放。
 
-- 每个状态持续 4-8秒随机时间
-- 时间到期后根据**概率分布**重新选择状态
-- 不同类型敌机有不同的概率分布
+| 机型                | 血量 | 速度 (m/s) | 转向 (rad/s) | 伤害 | 分数 | 命中半径 | 条令要点 |
+| ------------------- | ---- | ---------- | ------------ | ---- | ---- | -------- | -------- |
+| 侦察机 SCOUT        | 60   | 48         | 2.8          | 5    | 50   | 3.75 m   | 袭扰：约 350 米外盘旋等令牌，侧面切入，三发点射（0.12 秒一发，两组间隔 1.6 秒，射程 300 米、锥角 18°）；120 米内急转 60-90° 并改变高度，拉开到 300-400 米；一次航路最长 7 秒，在射程内尾追超过 2 秒即脱离；玩家机头对准（6° 内、500 米内）时蛇形摆动，被锁定 / 导弹来袭时猛烈摆动并俯冲或爬升 |
+| 战斗机 FIGHTER      | 100  | 55         | 2.0          | 7.5  | 100  | 5 m      | 狗斗：咬住玩家身后 150-250 米（目标 200 米），玩家进入机头 12° 锥角、320 米内才打四发点射（两组间隔 1.8 秒）；每轮最多 3 组或 10 秒；玩家机头 30° 内对着它、它 50° 内朝着玩家且在 450 米内时迎头对冲；没有令牌时在侧后方 300 米（偏离正后方 70°）待命；被锁定 / 导弹来袭时急转脱离 |
+| 重型轰炸机 HEAVY    | 300  | 35         | 0.9          | 15   | 200  | 7.5 m    | 炮艇：每 2.6 秒向玩家的前置位置打一个高炮弹扇面（3 发，第 6 关起 5 发，±8°，扇面射程 340 米），每轮最多 3 个扇面或 12 秒，之后歇 2 秒；480 米内才申请令牌；接近航线对准玩家侧面 70 米处，进入 110 米后保持航向穿过、拉开到 240 米再回头；扇面只在玩家处于机头 70° 内时打出；尾炮（身后 18° 锥角、250 米内，每 0.9 秒一发，伤害 ×0.5）不需要令牌；不理会锁定与来袭导弹 |
+| 狙击机 SNIPER       | 80   | 45         | 1.5          | 20   | 150  | 5.25 m   | 长枪手：在 410-490 米处盘旋；260-620 米内蓄力 1.3 秒（光束跟踪 0.9 秒、冻结 0.4 秒），长枪弹按完整提前量沿冻结的线打出；两枪间隔 4.5 秒，首枪在 1.5-3.5 秒后；玩家逼近 220 米内以 1.3 倍油门逃到 330 米外；被锁定 / 导弹来袭时中止蓄力并急转 |
+| 王牌 ACE            | 160  | 70         | 2.4          | 12.5 | 500  | 5.5 m    | 战斗机条令的强化版（咬尾 180 米、五发点射、两组间隔 1.4 秒、射程 340 米、每轮最多 4 组，急转脱离用 1.3 倍油门）；玩家在它尾后 60° 锥角、320 米内且机头 25° 内对着它持续 0.4 秒时打剪刀机动（每 1 秒换向、75° 转弯，最长 5 秒）；导弹：每 14 秒一枚，单独飞一次导弹航路——拉开到约 420 米、掉头，在 250-600 米、机头 35° 内对着玩家时锁定 2.0 秒后发射；首发在 4-8 秒后 |
+| 电子干扰机 JAMMER   | 120  | 38         | 1.1          | 0    | 250  | 5.5 m    | 无武装，从不申请令牌：守在其他（非干扰机）敌机平均位置后方约 400 米（300-500 米带内），场上只剩干扰机时在 650 米外绕玩家盘旋；存活且在玩家 800 米内时玩家导弹锁定时间 ×2 |
+| 导弹攻击机 STRIKER  | 140  | 46         | 1.3          | —    | 300  | 6 m      | 没有机炮（配置里的 damage 24 不使用）：在 450-700 米带的中线（575 米）盘旋；持令牌且在 400-760 米、机头 30° 内对着玩家时锁定 2.4 秒，相隔 0.4 秒发射两枚（领到几个导弹令牌打几枚），然后以 0.6 倍油门转开装填 10 秒；持令牌 4 秒仍打不出去就交还；首次锁定在 2-4 秒后 |
+| 幽灵机 WRAITH       | 110  | 58         | 2.3          | 9    | 350  | 5 m      | 隐形周期：可见至少 4 秒 → 淡出 0.6 秒 → 隐形 1.5-5 秒（约 15% 不透明度）→ 现形预警 0.7 秒（红色眼灯 + 提示音）→ 攻击；首次隐形在 1.5-3 秒后；持令牌且到了玩家身后 45° 锥角、200 米内时现形，隐形满 5 秒也会现形；攻击是一组五发点射（0.1 秒一发，射程 260 米、锥角 14°）；隐形时被击中立刻现形并僵直 1 秒；Boss 战不隐形 |
 
 ### 地形避让、EMP 瘫痪与关卡强度（十关战役）
 
 - `EnemyAI.setTerrainSampler(sampler)`：设置后敌机沿速度方向前瞻采样地表，预计高度低于“地表 + 安全高度”时按亏欠高度爬升；位置落到地表以下时直接抬到地表上方。`LevelManager` 为敌机注入自己的 `getCrashSurfaceY`，协调器为友军僚机注入同一采样。未设置时保持原有自由飞行。
-- `EnemyAI.applyStun(seconds)` / `isStunned()`：EMP 瘫痪期间航电失灵——不开火、不切换机动状态，保持惯性滑行。
-- 敌机强度在 `LevelManager` 生成时计算：血量 / 伤害 / 攻击冷却 = 基础配置 × 玩家难度档（`getDifficultyProfile`）× 关卡曲线（`getLevelScaling`，读取 `src/core/Difficulty.ts` 中逐关一列的 `LEVEL_CURVE` 表）；精度叠加关卡曲线的 `enemyAccuracyBonus` 与敌方雷达站加成（`UnitController.getHostileRadarBonus()`，经 `setAccuracyBonusProvider`），并设上限。`LevelConfig.difficulty` 为旧字段，不再参与计算。
-- 开火距离：敌机只在开火距离上限 `FIRE_RANGE`（420 米，`src/features/enemy/EnemyAI.ts`）以内射击，即使机头已对准目标。
-- 射击提前量：`LevelManager` 每步按玩家位置差分估计其速度（单步折算超过 250 米/秒视为瞬移、清零），经 `EnemyAI.setTargetVelocity` 交给敌机；生成敌机时把关卡曲线的 `enemyAimLead` 写入 `EnemyConfig.aimLead`（第 1 关 0，第 2 关 0.28，逐关升到第 10 关 0.94）。开火时瞄准 `目标 + 速度 × 拦截时间 × aimLead`（按子弹速度两次迭代的一阶拦截，上限 4 秒），再叠加精度散布；友军僚机不设 `aimLead`。
+- `EnemyAI.applyStun(seconds)` / `isStunned()`：EMP 瘫痪（最长 6 秒）期间航电失灵——不开火、不决策（条令）/ 不切换机动状态（僚机），保持惯性滑行；条令敌机同时交还攻击令牌、取消蓄力与点射，隐形机立刻现形。
+- 敌机强度在 `LevelManager` 生成时计算：血量 / 伤害 / 攻击冷却（条令敌机换算成开火节奏倍率 `cadenceScale`）= 基础配置 × 玩家难度档（`getDifficultyProfile`）× 关卡曲线（`getLevelScaling`，读取 `src/core/Difficulty.ts` 中逐关一列的 `LEVEL_CURVE` 表）；精度叠加关卡曲线的 `enemyAccuracyBonus` 与敌方雷达站加成（`UnitController.getHostileRadarBonus()`，经 `setAccuracyBonusProvider`），并设上限。`LevelConfig.difficulty` 为旧字段，不再参与计算。
+- 开火距离：条令敌机按各机型自己的射程与锥角开火（见「机型一览」）；没有条令的僚机只在开火距离上限 `FIRE_RANGE`（420 米，`src/features/enemy/EnemyAI.ts`）以内射击，即使机头已对准目标。
+- 射击提前量：`LevelManager` 每步按玩家位置差分估计其速度（单步折算超过 250 米/秒视为瞬移、清零），经 `EnemyAI.setTargetVelocity` 交给敌机；生成敌机时把关卡曲线的 `enemyAimLead` 写入 `EnemyConfig.aimLead`（第 1 关 0，第 2 关 0.28，逐关升到第 10 关 0.94）。开火时瞄准 `目标 + 速度 × 拦截时间 × aimLead`（按子弹速度两次迭代的一阶拦截，上限 4 秒），再叠加精度散布；条令敌机的机炮与长枪弹 / 高炮弹按同一个 `aimLead` 瞄准（狙击机的长枪弹用完整提前量）；友军僚机不设 `aimLead`。
 - 同屏上限：`LevelManager.getMaxConcurrentEnemies()` = `GameConfig.getMaxEnemies()`（桌面 6 / 移动端 5）+ 关卡曲线的 `concurrentEnemyBonus`（第 4-6 关 +1，第 7-10 关 +2）。
 - 外部操纵：`EnemyAI.updateKinematic(dt)` 按调用方写好的 `velocity` 积分（地形避让、贴地兜底、四元数朝向、尾迹与渲染插值与 `update` 相同），不运行机动状态机、不开火，机动状态与计时冻结，攻击冷却与 EMP 瘫痪照常计时；僚机编队飞行用它（见「具名僚机」）。
 
----
 
-## 敌机类型配置
+### 旧三状态 AI（僚机）
 
-### 概览表
+没有条令的 `EnemyAI` 走旧的三状态 AI。现在只有友军僚机这样飞：`FriendlyAI` 不给条令，数值固定为 `WINGMAN_CONFIG`（`src/features/enemy/FriendlyAI.ts`，战斗机级：血量 100、速度 55 米/秒、转向 2.0 弧度/秒、伤害 7.5、攻击冷却 0.5 秒、精度 0.5、`fireSpreadAngle` 45°），与敌机机型表脱钩，不再随机借用某种敌机的数值。`type` 仍是 `FIGHTER`，血条标签为「友军战斗机」（有呼号时显示呼号）。`ENEMY_CONFIGS` 里各机型的 `stateProbabilities` 等旧字段，条令飞行不读。
 
-| 类型       | 追逐  | 固定方向 | 盘旋 | 速度   | 转向      | 血量 | 特点                 |
-| ---------- | ----- | -------- | ---- | ------ | --------- | ---- | -------------------- |
-| **侦察机** | 25%   | 50%      | 25%  | 40 m/s | 1.5 rad/s | 60   | 快速但脆弱，攻击性弱 |
-| **战斗机** | 32.5% | 47.5%    | 20%  | 55 m/s | 2.0 rad/s | 100  | 平衡型               |
-| **重型机** | 35%   | 45%      | 20%  | 35 m/s | 0.8 rad/s | 300  | 慢但血厚，有侧向火力 |
-| **狙击机** | 30%   | 50%      | 20%  | 45 m/s | 1.2 rad/s | 80   | 远距离攻击，保持距离 |
-| **王牌**   | 40%   | 45%      | 15%  | 70 m/s | 2.4 rad/s | 160  | 高难度，攻击性强     |
+#### 三种状态
 
-### 配置详情
+- **追逐（CHASE）**：持续转向目标（受转向速度限制），攻击性最强
+- **固定方向（FIXED_DIRECTION）**：平滑转向一个距离目标 100-300 米的虚拟追踪点直线飞行，用于“休息”
+- **盘旋（CIRCLE）**：绕目标做大圆周水平飞行；半径 = 配置值（僚机 120 米）+ 随机 20-60 米，高度差随机；僚机绕最近的敌方目标
 
-#### 侦察机 (SCOUT)
+每个状态持续 `stateDurationRange`（僚机 4-8 秒）内的随机时长，到期后按 `stateProbabilities`（僚机：追逐 32.5%、固定方向 47.5%、盘旋 20%）重新选择。EMP 瘫痪期间不切换状态、不开火，保持惯性滑行。
 
-```typescript
-{
-  speed: 40,                    // 速度（米/秒）
-  turnSpeed: 1.5,              // 转向速度
-  health: 60,
-  damage: 10,
-  attackCooldown: 0.4,
-  accuracy: 0.4,
+#### 开火与精度
 
-  // 状态概率
-  stateProbabilities: {
-    CHASE: 0.25,              // 25% 追逐
-    FIXED_DIRECTION: 0.50,      // 50% 固定方向
-    CIRCLE: 0.25              // 25% 盘旋
-  },
-  stateDurationRange: [4, 8],   // 4-8秒
-
-  // 盘旋参数
-  circleRadius: 150,             // 150米半径
-  circleHeight: 30               // 30米高度差
-}
-```
-
-#### 战斗机 (FIGHTER)
-
-```typescript
-{
-  speed: 55,                    // 速度（米/秒）
-  turnSpeed: 2.0,
-  health: 100,
-  damage: 15,
-  attackCooldown: 0.5,
-  accuracy: 0.5,
-
-  stateProbabilities: {
-    CHASE: 0.325,             // 32.5% 追逐
-    FIXED_DIRECTION: 0.475,     // 47.5% 固定方向
-    CIRCLE: 0.20               // 20% 盘旋
-  },
-  stateDurationRange: [4, 8],
-
-  circleRadius: 120,
-  circleHeight: 40
-}
-```
-
-#### 重型轰炸机 (HEAVY)
-
-```typescript
-{
-  speed: 35,                    // 慢速
-  turnSpeed: 0.8,              // 转向慢
-  health: 300,                 // 血厚
-  damage: 30,
-  attackCooldown: 0.8,
-  accuracy: 0.6,
-
-  stateProbabilities: {
-    CHASE: 0.35,              // 35% 追逐
-    FIXED_DIRECTION: 0.45,      // 45% 固定方向
-    CIRCLE: 0.20               // 20% 盘旋
-  },
-  stateDurationRange: [5, 9],    // 反应慢，持续时间长
-
-  circleRadius: 100,
-  circleHeight: 20
-}
-```
-
-#### 狙击机 (SNIPER)
-
-```typescript
-{
-  speed: 45,
-  turnSpeed: 1.2,
-  health: 80,
-  damage: 40,                  // 高伤害
-  attackCooldown: 1.0,
-  accuracy: 0.7,
-
-  stateProbabilities: {
-    CHASE: 0.30,
-    FIXED_DIRECTION: 0.50,
-    CIRCLE: 0.20
-  },
-  stateDurationRange: [4, 8],
-
-  circleRadius: 180,            // 保持远距离
-  circleHeight: 50
-}
-```
-
-#### 王牌 (ACE)
-
-```typescript
-{
-  speed: 70,                    // 敌机中最快
-  turnSpeed: 2.4,              // 敌机中转向最快
-  health: 160,
-  damage: 25,
-  attackCooldown: 0.4,
-  accuracy: 0.6,
-
-  stateProbabilities: {
-    CHASE: 0.40,              // 40% 追逐（最高）
-    FIXED_DIRECTION: 0.45,
-    CIRCLE: 0.15               // 15% 盘旋
-  },
-  stateDurationRange: [3, 7],    // 反应快，状态切换频繁
-
-  circleRadius: 100,
-  circleHeight: 50
-}
-```
-
----
-
-## 射击规则
-
-### 追逐状态射击条件
-
-**圆锥区域检测**: 只有当敌机机头朝向玩家时才能射击
-
-```typescript
-// 计算机头方向与玩家方向的夹角
-const toPlayer = targetPosition - enemyPosition;
-const forward = velocity.normalized();
-const dot = toPlayer.dot(forward); // 1.0 = 正对准，0.0 = 垂直
-
-// 30°圆锥内（cos(30°) ≈ 0.866）
-if (dot > 0.866) {
-  fire(); // 可以射击
-}
-```
-
-### 盘旋状态射击规则
-
-- **侦察机、战斗机、狙击机、王牌**: 盘旋时**不射击**
-- **重型轰炸机**: 盘旋时**可以射击**（侧向火力）
-  - 射击频率更低（1.5倍冷却时间）
-
-### 固定方向飞行
-
-**所有类型固定方向飞行时都不射击**
-
----
-
-## 精度系统
-
-所有射击（包括玩家和敌人）都有随机扰动。敌机（`EnemyAI.fire`）的散布同时作用于偏航与俯仰，两个方向各自独立均匀分布：
-
-```typescript
-// 总散布角 = (1 - 精度) × AIM_SPREAD（AIM_SPREAD = 0.4 弧度）
-const spread = Math.max(0, 1 - accuracy) * AIM_SPREAD;
-// 偏航：绕世界 Y 轴
-tmpQuaternion.setFromAxisAngle(WORLD_UP, (Math.random() - 0.5) * spread);
-direction.applyQuaternion(tmpQuaternion);
-// 俯仰：绕水平侧轴（direction × 世界上方向；竖直射击时侧轴退化，跳过）
-tmpAxis.crossVectors(direction, WORLD_UP);
-if (tmpAxis.lengthSq() > 1e-8) {
-  tmpQuaternion.setFromAxisAngle(tmpAxis.normalize(), (Math.random() - 0.5) * spread);
-  direction.applyQuaternion(tmpQuaternion);
-}
-```
-
-下表的“最大扰动角度”即每个方向上的散布范围 `(1 - 精度) × 0.4` 弧度（中心两侧各一半）：
-
-| 精度            | 最大扰动角度 | 特点   |
-| --------------- | ------------ | ------ |
-| 0.4 (侦察机)    | ~13.7°       | 不太准 |
-| 0.5 (战斗机)    | ~11.5°       | 中等   |
-| 0.6 (王牌/重型) | ~9.2°        | 较准   |
-| 0.7 (狙击机)    | ~6.9°        | 准确   |
-| 0.9 (玩家基础)  | ~2.3°        | 很准   |
+- 任何状态下，只要攻击冷却已过、机头与目标方向的夹角在 `fireSpreadAngle` 之内、且目标在开火距离上限 `FIRE_RANGE`（420 米）以内，就开火一次
+- 散布：`(1 - accuracy) × AIM_SPREAD`（0.4 弧度），偏航与俯仰各自独立均匀分布；僚机精度 0.5，每个方向的散布范围约 11.5°（中心两侧各一半）
+- 僚机不设 `aimLead`，瞄准目标当前位置
 
 ---
 
@@ -368,7 +192,7 @@ if (tmpAxis.lengthSq() > 1e-8) {
 
 - `WingmanRoster`（`src/core/campaign/Wingmen.ts`，协调器持有）：友军 AI 战机入场时调用 `assign(mesh.uuid, 关卡)`，按 `WINGMEN` 的编队顺序领取第一个“已随队、不在空中、本关未被击落”的身份——渡鸦 Raven（第 1 关起）、雨燕 Swift（第 3 关起），没有可用身份时是普通友军；`countAvailable(关卡)` 给出此刻还能领取的身份数。呼号写入 `mesh.userData.displayName`，血条据此显示。`FRIENDLY_DEATH` 时 `release` 把僚机记为本关被击落，坠毁提示点名僚机；准备关卡（换关 / 读档）与 Boss 击破时 `reset()` 全员归队。
 - 出击：关卡开场后不久（`startLevelCombat`：1 秒后，第 1 关教学时在教学引导之后）与读档回到 Boss 战前（普通模式的 `startBossEncounter`），协调器的 `launchWingmen()` 让 `countAvailable` 架僚机一起升空——第 1-2 关渡鸦，第 3 关起渡鸦与雨燕——并逐架调用 `CampaignFlowController.handleWingmanLaunched(id)`；从波次打到 Boss 时编队已在空中，不会重复起飞。增援、Boss 战友军支援（`BossBattleController` 在开战后与每 30 秒）、「召唤友军」道具与护送友机走 `spawnFriendlyAI()`，只在有空出的身份时领取呼号（实际上只发生在不派编队的 Boss 模式），从不播入列台词。
-- 编队飞行（`FriendlyAI` + `EnemySystem`）：`EnemySystem.spawnFriendly` 给新友机分配最小的空闲编队位（`FriendlyAI.setFormationSlot`）；编队位在玩家水平航向坐标系里（航向取 `EnemySystem` 由相邻两步玩家位置推算的平滑速度）：0 号左、1 号右，机翼线前 38 米、横向 40 米、高 6 米，之后每排再向外 35 米、向后 25 米、向上 4 米。没有目标时僚机飞向编队位，并避开追尾相机的视线走廊（座机后 60 米到前 35 米、横向 ±28 米）：已在走廊内先横向让出（增益更大），直飞编队位会横穿走廊时从相机后方或座机前方绕行（右侧编队位绕得更远，两架换边时航线不交汇）；期望速度 = 玩家速度 + 限幅的位置修正，以 2 弧度/秒的转向角速度与 25 米/秒² 的加速度跟随，再经 `EnemyAI.updateKinematic` 积分。一旦出现敌机或 Boss 目标，照常追击。
+- 编队飞行（`FriendlyAI` + `EnemySystem`）：`EnemySystem.spawnFriendly` 给新友机分配最小的空闲编队位（`FriendlyAI.setFormationSlot`）；编队位在玩家水平航向坐标系里（航向取 `EnemySystem` 由相邻两步玩家位置推算的平滑速度）：0 号左、1 号右，机翼线前 38 米、横向 40 米、高 6 米，之后每排再向外 35 米、向后 25 米、向上 4 米。没有目标时僚机飞向编队位，并避开追尾相机的视线走廊（座机后 60 米到前 35 米、横向 ±28 米）：已在走廊内先横向让出（增益更大），直飞编队位会横穿走廊时从相机后方或座机前方绕行（右侧编队位绕得更远，两架换边时航线不交汇）；期望速度 = 玩家速度 + 限幅的位置修正，以 2 弧度/秒的转向角速度与 25 米/秒² 的加速度跟随，再经 `EnemyAI.updateKinematic` 积分。一旦出现敌机或 Boss 目标，照常追击（隐形中的幽灵机不算目标）。
 - 入场位姿：`EnemySystem.getFriendlySpawnPose(playerPosition, playerForward, outPosition, outHeading)` 把下一架友机放在其编队位后方 12 米（横向 40 米 + 每排 35 米、前方 26 米 − 每排 25 米、高 6 米 + 每排 4 米）；编队位布局只在 `FriendlyAI.ts` 导出的 `getFormationSlotOffset(slot, out)`（`FormationSlotOffset`：side / along / lateral / up，不分配）里定义，编队飞行与入场位姿都读它；机头朝玩家的水平航向（机头接近竖直时改用平滑速度，仍不可用时朝 -Z）；协调器在构造 `FriendlyAI` 之前把位姿写到网格上（`EnemyAI` 构造时记录插值起点），保持离地至少 30 米，初速为 `max(配置速度, 玩家速度)`。
 - 无线电：`ICampaignPresentation.onWingmanEvent(id, 'joined' | 'down')` 经 `WINGMAN_EVENT_RADIO` 播放通用台词——雨燕入列报到（`swift-joined`，每局战役只由 `handleWingmanLaunched` 触发一次）；渡鸦被击落时雨燕在空中则由她播报（`raven-down-swift`），否则由天穹指挥部（`raven-down-hq`）；雨燕被击落同理（`swift-down-raven` / `swift-down-hq`）。渡鸦没有入列台词。`isWingmanFlying(id)` 由名册（`WingmanStatus`）回答。
 - 友军单位损失：`UnitController` 的 `ALLY_LOSS_RADIO` 让友军预警机与护卫舰被击毁时播放各自机组 / 舰员的台词（`awacs-lost` / `frigate-lost`），其余友军单位为 `ally-unit-destroyed`。
@@ -377,7 +201,7 @@ if (tmpAxis.lengthSq() > 1e-8) {
 
 - 逐关强度：`getLevelScaling(level)` 读取 `src/core/Difficulty.ts` 中的 `LEVEL_CURVE` 表（每列一关，第 1 关为基准 1.0 / 0，逐关单调变难）。压力主要来自同一时刻的火力密度：敌机火力（伤害 ÷ 冷却）相对第 1 关约为 2 倍（第 2-3 关）、2.5-2.9 倍（第 4-5 关），第 6 关起上一个台阶（约 5.1 倍），到第 10 关约 9.8 倍；命中加成到 +0.27，射击提前量 `enemyAimLead` 到 0.94，同屏敌机加成 `concurrentEnemyBonus` 到 +2；血量涨幅压低（第 10 关敌机 1.27 倍、单位 1.18 倍），以免关卡越拖越长。单位伤害 = `enemyDamageMultiplier × unitDamageShare`（份额从 1.0 降到第 10 关的 0.6：单位单发伤害大，涨幅放缓）。得分倍率 `scoreMultiplier` 从 1.0 升到 2.08，使升级预算跟上。
 - 难度档：`getDifficultyProfile(1..5)` 在关卡曲线之上整体缩放敌人；基础数值按“专家”手感编写，默认档 3（「普通」，英文 Normal）由脚本飞行员实测调校：每分钟受到的伤害约为最大生命值的 20-25%（第 1-2 关）、约 30%（第 3-6 关），升到 35-40%（第 8-10 关），不会躲避的脚本飞行员每关（不含坠地）阵亡 0-2 次。档名为 `LocalizedText`，中英文逐档对应：Very Easy 非常简单 / Easy 简单 / Normal 普通 / Hard 困难 / Expert 专家；主菜单设置面板的难度项与「继续战役」说明直接取 `getDifficultyProfile(level).label`。
-- 敌机：开火距离上限 `FIRE_RANGE` 与偏航 + 俯仰散布（`EnemyAI.ts`，见上文「精度系统」），射击提前量见上文「地形避让、EMP 瘫痪与关卡强度」；同时在场的敌机上限 = 按设备固定的基础值（`GameConfig.getMaxEnemies()`，桌面 6 / 移动端 5）+ 关卡加成，与画质无关。
+- 敌机：各机型的射程、锥角与机炮散布 `GUN_SPREAD` 见上文「机型条令」「机型一览」，同时进攻的敌机数见「攻击令牌」（僚机的 `FIRE_RANGE` 与 `AIM_SPREAD` 见「旧三状态 AI（僚机）」），射击提前量见上文「地形避让、EMP 瘫痪与关卡强度」；同时在场的敌机上限 = 按设备固定的基础值（`GameConfig.getMaxEnemies()`，桌面 6 / 移动端 5）+ 关卡加成，与画质无关。
 - 波次与单位：第 1 关为教学关（敌机逐波缓升、战斗机从第 3 波开始、不部署高炮与地空导弹车）；第 2-10 关每波敌机减少，后期重型机上限降低；敌方地面 / 海上单位与轰炸机基础血量约降四成（武装直升机约四分之一），慢速单位不再把关卡拖长。具体数值以源码为准（`LevelConfig.enemiesPerWave`、`UnitDeployments`、`UNIT_CONFIGS`）。
 - Boss：血量、伤害与射速按实测击杀时间与承伤平滑（`BOSS_CONFIGS`）；导弹单发伤害 `missileDamage` 在 Boss 战开始时按难度档的 `enemyDamageMultiplier` 缩放（见下文「Boss 系统」）。
 - 测量工具：开发构建专用的脚本飞行员（`src/core/dev/ScriptedPilot.ts`）与平衡测量（`src/core/dev/BalanceHarness.ts`，`window.__AIR_SUPREME_DEV__.balance`）：以称职的普通玩家水平飞行（地形前瞻同时检查航线两侧 14 米的平行线，会绕开岩壁与立柱）、自动机库采购（贪心购买），记录每波清场时间、伤害来源、阵亡与最后 10 秒的主要伤害来源、Boss 击杀时间、得分与升级点。
@@ -437,11 +261,11 @@ if (tmpAxis.lengthSq() > 1e-8) {
 - 输入（`src/core/Input/InputHandler.ts`）：`getState()` 除布尔方向外带模拟量 `pitchAxis` / `yawAxis`（-1..1）与 `flightAssist`。触屏摇杆是浮动的——拇指落在 `#touch-stick-zone`（视口左侧 42%、从 38% 高度往下）里的任意位置，摇杆底座就移到落点；位移经径向死区（`TOUCH_STICK_TUNING.DEAD_ZONE` 0.12）与指数曲线（`EXPO` 1.7，`shapeStickMagnitude`）整形。触屏设备上键盘与触屏输入合并：每个轴取绝对值较大的一路，按键相或。开火 / 导弹的按下锁存到下一次 `getState()`，短于一个模拟步长的轻触也不会丢（被 `touchcancel` 取消的那一下不算按过，也不抹掉此前已经记下的轻触）；BOOST 是开关式锁存；窗口失焦或页面隐藏时释放全部按住的输入。
 - 飞行辅助（`src/features/player/PlayerController.ts`）：手指在摇杆上、且没有按下俯仰 / 偏航 / 滚转键时 `flightAssist` 为真，走 `applyAssistedAttitude`——偏航绕世界竖直轴，俯仰相对地平线不超过 `ASSIST_PITCH_LIMIT`（75°），坡度趋向 `-yawAxis × ASSIST_MAX_BANK`（45°），摇杆回中即改平。键盘仍走原来的机体轴操纵（`applyManualAttitude`）。
 - 设备档位（`GameConfig`）：`isMobile`（触屏设备）与 `isTablet`（触屏且视口短边不小于 700 CSS 像素），启动时判定一次。平板在各画质档下的目标帧率（`getTargetFPS()` / `getTargetFPSForPreset()`，`GameLoop` 的模拟步长由它决定）都是 60，`auto` 画质的像素比上限为 1.5。
-- 导引头（`src/features/combat/MissileSeeker.ts`，纯逻辑，由 `LockOnIndicator` 持有）：只要有导弹就一直工作，没有「按住锁定」这一步。准星是机头轴线前方 600 米（`GUN_ASSIST.REFERENCE_RANGE`）那一点的屏幕位置；捕获环以它为圆心，半径 = 视口短边 × `LOCK_RING_RATIO`（0.13）× 锁定范围升级倍率（下限 44 像素，上限为短边的 30%）。环内离准星最近的候选成为跟踪目标；目标在捕获环内时进度按 `1 / 锁定时间` 增长（锁定时间来自升级线：基础 1.0 秒，每级减 0.05 秒），在捕获环与保持环（捕获环的 1.6 倍）之间按 `LOCK_DECAY_RATE` 回落，完成的锁定在保持环内一直保持；出了保持环、转到相机后方或超过 `MAX_LOCK_DISTANCE`（1200 米）时，经 0.5 秒宽限后丢锁；不在候选表里的目标（被击毁 / 回收 / 隐形）立即丢弃。候选表每步由 `GameCoordinator.collectLockCandidates()` 重建：Boss 战中的 Boss 锁定目标、存活敌机、敌方单位瞄准点（`UnitController.collectLockTargets`）。
+- 导引头（`src/features/combat/MissileSeeker.ts`，纯逻辑，由 `LockOnIndicator` 持有）：只要有导弹就一直工作，没有「按住锁定」这一步。准星是机头轴线前方 600 米（`GUN_ASSIST.REFERENCE_RANGE`）那一点的屏幕位置；捕获环以它为圆心，半径 = 视口短边 × `LOCK_RING_RATIO`（0.13）× 锁定范围升级倍率（下限 44 像素，上限为短边的 30%）。环内离准星最近的候选成为跟踪目标；目标在捕获环内时进度按 `1 / 锁定时间` 增长（锁定时间来自升级线：基础 1.0 秒，每级减 0.05 秒；受干扰时再乘 `ILockJamProvider.getLockTimeScale()`，敌方干扰机在 800 米内时为 2，见「电子干扰与隐形」），在捕获环与保持环（捕获环的 1.6 倍）之间按 `LOCK_DECAY_RATE` 回落，完成的锁定在保持环内一直保持；出了保持环、转到相机后方或超过 `MAX_LOCK_DISTANCE`（1200 米）时，经 0.5 秒宽限后丢锁；不在候选表里的目标（被击毁 / 回收 / 隐形）立即丢弃。候选表每步由 `GameCoordinator.collectLockCandidates()` 重建：Boss 战中的 Boss 锁定目标、存活敌机（隐形中的除外）、敌方单位瞄准点（`UnitController.collectLockTargets`）。
 - 发射（`GameCoordinator.handleMissileInput`）：一次按键只发射一枚。已锁定时按下立即发射，锁定保留，下一枚要再按一次且间隔不少于 `LOCK_REARM_TIME`（0.35 秒）；锁定完成前按下并按住，则在锁定完成的那一刻发射；环内没有目标、或锁定完成前松手，提示「未锁定」（NO LOCK）；没有导弹时提示「无导弹」（NO MSL）。「快速射击」道具（`PowerUpType.MULTISHOT`）生效时一次按键齐射至多三枚（间隔 0.1 秒）。导弹从左右翼下挂架交替离架，载机当前速度作为 `launcherSpeed` 交给 `MissileSystem.fire(position, direction, target?, launcherSpeed)`。
 - 导弹飞行（`src/features/combat/MissileSystem.ts`）：离架初速 = 载机速度 + 20 米/秒，按 200 米/秒² 加速到巡航速度 `max(200, 载机速度 + 80)` 米/秒；先沿机头方向直飞 0.2 秒再制导，按目标的估计速度取前置量，转向速度 5.0 弧度/秒；命中判定按每一步扫过的线段计算，未声明命中半径的目标用 6 米近炸半径；寿命 12 秒、最大飞行距离 2400 米。伤害 80（再乘伤害倍率）；开局与复活后 3 枚，上限 5 枚。
-- 机炮提前量与辅助瞄准（`src/features/combat/GunLeadSolver.ts`，纯逻辑，由协调器持有）：用相邻两步的位置差估计目标速度，解出子弹与目标的相遇点；机头前方 40° 以内、500 米以内最近的空中目标得到提前量标记。同时解出辅助方向：瞄准点离机头轴线不超过锥角的内角时正对瞄准点，到外角平滑减为零，偏移不会超过内角，目标超过 480 米不辅助；`PlayerSystem.setGunAimAssist(direction, weight)` 让子弹沿它发射，并把基础散布从 3° 最多收窄到 1.2°，没有偏移时方向为 `null`，子弹沿机头方向发射。锥角分两档（`GunAssistCone`）：触屏 `'touch'` 用 `FULL_ANGLE` 2.5° / `OUTER_ANGLE` 5°，键盘 `'keyboard'` 用一半的 `KEYBOARD_FULL_ANGLE` 1.25° / `KEYBOARD_OUTER_ANGLE` 2.5°，其余参数（距离上限、过渡时间、换目标的余量、十字的画法）两档共用。`GameCoordinator.updateGunAim` 按设备选档——`GameConfig.isMobile` 为真用触屏档，否则用键盘档——与当下用哪种输入无关（接了键盘的触屏设备仍是触屏档）；一局之内档位不变。
-- 显示（`src/ui/LockOnIndicator.ts`）：`update(...)` 在模拟步推进导引头；`renderUpdate(...)` 在每个渲染帧（`GameCoordinator.renderAimHud`）按插值后的机体位姿摆放机炮十字、捕获环、目标角标与提前量标记，两种视角下都对准弹道。锁定状态 `search` / `track` / `lock` / `break` / `dry` 同时写到触屏导弹键的样式上。
+- 机炮提前量与辅助瞄准（`src/features/combat/GunLeadSolver.ts`，纯逻辑，由协调器持有）：用相邻两步的位置差估计目标速度，解出子弹与目标的相遇点；机头前方 40° 以内、500 米以内最近的空中目标得到提前量标记；隐形中的敌机不是候选（没有标记，辅助也不会吸过去）。同时解出辅助方向：瞄准点离机头轴线不超过锥角的内角时正对瞄准点，到外角平滑减为零，偏移不会超过内角，目标超过 480 米不辅助；`PlayerSystem.setGunAimAssist(direction, weight)` 让子弹沿它发射，并把基础散布从 3° 最多收窄到 1.2°，没有偏移时方向为 `null`，子弹沿机头方向发射。锥角分两档（`GunAssistCone`）：触屏 `'touch'` 用 `FULL_ANGLE` 2.5° / `OUTER_ANGLE` 5°，键盘 `'keyboard'` 用一半的 `KEYBOARD_FULL_ANGLE` 1.25° / `KEYBOARD_OUTER_ANGLE` 2.5°，其余参数（距离上限、过渡时间、换目标的余量、十字的画法）两档共用。`GameCoordinator.updateGunAim` 按设备选档——`GameConfig.isMobile` 为真用触屏档，否则用键盘档——与当下用哪种输入无关（接了键盘的触屏设备仍是触屏档）；一局之内档位不变。
+- 显示（`src/ui/LockOnIndicator.ts`）：`update(...)` 在模拟步推进导引头；`renderUpdate(...)` 在每个渲染帧（`GameCoordinator.renderAimHud`）按插值后的机体位姿摆放机炮十字、捕获环、目标角标与提前量标记，两种视角下都对准弹道。锁定状态 `search` / `track` / `lock` / `break` / `dry` 同时写到触屏导弹键的样式上。受干扰时捕获环内侧上沿显示「受干扰」（JAMMED，`.lk-jam`，紫色 `#cfa6ff`），容器带 `data-jammed`；没有导弹时标签照常显示 / 收起。
 
 ### 相机系统
 
@@ -449,7 +273,7 @@ if (tmpAxis.lengthSq() > 1e-8) {
 - 切换：`CAMERA_BLEND_SECONDS`（0.55 秒）smootherstep 位置 / 姿态混合，路径带轻微上拱；混合接近座舱时才隐藏机体外壳（`PLAYER_EXTERIOR_LAYER = 3`，相机关闭该层）并显示座舱模型。
 - 座舱：`CockpitModel`（遮光罩、三块 MFD、UFC、两块圆表、告警灯、HUD 组合玻璃、风挡立柱；静态部件按材质合并）与 `CockpitDisplays`（显示屏图集纹理）。座舱框架整体下俯 4°，遮光罩收成一道薄檐、风挡立柱变细，画面上半部基本通透，HUD 组合玻璃框住机炮十字与导引头捕获环。第一人称下自己的武器特效也让开视野：特殊武器的枪口闪光与轨道炮的屏幕闪光按 `FIRST_PERSON_FLASH_SCALE`（0.55）减弱，蜂群导弹从更靠外的位置离架，贴近镜头的武器粒子淡出。
 - 震动：`CameraShake` 创伤模型（trauma 0..1 累加并线性衰减，实际幅度为 trauma²，确定性平滑噪声，不用 `Math.random`）；`computeExplosionShake(distance, scale, radius)` 按距离二次衰减。FOV 随速度比与加力平滑放大；竖屏（宽高比小于 1）时提高竖直视场角，使水平视场保持约 70°（竖直上限 95°）；目标位姿含 NaN / Infinity 时保持上一帧；传送 / 复活 / 读档后 `snapToTarget()`。
-- 接线：`PlayerViewController`（`src/core/camera/`）按需加载；V / 视角按钮 → `toggleMode()`；`onModeChanged` → 武器视角、HUD 视角标签 + 切换音、写回设置；渲染步推进玩家加力尾焰（`updatePlayerAfterburner`），护盾按 `1 - 0.7 × blend` 淡化。友军僚机使用盟军涂装（`createFriendlyMesh`，与敌机同机体、同命中半径）。
+- 接线：`PlayerViewController`（`src/core/camera/`）按需加载；V / 视角按钮 → `toggleMode()`；`onModeChanged` → 武器视角、HUD 视角标签 + 切换音、写回设置；渲染步推进玩家加力尾焰（`updatePlayerAfterburner`），护盾按 `1 - 0.7 × blend` 淡化。友军僚机使用自己的机体（`createFriendlyMesh`：与玩家机同族的钢蓝机身、金色饰条与气泡座舱盖，命中半径 5 米，`userData.faction = FRIENDLY`）。
 
 ### Boss 系统（第 6-10 关）
 
@@ -491,7 +315,7 @@ if (tmpAxis.lengthSq() > 1e-8) {
 - 刺激音对齐下一拍并移调到当前调性，播放时闪避主音乐；`boss-defeated` / `level-complete` / `game-over` / `campaign-complete` 接管并结束当前曲目；曲目切换使用交叉淡化。
 - 调用时机：章节卡片 → 剧情曲 + 章节重音 + 打字音；入关 → 关卡曲 + `chapter-start`；波次检查点 → `checkpoint`；清场 → `level-complete`；Boss → Boss 曲；阶段切换 → 警报 + `phase-change`；击破 → `boss-defeated`；结算 → 胜利曲 + 计数音；结局 → 剧情曲；失败 → `game-over`；通关 → `campaign-complete` + 胜利曲；暂停 → `pauseMusic` + `stopSustainedSounds`，继续 → `resumeMusic`。
 - 菜单音乐：`MenuMusic` 在第一次用户手势后播放，进入战斗淡出，回到菜单恢复。
-- 音效：`AudioManager` 新增特殊武器、热焰弹、单位、界面、叙事与 Boss 效果音效（声部在 `src/core/Audio/sfx/SfxLibrary.ts`），音效总线带压缩器；`CampaignSfxRouter` 按距离静音并限流远处单位事件，把 Boss 效果提示映射到熔岩喷发、声呐、汽笛、雷击、护盾受击、阶段警报等音效。
+- 音效：`AudioManager` 新增特殊武器、热焰弹、单位、界面、叙事与 Boss 效果音效（声部在 `src/core/Audio/sfx/SfxLibrary.ts`），音效总线带压缩器；`CampaignSfxRouter` 按距离静音并限流远处单位事件，把 Boss 效果提示映射到熔岩喷发、声呐、汽笛、雷击、护盾受击、阶段警报等音效。敌机：`ENEMY_FIRED` 按弹种出声——高炮弹用 `playTankCannon`、长枪弹用 `playShoot('boss')`、其余 `playShoot('enemy')`，`quiet` 的后续弹不出声；`ENEMY_TELL` 的狙击机蓄力调用 `playLanceCharge(duration)`（`SoundType.LANCE_CHARGE`，在蓄力时长内升高的啸叫），幽灵机现形调用 `playDecloak(duration)`（`SoundType.WRAITH_DECLOAK`，高音下滑加低音嗡鸣）。
 
 ### VFX 与后处理
 
@@ -499,7 +323,7 @@ if (tmpAxis.lengthSq() > 1e-8) {
 - 后处理：`PostFxPipeline`（显示参考的 `RenderPass` → `UnrealBloomPass` → 调色 / 屏幕效果 `ShaderPass`）；渲染器不支持半浮点渲染目标或创建失败时回退直出；`balanced` / `quality` 开启，`performance` 关闭（屏幕效果改由 `ScreenOverlay` 的单个全屏三角形绘制）。末尾 Pass `needsSwap = false`，保证每帧都渲染到带深度缓冲的场景目标（`0db18f2`，`PostFxPipeline.test.ts` 固定）。
 - 屏幕效果（`ScreenEffectsState`）：`damagePulse` / `flash` / `empFlash` 为脉冲（取最大值后自动衰减），`lowHealth` / `speed` 为持续量（平滑趋近）；低血量暗角带心跳包络。EMP 脉冲约 0.5 秒衰减，调色 Pass 与 `performance` 档的 `ScreenOverlay` 都把它画成有上限的电光蓝屏幕边缘 + 一道从准星外扫向边缘的细环，故障条纹稀疏，中心不提亮、不混向白色。
 - EMP 世界特效（`WeaponFx`）：`spawnRing(..., additive = true, nearFade = 0)` 的 `nearFade > 0` 时离镜头该距离内的环段淡出（两道 EMP 冲击环用 48 米，轨道炮的环为 0）；环着色器保证 `smoothstep` 的两个边缘有序（细环原先被画成实心圆盘）；EMP 球壳在镜头贴近时整体压暗、约 4-32 米内的壳面淡出；中心闪光更小，第一人称不显示——追尾视角释放 EMP 不再白屏。
-- 尾迹：`ContrailSystem` 所有拖尾共享一个几何体（单 draw call），可见度随速度、过载与高度变化；`ContrailController` 为玩家常驻挂载，敌机与僚机按存活列表定期对账。
+- 尾迹：`ContrailSystem` 所有拖尾共享一个几何体（单 draw call），可见度随速度、过载与高度变化；`ContrailController` 为玩家常驻挂载，敌机与僚机按存活列表定期对账；颜色按网格的 `userData.faction`——玩家白色、敌机红橙（0xff5a3c）、僚机淡蓝（0x7fd4ff），隐形中的敌机不挂（协调器的 `collectContrailEnemyMeshes`）。敌机与僚机自己的引擎粒子尾迹用同样的阵营色（`ENEMY_TRAIL_COLOR` / `FRIENDLY_TRAIL_COLOR`）。
 - 护盾受击涟漪 `ShieldRipple`（`PlayerSystem.notifyShieldHit`）；玩家与残血敌机周期性 `createDamageSmoke`。
 - 透明材质规则：`transparent: true`、`depthTest: true`、`depthWrite: false`、`renderOrder 0`。
 
@@ -507,12 +331,12 @@ if (tmpAxis.lengthSq() > 1e-8) {
 
 - HUD 新面板：`updateWeaponPanel`（特殊武器挂架）、`updateFlares`、`showAutosave`、`setCameraMode`、`setBossStatus`（`null` 收起）、`setMissileWarning`、`flashWarning`；自动存档提示与闪烁告警的计时由 `hud.update(dt)` 推进（暂停时冻结）。`showBriefing(BriefingRequest)`、`showAutosave(label?)`、`flashWarning(text, tone)`、`setBossStatus(label, phase?)`、`showPowerUp(name, icon, duration)` 与 `showPowerUpBig(icon, name, minDisplayTime?, hideSubtext?, variant?)` 接受 `HudText`（见「界面语言」）；道具倒计时逐帧只读缓存好的文字。`setEnemyCounterMode(mode: HudEnemyCounterMode)`（`'wave' | 'boss'`）：波次中计数为「敌人 n · 剩余 m」（`ENEMIES n · LEFT m`）；Boss 战（Boss 模式或战役 Boss 关，由 `GameCoordinator.updateUI` 设置）只显示在场的敌方「敌人 n」——存活敌机（含 Boss 放出的）加存活敌方单位（含 Boss 无人机），不显示本关波次的「剩余」。
 - HUD 布局：`#hud` 按 `env(safe-area-inset-*)` 内缩，位置与尺寸按 `HudLayoutDensity` 写在 CSS 里（旋转屏幕即重新布局）。右侧状态列 `#hud-status`：波次、生命读数（标签 + 生命点）、导弹读数（标签、`n/上限` 计数、导弹点与装填进度）与道具计时（竖屏时两个读数并排）；中央消息栈 `#hud-top-stack`：Boss 条、简报、事件目标与竖屏下的存档提示，手机竖屏时是状态带下方的整行，栈底的位置由 HUD 写到 `<html>` 的 `--hud-stack-bottom`；竖屏下简报显示期间、或 Boss 条与事件目标同在栈里时，存档提示暂缓（隐藏、计时暂停），有空间后完整显示。中央大字提示（`showPowerUpBig`，`#hud-callout`）是横幅，按视角摆放，避开准星与导引头捕获环（捕获环半径由 `LockOnIndicator` 写到 `<html>` 的 `--hud-aim-r`，视角由 HUD 写到 `data-hud-camera`）：追尾视角下准星在屏幕上方约 29% 处，横幅放在座机下方（竖屏时在捕获环与座机之间）；第一人称下准星在屏幕中央，横幅从捕获环上方向上展开（横屏手机上在消息栈下方）。闪烁告警栏 `#hud-warning-lane` 在追尾视角下位于座机下方，第一人称下位于捕获环下方；ENEMIES / LEFT 计数器与驾驶舱信息栏同样的深色底。
-- 无线电面板的位置（`#radio-comms`，`src/ui/theme/radioStyles.ts`）：按布局与视角摆放，避开准星与雷达。桌面贴屏幕底边、紧挨雷达右侧；手机横握夹在摇杆与按键簇之间贴底，告警栏同时显示两行（HUD 在 `<html>` 上记 `data-hud-warning-rows='2'`）时收成一行正文、不显示头像与呼号行；竖屏第一人称是消息栈下方的整行（跟随 `--hud-stack-bottom`）；竖屏追尾视角（准星就在消息栈下方那一带）放到按键簇左侧、静止摇杆上方，平板与手机都在这一处。手机竖屏（视口宽度小于 700 像素）下这个框是紧凑的：不显示头像、军衔姓名与信号格，左右内边距 6 像素，告警栏显示几行它都不变；正文行数上限随视口高度分档——不足 599 像素 1 行、不足 633 像素 2 行、不足 666 像素 3 行、其上 4 行，728 像素起 5 行、799 像素起 6 行、833 像素起 7 行、867 像素起 8 行；从 6 行那一档起显示呼号行（只有呼号，用说话方的强调色）。各档按「框到了上限，上沿离两行告警的下沿仍至少 12 像素」推算（屏宽 430 像素以内；5 行及以上的档按底部有 34 像素安全区算，4 行及以下按没有安全区算）。
+- 无线电面板的位置（`#radio-comms`，`src/ui/theme/radioStyles.ts`）：按布局与视角摆放，避开准星与雷达。桌面贴屏幕底边、紧挨雷达右侧；手机横握夹在摇杆与按键簇之间贴底，告警栏同时显示两行（HUD 在 `<html>` 上记 `data-hud-warning-rows='2'`）时收成一行正文、不显示头像与呼号行；竖屏第一人称是消息栈下方的整行（跟随 `--hud-stack-bottom`）；竖屏追尾视角（准星就在消息栈下方那一带）放到按键簇左侧、静止摇杆上方，平板与手机都在这一处。手机竖屏（视口宽度小于 700 像素）下这个框是紧凑的：不显示头像、军衔姓名与信号格，左右内边距 6 像素，告警栏显示几行它都不变；正文行数上限随视口高度分档——不足 599 像素 1 行、不足 633 像素 2 行、不足 666 像素 3 行、其上 4 行，728 像素起 5 行、799 像素起 6 行、833 像素起 7 行、867 像素起 8 行；从 6 行那一档起显示呼号行（只有呼号，用说话方的强调色）。台词比框里放得下的行数多时，正文像字幕一样逐行上移（`radioFollowOffset`，`src/ui/RadioComms.ts`，用 `transform: translateY`）：逐字显示结束之前不动；开头停 `min(0.8 秒, 总时长 / 4)`，剩下的显示时间平分给每一行，第 k 行在「开头停留 + k × 每行时间」滑出上沿，滑动 `min(0.25 秒, 每行时间 / 2)`，静止时总是整行；减少动态效果时不滑动、一次跳一整行。只用于手机竖屏（宽度小于 700 像素）追尾视角的紧凑框，座舱视角、横屏与平板不跟读。各档按「框到了上限，上沿离两行告警的下沿仍至少 12 像素」推算（屏宽 430 像素以内；5 行及以上的档按底部有 34 像素安全区算，4 行及以下按没有安全区算）。
 - 雷达：`RadarBlipKind` 新增 `enemy-ground`（红色方块）、`enemy-sea`（红色菱形）、`ally-unit`（金色三角）、`neutral`（灰色空心圆）；`setRangeMultiplier` 由友军预警机驱动；`CombatHudFeed` 用池化对象生成雷达点（20 Hz）与血条快照（含第 6-10 关 Boss 子目标与可命中的敌方单位）。雷达盘（`#radar-minimap`）机头朝上：前方在上，右侧的目标画在右侧（原先左右画反）；`BASE_RANGE` 800 米是整个盘面的跨度（圆心到盘缘约 400 米）；量程外的目标贴在盘缘，画成同类的空心小符号并带一道朝外的短线（`drawRadarRimMarker`）。桌面端 120 像素、位于左下角；触屏布局在左上角状态舱下方，手机 84 像素、视口短边 ≥ 700 像素时 132 像素，并有单独的点按面 `#radar-tap-target`（点雷达不会带出摇杆）。
 - 关卡地图（`RadarLevelMap`，`#radar-map`，由 `RadarMinimap` 持有）：点击 / 轻触雷达或按 N 键开合，Esc 关闭（被雷达截获，不会同时暂停）；换关或雷达停止更新 1.5 秒后自动收起；打开时游戏不暂停。地图北向朝上、比例固定：战场边界圆、以玩家为圆心的 500 / 1000 米距离环、按航向旋转的玩家箭头、全部雷达目标（与雷达盘共用 `radarGlyphs.ts` 的符号，画得更大）、图例，以及每关采样一次的 64 × 64 陆地 / 水面底图（`CombatHudFeed` 把 `UnitController.getSurfaceSampler()` 交给 `PresentationController.setRadarTerrainSource`；没有采样器时只画网格）。面板为视口短边的 72%（200-560 像素），20 Hz 重绘。
 - 移动端：`index.html` 拇指弧按键簇新增 `#special-button`、`#flare-button`、`#cycle-button`、`#camera-button`；按键文字默认英文（FIRE / MSL / SPEC / FLARE / BOOST / SWAP / VIEW / PAUSE），`main.ts` 按语言改写（中文为 开火 / 导弹 / 特武 / 热焰 / 加速 / 切换 / 视角 / 暂停）；HUD 写入按钮的武器代号、外圈进度（`--tc-meter`）、空弹 / 告警状态（`data-alert`）与视角状态，以及导弹键的余量（`data-count`）与装填外圈；`LockOnIndicator` 把锁定状态写成导弹键的样式类。摇杆是浮动式的（触摸区 `#touch-stick-zone`，见「操控、瞄准与导弹」）；BOOST（`#throttle-button`）是开关式锁存，带 `aria-pressed`。视口宽高都不小于 700 像素时（与 `GameConfig.isTablet` 同一阈值）摇杆与按键簇放大并抬离底边，尺寸都是 `:root` 上的 CSS 变量（`--touch-stick-size`、`--touch-deck-scale` 等）。暂停键（`#upgrade-button`）与其他单击键一样在 `touchstart` 时锁存，直到 `InputHandler.isPauseToggled()` 读取（`resetPauseState()` 清除），低帧率下短于一个模拟步长的轻触也不会丢；桌面 Esc / P 仍取按下沿。
-- 血条：友军 AI 战机的 `mesh.userData.displayName`（僚机呼号）优先于按名称缓存的标签；敌机显示机型，Boss 显示名称，单位显示自己的型号名（`UnitMeshFactory` 写入的 `userData.displayName`，没有时退回阵营通用名），都按当前语言，切换语言时所有血条立即改名。三种尺寸：Boss 本体 120 × 10 像素（带名称）、Boss 部件 44 × 5 像素（深色底槽）、其他目标 60 × 6 像素（带名称）；视野内的 Boss 部件只有离准星最近的一个显示名称（带滞回：新部件离准星的距离须小于当前焦点的 80% 才切换），部件不再各自产生屏外箭头；名称标签用样式居中，不再逐次测量文字宽度。可命中的敌方地面 / 海上 / 空中单位也进入血条（`CombatHudFeed` 经 `UnitController.forEachHostileMarker`）：在屏幕上小于约 22 像素时加一个威胁色的目标角标并标出距离（取整到 10 米，大于 28 像素时收起）；快照带 `objective` 时换成目标样式——角标常显、加粗并脉动，屏外箭头闪烁（减少动态效果时不做动画）。屏外箭头（`OffscreenChevron`）的距离文字保持水平；敌方目标箭头与 Boss 导弹箭头（`BossMissileIndicator`）各持有一个 `ChevronAvoidance`（`src/ui/ChevronAvoidance.ts`），用同一套避让规则：避开雷达盘与 HUD 面板（得分 / 速度 / 强化 / 右上状态 / 生命条，以及顶部消息栈里正在显示的每一块），触屏布局下还避开摇杆与每个可见的触控按键；手机竖屏（视口宽度小于 700 像素、`data-density="touch-portrait"`）下，正在显示的无线电面板也算避让区（它正好在箭头从摇杆和按键簇移出来的落点上），平板与横握时不算。避让区约每秒量一次，无线电面板随台词长高也跟着更新。相距太近、中间放不下一枚箭头的避让区并成一块：按键先彼此并成一整簇；其余的块只有在外接矩形不会多盖住一块放得下箭头的空角时才并（竖屏手机上摇杆上方的空位因此留得住），HUD 面板不并进单独成块的雷达盘。箭头移出一块又碰到下一块时接着移，最多连移三步，取位移最小的走法。
-- 机库（模型预览）：主菜单的「机库」就是 `ModelPreview`（`#model-preview`）。它经 `Record<BossType, loader>` 按需导入每个 Boss 自己的网格工厂（第 6-10 关来自 `MagmaColossusMesh` / `AbyssalLeviathanMesh` / `TempestZeppelinMesh` / `PhantomWingMesh` / `OraclePrimeMesh`），把可见几何（排除隐藏部件与精灵）缩放到固定半径的包围球（球心取可见包围盒的中心，半径取离它最远的可见顶点，模型怎么转都不出球），切换模型时逐一释放几何体、材质与实例缓冲（跳过共享资源）。战机工厂按包围盒摆放的信号灯小球（`navLightPort` / `navLightStarboard` / `strobeLight` / `beaconLight`）先由 `hideSignalLights()`（`src/ui/menu/modelDisposal.ts`）隐藏，不显示也不参与取景；标题画面的战机同样处理。取景只用名称标签上方的区域：写入名称后（以及改变窗口大小、切换语言时）`frameCamera()` 从 DOM 读取标签上沿，与标签、画布上沿各留 8 像素（区域至少延伸到画布一半高度），相机后退到包围球的轮廓直径等于画布短边的 70%（各个模型大小一致），区域放不下这个直径时缩到放得进区域的高与宽并留边，再用 `setViewOffset` 把投影中心移到区域中心；画布尚未布局时按整个画布取景。模型的工厂或代码块加载失败时，名称标签写明「无法加载：{name}」（英文 `Could not load: {name}`），其余模型与返回照常可用，战机工厂模块导入失败的那一次不保留，下次翻到这一页会重新导入；`show()` 创建不了渲染器（浏览器不给 WebGL 上下文）时调用 `hide()`（经 `setOnBack` 的回调让主菜单回来，焦点落回「机库」按钮）并照常抛出错误。名称标签放得下时单行显示（宽度 600 像素以下字号 18 像素）；横屏且高度不超过 520 像素的视口压缩页眉并隐藏提示行，把高度留给展台。左右箭头按钮、左 / 右方向键或横向滑动切换模型，鼠标拖动旋转，`#rotate-toggle` 开关自动旋转，Esc 或返回按钮回到主菜单。渲染器只在显示期间存在（`show()` 创建，`hide()` 连同 WebGL 上下文一起释放）。
+- 血条：友军 AI 战机的 `mesh.userData.displayName`（僚机呼号）优先于按名称缓存的标签；喷气机血条的参考点在机体中心上方 `2 × 命中半径 / 5` 米（5 米命中半径时 2 米），大机体的血条与名称不再落在机身里；隐形中的敌机不进血条快照（血条、名称、目标框与屏外箭头一起消失）；敌机显示机型，Boss 显示名称，单位显示自己的型号名（`UnitMeshFactory` 写入的 `userData.displayName`，没有时退回阵营通用名），都按当前语言，切换语言时所有血条立即改名。三种尺寸：Boss 本体 120 × 10 像素（带名称）、Boss 部件 44 × 5 像素（深色底槽）、其他目标 60 × 6 像素（带名称）；视野内的 Boss 部件只有离准星最近的一个显示名称（带滞回：新部件离准星的距离须小于当前焦点的 80% 才切换），部件不再各自产生屏外箭头；名称标签用样式居中，不再逐次测量文字宽度。可命中的敌方地面 / 海上 / 空中单位也进入血条（`CombatHudFeed` 经 `UnitController.forEachHostileMarker`）：在屏幕上小于约 22 像素时加一个威胁色的目标角标并标出距离（取整到 10 米，大于 28 像素时收起）；快照带 `objective` 时换成目标样式——角标常显、加粗并脉动，屏外箭头闪烁（减少动态效果时不做动画）。屏外箭头（`OffscreenChevron`）的距离文字保持水平；敌方目标箭头与 Boss 导弹箭头（`BossMissileIndicator`）各持有一个 `ChevronAvoidance`（`src/ui/ChevronAvoidance.ts`），用同一套避让规则：避开雷达盘与 HUD 面板（得分 / 速度 / 强化 / 右上状态 / 生命条，以及顶部消息栈里正在显示的每一块），触屏布局下还避开摇杆与每个可见的触控按键；手机竖屏（视口宽度小于 700 像素、`data-density="touch-portrait"`）下，正在显示的无线电面板也算避让区（它正好在箭头从摇杆和按键簇移出来的落点上），平板与横握时不算。避让区约每秒量一次，无线电面板随台词长高也跟着更新。相距太近、中间放不下一枚箭头的避让区并成一块：按键先彼此并成一整簇；其余的块只有在外接矩形不会多盖住一块放得下箭头的空角时才并（竖屏手机上摇杆上方的空位因此留得住），HUD 面板不并进单独成块的雷达盘。箭头移出一块又碰到下一块时接着移，最多连移三步，取位移最小的走法。
+- 机库（模型预览）：主菜单的「机库」就是 `ModelPreview`（`#model-preview`），共 22 页：玩家机、友军僚机（类别 `ally`，`createFriendlyMesh`）、八种敌机（第 3-10 页，按 `EnemyType` 顺序，新机型在第 8-10 页）、十个 Boss、玩家导弹与 Boss 导弹。它经 `Record<BossType, loader>` 按需导入每个 Boss 自己的网格工厂（第 6-10 关来自 `MagmaColossusMesh` / `AbyssalLeviathanMesh` / `TempestZeppelinMesh` / `PhantomWingMesh` / `OraclePrimeMesh`），把可见几何（排除隐藏部件与精灵）缩放到固定半径的包围球（球心取可见包围盒的中心，半径取离它最远的可见顶点，模型怎么转都不出球），切换模型时逐一释放几何体、材质与实例缓冲（跳过共享资源）。战机工厂按包围盒摆放的信号灯小球（`navLightPort` / `navLightStarboard` / `strobeLight` / `beaconLight`）先由 `hideSignalLights()`（`src/ui/menu/modelDisposal.ts`）隐藏，不显示也不参与取景；标题画面的战机同样处理。取景只用名称标签上方的区域：写入名称后（以及改变窗口大小、切换语言时）`frameCamera()` 从 DOM 读取标签上沿，与标签、画布上沿各留 8 像素（区域至少延伸到画布一半高度），相机后退到包围球的轮廓直径等于画布短边的 70%（各个模型大小一致），区域放不下这个直径时缩到放得进区域的高与宽并留边，再用 `setViewOffset` 把投影中心移到区域中心；画布尚未布局时按整个画布取景。模型的工厂或代码块加载失败时，名称标签写明「无法加载：{name}」（英文 `Could not load: {name}`），其余模型与返回照常可用，战机工厂模块导入失败的那一次不保留，下次翻到这一页会重新导入；`show()` 创建不了渲染器（浏览器不给 WebGL 上下文）时调用 `hide()`（经 `setOnBack` 的回调让主菜单回来，焦点落回「机库」按钮）并照常抛出错误。名称标签放得下时单行显示（宽度 600 像素以下字号 18 像素）；横屏且高度不超过 520 像素的视口压缩页眉并隐藏提示行，把高度留给展台。左右箭头按钮、左 / 右方向键或横向滑动切换模型，鼠标拖动旋转，`#rotate-toggle` 开关自动旋转，Esc 或返回按钮回到主菜单。渲染器只在显示期间存在（`show()` 创建，`hide()` 连同 WebGL 上下文一起释放）。
 
 ### 主菜单
 
@@ -547,14 +371,14 @@ src/
 │   ├── boss/                     # AdvancedBossController、AdvancedBossSupport、BossHitFeedback、LegacyBossHitVolumes
 │   ├── hud/                      # CombatHudFeed
 │   ├── save/                     # SaveSystem
-│   ├── dev/                      # DevHooks、ScriptedPilot、BalanceHarness（仅开发构建）
+│   ├── dev/                      # DevHooks（含 spawnEnemy / listJets / clearJets / holdWaves）、ScriptedPilot、BalanceHarness（仅开发构建）
 │   ├── systems/                  # PlayerSystem、CombatSystem、EnemySystem、PowerUpSystem
 │   ├── Input/                    # InputHandler
 │   ├── Audio/                    # AudioManager、MusicSystem、VoiceSystem、VoiceDucking、AudioContextHost、AudioKit、music/、sfx/
 │   └── utils/                    # Logger
 ├── features/
 │   ├── campaign/                 # CampaignData（导入入口）、CampaignTypes、CampaignCast、CampaignChapters、CampaignRadio、CampaignStory、ChapterTitles
-│   ├── enemy/                    # EnemyAI、FriendlyAI、EnemyTypes、EnemyFSM（旧版，已废弃）
+│   ├── enemy/                    # EnemyAI、FriendlyAI（WINGMAN_CONFIG）、EnemyTypes、AttackDirector、MissileDirector、JetThreat、EnemyWeapons、doctrine/（各机型条令、JetDoctrine、MissileRack、DoctrineMath）、effects/（LanceBeam、CloakFade）、EnemyFSM（旧版，已废弃）
 │   ├── units/                    # UnitTypes、UnitDeployments、UnitSystem、UnitBehaviors、UnitBehaviorsAir、UnitMesh*、UnitMissiles、UnitProjectiles、UnitEventBridge …
 │   ├── weapons/                  # WeaponTypes、WeaponSystem、CountermeasureSystem、控制器与特效
 │   ├── boss/                     # BossTypes、BossContracts、BossAI、各关 Boss AI / Mesh / 特效、BossMissileSystem、BossAim
@@ -564,7 +388,7 @@ src/
 │   ├── levels/                   # LevelManager
 │   ├── terrain/                  # LevelConfig、TerrainGenerator、environments/、worldscape/（含 staticBatch、vegetation、clouds）
 │   ├── player/                   # PlayerController
-│   ├── aircraft/                 # AircraftMeshFactory
+│   ├── aircraft/                 # AircraftMeshFactory（玩家机、八种敌机、友军僚机）
 │   ├── powerups/                 # PowerUpSystem、BalloonPowerUp
 │   └── upgrade/                  # UpgradeSystem
 ├── scenes/                       # GameScene（渲染器、光照、后处理）
@@ -578,14 +402,20 @@ public/voice/                     # 配音包：en/、zh/（<台词 id>.mp3）�
 
 ## 最近更新记录
 
-### 2026-10: 键盘辅助瞄准、后台存档与手机竖屏布局
+### 2026-10: 敌机舰队重做、键盘辅助瞄准、后台存档与手机竖屏布局
 
 **主要变更**（分支 `workflow/enemy-fleet`，逐项见 `CHANGELOG.md` 的同名一节）:
 
-1. **机炮** - 键盘端的辅助瞄准：`GAME_CONSTANTS.GUN_ASSIST.KEYBOARD_FULL_ANGLE`（1.25°）/ `KEYBOARD_OUTER_ANGLE`（2.5°），`GunLeadSolver.update` 新增 `assistCone: GunAssistCone` 参数（`'touch' | 'keyboard'`）；协调器不再按设备开关辅助，改为按 `GameConfig.isMobile` 选锥角；操作说明的键盘页加了一行说明
-2. **存档** - 后台存档：`GameCoordinator.setupBackgroundSave()` / `saveCampaignInBackground()` 与 `CampaignFlowController.saveInBackground()`，`main.ts` 的 `beforeunload` 也调用；页面每隐藏一次只存一次，同一检查点位置上不会把已存的生命数写低；「保存并退出」不变
-3. **HUD** - 手机竖屏（宽度不到 700 像素）追尾视角的无线电面板改放到按键簇左侧、摇杆上方，不显示头像，正文行数上限随视口高度分档（`src/ui/theme/radioStyles.ts`）；屏外箭头在手机竖屏时也避开正在显示的无线电面板，遮挡矩形的合并规则随之调整（`src/ui/ChevronAvoidance.ts`）
-4. **配置** - 删除 `public/config/game-config.json` 与 `src/core/utils/ConfigLoader.ts`（没有任何代码读取），数值以 `src/config.ts` 等源码常量为准
+1. **敌机外观** - `createEnemyMesh` 八种敌方无人机机体（深炮铜 + 红色识别、传感器目镜代替座舱盖、两侧翼尖红色信号灯；新增 `buildJammer` / `buildStriker` / `buildWraith`），各机型缩放不同，`userData.hitRadius = 2.5 × 缩放`（3.75-7.5 米），协调器的敌机战斗目标改用 `getDeclaredHitRadius(mesh, 5)`；`createFriendlyMesh` 改为僚机自己的机体；尾迹按阵营着色；机库加入友军僚机与三种新机型（22 页）
+2. **敌机行为** - 机型条令（`src/features/enemy/doctrine/`）、`AttackDirector`（攻击令牌与进入方位）、拴绳、`IJetThreatProvider`（锁定 / 来袭导弹 / 玩家机头方向 / 可否攻击）；`LevelManager` 给每架敌机配条令与 `cadenceScale`；僚机改用固定的 `WINGMAN_CONFIG`、不带条令
+3. **敌机武器** - `EnemyWeaponKind`（机炮弹 / 高炮弹 / 长枪弹）与 `ProjectilePool` 的弹种外观、扫掠命中和池满回收；狙击机瞄准光束 `LanceBeam`；王牌 / 导弹攻击机的追踪导弹走单位导弹池（`UnitSystem.launchJetMissile`、`setJetMissileLock`），`MissileDirector` 全队上限；重型轰炸机尾炮不占令牌
+4. **干扰与隐形** - `ILockJamProvider`（`MissileSeeker.setJamProvider`、`LockOnIndicator.setLockJamProvider` 与「受干扰」标签）；幽灵机隐形周期与 `CloakFade`，隐形中的敌机退出锁定、机炮提前量 / 辅助、雷达、血条、尾迹与僚机目标
+5. **事件与音效** - 新事件 `ENEMY_TELL`；`ENEMY_FIRED` 新增可选 `weapon` / `speed` / `quiet`；`SoundType.LANCE_CHARGE` / `WRAITH_DECLOAK`；喷气机血条高度随命中半径变化
+6. **开发钩子** - `window.__AIR_SUPREME_DEV__` 新增 `spawnEnemy` / `listJets` / `clearJets` / `holdWaves`；`BalanceHarness` 按弹种的弹速与射程记账，敌机导弹按发射者归因
+7. **机炮** - 键盘端的辅助瞄准：`GAME_CONSTANTS.GUN_ASSIST.KEYBOARD_FULL_ANGLE`（1.25°）/ `KEYBOARD_OUTER_ANGLE`（2.5°），`GunLeadSolver.update` 新增 `assistCone: GunAssistCone` 参数（`'touch' | 'keyboard'`）；协调器不再按设备开关辅助，改为按 `GameConfig.isMobile` 选锥角；操作说明的键盘页加了一行说明
+8. **存档** - 后台存档：`GameCoordinator.setupBackgroundSave()` / `saveCampaignInBackground()` 与 `CampaignFlowController.saveInBackground()`，`main.ts` 的 `beforeunload` 也调用；页面每隐藏一次只存一次，同一检查点位置上不会把已存的生命数写低；「保存并退出」不变
+9. **HUD** - 手机竖屏（宽度不到 700 像素）追尾视角的无线电面板改放到按键簇左侧、摇杆上方，不显示头像，正文行数上限随视口高度分档（`src/ui/theme/radioStyles.ts`），放不下的台词逐行上移（`radioFollowOffset`）；屏外箭头在手机竖屏时也避开正在显示的无线电面板，遮挡矩形的合并规则随之调整（`src/ui/ChevronAvoidance.ts`）
+10. **配置** - 删除 `public/config/game-config.json` 与 `src/core/utils/ConfigLoader.ts`（没有任何代码读取），数值以 `src/config.ts` 等源码常量为准
 
 ### 2026-10: 操控与武器体验
 
@@ -835,26 +665,23 @@ npm run test:run   # Vitest 单次运行（npm run test 为监听模式）
 
 ### 修改敌人配置
 
-编辑 `src/features/enemy/EnemyTypes.ts`:
-
-- 修改 `ENEMY_CONFIGS` 对象
-- 调整速度、转向、概率等参数
-- 保持概率总和为 1.0
+- 基础数值（血量、速度、转向、伤害、精度、分数）：`src/features/enemy/EnemyTypes.ts` 的 `ENEMY_CONFIGS`
+- 打法参数（距离带、点射、蓄力、隐形周期等）：各机型条令文件里的 `*_TUNING`（`src/features/enemy/doctrine/`）；所有机型共用的规则在 `DoctrineTypes.ts` 的 `DOCTRINE_RULES`
+- 弹种与敌机导弹：`src/features/enemy/EnemyWeapons.ts`（`ENEMY_WEAPON_SPECS`、`JET_MISSILE_SPEC`、`JET_MISSILE_RULES`）；攻击令牌数：`AttackDirector.ts` 的 `getAttackTokenCount`
+- 僚机数值：`src/features/enemy/FriendlyAI.ts` 的 `WINGMAN_CONFIG`（旧三状态 AI 的概率总和保持 1.0）
 
 ### 修改敌人AI行为
 
-编辑 `src/features/enemy/EnemyAI.ts`:
-
-- `updateChase()` - 追逐状态行为
-- `updateFixedDirection()` - 固定方向行为
-- `updateCircle()` - 盘旋状态行为
-- `fire()` - 射击逻辑
+- 敌机：编辑对应机型的条令（`src/features/enemy/doctrine/<Type>Doctrine.ts` 的 `decide()`）；条令只读 `DoctrineContext`、只写 `DoctrineCommand`，可以在测试里脱离场景推进
+- 运动执行、开火收发、瘫痪、隐形与预警特效：`src/features/enemy/EnemyAI.ts`
+- 僚机（旧三状态 AI）：`EnemyAI.ts` 的 `updateChase()` / `updateFixedDirection()` / `updateCircle()` / `fire()`
 
 ### 添加新敌人类型
 
-1. 在 `EnemyTypes.ts` 中添加枚举值
-2. 在 `ENEMY_CONFIGS` 中添加配置
-3. 在 `getEnemyTypesForWave()` 中配置出现规则
+1. 在 `EnemyTypes.ts` 中添加枚举值与 `ENEMY_CONFIGS` 配置
+2. 写一份条令（继承 `JetDoctrine`），在 `createJetDoctrine()` 中登记
+3. 在 `AircraftMeshFactory.createEnemyMesh()` 中加机体与缩放（命中半径随缩放）
+4. 配置出现规则（波次的机型选择）
 
 ---
 
@@ -865,14 +692,14 @@ npm run test:run   # Vitest 单次运行（npm run test 为监听模式）
 1. **只能向前飞** - 飞机不能后退或横向平移
 2. **转向受限** - 转向速度受 `turnSpeed` 限制
 3. **平滑运动** - 使用四元数插值，避免突然转向
-4. **概率驱动** - 状态切换基于概率，增加随机性
-5. **友好难度** - 降低追逐概率，多"固定方向"休息
+4. **每种机型一套打法** - 条令决定往哪飞、何时开火，招牌攻击至少 0.7 秒预警（光束、锁定告警、蓄力音、现形眼灯）
+5. **友好难度** - 攻击令牌限制同时进攻的敌机数，进攻方向两两错开；僚机的旧三状态 AI 仍按概率切换状态
 
 ### 射击设计
 
-1. **真实朝向** - 机头必须朝向目标才能射击
+1. **真实朝向** - 机头必须朝向目标才能射击（各机型有自己的锥角与射程；重型轰炸机尾炮朝后）
 2. **精度差异** - 不同类型有不同精度和扰动
-3. **合理限制** - 盘旋时不射击（除重型机）
+3. **合理限制** - 没有攻击令牌不对玩家开火（重型轰炸机尾炮除外）
 4. **玩家优势** - 玩家精度高，敌人精度低
 
 ### 性能优化
@@ -892,12 +719,13 @@ npm run test:run   # Vitest 单次运行（npm run test 为监听模式）
 2. 战役进度记录（`air-supreme:campaign-progress`：通关、最高分、到达的最高关卡）目前只写入，界面未展示
 3. 手机竖屏 390×844 / 430×932 上，无线电面板显示满行数时，一部分屏外箭头会比必要的位置多让出 4-32 像素（`ChevronAvoidance` 把无线电面板、摇杆与按键簇并成一块来避让）
 4. 后台存档的两处限制：从第 1 关以外开局的第一次机库期间转入后台不会存档；同一检查点位置上的生命数在后台存档之间只增不减（见「存档」一节的「后台存档」）
+5. 敌机条令与规格（`docs/enemy-fleet-spec.md`）之间尚未修复的偏差记录为 `it.fails` 用例（带 `FINDING:` 注释，在 `src/__tests__`），修复后改回普通用例
 
 ### 技术债
 
 1. `EnemyFSM.ts` 已废弃但未删除（兼容性保留）
 2. 部分类型使用 `any` 避免严格类型检查
-3. 硬编码的魔法数字（如 30° 圆锥角）
+3. 硬编码的魔法数字（如僚机旧 AI 里的距离与角度）
 
 ---
 
@@ -905,7 +733,7 @@ npm run test:run   # Vitest 单次运行（npm run test 为监听模式）
 
 ### 短期
 
-1. 添加更多敌人类型（如轰炸机、支援机）——十关战役已加入战略轰炸机、预警机等地面 / 海上 / 空中单位（见「十关战役系统」）
+1. 添加更多敌人类型（如轰炸机、支援机）——十关战役已加入战略轰炸机、预警机等地面 / 海上 / 空中单位（见「十关战役系统」），敌机舰队一轮加入电子干扰机、导弹攻击机与幽灵机（见「敌人AI系统」）
 2. 实现敌机编队飞行
 3. 优化粒子性能
 
