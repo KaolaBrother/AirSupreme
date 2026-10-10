@@ -26,8 +26,9 @@ export interface IPauseMenuOptions {
    */
   getSaveStatus?: () => CampaignExitSave;
   /**
-   * 执行存档并返回真实结果。'failed' 时菜单停在失败页，由玩家选择仍然退出或返回；
-   * 其余结果随即调用 onExitToMenu（预告说会存、结果却没存时回到确认页重新说明，不退出）。
+   * 执行存档并返回真实结果。只在预告是 'saved'（确认页写着“保存并退出”）时调用；不存档的对局
+   * 直接 onExitToMenu，不会调用它。'saved' 随即调用 onExitToMenu；'failed' 时菜单停在失败页，
+   * 由玩家选择仍然退出或返回；其余结果（预告说会存、结果却没存）回到确认页重新说明，不退出。
    */
   onSaveAndExit?: () => CampaignExitSave;
   applyAudio: (sfx: number, music: number) => void;
@@ -202,7 +203,7 @@ export class PauseMenu {
     document.body.appendChild(this.overlay);
     this.renderDefaultView();
     // 语言切换后按新语言重绘当前视图（停留在原来的页面）
-    this.unsubscribeLocale = onLocaleChange(() => this.renderView(this.view));
+    this.unsubscribeLocale = onLocaleChange(() => this.redrawForLocale());
   }
 
   public show(): void {
@@ -243,6 +244,26 @@ export class PauseMenu {
     this.visible = false;
     this.unsubscribeLocale();
     this.overlay.remove();
+  }
+
+  /**
+   * 语言切换：按新语言重绘当前视图。确认 / 失败页上玩家已经移到的那个按钮（左 / 右）重绘后仍然
+   * 有焦点；初始焦点规则只在打开页面时决定焦点。
+   */
+  private redrawForLocale(): void {
+    const focused = this.confirmButtons().findIndex((button) => button === document.activeElement);
+    this.renderView(this.view);
+    if (focused >= 0) {
+      this.confirmButtons()[focused]?.focus();
+    }
+  }
+
+  /** 确认 / 失败页的一排两个按钮（[左, 右]）；其他页面为空 */
+  private confirmButtons(): HTMLButtonElement[] {
+    if (this.view !== PauseMenuView.Confirm && this.view !== PauseMenuView.SaveFailed) {
+      return [];
+    }
+    return Array.from(this.panel.querySelectorAll<HTMLButtonElement>('.pause-actions button'));
   }
 
   private renderView(view: PauseMenuView): void {
@@ -356,18 +377,18 @@ export class PauseMenu {
   }
 
   /**
-   * 确认退出：接了“保存并退出”就先存档——失败停在失败页；确认页说过会存、结果却没存时回到确认页
-   * 按最新状态重新说明。只有存档成功或本来就不存档时才真的退出。
+   * 确认退出：确认页说了会存才去存档——失败停在失败页；结果却没存时回到确认页按最新状态重新说明。
+   * 确认页说了不存档（或游戏侧没有接“保存并退出”）就只退出，不发起存档。
    */
   private confirmExit(): void {
-    const { getSaveStatus, onSaveAndExit } = this.options;
-    if (getSaveStatus && onSaveAndExit) {
+    const { onSaveAndExit } = this.options;
+    if (this.confirmPromisesSave && onSaveAndExit) {
       const result = onSaveAndExit();
       if (result.kind === 'failed') {
         this.renderSaveFailedView();
         return;
       }
-      if (this.confirmPromisesSave && result.kind !== 'saved') {
+      if (result.kind !== 'saved') {
         this.renderConfirmView();
         return;
       }
