@@ -850,6 +850,111 @@ describe('HUD', () => {
       expectLabelsIn('en');
     });
 
+    // 得分 / 速度 / 波次行（b602778 已修）：这三行以前要等下一次数值变化才换语言——HUD 挂上之前
+    // 选的语言、或两局之间（HUD 拆下、不再监听语言切换时）换的语言都不生效。现在 init() 时按当前
+    // 语言补写。只有英文、不算缺陷的两处不在这里：LIFE × N 与 BOSS 标签。
+    const LINE_IDS = ['hud-score', 'hud-speed', 'hud-wave-line'] as const;
+    const LANGUAGE_SWITCHES: Array<[Locale, Locale]> = [
+      ['en', 'zh-CN'],
+      ['zh-CN', 'en'],
+    ];
+
+    /** 三行现在显示的文字 */
+    function lines(): string[] {
+      return LINE_IDS.map((id) => {
+        const element = document.getElementById(id);
+        expect(element, `expected #${id} in the HUD`).not.toBeNull();
+        return ((element as HTMLElement).textContent ?? '').trim();
+      });
+    }
+
+    /** 只留标签：去掉数字和速度单位 */
+    function labelsOf(texts: string[]): string[] {
+      return texts.map((text) =>
+        text.replace(/km\/h/g, '').replace(/\d+/g, '').replace(/\s+/g, ' ').trim()
+      );
+    }
+
+    function feedRun(instance: HUD): void {
+      instance.updateScore(1234);
+      instance.updateSpeed(31.4);
+      instance.updateEnemies(3);
+      instance.updateRemainingEnemies(7);
+    }
+
+    /** 从创建到显示都在 locale 下的 HUD 写出的三行（参照） */
+    function linesOfHudIn(locale: Locale, feed?: (instance: HUD) => void): string[] {
+      setLocale(locale);
+      const instance = new HUD();
+      try {
+        instance.init();
+        feed?.(instance);
+        return lines();
+      } finally {
+        instance.dispose();
+      }
+    }
+
+    function expectWrittenIn(locale: Locale, labels: string[]): void {
+      expect(labels).toHaveLength(LINE_IDS.length);
+      labels.forEach((label, index) => {
+        if (locale === 'en') {
+          expect(label, LINE_IDS[index]).toMatch(/[A-Za-z]/);
+          expect(label, LINE_IDS[index]).not.toMatch(HAN);
+        } else {
+          expect(label, LINE_IDS[index]).toMatch(HAN);
+        }
+      });
+    }
+
+    it.each(LANGUAGE_SWITCHES)(
+      'writes the score, speed and wave lines in the language picked before the HUD first comes up (%s → %s)',
+      (from, to) => {
+        const expected = linesOfHudIn(to);
+        expectWrittenIn(to, labelsOf(expected));
+
+        // 开始菜单阶段：HUD 以原来的语言创建，还没挂上；玩家换了语言再开局
+        setLocale(from);
+        const instance = new HUD();
+        try {
+          setLocale(to);
+          instance.init();
+
+          // 没有任何数值更新，三行已经是新语言
+          expect(lines()).toEqual(expected);
+        } finally {
+          instance.dispose();
+        }
+      }
+    );
+
+    it.each(LANGUAGE_SWITCHES)(
+      'rewrites them when the language changed between two runs, without waiting for a new value (%s → %s)',
+      (from, to) => {
+        const expected = labelsOf(linesOfHudIn(to, feedRun));
+        const stale = labelsOf(linesOfHudIn(from, feedRun));
+        expectWrittenIn(to, expected);
+        expectWrittenIn(from, stale);
+        expected.forEach((label, index) => expect(label, LINE_IDS[index]).not.toBe(stale[index]));
+
+        setLocale(from);
+        const instance = new HUD();
+        try {
+          instance.init();
+          feedRun(instance);
+          expect(labelsOf(lines())).toEqual(stale);
+          // 一局结束 HUD 拆下（不再监听语言切换），玩家在菜单里换了语言，下一局再挂上
+          instance.dispose();
+          setLocale(to);
+          instance.init();
+
+          expect(labelsOf(lines())).toEqual(expected);
+        } finally {
+          instance.dispose();
+        }
+      }
+    );
+
     it('re-labels both readouts when the language changes, leaving the numbers alone', () => {
       hud.init();
       hud.updateLives(2);
