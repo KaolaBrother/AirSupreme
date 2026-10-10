@@ -32,7 +32,7 @@ AirSupreme 是一个基于 Three.js 和 TypeScript 的 3D 飞机战斗游戏。
 4. **关卡管理** - 波次生成、敌机生成
 5. **粒子系统** - 尾迹、爆炸效果
 6. **UI系统** - HUD、小地图、血条
-7. **配置系统** - JSON 配置加载、默认值 fallback
+7. **配置系统** - `src/config.ts` 里的运行时常量与设备 / 画质档位
 8. **日志系统** - 结构化日志、模块标记、级别控制
 9. **运行时边界系统** - 动态导入、预热、表现层 runtime loader
 10. **战役流程与表现层** - 章节 → 波次 → 检查点 → Boss → 结算 → 机库；剧情卡片、无线电、HUD 面板、音乐与音效统一经 `ICampaignPresentation`
@@ -322,7 +322,7 @@ if (tmpAxis.lengthSq() > 1e-8) {
 
 ## 十关战役系统（2026-10）
 
-签名与契约见 `docs/api.md`，模块接线、逐帧顺序与数据流见 `docs/architecture.md`；本节是长篇说明。仍在调校的平衡数值（花费、血量、波次规模、强度曲线）以源码为准：`src/core/Difficulty.ts`、`public/config/game-config.json`、`src/config.ts`、`src/features/terrain/LevelConfig.ts`、`src/features/units/UnitDeployments.ts`、`src/features/upgrade/UpgradeSystem.ts`、`src/features/boss/BossTypes.ts`。
+签名与契约见 `docs/api.md`，模块接线、逐帧顺序与数据流见 `docs/architecture.md`；本节是长篇说明。仍在调校的平衡数值（花费、血量、波次规模、强度曲线）以源码为准：`src/core/Difficulty.ts`、`src/config.ts`、`src/features/terrain/LevelConfig.ts`、`src/features/units/UnitDeployments.ts`、`src/features/upgrade/UpgradeSystem.ts`、`src/features/boss/BossTypes.ts`。
 
 ### 战役流程
 
@@ -548,7 +548,7 @@ src/
 │   ├── systems/                  # PlayerSystem、CombatSystem、EnemySystem、PowerUpSystem
 │   ├── Input/                    # InputHandler
 │   ├── Audio/                    # AudioManager、MusicSystem、VoiceSystem、VoiceDucking、AudioContextHost、AudioKit、music/、sfx/
-│   └── utils/                    # ConfigLoader、Logger
+│   └── utils/                    # Logger
 ├── features/
 │   ├── campaign/                 # CampaignData（导入入口）、CampaignTypes、CampaignCast、CampaignChapters、CampaignRadio、CampaignStory、ChapterTitles
 │   ├── enemy/                    # EnemyAI、FriendlyAI、EnemyTypes、EnemyFSM（旧版，已废弃）
@@ -904,29 +904,9 @@ npm run test:run   # Vitest 单次运行（npm run test 为监听模式）
 
 ---
 
-## 配置系统 (ConfigLoader)
+## 配置系统
 
-### 配置文件
-
-位置: `public/config/game-config.json`
-
-包含玩家、敌人、Boss、导弹、升级等配置段。启动时 `src/main.ts` 调用 `configLoader.load()` 读取它，并合并到 `ConfigLoader` 内置的默认值之上。
-
-**现状**：除了这次 `load()`，运行时代码没有调用 `configLoader` 的任何读取方法，所以这份 JSON 目前没有运行时读取方——只改 JSON 不会改变实际玩法。以 `missile` 段为例：玩家导弹的数值来自 `GAME_CONSTANTS.MISSILE`（`src/config.ts`），基础锁定时间与补给时间来自升级线（`UPGRADE_CONFIGS`）；`getMissile()` 返回的只是 JSON 里的值，没有系统使用它。
-
-### 使用方式
-
-```typescript
-import { configLoader } from '@/core/utils/ConfigLoader';
-
-// 异步加载配置
-await configLoader.load();
-
-// 读取方法（目前没有运行时调用方，见上）
-const playerConfig = configLoader.getPlayer();
-const enemyConfig = configLoader.getEnemy('FIGHTER');
-const bossConfig = configLoader.getBoss('HEAVY_BOMBER');
-```
+运行时常量在 `src/config.ts`：`GAME_CONSTANTS`（玩家、子弹、机炮辅助、相机、世界、道具、关卡、导弹）与 `GameConfig`（设备 / 画质档位）。没有外部配置文件，启动时也不请求任何配置文件：敌机、Boss、关卡、升级等数值表都在各自的 TypeScript 源文件里（如 `EnemyTypes.ts`、`BossTypes.ts`、`LevelConfig.ts`、`UpgradeSystem.ts`）。
 
 ---
 

@@ -209,7 +209,7 @@ All bosses satisfy `IBossCore`; bosses 6–10 also implement `IAdvancedBoss` (`s
 - Menus: `src/ui/StartMenu.ts` (`whenLaunched`), `src/ui/menu/` (`TitleScreen.ts`, `SettingsSheet.ts`, `HowToPlaySheet.ts`, `MenuSheet.ts`, `MenuHero.ts` / `MenuHeroScene.ts`, `MenuBackdrop.ts`, `menuLabels.ts`, `settingsControls.ts`, styles), `src/ui/ModelPreview.ts` (the Hangar), `src/ui/UpgradeMenu.ts` (the Language and Voice rows live in `SettingsSheet` and `PauseMenu`)
 - Input: `src/core/Input/InputHandler.ts` (`InputState`, `TOUCH_STICK_TUNING`), touch deck markup and sizes in `index.html`
 - Audio: `src/core/Audio/AudioContextHost.ts` (`unlockAudioFromUserGesture`, shared `AudioContext`, `getSharedOutputNode`), `src/core/Audio/AudioManager.ts`, `src/core/Audio/MusicSystem.ts`, `src/core/Audio/music/`, `src/core/Audio/sfx/`, `src/core/Audio/VoiceSystem.ts`, `src/core/Audio/VoiceDucking.ts`
-- Config: `src/config.ts`, `public/config/game-config.json`
+- Config: `src/config.ts`
 - Player: `src/core/systems/PlayerSystem.ts` (`setCrashSurfaceSampler`, respawn track and crash grace), `src/features/player/PlayerController.ts`
 - Enemy and friendly AI: `src/features/enemy/EnemyAI.ts` (`setTargetVelocity`, `updateKinematic`), `src/features/enemy/FriendlyAI.ts` (formation slots), `src/core/systems/EnemySystem.ts` (`getFriendlySpawnPose`)
 - Levels / crash surface: `src/features/levels/LevelManager.ts`, `src/features/terrain/TerrainGenerator.ts` (`WORLDSCAPE_WATER_Y`, `getCrashSurfaceY`, `sampleSurface`)
