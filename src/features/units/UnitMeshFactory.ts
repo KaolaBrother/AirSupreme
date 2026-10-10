@@ -38,6 +38,7 @@ import {
  *
  * createUnitMesh(type) 返回 THREE.Group：
  * - userData.unitType / userData.hitRadius（米）/ userData.faction
+ * - userData.displayName：UNIT_CONFIGS[type].name（双语显示名，HUD 血条 / 目标标记用）
  * - userData.aimPoint：车体 / 舰体中部的空节点（玩家导弹 / 自动瞄准的目标点）
  * - 可动部件（按类型存在）：turret、barrel、launcher、rackMissiles[]、muzzle、muzzles[]、
  *   dish、radar、ciws、vls、wake、bowWake、periscope、prop、props[]、mainRotor、tailRotor、
@@ -129,6 +130,8 @@ export function createUnitMesh(type: UnitType): THREE.Group {
   const group = instantiateTemplate(getTemplate(type));
   group.name = `UNIT_${type}`;
   group.userData.unitType = type;
+  // 显示名（双语对象）：HUD 目标标记直接读它，不必把单位模块拉进 HUD 分包
+  group.userData.displayName = config.name;
   group.userData.hitRadius = config.hitRadius;
   const displayScale = UNIT_DISPLAY_SCALE[type] ?? 1;
   if (displayScale !== 1) group.scale.setScalar(displayScale);
