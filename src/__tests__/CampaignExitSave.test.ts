@@ -359,6 +359,14 @@ function breakStorageWrites(): void {
   });
 }
 
+/** 存储悄悄丢弃写入：setItem 不抛错也不落盘，已有内容保持原样，读取照常 */
+function dropStorageWrites(): void {
+  vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => undefined);
+}
+
+/** 固定时钟用的时刻（Date.now 毫秒）：让“存档时间”在测试里是确定的 */
+const FROZEN_NOW = 1_760_000_000_000;
+
 const ORIGINAL_STORAGE = Object.getOwnPropertyDescriptor(window, 'localStorage');
 
 function restoreStorage(): void {
@@ -870,36 +878,152 @@ describe('campaign exit save', () => {
         await enterCombat(h, 1);
         clearWaves(h, 1);
         window.localStorage.clear();
-        vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => undefined);
+        dropStorageWrites();
 
         expect(h.flow.saveForExit()).toEqual({ kind: 'failed' });
+        expect(rawCheckpoint()).toBeNull();
       });
 
-      // 发现 F3（规格 S2“写入后读回确认”）：saveForExit 只确认“读得到一个检查点”，没有确认读回来的
-      // 就是刚写的那份。写入被悄悄丢弃（setItem 不抛错也不落盘）时，它把存储里原有的旧检查点当成成功，
-      // 返回 saved（位置是旧的那一波），暂停菜单随即退出。实现修正后本用例会转为通过，届时去掉 .fails。
-      it.fails(
-        'is "failed" when the write is dropped and the read-back finds the older checkpoint',
-        async () => {
+      // “写入后读回确认”确认的是刚写的那一份：写入被悄悄丢弃（setItem 不抛错也不落盘）、
+      // 读回来的还是存储里原有的旧检查点时，不能把旧检查点当成这次存档成功。
+      it('is "failed" when the write is dropped and the read-back finds the older checkpoint', async () => {
+        const h = createHarness();
+        await enterCombat(h, 3);
+        clearWaves(h, 2);
+        const storedBefore = rawCheckpoint();
+        h.flow.handleWaveStart(2);
+        h.flow.handleWaveComplete(2);
+        // 存储退回到上一波的自动存档，之后的写入被悄悄丢弃
+        window.localStorage.setItem(CAMPAIGN_SAVE_KEY, storedBefore ?? '');
+        playOn(h);
+        dropStorageWrites();
+
+        const result = h.flow.saveForExit();
+
+        expect(rawCheckpoint(), 'nothing was written').toBe(storedBefore);
+        // 读回来的不是刚写的那份（第 4 波、此刻的分数），不能报“已保存”
+        expect(result).toEqual({ kind: 'failed' });
+      });
+
+      it('is "failed" when the dropped write and the older checkpoint share score and time but not the position', async () => {
+        // 同一毫秒、分数也没变：只有位置（第 3 波 / 第 4 波）分得出读回来的是旧检查点
+        vi.spyOn(Date, 'now').mockReturnValue(FROZEN_NOW);
+        const h = createHarness();
+        await enterCombat(h, 3);
+        h.run.score = 3_000;
+        clearWaves(h, 2);
+        const storedBefore = rawCheckpoint();
+        // 从这里起存储悄悄丢弃写入：下一波的自动存档也没落盘
+        dropStorageWrites();
+        h.flow.handleWaveStart(2);
+        h.flow.handleWaveComplete(2);
+        expectOutcome(h.flow.describeExitSave(), { stage: 'wave', level: 3, wave: 3 });
+
+        const result = h.flow.saveForExit();
+
+        expect(rawCheckpoint(), 'nothing was written').toBe(storedBefore);
+        const stale = storedCheckpoint();
+        expect([stale.checkpoint, stale.level, stale.wave, stale.score]).toEqual([
+          'wave',
+          3,
+          2,
+          3_000,
+        ]);
+        expect(result).toEqual({ kind: 'failed' });
+      });
+
+      it('is "failed" when the dropped write and the older checkpoint share the position but not the score', async () => {
+        // 整个过程在同一毫秒里：存档时间分不出新旧，位置也一样，只有分数不同
+        vi.spyOn(Date, 'now').mockReturnValue(FROZEN_NOW);
+        const h = createHarness();
+        await enterCombat(h, 3);
+        h.run.score = 3_000;
+        clearWaves(h, 2);
+        const storedBefore = rawCheckpoint();
+        expect(storedCheckpoint().savedAt).toBe(FROZEN_NOW);
+        // 同一波里又加了分，然后退出
+        h.flow.handleWaveStart(2);
+        h.run.score = 4_200;
+        expectOutcome(h.flow.describeExitSave(), { stage: 'wave', level: 3, wave: 2 });
+        dropStorageWrites();
+
+        const result = h.flow.saveForExit();
+
+        expect(rawCheckpoint(), 'nothing was written').toBe(storedBefore);
+        const stale = storedCheckpoint();
+        expect([stale.checkpoint, stale.level, stale.wave, stale.score]).toEqual([
+          'wave',
+          3,
+          2,
+          3_000,
+        ]);
+        expect(result).toEqual({ kind: 'failed' });
+      });
+
+      it('is "failed" when the dropped write and the older checkpoint share position and score but not the time', async () => {
+        const clock = vi.spyOn(Date, 'now').mockReturnValue(FROZEN_NOW);
+        const h = createHarness();
+        await enterCombat(h, 3);
+        h.run.score = 3_000;
+        clearWaves(h, 2);
+        const storedBefore = rawCheckpoint();
+        // 五分钟之后：分数没变，但掉了两条命、买了升级——这些都没存上
+        clock.mockReturnValue(FROZEN_NOW + 5 * 60_000);
+        h.flow.handleWaveStart(2);
+        h.run.lives = 1;
+        const upgrades = h.stats.getUpgrades();
+        upgrades.awardBonusPoints(6);
+        expect(upgrades.upgrade(UpgradeType.MAX_HEALTH)).toBe(true);
+        dropStorageWrites();
+
+        const result = h.flow.saveForExit();
+
+        expect(rawCheckpoint(), 'nothing was written').toBe(storedBefore);
+        const stale = storedCheckpoint();
+        expect([stale.checkpoint, stale.level, stale.wave, stale.score]).toEqual([
+          'wave',
+          3,
+          2,
+          3_000,
+        ]);
+        expect([stale.lives, upgradeLevel(stale, UpgradeType.MAX_HEALTH)]).toEqual([3, 0]);
+        expect(result).toEqual({ kind: 'failed' });
+      });
+
+      it.each([0, 1, 5 * 60_000])(
+        'a write that lands is "saved" with the clock %i ms after the autosave',
+        async (elapsed) => {
+          // 对照：读回确认不能把真的写进去的存档判成失败（包括与自动存档落在同一毫秒）
+          const clock = vi.spyOn(Date, 'now').mockReturnValue(FROZEN_NOW);
           const h = createHarness();
           await enterCombat(h, 3);
+          h.run.score = 3_000;
           clearWaves(h, 2);
-          const storedBefore = rawCheckpoint();
+          clock.mockReturnValue(FROZEN_NOW + elapsed);
           h.flow.handleWaveStart(2);
-          h.flow.handleWaveComplete(2);
-          // 存储退回到上一波的自动存档，之后的写入被悄悄丢弃（不抛错）
-          window.localStorage.setItem(CAMPAIGN_SAVE_KEY, storedBefore ?? '');
-          playOn(h);
-          vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => undefined);
+          h.run.lives = 1;
 
-          const result = h.flow.saveForExit();
+          expectOutcome(h.flow.saveForExit(), { stage: 'wave', level: 3, wave: 2 });
 
-          vi.restoreAllMocks();
-          expect(rawCheckpoint(), 'nothing was written').toBe(storedBefore);
-          // 读回来的不是刚写的那份（第 4 波、此刻的分数），不能报“已保存”
-          expect(result).toEqual({ kind: 'failed' });
+          const save = storedCheckpoint();
+          expect(save.savedAt).toBe(FROZEN_NOW + elapsed);
+          expectCurrentState(save, h);
         }
       );
+
+      it('a write that lands is "saved" when the store rounds a fractional score', async () => {
+        const h = createHarness();
+        await enterCombat(h, 3);
+        clearWaves(h, 2);
+        h.run.score = 7_350.5;
+
+        expectOutcome(h.flow.saveForExit(), { stage: 'wave', level: 3, wave: 2 });
+
+        const save = storedCheckpoint();
+        expect(Number.isInteger(save.score)).toBe(true);
+        expect(Math.abs(save.score - 7_350.5)).toBeLessThanOrEqual(0.5);
+        expect([save.checkpoint, save.level, save.wave]).toEqual(['wave', 3, 2]);
+      });
 
       it('saves at the same position once the store works again', async () => {
         const h = createHarness();
