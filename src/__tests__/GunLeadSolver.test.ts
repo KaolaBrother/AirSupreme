@@ -538,11 +538,9 @@ describe('GunLeadSolver', () => {
       expect(rig.solver.getPipTarget()).toBeNull();
     });
 
-    // FINDING（缺陷，低优先级）：机头方向为 NaN 时，GunLeadSolver.update 的前方锥判定
-    // `cos < PIP_FRONT_COS` 对 NaN 恒为 false，目标直接通过，照样给出提前量标记。
-    // 规格要求标记只给机头前方 40° 锥内的目标，项目约定要求对 NaN / Infinity 设防。
-    // 修复后去掉 .fails。
-    it.fails('offers nothing when the nose direction is not finite', () => {
+    // 曾经的缺陷（b35f8e1 已修）：机头方向为 NaN 时前方锥判定对 NaN 恒为 false，
+    // 目标直接通过，照样给出提前量标记。
+    it('offers nothing when the nose direction is not finite', () => {
       rig.forward.set(Number.NaN, Number.NaN, Number.NaN);
       addMover(rig, new THREE.Vector3(0, 0, -300));
       fly(rig, WARM_UPDATES);

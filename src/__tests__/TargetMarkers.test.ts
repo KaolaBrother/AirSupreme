@@ -26,7 +26,7 @@ import { LOCALES, expectBilingual, resetLocale, textIn } from './i18nTestUtils';
  *   变大到约 28 px 以上才收起（滞回）。
  * - M3：敌机清空、单位拖住波次时，剩下的单位总是有目标框，目标框与箭头带 is-objective。
  *
- * 屏幕外箭头的像素位置不在这里断言（另有批次在调整它避开触控区）。
+ * 屏幕外箭头的像素位置（避开摇杆 / 按键 / 雷达、留在屏幕内）在 ChevronAvoidance.test.ts 里断言。
  */
 
 const VIEW_WIDTH = 1280;
@@ -709,23 +709,35 @@ describe('hostile unit target markers', () => {
         return shownBrackets().length > 0;
       }
 
-      /** 由近及远：目标框出现的距离；再由远及近：目标框收起的距离 */
+      const NEAR = 30;
+      const FAR = 4000;
+      const COARSE = 1.1;
+      const FINE = 1.01;
+
+      /**
+       * 由近及远：目标框出现的距离；再由远及近：目标框收起的距离（精确到 1%）。
+       * 先用 10% 的步子找到翻转所在的区间，回到起点恢复原来的状态，再在区间里用 1% 的步子细找
+       * ——每一趟都只朝一个方向走，滞回不影响结果，刷新次数只有逐 1% 扫一遍的几分之一。
+       */
       function thresholds(tank: UnitInstance): { appears: number; disappears: number } {
-        const STEP = 1.01;
+        expect(bracketAt(tank, NEAR), 'no bracket up close').toBe(false);
         let appears = Number.NaN;
-        for (let distance = 30; distance < 4000; distance *= STEP) {
-          if (bracketAt(tank, distance)) {
-            appears = distance;
-            break;
+        for (let distance = NEAR; distance < FAR && Number.isNaN(appears); distance *= COARSE) {
+          if (!bracketAt(tank, distance)) continue;
+          expect(bracketAt(tank, NEAR), 'no bracket up close').toBe(false);
+          for (let fine = distance / COARSE; Number.isNaN(appears); fine *= FINE) {
+            if (bracketAt(tank, fine)) appears = fine;
           }
         }
         expect(appears, 'the bracket appears as the target shrinks').not.toBeNaN();
-        expect(bracketAt(tank, 4000)).toBe(true);
+
+        expect(bracketAt(tank, FAR)).toBe(true);
         let disappears = Number.NaN;
-        for (let distance = 4000; distance > 20; distance /= STEP) {
-          if (!bracketAt(tank, distance)) {
-            disappears = distance;
-            break;
+        for (let distance = FAR; distance > 20 && Number.isNaN(disappears); distance /= COARSE) {
+          if (bracketAt(tank, distance)) continue;
+          expect(bracketAt(tank, FAR), 'bracketed far away').toBe(true);
+          for (let fine = distance * COARSE; Number.isNaN(disappears); fine /= FINE) {
+            if (!bracketAt(tank, fine)) disappears = fine;
           }
         }
         expect(disappears, 'the bracket goes away as the target grows').not.toBeNaN();

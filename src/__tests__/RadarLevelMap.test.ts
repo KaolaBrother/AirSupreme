@@ -10,6 +10,7 @@ import {
 } from '@/ui/RadarMinimap';
 import {
   addedShapes,
+  boundsOf,
   centreOf,
   copyShapes,
   installCanvasRecording,
@@ -19,7 +20,9 @@ import {
   type PaintedShape,
   type Point,
 } from './canvasRecorder';
+import { recordDeclaredStyles, type DeclaredStyles } from './declaredStyle';
 import { resetLocale } from './i18nTestUtils';
+import { describeListeners, trackListeners } from './listenerTracker';
 
 /**
  * 展开的关卡地图（规格 M7）：点击 / 轻触雷达或按 N 展开一张更大的、北朝上的地图（#radar-map），
@@ -29,9 +32,26 @@ import { resetLocale } from './i18nTestUtils';
  * 只画网格。dispose() 移除元素与它加过的全部监听。
  *
  * 时间用可控的 performance.now；画布用记录型上下文。
+ *
+ * 看得清、不出界（规格 P4）：面板底色基本不透明（alpha 不低于 0.9）；玩家在地图范围（±1500 米）
+ * 之外时，玩家符号整个画在面板里，换成一眼能分辨的样子（空心，带一截朝外的短线）；范围之外的
+ * 目标画成贴边的符号，留在面板里，不被边裁掉。范围之内的画法不变。
  */
 
 const BOUNDARY_RADIUS_M = 1350;
+/** 地图显示的范围：关卡中心四周各这么远（正方形） */
+const MAP_EXTENT_M = 1500;
+const ALL_KINDS: readonly RadarBlipKind[] = [
+  'enemy',
+  'spawning',
+  'boss',
+  'enemy-ground',
+  'enemy-sea',
+  'ally',
+  'ally-unit',
+  'neutral',
+  'pickup',
+];
 /** 雷达刷新间隔（20 Hz）略放宽，保证每次都重绘地图 */
 const FRAME_MS = 60;
 const PLAYER = new THREE.Vector3(-300, 180, 420);
@@ -119,6 +139,8 @@ describe('RadarMinimap level map', () => {
   let recording: CanvasRecording;
   let radar: RadarMinimap;
   let now: number;
+  /** 面板的样式是整段写进 cssText 的，jsdom 会丢：按代码声明的原文读（见 declaredStyle.ts） */
+  let styles: DeclaredStyles;
   let originalIsMobile: boolean;
   let originalInnerWidth: number;
   let originalInnerHeight: number;
@@ -138,10 +160,12 @@ describe('RadarMinimap level map', () => {
     now = 10_000;
     vi.spyOn(performance, 'now').mockImplementation(() => now);
     recording = installCanvasRecording();
+    styles = recordDeclaredStyles();
   });
 
   afterEach(() => {
     radar?.dispose();
+    styles.stop();
     recording.restore();
     vi.restoreAllMocks();
     resetLocale();
@@ -732,6 +756,400 @@ describe('RadarMinimap level map', () => {
       expect(texts().some((text) => /enem|hostile/i.test(text))).toBe(true);
     });
 
+    // ───────────────────────────── 看得清、不出界（P4） ─────────────────────────────
+
+    describe('panel backdrop', () => {
+      /** 一个颜色的不透明度；var(--x, 回退值) 取回退值 */
+      function alphaOf(color: string): number {
+        const value = color.trim();
+        const fallback = value.match(/^var\(\s*--[\w-]+\s*,\s*(.+)\)$/);
+        if (fallback) return alphaOf(fallback[1]);
+        const functional = value.match(/^(?:rgba?|hsla?)\(([^)]*)\)$/i);
+        if (functional) {
+          const parts = functional[1].split(/[\s,/]+/).filter((part) => part !== '');
+          if (parts.length < 4) return 1;
+          return parts[3].endsWith('%') ? Number.parseFloat(parts[3]) / 100 : Number(parts[3]);
+        }
+        const hex = value.match(/^#([0-9a-f]{3,8})$/i);
+        if (hex) {
+          if (hex[1].length === 4) return Number.parseInt(hex[1][3] + hex[1][3], 16) / 255;
+          if (hex[1].length === 8) return Number.parseInt(hex[1].slice(6), 16) / 255;
+          return 1;
+        }
+        return Number.NaN;
+      }
+
+      /** 面板声明的底色 */
+      function backdropOf(panel: HTMLElement): string {
+        return styles.of(panel, 'background-color') || styles.of(panel, 'background') || '(none)';
+      }
+
+      it('reads the opacity of the usual colour notations (the helper works)', () => {
+        expect(alphaOf('rgba(8, 14, 24, 0.97)')).toBeCloseTo(0.97);
+        expect(alphaOf('rgba(8,14,24,0.72)')).toBeCloseTo(0.72);
+        expect(alphaOf('rgb(8 14 24 / 50%)')).toBeCloseTo(0.5);
+        expect(alphaOf('rgb(8, 14, 24)')).toBe(1);
+        expect(alphaOf('#08121c')).toBe(1);
+        expect(alphaOf('#08121c80')).toBeCloseTo(0.5, 1);
+        expect(alphaOf('var(--hud-glass, rgba(8,14,24,0.72))')).toBeCloseTo(0.72);
+        expect(alphaOf('transparent')).toBeNaN();
+        expect(alphaOf('(none)')).toBeNaN();
+      });
+
+      it.each([
+        ['desktop', DESKTOP],
+        ['phone landscape', PHONE_LANDSCAPE],
+        ['phone portrait', PHONE_PORTRAIT],
+      ] as const)('is effectively opaque: alpha at least 0.9 (%s)', (_name, target) => {
+        open(target);
+        const declared = backdropOf(map);
+        const alpha = alphaOf(declared);
+        expect(alpha, `#radar-map background "${declared}"`).toBeGreaterThanOrEqual(0.9);
+        // 整个面板没有再被调成半透明
+        const opacity = styles.of(map, 'opacity');
+        expect(
+          alpha * (opacity === '' ? 1 : Number(opacity)),
+          'with the opacity of the panel'
+        ).toBeGreaterThanOrEqual(0.9);
+        expect(styles.of(map, 'visibility')).not.toBe('hidden');
+      });
+
+      it('stays opaque after the map is closed and opened again, and after a resize', () => {
+        open(PHONE_LANDSCAPE);
+        press('KeyN', 'n');
+        frame();
+        press('KeyN', 'n');
+        frame();
+        window.dispatchEvent(new Event('resize'));
+        frame();
+        expect(mapShown()).toBe(true);
+        const declared = backdropOf(mapNode() as HTMLElement);
+        expect(alphaOf(declared), `"${declared}"`).toBeGreaterThanOrEqual(0.9);
+      });
+    });
+
+    describe.each([
+      ['a large panel (desktop)', DESKTOP],
+      ['a compact panel (phone)', PHONE_LANDSCAPE],
+    ] as const)('beyond the map extent, on %s', (_name, target) => {
+      /** 正方形地图的边长（面板去掉图例条）：画布坐标 0..side */
+      let side: number;
+
+      beforeEach(() => {
+        open(target);
+        side = px(map.style.width);
+      });
+
+      const polygons = (shapes: readonly PaintedShape[]): PaintedShape[] =>
+        shapes.filter(
+          (shape) => shape.paint !== 'text' && shape.subpaths.some((sub) => sub.points.length >= 3)
+        );
+
+      /** 形状画到的范围：描边再往外半个线宽 */
+      function inkBounds(shapes: readonly PaintedShape[]): ReturnType<typeof boundsOf> {
+        const box = boundsOf(shapes);
+        const spread = Math.max(
+          0,
+          ...shapes.filter((shape) => shape.paint === 'stroke').map((shape) => shape.lineWidth / 2)
+        );
+        return {
+          minX: box.minX - spread,
+          minY: box.minY - spread,
+          maxX: box.maxX + spread,
+          maxY: box.maxY + spread,
+        };
+      }
+
+      function expectInsideMap(shapes: readonly PaintedShape[], what: string): void {
+        const box = inkBounds(shapes);
+        expect(box.minX, `${what}: left edge`).toBeGreaterThanOrEqual(0);
+        expect(box.minY, `${what}: top edge`).toBeGreaterThanOrEqual(0);
+        expect(box.maxX, `${what}: right edge`).toBeLessThanOrEqual(side);
+        expect(box.maxY, `${what}: bottom edge`).toBeLessThanOrEqual(side);
+      }
+
+      /** 地图中心指向世界坐标 (x, z) 的方向（北朝上：-Z 为上、+X 为右） */
+      const bearingTo = (position: THREE.Vector3): THREE.Vector2 =>
+        new THREE.Vector2(position.x, position.z).normalize();
+
+      /** 这些形状是不是画在地图边上、朝着 position 的方向 */
+      function expectAtTheEdgeToward(
+        shapes: readonly PaintedShape[],
+        position: THREE.Vector3,
+        what: string
+      ): void {
+        const at = centreOf(shapes);
+        const offset = new THREE.Vector2(at.x - centre.x, at.y - centre.y);
+        const reach = Math.max(Math.abs(offset.x), Math.abs(offset.y));
+        expect(reach, `${what}: near the edge of the map`).toBeGreaterThan((side / 2) * 0.8);
+        expect(
+          offset.clone().normalize().dot(bearingTo(position)),
+          `${what}: in the direction of the real position`
+        ).toBeGreaterThan(0.95);
+      }
+
+      /** 一条短线是不是从符号朝外指、指向 position 的方向 */
+      function expectOutwardTick(
+        tick: PaintedShape,
+        body: readonly PaintedShape[],
+        position: THREE.Vector3,
+        what: string
+      ): void {
+        const [a, b] = tick.subpaths[0].points;
+        const bodyAt = centreOf(body);
+        const near = Math.hypot(a.x - bodyAt.x, a.y - bodyAt.y);
+        const far = Math.hypot(b.x - bodyAt.x, b.y - bodyAt.y);
+        const [inner, outer] = near <= far ? [a, b] : [b, a];
+        const along = new THREE.Vector2(outer.x - inner.x, outer.y - inner.y);
+        expect(along.length(), `${what}: the tick has a length`).toBeGreaterThan(1.5);
+        const outward = bearingTo(position);
+        expect(along.normalize().dot(outward), `${what}: the tick points outward`).toBeGreaterThan(
+          0.95
+        );
+        // 短线在符号的外侧（离地图中心更远的一侧）
+        const mid = new THREE.Vector2((a.x + b.x) / 2 - bodyAt.x, (a.y + b.y) / 2 - bodyAt.y);
+        expect(mid.dot(outward), `${what}: the tick is on the outer side`).toBeGreaterThan(0);
+      }
+
+      // ── 玩家 ──
+
+      /** 玩家符号：换一个位置和航向之后新画出来的东西（距离环与它的标注不算符号本身） */
+      function playerMarker(
+        player: THREE.Vector3,
+        rotation: THREE.Quaternion = NORTH
+      ): { body: PaintedShape[]; ticks: PaintedShape[] } {
+        const elsewhere = drawn([], heading(200), new THREE.Vector3(321, 150, -123));
+        const added = addedShapes(elsewhere, drawn([], rotation, player));
+        return { body: polygons(added), ticks: added.filter(isLineSegment) };
+      }
+
+      /** 范围内的玩家符号用什么颜色填 */
+      function playerColour(): string {
+        const { body } = playerMarker(new THREE.Vector3(200, 150, -300));
+        const filled = body.filter((shape) => shape.paint === 'fill');
+        expect(filled.length, 'an in-range player is a filled arrow').toBeGreaterThan(0);
+        return filled[0].style;
+      }
+
+      const PLAYER_OUTSIDE: ReadonlyArray<[name: string, position: THREE.Vector3]> = [
+        ['east', new THREE.Vector3(2500, 200, 0)],
+        ['far north', new THREE.Vector3(0, 200, -4000)],
+        ['south-west', new THREE.Vector3(-1800, 200, 1700)],
+        ['just past the east edge', new THREE.Vector3(1600, 200, 200)],
+        ['just past the south edge', new THREE.Vector3(-900, 200, 1520)],
+        ['north-east corner', new THREE.Vector3(1900, 200, -1900)],
+        ['very far away', new THREE.Vector3(-4.0e7, 200, 1.5e7)],
+      ];
+
+      const PLAYER_INSIDE: ReadonlyArray<[name: string, position: THREE.Vector3]> = [
+        ['the middle', new THREE.Vector3(0, 200, 0)],
+        ['near the east edge', new THREE.Vector3(1400, 200, 0)],
+        ['near the south-east corner', new THREE.Vector3(1400, 200, 1400)],
+        ['right at the north-west corner', new THREE.Vector3(-1490, 200, -1490)],
+        ['on the south edge', new THREE.Vector3(300, 200, 1500)],
+      ];
+
+      it.each(PLAYER_OUTSIDE)('draws a player %s fully inside the panel', (_n, position) => {
+        for (const deg of [0, 90, 180, 270, 45]) {
+          const { body, ticks } = playerMarker(position, heading(deg));
+          expect(body.length, `heading ${deg}: a player marker is drawn`).toBeGreaterThan(0);
+          expectInsideMap([...body, ...ticks], `heading ${deg}`);
+        }
+      });
+
+      it.each(PLAYER_OUTSIDE)(
+        'draws a player %s at the edge, in that direction',
+        (_n, position) => {
+          const { body } = playerMarker(position);
+          expectAtTheEdgeToward(body, position, 'player marker');
+        }
+      );
+
+      it.each(PLAYER_OUTSIDE)('draws a player %s hollow, with an outward tick', (_n, position) => {
+        const colour = playerColour();
+        for (const deg of [0, 135]) {
+          const what = `heading ${deg}`;
+          const { body, ticks } = playerMarker(position, heading(deg));
+          // 空心：轮廓用玩家的颜色描，里面不用它填
+          expect(
+            body.filter((shape) => shape.paint === 'fill' && shape.style === colour),
+            `${what}: not filled in the player colour`
+          ).toEqual([]);
+          const outline = body.filter(
+            (shape) => shape.paint === 'stroke' && shape.style === colour
+          );
+          expect(outline.length, `${what}: outlined in the player colour`).toBeGreaterThan(0);
+          expect(outline[0].alpha, `${what}: a clearly visible outline`).toBeGreaterThanOrEqual(
+            0.6
+          );
+          expect(ticks, `${what}: exactly one tick`).toHaveLength(1);
+          expect(ticks[0].style, `${what}: the tick is in the player colour`).toBe(colour);
+          expectOutwardTick(ticks[0], body, position, what);
+        }
+      });
+
+      it.each(PLAYER_OUTSIDE)('still shows the heading of a player %s', (_n, position) => {
+        const cases: Array<[deg: number, dx: number, dy: number]> = [
+          [0, 0, -1],
+          [90, 1, 0],
+          [180, 0, 1],
+          [270, -1, 0],
+        ];
+        for (const [deg, dx, dy] of cases) {
+          const { body } = playerMarker(position, heading(deg));
+          const vertices = body[0].subpaths.flatMap((sub) => sub.points);
+          const distinct = vertices.filter(
+            (p, index) =>
+              vertices.findIndex((q) => Math.hypot(p.x - q.x, p.y - q.y) < 1e-6) === index
+          );
+          const mean = {
+            x: distinct.reduce((sum, p) => sum + p.x, 0) / distinct.length,
+            y: distinct.reduce((sum, p) => sum + p.y, 0) / distinct.length,
+          };
+          const tip = distinct.reduce((best, p) =>
+            Math.hypot(p.x - mean.x, p.y - mean.y) > Math.hypot(best.x - mean.x, best.y - mean.y)
+              ? p
+              : best
+          );
+          const pointing = new THREE.Vector2(tip.x - mean.x, tip.y - mean.y).normalize();
+          expect(pointing.dot(new THREE.Vector2(dx, dy)), `heading ${deg}`).toBeGreaterThan(0.96);
+        }
+      });
+
+      it.each(PLAYER_INSIDE)(
+        'draws a player in / at %s the usual way: filled, no tick',
+        (_n, position) => {
+          const colour = playerColour();
+          const { body, ticks } = playerMarker(position, heading(60));
+          expect(
+            body.filter((shape) => shape.paint === 'fill' && shape.style === colour).length,
+            'filled in the player colour'
+          ).toBeGreaterThan(0);
+          expect(ticks, 'no outward tick').toEqual([]);
+          expectInsideMap(body, 'player marker');
+        }
+      );
+
+      it('draws the two styles differently on the same bearing', () => {
+        // 同一条方位线上：一个刚好在范围内，一个在范围外
+        const inside = playerMarker(new THREE.Vector3(MAP_EXTENT_M - 5, 200, 0), heading(30));
+        const outside = playerMarker(new THREE.Vector3(MAP_EXTENT_M + 400, 200, 0), heading(30));
+        const paintOf = (shapes: PaintedShape[]): string[] =>
+          shapes.map((shape) => `${shape.paint} ${shape.style}`).sort();
+        expect(paintOf(outside.body)).not.toEqual(paintOf(inside.body));
+        expect(outside.ticks.length).toBeGreaterThan(inside.ticks.length);
+      });
+
+      it('goes back to the usual marker when the player returns inside', () => {
+        const colour = playerColour();
+        const away = playerMarker(new THREE.Vector3(0, 200, 2600));
+        expect(away.ticks).toHaveLength(1);
+        const back = playerMarker(new THREE.Vector3(0, 200, 900));
+        expect(back.ticks).toEqual([]);
+        expect(back.body.some((shape) => shape.paint === 'fill' && shape.style === colour)).toBe(
+          true
+        );
+      });
+
+      // ── 目标 ──
+
+      interface Contact {
+        body: PaintedShape[];
+        ticks: PaintedShape[];
+        all: PaintedShape[];
+      }
+
+      function contact(position: THREE.Vector3, kind: RadarBlipKind): Contact {
+        const empty = drawn([]);
+        const all = addedShapes(empty, drawn([{ position, kind }]));
+        return {
+          all,
+          body: all.filter((shape) => !isLineSegment(shape)),
+          ticks: all.filter(isLineSegment),
+        };
+      }
+
+      const CONTACT_OUTSIDE: ReadonlyArray<[name: string, position: THREE.Vector3]> = [
+        ['east', new THREE.Vector3(2600, 100, -300)],
+        ['north-west', new THREE.Vector3(-1700, 100, -2900)],
+        ['far south', new THREE.Vector3(0, 100, 5000)],
+        ['just past the west edge', new THREE.Vector3(-1510, 100, 40)],
+        ['south-east corner', new THREE.Vector3(2200, 100, 2200)],
+      ];
+
+      it.each(ALL_KINDS)('keeps a far %s fully inside the panel, tick included', (kind) => {
+        for (const [name, position] of CONTACT_OUTSIDE) {
+          const marker = contact(position, kind);
+          expect(marker.all.length, `${name}: the contact is drawn`).toBeGreaterThan(0);
+          expectInsideMap(marker.all, name);
+        }
+      });
+
+      it.each(ALL_KINDS)('puts a far %s at the edge, in its direction', (kind) => {
+        for (const [name, position] of CONTACT_OUTSIDE) {
+          const marker = contact(position, kind);
+          expect(marker.body.length, `${name}: a marker body`).toBeGreaterThan(0);
+          expectAtTheEdgeToward(marker.body, position, name);
+        }
+      });
+
+      it.each(ALL_KINDS)('draws a far %s as a hollow rim marker with an outward tick', (kind) => {
+        const near = contact(new THREE.Vector3(500, 100, -200), kind);
+        expect(near.ticks, 'in range: no tick').toEqual([]);
+        const colours = new Set(near.all.map((shape) => shape.style));
+
+        for (const [name, position] of CONTACT_OUTSIDE) {
+          const marker = contact(position, kind);
+          expect(
+            marker.all.filter((shape) => shape.paint === 'fill'),
+            `${name}: hollow`
+          ).toEqual([]);
+          expect(marker.ticks, `${name}: exactly one tick`).toHaveLength(1);
+          expectOutwardTick(marker.ticks[0], marker.body, position, name);
+          // 还是这一类目标的颜色
+          for (const shape of marker.all) {
+            expect(colours.has(shape.style), `${name}: ${shape.style} is the ${kind} colour`).toBe(
+              true
+            );
+          }
+        }
+      });
+
+      it.each(ALL_KINDS)('draws an in-range %s the same anywhere on the map', (kind) => {
+        // 范围内的画法不变：靠近边缘的目标与地图中间的目标是同一个符号，只是位置不同
+        const middle = contact(new THREE.Vector3(100, 100, -100), kind);
+        const edge = contact(new THREE.Vector3(1450, 100, -1450), kind);
+        const paintOf = (marker: Contact): string[] =>
+          marker.all.map((shape) => `${shape.paint} ${shape.style} ${shape.alpha}`);
+        expect(paintOf(edge)).toEqual(paintOf(middle));
+        expect(edge.ticks).toEqual([]);
+        // 画在它真实的位置上：两个目标相距 1350 米（东西、南北各一份）
+        const span = centreOf(edge.body).x - centreOf(middle.body).x;
+        expect(centreOf(middle.body).y - centreOf(edge.body).y).toBeCloseTo(span, 0);
+        expect(span / 1350).toBeCloseTo(pixelsPerMetre(), 2);
+      });
+
+      it('draws far contacts and a far player together, all inside the panel', () => {
+        const farPlayer = new THREE.Vector3(-2400, 200, -2400);
+        const blips: RadarBlip[] = ALL_KINDS.map((kind, index) => ({
+          kind,
+          position: new THREE.Vector3(
+            Math.cos(index * 0.7) * 3000,
+            100,
+            Math.sin(index * 0.7) * 3000
+          ),
+        }));
+        const empty = drawn([], NORTH, new THREE.Vector3(0, 200, 0));
+        const added = addedShapes(empty, drawn(blips, heading(45), farPlayer));
+        const markers = added.filter((shape) => shape.paint !== 'text');
+        expect(
+          markers.filter(isLineSegment).length,
+          'one tick per contact and one for the player'
+        ).toBe(ALL_KINDS.length + 1);
+        expectInsideMap(markers, 'everything drawn');
+      });
+    });
+
     describe('terrain', () => {
       interface Sampled {
         x: number;
@@ -896,80 +1314,6 @@ describe('RadarMinimap level map', () => {
   // ───────────────────────────── dispose ─────────────────────────────
 
   describe('dispose()', () => {
-    interface Registration {
-      target: EventTarget;
-      type: string;
-      listener: unknown;
-      capture: boolean;
-    }
-
-    function captureOf(options: unknown): boolean {
-      if (typeof options === 'boolean') return options;
-      return typeof options === 'object' && options !== null
-        ? (options as AddEventListenerOptions).capture === true
-        : false;
-    }
-
-    type ListenerOwner = Pick<EventTarget, 'addEventListener' | 'removeEventListener'>;
-
-    /**
-     * 记录雷达存活期间加上、还没移除的监听。
-     * 测试环境里 window 的 addEventListener 是它自己的（绑定过的）方法，不走
-     * EventTarget.prototype，所以两处都要接管：原型管元素与 document，window 单独管。
-     */
-    function trackListeners(): { live: Registration[]; stop(): void } {
-      const live: Registration[] = [];
-      const restores: Array<() => void> = [];
-
-      const watch = (owner: ListenerOwner, fixedTarget: EventTarget | null): void => {
-        const originalAdd = owner.addEventListener;
-        const originalRemove = owner.removeEventListener;
-        const add = vi.spyOn(owner, 'addEventListener').mockImplementation(function (
-          this: EventTarget,
-          type,
-          listener,
-          options
-        ) {
-          const target = fixedTarget ?? this;
-          live.push({ target, type, listener, capture: captureOf(options) });
-          return Reflect.apply(originalAdd, target, [type, listener, options]);
-        });
-        const remove = vi.spyOn(owner, 'removeEventListener').mockImplementation(function (
-          this: EventTarget,
-          type,
-          listener,
-          options
-        ) {
-          const target = fixedTarget ?? this;
-          const capture = captureOf(options);
-          const index = live.findIndex(
-            (entry) =>
-              entry.target === target &&
-              entry.type === type &&
-              entry.listener === listener &&
-              entry.capture === capture
-          );
-          if (index >= 0) live.splice(index, 1);
-          return Reflect.apply(originalRemove, target, [type, listener, options]);
-        });
-        restores.push(() => {
-          add.mockRestore();
-          remove.mockRestore();
-        });
-      };
-
-      watch(EventTarget.prototype, null);
-      if (window.addEventListener !== EventTarget.prototype.addEventListener) {
-        watch(window, window);
-      }
-      return {
-        live,
-        stop() {
-          for (const restore of restores.reverse()) restore();
-        },
-      };
-    }
-
     it('the listener tracker sees listeners on window, document and elements', () => {
       const tracker = trackListeners();
       try {
@@ -984,13 +1328,6 @@ describe('RadarMinimap level map', () => {
         tracker.stop();
       }
     });
-
-    function describeTarget(target: EventTarget): string {
-      if (target === window) return 'window';
-      if (target === document) return 'document';
-      if (target instanceof HTMLElement) return `<${target.tagName.toLowerCase()}#${target.id}>`;
-      return String(target);
-    }
 
     it.each([
       ['desktop', DESKTOP],
@@ -1012,10 +1349,7 @@ describe('RadarMinimap level map', () => {
 
         expect(document.getElementById('radar-minimap')).toBeNull();
         expect(document.getElementById('radar-map')).toBeNull();
-        expect(
-          tracker.live.map((entry) => `${entry.type} on ${describeTarget(entry.target)}`),
-          'listeners left behind'
-        ).toEqual([]);
+        expect(describeListeners(tracker.live), 'listeners left behind').toEqual([]);
       } finally {
         tracker.stop();
       }
