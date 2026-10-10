@@ -9,6 +9,7 @@ import {
   CAMPAIGN_SAVE_VERSION,
   describeCheckpoint,
   describeCheckpointText,
+  getCampaignProgress,
   loadCampaignCheckpoint,
   type CampaignSaveData,
 } from '@/core/save/SaveSystem';
@@ -22,6 +23,7 @@ import {
   createCoordinatorRig,
   flush,
   isSettlementUp,
+  isTabIntercepted,
   keyDown,
   keyUp,
   LABELS,
@@ -41,6 +43,7 @@ import {
   WAVE_CHECKPOINT,
   type CheckpointInput,
   type CoordinatorRig,
+  type EncounterSigns,
   type HostOptions,
 } from './gameOverRig';
 import { LOCALES, resetLocale, textIn } from './i18nTestUtils';
@@ -60,6 +63,16 @@ import { LOCALES, resetLocale, textIn } from './i18nTestUtils';
  * 5. 文案跟随当前语言。
  * 6. 结算界面没有任何一条路会不声不响地毁掉或改写检查点。
  * 7. 只用键盘的玩家在每种状态下都够得着并能触发面板上的每个动作。
+ *
+ * 后续修正（批次 P4a）带来的规格：
+ * 8. 面板一出现（失败 / 通关，有没有检查点都一样）第一个动作就拿到焦点；面板显示期间
+ *    Tab / Shift+Tab 只在面板的动作之间循环，焦点出不去；面板隐藏或 HUD 销毁之后不再拦 Tab。
+ * 9. 每个动作在一次面板里只把回调交出去一次，按多少下都一样。按动作算，不按面板算
+ *    （先按“重试”再按“返回菜单”，两个都交）；面板再次出现（下一次阵亡 / 通关）重新可按。
+ * 10. 本局已经结束之后，同一个模拟步里晚到的清波 / 清关 / 击破 Boss / 雨燕入列不再写、改写或清除
+ *     检查点，也不记通关；晚到的清关不在面板底下开 Boss 战。反过来，先清关 / 击破、后阵亡：
+ *     第 1-9 关写下的检查点正是面板提供的那一份；最终关记通关、清检查点，面板是
+ *     “再来一局 / 返回菜单”。
  *
  * 两层：先直接驱动 HUD（面板本身），再经协调器台架（见 gameOverRig.ts）从阵亡事件走到面板——
  * 面板上是什么、按下去交给宿主什么，都由生产代码决定。经 main.ts 重新开局的部分在
@@ -538,9 +551,34 @@ describe('the old floating "continue from checkpoint" button is gone', () => {
   });
 });
 
-describe('result panel on the HUD: its buttons are ordinary focusable buttons', () => {
-  // 对照组：页面上只有 HUD、没有游戏的按键处理时，Tab 能走到每个动作——
-  // 下面协调器那一层里走不到，问题就不在面板的按钮上，也不在这里的键盘模型上
+/** 面板的三种样子 */
+const PANELS = [
+  ['MISSION FAILED with a checkpoint', (b: Bench) => b.hud.showGameOver(900, b.retry)],
+  ['MISSION FAILED without a checkpoint', (b: Bench) => b.hud.showGameOver(900)],
+  ['MISSION COMPLETE', (b: Bench) => b.hud.showMissionComplete(900)],
+] as const;
+
+interface OutsideControls {
+  before: HTMLButtonElement;
+  field: HTMLInputElement;
+  link: HTMLAnchorElement;
+}
+
+/** 面板之外、页面上别的可聚焦控件：一个排在 HUD 前面，两个排在后面 */
+function addOutsideControls(): OutsideControls {
+  const before = document.createElement('button');
+  before.textContent = 'outside, before the HUD';
+  document.body.prepend(before);
+  const field = document.createElement('input');
+  document.body.append(field);
+  const link = document.createElement('a');
+  link.href = '#';
+  link.textContent = 'outside, after the HUD';
+  document.body.append(link);
+  return { before, field, link };
+}
+
+describe('result panel on the HUD: keyboard focus (spec 8)', () => {
   let bench: Bench;
 
   beforeEach(() => {
@@ -553,11 +591,16 @@ describe('result panel on the HUD: its buttons are ordinary focusable buttons', 
     cleanUp();
   });
 
-  it.each([
-    ['MISSION FAILED with a checkpoint', (b: Bench) => b.hud.showGameOver(900, b.retry)],
-    ['MISSION FAILED without a checkpoint', (b: Bench) => b.hud.showGameOver(900)],
-    ['MISSION COMPLETE', (b: Bench) => b.hud.showMissionComplete(900)],
-  ] as const)('%s: Tab reaches both actions', (_name, show) => {
+  it.each(PANELS)('%s: the first action has the focus as the panel appears', (_name, show) => {
+    const outside = addOutsideControls();
+    outside.field.focus();
+
+    show(bench);
+
+    expect(document.activeElement).toBe(actionButtons()[0]);
+  });
+
+  it.each(PANELS)('%s: Tab reaches both actions', (_name, show) => {
     show(bench);
     const [first, second] = actionButtons();
 
@@ -565,6 +608,320 @@ describe('result panel on the HUD: its buttons are ordinary focusable buttons', 
     expect(tabTo(second)).toBe(true);
     expect(tabTo(first)).toBe(true);
   });
+
+  it.each(PANELS)(
+    '%s: Tab and Shift+Tab go round the two actions and nowhere else',
+    (_name, show) => {
+      show(bench);
+      addOutsideControls();
+      const [first, second] = actionButtons();
+      expect(document.activeElement).toBe(first);
+
+      const forward: Array<Element | null> = [];
+      for (let i = 0; i < 6; i++) {
+        pressTab();
+        forward.push(document.activeElement);
+      }
+      const backward: Array<Element | null> = [];
+      for (let i = 0; i < 5; i++) {
+        pressTab({ shiftKey: true });
+        backward.push(document.activeElement);
+      }
+
+      expect(forward).toEqual([second, first, second, first, second, first]);
+      expect(backward).toEqual([second, first, second, first, second]);
+    }
+  );
+
+  it.each(PANELS)(
+    '%s: focus that got away (a click on the background, a control behind the panel) is back on the next Tab',
+    (_name, show) => {
+      show(bench);
+      const outside = addOutsideControls();
+      const leave: Array<[string, () => void]> = [
+        ['nothing focused', () => (document.activeElement as HTMLElement).blur()],
+        ['a button before the HUD', () => outside.before.focus()],
+        ['a field after the HUD', () => outside.field.focus()],
+        ['a link after the HUD', () => outside.link.focus()],
+      ];
+
+      for (const [where, away] of leave) {
+        for (const shiftKey of [false, true]) {
+          away();
+          expect(actionButtons(), `${where}: focus did leave`).not.toContain(
+            document.activeElement
+          );
+
+          pressTab({ shiftKey });
+
+          expect(actionButtons(), `${where}, ${shiftKey ? 'Shift+Tab' : 'Tab'}`).toContain(
+            document.activeElement
+          );
+        }
+      }
+    }
+  );
+
+  const TAB_FREE: Array<[string, (b: Bench) => void]> = [
+    ['before any panel has been shown', (b) => b.hud.show()],
+    [
+      'after the retry panel hides',
+      (b) => {
+        b.hud.showGameOver(900, b.retry);
+        b.hud.hideGameOver();
+      },
+    ],
+    [
+      'after the Play Again panel hides',
+      (b) => {
+        b.hud.showGameOver(900);
+        b.hud.hideGameOver();
+      },
+    ],
+    [
+      'after the MISSION COMPLETE panel hides',
+      (b) => {
+        b.hud.showMissionComplete(900);
+        b.hud.hideGameOver();
+      },
+    ],
+    [
+      'after one panel replaced another and then hid',
+      (b) => {
+        b.hud.showGameOver(900, b.retry);
+        b.hud.showGameOver(950);
+        b.hud.showMissionComplete(990);
+        b.hud.hideGameOver();
+      },
+    ],
+    [
+      'after the HUD is disposed with the retry panel up',
+      (b) => {
+        b.hud.showGameOver(900, b.retry);
+        b.hud.dispose();
+      },
+    ],
+    [
+      'after the HUD is disposed with MISSION COMPLETE up',
+      (b) => {
+        b.hud.showMissionComplete(900);
+        b.hud.dispose();
+      },
+    ],
+  ];
+
+  it.each(TAB_FREE)('%s, Tab is the page’s again', (_name, reach) => {
+    reach(bench);
+    const outside = addOutsideControls();
+
+    outside.before.focus();
+    expect(isTabIntercepted(), 'Tab').toBe(false);
+    expect(isTabIntercepted({ shiftKey: true }), 'Shift+Tab').toBe(false);
+    expect(document.activeElement, 'focus was not pulled anywhere').toBe(outside.before);
+
+    // 浏览器自己的顺序：HUD 前面的按钮 → 后面的输入框 → 链接，面板的动作不在其中
+    pressTab();
+    expect(document.activeElement).toBe(outside.field);
+    pressTab();
+    expect(document.activeElement).toBe(outside.link);
+    pressTab({ shiftKey: true });
+    expect(document.activeElement).toBe(outside.field);
+  });
+
+  it('…whereas with a panel up the same Tab is taken over (the check above is not vacuous)', () => {
+    bench.hud.showGameOver(900);
+    const outside = addOutsideControls();
+    outside.before.focus();
+
+    expect(isTabIntercepted()).toBe(true);
+  });
+});
+
+describe('result panel on the HUD: each action delivers once per panel (spec 9)', () => {
+  let bench: Bench;
+
+  beforeEach(() => {
+    prepare();
+    bench = createBench();
+  });
+
+  afterEach(() => {
+    bench.hud.dispose();
+    cleanUp();
+  });
+
+  interface ActionCase {
+    name: string;
+    show: (b: Bench) => void;
+    index: 0 | 1;
+    delivered: (b: Bench) => Mock<() => void>;
+  }
+
+  const [[, failedWithCheckpoint], [, failedWithout], [, complete]] = PANELS;
+  const ACTIONS: ActionCase[] = [
+    {
+      name: 'Retry from checkpoint',
+      show: failedWithCheckpoint,
+      index: 0,
+      delivered: (b) => b.onCheckpointRetry,
+    },
+    {
+      name: 'Play Again on MISSION FAILED',
+      show: failedWithout,
+      index: 0,
+      delivered: (b) => b.onRetry,
+    },
+    {
+      name: 'Play Again on MISSION COMPLETE',
+      show: complete,
+      index: 0,
+      delivered: (b) => b.onRetry,
+    },
+    {
+      name: 'Main Menu beside the retry',
+      show: failedWithCheckpoint,
+      index: 1,
+      delivered: (b) => b.onExitToMenu,
+    },
+    {
+      name: 'Main Menu on MISSION FAILED',
+      show: failedWithout,
+      index: 1,
+      delivered: (b) => b.onExitToMenu,
+    },
+    {
+      name: 'Main Menu on MISSION COMPLETE',
+      show: complete,
+      index: 1,
+      delivered: (b) => b.onExitToMenu,
+    },
+  ];
+
+  /** 把这个动作连按好几下：点两下，再用 Enter、Space 各按一下，最后再点一下 */
+  function mash(index: 0 | 1): void {
+    const button = actionButtons()[index];
+    button.click();
+    button.click();
+    button.focus();
+    pressActivationKey('Enter');
+    pressActivationKey(' ');
+    button.click();
+  }
+
+  it.each(ACTIONS)('$name: pressed again and again, delivered once', (action) => {
+    action.show(bench);
+    letThePanelSettle();
+
+    mash(action.index);
+
+    expect(action.delivered(bench)).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(ACTIONS)(
+    '$name: a click, Enter and Space each deliver on a panel of their own',
+    (action) => {
+      const presses: Array<[string, (button: HTMLButtonElement) => void]> = [
+        ['click', (button) => button.click()],
+        ['Enter', () => pressActivationKey('Enter')],
+        ['Space', () => pressActivationKey(' ')],
+      ];
+
+      presses.forEach(([how, press], done) => {
+        action.show(bench);
+        letThePanelSettle();
+        const button = actionButtons()[action.index];
+        button.focus();
+
+        press(button);
+
+        expect(action.delivered(bench), how).toHaveBeenCalledTimes(done + 1);
+      });
+    }
+  );
+
+  it.each(ACTIONS)(
+    '$name: the next panel re-arms it, after a hide and when one panel replaces another',
+    (action) => {
+      action.show(bench);
+      letThePanelSettle();
+      mash(action.index);
+      expect(action.delivered(bench), 'first panel').toHaveBeenCalledTimes(1);
+
+      bench.hud.hideGameOver();
+      action.show(bench);
+      letThePanelSettle();
+      mash(action.index);
+      expect(action.delivered(bench), 'hidden, then shown again').toHaveBeenCalledTimes(2);
+
+      action.show(bench);
+      letThePanelSettle();
+      mash(action.index);
+      expect(action.delivered(bench), 'shown again without a hide').toHaveBeenCalledTimes(3);
+    }
+  );
+
+  it.each(PANELS)(
+    '%s: per action, not per panel: pressing one action does not use up the other',
+    (_name, show) => {
+      const first = (): Mock<() => void> =>
+        show === failedWithCheckpoint ? bench.onCheckpointRetry : bench.onRetry;
+
+      show(bench);
+      letThePanelSettle();
+      mash(0);
+      mash(1);
+      expect(first(), 'first action, pressed first').toHaveBeenCalledTimes(1);
+      expect(bench.onExitToMenu, 'Main Menu, pressed second').toHaveBeenCalledTimes(1);
+
+      show(bench);
+      letThePanelSettle();
+      mash(1);
+      mash(0);
+      expect(bench.onExitToMenu, 'Main Menu, pressed first').toHaveBeenCalledTimes(2);
+      expect(first(), 'first action, pressed second').toHaveBeenCalledTimes(2);
+    }
+  );
+
+  it('a different kind of panel re-arms too: failed, then complete, then failed again', () => {
+    bench.hud.showGameOver(100, bench.retry);
+    letThePanelSettle();
+    mash(0);
+    mash(1);
+
+    bench.hud.showMissionComplete(900);
+    letThePanelSettle();
+    mash(0);
+    mash(1);
+    expect(bench.onRetry, 'Play Again on the MISSION COMPLETE panel').toHaveBeenCalledTimes(1);
+    expect(bench.onExitToMenu).toHaveBeenCalledTimes(2);
+
+    bench.hud.showGameOver(200, bench.retry);
+    letThePanelSettle();
+    mash(0);
+    mash(1);
+    expect(bench.onCheckpointRetry).toHaveBeenCalledTimes(2);
+    expect(bench.onExitToMenu).toHaveBeenCalledTimes(3);
+    expect(bench.onRetry).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(LOCALES)(
+    're-wording an open panel (language switched to %s) does not re-arm what was delivered',
+    (locale) => {
+      setLocale(otherLocale(locale));
+      bench.hud.showGameOver(100, bench.retry);
+      letThePanelSettle();
+      mash(0);
+      mash(1);
+
+      setLocale(locale);
+      letThePanelSettle();
+      mash(0);
+      mash(1);
+
+      expect(bench.onCheckpointRetry).toHaveBeenCalledTimes(1);
+      expect(bench.onExitToMenu).toHaveBeenCalledTimes(1);
+    }
+  );
 });
 
 // ══════════════════════════════════ 经协调器 ══════════════════════════════════
@@ -686,20 +1043,36 @@ describe('game over through the coordinator', () => {
       expect(host.onExitToMenu).not.toHaveBeenCalled();
     });
 
-    // FINDING（低）：规格第 1 条写“不管按多少下，只把存档交给 onContinueFromCheckpoint 一次”。
-    // 面板和协调器都不拦：按 N 下就调用宿主 N 次（src/ui/HUD.ts:850-857，
-    // src/core/GameCoordinator.ts:2412）。成品里只开出一局，靠的是 main.ts：第一次调用同步销毁
-    // 旧游戏（面板随之移除），bootGame 的防重入再挡掉其余几次（见 GameOverRetryBoot.test.ts）。
-    it.fails('hands the save over once however many times the retry is pressed', async () => {
-      await dieAtCheckpoint();
+    // 规格第 1 条：“不管按多少下，只把存档交给 onContinueFromCheckpoint 一次”（第 9 条的按动作锁）
+    it('hands the save over once however many times the retry is pressed', async () => {
+      const { raw } = await dieAtCheckpoint();
       letThePanelSettle();
       const retry = actionButtons()[0];
 
       retry.click();
       retry.click();
       pressActivationKey('Enter');
+      pressActivationKey(' ');
 
       expect(host.onContinueFromCheckpoint).toHaveBeenCalledTimes(1);
+      expect(host.onContinueFromCheckpoint.mock.calls[0][0]).toEqual(JSON.parse(raw));
+    });
+
+    it('Main Menu, too, is delivered once; and a retry already pressed does not use it up', async () => {
+      await dieAtCheckpoint();
+      letThePanelSettle();
+      const [retry, mainMenu] = actionButtons();
+
+      retry.click();
+      mainMenu.click();
+      mainMenu.click();
+      mainMenu.focus();
+      pressActivationKey('Enter');
+      pressActivationKey(' ');
+
+      expect(host.onContinueFromCheckpoint).toHaveBeenCalledTimes(1);
+      expect(host.onExitToMenu).toHaveBeenCalledTimes(1);
+      expect(host.onRetry).not.toHaveBeenCalled();
     });
 
     it.each([
@@ -858,6 +1231,73 @@ describe('game over through the coordinator', () => {
       expect(rawSave(), 'and the panel saved nothing').toBeNull();
     });
 
+    it('Play Again calls onRetry once however many times it is pressed', async () => {
+      const run = await startRun();
+      run.die();
+      letThePanelSettle();
+      const playAgain = actionButtons()[0];
+
+      playAgain.click();
+      playAgain.click();
+      pressActivationKey('Enter');
+      pressActivationKey(' ');
+
+      expect(host.onRetry).toHaveBeenCalledTimes(1);
+      expect(host.onExitToMenu).not.toHaveBeenCalled();
+    });
+
+    // Play Again 现在一出现就有焦点，而 Space 是开火键：阵亡那一刻还按着它的玩家不该被直接带进下一局
+    it.each([
+      ['Space (the fire key)', ' '],
+      ['Enter', 'Enter'],
+    ] as const)(
+      '%s held down as the Play Again panel appears, and let go later, starts nothing',
+      async (_name, key) => {
+        const run = await startRun();
+        keyDown(key);
+        run.die();
+        expect(document.activeElement).toBe(actionButtons()[0]);
+
+        for (let i = 0; i < 12; i++) {
+          keyDown(key, { repeat: true });
+          now += 33;
+        }
+        letThePanelSettle();
+        for (let i = 0; i < 12; i++) {
+          keyDown(key, { repeat: true });
+          now += 33;
+        }
+        keyUp(key);
+
+        expect(host.onRetry).not.toHaveBeenCalled();
+        expect(host.onExitToMenu).not.toHaveBeenCalled();
+
+        pressActivationKey(key);
+        expect(host.onRetry, 'a fresh press after letting go').toHaveBeenCalledTimes(1);
+      }
+    );
+
+    it.each([
+      ['Space (the fire key)', ' '],
+      ['Enter', 'Enter'],
+    ] as const)(
+      '%s tapped in the very instant the Play Again panel appears starts nothing; a tap once it settled does',
+      async (_name, key) => {
+        const run = await startRun();
+        run.die();
+
+        pressActivationKey(key);
+
+        expect(host.onRetry).not.toHaveBeenCalled();
+        expect(isSettlementUp(), 'the panel is still there to read').toBe(true);
+
+        letThePanelSettle();
+        pressActivationKey(key);
+
+        expect(host.onRetry).toHaveBeenCalledTimes(1);
+      }
+    );
+
     it('boss mode gets Play Again + Main Menu even with a campaign save in storage', async () => {
       const raw = seedSave();
       const run = await startRun({ gameMode: 'boss', startLevel: 4 });
@@ -956,6 +1396,22 @@ describe('game over through the coordinator', () => {
       expect(host.onRetry).toHaveBeenCalledTimes(1);
       expect(host.onExitToMenu).toHaveBeenCalledTimes(1);
       expect(host.onContinueFromCheckpoint).not.toHaveBeenCalled();
+    });
+
+    it('campaign complete: the fire key still down, or tapped as the panel appears, starts nothing', async () => {
+      const run = await startRun({ startLevel: 10 });
+      keyDown(' ');
+      run.destroyBoss(10);
+      expect(settlementTitle()).toBe(LABELS.complete.en);
+
+      keyDown(' ', { repeat: true });
+      keyUp(' ');
+      pressActivationKey(' ');
+      expect(host.onRetry).not.toHaveBeenCalled();
+
+      letThePanelSettle();
+      pressActivationKey(' ');
+      expect(host.onRetry).toHaveBeenCalledTimes(1);
     });
 
     it('boss mode complete with a campaign save in storage: no retry, save untouched', async () => {
@@ -1169,107 +1625,394 @@ describe('game over through the coordinator', () => {
 
       expect(run.session.isPaused()).toBe(true);
     });
+  });
 
-    // FINDING（低）：面板一旦亮出“从检查点重试 · 第 N 波”，存储里的检查点还会被同一个模拟步里
-    // 稍后到来的进度事件改写，面板不更新、也不提示。update() 在玩家阵亡之后照常把这一步剩下的
-    // 系统跑完（src/core/GameCoordinator.ts:1183-1193，阵亡事件是同步发出的），所以“同归于尽”
-    // ——最后一架敌机 / Boss 与玩家在同一步里被击毁——会在任务失败之后触发：
-    //   · WAVE_COMPLETE → 写下一波的检查点（GameCoordinator.ts:854-857）；
-    //   · LEVEL_COMPLETE → 写 Boss 战前检查点（GameCoordinator.ts:867-873）；
-    //   · handleBossDestroy → 写下一关机库检查点；第 10 关则清掉检查点并记为通关
-    //     （GameCoordinator.ts:3452，CampaignFlowController.ts:311-318 / 341）。
-    // 写进去的快照生命数是 max(1, 0) = 1。“重试”仍回到面板上写的那一处（用的是阵亡时读到的那份），
-    // “返回菜单 → 继续战役”却去了另一处。这几条用例直接往事件总线上发事件：如果修法是阵亡后
-    // 不再跑这一步剩下的系统，而不是让这些处理器在结束后不写档，用例要相应改成驱动 update()。
-    it.fails.each([
-      ['the wave is cleared', (run: CoordinatorRig) => run.completeWave(3)],
-      ['the level is cleared', (run: CoordinatorRig) => run.completeLevel(2)],
-      ['the boss goes down', (run: CoordinatorRig) => run.destroyBoss(2)],
-      ['the final boss goes down', (run: CoordinatorRig) => run.destroyBoss(10)],
-    ] as const)(
-      'once the panel is up, the stored checkpoint stays as described even if %s in that same step',
+  // 阵亡与清波 / 清关 / 击破 Boss 可能落在同一个模拟步里：update() 在玩家阵亡之后照常把这一步剩下的
+  // 系统跑完（阵亡事件是同步发出的），“同归于尽”——最后一架敌机 / Boss 与玩家在同一步里被击毁——
+  // 的进度事件于是在任务失败之后才到。这些用例直接往事件总线 / 协调器的处理器上发事件。
+  describe('progress landing after the fatal hit, in the same step (spec 10)', () => {
+    const LATE: Array<[string, (run: CoordinatorRig) => void]> = [
+      ['the wave is cleared', (run) => run.completeWave(3)],
+      ['the level is cleared', (run) => run.completeLevel(2)],
+      ['the boss goes down', (run) => run.destroyBoss(2)],
+      ['Swift joins the flight', (run) => run.campaign.handleWingmanLaunched('swift')],
+    ];
+
+    it.each(LATE)(
+      '%s: storage, panel and the save handed over stay as they were',
       async (_name, progress) => {
         const run = await startRun({ startLevel: 2 });
-        seedSave({ checkpoint: 'wave', level: 2, wave: 3 });
+        const raw = seedSave({ checkpoint: 'wave', level: 2, wave: 3 });
         run.die();
         expect(readText(actionButtons()[0])).toContain(WAVE_PLACE.en);
         const everything = storageSnapshot();
+        const writes = watchCheckpointWrites();
 
         progress(run);
+        run.tick(30);
 
         expect(storageSnapshot()).toEqual(everything);
+        expect(writes(), 'not even rewritten with the same bytes').toBe(0);
+        expect(settlementTitle()).toBe(LABELS.failed.en);
+        expect(readText(actionButtons()[0])).toContain(LABELS.retry.en);
+        expect(readText(actionButtons()[0])).toContain(WAVE_PLACE.en);
+        expect(run.target.showHangar, 'no hangar stop under the panel').not.toHaveBeenCalled();
+
+        letThePanelSettle();
+        actionButtons()[0].click();
+        expect(host.onContinueFromCheckpoint.mock.calls[0][0]).toEqual(JSON.parse(raw));
+        expect(rawSave()).toBe(raw);
       }
     );
+
+    it('the final boss goes down: no win is recorded, the checkpoint stays, the panel stays MISSION FAILED', async () => {
+      const run = await startRun({ startLevel: 10 });
+      const raw = seedSave({ checkpoint: 'boss', level: 10, wave: 8 });
+      run.die();
+      const everything = storageSnapshot();
+
+      run.destroyBoss(10);
+      run.tick(30);
+
+      expect(storageSnapshot()).toEqual(everything);
+      expect(rawSave()).toBe(raw);
+      expect(getCampaignProgress().completed, 'the campaign is not marked complete').toBe(false);
+      expect(settlementTitle()).toBe(LABELS.failed.en);
+      expect(readText(actionButtons()[0])).toContain(LABELS.retry.en);
+      expect(readText(actionButtons()[0])).toContain('Ch. 10 · The Oracle Core · Boss');
+      expect(actionTexts()).toHaveLength(2);
+      expect(readText(settlementPanel())).not.toMatch(START_OVER_WORDING);
+    });
+
+    it('a run that died before its first checkpoint: late progress still writes none', async () => {
+      const run = await startRun({ startLevel: 2 });
+      run.die();
+      const everything = storageSnapshot();
+
+      run.completeWave(3);
+      run.completeLevel(2);
+      run.destroyBoss(2);
+      run.campaign.handleWingmanLaunched('swift');
+      run.tick(30);
+
+      expect(rawSave()).toBeNull();
+      expect(storageSnapshot()).toEqual(everything);
+      expect(actionTexts()).toEqual([LABELS.playAgain.en, LABELS.mainMenu.en]);
+    });
+
+    it('…whereas during play Swift joining is noted in the checkpoint (the Swift case above is not vacuous)', async () => {
+      const run = await startRun({ startLevel: 2 });
+      seedSave({ checkpoint: 'wave', level: 2, wave: 3 });
+      expect(storedSave().swiftJoined ?? false).toBe(false);
+
+      run.campaign.handleWingmanLaunched('swift');
+
+      expect(storedSave().swiftJoined).toBe(true);
+    });
   });
 
-  describe('keyboard only, with the game’s own key handling listening (spec 7)', () => {
-    it('with a checkpoint: Tab moves between Retry and Main Menu, Enter and Space activate', async () => {
-      await dieAtCheckpoint();
-      const [retry, mainMenu] = actionButtons();
+  describe('progress landing just before the fatal hit, in the same step (spec 10)', () => {
+    /** 面板提供的正是存储里此刻那一份：位置、交出去的存档、原始字节 */
+    function expectPanelOffersTheStoredCheckpoint(raw: string | null): void {
+      expect(raw, 'a checkpoint is stored').not.toBeNull();
+      const [first, second] = actionButtons();
+      expect(settlementTitle()).toBe(LABELS.failed.en);
+      expect(actionButtons()).toHaveLength(2);
+      expect(readText(first)).toContain(LABELS.retry.en);
+      expect(readText(first)).toContain(describeCheckpoint(storedSave()));
+      expect(readText(second)).toBe(LABELS.mainMenu.en);
+      expect(readText(settlementPanel())).not.toMatch(START_OVER_WORDING);
+      expect(rawSave(), 'the death left what was just written alone').toBe(raw);
+
       letThePanelSettle();
-      expect(document.activeElement).toBe(retry);
+      first.click();
+      expect(host.onContinueFromCheckpoint).toHaveBeenCalledTimes(1);
+      expect(host.onContinueFromCheckpoint.mock.calls[0][0]).toEqual(JSON.parse(raw as string));
+      expect(rawSave()).toBe(raw);
+    }
+
+    it('wave cleared, then the fatal hit: the panel offers the wave checkpoint just written', async () => {
+      const run = await startRun({ startLevel: 2 });
+      const older = seedSave({ checkpoint: 'wave', level: 2, wave: 3 });
+
+      run.completeWave(3);
+      const raw = rawSave();
+      expect(raw, 'the clear wrote a newer checkpoint').not.toBe(older);
+      run.die();
+      run.tick(30);
+
+      expect(readText(actionButtons()[0])).toContain('Ch. 2 · Sandstorm · Wave 5');
+      expectPanelOffersTheStoredCheckpoint(raw);
+    });
+
+    it('level cleared, then the fatal hit: the panel offers the checkpoint before the boss', async () => {
+      const run = await startRun({ startLevel: 2 });
+      const older = seedSave({ checkpoint: 'wave', level: 2, wave: 3 });
+
+      run.completeLevel(2);
+      const raw = rawSave();
+      expect(raw).not.toBe(older);
+      run.die();
+      run.tick(30);
+
+      expect(storedSave()).toMatchObject({ checkpoint: 'boss', level: 2 });
+      expect(readText(actionButtons()[0])).toContain('Ch. 2 · Sandstorm · Boss');
+      expectPanelOffersTheStoredCheckpoint(raw);
+    });
+
+    it.each([
+      [1, 'Ch. 2 · Sandstorm · Hangar'],
+      [2, 'Ch. 3 · Snowbound Summit · Hangar'],
+      [9, 'Ch. 10 · The Oracle Core · Hangar'],
+    ] as const)(
+      'the boss of level %i destroyed, then the fatal hit: the hangar checkpoint is stored and is the one offered',
+      async (level, place) => {
+        const run = await startRun({ startLevel: level });
+        const older = seedSave({ checkpoint: 'boss', level, wave: 4 });
+
+        run.killBoss(level);
+        const raw = rawSave();
+        expect(raw).not.toBe(older);
+        expect(storedSave()).toMatchObject({ checkpoint: 'hangar', level: level + 1 });
+        run.die();
+        run.tick(30);
+
+        expect(readText(actionButtons()[0])).toContain(place);
+        expect(run.target.showHangar, 'the dead run goes on to no hangar').not.toHaveBeenCalled();
+        expectPanelOffersTheStoredCheckpoint(raw);
+      }
+    );
+
+    it('the final boss destroyed, then the fatal hit: the win is recorded, the checkpoint is cleared, Play Again + Main Menu', async () => {
+      const run = await startRun({ startLevel: 10 });
+      seedSave({ checkpoint: 'boss', level: 10, wave: 8 });
+      expect(getCampaignProgress().completed).toBe(false);
+
+      run.killBoss(10);
+      expect(getCampaignProgress().completed, 'the win is recorded').toBe(true);
+      expect(rawSave(), 'the checkpoint is cleared').toBeNull();
+      const everything = storageSnapshot();
+      run.die();
+      run.tick(30);
+
+      expect(isSettlementUp()).toBe(true);
+      expect(actionTexts()).toEqual([LABELS.playAgain.en, LABELS.mainMenu.en]);
+      expect(readText(settlementPanel())).not.toMatch(CHECKPOINT_WORDING);
+      expect(retryActions()).toHaveLength(0);
+      expect(storageSnapshot(), 'the death changed nothing that was recorded').toEqual(everything);
+      expect(getCampaignProgress().completed).toBe(true);
+
+      letThePanelSettle();
+      actionButtons()[0].click();
+      expect(host.onRetry).toHaveBeenCalledTimes(1);
+      expect(host.onContinueFromCheckpoint).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('a level clear and the boss encounter (spec 10)', () => {
+    /** 这一局已经开过对局；清关时协调器真的去做“回血、清场、简报、置 Boss 战状态” */
+    async function watchedRun(
+      settings: Partial<GameSettings> = {}
+    ): Promise<{ run: CoordinatorRig; signs: () => EncounterSigns }> {
+      const run = await startRun({ startLevel: 2, ...settings });
+      return { run, signs: run.watchBossEncounter() };
+    }
+
+    it('during play a level clear starts the encounter: heal, units cleared, briefing, boss-battle state, checkpoint before the boss', async () => {
+      const { run, signs } = await watchedRun();
+      const before = signs();
+      expect(before.inBossBattle).toBe(false);
+
+      run.completeLevel(2);
+
+      expect(signs()).toEqual({
+        heals: before.heals + 1,
+        unitClears: before.unitClears + 1,
+        briefings: before.briefings + 1,
+        musicStops: before.musicStops + 1,
+        inBossBattle: true,
+      });
+      expect(storedSave()).toMatchObject({ checkpoint: 'boss', level: 2 });
+    });
+
+    it.each([
+      ['with a checkpoint', true],
+      ['without one', false],
+    ] as const)(
+      'once the run is over (%s), a late level clear starts nothing under the panel',
+      async (_name, withCheckpoint) => {
+        const { run, signs } = await watchedRun();
+        if (withCheckpoint) {
+          seedSave({ checkpoint: 'wave', level: 2, wave: 3 });
+        }
+        run.die();
+        const before = signs();
+        const everything = storageSnapshot();
+        const title = settlementTitle();
+        const actions = actionTexts();
+
+        run.completeLevel(2);
+        run.tick(30);
+
+        expect(signs()).toEqual(before);
+        expect(before.inBossBattle).toBe(false);
+        expect(run.target.startBossBattleAt).not.toHaveBeenCalled();
+        expect(storageSnapshot()).toEqual(everything);
+        expect(isSettlementUp()).toBe(true);
+        expect(settlementTitle()).toBe(title);
+        expect(actionTexts()).toEqual(actions);
+      }
+    );
+
+    it('after MISSION COMPLETE a stray level clear starts nothing either', async () => {
+      const { run, signs } = await watchedRun({ startLevel: 10 });
+      run.destroyBoss(10);
+      expect(settlementTitle()).toBe(LABELS.complete.en);
+      run.session.setInBossBattle(false);
+      const before = signs();
+      const everything = storageSnapshot();
+
+      run.completeLevel(10);
+
+      expect(signs()).toEqual(before);
+      expect(storageSnapshot()).toEqual(everything);
+      expect(settlementTitle()).toBe(LABELS.complete.en);
+    });
+
+    it('boss mode during play: a level clear is still ignored, and writes nothing', async () => {
+      const raw = seedSave();
+      const { run, signs } = await watchedRun({ gameMode: 'boss', startLevel: 4 });
+      const before = signs();
+      const everything = storageSnapshot();
+
+      run.completeLevel(4);
+
+      expect(signs()).toEqual(before);
+      expect(storageSnapshot()).toEqual(everything);
+      expect(rawSave()).toBe(raw);
+    });
+
+    it('already in a boss battle during play: a second level clear is still ignored', async () => {
+      const { run, signs } = await watchedRun();
+      const raw = seedSave({ checkpoint: 'boss', level: 2, wave: 5 });
+      run.session.setInBossBattle(true);
+      const before = signs();
+
+      run.completeLevel(2);
+
+      expect(signs()).toEqual(before);
+      expect(before.inBossBattle).toBe(true);
+      expect(rawSave(), 'the checkpoint before the boss is not rewritten').toBe(raw);
+    });
+  });
+
+  describe('keyboard only, with the game’s own key handling listening (spec 7, spec 8)', () => {
+    type Reach = () => Promise<void>;
+    const withCheckpoint: Reach = async () => {
+      await dieAtCheckpoint();
+    };
+    const withoutCheckpoint: Reach = async () => {
+      (await startRun()).die();
+    };
+    const missionComplete: Reach = async () => {
+      (await startRun({ startLevel: 10 })).destroyBoss(10);
+    };
+    const STATES: Array<[string, Reach]> = [
+      ['with a checkpoint', withCheckpoint],
+      ['without a checkpoint', withoutCheckpoint],
+      ['mission complete', missionComplete],
+    ];
+
+    /** 面板上第 index 个动作按下去该调用的宿主回调 */
+    function callbackOf(reach: Reach, index: 0 | 1): Mock {
+      if (index === 1) {
+        return host.onExitToMenu;
+      }
+      return reach === withCheckpoint ? host.onContinueFromCheckpoint : host.onRetry;
+    }
+
+    it.each(STATES)(
+      '%s: the first action has the focus as the panel appears',
+      async (_n, reach) => {
+        await reach();
+
+        expect(isSettlementUp()).toBe(true);
+        expect(document.activeElement).toBe(actionButtons()[0]);
+      }
+    );
+
+    it.each(STATES)('%s: Tab and Shift+Tab move between the two actions', async (_n, reach) => {
+      await reach();
+      const [first, second] = actionButtons();
 
       expect(pressTab()).toBe(true);
-      expect(document.activeElement).toBe(mainMenu);
-      pressActivationKey('Enter');
-      expect(host.onExitToMenu).toHaveBeenCalledTimes(1);
-      pressActivationKey(' ');
-      expect(host.onExitToMenu).toHaveBeenCalledTimes(2);
-
+      expect(document.activeElement).toBe(second);
       expect(pressTab({ shiftKey: true })).toBe(true);
-      expect(document.activeElement).toBe(retry);
-      pressActivationKey(' ');
-      expect(host.onContinueFromCheckpoint).toHaveBeenCalledTimes(1);
+      expect(document.activeElement).toBe(first);
+      expect(tabTo(second)).toBe(true);
+      expect(tabTo(first)).toBe(true);
     });
 
-    it('with a checkpoint: every action can be reached from every other', async () => {
-      await dieAtCheckpoint();
-      const [retry, mainMenu] = actionButtons();
-
-      expect(tabTo(mainMenu)).toBe(true);
-      expect(tabTo(retry)).toBe(true);
-      expect(tabTo(mainMenu)).toBe(true);
-    });
-
-    // FINDING（中）：没有检查点的任务失败面板和任务完成面板上，只用键盘的玩家哪个动作都够不着。
-    // 面板出现时没有任何东西拿到焦点（只有带检查点时才 focus：src/ui/HUD.ts:3199-3203；
-    // showMissionComplete 从不 focus：src/ui/HUD.ts:3209-3232），而焦点不在表单控件上时
-    // InputHandler 会吃掉 Tab（src/core/Input/InputHandler.ts:271-274，Tab 是切换特殊武器的键），
-    // 于是焦点永远进不了面板，Enter / Space 也就无从触发。
-    it.fails(
-      'without a checkpoint: Tab reaches Play Again and Main Menu, Enter activates them',
-      async () => {
-        const run = await startRun();
-        run.die();
-        const [playAgain, mainMenu] = actionButtons();
+    // 每个键、每个动作各用一块新面板：同一块面板上一个动作只交一次（第 9 条）
+    describe.each(STATES)('%s', (_n, reach) => {
+      it.each([
+        ['Enter', 'Enter', 0],
+        ['Space', ' ', 0],
+        ['Enter', 'Enter', 1],
+        ['Space', ' ', 1],
+      ] as const)('%s activates action #%#', async (_key, key, index) => {
+        await reach();
         letThePanelSettle();
+        const target = actionButtons()[index];
+        const other = callbackOf(reach, index === 0 ? 1 : 0);
 
-        expect(tabTo(playAgain), 'Tab reaches Play Again').toBe(true);
-        pressActivationKey('Enter');
-        expect(host.onRetry).toHaveBeenCalledTimes(1);
+        expect(tabTo(target), 'Tab reaches it').toBe(true);
+        pressActivationKey(key);
 
-        expect(tabTo(mainMenu), 'Tab reaches Main Menu').toBe(true);
-        pressActivationKey('Enter');
-        expect(host.onExitToMenu).toHaveBeenCalledTimes(1);
+        expect(callbackOf(reach, index)).toHaveBeenCalledTimes(1);
+        expect(other).not.toHaveBeenCalled();
+      });
+    });
+
+    it.each(STATES)(
+      '%s: however often Tab or Shift+Tab is pressed, focus stays on the panel’s actions',
+      async (_n, reach) => {
+        await reach();
+        const outside = addOutsideControls();
+        const actions = actionButtons();
+
+        for (let i = 0; i < 7; i++) {
+          pressTab();
+          expect(actions, `Tab #${i + 1}`).toContain(document.activeElement);
+        }
+        for (let i = 0; i < 7; i++) {
+          pressTab({ shiftKey: true });
+          expect(actions, `Shift+Tab #${i + 1}`).toContain(document.activeElement);
+        }
+        // 点了一下面板后面的控件，焦点跑了出去：下一个 Tab 回到面板上
+        outside.field.focus();
+        pressTab();
+        expect(actions, 'back from a control behind the panel').toContain(document.activeElement);
+        outside.before.focus();
+        pressTab({ shiftKey: true });
+        expect(actions, 'and back with Shift+Tab').toContain(document.activeElement);
       }
     );
 
-    it.fails(
-      'mission complete: Tab reaches Play Again and Main Menu, Enter activates them',
-      async () => {
-        const run = await startRun({ startLevel: 10 });
-        run.destroyBoss(10);
-        const [playAgain, mainMenu] = actionButtons();
-        letThePanelSettle();
+    it.each(STATES)('%s: once the game is disposed, Tab is the page’s again', async (_n, reach) => {
+      await reach();
+      expect(rig).not.toBeNull();
 
-        expect(tabTo(playAgain), 'Tab reaches Play Again').toBe(true);
-        pressActivationKey('Enter');
-        expect(host.onRetry).toHaveBeenCalledTimes(1);
+      (rig as CoordinatorRig).dispose();
+      const outside = addOutsideControls();
+      outside.before.focus();
 
-        expect(tabTo(mainMenu), 'Tab reaches Main Menu').toBe(true);
-        pressActivationKey('Enter');
-        expect(host.onExitToMenu).toHaveBeenCalledTimes(1);
-      }
-    );
+      expect(isTabIntercepted()).toBe(false);
+      expect(isTabIntercepted({ shiftKey: true })).toBe(false);
+      pressTab();
+      expect(document.activeElement).toBe(outside.field);
+      pressTab();
+      expect(document.activeElement).toBe(outside.link);
+    });
   });
 });

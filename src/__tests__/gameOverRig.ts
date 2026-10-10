@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { expect, vi } from 'vitest';
+import { expect, vi, type Mock } from 'vitest';
 import { EventBus, GameEventType } from '@/core/EventBus';
 import { GameSessionState } from '@/core/GameSessionState';
 import { GameState } from '@/core/GameState';
@@ -26,7 +26,8 @@ import type { GameSettings } from '@/ui/StartMenu';
  * 办法——以真实的 GameCoordinator 原型为原型造一个对象，只把重量级的协作者换成替身：
  * - 真实运行的协调器方法：boot / bootWhenReady / ensurePresentationRuntime / applyGameSettings /
  *   setupEventListeners / createCampaignFlow / captureCheckpoint / resolveCheckpointRetry /
- *   showMissionComplete / handleBossDestroy / handlePauseToggle / dispose；
+ *   showMissionComplete / handleBossDestroy / handlePauseToggle / dispose，以及
+ *   watchBossEncounter() 之后的 startBossEncounter / presentBossBriefing / launchWingmen；
  * - 真实的协作者：GameSessionState、GameState、PlayerStats、ResourceRegistry、InputHandler、
  *   EventBus、CampaignFlowController、SaveSystem，以及表现层运行时（HUD、锁定框、Boss 指示器、
  *   PresentationController，由 ensurePresentationRuntime 自己创建并接线）；
@@ -228,6 +229,15 @@ export function pressTab(init: { shiftKey?: boolean } = {}): boolean {
 }
 
 /**
+ * 在当前焦点上按一下 Tab，只看它有没有被页面上的脚本拦下（preventDefault）；不替浏览器移动焦点。
+ */
+export function isTabIntercepted(init: { shiftKey?: boolean } = {}): boolean {
+  const down = dispatchKey('keydown', 'Tab', init);
+  dispatchKey('keyup', 'Tab', init);
+  return down.defaultPrevented;
+}
+
+/**
  * Enter / Space 对按钮的默认动作。jsdom 不会把按键变成 click，这里按浏览器的做法补上：
  * - Enter：每个没被 preventDefault 的 keydown（含按住不放的自动重复）都激活一次；
  * - Space：没被 preventDefault 的 keydown（含自动重复）把焦点所在的按钮“按下”，
@@ -316,6 +326,20 @@ export interface CoordinatorClass {
   prototype: object;
 }
 
+/** “Boss 战开没开”的读数（startBossEncounter 做的几件事各记一笔） */
+export interface EncounterSigns {
+  /** 回满血的次数 */
+  heals: number;
+  /** 清场（地面 / 海上 / 空中单位）的次数 */
+  unitClears: number;
+  /** Boss 简报卡片出现的次数 */
+  briefings: number;
+  /** 关卡音乐被停掉的次数 */
+  musicStops: number;
+  /** 会话是否处于 Boss 战 */
+  inBossBattle: boolean;
+}
+
 export interface CoordinatorRig {
   /** 以真实原型为原型的协调器对象 */
   readonly target: Stub;
@@ -340,6 +364,15 @@ export interface CoordinatorRig {
   completeLevel(level: number): void;
   /** 击破当前关的 Boss（协调器的 handleBossDestroy）；随后把收尾 / 结算 / 结局走完 */
   destroyBoss(level: number): void;
+  /** 只是击破 Boss，不推进收尾（同一个模拟步里后面还有别的事发生时用） */
+  killBoss(level: number): void;
+  /** 推进战役的游戏时间（Boss 击破后的收尾停顿在这里走完） */
+  tick(seconds: number): void;
+  /**
+   * 换回真实的 startBossEncounter（回满血、清场、Boss 简报、置 Boss 战状态；真正开打的
+   * startBossBattleAt 仍是替身），返回读数。要在对局开始之后调用。
+   */
+  watchBossEncounter(): () => EncounterSigns;
   /** Esc / P（协调器的 handlePauseToggle） */
   togglePause(): void;
   call<T>(method: string, ...args: unknown[]): T;
@@ -358,6 +391,7 @@ export function createCoordinatorRig(Real: CoordinatorClass, options: HostOption
   let cameraMode: GameSettings['cameraMode'] = 'third-person';
   const session = new GameSessionState();
   const gameState = new GameState();
+  const health = stubWith({ getHealthPercent: () => 1 });
 
   const target = Object.create(Real.prototype) as Stub;
   Object.assign(target, {
@@ -383,7 +417,7 @@ export function createCoordinatorRig(Real: CoordinatorClass, options: HostOption
         lives = value;
       },
       isShieldActive: () => false,
-      getHealth: () => stubWith(),
+      getHealth: () => health,
     }),
     view: stubWith({
       getMode: () => cameraMode,
@@ -420,6 +454,7 @@ export function createCoordinatorRig(Real: CoordinatorClass, options: HostOption
     prepareLevel: () => Promise.resolve(),
     startLevelCombat: vi.fn(),
     startBossEncounter: vi.fn(),
+    startBossBattleAt: vi.fn(),
     showHangar: vi.fn(),
     syncProgression: vi.fn(),
     setStoryHold: vi.fn(),
@@ -435,6 +470,15 @@ export function createCoordinatorRig(Real: CoordinatorClass, options: HostOption
 
   target.campaign = call<CampaignFlowController>('createCampaignFlow');
   call<void>('setupEventListeners');
+
+  const killBoss = (level: number): void => {
+    session.setLevel(level);
+    session.setInBossBattle(true);
+    const type = getBossForLevel(level);
+    expect(type, `level ${level} has a boss`).not.toBeNull();
+    const config = BOSS_CONFIGS[type as keyof typeof BOSS_CONFIGS];
+    call<void>('handleBossDestroy', new THREE.Vector3(0, 200, -400), config, session.isBossMode());
+  };
 
   return {
     target,
@@ -472,19 +516,24 @@ export function createCoordinatorRig(Real: CoordinatorClass, options: HostOption
       EventBus.emit(GameEventType.LEVEL_COMPLETE, { level });
     },
     destroyBoss: (level) => {
-      session.setLevel(level);
-      session.setInBossBattle(true);
-      const type = getBossForLevel(level);
-      expect(type, `level ${level} has a boss`).not.toBeNull();
-      const config = BOSS_CONFIGS[type as keyof typeof BOSS_CONFIGS];
-      call<void>(
-        'handleBossDestroy',
-        new THREE.Vector3(0, 200, -400),
-        config,
-        session.isBossMode()
-      );
+      killBoss(level);
       // 收尾停顿（游戏时间）之后才是结算 / 机库 / 结局
       (target.campaign as CampaignFlowController).tick(3);
+    },
+    killBoss,
+    tick: (seconds) => (target.campaign as CampaignFlowController).tick(seconds),
+    watchBossEncounter: () => {
+      expect(target.presentationRuntimeReady, 'the presentation runtime is up').toBe(true);
+      Reflect.deleteProperty(target, 'startBossEncounter');
+      const briefing = vi.spyOn(target.hud as HUD, 'showBriefing');
+      const calls = (fn: unknown): number => (fn as Mock).mock.calls.length;
+      return () => ({
+        heals: calls(health.healToMax),
+        unitClears: calls((target.units as Stub).clear),
+        briefings: briefing.mock.calls.length,
+        musicStops: calls((target.musicSystem as Stub).stopMusic),
+        inBossBattle: session.isInBossBattle(),
+      });
     },
     togglePause: () => call<void>('handlePauseToggle'),
     call,
