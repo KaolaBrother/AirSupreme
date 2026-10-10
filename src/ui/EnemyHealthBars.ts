@@ -35,6 +35,15 @@ const BRACKET_DISTANCE_STEP = 10;
 const TARGET_MARKER_STYLE_ID = 'enemy-target-marker-style';
 const OBJECTIVE_CLASS = 'is-objective';
 
+/**
+ * 雷达盘（#radar-minimap）叠在箭头层之上，落在盘下的屏幕外箭头会被整个挡住：
+ * 约每秒量一次雷达盘的位置，箭头落进去时横向滑到盘朝屏幕中心的一侧。
+ * 留白略大于箭头的半宽（箭头 40px，以中心定位）。
+ */
+const RADAR_ELEMENT_ID = 'radar-minimap';
+const RADAR_AVOID_PADDING_PX = 22;
+const RADAR_RECT_REFRESH_UPDATES = 30;
+
 /** 八段线性渐变拼出四个角；--ehb-arm / --ehb-w 为角的臂长与线宽 */
 const BRACKET_CORNER_LAYERS = ['left top', 'right top', 'left bottom', 'right bottom']
   .map(
@@ -366,6 +375,12 @@ export class EnemyHealthBars {
   private readonly lastCameraQuaternion = new Quaternion();
   private readonly lastPlayerPosition = new Vector3();
   private cameraStateInitialized: boolean = false;
+  // 雷达盘在屏幕上的范围（已含留白；right <= left 表示没有雷达）
+  private radarLeft: number = 0;
+  private radarRight: number = 0;
+  private radarTop: number = 0;
+  private radarBottom: number = 0;
+  private radarRectAge: number = RADAR_RECT_REFRESH_UPDATES;
 
   constructor() {
     this.container = document.createElement('div');
@@ -408,6 +423,7 @@ export class EnemyHealthBars {
   ): void {
     this.init();
     this.syncLabelLocale();
+    this.refreshRadarRect();
 
     const cameraMoved =
       !this.cameraStateInitialized ||
@@ -1023,6 +1039,23 @@ export class EnemyHealthBars {
       }
     }
 
+    // 雷达盘叠在箭头层之上：会被压住的箭头横向滑到雷达盘朝屏幕中心的一侧（高度与指向不变）
+    if (this.radarRight > this.radarLeft) {
+      const viewportWidth = window.innerWidth;
+      const arrowPx = arrowX * viewportWidth;
+      const arrowPy = arrowY * window.innerHeight;
+      if (
+        viewportWidth > 0 &&
+        arrowPx > this.radarLeft &&
+        arrowPx < this.radarRight &&
+        arrowPy > this.radarTop &&
+        arrowPy < this.radarBottom
+      ) {
+        const radarOnLeft = this.radarLeft + this.radarRight < viewportWidth;
+        arrowX = (radarOnLeft ? this.radarRight : this.radarLeft) / viewportWidth;
+      }
+    }
+
     // 箭头默认指向上方（CSS border-bottom 三角形尖端朝上）
     // atan2(x, y) 给出正确的旋转角度：
     // - 上方 (y>0): atan2(0, 1) = 0°
@@ -1039,6 +1072,27 @@ export class EnemyHealthBars {
       distance,
       kind: 'enemy',
     });
+  }
+
+  /** 雷达盘的位置只在布局变化时才变：约每秒量一次，不逐帧读取布局 */
+  private refreshRadarRect(): void {
+    this.radarRectAge += 1;
+    if (this.radarRectAge < RADAR_RECT_REFRESH_UPDATES) {
+      return;
+    }
+    this.radarRectAge = 0;
+    const rect = document.getElementById(RADAR_ELEMENT_ID)?.getBoundingClientRect();
+    if (rect && rect.width > 0 && rect.height > 0) {
+      this.radarLeft = rect.left - RADAR_AVOID_PADDING_PX;
+      this.radarRight = rect.right + RADAR_AVOID_PADDING_PX;
+      this.radarTop = rect.top - RADAR_AVOID_PADDING_PX;
+      this.radarBottom = rect.bottom + RADAR_AVOID_PADDING_PX;
+    } else {
+      this.radarLeft = 0;
+      this.radarRight = 0;
+      this.radarTop = 0;
+      this.radarBottom = 0;
+    }
   }
 
   private resetArrowIndicator(chevron: OffscreenChevron): void {
