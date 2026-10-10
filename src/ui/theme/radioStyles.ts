@@ -293,20 +293,32 @@ ${toneBlock('muted', '195, 204, 214')}
 
 /*
  * 更矮的竖屏手机（视口不到 790px 高：360×740、375×667，以及带着地址栏的手机浏览器）：
- * 告警通道第二行的下沿已经贴着、甚至伸进按键簇，两者之间放不下面板。两行告警同时显示时，
- * 收小的面板改放到按键簇左侧、静止摇杆的上方（平板竖屏的面板也在这一处）；这一栏很窄，
- * 正文放到四行，上沿仍在第二行告警之下
+ * 告警通道到按键簇之间放不下面板——完整大小的面板连第一行（导弹告警）都盖住，第二行的下沿
+ * 已经贴着、甚至伸进按键簇。这一档不管告警通道显示几行，面板都收小（不显示头像和呼号行），
+ * 放到按键簇左侧、静止摇杆的上方（平板竖屏的面板也在这一处）；这一栏很窄，正文放到四行，
+ * 上沿仍在第二行告警之下。
+ * 每条规则多写一个带 data-hud-warning-rows='2' 的选择器，只为压过上面两行告警时的收小规则
+ * （优先级相同，后写的生效）
  */
 @media (orientation: portrait) and (max-width: 699.98px) and (max-height: 789.98px) {
+  :root:not([data-hud-camera='first-person']) #radio-comms[data-density='touch-portrait'],
   :root[data-hud-warning-rows='2']:not([data-hud-camera='first-person']) #radio-comms[data-density='touch-portrait'] {
     right: calc(max(20px, env(safe-area-inset-right)) + var(--touch-deck-w, 210px) + 14px);
     bottom: calc(max(20px, env(safe-area-inset-bottom)) + var(--touch-stick-size, 96px) + 14px);
   }
 
-  :root[data-hud-warning-rows='2']:not([data-hud-camera='first-person']) #radio-comms[data-density='touch-portrait'] .rc-text {
-    -webkit-line-clamp: 4;
+  :root:not([data-hud-camera='first-person']) #radio-comms[data-density='touch-portrait'] .rc-portrait,
+  :root:not([data-hud-camera='first-person']) #radio-comms[data-density='touch-portrait'] .rc-head {
+    display: none;
   }
 
+  :root:not([data-hud-camera='first-person']) #radio-comms[data-density='touch-portrait'] .rc-text,
+  :root[data-hud-warning-rows='2']:not([data-hud-camera='first-person']) #radio-comms[data-density='touch-portrait'] .rc-text {
+    -webkit-line-clamp: 4;
+    line-height: 1.3;
+  }
+
+  :root:not([data-hud-camera='first-person']) #radio-comms[data-density='touch-portrait'] .rc-panel,
   :root[data-hud-warning-rows='2']:not([data-hud-camera='first-person']) #radio-comms[data-density='touch-portrait'] .rc-panel {
     padding-top: 3px;
     padding-bottom: 3px;
