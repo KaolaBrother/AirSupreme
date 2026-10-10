@@ -19,3 +19,12 @@ declare module 'path' {
 declare module 'url' {
   export function fileURLToPath(url: string | URL): string;
 }
+
+declare module 'vm' {
+  /** 在新的上下文里执行一段脚本；timeout（毫秒）到了还没执行完就中断并抛错 */
+  export function runInNewContext(
+    code: string,
+    contextObject?: Record<string, unknown>,
+    options?: { timeout?: number }
+  ): unknown;
+}
