@@ -4,6 +4,7 @@ import { getLogger } from '@/core/utils/Logger';
 import { tr, type LocalizedText } from '@/i18n';
 import {
   RADAR_DRAW_PASSES,
+  RADAR_RIM_MARKER_REACH,
   drawRadarBlip,
   drawRadarRimMarker,
   normalizeRadarKind,
@@ -27,6 +28,27 @@ const LEGEND_COMPACT_HEIGHT_PX = 34;
 const COMPACT_PANEL_PX = 360;
 const MAP_PADDING_PX = 8;
 const MAX_PIXEL_RATIO = 2;
+/**
+ * 面板底色：基本不透明，背后的战场（自己的飞机、地形）和压在下面的触控按键不再透上来，
+ * 地图才读得清。陆地 / 水域底图、网格、图例都按这层深色底调的对比度。
+ */
+const PANEL_BACKDROP = 'rgba(8, 14, 24, 0.97)';
+
+/** 目标符号的放大倍率（小面板 / 大面板） */
+const BLIP_SCALE_COMPACT = 1.35;
+const BLIP_SCALE = 1.7;
+/** 玩家箭头：半长（小面板 / 大面板）与各顶点相对半长的比例 */
+const PLAYER_ARROW_SIZE_COMPACT = 8;
+const PLAYER_ARROW_SIZE = 10;
+const PLAYER_ARROW_TIP = 1.25;
+const PLAYER_ARROW_TAIL = 0.8;
+const PLAYER_ARROW_NOTCH = 0.3;
+const PLAYER_ARROW_WING = 0.75;
+/** 玩家在地图范围之外：箭头改成空心，尖端外再画一截朝外的短线（与量程外目标同一套画法） */
+const PLAYER_BEYOND_TICK_GAP_PX = 3;
+const PLAYER_BEYOND_TICK_LENGTH_PX = 5;
+/** 贴边的符号与画布边之间再留的一点空隙 */
+const EDGE_CLEARANCE_PX = 1.5;
 
 /** 地图显示整个战场（正方形，边长为 2 × 半跨度），北（世界 -Z）朝上 */
 const MAP_HALF_EXTENT = GAME_CONSTANTS.WORLD.BATTLEFIELD_HALF_EXTENT;
@@ -45,11 +67,15 @@ const TERRAIN_GRID = 64;
 const TERRAIN_ROWS_PER_STEP = 16;
 /** 高差小于这个值（米）且没有水域：底图没有信息量，只画网格 */
 const TERRAIN_FLAT_RANGE = 1;
+/**
+ * 底图颜色叠在不透明的深色面板上（不再有明亮的战场从后面透上来）：低处的陆地略提亮、偏绿，
+ * 与水域、与边界圈外的底色都分得开；高处保持偏暗，红 / 金 / 青色的目标符号压在上面仍然醒目。
+ */
 const WATER_RGB: readonly [number, number, number] = [26, 72, 112];
-const LAND_LOW_RGB: readonly [number, number, number] = [38, 70, 58];
-const LAND_HIGH_RGB: readonly [number, number, number] = [156, 164, 142];
+const LAND_LOW_RGB: readonly [number, number, number] = [44, 80, 60];
+const LAND_HIGH_RGB: readonly [number, number, number] = [134, 142, 118];
 const WATER_ALPHA = 150;
-const LAND_ALPHA = 118;
+const LAND_ALPHA = 140;
 
 const FONT_STACK = "Arial, 'PingFang SC', 'Microsoft YaHei', sans-serif";
 const FULL_CIRCLE = Math.PI * 2;
@@ -81,6 +107,10 @@ type TerrainState = 'none' | 'pending' | 'sampling' | 'ready' | 'flat';
 /**
  * 展开的关卡地图：屏幕中央的大面板，北朝上、固定比例显示整个战场——边界圈、以玩家为圆心的
  * 500 / 1000 米距离环、按航向旋转的玩家箭头、雷达上的全部目标（同样的形状与颜色，更大）和图例。
+ * 面板底色基本不透明：背后的 3D 画面不透上来。
+ *
+ * 地图范围之外的东西不会画到面板外，也不会丢：目标收回到地图边内，画成空心符号加一截朝外的
+ * 短线；玩家箭头同样收回、改成空心并加短线。贴着地图边的玩家箭头也整个留在面板内。
  *
  * 有地表采样器时在目标下方铺一张低分辨率的陆地 / 水域底图：每关采样一次（分几次重绘采完），
  * 缓存在离屏画布里；没有采样器或地形是平的就只画网格。
@@ -121,7 +151,6 @@ export class RadarLevelMap {
     this.element = document.createElement('div');
     this.element.id = 'radar-map';
     this.element.setAttribute('role', 'button');
-    // 半透明玻璃面板：保留对背后战场的感知
     this.element.style.cssText = `
       position: fixed;
       left: 50%;
@@ -133,7 +162,7 @@ export class RadarLevelMap {
       cursor: pointer;
       pointer-events: auto;
       touch-action: none;
-      background: rgba(8, 14, 24, 0.5);
+      background: ${PANEL_BACKDROP};
       border: 1px solid var(--hud-edge, ${HUD_COLORS.edge});
       border-radius: var(--hud-radius, 12px);
       box-shadow: var(--hud-shadow, ${HUD_COLORS.shadow}), inset 0 0 22px rgba(143, 228, 255, 0.12);
@@ -267,10 +296,25 @@ export class RadarLevelMap {
     ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
 
     const size = this.size;
-    const playerVisible = this.project(playerPos.x, playerPos.z);
+    const compact = size < COMPACT_PANEL_PX;
+
+    // 玩家箭头整个留在面板内：贴着地图边时略向内收；在地图范围之外时再多收一截，留给朝外的短线
+    const arrowSize = compact ? PLAYER_ARROW_SIZE_COMPACT : PLAYER_ARROW_SIZE;
+    const arrowInset = arrowSize * PLAYER_ARROW_TIP + EDGE_CLEARANCE_PX - MAP_PADDING_PX;
+    let playerVisible = this.project(playerPos.x, playerPos.z, arrowInset, true);
+    if (playerVisible && this.projectedBeyond) {
+      playerVisible = this.project(
+        playerPos.x,
+        playerPos.z,
+        arrowInset + PLAYER_BEYOND_TICK_GAP_PX + PLAYER_BEYOND_TICK_LENGTH_PX,
+        true
+      );
+    }
     const playerX = this.projectedX;
     const playerY = this.projectedY;
     const playerBeyond = this.projectedBeyond;
+    const playerUx = this.projectedUx;
+    const playerUy = this.projectedUy;
 
     ctx.save();
     ctx.beginPath();
@@ -281,11 +325,16 @@ export class RadarLevelMap {
       this.drawRangeRings(ctx, playerX, playerY);
     }
 
-    const blipScale = size < COMPACT_PANEL_PX ? 1.35 : 1.7;
+    const blipScale = compact ? BLIP_SCALE_COMPACT : BLIP_SCALE;
+    // 地图范围之外的目标收回到地图边内，空心符号和朝外的短线都留在面板内
+    const rimInset = RADAR_RIM_MARKER_REACH * blipScale + EDGE_CLEARANCE_PX - MAP_PADDING_PX;
     for (const pass of RADAR_DRAW_PASSES) {
       for (const blip of blips) {
         const kind = normalizeRadarKind(blip.kind);
-        if (!pass.includes(kind) || !this.project(blip.position.x, blip.position.z)) {
+        if (
+          !pass.includes(kind) ||
+          !this.project(blip.position.x, blip.position.z, rimInset, false)
+        ) {
           continue;
         }
         if (this.projectedBeyond) {
@@ -305,16 +354,33 @@ export class RadarLevelMap {
     }
 
     if (playerVisible) {
-      this.drawPlayerArrow(ctx, playerX, playerY, forwardX, forwardZ);
+      this.drawPlayerArrow(
+        ctx,
+        playerX,
+        playerY,
+        forwardX,
+        forwardZ,
+        arrowSize,
+        playerBeyond,
+        playerUx,
+        playerUy
+      );
     }
     ctx.restore();
   }
 
   /**
-   * 世界 (x, z) → 画布坐标（结果写入 projectedX/Y）。超出地图的点贴在地图边上并标记 beyond，
-   * (projectedUx, projectedUy) 为地图中心指向它的单位向量；坐标非法时返回 false。
+   * 世界 (x, z) → 画布坐标（结果写入 projectedX/Y）。超出地图范围的点标记 beyond，并沿地图中心
+   * 到它的连线收回到地图边内 edgeInset 处（给符号和朝外的短线留位置），
+   * (projectedUx, projectedUy) 为地图中心指向它的单位向量。clampInside 为 true 时，地图内
+   * 贴着边的点也收到这条线以内（玩家箭头用，保证整个箭头在面板内）。坐标非法时返回 false。
    */
-  private project(worldX: number, worldZ: number): boolean {
+  private project(
+    worldX: number,
+    worldZ: number,
+    edgeInset: number,
+    clampInside: boolean
+  ): boolean {
     if (!Number.isFinite(worldX) || !Number.isFinite(worldZ)) {
       return false;
     }
@@ -324,14 +390,20 @@ export class RadarLevelMap {
     let dx = worldX * scale;
     let dy = worldZ * scale;
     const reach = Math.max(Math.abs(dx), Math.abs(dy));
+    if (!Number.isFinite(reach)) {
+      return false;
+    }
     this.projectedBeyond = reach > half;
-    if (this.projectedBeyond) {
-      const clamp = half / reach;
-      dx *= clamp;
-      dy *= clamp;
-      const length = Math.hypot(dx, dy);
-      this.projectedUx = length > 0 ? dx / length : 0;
-      this.projectedUy = length > 0 ? dy / length : -1;
+    const limit = Math.max(0, half - Math.max(0, edgeInset));
+    if (this.projectedBeyond || (clampInside && reach > limit)) {
+      // 先按 reach 归一（每个分量不超过 1），再放到 limit 上：很大的坐标也不会溢出
+      const nx = dx / reach;
+      const ny = dy / reach;
+      const length = Math.hypot(nx, ny);
+      this.projectedUx = nx / length;
+      this.projectedUy = ny / length;
+      dx = nx * limit;
+      dy = ny * limit;
     }
     this.projectedX = center + dx;
     this.projectedY = center + dy;
@@ -362,13 +434,21 @@ export class RadarLevelMap {
     ctx.globalAlpha = 1;
   }
 
-  /** 玩家：按航向旋转的箭头（北朝上：世界 -Z 为上、+X 为右） */
+  /**
+   * 玩家：按航向旋转的箭头（北朝上：世界 -Z 为上、+X 为右），s 为箭头半长。
+   * beyond 为 true（玩家在地图范围之外，(x, y) 已收回到地图边内）时画成空心，并沿
+   * (ux, uy)——地图中心指向玩家实际位置的方向——在箭头外画一截短线：读作“在那个方向、地图之外”。
+   */
   private drawPlayerArrow(
     ctx: CanvasRenderingContext2D,
     x: number,
     y: number,
     forwardX: number,
-    forwardZ: number
+    forwardZ: number,
+    s: number,
+    beyond: boolean,
+    ux: number,
+    uy: number
   ): void {
     const length = Math.hypot(forwardX, forwardZ);
     // 画布上的航向单位向量；航向非法时指向正北
@@ -377,18 +457,36 @@ export class RadarLevelMap {
     // 右手方向（画布坐标）
     const rx = -hy;
     const ry = hx;
-    const s = this.size < COMPACT_PANEL_PX ? 8 : 10;
+    const tip = s * PLAYER_ARROW_TIP;
+    const tail = s * PLAYER_ARROW_TAIL;
+    const notch = s * PLAYER_ARROW_NOTCH;
+    const wing = s * PLAYER_ARROW_WING;
 
     ctx.beginPath();
-    ctx.moveTo(x + hx * s * 1.25, y + hy * s * 1.25);
-    ctx.lineTo(x - hx * s * 0.8 + rx * s * 0.75, y - hy * s * 0.8 + ry * s * 0.75);
-    ctx.lineTo(x - hx * s * 0.3, y - hy * s * 0.3);
-    ctx.lineTo(x - hx * s * 0.8 - rx * s * 0.75, y - hy * s * 0.8 - ry * s * 0.75);
-    ctx.lineTo(x + hx * s * 1.25, y + hy * s * 1.25);
-    ctx.fillStyle = HUD_COLORS.sys;
+    ctx.moveTo(x + hx * tip, y + hy * tip);
+    ctx.lineTo(x - hx * tail + rx * wing, y - hy * tail + ry * wing);
+    ctx.lineTo(x - hx * notch, y - hy * notch);
+    ctx.lineTo(x - hx * tail - rx * wing, y - hy * tail - ry * wing);
+    ctx.lineTo(x + hx * tip, y + hy * tip);
+    if (!beyond) {
+      ctx.fillStyle = HUD_COLORS.sys;
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(4, 8, 14, 0.9)';
+      ctx.lineWidth = 1.2;
+      ctx.stroke();
+      return;
+    }
+
+    ctx.fillStyle = 'rgba(4, 8, 14, 0.9)';
     ctx.fill();
-    ctx.strokeStyle = 'rgba(4, 8, 14, 0.9)';
-    ctx.lineWidth = 1.2;
+    ctx.strokeStyle = HUD_COLORS.sys;
+    ctx.lineWidth = 1.6;
+    ctx.stroke();
+    const tickStart = tip + PLAYER_BEYOND_TICK_GAP_PX;
+    const tickEnd = tickStart + PLAYER_BEYOND_TICK_LENGTH_PX;
+    ctx.beginPath();
+    ctx.moveTo(x + ux * tickStart, y + uy * tickStart);
+    ctx.lineTo(x + ux * tickEnd, y + uy * tickEnd);
     ctx.stroke();
   }
 
@@ -464,9 +562,10 @@ export class RadarLevelMap {
     ctx.textAlign = 'left';
     ctx.font = `bold ${compact ? 10 : 12}px ${FONT_STACK}`;
     ctx.fillText(tr(TXT_TITLE), 10, compact ? 12 : 15, size * 0.3);
+    // 关闭提示：与标题同字号（原来的 9 / 11px 在手机上太小），用次要色与标题区分
     ctx.textAlign = 'right';
     ctx.fillStyle = HUD_COLORS.muted;
-    ctx.font = `${compact ? 9 : 11}px ${FONT_STACK}`;
+    ctx.font = `${compact ? 10 : 12}px ${FONT_STACK}`;
     ctx.fillText(
       tr(this.touchLayout ? TXT_CLOSE_TOUCH : TXT_CLOSE_DESKTOP),
       size - 10,
