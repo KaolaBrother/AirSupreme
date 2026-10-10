@@ -1,8 +1,30 @@
-import { AdditiveBlending, CanvasTexture, Color, Material, Sprite, SpriteMaterial, Vector3 } from 'three';
-import type { Group, Quaternion, Scene } from 'three';
+import {
+  AdditiveBlending,
+  CanvasTexture,
+  Color,
+  Material,
+  Quaternion,
+  Sprite,
+  SpriteMaterial,
+  Vector3,
+} from 'three';
+import type { Group, Scene } from 'three';
 import type { InputState } from '@/core/Input/InputHandler';
 import { GAME_CONSTANTS } from '@/config';
 import { PlayerStats } from '@/features/upgrade/UpgradeSystem';
+
+const WORLD_UP = new Vector3(0, 1, 0);
+
+/**
+ * 俯仰 / 偏航的模拟量（-1..1）。优先用 InputState 里的模拟量；缺省、非有限或为 0 时退回布尔方向
+ * （±1）——脚本飞行员和旧调用方只写布尔方向。
+ */
+function resolveAxis(axis: number | undefined, positive: boolean, negative: boolean): number {
+  if (axis !== undefined && Number.isFinite(axis) && axis !== 0) {
+    return Math.max(-1, Math.min(1, axis));
+  }
+  return (positive ? 1 : 0) - (negative ? 1 : 0);
+}
 
 /**
  * 玩家控制器
@@ -15,6 +37,12 @@ export class PlayerController {
 
   // 缓存向量（避免每帧创建）
   private forward: Vector3;
+
+  // 辅助飞行用的缓存（避免每帧创建）
+  private readonly assistLevelRight = new Vector3();
+  private readonly assistLevelUp = new Vector3();
+  private readonly assistStep = new Quaternion();
+  private readonly assistBackup = new Quaternion();
 
   // 自动回中速度（弧度/秒）
   private readonly autoLevelSpeed: number = 2.0;
@@ -125,43 +153,27 @@ export class PlayerController {
   }
 
   /**
-   * 更新飞机状态
+   * 手动模型（键盘）：绕机体自身三轴转动，完全没有输入时自动改平机翼。
+   * 俯仰 / 偏航角速度按模拟量缩放——键盘为 ±1，即原来的满速。
    */
-  public update(deltaTime: number, input: InputState): void {
+  private applyManualAttitude(
+    deltaTime: number,
+    input: InputState,
+    pitchAxis: number,
+    yawAxis: number
+  ): void {
     // 检查是否有输入
     const hasInput = input.pitchUp || input.pitchDown || input.yawLeft || input.yawRight ||
-                      input.rollLeft || input.rollRight;
-
-    // 速度控制
-    const maxSpeed = this.playerStats.getMaxSpeed();
-    const minSpeed = maxSpeed * 0.5; // 最小速度为最大速度的一半
-
-    if (input.throttle) {
-      this.currentSpeed = Math.min(
-        maxSpeed,
-        this.currentSpeed + 20 * deltaTime
-      );
-    } else {
-      this.currentSpeed = Math.max(
-        minSpeed,
-        this.currentSpeed - 10 * deltaTime
-      );
-    }
+                      input.rollLeft || input.rollRight || pitchAxis !== 0 || yawAxis !== 0;
 
     // 俯仰（Pitch）- 机头上下（W向上，S向下）
-    if (input.pitchUp) {
-      this.aircraft.rotateX(GAME_CONSTANTS.PLAYER.PITCH_SPEED * deltaTime);
-    }
-    if (input.pitchDown) {
-      this.aircraft.rotateX(-GAME_CONSTANTS.PLAYER.PITCH_SPEED * deltaTime);
+    if (pitchAxis !== 0) {
+      this.aircraft.rotateX(GAME_CONSTANTS.PLAYER.PITCH_SPEED * pitchAxis * deltaTime);
     }
 
-    // 偏航（Yaw）- 机头左右
-    if (input.yawLeft) {
-      this.aircraft.rotateY(GAME_CONSTANTS.PLAYER.YAW_SPEED * deltaTime);
-    }
-    if (input.yawRight) {
-      this.aircraft.rotateY(-GAME_CONSTANTS.PLAYER.YAW_SPEED * deltaTime);
+    // 偏航（Yaw）- 机头左右（正 = 右转）
+    if (yawAxis !== 0) {
+      this.aircraft.rotateY(-GAME_CONSTANTS.PLAYER.YAW_SPEED * yawAxis * deltaTime);
     }
 
     // 翻滚（Roll）- 机翼倾斜
@@ -193,6 +205,120 @@ export class PlayerController {
         // 应用回正旋转（绕Z轴）
         this.aircraft.rotateZ(amountToLevel);
       }
+    }
+  }
+
+  /**
+   * 辅助模型（触控摇杆）：航向、俯仰、坡度三个通道互不耦合，推右永远是相对地平线右转。
+   * - 偏航：绕世界竖直轴，角速度 ∝ yawAxis；
+   * - 俯仰：绕“水平右轴”（机翼水平时就是机体右轴），角速度 ∝ pitchAxis；机头相对地平线
+   *   超过 ASSIST_PITCH_LIMIT 后不再增大，减小 |俯仰| 的输入始终允许（界外的姿态也能改回来）；
+   * - 滚转：坡度平滑逼近 -yawAxis × ASSIST_MAX_BANK（压向转弯一侧，摇杆回中时机翼改平）。
+   * 全程四元数运算，结尾归一化；结果出现 NaN / Infinity 时恢复到本步之前的姿态。
+   */
+  private applyAssistedAttitude(deltaTime: number, pitchAxis: number, yawAxis: number): void {
+    if (!Number.isFinite(deltaTime) || deltaTime <= 0) {
+      return;
+    }
+
+    const tuning = GAME_CONSTANTS.PLAYER;
+    const quaternion = this.aircraft.quaternion;
+    this.assistBackup.copy(quaternion);
+
+    // 偏航：绕世界竖直轴（左乘 = 世界坐标系下的旋转）
+    if (yawAxis !== 0) {
+      this.assistStep.setFromAxisAngle(WORLD_UP, -tuning.YAW_SPEED * yawAxis * deltaTime);
+      quaternion.premultiply(this.assistStep);
+    }
+
+    // 水平右轴：垂直于机头方向、躺在水平面内。机头几乎垂直时没有定义，退回机体右轴
+    const forward = this.forward.set(0, 0, -1).applyQuaternion(quaternion);
+    const levelRight = this.assistLevelRight.crossVectors(forward, WORLD_UP);
+    const horizontal = levelRight.length();
+    const hasHorizon = horizontal > 1e-4;
+    if (hasHorizon) {
+      levelRight.divideScalar(horizontal);
+    } else {
+      levelRight.set(1, 0, 0).applyQuaternion(quaternion);
+    }
+
+    // 俯仰：机头仰角（相对地平线）到达上限后只允许往回推
+    const elevation = Math.asin(Math.max(-1, Math.min(1, forward.y)));
+    const pitchLimit = tuning.ASSIST_PITCH_LIMIT;
+    let pitchStep = tuning.PITCH_SPEED * pitchAxis * deltaTime;
+    if (pitchStep > 0) {
+      pitchStep = Math.min(pitchStep, Math.max(0, pitchLimit - elevation));
+    } else if (pitchStep < 0) {
+      pitchStep = Math.max(pitchStep, Math.min(0, -pitchLimit - elevation));
+    }
+    if (pitchStep !== 0) {
+      this.assistStep.setFromAxisAngle(levelRight, pitchStep);
+      quaternion.premultiply(this.assistStep);
+    }
+
+    // 滚转：当前坡度 = 机体右轴相对水平右轴绕机身轴转过的角度（正 = 右翼抬起）
+    if (hasHorizon) {
+      forward.set(0, 0, -1).applyQuaternion(quaternion);
+      const levelUp = this.assistLevelUp.crossVectors(levelRight, forward);
+      const right = this.rightVector.set(1, 0, 0).applyQuaternion(quaternion);
+      const bank = Math.atan2(right.dot(levelUp), right.dot(levelRight));
+
+      let bankError = -yawAxis * tuning.ASSIST_MAX_BANK - bank;
+      if (bankError > Math.PI) {
+        bankError -= Math.PI * 2;
+      } else if (bankError < -Math.PI) {
+        bankError += Math.PI * 2;
+      }
+
+      // 指数逼近 + 角速度上限：进弯、改平都平顺，不会一步到位
+      const maxStep = tuning.ASSIST_ROLL_MAX_RATE * deltaTime;
+      const eased = bankError * (1 - Math.exp(-tuning.ASSIST_ROLL_RESPONSE * deltaTime));
+      const rollStep = Math.max(-maxStep, Math.min(maxStep, eased));
+      if (rollStep !== 0) {
+        this.aircraft.rotateZ(rollStep);
+      }
+    }
+
+    quaternion.normalize();
+    if (
+      !Number.isFinite(quaternion.x) ||
+      !Number.isFinite(quaternion.y) ||
+      !Number.isFinite(quaternion.z) ||
+      !Number.isFinite(quaternion.w)
+    ) {
+      quaternion.copy(this.assistBackup);
+    }
+  }
+
+  /**
+   * 更新飞机状态
+   */
+  public update(deltaTime: number, input: InputState): void {
+    // 俯仰 / 偏航模拟量：键盘为 ±1（与原来的满速一致），触控摇杆为连续值
+    const pitchAxis = resolveAxis(input.pitchAxis, input.pitchUp, input.pitchDown);
+    const yawAxis = resolveAxis(input.yawAxis, input.yawRight, input.yawLeft);
+
+    // 速度控制
+    const maxSpeed = this.playerStats.getMaxSpeed();
+    const minSpeed = maxSpeed * 0.5; // 最小速度为最大速度的一半
+
+    if (input.throttle) {
+      this.currentSpeed = Math.min(
+        maxSpeed,
+        this.currentSpeed + 20 * deltaTime
+      );
+    } else {
+      this.currentSpeed = Math.max(
+        minSpeed,
+        this.currentSpeed - 10 * deltaTime
+      );
+    }
+
+    // 姿态：触控摇杆走辅助模型，键盘走原有的手动模型
+    if (input.flightAssist === true) {
+      this.applyAssistedAttitude(deltaTime, pitchAxis, yawAxis);
+    } else {
+      this.applyManualAttitude(deltaTime, input, pitchAxis, yawAxis);
     }
 
     // 前进移动

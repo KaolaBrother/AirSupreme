@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { GameConfig } from '@/config';
 import type { CombatTarget, IDecoyProvider } from '@/core/CombatContracts';
 import { getLevelScaling, type DifficultyProfile, type LevelScaling } from '@/core/Difficulty';
 import { Faction } from '@/core/Faction';
@@ -11,13 +12,14 @@ import type { ParticleSystem } from '@/features/effects/ParticleSystem';
 import type { ProjectilePool } from '@/features/combat/ProjectilePool';
 import type { MissileSystem } from '@/features/combat/MissileSystem';
 import type {
+  HostileUnitVisitor,
   PlayerLockState,
   UnitInstance,
   UnitRouteProvider,
   UnitSystem,
   UnitUpdateContext,
 } from '@/features/units/UnitSystem';
-import type { UnitRadarKind, UnitType } from '@/features/units/UnitTypes';
+import type { UnitDomain, UnitRadarKind, UnitType } from '@/features/units/UnitTypes';
 import { tr, type LocalizedText } from '@/i18n';
 import { RadioBudget, type RadioBudgetConfig } from '@/core/campaign/RadioBudget';
 
@@ -49,8 +51,11 @@ export interface UnitControllerDeps {
   onEscortResult(success: boolean): void;
 }
 
-/** 敌机全部清空后，残留单位最多拖住波次的时长（秒，游戏时间），防止卡关 */
-const WAVE_STALL_LIMIT_SECONDS = 150;
+/**
+ * 敌机全部清空后，残留单位最多拖住波次的时长（秒，游戏时间），防止卡关。
+ * 玩家每次打中敌方单位都会重新计时：正在进攻的玩家不会被打断，够不着目标的玩家一分钟后放行。
+ */
+const WAVE_STALL_LIMIT_SECONDS = 60;
 /** Boss 召唤的无人机同时存在上限 */
 const MAX_BOSS_DRONES = 8;
 /**
@@ -64,6 +69,11 @@ const MISSILE_INBOUND_WARNING: LocalizedText = {
   en: 'Missile inbound · Press G for flares',
   zh: '导弹来袭 · 按 G 投放热焰弹',
 };
+/** 触控设备没有 G 键：指向屏幕上的热焰键（键面文字见 main.ts 的 localizeShell） */
+const MISSILE_INBOUND_WARNING_TOUCH: LocalizedText = {
+  en: 'Missile inbound · Tap FLARE',
+  zh: '导弹来袭 · 点「热焰」键',
+};
 const CEASE_FIRE_WARNING: LocalizedText = {
   en: 'Cease fire! Those are civilians!',
   zh: '停火！那是平民目标！',
@@ -71,6 +81,44 @@ const CEASE_FIRE_WARNING: LocalizedText = {
 const TARGETS_LEFT_AREA_WARNING: LocalizedText = {
   en: 'Remaining targets have left the area',
   zh: '残余目标脱离战区',
+};
+
+/** HUD 目标标记的访问函数：网格、当前 / 最大血量（只给可被命中的敌方单位） */
+export type HostileMarkerVisitor = (
+  mesh: THREE.Object3D,
+  health: number,
+  maxHealth: number
+) => void;
+
+/**
+ * 敌机清空后仍有敌方单位拖住波次时的提示（每波一次）：按剩余单位的作战域选词，
+ * [单数, 复数] 各一条；mixed 为多个作战域混合。
+ */
+type ObjectiveHintKind = UnitDomain | 'mixed';
+const OBJECTIVE_HINTS: Readonly<
+  Record<ObjectiveHintKind, readonly [LocalizedText, LocalizedText]>
+> = {
+  ground: [
+    { en: 'Ground target remaining · follow the marker', zh: '地面目标尚未清除 · 跟随标记前往' },
+    { en: 'Ground targets remaining · follow the markers', zh: '地面目标尚未清除 · 跟随标记前往' },
+  ],
+  sea: [
+    { en: 'Enemy ship remaining · follow the marker', zh: '敌舰尚未清除 · 跟随标记前往' },
+    { en: 'Enemy ships remaining · follow the markers', zh: '敌舰尚未清除 · 跟随标记前往' },
+  ],
+  air: [
+    { en: 'Air target remaining · follow the marker', zh: '空中目标尚未清除 · 跟随标记前往' },
+    { en: 'Air targets remaining · follow the markers', zh: '空中目标尚未清除 · 跟随标记前往' },
+  ],
+  mixed: [
+    { en: 'Targets remaining · follow the markers', zh: '仍有目标尚未清除 · 跟随标记前往' },
+    { en: 'Targets remaining · follow the markers', zh: '仍有目标尚未清除 · 跟随标记前往' },
+  ],
+};
+/** 剩下的全是潜航中的潜艇：没有屏幕标记可跟，只能看雷达等它上浮 */
+const OBJECTIVE_SUBMERGED_HINT: LocalizedText = {
+  en: 'Submarine submerged · watch the radar until it surfaces',
+  zh: '潜艇潜航中 · 留意雷达，等它上浮',
 };
 /**
  * 友军单位被毁时的专属无线电（键为 UnitType 字符串值，如 ALLY_AWACS / ALLY_FRIGATE，
@@ -109,6 +157,16 @@ export class UnitController {
   // 波次门控
   private waveStallTimer = 0;
   private waveReleased = false;
+  /** 敌机已清空、敌方单位仍拖住波次：HUD 把它们的标记换成“目标”样式 */
+  private objectiveActive = false;
+  /** 本波的“剩余目标”提示已经给过（每波一次） */
+  private objectiveHintShown = false;
+  // 提示选词时的计数（forEachAliveHostile 回调复用）
+  private remainingGround = 0;
+  private remainingSea = 0;
+  private remainingAir = 0;
+  private remainingTargetable = 0;
+  private markerVisitor: HostileMarkerVisitor | null = null;
 
   // 告警（配音配额每波 / 每场 Boss 战重新计数：spawnForWave / clear）
   private lastLockState: PlayerLockState = 'none';
@@ -202,6 +260,10 @@ export class UnitController {
 
     system.onUnitDestroyed = (unit, position, byPlayer) =>
       this.handleUnitDestroyed(unit, position, byPlayer);
+    system.onUnitDamaged = (unit, _amount, byPlayer) => {
+      // 玩家还在打敌方单位：防卡关计时重新开始，不会打到一半被放行
+      if (byPlayer && unit.faction === Faction.ENEMY) this.waveStallTimer = 0;
+    };
     system.onCivilianHit = () => {
       // HUD 告警与音效每次都有；配音按配额（进了无线电才计数）
       if (this.civilianHitRadio.isReady() && this.deps.presentation.genericRadio('civilian-hit')) {
@@ -222,7 +284,10 @@ export class UnitController {
       );
       if (phase !== 'launched') return;
       // 每次发射：HUD 闪烁告警（告警音见上）；配音按配额，进了无线电才计数
-      this.deps.presentation.flashWarning(MISSILE_INBOUND_WARNING, 'threat');
+      this.deps.presentation.flashWarning(
+        GameConfig.isMobile ? MISSILE_INBOUND_WARNING_TOUCH : MISSILE_INBOUND_WARNING,
+        'threat'
+      );
       if (
         this.missileWarningRadio.isReady() &&
         this.deps.presentation.genericRadio('missile-warning')
@@ -295,6 +360,11 @@ export class UnitController {
     this.system?.setSurfaceSampler(sampler);
   }
 
+  /** 当前的地表采样器（展开的关卡地图用它画陆地 / 水域底图）；未设置时为 null */
+  public getSurfaceSampler(): UnitSurfaceSampler | null {
+    return this.surfaceSampler;
+  }
+
   public setDecoyProvider(provider: IDecoyProvider | null): void {
     this.decoyProvider = provider;
     this.system?.setDecoyProvider(provider);
@@ -345,6 +415,8 @@ export class UnitController {
   public spawnForWave(level: number, waveIndex: number, playerPosition: THREE.Vector3): number {
     this.waveStallTimer = 0;
     this.waveReleased = false;
+    this.objectiveActive = false;
+    this.objectiveHintShown = false;
     this.resetRadioBudgets();
     const system = this.system;
     if (!system) return 0;
@@ -361,6 +433,76 @@ export class UnitController {
 
   public getAliveHostileCount(): number {
     return this.system?.getAliveHostileCount() ?? 0;
+  }
+
+  /**
+   * 敌机已清空、敌方单位仍拖住波次（尚未放行）：这些单位就是玩家此刻的目标，
+   * HUD 把它们的标记换成“目标”样式。
+   */
+  public isObjectiveActive(): boolean {
+    return this.objectiveActive;
+  }
+
+  /**
+   * HUD 目标标记：逐个访问此刻可被命中的敌方单位（潜航中的潜艇不在内），不分配。
+   * 网格是单位根节点（UNIT_*，userData.displayName 为双语显示名）。
+   */
+  public forEachHostileMarker(visit: HostileMarkerVisitor): void {
+    const system = this.system;
+    if (!system) return;
+    this.markerVisitor = visit;
+    system.forEachAliveHostile(this.visitMarker);
+    this.markerVisitor = null;
+  }
+
+  private readonly visitMarker: HostileUnitVisitor = (
+    mesh,
+    health,
+    maxHealth,
+    _domain,
+    targetable
+  ) => {
+    if (targetable) this.markerVisitor?.(mesh, health, maxHealth);
+  };
+
+  private readonly countRemaining: HostileUnitVisitor = (
+    _mesh,
+    _health,
+    _maxHealth,
+    domain,
+    targetable
+  ) => {
+    if (domain === 'ground') this.remainingGround++;
+    else if (domain === 'sea') this.remainingSea++;
+    else this.remainingAir++;
+    if (targetable) this.remainingTargetable++;
+  };
+
+  /** “剩余目标”提示：按剩下的单位是地面 / 海上 / 空中 / 混合选词 */
+  private showObjectiveHint(system: UnitSystem): void {
+    this.remainingGround = 0;
+    this.remainingSea = 0;
+    this.remainingAir = 0;
+    this.remainingTargetable = 0;
+    system.forEachAliveHostile(this.countRemaining);
+    const total = this.remainingGround + this.remainingSea + this.remainingAir;
+    if (total === 0) return;
+    let text: LocalizedText;
+    if (this.remainingTargetable === 0) {
+      text = OBJECTIVE_SUBMERGED_HINT;
+    } else {
+      const kind: ObjectiveHintKind =
+        this.remainingGround === total
+          ? 'ground'
+          : this.remainingSea === total
+            ? 'sea'
+            : this.remainingAir === total
+              ? 'air'
+              : 'mixed';
+      text = OBJECTIVE_HINTS[kind][total > 1 ? 1 : 0];
+    }
+    // 双语原文交给 HUD：提示显示期间切换语言随之重绘
+    this.deps.presentation.flashWarning(text, 'sys');
   }
 
   // ───────────────────────────── 每帧 ─────────────────────────────
@@ -392,8 +534,14 @@ export class UnitController {
     this.missileWarningRadio.update(deltaTime);
     this.civilianHitRadio.update(deltaTime);
 
-    // 防卡关：敌机已清空但单位迟迟未清（例如潜艇长时间潜航）
-    if (jetsCleared && !this.waveReleased && system.getAliveHostileCount() > 0) {
+    // 敌机已清空但单位还在：它们就是玩家此刻的目标（标记换样式，每波提示一次）；
+    // 防卡关：迟迟未清（够不着 / 潜艇长时间潜航）则放行，玩家每次命中敌方单位都重新计时
+    const holding = jetsCleared && !this.waveReleased && system.getAliveHostileCount() > 0;
+    if (holding) {
+      if (!this.objectiveHintShown) {
+        this.objectiveHintShown = true;
+        this.showObjectiveHint(system);
+      }
       this.waveStallTimer += deltaTime;
       if (this.waveStallTimer >= WAVE_STALL_LIMIT_SECONDS) {
         this.waveReleased = true;
@@ -402,6 +550,7 @@ export class UnitController {
     } else if (!jetsCleared) {
       this.waveStallTimer = 0;
     }
+    this.objectiveActive = holding && !this.waveReleased;
 
     // 锁定告警（第 2 轮：HUD.setMissileWarning）
     const lockState = system.getPlayerLockState();
@@ -542,6 +691,8 @@ export class UnitController {
     this.bossDroneCount = 0;
     this.waveStallTimer = 0;
     this.waveReleased = false;
+    this.objectiveActive = false;
+    this.objectiveHintShown = false;
     this.resetRadioBudgets();
     if (this.lastLockState !== 'none') {
       this.lastLockState = 'none';

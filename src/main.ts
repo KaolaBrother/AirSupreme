@@ -7,6 +7,7 @@ import type { CampaignSaveData } from './core/save/SaveSystem';
 import { MenuMusic } from './core/campaign/MenuMusic';
 import { onLocaleChange, setLocale, tr } from './i18n';
 import { StartMenu, type GameSettings } from './ui/StartMenu';
+import { prefersReducedMotion } from './ui/theme/hudTokens';
 
 const log = getLogger('Main');
 
@@ -55,55 +56,128 @@ function localizeShell(): void {
   setShellLabel('#camera-button', tr({ en: 'Switch camera view', zh: '切换视角' }));
 }
 
-function hideLoadingScreen(): void {
-  const loadingScreen = document.getElementById('loading-screen');
-  if (loadingScreen) {
-    loadingScreen.classList.add('hidden');
+/** 加载画面淡出的时长（与 index.html 里 #loading-screen 的 transition 一致） */
+const LOADING_FADE_MS = 320;
+let loadingHideTimer: ReturnType<typeof setTimeout> | null = null;
+
+function cancelLoadingHide(loadingScreen: HTMLElement): void {
+  if (loadingHideTimer !== null) {
+    clearTimeout(loadingHideTimer);
+    loadingHideTimer = null;
   }
+  loadingScreen.classList.remove('is-leaving');
 }
 
-function renderLoadingMessage(title: string, lines: string[]): void {
+/** 收起加载 / “进入战场”画面：淡出后再隐藏（减少动态效果时直接隐藏） */
+function hideLoadingScreen(): void {
+  const loadingScreen = document.getElementById('loading-screen');
+  if (!loadingScreen || loadingScreen.classList.contains('hidden')) {
+    return;
+  }
+  cancelLoadingHide(loadingScreen);
+  delete loadingScreen.dataset.state;
+  if (prefersReducedMotion()) {
+    loadingScreen.classList.add('hidden');
+    return;
+  }
+  loadingScreen.classList.add('is-leaving');
+  loadingHideTimer = setTimeout(() => {
+    loadingHideTimer = null;
+    loadingScreen.classList.add('hidden');
+    loadingScreen.classList.remove('is-leaving');
+  }, LOADING_FADE_MS);
+}
+
+type LoadingTone = 'progress' | 'error';
+
+/**
+ * 把加载画面换成一条消息（样式在 index.html 的 #loading-screen 里）：
+ * 小标题 + 标题 + 若干行说明；progress 带进度条，error 用告警色并立即朗读。
+ */
+function renderLoadingMessage(
+  tone: LoadingTone,
+  kicker: string,
+  title: string,
+  lines: string[]
+): void {
   const loadingScreen = document.getElementById('loading-screen');
   if (!loadingScreen) {
     return;
   }
 
   const box = document.createElement('div');
-  box.style.cssText = 'text-align: center; color: white; padding: 0 20px;';
+  box.className = 'loading-core loading-message';
+  box.dataset.tone = tone;
+  box.setAttribute('role', tone === 'error' ? 'alert' : 'status');
+
+  const kickerEl = document.createElement('div');
+  kickerEl.className = 'loading-kicker';
+  kickerEl.textContent = kicker;
   const heading = document.createElement('h1');
-  heading.style.cssText = 'font-size: 32px; margin-bottom: 20px; letter-spacing: 0.06em;';
   heading.textContent = title;
-  box.appendChild(heading);
+  box.append(kickerEl, heading);
+
   lines.forEach((line, index) => {
     const paragraph = document.createElement('p');
-    paragraph.style.cssText =
-      index === 0
-        ? 'font-size: 16px; opacity: 0.8;'
-        : 'font-size: 14px; margin-top: 20px; opacity: 0.6;';
+    paragraph.className = index === 0 ? 'loading-line' : 'loading-note';
     paragraph.textContent = line;
     box.appendChild(paragraph);
   });
+
+  if (tone === 'progress') {
+    const bar = document.createElement('div');
+    bar.className = 'loading-bar';
+    const fill = document.createElement('div');
+    fill.className = 'loading-bar-fill';
+    bar.appendChild(fill);
+    box.appendChild(bar);
+  }
   loadingScreen.replaceChildren(box);
 }
 
+/**
+ * “进入战场”画面。从菜单出发时它先垫在正在淡出的菜单下面，随后 bootGame 再调一次——
+ * 已经在显示就不重建，进度条动画不会重来。
+ */
 function showEnteringBattlefield(): void {
   const loadingScreen = document.getElementById('loading-screen');
-  if (loadingScreen) {
-    loadingScreen.classList.remove('hidden');
-    renderLoadingMessage(tr({ en: '⏳ Entering the battlefield', zh: '⏳ 正在进入战场' }), [
-      tr({ en: 'Starting the game runtime…', zh: '正在初始化游戏运行时...' }),
-    ]);
+  if (!loadingScreen) {
+    return;
   }
+  cancelLoadingHide(loadingScreen);
+  const alreadyShown =
+    loadingScreen.dataset.state === 'entering' && !loadingScreen.classList.contains('hidden');
+  loadingScreen.classList.remove('hidden');
+  if (alreadyShown) {
+    return;
+  }
+  renderLoadingMessage(
+    'progress',
+    tr({ en: 'Sortie', zh: '出击' }),
+    tr({ en: 'Entering the battlefield', zh: '正在进入战场' }),
+    [tr({ en: 'Starting the game runtime…', zh: '正在初始化游戏运行时...' })]
+  );
+  loadingScreen.dataset.state = 'entering';
 }
 
 function showError(message: string): void {
-  renderLoadingMessage(tr({ en: '⚠️ Failed to load', zh: '⚠️ 加载失败' }), [
-    message,
-    tr({
-      en: 'Try reloading the page or using a different browser.',
-      zh: '请尝试刷新页面或使用其他浏览器',
-    }),
-  ]);
+  const loadingScreen = document.getElementById('loading-screen');
+  if (loadingScreen) {
+    cancelLoadingHide(loadingScreen);
+    loadingScreen.dataset.state = 'error';
+  }
+  renderLoadingMessage(
+    'error',
+    tr({ en: 'System fault', zh: '系统故障' }),
+    tr({ en: 'Failed to load', zh: '加载失败' }),
+    [
+      message,
+      tr({
+        en: 'Try reloading the page or using a different browser.',
+        zh: '请尝试刷新页面或使用其他浏览器',
+      }),
+    ]
+  );
 }
 
 function checkWebGL(): boolean {
@@ -157,6 +231,8 @@ async function main(): Promise<void> {
     menuMusic.install();
     let game: GameCoordinator | null = null;
     let lastSettings: GameSettings | null = null;
+    // bootGame 正在等游戏代码加载 / 启动：这期间再来的启动请求一律不理
+    let booting = false;
 
     function disposeGame(): void {
       game?.dispose();
@@ -201,11 +277,18 @@ async function main(): Promise<void> {
       settings: GameSettings,
       resume: CampaignSaveData | null = null
     ): Promise<void> {
+      // 不可重入：结算界面的重试键连点两下、或上一次启动还在加载游戏代码时又来一次，
+      // 两次调用各建一个 GameCoordinator，先建的那个再也没人释放。“再来一局”和检查点续玩
+      // 都走这里，所以只在这一处拦。
+      if (booting) {
+        return;
+      }
       showEnteringBattlefield();
       disposeGame();
       unlockAudioFromUserGesture();
       menuMusic.onMenuHidden();
 
+      booting = true;
       try {
         const [{ GameCoordinator }] = await Promise.all([import('./core/GameCoordinator')]);
         void GameCoordinator.warmRuntimeChunks();
@@ -228,16 +311,30 @@ async function main(): Promise<void> {
             zh: '游戏启动失败，请查看控制台了解详情',
           })
         );
+      } finally {
+        // 启动失败也要放开，出错画面之后还能再试
+        booting = false;
       }
     }
 
-    startMenu.setOnStart(async (settings: GameSettings) => {
-      startMenu.hide();
-      await bootGame(settings);
+    /**
+     * 从菜单进入战场：“进入战场”画面先垫在正在淡出的菜单下面，
+     * 等菜单的过场播完（约 0.3 秒，减少动态效果时没有）再做耗时的启动。
+     */
+    function launchFromMenu(start: () => void): void {
+      showEnteringBattlefield();
+      void startMenu.whenLaunched().then(start);
+    }
+
+    startMenu.setOnStart((settings: GameSettings) => {
+      launchFromMenu(() => {
+        startMenu.hide();
+        void bootGame(settings);
+      });
     });
 
     // 开始菜单“继续战役”：读取并校验过的检查点
-    startMenu.setOnContinue((save) => continueFromCheckpoint(save));
+    startMenu.setOnContinue((save) => launchFromMenu(() => continueFromCheckpoint(save)));
 
     hideLoadingScreen();
     warmGameCoordinatorChunk();

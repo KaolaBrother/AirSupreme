@@ -5,7 +5,13 @@ import { BOSS_CONFIGS, BossType, getBossForLevel } from '@/features/boss/BossTyp
 import { getCampaignChapter } from '@/features/campaign/CampaignData';
 import { ENEMY_CONFIGS, EnemyType } from '@/features/enemy/EnemyTypes';
 import { getLocale, onLocaleChange, tr, type Locale, type LocalizedText } from '@/i18n';
-import { OffscreenChevron } from '@/ui/OffscreenChevron';
+import {
+  CHEVRON_EDGE_PADDING,
+  CHEVRON_EXIT_NONE,
+  ChevronAvoidance,
+  type ChevronAvoidExit,
+} from '@/ui/ChevronAvoidance';
+import { OffscreenChevron, measureChevronFootprint } from '@/ui/OffscreenChevron';
 import { HUD_COLORS } from '@/ui/theme/hudTokens';
 
 const CAMERA_POSITION_THRESHOLD_SQ = 0.01;
@@ -13,6 +19,138 @@ const PLAYER_POSITION_THRESHOLD_SQ = 0.01;
 const TARGET_POSITION_THRESHOLD_SQ = 0.01;
 const CAMERA_ROTATION_THRESHOLD = 0.0025;
 const HEALTH_PERCENT_THRESHOLD = 0.001;
+
+/**
+ * 目标框：地面 / 海上 / 空中单位在远处只有几个像素高，屏幕上小于约 22px 时在它周围画一个
+ * 威胁色的角框并标出距离，一公里外也找得到；靠近到看得清（> 28px，留出滞回）后收起。
+ * 当前目标（敌机清空后拖住波次的单位）始终带框，并换成加粗、脉冲的样式。
+ */
+const BRACKET_SHOW_BELOW_PX = 22;
+const BRACKET_HIDE_ABOVE_PX = 28;
+const BRACKET_MIN_SIZE_PX = 26;
+const BRACKET_OBJECTIVE_MIN_SIZE_PX = 34;
+const BRACKET_MAX_SIZE_PX = 96;
+const BRACKET_PADDING_PX = 14;
+/** 单位可见轮廓约为命中半径的一半（命中半径按放大后的整车 / 整舰设定，偏大） */
+const UNIT_VISIBLE_SIZE_RATIO = 0.5;
+/** 相机投影矩阵不可用时的回退：垂直视场 60° 的 1 / tan(fov / 2) */
+const FALLBACK_PROJECTION_SCALE = 1.732;
+/** 目标框距离取整（米）：减少逐帧改写文字 */
+const BRACKET_DISTANCE_STEP = 10;
+
+const TARGET_MARKER_STYLE_ID = 'enemy-target-marker-style';
+const OBJECTIVE_CLASS = 'is-objective';
+
+/** 八段线性渐变拼出四个角；--ehb-arm / --ehb-w 为角的臂长与线宽 */
+const BRACKET_CORNER_LAYERS = ['left top', 'right top', 'left bottom', 'right bottom']
+  .map(
+    (corner) =>
+      `linear-gradient(var(--ehb-c), var(--ehb-c)) ${corner} / var(--ehb-arm) var(--ehb-w) no-repeat, ` +
+      `linear-gradient(var(--ehb-c), var(--ehb-c)) ${corner} / var(--ehb-w) var(--ehb-arm) no-repeat`
+  )
+  .join(', ');
+
+const TARGET_MARKER_CSS = `
+.enemy-target-bracket {
+  --ehb-c: var(--hud-threat, ${HUD_COLORS.threat});
+  --ehb-arm: 7px;
+  --ehb-w: 2px;
+  position: absolute;
+  display: none;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+}
+
+.enemy-target-bracket-frame {
+  position: absolute;
+  inset: 0;
+  opacity: 0.88;
+  background: ${BRACKET_CORNER_LAYERS};
+  filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.9));
+}
+
+.enemy-target-bracket-distance {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  margin-top: 2px;
+  color: var(--ehb-c);
+  font-size: 11px;
+  font-weight: bold;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.95), 0 0 3px rgba(0, 0, 0, 0.8);
+}
+
+/* 当前目标：角框加粗加长、四边中点加刻线，并脉冲 */
+.enemy-target-bracket.${OBJECTIVE_CLASS} {
+  --ehb-arm: 11px;
+  --ehb-w: 3px;
+}
+
+.enemy-target-bracket.${OBJECTIVE_CLASS} .enemy-target-bracket-frame {
+  opacity: 1;
+  animation: enemy-target-objective-pulse 0.9s ease-in-out infinite;
+}
+
+.enemy-target-bracket.${OBJECTIVE_CLASS} .enemy-target-bracket-frame::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(var(--ehb-c), var(--ehb-c)) center top / 2px 6px no-repeat,
+    linear-gradient(var(--ehb-c), var(--ehb-c)) center bottom / 2px 6px no-repeat,
+    linear-gradient(var(--ehb-c), var(--ehb-c)) left center / 6px 2px no-repeat,
+    linear-gradient(var(--ehb-c), var(--ehb-c)) right center / 6px 2px no-repeat;
+}
+
+.enemy-target-bracket.${OBJECTIVE_CLASS} .enemy-target-bracket-distance {
+  font-size: 12px;
+}
+
+/* 当前目标在屏幕外：箭头换成威胁色并闪烁（OffscreenChevron 的内联 animation: none 用 !important 盖过） */
+.enemy-arrow-indicator.${OBJECTIVE_CLASS} {
+  animation: enemy-target-objective-blink 0.9s ease-in-out infinite !important;
+}
+
+.enemy-arrow-indicator.${OBJECTIVE_CLASS} svg,
+.enemy-arrow-indicator.${OBJECTIVE_CLASS} path {
+  fill: var(--hud-threat, ${HUD_COLORS.threat});
+}
+
+.enemy-arrow-indicator.${OBJECTIVE_CLASS} .offscreen-chevron-distance {
+  color: var(--hud-threat, ${HUD_COLORS.threat}) !important;
+}
+
+@keyframes enemy-target-objective-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.55; transform: scale(1.16); }
+}
+
+@keyframes enemy-target-objective-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .enemy-target-bracket.${OBJECTIVE_CLASS} .enemy-target-bracket-frame,
+  .enemy-arrow-indicator.${OBJECTIVE_CLASS} {
+    animation: none !important;
+  }
+}
+`;
+
+function ensureTargetMarkerStyle(): void {
+  if (typeof document === 'undefined' || document.getElementById(TARGET_MARKER_STYLE_ID)) {
+    return;
+  }
+  const style = document.createElement('style');
+  style.id = TARGET_MARKER_STYLE_ID;
+  style.textContent = TARGET_MARKER_CSS;
+  document.head.appendChild(style);
+}
 
 /** 兜底标签（按界面语言取值） */
 const FALLBACK_ENEMY_LABEL: LocalizedText = { en: 'Hostile', zh: '敌方目标' };
@@ -78,7 +216,8 @@ function isLocalizedText(value: unknown): value is LocalizedText {
 }
 
 /**
- * 友军 AI 战机的飞行员呼号（运行时写在 mesh.userData.displayName，双语对象或字符串）。
+ * 网格自带的显示名（mesh.userData.displayName，双语对象或字符串）：友军 AI 战机的飞行员呼号，
+ * 以及地面 / 海上 / 空中单位的型号名（UnitMeshFactory 写入 UNIT_CONFIGS[type].name）。
  * 每帧调用：只挑字段，不分配。
  */
 function readDisplayName(mesh: Object3D): string | null {
@@ -91,7 +230,8 @@ function readDisplayName(mesh: Object3D): string | null {
 
 /**
  * 解析血条标签：Boss 本体 → 战役名；Boss 部件 → 部件名；敌机（含 Boss 召唤的敌机）→
- * ENEMY_CONFIGS 型号名（友军加“友军”前缀）；地面 / 海上 / 空中单位（UNIT_*）→ 按阵营的通用名。
+ * ENEMY_CONFIGS 型号名（友军加“友军”前缀）；地面 / 海上 / 空中单位（UNIT_*）→ 网格自带的
+ * 型号名（如“主战坦克”），没有时退回按阵营的通用名。
  */
 function resolveTargetLabel(mesh: Object3D, isFriendly: boolean): string {
   const name = mesh.name || '';
@@ -111,6 +251,8 @@ function resolveTargetLabel(mesh: Object3D, isFriendly: boolean): string {
     return isFriendly ? tr(FRIENDLY_TYPE_LABEL, { type: typeName }) : typeName;
   }
   if (name.startsWith('UNIT_') || mesh.userData.unitType !== undefined) {
+    const unitName = readDisplayName(mesh);
+    if (unitName) return unitName;
     const faction: unknown = mesh.userData.faction;
     if (isFriendly || faction === Faction.FRIENDLY) {
       return tr({ en: 'Friendly unit', zh: '友军单位' });
@@ -155,11 +297,44 @@ function getBarKind(name: string): BarKind {
   return 'unit';
 }
 
+/** 血条快照：objective 为 true 时按“当前目标”样式标记（见 BRACKET_* 常量上的说明） */
+interface HealthBarInput {
+  mesh: Object3D;
+  currentHealth: number;
+  maxHealth: number;
+  objective?: boolean;
+}
+
+/** 目标框：外层定位、内层角框（当前目标时脉冲）、下方的距离 */
+interface TargetBracket {
+  root: HTMLDivElement;
+  distance: HTMLSpanElement;
+}
+
+/**
+ * 单位目标的估算半径（米）：只有地面 / 海上 / 空中单位（userData.unitType）带命中半径，
+ * 其余目标返回 0（不按大小画目标框）。
+ */
+function readUnitRadius(mesh: Object3D): number {
+  if (mesh.userData.unitType === undefined) return 0;
+  const radius: unknown = mesh.userData.hitRadius;
+  return typeof radius === 'number' && Number.isFinite(radius) && radius > 0 ? radius : 0;
+}
+
 interface HealthBarEntry {
   bar: HTMLDivElement;
   background: HTMLDivElement;
   targetName: HTMLSpanElement;
   chevron: OffscreenChevron | null;
+  /** 箭头上一次避让时走的出口（滞回用） */
+  arrowExit: ChevronAvoidExit;
+  /** 目标框（第一次需要时创建） */
+  bracket: TargetBracket | null;
+  bracketShown: boolean;
+  /** 单位目标的命中半径（米）；0 表示不按大小画目标框 */
+  unitRadius: number;
+  /** 当前目标样式 */
+  objective: boolean;
   screenPos: { x: number; y: number; z: number } | null; // 缓存屏幕位置
   lastBarWorldPosition: Vector3;
   lastHealthPercent: number;
@@ -199,6 +374,8 @@ export class EnemyHealthBars {
   private readonly lastCameraQuaternion = new Quaternion();
   private readonly lastPlayerPosition = new Vector3();
   private cameraStateInitialized: boolean = false;
+  /** 屏幕外箭头的避让区（雷达盘 / 触控控件 / HUD 面板），规则见 ChevronAvoidance */
+  private readonly arrowAvoidance = new ChevronAvoidance();
 
   constructor() {
     this.container = document.createElement('div');
@@ -219,35 +396,30 @@ export class EnemyHealthBars {
       return;
     }
 
+    ensureTargetMarkerStyle();
     document.body.appendChild(this.container);
     // 切换语言立即重写现有血条的名字（暂停时游戏不调用 update，也要换）
     this.unsubscribeLocale ??= onLocaleChange(() => this.relabelAll());
+    this.arrowAvoidance.attach();
     this.initialized = true;
   }
 
   /**
    * 更新敌人血条
-   * @param enemies 敌人列表，包含位置、血量等信息
+   * @param enemies 敌人列表，包含位置、血量等信息（敌方单位同样在内；objective 标出当前目标）
    * @param friendlies 友军列表，包含位置、血量等信息
    * @param camera 相机
    * @param playerPosition 玩家位置
    */
   public update(
-    enemies: Array<{
-      mesh: Object3D;
-      currentHealth: number;
-      maxHealth: number;
-    }>,
-    friendlies: Array<{
-      mesh: Object3D;
-      currentHealth: number;
-      maxHealth: number;
-    }>,
+    enemies: HealthBarInput[],
+    friendlies: HealthBarInput[],
     camera: Camera,
     playerPosition: Vector3
   ): void {
     this.init();
     this.syncLabelLocale();
+    this.arrowAvoidance.refresh();
 
     const cameraMoved =
       !this.cameraStateInitialized ||
@@ -410,11 +582,7 @@ export class EnemyHealthBars {
    * 更新或创建血条
    */
   private updateOrCreateHealthBar(
-    enemy: {
-      mesh: Object3D;
-      currentHealth: number;
-      maxHealth: number;
-    },
+    enemy: HealthBarInput,
     camera: Camera,
     playerPosition: Vector3,
     cameraMoved: boolean,
@@ -438,6 +606,7 @@ export class EnemyHealthBars {
         if (barData.chevron) {
           this.resetArrowIndicator(barData.chevron);
         }
+        this.hideBracket(barData);
         barData.wasInView = null;
       }
       return;
@@ -462,6 +631,11 @@ export class EnemyHealthBars {
         background,
         targetName,
         chevron,
+        arrowExit: CHEVRON_EXIT_NONE,
+        bracket: null,
+        bracketShown: false,
+        unitRadius: isFriendly ? 0 : readUnitRadius(enemy.mesh),
+        objective: false,
         screenPos: null,
         lastBarWorldPosition: this.barWorldPosition.clone(),
         lastHealthPercent: Number.NaN,
@@ -475,6 +649,15 @@ export class EnemyHealthBars {
     }
     barData.mesh = enemy.mesh;
     barData.isFriendly = isFriendly;
+
+    // 当前目标：箭头与目标框换样式（类名只在状态变化时改）
+    const objective = !isFriendly && enemy.objective === true;
+    const objectiveChanged = objective !== barData.objective;
+    if (objectiveChanged) {
+      barData.objective = objective;
+      barData.chevron?.element.classList.toggle(OBJECTIVE_CLASS, objective);
+      barData.bracket?.root.classList.toggle(OBJECTIVE_CLASS, objective);
+    }
 
     const healthPercent = enemy.currentHealth / enemy.maxHealth;
     const targetMoved =
@@ -513,6 +696,7 @@ export class EnemyHealthBars {
       !needsPositionUpdate &&
       !needsArrowUpdate &&
       !visibilityChanged &&
+      !objectiveChanged &&
       !barData.labelDirty
     ) {
       return;
@@ -527,6 +711,7 @@ export class EnemyHealthBars {
       this.setStyleValue(barData.bar, 'display', 'block');
       if (barData.chevron) {
         this.resetArrowIndicator(barData.chevron);
+        barData.arrowExit = CHEVRON_EXIT_NONE;
       }
 
       if (needsPositionUpdate) {
@@ -545,8 +730,13 @@ export class EnemyHealthBars {
       }
 
       this.writeTargetName(barData, this.getTargetName(enemy.mesh, isFriendly));
+
+      if (needsPositionUpdate || objectiveChanged) {
+        this.updateBracket(barData, screenPos, worldPos, camera, playerPosition);
+      }
     } else {
       this.setStyleValue(barData.bar, 'display', 'none');
+      this.hideBracket(barData);
       if (barData.chevron) {
         const distance = playerPosition.distanceTo(worldPos);
         if (!Number.isFinite(distance)) {
@@ -563,7 +753,7 @@ export class EnemyHealthBars {
             this.cameraLocal.copy(worldPos).sub(camera.position);
             this.invertedCameraQuaternion.copy(camera.quaternion).invert();
             this.cameraLocal.applyQuaternion(this.invertedCameraQuaternion);
-            this.updateArrowIndicator(barData.chevron, this.cameraLocal, distance);
+            this.updateArrowIndicator(barData, barData.chevron, this.cameraLocal, distance);
           }
         }
       }
@@ -670,6 +860,100 @@ export class EnemyHealthBars {
   }
 
   /**
+   * 目标框：单位目标在屏幕上太小（或它是当前目标）时，在投影点周围画角框并标出离玩家的距离。
+   * 只在位置 / 目标状态变化时调用。
+   */
+  private updateBracket(
+    barData: HealthBarEntry,
+    screenPos: { x: number; y: number },
+    worldPos: Vector3,
+    camera: Camera,
+    playerPosition: Vector3
+  ): void {
+    const objective = barData.objective;
+    if (!objective && barData.unitRadius <= 0) {
+      return;
+    }
+    const apparent = this.getApparentSizePx(barData.unitRadius, worldPos, camera);
+    // 滞回：已显示的框要等目标明显变大才收起，避免在阈值附近闪烁
+    const show =
+      objective ||
+      apparent < (barData.bracketShown ? BRACKET_HIDE_ABOVE_PX : BRACKET_SHOW_BELOW_PX);
+    if (!show) {
+      this.hideBracket(barData);
+      return;
+    }
+
+    let bracket = barData.bracket;
+    if (!bracket) {
+      bracket = this.createBracket();
+      bracket.root.classList.toggle(OBJECTIVE_CLASS, objective);
+      this.container.appendChild(bracket.root);
+      barData.bracket = bracket;
+    }
+
+    const minSize = objective ? BRACKET_OBJECTIVE_MIN_SIZE_PX : BRACKET_MIN_SIZE_PX;
+    const wanted = Number.isFinite(apparent) ? apparent + BRACKET_PADDING_PX : minSize;
+    // 取偶数像素：四个角对称，也少改几次样式
+    const size = Math.round(Math.max(minSize, Math.min(BRACKET_MAX_SIZE_PX, wanted)) / 2) * 2;
+    const root = bracket.root;
+    this.setStyleValue(root, 'width', `${size}px`);
+    this.setStyleValue(root, 'height', `${size}px`);
+    this.setStyleValue(root, 'left', `${Math.round(screenPos.x * window.innerWidth)}px`);
+    this.setStyleValue(root, 'top', `${Math.round(screenPos.y * window.innerHeight)}px`);
+
+    const distance = playerPosition.distanceTo(worldPos);
+    this.setTextContent(
+      bracket.distance,
+      Number.isFinite(distance)
+        ? `${Math.round(distance / BRACKET_DISTANCE_STEP) * BRACKET_DISTANCE_STEP}m`
+        : ''
+    );
+    this.setStyleValue(root, 'display', 'block');
+    barData.bracketShown = true;
+  }
+
+  private hideBracket(barData: HealthBarEntry): void {
+    if (!barData.bracketShown) {
+      return;
+    }
+    barData.bracketShown = false;
+    if (barData.bracket) {
+      this.setStyleValue(barData.bracket.root, 'display', 'none');
+    }
+  }
+
+  /**
+   * 单位在屏幕上的大致像素高度：可见轮廓（命中半径的一半）按相机距离与投影矩阵换算。
+   * 半径未知或距离 / 投影非有限时返回 Infinity（不按大小画框）。
+   */
+  private getApparentSizePx(unitRadius: number, worldPos: Vector3, camera: Camera): number {
+    if (unitRadius <= 0) {
+      return Infinity;
+    }
+    const distance = camera.position.distanceTo(worldPos);
+    if (!Number.isFinite(distance) || distance <= 0) {
+      return Infinity;
+    }
+    const projection = camera.projectionMatrix.elements[5];
+    const scale =
+      Number.isFinite(projection) && projection > 0 ? projection : FALLBACK_PROJECTION_SCALE;
+    return (unitRadius * UNIT_VISIBLE_SIZE_RATIO * scale * window.innerHeight) / distance;
+  }
+
+  private createBracket(): TargetBracket {
+    const root = document.createElement('div');
+    root.className = 'enemy-target-bracket';
+    const frame = document.createElement('div');
+    frame.className = 'enemy-target-bracket-frame';
+    const distance = document.createElement('span');
+    distance.className = 'enemy-target-bracket-distance';
+    root.appendChild(frame);
+    root.appendChild(distance);
+    return { root, distance };
+  }
+
+  /**
    * 创建屏幕外指向箭头（琥珀色敌人威胁）
    */
   private createArrowIndicator(): OffscreenChevron {
@@ -686,13 +970,14 @@ export class EnemyHealthBars {
    * 使用相机局部坐标系进行角度计算，正确处理敌人在相机后面或下方的情况
    */
   private updateArrowIndicator(
+    barData: HealthBarEntry,
     chevron: OffscreenChevron,
     cameraLocal: Vector3,
     distance: number
   ): void {
     const centerX = 0.5;
     const centerY = 0.5;
-    const edgePadding = 0.08;
+    const edgePadding = CHEVRON_EDGE_PADDING;
 
     const isOnRight = cameraLocal.x > 0;
     const isAbove = cameraLocal.y > 0;
@@ -761,9 +1046,15 @@ export class EnemyHealthBars {
     // - 左方 (x<0): atan2(-1, 0) = -90°
     const rotationAngle = Math.atan2(cameraLocal.x, cameraLocal.y) * (180 / Math.PI);
 
+    // 雷达盘 / 触控控件 / HUD 面板叠在箭头层之上：整枚箭头（含距离标签）移出它们，并留在屏幕内
+    const avoidance = this.arrowAvoidance;
+    measureChevronFootprint(rotationAngle, distance, avoidance.footprint);
+    avoidance.resolve(arrowX * window.innerWidth, arrowY * window.innerHeight, barData.arrowExit);
+    barData.arrowExit = avoidance.exit;
+
     const arrow = chevron.element;
-    this.setStyleValue(arrow, 'left', `${arrowX * 100}%`);
-    this.setStyleValue(arrow, 'top', `${arrowY * 100}%`);
+    this.setStyleValue(arrow, 'left', `${Math.round(avoidance.x)}px`);
+    this.setStyleValue(arrow, 'top', `${Math.round(avoidance.y)}px`);
     chevron.update({
       rotationDeg: rotationAngle,
       distance,
@@ -868,6 +1159,7 @@ export class EnemyHealthBars {
         this.resetArrowIndicator(barData.chevron);
         barData.chevron.dispose();
       }
+      barData.bracket?.root.remove();
       barData.bar.remove();
       this.healthBars.delete(id);
     }
@@ -882,6 +1174,7 @@ export class EnemyHealthBars {
         this.resetArrowIndicator(barData.chevron);
         barData.chevron.dispose();
       }
+      barData.bracket?.root.remove();
       barData.bar.remove();
     }
     this.healthBars.clear();
@@ -891,23 +1184,11 @@ export class EnemyHealthBars {
   public dispose(): void {
     this.unsubscribeLocale?.();
     this.unsubscribeLocale = null;
+    this.arrowAvoidance.detach();
     this.clear();
     if (this.container.parentElement) {
       this.container.remove();
     }
     this.initialized = false;
-  }
-
-  /**
-   * 获取第一个敌人的屏幕位置（用于锁定系统）
-   * @returns 第一个可见敌人的屏幕位置，如果没有敌人则返回 null
-   */
-  public getFirstEnemyScreenPos(): { x: number; y: number } | null {
-    for (const barData of this.healthBars.values()) {
-      if (barData.screenPos && barData.bar.style.display !== 'none') {
-        return { x: barData.screenPos.x, y: barData.screenPos.y };
-      }
-    }
-    return null;
   }
 }

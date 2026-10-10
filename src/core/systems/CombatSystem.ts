@@ -7,6 +7,7 @@ import { BossProjectilePool } from '@/features/combat/BossProjectilePool';
 import { MissileSystem } from '@/features/combat/MissileSystem';
 import { ParticleSystem } from '@/features/effects/ParticleSystem';
 import { Faction, areHostile } from '@/core/Faction';
+import { GAME_CONSTANTS } from '@/config';
 
 type EnvironmentProjectileSource = 'player' | 'enemy' | 'boss';
 export type ProjectileHitSource =
@@ -61,7 +62,7 @@ export class CombatSystem implements IGameSystem {
     this.activeEnemyHit?.(target, damage, 'player-bullet');
   };
   private readonly handleMissileHit = (target: Object3D, impactPosition: Vector3): void => {
-    this.activeEnemyHit?.(target, 50 * this.damageMultiplier, 'missile');
+    this.activeEnemyHit?.(target, GAME_CONSTANTS.MISSILE.DAMAGE * this.damageMultiplier, 'missile');
     EventBus.emit(GameEventType.MISSILE_HIT, {
       position: impactPosition,
       target,
@@ -125,12 +126,6 @@ export class CombatSystem implements IGameSystem {
           payload.owner,
           payload.faction
         );
-      })
-    );
-
-    this.eventUnsubscribers.push(
-      EventBus.on(GameEventType.MISSILE_FIRED, ({ payload }) => {
-        this.missileSystem.fire(payload.position, new Vector3(0, 0, -1), payload.target);
       })
     );
   }

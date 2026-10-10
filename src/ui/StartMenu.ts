@@ -1,86 +1,562 @@
-import { type QualityPreset } from '@/config';
+import { GameConfig } from '@/config';
 import { unlockAudioFromUserGesture } from '@/core/Audio/AudioContextHost';
-import { getDifficultyProfile } from '@/core/Difficulty';
 import {
   describeCheckpoint,
   loadCampaignCheckpoint,
   type CampaignSaveData,
 } from '@/core/save/SaveSystem';
 import {
-  DEFAULT_START_FLOW_SETTINGS,
-  LANGUAGE_ENDONYMS,
-  getAudioSettings,
-  getPresentationSettings,
   loadStartFlowSettings,
   saveStartFlowSettings,
-  stepLanguage,
-  TEST_SCORE_OPTIONS,
-  type CameraModeSetting,
   type StartFlowSettings,
 } from '@/core/SessionSettings';
-import { TOTAL_LEVELS, getCampaignChapter } from '@/features/campaign/CampaignData';
-import { getLocale, onLocaleChange, setLocale, tr, type LocalizedText } from '@/i18n';
-import { HUD_COLORS, injectHudTokens } from '@/ui/theme/hudTokens';
+import { getLocale, onLocaleChange, setLocale, tr } from '@/i18n';
+import { injectHudTokens, prefersReducedMotion } from '@/ui/theme/hudTokens';
+import { el, isEditableTarget } from './menu/dom';
+import { HowToPlaySheet } from './menu/HowToPlaySheet';
+import { MenuBackdrop } from './menu/MenuBackdrop';
+import { MenuHero } from './menu/MenuHero';
+import { chapterCaption, difficultyText } from './menu/menuLabels';
+import { MenuSheet } from './menu/MenuSheet';
+import { MENU_CSS } from './menu/menuStyles';
+import { SettingsSheet } from './menu/SettingsSheet';
+import { SHEET_CSS } from './menu/sheetStyles';
+import { TitleScreen, type TitleAction } from './menu/TitleScreen';
 import type { ModelPreview } from './ModelPreview';
+
 type ModelPreviewModule = typeof import('./ModelPreview');
 
-const QUALITY_LABELS: Readonly<Record<QualityPreset, LocalizedText>> = {
-  auto: { en: 'Auto', zh: '自动' },
-  performance: { en: 'Performance', zh: '性能' },
-  balanced: { en: 'Balanced', zh: '平衡' },
-  quality: { en: 'High', zh: '高质量' },
-};
+/** 入场编排的总时长：之后摘掉 is-entering，悬停 / 按下的位移不再被动画的结束帧压住 */
+const ENTRANCE_MS = 1400;
+/** “进入战场”过场的时长（与 menuStyles 里的 tm-launch 一致） */
+const LAUNCH_MS = 340;
 
-const SWITCH_ON: LocalizedText = { en: 'On', zh: '开启' };
-const SWITCH_OFF: LocalizedText = { en: 'Off', zh: '关闭' };
-
-/** 操作说明：按键（字符串原样显示，双语对象按语言取）+ 动作 */
-const CONTROL_LEGEND: ReadonlyArray<{
-  keys: ReadonlyArray<string | LocalizedText>;
-  joiner?: string;
-  action: LocalizedText;
-}> = [
-  { keys: ['W', 'S'], action: { en: 'Pitch (nose up / down)', zh: '俯仰（机头上下）' } },
-  { keys: ['A', 'D'], action: { en: 'Yaw (nose left / right)', zh: '偏航（机头左右）' } },
-  { keys: ['Q', 'E'], action: { en: 'Roll (bank the wings)', zh: '翻滚（机翼倾斜）' } },
-  { keys: [{ en: 'Space', zh: '空格' }], action: { en: 'Fire guns', zh: '开火' } },
-  { keys: ['Shift'], action: { en: 'Boost', zh: '加速' } },
-  { keys: ['M'], action: { en: 'Fire missile', zh: '发射导弹' } },
-  { keys: ['F'], action: { en: 'Special weapon (hold)', zh: '特殊武器（可长按）' } },
-  { keys: ['Tab', 'X'], action: { en: 'Cycle special weapon', zh: '切换特殊武器' } },
-  { keys: ['1', '5'], joiner: ' – ', action: { en: 'Select special weapon', zh: '选择特殊武器' } },
-  { keys: ['G'], action: { en: 'Drop flares', zh: '投放热焰弹' } },
-  { keys: ['V'], action: { en: 'First / third-person view', zh: '切换第一 / 第三人称' } },
-];
-
+/**
+ * 主菜单（标题画面）。
+ *
+ * 画面：全屏的黄昏云海背景（MenuBackdrop，纯 CSS / 2D 画布）+ 按需加载的实时 3D 主机
+ * （MenuHero）+ 标志与少数几个动作（TitleScreen）。设置、操作说明各是一张面板
+ * （SettingsSheet / HowToPlaySheet），机库是模型预览（ModelPreview，按需加载）。
+ *
+ * 对外接口与原来一致：setOnStart / setOnContinue / reloadFromStorage / show / hide / dispose，
+ * 根节点 id 仍是 #start-menu；新增 whenLaunched()（见该方法）。
+ * 设置的取值范围、存储字段与保存时机不变：每次改动立即 saveStartFlowSettings。
+ */
 export class StartMenu {
-  private container: HTMLDivElement;
-  private settingsContainer: HTMLDivElement;
+  private readonly container: HTMLDivElement;
+  private readonly backdrop: MenuBackdrop;
+  private readonly hero: MenuHero;
+  private readonly title: TitleScreen;
+  private readonly settingsSheet: SettingsSheet;
+  private readonly howToSheet: HowToPlaySheet;
+  private readonly confirmSheet: MenuSheet;
+  private readonly reducedMotion: boolean;
+
   private onStart?: (settings: GameSettings) => void;
   private onContinue?: (save: CampaignSaveData) => void;
-  private continueButton: HTMLButtonElement | null = null;
+  private settings: GameSettings;
+  private save: CampaignSaveData | null;
+
   private modelPreview: ModelPreview | null = null;
   private modelPreviewPromise: Promise<ModelPreview> | null = null;
   private modelPreviewModulePromise: Promise<ModelPreviewModule> | null = null;
-  private isDisposed: boolean = false;
+  private preloadTimer: ReturnType<typeof setTimeout> | null = null;
+  private hangarLoading = false;
+  private inHangar = false;
+
+  private visible = false;
+  private isDisposed = false;
+  private entranceTimer: ReturnType<typeof setTimeout> | null = null;
+  private launching = false;
+  private launchTimer: ReturnType<typeof setTimeout> | null = null;
+  private launchPromise: Promise<void> | null = null;
+  private resolveLaunch: (() => void) | null = null;
   private unsubscribeLocale: (() => void) | null = null;
 
-  private settings: GameSettings = { ...DEFAULT_START_FLOW_SETTINGS };
+  private readonly handleKeydown = (event: KeyboardEvent): void => this.onKeydown(event);
 
   constructor() {
-    this.loadSettings();
+    this.settings = loadStartFlowSettings();
+    this.save = loadCampaignCheckpoint();
+    this.reducedMotion = prefersReducedMotion();
     injectHudTokens();
-    this.container = this.createContainer();
-    this.settingsContainer = this.createSettingsPanel();
-    this.container.appendChild(this.settingsContainer);
+
+    this.container = el('div');
+    this.container.id = 'start-menu';
+    this.container.classList.toggle('is-reduced', this.reducedMotion);
+    const style = document.createElement('style');
+    style.textContent = MENU_CSS + SHEET_CSS;
+    this.container.append(style);
+    // iOS Safari 只有在祖先上注册过触摸监听时才给按钮应用 :active（按下反馈）
+    this.container.addEventListener('touchstart', () => undefined, { passive: true });
+
+    this.backdrop = new MenuBackdrop();
+    this.hero = new MenuHero(this.backdrop.heroSlot, {
+      reducedMotion: this.reducedMotion,
+      touchDevice: GameConfig.isMobile,
+    });
+
+    this.title = new TitleScreen(
+      {
+        onAction: (action) => this.handleAction(action),
+        onHangarIntent: () => this.preloadModelPreviewModule(),
+      },
+      { save: this.save, settings: this.settings }
+    );
+
+    const onOpenChange = (): void => this.syncSheetState();
+    this.settingsSheet = new SettingsSheet(
+      {
+        getSettings: () => this.settings,
+        update: (patch) => this.updateSettings(patch),
+      },
+      { reducedMotion: this.reducedMotion, onOpenChange }
+    );
+    this.howToSheet = new HowToPlaySheet({
+      reducedMotion: this.reducedMotion,
+      defaultView: GameConfig.isMobile ? 'touch' : 'keyboard',
+      onOpenChange,
+    });
+    this.confirmSheet = new MenuSheet({
+      id: 'new-campaign-confirm',
+      variant: 'dialog',
+      reducedMotion: this.reducedMotion,
+      onOpenChange,
+    });
+    this.renderConfirm();
+
+    this.container.append(
+      this.backdrop.root,
+      this.title.root,
+      this.settingsSheet.sheet.layer,
+      this.howToSheet.sheet.layer,
+      this.confirmSheet.layer
+    );
     document.body.appendChild(this.container);
-    this.refreshContinueButton();
+
+    this.setVisible(true);
     this.scheduleModelPreviewPreload();
     this.unsubscribeLocale = onLocaleChange(() => this.applyLocale());
   }
 
+  // ───────────────────────────── 对外接口 ─────────────────────────────
+
+  public setOnStart(callback: (settings: GameSettings) => void): void {
+    this.onStart = callback;
+  }
+
+  /** 点击“继续战役”时回调（传入刚读取并校验过的检查点） */
+  public setOnContinue(callback: (save: CampaignSaveData) => void): void {
+    this.onContinue = callback;
+  }
+
+  /**
+   * “进入战场”过场（约 0.3 秒：前景收走、主机加力冲出、菜单淡出）播完且菜单已隐藏后兑现。
+   * onStart / onContinue 仍在点击的调用栈上同步触发（音频解锁依赖这一点）；调用方想让过场
+   * 播完再做耗时的启动工作，就在回调里等这个 Promise。没有过场在播（减少动态效果、或菜单
+   * 已被 hide()）时立即兑现。
+   */
+  public whenLaunched(): Promise<void> {
+    return this.launchPromise ?? Promise.resolve();
+  }
+
+  public reloadFromStorage(): void {
+    this.settings = loadStartFlowSettings();
+    // 与原先一致：读回的设置规范化后写回存储
+    saveStartFlowSettings(this.settings);
+    this.save = loadCampaignCheckpoint();
+    this.settingsSheet.sync();
+    this.refreshTitle();
+  }
+
+  public show(): void {
+    this.reloadFromStorage();
+    this.settleLaunch(false);
+    if (this.inHangar) {
+      // 机库还开着就被要求显示菜单：先收起机库（它会回调 resumeFromHangar）
+      this.modelPreview?.hide();
+    }
+    this.setVisible(true);
+  }
+
+  public hide(): void {
+    if (this.launching) {
+      this.settleLaunch(true);
+      return;
+    }
+    this.closeSheets();
+    this.setVisible(false);
+  }
+
+  public dispose(): void {
+    if (this.isDisposed) {
+      return;
+    }
+    this.isDisposed = true;
+    this.settleLaunch(false);
+    this.setVisible(false);
+    if (this.preloadTimer !== null) {
+      clearTimeout(this.preloadTimer);
+      this.preloadTimer = null;
+    }
+    this.unsubscribeLocale?.();
+    this.unsubscribeLocale = null;
+    this.modelPreview?.dispose();
+    this.modelPreview = null;
+    this.settingsSheet.dispose();
+    this.howToSheet.dispose();
+    this.confirmSheet.dispose();
+    this.hero.dispose();
+    this.backdrop.dispose();
+    this.container.remove();
+  }
+
+  // ───────────────────────────── 显示 / 隐藏 ─────────────────────────────
+
+  /**
+   * 显示：播放入场编排、启动主机与视差、接管键盘。
+   * 隐藏：容器 display:none（CSS 动画随之停止）、释放主机的 WebGL 上下文、摘掉监听。
+   */
+  private setVisible(visible: boolean): void {
+    if (this.entranceTimer !== null) {
+      clearTimeout(this.entranceTimer);
+      this.entranceTimer = null;
+    }
+    this.container.classList.remove('is-entering');
+
+    if (!visible) {
+      this.container.style.display = 'none';
+      if (this.visible) {
+        this.visible = false;
+        document.removeEventListener('keydown', this.handleKeydown);
+        this.backdrop.disableParallax();
+        this.hero.stop();
+      }
+      return;
+    }
+
+    this.container.style.display = '';
+    if (!this.reducedMotion) {
+      // 重新触发入场动画：先让“没有 is-entering”的状态生效一帧
+      void this.container.offsetWidth;
+      this.container.classList.add('is-entering');
+      this.entranceTimer = setTimeout(() => {
+        this.entranceTimer = null;
+        this.container.classList.remove('is-entering');
+      }, ENTRANCE_MS);
+    }
+    if (!this.visible) {
+      this.visible = true;
+      document.addEventListener('keydown', this.handleKeydown);
+      if (!this.reducedMotion) {
+        this.backdrop.enableParallax(this.container, (x, y) => this.hero.setPointer(x, y));
+      }
+      this.hero.start();
+    }
+  }
+
+  private refreshTitle(): void {
+    this.title.update({ save: this.save, settings: this.settings });
+  }
+
+  // ───────────────────────────── 设置 ─────────────────────────────
+
+  /** 设置面板改了一项：合并、保存、刷新显示；语言变化时切换界面语言（随后整体重建文案） */
+  private updateSettings(patch: Partial<StartFlowSettings>): void {
+    const previousLanguage = this.settings.language;
+    // 原地修改：已经交给调用方的设置对象（重试用）与菜单里的保持同一份
+    Object.assign(this.settings, patch);
+    saveStartFlowSettings(this.settings);
+    this.settingsSheet.sync();
+    this.refreshTitle();
+    if (this.settings.language !== previousLanguage) {
+      setLocale(this.settings.language);
+    }
+  }
+
+  /** 语言切换（设置面板或暂停菜单里）：标题画面、三张面板都按新语言重建 */
+  private applyLocale(): void {
+    if (this.isDisposed) {
+      return;
+    }
+    // 语言也可能在暂停菜单里切换：内存中的设置跟上，避免之后把旧语言写回存储
+    this.settings.language = getLocale();
+    this.refreshTitle();
+    this.settingsSheet.render();
+    this.howToSheet.render();
+    this.renderConfirm();
+  }
+
+  // ───────────────────────────── 动作 ─────────────────────────────
+
+  private handleAction(action: TitleAction): void {
+    // 菜单不在屏幕上时（已进入对局 / 机库开着）按钮还留着焦点：再来的点击、Enter 都不算
+    if (!this.visible || this.launching || this.isDisposed) {
+      return;
+    }
+    switch (action) {
+      case 'continue':
+        this.continueCampaign();
+        break;
+      case 'start':
+        this.requestNewGame();
+        break;
+      case 'hangar':
+        void this.openHangar();
+        break;
+      case 'settings':
+        this.settingsSheet.open(() => this.title.getButton('settings'));
+        break;
+      case 'howto':
+        this.howToSheet.open(() => this.title.getButton('howto'));
+        break;
+    }
+  }
+
+  private continueCampaign(): void {
+    // 重新读取并校验：存档可能在别的标签页里被清掉，或已损坏
+    const save = loadCampaignCheckpoint();
+    if (!save) {
+      this.save = null;
+      this.refreshTitle();
+      return;
+    }
+    const onContinue = this.onContinue;
+    if (!onContinue) {
+      return;
+    }
+    this.launch(() => onContinue(save));
+  }
+
+  /**
+   * 开新局。正常模式的新局一启动就会清掉战役检查点（CampaignFlowController.setupNewRun），
+   * 从高级选项里选关 / 带测试分数开局也一样；所以只要有存档且是正常模式，就先确认。
+   * Boss 模式不读也不写战役存档，直接开始。
+   */
+  private requestNewGame(): void {
+    // 重新读取：存档可能在别的标签页里被清掉，或已损坏
+    const save = loadCampaignCheckpoint();
+    const existenceChanged = (save === null) !== (this.save === null);
+    this.save = save;
+    if (existenceChanged) {
+      this.refreshTitle();
+    }
+    if (save && this.settings.gameMode === 'normal') {
+      this.renderConfirm();
+      this.confirmSheet.open(() => this.title.getButton('start'));
+      return;
+    }
+    this.startGame();
+  }
+
+  private startGame(): void {
+    const onStart = this.onStart;
+    this.launch(() => onStart?.(this.settings));
+  }
+
+  /**
+   * 进入战场：音频解锁与回调都在点击的调用栈上同步完成；菜单自己播完过场后隐藏
+   * （减少动态效果时立刻隐藏）。调用方中途调 hide() 会直接结束过场。
+   */
+  private launch(run: () => void): void {
+    unlockAudioFromUserGesture();
+    this.closeSheets();
+    if (this.reducedMotion) {
+      this.setVisible(false);
+      run();
+      return;
+    }
+    this.launching = true;
+    this.container.classList.add('is-launching');
+    this.hero.launch();
+    this.launchPromise = new Promise<void>((resolve) => {
+      this.resolveLaunch = resolve;
+    });
+    this.launchTimer = setTimeout(() => this.settleLaunch(true), LAUNCH_MS);
+    run();
+  }
+
+  /** 结束过场；hideMenu：同时隐藏菜单（show() 打断过场时不隐藏） */
+  private settleLaunch(hideMenu: boolean): void {
+    if (!this.launching) {
+      return;
+    }
+    this.launching = false;
+    if (this.launchTimer !== null) {
+      clearTimeout(this.launchTimer);
+      this.launchTimer = null;
+    }
+    this.container.classList.remove('is-launching');
+    const resolve = this.resolveLaunch;
+    this.resolveLaunch = null;
+    this.launchPromise = null;
+    if (hideMenu) {
+      this.setVisible(false);
+    }
+    resolve?.();
+  }
+
+  // ───────────────────────────── 面板 ─────────────────────────────
+
+  private openSheets(): MenuSheet[] {
+    return [this.confirmSheet, this.howToSheet.sheet, this.settingsSheet.sheet].filter((sheet) =>
+      sheet.isOpen()
+    );
+  }
+
+  /** 有面板打开时，背后的标题画面退后并失去交互（键盘、读屏都进不去） */
+  private syncSheetState(): void {
+    const open = this.openSheets().length > 0;
+    this.container.classList.toggle('has-sheet', open);
+    this.title.root.inert = open;
+  }
+
+  private closeSheets(): void {
+    for (const sheet of this.openSheets()) {
+      sheet.close(false);
+    }
+  }
+
+  /** “新战役”确认框：写明会被覆盖的是哪一份存档；默认焦点在“保留存档”上 */
+  private renderConfirm(): void {
+    const sheet = this.confirmSheet;
+    sheet.setHeading(
+      tr({ en: 'New campaign', zh: '新战役' }),
+      tr({ en: 'Replace your saved campaign?', zh: '覆盖当前的战役存档？' }),
+      tr({ en: 'Cancel', zh: '取消' })
+    );
+    sheet.panel.setAttribute('aria-describedby', 'new-campaign-confirm-text');
+
+    const text = el(
+      'p',
+      'cf-text',
+      tr({
+        en: 'Starting a new campaign erases the checkpoint below. This cannot be undone.',
+        zh: '开始新战役会清除下面这份检查点存档，无法恢复。',
+      })
+    );
+    text.id = 'new-campaign-confirm-text';
+    const nodes: HTMLElement[] = [text];
+
+    const save = this.save;
+    if (save) {
+      const card = el('div', 'cf-save');
+      card.id = 'new-campaign-confirm-save';
+      card.append(
+        el('span', 'cf-save-label', tr({ en: 'Saved campaign', zh: '当前存档' })),
+        ' ',
+        el('span', 'cf-save-title', describeCheckpoint(save)),
+        ' ',
+        el(
+          'span',
+          'cf-save-meta',
+          tr(
+            {
+              en: 'Score {score} · {difficulty} · Lives {lives}',
+              zh: '得分 {score} · {difficulty} · 生命 {lives}',
+            },
+            {
+              score: save.score,
+              difficulty: difficultyText(save.difficulty),
+              lives: save.lives,
+            }
+          )
+        )
+      );
+      nodes.push(card);
+    }
+
+    // 新局从哪里开始（高级选项改过起始关卡 / 测试分数时尤其要看得见）
+    const startText = el(
+      'p',
+      'cf-text cf-start',
+      tr(
+        { en: 'The new run starts at {chapter}.', zh: '新战役从「{chapter}」开始。' },
+        { chapter: chapterCaption(this.settings.startLevel) }
+      )
+    );
+    nodes.push(startText);
+    sheet.body.replaceChildren(...nodes);
+
+    const cancel = el('button', 'cf-btn', tr({ en: 'Keep my save', zh: '保留存档' }));
+    cancel.type = 'button';
+    cancel.id = 'new-campaign-cancel';
+    cancel.dataset.autofocus = '';
+    cancel.addEventListener('click', () => sheet.close());
+
+    const confirm = el(
+      'button',
+      'cf-btn cf-btn-danger',
+      tr({ en: 'Start new campaign', zh: '开始新战役' })
+    );
+    confirm.type = 'button';
+    confirm.id = 'new-campaign-confirm-btn';
+    confirm.addEventListener('click', () => {
+      if (!this.visible || this.launching) {
+        return;
+      }
+      sheet.close(false);
+      this.startGame();
+    });
+
+    const actions = el('div', 'cf-actions');
+    actions.append(cancel, confirm);
+    const hadFocus = sheet.footer.contains(document.activeElement);
+    const focusedConfirm = hadFocus && document.activeElement?.id === confirm.id;
+    sheet.footer.replaceChildren(actions);
+    if (hadFocus) {
+      (focusedConfirm ? confirm : cancel).focus({ preventScroll: true });
+    }
+  }
+
+  // ───────────────────────────── 键盘 ─────────────────────────────
+
+  /**
+   * 菜单可见时的全局按键：
+   * 面板打开——Esc 关闭最上面那张，Tab 圈在面板里，上下方向键在各行之间移动；
+   * 标题画面——焦点不在任何按钮上时，Enter 触发主动作，方向键把焦点放到动作列表上
+   * （按钮之间的方向键移动由 TitleScreen 自己处理）。
+   */
+  private onKeydown(event: KeyboardEvent): void {
+    if (!this.visible || this.launching || this.inHangar || event.defaultPrevented) {
+      return;
+    }
+    const sheet = this.openSheets()[0];
+    if (sheet) {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        sheet.close();
+        return;
+      }
+      sheet.handleKeydown(event);
+      return;
+    }
+    if (event.altKey || event.ctrlKey || event.metaKey || isEditableTarget(event.target)) {
+      return;
+    }
+    if (this.title.containsFocus()) {
+      return;
+    }
+    if (event.key === 'Enter') {
+      // 按住不放的重复事件不算（例如在结算画面按 Enter 回到菜单时还没松手）
+      if (!event.repeat) {
+        event.preventDefault();
+        this.title.getButton(this.title.getPrimaryAction())?.click();
+      }
+    } else if (event.key === 'ArrowDown' || event.key === 'ArrowRight') {
+      event.preventDefault();
+      this.title.focusEdge(1);
+    } else if (event.key === 'ArrowUp' || event.key === 'ArrowLeft') {
+      event.preventDefault();
+      this.title.focusEdge(-1);
+    }
+  }
+
+  // ───────────────────────────── 机库 ─────────────────────────────
+
   private scheduleModelPreviewPreload(): void {
     const preload = (): void => {
+      this.preloadTimer = null;
       if (this.isDisposed) {
         return;
       }
@@ -96,7 +572,7 @@ export class StartMenu {
       return;
     }
 
-    setTimeout(preload, 1200);
+    this.preloadTimer = setTimeout(preload, 1200);
   }
 
   private preloadModelPreviewModule(): void {
@@ -104,9 +580,13 @@ export class StartMenu {
       return;
     }
 
-    this.modelPreviewModulePromise = import('./ModelPreview').catch((error) => {
-      this.modelPreviewModulePromise = null;
-      throw error;
+    const modulePromise = import('./ModelPreview');
+    this.modelPreviewModulePromise = modulePromise;
+    // 预加载失败不算错误：点“机库”时会再试一次
+    modulePromise.catch(() => {
+      if (this.modelPreviewModulePromise === modulePromise) {
+        this.modelPreviewModulePromise = null;
+      }
     });
   }
 
@@ -118,19 +598,12 @@ export class StartMenu {
     if (!this.modelPreviewPromise) {
       const modulePromise = this.modelPreviewModulePromise ?? import('./ModelPreview');
       this.modelPreviewModulePromise = modulePromise;
-      this.modelPreviewPromise = modulePromise.then(({ ModelPreview }) => {
-        const preview = new ModelPreview();
-        preview.setOnBack(() => {
-          if (!this.isDisposed) {
-            this.container.style.display = 'flex';
-          }
-        });
-
+      this.modelPreviewPromise = modulePromise.then(({ ModelPreview: Preview }) => {
         if (this.isDisposed) {
-          preview.dispose();
           throw new Error('StartMenu was disposed; model preview initialization cancelled');
         }
-
+        const preview = new Preview();
+        preview.setOnBack(() => this.resumeFromHangar());
         this.modelPreview = preview;
         return preview;
       });
@@ -145,888 +618,51 @@ export class StartMenu {
     }
   }
 
-  private loadSettings(): void {
-    this.settings = loadStartFlowSettings();
-  }
-
-  private saveSettings(): void {
-    saveStartFlowSettings(this.settings);
-  }
-
-  private createContainer(): HTMLDivElement {
-    const container = document.createElement('div');
-    container.id = 'start-menu';
-    container.innerHTML = `
-      <style>
-        #start-menu {
-          position: fixed;
-          top: 0;
-          left: 0;
-          width: 100%;
-          height: 100%;
-          background: rgba(8, 14, 24, 1);
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          padding: 40px 20px;
-          overflow-y: auto;
-          z-index: 1000;
-          font-family: var(--hud-font, 'Arial', sans-serif);
-          color: var(--hud-text, ${HUD_COLORS.text});
-        }
-
-        .menu-title {
-          font-size: 56px;
-          font-weight: bold;
-          letter-spacing: 0.14em;
-          margin-bottom: 10px;
-          color: var(--hud-sys, ${HUD_COLORS.sys});
-          text-shadow: 0 0 20px rgba(143, 228, 255, 0.45);
-        }
-
-        .menu-subtitle {
-          font-size: 24px;
-          opacity: 0.8;
-          margin-bottom: 40px;
-          color: var(--hud-muted, ${HUD_COLORS.muted});
-        }
-
-        .settings-panel {
-          background: var(--hud-glass, ${HUD_COLORS.glass});
-          border-radius: var(--hud-radius, 12px);
-          padding: 30px 40px;
-          margin-bottom: 30px;
-          backdrop-filter: blur(10px);
-          border: 1px solid var(--hud-edge, ${HUD_COLORS.edge});
-          width: min(420px, 100%);
-          box-sizing: border-box;
-          box-shadow: var(--hud-shadow, ${HUD_COLORS.shadow});
-        }
-
-        .setting-row {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          margin: 15px 0;
-        }
-
-        .setting-label {
-          font-size: 18px;
-        }
-
-        .setting-control {
-          display: flex;
-          align-items: center;
-          gap: 10px;
-        }
-
-        .setting-btn {
-          width: 40px;
-          height: 40px;
-          border-radius: 50%;
-          border: 2px solid rgba(255, 255, 255, 0.5);
-          background: rgba(255, 255, 255, 0.1);
-          color: white;
-          font-size: 20px;
-          cursor: pointer;
-          transition: all 0.2s;
-        }
-
-        .setting-btn:hover {
-          background: rgba(255, 255, 255, 0.3);
-          transform: scale(1.1);
-        }
-
-        /* 统一的数值宽度：各行的 - / + 按钮对齐（英文数值比中文长） */
-        .setting-value {
-          font-size: 20px;
-          font-weight: bold;
-          min-width: 6em;
-          text-align: center;
-          white-space: nowrap;
-        }
-
-        .start-btn,
-        .preview-btn {
-          padding: 16px 28px;
-          font-size: 20px;
-          font-weight: 700;
-          letter-spacing: 0.08em;
-          border: 1px solid var(--hud-edge, ${HUD_COLORS.edge});
-          border-radius: var(--hud-radius, 12px);
-          background: var(--hud-glass, ${HUD_COLORS.glass});
-          color: var(--hud-text, ${HUD_COLORS.text});
-          cursor: pointer;
-          transition: border-color 0.2s, box-shadow 0.2s;
-          box-shadow: var(--hud-shadow, ${HUD_COLORS.shadow});
-        }
-
-        .start-btn:hover,
-        .preview-btn:hover {
-          border-color: var(--hud-sys, ${HUD_COLORS.sys});
-          box-shadow: 0 0 16px rgba(143, 228, 255, 0.28);
-        }
-
-        .button-container {
-          display: flex;
-          gap: 20px;
-          justify-content: center;
-          margin-bottom: 30px;
-          flex-wrap: wrap;
-        }
-
-        .controls-info {
-          background: rgba(0, 0, 0, 0.3);
-          border-radius: 10px;
-          padding: 20px 30px;
-          text-align: left;
-        }
-
-        .controls-title {
-          font-size: 20px;
-          margin-bottom: 15px;
-          text-align: center;
-        }
-
-        .control-row {
-          display: flex;
-          justify-content: space-between;
-          gap: 12px;
-          margin: 8px 0;
-          font-size: 16px;
-        }
-
-        .control-row > span:first-child {
-          flex-shrink: 0;
-          white-space: nowrap;
-        }
-
-        .key {
-          background: rgba(255, 255, 255, 0.2);
-          padding: 3px 10px;
-          border-radius: 5px;
-          font-family: monospace;
-        }
-
-        .mobile-controls-info {
-          margin-top: 15px;
-          padding-top: 15px;
-          border-top: 1px solid rgba(255, 255, 255, 0.2);
-        }
-
-        .continue-btn {
-          display: flex;
-          flex-direction: column;
-          align-items: flex-start;
-          gap: 4px;
-          width: 100%;
-          box-sizing: border-box;
-          margin: 0 0 18px;
-          padding: 14px 18px;
-          border: 1px solid var(--hud-sys, ${HUD_COLORS.sys});
-          border-left: 3px solid var(--hud-ally, ${HUD_COLORS.ally});
-          border-radius: var(--hud-radius, 12px);
-          background: var(--hud-glass, ${HUD_COLORS.glass});
-          color: var(--hud-text, ${HUD_COLORS.text});
-          font-family: inherit;
-          text-align: left;
-          cursor: pointer;
-          transition: border-color 0.2s, box-shadow 0.2s;
-          box-shadow: var(--hud-shadow, ${HUD_COLORS.shadow});
-        }
-
-        .continue-btn:hover {
-          box-shadow: 0 0 16px rgba(143, 228, 255, 0.28);
-        }
-
-        .continue-title {
-          font-size: 20px;
-          font-weight: 700;
-          letter-spacing: 0.08em;
-        }
-
-        .continue-detail {
-          font-size: 15px;
-          color: var(--hud-sys, ${HUD_COLORS.sys});
-        }
-
-        .continue-meta {
-          font-size: 13px;
-          color: var(--hud-muted, ${HUD_COLORS.muted});
-        }
-
-        .setting-label-group {
-          display: flex;
-          flex-direction: column;
-          gap: 3px;
-          min-width: 0;
-        }
-
-        .setting-caption {
-          font-size: 12px;
-          letter-spacing: 0.04em;
-          color: var(--hud-muted, ${HUD_COLORS.muted});
-        }
-
-        #start-menu::-webkit-scrollbar {
-          width: 8px;
-        }
-
-        #start-menu::-webkit-scrollbar-track {
-          background: rgba(255, 255, 255, 0.1);
-          border-radius: 4px;
-        }
-
-        #start-menu::-webkit-scrollbar-thumb {
-          background: rgba(255, 255, 255, 0.3);
-          border-radius: 4px;
-        }
-
-        #start-menu::-webkit-scrollbar-thumb:hover {
-          background: rgba(255, 255, 255, 0.5);
-        }
-
-        /* 手机竖屏：收窄留白、缩小字号，给较长的英文标签与数值留出空间 */
-        @media (max-width: 480px) {
-          #start-menu {
-            padding: 28px 12px;
-          }
-
-          .menu-title {
-            font-size: 40px;
-          }
-
-          .menu-subtitle {
-            font-size: 18px;
-            margin-bottom: 24px;
-          }
-
-          .settings-panel {
-            padding: 20px 16px;
-          }
-
-          .setting-label {
-            font-size: 16px;
-          }
-
-          .setting-control {
-            gap: 8px;
-          }
-
-          .setting-value {
-            font-size: 17px;
-          }
-
-          .start-btn,
-          .preview-btn {
-            padding: 14px 22px;
-            font-size: 18px;
-          }
-
-          .controls-info {
-            padding: 16px 16px;
-          }
-
-          .control-row {
-            font-size: 14px;
-          }
-        }
-      </style>
-
-      <div class="menu-title">AIR SUPREME</div>
-      <div class="menu-subtitle"></div>
-    `;
-    this.renderSubtitle(container);
-    return container;
-  }
-
-  private renderSubtitle(container: HTMLElement = this.container): void {
-    const subtitle = container.querySelector('.menu-subtitle');
-    if (subtitle) {
-      subtitle.textContent = tr({ en: '3D Air Combat', zh: '3D 空战游戏' });
+  /**
+   * 进机库：先停掉标题画面的主机（归还它的 WebGL 上下文），再让模型预览创建自己的渲染器，
+   * 两个上下文不会同时存在。
+   */
+  private async openHangar(): Promise<void> {
+    if (this.hangarLoading || this.inHangar) {
+      return;
+    }
+    this.hangarLoading = true;
+    this.title.setBusy('hangar');
+    try {
+      const preview = await this.ensureModelPreview();
+      // 模块下载期间玩家可能已经开了一张面板：机库不盖到面板上面，这次就不进了（模块已就绪，再点即开）
+      if (this.isDisposed || !this.visible || this.launching || this.openSheets().length > 0) {
+        return;
+      }
+      this.inHangar = true;
+      this.setVisible(false);
+      // 模块已经到了：先让“机库”按钮恢复可用。机库建不出渲染器时 show() 会当场回调
+      // resumeFromHangar，焦点要落回这个按钮——停用着的按钮接不住焦点
+      this.title.setBusy(null);
+      preview.show();
+    } catch (error) {
+      if (!this.isDisposed) {
+        console.error('Failed to load model preview', error);
+      }
+    } finally {
+      this.hangarLoading = false;
+      if (!this.isDisposed) {
+        this.title.setBusy(null);
+      }
     }
   }
 
-  /**
-   * 语言切换后重建设置面板（标签、数值、按钮、操作说明都按新语言渲染），
-   * 并把键盘焦点放回原来那一行的同一个按钮。
-   */
-  private applyLocale(): void {
+  /** 从机库返回（模型预览已经释放了它的渲染器）：菜单与主机回来，焦点还给“机库”按钮 */
+  private resumeFromHangar(): void {
+    if (!this.inHangar) {
+      return;
+    }
+    this.inHangar = false;
     if (this.isDisposed) {
       return;
     }
-    // 语言也可能在暂停菜单里切换：内存中的设置跟上，避免之后把旧语言写回存储
-    this.settings.language = getLocale();
-    const active = document.activeElement;
-    let focusRowId: string | null = null;
-    let focusIndex = -1;
-    if (active instanceof HTMLElement && this.settingsContainer.contains(active)) {
-      const row = active.closest('.setting-row');
-      if (row?.id) {
-        focusRowId = row.id;
-        focusIndex = Array.from(row.querySelectorAll('button')).indexOf(
-          active as HTMLButtonElement
-        );
-      }
-    }
-
-    this.renderSubtitle();
-    const panel = this.createSettingsPanel();
-    this.settingsContainer.replaceWith(panel);
-    this.settingsContainer = panel;
-    this.refreshContinueButton();
-
-    if (focusRowId && focusIndex >= 0) {
-      const buttons = panel.querySelectorAll<HTMLButtonElement>(`#${focusRowId} button`);
-      buttons[focusIndex]?.focus();
-    }
-  }
-
-  private createSettingsPanel(): HTMLDivElement {
-    const panel = document.createElement('div');
-    panel.className = 'settings-panel';
-
-    // 继续战役（存在有效检查点时显示）
-    panel.appendChild(this.createContinueButton());
-
-    // 界面语言：选项名用各语言自称；切换后整块面板按新语言重建（见 applyLocale）
-    const changeLanguage = (direction: 1 | -1): void => {
-      this.settings.language = stepLanguage(this.settings.language, direction);
-      this.updateDisplay();
-      setLocale(this.settings.language);
-    };
-    panel.appendChild(
-      this.createSettingRow(
-        'language',
-        tr({ en: 'Language', zh: '语言' }),
-        LANGUAGE_ENDONYMS[this.settings.language],
-        () => changeLanguage(-1),
-        () => changeLanguage(1)
-      )
-    );
-
-    // 难度设置
-    panel.appendChild(
-      this.createSettingRow(
-        'difficulty',
-        tr({ en: 'Difficulty', zh: '难度' }),
-        this.getDifficultyText(this.settings.difficulty),
-        () => {
-          this.settings.difficulty = Math.max(1, this.settings.difficulty - 1);
-          this.updateDisplay();
-        },
-        () => {
-          this.settings.difficulty = Math.min(5, this.settings.difficulty + 1);
-          this.updateDisplay();
-        }
-      )
-    );
-
-    // 音量设置
-    panel.appendChild(
-      this.createSettingRow(
-        'sfx',
-        tr({ en: 'SFX volume', zh: '音效音量' }),
-        `${Math.round(this.settings.sfxVolume * 100)}%`,
-        () => {
-          this.settings.sfxVolume = Math.max(0, this.settings.sfxVolume - 0.1);
-          this.updateDisplay();
-        },
-        () => {
-          this.settings.sfxVolume = Math.min(1, this.settings.sfxVolume + 0.1);
-          this.updateDisplay();
-        }
-      )
-    );
-
-    panel.appendChild(
-      this.createSettingRow(
-        'music',
-        tr({ en: 'Music volume', zh: '音乐音量' }),
-        `${Math.round(this.settings.musicVolume * 100)}%`,
-        () => {
-          this.settings.musicVolume = Math.max(0, this.settings.musicVolume - 0.1);
-          this.updateDisplay();
-        },
-        () => {
-          this.settings.musicVolume = Math.min(1, this.settings.musicVolume + 0.1);
-          this.updateDisplay();
-        }
-      )
-    );
-
-    // 角色配音音量（0% = 纯文字字幕）
-    const stepVoice = (direction: 1 | -1): void => {
-      const next = Math.round((this.settings.voiceVolume + direction * 0.1) * 10) / 10;
-      this.settings.voiceVolume = Math.min(1, Math.max(0, next));
-      this.updateDisplay();
-    };
-    panel.appendChild(
-      this.createSettingRow(
-        'voice',
-        tr({ en: 'Voice volume', zh: '语音音量' }),
-        `${Math.round(this.settings.voiceVolume * 100)}%`,
-        () => stepVoice(-1),
-        () => stepVoice(1)
-      )
-    );
-
-    const presetList: QualityPreset[] = ['auto', 'performance', 'balanced', 'quality'];
-    const stepQuality = (direction: 1 | -1): void => {
-      const index = presetList.indexOf(this.settings.qualityPreset);
-      const nextIndex = (index + direction + presetList.length) % presetList.length;
-      this.settings.qualityPreset = presetList[nextIndex];
-      this.updateDisplay();
-    };
-    panel.appendChild(
-      this.createSettingRow(
-        'quality',
-        tr({ en: 'Graphics', zh: '画质' }),
-        this.getQualityPresetText(this.settings.qualityPreset),
-        () => stepQuality(-1),
-        () => stepQuality(1)
-      )
-    );
-
-    // 视角：第三人称（默认）/ 第一人称，对局中按 V 切换
-    const toggleCameraMode = (): void => {
-      this.settings.cameraMode =
-        this.settings.cameraMode === 'first-person' ? 'third-person' : 'first-person';
-      this.updateDisplay();
-    };
-    panel.appendChild(
-      this.createSettingRow(
-        'camera',
-        tr({ en: 'Camera', zh: '视角' }),
-        this.getCameraModeText(this.settings.cameraMode),
-        toggleCameraMode,
-        toggleCameraMode
-      )
-    );
-
-    const toggleTutorial = (): void => {
-      this.settings.tutorialEnabled = !this.settings.tutorialEnabled;
-      this.updateDisplay();
-    };
-    panel.appendChild(
-      this.createSettingRow(
-        'tutorial',
-        tr({ en: 'Tutorial', zh: '教程' }),
-        tr(this.settings.tutorialEnabled ? SWITCH_ON : SWITCH_OFF),
-        toggleTutorial,
-        toggleTutorial
-      )
-    );
-
-    // 生命值设置
-    panel.appendChild(
-      this.createSettingRow(
-        'lives',
-        tr({ en: 'Lives', zh: '生命数' }),
-        `${this.settings.playerLives}`,
-        () => {
-          this.settings.playerLives = Math.max(1, this.settings.playerLives - 1);
-          this.updateDisplay();
-        },
-        () => {
-          this.settings.playerLives = Math.min(9, this.settings.playerLives + 1);
-          this.updateDisplay();
-        }
-      )
-    );
-
-    // 选关设置（1..TOTAL_LEVELS，下方显示章节标题）
-    const levelRow = this.createSettingRow(
-      'level',
-      tr({ en: 'Start level', zh: '起始关卡' }),
-      this.getLevelText(this.settings.startLevel),
-      () => {
-        this.settings.startLevel = Math.max(1, this.settings.startLevel - 1);
-        this.updateDisplay();
-      },
-      () => {
-        this.settings.startLevel = Math.min(TOTAL_LEVELS, this.settings.startLevel + 1);
-        this.updateDisplay();
-      },
-      this.getChapterCaption(this.settings.startLevel)
-    );
-    const levelCaption = levelRow.querySelector('.setting-caption');
-    if (levelCaption) {
-      levelCaption.id = 'level-chapter';
-    }
-    panel.appendChild(levelRow);
-
-    // 游戏模式选择
-    const toggleMode = (): void => {
-      this.settings.gameMode = this.settings.gameMode === 'normal' ? 'boss' : 'normal';
-      this.updateDisplay();
-    };
-    panel.appendChild(
-      this.createSettingRow(
-        'mode',
-        tr({ en: 'Game mode', zh: '游戏模式' }),
-        this.getModeText(),
-        toggleMode,
-        toggleMode
-      )
-    );
-
-    const testScoreValues: readonly number[] = TEST_SCORE_OPTIONS;
-    panel.appendChild(
-      this.createSettingRow(
-        'testscore',
-        tr({ en: 'Test score', zh: '测试分数' }),
-        this.getTestScoreText(),
-        () => {
-          const currentIndex = Math.max(0, testScoreValues.indexOf(this.settings.testScore));
-          this.settings.testScore = testScoreValues[Math.max(0, currentIndex - 1)];
-          this.updateDisplay();
-        },
-        () => {
-          const currentIndex = Math.max(0, testScoreValues.indexOf(this.settings.testScore));
-          this.settings.testScore =
-            testScoreValues[Math.min(testScoreValues.length - 1, currentIndex + 1)];
-          this.updateDisplay();
-        }
-      )
-    );
-
-    // 按钮容器 - 并排放置
-    const buttonContainer = document.createElement('div');
-    buttonContainer.className = 'button-container';
-
-    // 开始按钮
-    const startBtn = document.createElement('button');
-    startBtn.className = 'start-btn';
-    startBtn.textContent = this.getStartButtonText();
-    startBtn.id = 'start-btn';
-    startBtn.onclick = () => this.startGame();
-    buttonContainer.appendChild(startBtn);
-
-    // 模型预览按钮
-    const previewLabel: LocalizedText = { en: 'Model Preview', zh: '模型预览' };
-    const previewBtn = document.createElement('button');
-    previewBtn.className = 'preview-btn';
-    previewBtn.id = 'preview-btn';
-    previewBtn.textContent = tr(previewLabel);
-    previewBtn.onmouseenter = () => this.preloadModelPreviewModule();
-    previewBtn.onfocus = () => this.preloadModelPreviewModule();
-    previewBtn.onclick = async () => {
-      if (previewBtn.disabled) {
-        return;
-      }
-
-      previewBtn.disabled = true;
-      previewBtn.textContent = tr({ en: 'Loading…', zh: '加载中...' });
-
-      try {
-        const preview = await this.ensureModelPreview();
-        this.container.style.display = 'none';
-        preview.show();
-      } catch (error) {
-        console.error('Failed to load model preview', error);
-      } finally {
-        if (!this.isDisposed) {
-          previewBtn.disabled = false;
-          previewBtn.textContent = tr(previewLabel);
-        }
-      }
-    };
-    buttonContainer.appendChild(previewBtn);
-
-    panel.appendChild(buttonContainer);
-    panel.appendChild(this.createControlsLegend());
-
-    return panel;
-  }
-
-  /** 控制说明：按键 + 动作；文字都走 textContent */
-  private createControlsLegend(): HTMLDivElement {
-    const controlsInfo = document.createElement('div');
-    controlsInfo.className = 'controls-info';
-
-    const title = document.createElement('div');
-    title.className = 'controls-title';
-    title.textContent = tr({ en: '📖 Controls', zh: '📖 控制说明' });
-    const blocks: HTMLElement[] = [title];
-
-    for (const entry of CONTROL_LEGEND) {
-      const row = document.createElement('div');
-      row.className = 'control-row';
-      const keys = document.createElement('span');
-      entry.keys.forEach((key, index) => {
-        if (index > 0) {
-          keys.append(entry.joiner ?? ' / ');
-        }
-        const keyEl = document.createElement('span');
-        keyEl.className = 'key';
-        keyEl.textContent = tr(key);
-        keys.appendChild(keyEl);
-      });
-      const action = document.createElement('span');
-      action.textContent = tr(entry.action);
-      // 空白文本节点不参与 flex 排版，只让 textContent / 读屏里按键与说明分成两个词
-      row.append(keys, ' ', action);
-      blocks.push(row);
-    }
-
-    const mobile = document.createElement('div');
-    mobile.className = 'mobile-controls-info';
-    mobile.textContent = tr({
-      en: '📱 Mobile: virtual stick and on-screen buttons',
-      zh: '📱 移动端：使用虚拟摇杆和按钮控制',
-    });
-    blocks.push(mobile);
-    blocks.forEach((block) => controlsInfo.append(block, '\n'));
-    return controlsInfo;
-  }
-
-  private createContinueButton(): HTMLButtonElement {
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.id = 'continue-btn';
-    button.className = 'continue-btn';
-    button.style.display = 'none';
-
-    const title = document.createElement('span');
-    title.className = 'continue-title';
-    title.textContent = tr({ en: 'Continue Campaign', zh: '继续战役' });
-
-    const detail = document.createElement('span');
-    detail.className = 'continue-detail';
-    detail.id = 'continue-detail';
-
-    const meta = document.createElement('span');
-    meta.className = 'continue-meta';
-    meta.id = 'continue-meta';
-
-    // 按钮是 flex 纵列，空白节点不影响排版，只让无障碍名称里三段文字之间有空格
-    button.append(title, ' ', detail, ' ', meta);
-    button.onclick = () => this.continueCampaign();
-
-    this.continueButton = button;
-    return button;
-  }
-
-  /** 按当前存档刷新“继续战役”按钮；损坏的存档会在读取时被清理 */
-  private refreshContinueButton(): void {
-    const button = this.continueButton;
-    if (!button) {
-      return;
-    }
-
-    const save = loadCampaignCheckpoint();
-    if (!save) {
-      button.style.display = 'none';
-      return;
-    }
-
-    const detail = button.querySelector('.continue-detail');
-    const meta = button.querySelector('.continue-meta');
-    if (detail) {
-      detail.textContent = describeCheckpoint(save);
-    }
-    if (meta) {
-      meta.textContent = tr(
-        {
-          en: 'Score {score} · {difficulty} · Lives {lives}',
-          zh: '得分 {score} · {difficulty} · 生命 {lives}',
-        },
-        {
-          score: save.score,
-          difficulty: this.getDifficultyText(save.difficulty),
-          lives: save.lives,
-        }
-      );
-    }
-    button.style.display = '';
-  }
-
-  private continueCampaign(): void {
-    const save = loadCampaignCheckpoint();
-    if (!save) {
-      this.refreshContinueButton();
-      return;
-    }
-    if (!this.onContinue) {
-      return;
-    }
-
-    unlockAudioFromUserGesture();
-    this.container.style.display = 'none';
-    this.onContinue(save);
-  }
-
-  /** key 决定行 / 数值的 id（#key-row / #key-value），与界面语言无关 */
-  private createSettingRow(
-    key: string,
-    label: string,
-    initialValue: string,
-    onDecrease: () => void,
-    onIncrease: () => void,
-    caption?: string
-  ): HTMLDivElement {
-    const row = document.createElement('div');
-    row.className = 'setting-row';
-    row.id = `${key}-row`;
-
-    const labelEl = document.createElement('span');
-    labelEl.className = 'setting-label';
-    labelEl.textContent = label;
-
-    const control = document.createElement('div');
-    control.className = 'setting-control';
-
-    const decreaseBtn = document.createElement('button');
-    decreaseBtn.className = 'setting-btn';
-    decreaseBtn.textContent = '-';
-    decreaseBtn.onclick = onDecrease;
-
-    const valueEl = document.createElement('span');
-    valueEl.className = 'setting-value';
-    valueEl.textContent = initialValue;
-    valueEl.id = `${key}-value`;
-
-    const increaseBtn = document.createElement('button');
-    increaseBtn.className = 'setting-btn';
-    increaseBtn.textContent = '+';
-    increaseBtn.onclick = onIncrease;
-
-    control.appendChild(decreaseBtn);
-    control.appendChild(valueEl);
-    control.appendChild(increaseBtn);
-
-    if (caption === undefined) {
-      row.appendChild(labelEl);
-    } else {
-      const labelGroup = document.createElement('div');
-      labelGroup.className = 'setting-label-group';
-      const captionEl = document.createElement('span');
-      captionEl.className = 'setting-caption';
-      captionEl.textContent = caption;
-      labelGroup.appendChild(labelEl);
-      labelGroup.appendChild(captionEl);
-      row.appendChild(labelGroup);
-    }
-    row.appendChild(control);
-
-    return row;
-  }
-
-  /** 难度档名以 Difficulty.ts 的难度档为唯一来源（越界钳到 1..5，非数值按默认档） */
-  private getDifficultyText(level: number): string {
-    const safeLevel = Number.isFinite(level) ? level : DEFAULT_START_FLOW_SETTINGS.difficulty;
-    return tr(getDifficultyProfile(safeLevel).label);
-  }
-
-  /** 如“第六章 · 熔炉之心” */
-  private getChapterCaption(level: number): string {
-    const chapter = getCampaignChapter(level);
-    return `${tr(chapter.chapterLabel)} · ${tr(chapter.title)}`;
-  }
-
-  private getLevelText(level: number): string {
-    return tr({ en: 'Level {level}', zh: '第{level}关' }, { level });
-  }
-
-  private getCameraModeText(mode: CameraModeSetting): string {
-    return mode === 'first-person'
-      ? tr({ en: 'First-person', zh: '第一人称' })
-      : tr({ en: 'Third-person', zh: '第三人称' });
-  }
-
-  private getQualityPresetText(preset: QualityPreset): string {
-    return tr(QUALITY_LABELS[preset] ?? QUALITY_LABELS.auto);
-  }
-
-  private getModeText(): string {
-    return this.settings.gameMode === 'normal'
-      ? tr({ en: 'Normal', zh: '普通模式' })
-      : tr({ en: 'Boss mode', zh: 'Boss 模式' });
-  }
-
-  private getTestScoreText(): string {
-    return this.settings.testScore === 0 ? tr(SWITCH_OFF) : `${this.settings.testScore}`;
-  }
-
-  private getStartButtonText(): string {
-    return this.settings.gameMode === 'normal'
-      ? tr({ en: 'Start Game', zh: '开始游戏' })
-      : tr({ en: 'Boss Challenge', zh: 'Boss 挑战' });
-  }
-
-  private setRowValue(key: string, text: string): void {
-    const value = this.container.querySelector(`#${key}-row .setting-value`);
-    if (value) {
-      value.textContent = text;
-    }
-  }
-
-  private updateDisplay(): void {
-    const audioSettings = getAudioSettings(this.settings);
-    const presentationSettings = getPresentationSettings(this.settings);
-
-    this.setRowValue('language', LANGUAGE_ENDONYMS[this.settings.language]);
-    this.setRowValue('difficulty', this.getDifficultyText(this.settings.difficulty));
-    this.setRowValue('sfx', `${Math.round(audioSettings.sfxVolume * 100)}%`);
-    this.setRowValue('music', `${Math.round(audioSettings.musicVolume * 100)}%`);
-    this.setRowValue('voice', `${Math.round(this.settings.voiceVolume * 100)}%`);
-    this.setRowValue('quality', this.getQualityPresetText(presentationSettings.qualityPreset));
-    this.setRowValue('camera', this.getCameraModeText(this.settings.cameraMode));
-    this.setRowValue('tutorial', tr(presentationSettings.tutorialEnabled ? SWITCH_ON : SWITCH_OFF));
-    this.setRowValue('lives', `${this.settings.playerLives}`);
-    this.setRowValue('level', this.getLevelText(this.settings.startLevel));
-    this.setRowValue('mode', this.getModeText());
-    this.setRowValue('testscore', this.getTestScoreText());
-
-    const levelCaption = this.container.querySelector('#level-chapter');
-    if (levelCaption) {
-      levelCaption.textContent = this.getChapterCaption(this.settings.startLevel);
-    }
-    const startBtn = this.container.querySelector('#start-btn');
-    if (startBtn) {
-      startBtn.textContent = this.getStartButtonText();
-    }
-
-    this.saveSettings();
-  }
-
-  private startGame(): void {
-    unlockAudioFromUserGesture();
-    this.container.style.display = 'none';
-    this.onStart?.(this.settings);
-  }
-
-  public setOnStart(callback: (settings: GameSettings) => void): void {
-    this.onStart = callback;
-  }
-
-  /** 点击“继续战役”时回调（传入刚读取并校验过的检查点）；菜单会先隐藏 */
-  public setOnContinue(callback: (save: CampaignSaveData) => void): void {
-    this.onContinue = callback;
-  }
-
-  public reloadFromStorage(): void {
-    this.loadSettings();
-    this.updateDisplay();
-    this.refreshContinueButton();
-  }
-
-  public show(): void {
-    this.reloadFromStorage();
-    this.container.style.display = 'flex';
-  }
-
-  public hide(): void {
-    this.container.style.display = 'none';
-  }
-
-  public dispose(): void {
-    this.isDisposed = true;
-    this.unsubscribeLocale?.();
-    this.unsubscribeLocale = null;
-    this.modelPreview?.dispose();
-    this.container.remove();
+    this.setVisible(true);
+    this.title.getButton('hangar')?.focus({ preventScroll: true });
   }
 }
 

@@ -82,6 +82,15 @@ export type UnitRouteProvider = (
 
 export type PlayerLockState = 'none' | 'locking' | 'incoming';
 
+/** forEachAliveHostile 的访问函数：网格、当前 / 最大血量、作战域、此刻是否可被命中 */
+export type HostileUnitVisitor = (
+  mesh: THREE.Object3D,
+  health: number,
+  maxHealth: number,
+  domain: UnitDomain,
+  targetable: boolean
+) => void;
+
 /**
  * 可选特效覆盖：VFX 批次落地后，协调器可把受损冒烟 / 水花 / 枪口焰换成更强的专用特效
  * （例如 particleSystem.createDamageSmoke / createSplash / createMuzzleFlash），
@@ -902,6 +911,17 @@ export class UnitSystem implements IGameSystem {
       if (unit.faction === Faction.ENEMY && unit.isAlive()) count++;
     }
     return count;
+  }
+
+  /**
+   * 扩展：逐个访问存活的敌方单位（HUD 目标标记 / 波次提示用），不分配。
+   * targetable 为 false 表示潜航中的潜艇：仍拖住波次，但不可命中，也不应画屏幕标记。
+   */
+  forEachAliveHostile(visit: HostileUnitVisitor): void {
+    for (const unit of this.units) {
+      if (unit.faction !== Faction.ENEMY || !unit.isAlive()) continue;
+      visit(unit.mesh, Math.max(0, unit.health), unit.maxHealth, unit.domain, unit.targetable);
+    }
   }
 
   /** 敌方雷达站存活时提供的精度加成：一座 0.15，每多一座 +0.05，上限 0.25 */

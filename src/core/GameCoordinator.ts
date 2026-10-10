@@ -19,12 +19,10 @@ import { EnemyType, ENEMY_CONFIGS } from '@/features/enemy/EnemyTypes';
 import { PowerUpType, POWER_UP_CONFIGS } from '@/features/powerups/PowerUpSystem';
 import type { UpgradeMenu } from '@/ui/UpgradeMenu';
 import type { PauseMenu } from '@/ui/PauseMenu';
-import type { HUD, HudText, HudTextWithParams } from '@/ui/HUD';
+import type { HUD, HudText, HudTextWithParams, SettlementCheckpointRetry } from '@/ui/HUD';
 import type { GameSettings } from '@/ui/StartMenu';
-import type { EnemyHealthBars } from '@/ui/EnemyHealthBars';
 import type { LockOnIndicator } from '@/ui/LockOnIndicator';
 import type { BossMissileIndicator } from '@/ui/BossMissileIndicator';
-import { CheckpointResumeButton } from '@/ui/CheckpointResumeButton';
 import { GameConfig, GAME_CONSTANTS, type QualityPreset } from '@/config';
 import { BOSS_CONFIGS, BossType, BossConfig } from '@/features/boss/BossTypes';
 import type { BossMinionKind } from '@/features/boss/BossContracts';
@@ -49,6 +47,7 @@ import type { TerrainSurfaceKind } from '@/features/terrain/environments/Terrain
 import { PlayerViewController } from '@/core/camera/PlayerViewController';
 import { UnitController } from '@/core/units/UnitController';
 import { SpecialWeaponsController } from '@/core/combat/SpecialWeaponsController';
+import { GunLeadSolver } from '@/features/combat/GunLeadSolver';
 import { CombatVfxController } from '@/core/vfx/CombatVfxController';
 import { CombatHudFeed } from '@/core/hud/CombatHudFeed';
 import { CampaignFlowController } from '@/core/campaign/CampaignFlowController';
@@ -59,6 +58,7 @@ import {
   type ICampaignPresentation,
 } from '@/core/campaign/CampaignPresentation';
 import {
+  describeCheckpointText,
   hasCampaignCheckpoint,
   loadCampaignCheckpoint,
   type CampaignCheckpointInput,
@@ -185,14 +185,22 @@ const TUTORIAL_OBJECTIVE_TEXT = {
     zh: '持续开火，校准机炮节奏。',
   },
   lockTitle: { en: 'Training · Missile lock', zh: '教程 · 导弹锁定' },
-  lockObjective: {
-    en: 'Keep the target in your sights; fire when the lock ring closes.',
-    zh: '目标稳定入准星，锁定圈闭合后发射。',
+  lockObjectiveKeyboard: {
+    en: 'Keep the enemy inside the ring. When it turns green, press M.',
+    zh: '把敌机保持在环内，环变绿后按 M。',
+  },
+  lockObjectiveTouch: {
+    en: 'Keep the enemy inside the ring. When it turns green, tap MSL.',
+    zh: '把敌机保持在环内，环变绿后点「导弹」键。',
   },
   launchTitle: { en: 'Training · Missile launch', zh: '教程 · 导弹发射' },
-  launchObjective: {
-    en: 'Fire as soon as you have a lock and watch it hit.',
-    zh: '锁定达成后立刻发射，观察命中反馈。',
+  launchObjectiveKeyboard: {
+    en: 'The ring is green: press M to fire a missile.',
+    zh: '环已变绿：按 M 发射导弹。',
+  },
+  launchObjectiveTouch: {
+    en: 'The ring is green: tap MSL to fire a missile.',
+    zh: '环已变绿：点「导弹」键发射导弹。',
   },
   killTitle: { en: 'Training · First kill', zh: '教程 · 击落首个目标' },
   killObjective: {
@@ -343,6 +351,11 @@ export class GameCoordinator {
     };
   /** 特殊武器开火的镜头震动（integration-notes 震动表） */
   private static readonly NO_ENEMIES: readonly EnemyAI[] = [];
+  /**
+   * 导弹挂架（机体局部坐标，右侧；左侧取 -x）：在机翼下方、座舱视点的侧下方，
+   * 第一人称时导弹从视野边缘离架，不再穿过镜头。
+   */
+  private static readonly MISSILE_PYLON = { x: 1.5, y: -0.2, z: -1.3 } as const;
   private static readonly WEAPON_FIRE_SHAKE: Record<SpecialWeaponId, number> = {
     rockets: 0.1,
     laser: 0,
@@ -350,6 +363,11 @@ export class GameCoordinator {
     railgun: 0.35,
     emp: 0,
   };
+  /**
+   * 第一人称下特殊武器的枪口焰与电磁炮闪屏的缩减：眼点就在炮口后面，原尺寸会糊住座舱视野。
+   * 与机炮枪口焰（第一人称 0.3 / 第三人称 0.55）同一个比例。
+   */
+  private static readonly FIRST_PERSON_FLASH_SCALE = 0.55;
 
   private gameLoop: GameLoop;
   private gameScene: GameScene;
@@ -371,7 +389,6 @@ export class GameCoordinator {
   private readonly hudFeed: CombatHudFeed;
   /** 具名僚机「渡鸦」「雨燕」：友机入场领取身份，坠毁 / 撤场时归还 */
   private readonly wingmen = new WingmanRoster();
-  private readonly checkpointResumeButton = new CheckpointResumeButton();
   private readonly options: GameCoordinatorOptions;
   private readonly showStartMenu: boolean;
   private presentationRuntimePromise: Promise<void> | null = null;
@@ -387,7 +404,6 @@ export class GameCoordinator {
 
   private hud!: HUD;
   private lockOnIndicator!: LockOnIndicator;
-  private enemyHealthBars!: EnemyHealthBars;
   private presentationController!: PresentationController;
 
   private playerStats: PlayerStats;
@@ -395,9 +411,24 @@ export class GameCoordinator {
 
   private missileCount: number = GAME_CONSTANTS.MISSILE.STARTING_MISSILES;
   private missileRespawnTimer: number = 0;
-  private missileFiringScheduled: boolean = false;
   private multiShotActive: boolean = false;
-  private lastMissileLockState: string | null = null;
+  /** 导弹键上一步是否按住（InputState.missile 是电平，这里自己做上升沿检测） */
+  private missileHeldPrev: boolean = false;
+  /** 本次按键还没有发射过导弹（一次按键最多发射一次） */
+  private missilePressArmed: boolean = false;
+  /** 两次发射之间的间隔计时（秒） */
+  private missileRearmTimer: number = 0;
+  /** 下一枚导弹从哪一侧翼下挂架发射（1 右 / -1 左），逐发交替 */
+  private missilePylonSide: number = 1;
+  private readonly missileSpawnPosition = new THREE.Vector3();
+  private readonly missileSpawnForward = new THREE.Vector3();
+  /** 机炮提前量：候选（前段是空中目标）、炮口 / 机头方向、渲染帧的提前量点 */
+  private readonly gunLeadSolver = new GunLeadSolver();
+  private readonly gunTargets: THREE.Object3D[] = [];
+  private readonly gunSurfaceTargets: THREE.Object3D[] = [];
+  private readonly gunMuzzle = new THREE.Vector3();
+  private readonly gunForward = new THREE.Vector3();
+  private readonly gunLeadPoint = new THREE.Vector3();
 
   private upgradeMenuPromise: Promise<UpgradeMenu> | null = null;
   private pauseMenuPromise: Promise<PauseMenu> | null = null;
@@ -597,7 +628,6 @@ export class GameCoordinator {
 
           this.hud = runtime.hud;
           this.lockOnIndicator = runtime.lockOnIndicator;
-          this.enemyHealthBars = runtime.enemyHealthBars;
           this.bossIndicator = runtime.bossIndicator;
           this.presentationController = runtime.presentationController;
           this.lockOnIndicator.setLockTime(this.playerStats.getMissileLockTime());
@@ -696,6 +726,7 @@ export class GameCoordinator {
         this.audioManager.playExplosion('player', 2);
         this.particleSystem?.createExplosion(payload.position, 2, 'player');
         this.lockOnIndicator.cancelLockOn();
+        this.resetWeaponAim();
         this.playerAircraft.visible = false;
         this.view.addShake(1);
         this.gameScene.setScreenEffects({ flash: 0.6, damagePulse: 1 });
@@ -708,8 +739,7 @@ export class GameCoordinator {
           this.pauseMenu?.hide();
           this.upgradeMenu?.hide();
           this.hud.hideRespawnOverlay();
-          this.hud.showGameOver(this.gameState.getScore());
-          this.offerCheckpointResume();
+          this.hud.showGameOver(this.gameState.getScore(), this.resolveCheckpointRetry());
         } else {
           this.hud.showRespawnOverlay({
             lives: payload.lives,
@@ -806,12 +836,6 @@ export class GameCoordinator {
     );
 
     this.resourceRegistry.addUnsubscriber(
-      EventBus.on(GameEventType.MISSILE_FIRED, () => {
-        this.handleTutorialMissileFired();
-      })
-    );
-
-    this.resourceRegistry.addUnsubscriber(
       EventBus.on(GameEventType.MISSILE_HIT, ({ payload }) => {
         this.audioManager.playMissileExplosion();
         this.view.addExplosionShake(payload.position, 1.2);
@@ -841,7 +865,12 @@ export class GameCoordinator {
 
     this.resourceRegistry.addUnsubscriber(
       EventBus.on(GameEventType.LEVEL_COMPLETE, ({ payload }) => {
-        if (this.sessionState.isBossMode() || this.sessionState.isInBossBattle()) {
+        // 本局已结束（阵亡与清关落在同一个模拟步）：不再在结算面板底下开 Boss 战
+        if (
+          !this.sessionState.isPlaying() ||
+          this.sessionState.isBossMode() ||
+          this.sessionState.isInBossBattle()
+        ) {
           return;
         }
         this.campaign.handleLevelComplete(payload.level);
@@ -1133,12 +1162,16 @@ export class GameCoordinator {
 
     if (!respawning) {
       this.playerSystem.getController().update(deltaTime, input);
+      this.updateGunAim(deltaTime);
 
       if (input.fire && this.playerSystem.canFire()) {
         this.playerSystem.fire();
       }
 
       this.handleMissileInput(input, deltaTime);
+    } else {
+      // 等待复活：记住按键电平，复活瞬间按住的导弹键不算一次新的按下
+      this.missileHeldPrev = input.missile;
     }
     this.updateFlightState(input);
 
@@ -1295,8 +1328,8 @@ export class GameCoordinator {
     this.view.setFlightState(speedRatio, boosting);
   }
 
-  private handleMissileInput(input: ReturnType<InputHandler['getState']>, deltaTime: number): void {
-    // 锁定候选：Boss 可受伤部件（隐形 / 护盾偏转体除外）→ 敌机 → 敌方单位瞄准点 → Boss 导弹
+  /** 锁定候选：Boss 可受伤部件（隐形 / 护盾偏转体除外）与 Boss 导弹 → 敌机 → 敌方单位瞄准点 */
+  private collectLockCandidates(): THREE.Object3D[] {
     const targetMeshes = this.lockTargets;
     targetMeshes.length = 0;
     const bossController = this.bossBattleController;
@@ -1310,117 +1343,217 @@ export class GameCoordinator {
       if (enemy.isAlive()) targetMeshes.push(enemy.getMesh());
     }
     this.units.collectLockTargets(targetMeshes);
+    return targetMeshes;
+  }
 
-    // 幻影之翼隐形：已锁定的 Boss 部件立即丢失
-    if (inBossFight && bossController?.isBossHiddenFromSensors()) {
-      const locked = this.lockOnIndicator.getCurrentTarget();
-      const bossMesh = bossController.getCurrentBoss()?.getMesh();
-      if (locked && bossMesh && this.isDescendantOf(locked, bossMesh)) {
-        this.lockOnIndicator.cancelLockOn();
-      }
-    }
+  /**
+   * 导弹：导引头一直工作（有导弹即可，见 MissileSeeker），按一下导弹键发射一枚。
+   * - 已锁定：立即发射，锁定保留；LOCK_REARM_TIME 之后再按一次可以再发射。
+   * - 正在锁定：先不发射；按住不放，锁定完成的那一刻发射（一次按键只发射一次）。
+   * - 没有目标，或锁定完成前就松手：准星处提示“未锁定”并播放轻微的拒绝音。
+   * - 没有导弹：提示“无导弹”并播放空仓音。
+   * 候选表每步完整重建：目标被击毁 / 回收 / 隐形（不在表里）时导引头立即丢弃。
+   */
+  private handleMissileInput(input: ReturnType<InputHandler['getState']>, deltaTime: number): void {
+    const indicator = this.lockOnIndicator;
+    const held = input.missile;
+    const pressed = held && !this.missileHeldPrev;
+    const released = !held && this.missileHeldPrev;
+    this.missileHeldPrev = held;
+    this.missileRearmTimer = Math.max(0, this.missileRearmTimer - deltaTime);
 
-    const enemyScreenPos = this.enemyHealthBars.getFirstEnemyScreenPos();
+    indicator.setMissileCount(this.missileCount);
+    indicator.update(
+      this.playerSystem.getPosition(),
+      this.collectLockCandidates(),
+      this.gameScene.camera,
+      deltaTime,
+      this.playerSystem.getQuaternion()
+    );
 
     if (this.missileCount <= 0) {
-      if (input.missile) {
-        this.lockOnIndicator.setNoMissiles(true);
+      this.missilePressArmed = false;
+      if (pressed) {
+        indicator.showCue('no-missile');
         this.audioManager.playMissileDry();
-        this.lastMissileLockState = this.lockOnIndicator.getLockState();
-      } else {
-        this.lockOnIndicator.setNoMissiles(false);
-        this.lastMissileLockState = null;
       }
       return;
     }
 
-    this.lockOnIndicator.setNoMissiles(false);
+    const seeker = indicator.getSeeker();
+    const events = seeker.events;
+    if (events.acquired) {
+      this.handleTutorialMissileLockStarted();
+    }
+    if (events.locked) {
+      this.audioManager.playMissileLockConfirm();
+      this.handleTutorialMissileLockCompleted();
+    } else if (events.lost) {
+      this.audioManager.playMissileLockBreak();
+    } else if (seeker.getTarget() && !seeker.isLocked()) {
+      // 跟踪音自带节流（见 AudioManager.playMissileLock）
+      this.audioManager.playMissileLock();
+    }
 
-    if (this.lockOnIndicator.isLocking()) {
-      const lockComplete = this.lockOnIndicator.update(
-        this.playerSystem.getPosition(),
-        targetMeshes,
-        this.gameScene.camera,
-        deltaTime,
-        enemyScreenPos
-      );
+    if (pressed) {
+      this.missilePressArmed = true;
+    }
 
-      const lockState = this.lockOnIndicator.getLockState();
-      if (lockState === 'track') {
-        this.audioManager.playMissileLock();
-      } else if (lockState === 'break' && this.lastMissileLockState !== 'break') {
-        this.audioManager.playMissileLockBreak();
+    const lockedTarget = seeker.getLockedTarget();
+    if (this.missilePressArmed && held && lockedTarget && this.missileRearmTimer <= 0) {
+      this.missilePressArmed = false;
+      this.missileRearmTimer = GAME_CONSTANTS.MISSILE.LOCK_REARM_TIME;
+      this.fireMissile(lockedTarget);
+      return;
+    }
+
+    if (pressed && !seeker.getTarget()) {
+      // 环内没有目标：按下即提示
+      this.missilePressArmed = false;
+      indicator.showCue('no-lock');
+      this.audioManager.playMissileDry();
+    } else if (released && this.missilePressArmed) {
+      // 锁定完成前松手（已锁定、只是还在发射间隔内的不提示）
+      this.missilePressArmed = false;
+      if (!lockedTarget) {
+        indicator.showCue('no-lock');
+        this.audioManager.playMissileDry();
       }
-      this.lastMissileLockState = lockState;
+    }
+  }
 
-      if (lockComplete) {
-        this.handleTutorialMissileLockCompleted();
-        const lockedTarget = this.lockOnIndicator.getCurrentTarget();
-        if (lockedTarget && this.missileCount > 0 && !this.missileFiringScheduled) {
-          this.missileFiringScheduled = true;
-          this.audioManager.playMissileLockConfirm();
-
-          this.scheduleTimeout(() => {
-            this.fireMissile(lockedTarget);
-            this.lockOnIndicator.onMissileFired();
-            this.missileFiringScheduled = false;
-          }, 200);
+  /**
+   * 机炮提前量：候选 = 存活敌机 + 敌方空中单位（可显示提前量标记），其后是敌方地面 / 海上单位
+   * （只参与触屏辅助）。触屏设备上把辅助方向交给 PlayerSystem（机炮十字画的是同一个方向，
+   * 见 renderAimHud），桌面不改变弹道。
+   */
+  private updateGunAim(deltaTime: number): void {
+    const targets = this.gunTargets;
+    const surfaceTargets = this.gunSurfaceTargets;
+    targets.length = 0;
+    surfaceTargets.length = 0;
+    for (const enemy of this.enemySystem?.getEnemies() ?? []) {
+      if (enemy.isAlive()) targets.push(enemy.getMesh());
+    }
+    const unitSystem = this.units.getSystem();
+    if (unitSystem) {
+      const aimObjects = this.lockTargets;
+      aimObjects.length = 0;
+      this.units.collectLockTargets(aimObjects);
+      for (let i = 0; i < aimObjects.length; i++) {
+        const aimObject = aimObjects[i];
+        if (unitSystem.findByMesh(aimObject)?.domain === 'air') {
+          targets.push(aimObject);
+        } else {
+          surfaceTargets.push(aimObject);
         }
       }
-    } else if (input.missile) {
-      this.handleTutorialMissileLockStarted();
-      this.audioManager.playMissileLock();
-      this.lockOnIndicator.startLockOn();
-      this.lastMissileLockState = this.lockOnIndicator.getLockState();
-    } else {
-      this.lockOnIndicator.cancelLockOn();
-      this.lastMissileLockState = this.lockOnIndicator.getLockState();
     }
+    const airCount = targets.length;
+    for (let i = 0; i < surfaceTargets.length; i++) targets.push(surfaceTargets[i]);
+
+    const quaternion = this.playerSystem.getQuaternion();
+    const forward = this.gunForward.set(0, 0, -1).applyQuaternion(quaternion);
+    // 炮口位置与 PlayerSystem.fire 一致：机体前方 2 米
+    const muzzle = this.gunMuzzle.copy(this.playerSystem.getPosition()).addScaledVector(forward, 2);
+    const assist = GameConfig.isMobile;
+    this.gunLeadSolver.update(deltaTime, muzzle, forward, targets, airCount, assist);
+    // 没有辅助（含桌面端）时方向为 null：子弹沿机头方向发射
+    this.playerSystem.setGunAimAssist(
+      this.gunLeadSolver.getAssistDirection(),
+      this.gunLeadSolver.getAssistWeight()
+    );
   }
 
-  private isDescendantOf(object: THREE.Object3D, root: THREE.Object3D): boolean {
-    let current: THREE.Object3D | null = object;
-    let depth = 0;
-    while (current && depth < 32) {
-      if (current === root) return true;
-      current = current.parent;
-      depth++;
-    }
-    return false;
+  /** 阵亡 / 剧情冻结：清掉按键状态、提前量解算与触屏辅助 */
+  private resetWeaponAim(): void {
+    this.missilePressArmed = false;
+    this.missileRearmTimer = 0;
+    this.resetGunAim();
   }
 
+  /**
+   * 提前量解算与触屏辅助归零（阵亡 / 剧情冻结 / 换关）：机炮十字回到机头轴线上。
+   * 等待复活期间不解算（见 update），所以复活时仍是阵亡那一刻清零后的状态。
+   */
+  private resetGunAim(): void {
+    this.gunLeadSolver.reset();
+    this.playerSystem.setGunAimAssist(null);
+  }
+
+  /**
+   * 渲染帧：准星 / 机炮十字 / 目标角标 / 提前量标记跟随当前相机与插值后的可视位置。
+   * @param alpha 两个模拟步之间的插值比例（机炮辅助偏移与机体位姿用同一个比例）
+   */
+  private renderAimHud(alpha: number): void {
+    if (!this.presentationRuntimeReady) {
+      return;
+    }
+    const visible =
+      this.sessionState.isPlaying() &&
+      !this.sessionState.isPaused() &&
+      !this.storyHold &&
+      this.playerAircraft.visible &&
+      !this.playerSystem.isPlayerRespawning();
+    const hasLead = visible && this.gunLeadSolver.getPipPoint(this.gunLeadPoint);
+    // 机炮十字的方向 = 插值后的机头方向 + 插值后的辅助偏移（与子弹用的是同一个偏移）；没有偏移时为 null。
+    // 十字画在这个方向上瞄准点的距离处，追尾视角下才会落在目标上
+    const gunAimDirection = visible
+      ? this.gunLeadSolver.getRenderAssistDirection(this.interpolatedCameraTargetQuaternion, alpha)
+      : null;
+    this.lockOnIndicator.renderUpdate(
+      visible,
+      this.interpolatedCameraTargetPosition,
+      this.interpolatedCameraTargetQuaternion,
+      this.gameScene.camera,
+      hasLead ? this.gunLeadPoint : null,
+      this.gunLeadSolver.isPipOnTarget(),
+      gunAimDirection,
+      this.gunLeadSolver.getRenderAssistDistance(alpha)
+    );
+  }
+
+  /** 发射导弹；多重导弹道具生效时一次齐射至多三枚（间隔 0.1 秒，左右挂架交替） */
   private fireMissile(target?: THREE.Object3D): void {
     if (this.missileCount <= 0 || !this.combatSystem) return;
 
-    const missileCount = this.multiShotActive ? Math.min(3, this.missileCount) : 1;
-
-    for (let i = 0; i < missileCount; i++) {
-      this.scheduleTimeout(() => {
-        if (this.missileCount <= 0) return;
-
-        const position = this.playerSystem.getPosition().clone();
-        const quaternion = this.playerSystem.getQuaternion();
-
-        const cockpitOffset = new THREE.Vector3(0, 0.3, -0.5);
-        cockpitOffset.applyQuaternion(quaternion);
-        position.add(cockpitOffset);
-
-        const forward = new THREE.Vector3(0, 0, -1);
-        forward.applyQuaternion(quaternion);
-
-        this.combatSystem?.getMissileSystem().fire(position, forward, target);
-        this.audioManager.playMissileLaunch();
-        this.view.addShake(0.05);
-
-        this.missileCount--;
-        this.presentationController.updateMissileHud(
-          0,
-          { missileCount: this.missileCount, missileProgress: 0 },
-          true
-        );
-        this.lockOnIndicator.onMissileFired();
-      }, i * 100);
+    const salvo = this.multiShotActive ? Math.min(3, this.missileCount) : 1;
+    this.launchMissile(target);
+    for (let i = 1; i < salvo; i++) {
+      this.scheduleTimeout(() => this.launchMissile(target), i * 100);
     }
+  }
+
+  /** 从翼下挂架发射一枚：沿机头方向离架，直飞一小段后才开始制导（见 MissileSystem） */
+  private launchMissile(target?: THREE.Object3D): void {
+    if (this.missileCount <= 0 || !this.combatSystem) return;
+    if (this.playerSystem.isPlayerRespawning()) return;
+
+    const quaternion = this.playerSystem.getQuaternion();
+    const pylon = GameCoordinator.MISSILE_PYLON;
+    const side = this.missilePylonSide;
+    this.missilePylonSide = -side;
+    const position = this.missileSpawnPosition
+      .set(pylon.x * side, pylon.y, pylon.z)
+      .applyQuaternion(quaternion)
+      .add(this.playerSystem.getPosition());
+    const forward = this.missileSpawnForward.set(0, 0, -1).applyQuaternion(quaternion);
+
+    // 导弹继承载机当前速度后继续加速：加力 / 速度升级之后载机也追不上自己的导弹
+    this.combatSystem
+      .getMissileSystem()
+      .fire(position, forward, target, this.playerSystem.getSpeed());
+    this.audioManager.playMissileLaunch();
+    this.view.addShake(0.05);
+
+    this.missileCount--;
+    this.presentationController.updateMissileHud(
+      0,
+      { missileCount: this.missileCount, missileProgress: 0 },
+      true
+    );
+    this.lockOnIndicator.setMissileCount(this.missileCount);
+    this.handleTutorialMissileFired();
   }
 
   private handleBalloonCollisions(): void {
@@ -1574,7 +1707,7 @@ export class GameCoordinator {
     ) {
       return {
         title: tr(text.lockTitle),
-        objective: tr(text.lockObjective),
+        objective: tr(GameConfig.isMobile ? text.lockObjectiveTouch : text.lockObjectiveKeyboard),
         status: tr(text.lockingStatus, { done: completedSteps }),
       };
     }
@@ -1585,7 +1718,9 @@ export class GameCoordinator {
     ) {
       return {
         title: tr(text.launchTitle),
-        objective: tr(text.launchObjective),
+        objective: tr(
+          GameConfig.isMobile ? text.launchObjectiveTouch : text.launchObjectiveKeyboard
+        ),
         status: tr(text.launchStatus, { done: completedSteps }),
       };
     }
@@ -1784,6 +1919,7 @@ export class GameCoordinator {
         renderDeltaTime
       );
       this.vfx.renderUpdate(renderDeltaTime);
+      this.renderAimHud(clampedAlpha);
       this.playerSystem.setShieldViewFade(1 - 0.7 * this.view.getBlend());
       this.gameScene.render();
     } finally {
@@ -1846,6 +1982,8 @@ export class GameCoordinator {
         enemySystem.setDifficultyProfile(this.getCurrentDifficultyProfile());
         runtimeSystems.combatSystem.setDamageMultiplier(1);
 
+        // 加载期间排队的单次动作（含开火 / 导弹的按下沿）不带进第一步
+        this.inputHandler.resetActionQueue();
         this.gameLoop.start(
           (dt) => this.update(dt),
           (alpha) => this.render(alpha)
@@ -1996,6 +2134,8 @@ export class GameCoordinator {
     return levelManager.whenTerrainReady().then(() => {
       if (this.isDisposed) return;
       this.units.prewarmLevel(level);
+      // 导弹模型的几何体 / 贴图 / 着色器提前建好，避免第一次发射时卡一下
+      this.combatSystem?.getMissileSystem().prewarm();
       this.placePlayerAtLevelStart(level);
       this.playerSystem.syncMaxHealth();
       this.playerSystem.getHealth().healToMax();
@@ -2031,6 +2171,7 @@ export class GameCoordinator {
     }
     this.sessionState.setLevel(level);
     this.sessionState.setWave(startWave);
+    this.resetGunAim();
     this.presentLevelBriefing(level);
     const shouldRunTutorialIntro = firstLevelOfSession && this.shouldRunTutorialIntro();
     const tutorialWaveDelayMs = shouldRunTutorialIntro ? this.getTutorialWaveDelayMs() : 0;
@@ -2176,6 +2317,7 @@ export class GameCoordinator {
     if (hold) {
       this.audioManager.stopEngine();
       this.lockOnIndicator.cancelLockOn();
+      this.resetWeaponAim();
     } else {
       this.presentationController.resetHudThrottle();
       if (this.sessionState.isPlaying() && this.playerSystem.getLives() > 0) {
@@ -2258,17 +2400,21 @@ export class GameCoordinator {
     this.sessionState.setLevel(save.level);
   }
 
-  /** 结算界面：正常模式且存在检查点时提供“从检查点继续” */
-  private offerCheckpointResume(): void {
+  /**
+   * 任务失败的结算面板：正常模式且存在检查点时，主动作是“从检查点重试”（写明回到哪一关哪一波），
+   * 面板上不再有“再来一局”——它会从头开一局、清掉这份存档。Boss 模式 / 没有检查点返回 null，
+   * 面板照旧是“再来一局 / 返回菜单”。
+   */
+  private resolveCheckpointRetry(): SettlementCheckpointRetry | null {
     const onContinue = this.options.onContinueFromCheckpoint;
     if (!onContinue || this.sessionState.isBossMode() || !hasCampaignCheckpoint()) {
-      return;
+      return null;
     }
     const save = loadCampaignCheckpoint();
     if (!save) {
-      return;
+      return null;
     }
-    this.checkpointResumeButton.show(save, (resumeSave) => onContinue(resumeSave));
+    return { detail: describeCheckpointText(save), onRetry: () => onContinue(save) };
   }
 
   // ===========================================================================================
@@ -2282,10 +2428,15 @@ export class GameCoordinator {
       collectTargets: (out) => this.collectWeaponTargets(out),
       onEmpPulse: (center, radius, seconds) => this.handleEmpPulse(center, radius, seconds),
       onFired: (id, position, direction) => {
-        this.particleSystem?.createMuzzleFlash(position, direction, id === 'railgun' ? 1.6 : 1);
+        const viewScale = this.view.isFirstPerson() ? GameCoordinator.FIRST_PERSON_FLASH_SCALE : 1;
+        this.particleSystem?.createMuzzleFlash(
+          position,
+          direction,
+          (id === 'railgun' ? 1.6 : 1) * viewScale
+        );
         this.view.addShake(GameCoordinator.WEAPON_FIRE_SHAKE[id]);
         if (id === 'railgun') {
-          this.gameScene.setScreenEffects({ flash: 0.25 });
+          this.gameScene.setScreenEffects({ flash: 0.25 * viewScale });
         }
       },
       onImpact: (_id, position, scale) => {
@@ -2452,6 +2603,24 @@ export class GameCoordinator {
           getStats: () => this.playerStats,
           isStoryHold: () => this.storyHold,
           getUpgradeMenuVisible: () => this.upgradeMenu?.isVisible() ?? false,
+          getAimState: () => {
+            const indicator = this.lockOnIndicator;
+            const aim = indicator.getAimScreen();
+            const cross = indicator.getGunCrossScreen();
+            return {
+              reticle: aim.visible ? { x: Math.round(aim.x), y: Math.round(aim.y) } : null,
+              gunCross: cross.visible ? { x: Math.round(cross.x), y: Math.round(cross.y) } : null,
+              gunCrossAssisted: indicator.isGunCrossAssisted(),
+              acquireRadius: Math.round(indicator.getAcquireRadius()),
+              keepRadius: Math.round(indicator.getKeepRadius()),
+              lockState: indicator.getLockState(),
+              lockProgress: Math.round(indicator.getLockProgress() * 100) / 100,
+              hasTarget: indicator.getTrackedTarget() !== null,
+              missiles: this.missileCount,
+              leadPip: this.gunLeadSolver.getPipTarget() !== null,
+              gunAssist: this.gunLeadSolver.getAssistDirection() !== null,
+            };
+          },
           clickHangarContinue: () => {
             const button = document.querySelector<HTMLButtonElement>('#upgrade-menu button.hangar');
             button?.click();
@@ -2514,7 +2683,18 @@ export class GameCoordinator {
         icon: '🔥',
         text: { en: 'Guns to suppress, missiles to kill', zh: '机炮压制，导弹点杀' },
       },
-      { icon: '🚀', text: { en: 'Lock on before firing missiles', zh: '锁定后再发射导弹' } },
+      {
+        icon: '🚀',
+        text: GameConfig.isMobile
+          ? {
+              en: 'Hold an enemy in the ring. When it turns green, tap MSL',
+              zh: '把敌机保持在环内，环变绿后点「导弹」键',
+            }
+          : {
+              en: 'Hold an enemy in the ring. When it turns green, press M',
+              zh: '把敌机保持在环内，环变绿后按 M',
+            },
+      },
       {
         icon: '🎯',
         text: { en: 'The first kill ends the training', zh: '击杀首个目标后转常规' },
@@ -2687,7 +2867,7 @@ export class GameCoordinator {
     this.tutorialCombatState.fireHintShown = true;
     this.hud.showPowerUpBig(
       '🔥',
-      { en: 'Guns check. Ready a missile lock', zh: '火力确认，准备导弹锁定' },
+      { en: 'Guns check. Now hold an enemy inside the ring', zh: '火力确认，把敌机保持在环内' },
       GameCoordinator.TUTORIAL_HINT_MED_MS / 1000
     );
     this.updatePlayerFacingObjective();
@@ -2701,7 +2881,10 @@ export class GameCoordinator {
     this.tutorialCombatState.lockHintShown = true;
     this.hud.showPowerUpBig(
       '🎯',
-      { en: 'Hold steady until the lock ring closes', zh: '稳住准星，等待锁定圈闭合' },
+      {
+        en: 'Tracking. Keep it in the ring until it turns green',
+        zh: '跟踪中，保持在环内直到变绿',
+      },
       GameCoordinator.TUTORIAL_HINT_MED_MS / 1000
     );
     this.updatePlayerFacingObjective();
@@ -2729,7 +2912,9 @@ export class GameCoordinator {
     this.tutorialCombatState.lockCompleteHintShown = true;
     this.hud.showPowerUpBig(
       '✅',
-      { en: 'Locked. Fire now!', zh: '锁定完成，立刻发射' },
+      GameConfig.isMobile
+        ? { en: 'Locked. Tap MSL to fire!', zh: '已锁定，点「导弹」键发射！' }
+        : { en: 'Locked. Press M to fire!', zh: '已锁定，按 M 发射！' },
       GameCoordinator.TUTORIAL_HINT_SHORT_MS / 1000
     );
     this.updatePlayerFacingObjective();
@@ -3135,6 +3320,14 @@ export class GameCoordinator {
             });
           },
           onExitToMenu: () => this.options.onExitToMenu?.(),
+          // 保存并退出。对局已结束（阵亡 / 通关）时不存档：此时菜单本来就打不开，这里只是兜底，
+          // 免得结束后的快照被写成检查点
+          getSaveStatus: () =>
+            this.sessionState.isPlaying()
+              ? this.campaign.describeExitSave()
+              : { kind: 'no-save-mode' },
+          onSaveAndExit: () =>
+            this.sessionState.isPlaying() ? this.campaign.saveForExit() : { kind: 'no-save-mode' },
           applyAudio: (sfx, music) => {
             this.audioManager.setSFXVolume(sfx);
             this.audioManager.setMusicVolume(music);
@@ -3580,7 +3773,6 @@ export class GameCoordinator {
     this.vfx.dispose();
     this.view.dispose();
     this.presentation.dispose();
-    this.checkpointResumeButton.dispose();
     this.enemySystem?.dispose();
     this.particleSystem?.clear();
     this.powerUpSystem?.dispose();

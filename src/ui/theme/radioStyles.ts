@@ -4,7 +4,8 @@ import { HUD_COLORS, HUD_LAYERS, HUD_TONE_COLORS } from './hudPalette';
  * 无线电通讯面板样式。
  *
  * 位置避开准星与雷达：桌面贴底、紧挨雷达右侧；手机横握夹在摇杆与右侧按键簇之间；
- * 竖屏放到顶部状态栏下方。按键簇宽度由 index.html 的 --touch-deck-w / --touch-stick-size 提供。
+ * 竖屏第一人称放到顶部状态栏下方，竖屏追尾视角（准星在屏幕上方）放到按键簇上方。
+ * 按键簇尺寸由 index.html 的 --touch-deck-w / --touch-deck-h / --touch-stick-size 提供。
  */
 export const RADIO_STYLE_ID = 'radio-comms-style';
 
@@ -234,6 +235,103 @@ ${toneBlock('muted', '195, 204, 214')}
   top: calc(var(--hud-stack-bottom, calc(128px + env(safe-area-inset-top, 0px))) + 8px);
   bottom: auto;
   width: auto;
+}
+
+/*
+ * 竖屏追尾视角：准星与导弹捕获环在屏幕上方约 29% 处，正好是消息栈下方这一带，
+ * 面板留在那里会盖住准星和正在瞄的目标。改放到触控按键簇上方、向上生长
+ * （按键簇高度由 index.html 的 --touch-deck-h 提供；第一人称准星在屏幕中心，仍用上面的位置）
+ */
+:root:not([data-hud-camera='first-person']) #radio-comms[data-density='touch-portrait'] {
+  top: auto;
+  bottom: calc(max(20px, env(safe-area-inset-bottom)) + var(--touch-deck-h, 240px) + 8px);
+}
+
+/*
+ * 手机竖屏追尾视角：机体下方的告警通道（第一行在屏幕中线下方约 45–75px）到按键簇之间，
+ * 最多放得下两行正文；第三行会盖住导弹告警。
+ * 通道同时显示两行（导弹告警 + 闪烁告警，HUD 在 <html> 上记 data-hud-warning-rows='2'）时，
+ * 第二行下沿到按键簇只剩约 50px，底部有安全区的 iPhone 上只剩约 39px：面板收成一行正文，
+ * 不显示头像和呼号行（左侧的色条仍标出说话方的阵营），内边距和行高收紧（整条约 21px 高），
+ * 底边不动、向上让出第二行；告警一收起就恢复
+ */
+@media (orientation: portrait) and (max-width: 699.98px) {
+  :root:not([data-hud-camera='first-person']) #radio-comms[data-density='touch-portrait'] .rc-text {
+    -webkit-line-clamp: 2;
+  }
+
+  :root[data-hud-warning-rows='2']:not([data-hud-camera='first-person']) #radio-comms[data-density='touch-portrait'] .rc-portrait,
+  :root[data-hud-warning-rows='2']:not([data-hud-camera='first-person']) #radio-comms[data-density='touch-portrait'] .rc-head {
+    display: none;
+  }
+
+  :root[data-hud-warning-rows='2']:not([data-hud-camera='first-person']) #radio-comms[data-density='touch-portrait'] .rc-text {
+    -webkit-line-clamp: 1;
+    line-height: 1.3;
+  }
+
+  :root[data-hud-warning-rows='2']:not([data-hud-camera='first-person']) #radio-comms[data-density='touch-portrait'] .rc-panel {
+    padding-top: 1px;
+    padding-bottom: 1px;
+  }
+}
+
+/* 矮一些的手机（如 360×800）：第二行下沿到按键簇只剩约 33px，收小的面板再贴近按键簇 4px */
+@media (orientation: portrait) and (max-width: 699.98px) and (max-height: 819.98px) {
+  :root[data-hud-warning-rows='2']:not([data-hud-camera='first-person']) #radio-comms[data-density='touch-portrait'] {
+    bottom: calc(max(20px, env(safe-area-inset-bottom)) + var(--touch-deck-h, 240px) + 4px);
+  }
+}
+
+/*
+ * 手机横握同理：面板贴在屏幕底边，告警通道的第二行下沿离底边只剩约 50px
+ * （底部有安全区的 iPhone 上扣掉安全区只剩约 31px），两行同时显示时同样收成一行正文
+ * （平板横屏的告警通道离面板很远，不需要）
+ */
+@media (orientation: landscape) and (max-height: 699.98px) {
+  :root[data-hud-warning-rows='2'] #radio-comms[data-density='touch-landscape'] .rc-portrait,
+  :root[data-hud-warning-rows='2'] #radio-comms[data-density='touch-landscape'] .rc-head {
+    display: none;
+  }
+
+  :root[data-hud-warning-rows='2'] #radio-comms[data-density='touch-landscape'] .rc-text {
+    -webkit-line-clamp: 1;
+    line-height: 1.3;
+  }
+
+  :root[data-hud-warning-rows='2'] #radio-comms[data-density='touch-landscape'] .rc-panel {
+    padding-top: 1px;
+    padding-bottom: 1px;
+  }
+}
+
+/* 矮一些的手机（如 800×360）：第二行下沿离底边只剩约 37px，收小的面板再往底边靠 6px */
+@media (orientation: landscape) and (max-height: 379.98px) {
+  :root[data-hud-warning-rows='2'] #radio-comms[data-density='touch-landscape'] {
+    bottom: max(6px, env(safe-area-inset-bottom));
+  }
+}
+
+/*
+ * 平板（index.html 的平板档）：摇杆 / 按键簇从两侧收进 28px + 安全区，并整体抬高 10% 屏高。
+ * - 横屏：面板左右缘按这组边距避让（手机档的 20px 会让面板离摇杆、按键簇只剩 6px）。
+ * - 竖屏追尾视角：按键簇上方那一带被抬高的按键簇和告警通道占着，面板改放到按键簇左侧、
+ *   静止摇杆的上方。
+ */
+@media (min-width: 700px) and (min-height: 700px) {
+  #radio-comms[data-density='touch-landscape'] {
+    left: calc(28px + env(safe-area-inset-left, 0px) + var(--touch-stick-size, 150px) + 14px);
+    right: calc(28px + env(safe-area-inset-right, 0px) + var(--touch-deck-w, 334.8px) + 14px);
+  }
+
+  :root:not([data-hud-camera='first-person']) #radio-comms[data-density='touch-portrait'] {
+    left: calc(28px + env(safe-area-inset-left, 0px));
+    right: calc(28px + env(safe-area-inset-right, 0px) + var(--touch-deck-w, 334.8px) + 14px);
+    bottom: calc(
+      max(10vh, calc(env(safe-area-inset-bottom, 0px) + 20px)) + var(--touch-stick-size, 150px) +
+        14px
+    );
+  }
 }
 
 #radio-comms:not([data-density='desktop']) .rc-panel {

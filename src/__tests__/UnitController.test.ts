@@ -361,10 +361,16 @@ describe('UnitController warnings relabel on a language switch', () => {
 
   const flashText = (): string => document.getElementById('hud-flash-warning')?.textContent ?? '';
 
-  /** 唯一一次告警：传的是双语原文，HUD 上按当前语言显示并随切换重绘 */
-  function expectRelabelledWarning(tone: HudWarningTone): void {
-    expect(flashWarning).toHaveBeenCalledTimes(1);
-    const [text, calledTone] = flashWarning.mock.calls[0] as [HudText, HudWarningTone];
+  /**
+   * 最近一次告警（默认也是唯一一次）：传的是双语原文，HUD 上按当前语言显示并随切换重绘。
+   * 返回这条告警的双语原文。
+   */
+  function expectRelabelledWarning(tone: HudWarningTone, expectedCalls = 1): LocalizedText {
+    expect(flashWarning).toHaveBeenCalledTimes(expectedCalls);
+    const [text, calledTone] = flashWarning.mock.calls[expectedCalls - 1] as [
+      HudText,
+      HudWarningTone,
+    ];
     expect(calledTone).toBe(tone);
     expect(typeof text, 'a bilingual value, not a string resolved at call time').not.toBe('string');
     const bilingual = text as LocalizedText;
@@ -377,6 +383,7 @@ describe('UnitController warnings relabel on a language switch', () => {
     expect(flashText()).not.toContain(bilingual.en);
     setLocale('en');
     expect(flashText()).toContain(bilingual.en);
+    return bilingual;
   }
 
   it('missile inbound', () => {
@@ -389,15 +396,32 @@ describe('UnitController warnings relabel on a language switch', () => {
     expectRelabelledWarning('threat');
   });
 
-  it('remaining targets have left the area', () => {
-    // 敌机已清空，远处一座敌方雷达站拖住波次：防卡关放行时告警
+  it('target remaining (objective hint)', () => {
+    // 敌机已清空，远处一座敌方雷达站拖住波次：先提示“还有目标，跟随标记”
     expect(system.spawnUnit(UnitType.RADAR_STATION, new THREE.Vector3(30000, 0, 30000))).not.toBe(
       null
     );
-    for (let elapsed = 0; elapsed < 200 && flashWarning.mock.calls.length === 0; elapsed += 1) {
+    controller.update(1, playerMesh, playerPosition, [], [], true);
+    expect(controller.getWaveHoldCount(), 'the unit holds the wave').toBe(1);
+    const hint = expectRelabelledWarning('sys');
+    expect(hint.en).toMatch(/remain/i);
+    expect(hint.en).not.toMatch(/left the area/i);
+  });
+
+  it('remaining targets have left the area', () => {
+    // 同样的局面，玩家 60 秒没有打中任何敌方单位：防卡关放行并告警（之前那条“还有目标”提示在前）
+    expect(system.spawnUnit(UnitType.RADAR_STATION, new THREE.Vector3(30000, 0, 30000))).not.toBe(
+      null
+    );
+    let elapsed = 0;
+    for (; elapsed < 200 && controller.getWaveHoldCount() > 0; elapsed += 1) {
       controller.update(1, playerMesh, playerPosition, [], [], true);
     }
     expect(controller.getWaveHoldCount(), 'the wave is released').toBe(0);
-    expectRelabelledWarning('sys');
+    expect(elapsed, 'released after 60 s, not 150 s').toBe(60);
+    const warning = expectRelabelledWarning('sys', 2);
+    expect(warning.en).toMatch(/left the area/i);
+    expect(flashWarning.mock.calls[0][1]).toBe('sys');
+    expect((flashWarning.mock.calls[0][0] as LocalizedText).en).not.toMatch(/left the area/i);
   });
 });

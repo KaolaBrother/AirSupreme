@@ -65,7 +65,7 @@ const SHELL_COPY = {
   pause: { en: 'PAUSE', zh: '暂停' },
   pauseLabel: { en: 'Pause', zh: '暂停' },
   fire: { en: 'FIRE', zh: '开火' },
-  loadFailed: { en: '⚠️ Failed to load', zh: '⚠️ 加载失败' },
+  loadFailed: { en: 'Failed to load', zh: '加载失败' },
 } satisfies Record<string, LocalizedText>;
 
 function resolveShippedIconFile(href: string): string | null {
@@ -280,9 +280,12 @@ describe('page shell language (main.ts)', () => {
     const i18n = await bootShell();
     expect(i18n.getLocale()).toBe(locale);
     expectShellIn(locale);
-    // 之后渲染的报错画面也用同一语言
+    // 之后渲染的报错画面也用同一语言（批次 X5：报错画面不再带 ⚠️ 等表情符号）
     const heading = document.querySelector('#loading-screen h1');
     expect(heading?.textContent).toBe(textIn(SHELL_COPY.loadFailed, locale));
+    expect(document.getElementById('loading-screen')?.textContent ?? '').not.toMatch(
+      /\p{Extended_Pictographic}/u
+    );
   });
 
   it('relabels the shell live when the language changes', async () => {

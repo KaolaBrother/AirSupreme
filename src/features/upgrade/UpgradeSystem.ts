@@ -179,8 +179,8 @@ export const UPGRADE_CONFIGS: Record<UpgradeType, UpgradeConfig> = {
     UpgradeType.MISSILE_LOCK_TIME,
     { en: 'Missile Lock Speed', zh: '导弹锁定速度' },
     { en: 'Lock on with missiles faster', zh: '减少导弹锁定所需时间' },
-    1.5,
-    -0.1,
+    1.0,
+    -0.05,
     UNIT_SECONDS
   ),
   [UpgradeType.MISSILE_LOCK_RADIUS]: coreConfig(

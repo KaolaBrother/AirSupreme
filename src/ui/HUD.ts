@@ -2,6 +2,8 @@ import { GAME_CONSTANTS, GameConfig } from '@/config';
 import { SPECIAL_WEAPON_IDS } from '@/core/CombatContracts';
 import { SPECIAL_WEAPON_CONFIGS } from '@/features/weapons/WeaponTypes';
 import { onLocaleChange, tr, type LocalizedText, type TextParams } from '@/i18n';
+import { menuKitCss, rescopeMenuCss } from '@/ui/menu/menuStyles';
+import { sheetKitCss } from '@/ui/menu/sheetStyles';
 import { injectHudExtrasStyles } from '@/ui/theme/hudExtrasStyles';
 import {
   GLYPH_CAMERA,
@@ -40,7 +42,12 @@ const TXT_RELOAD: LocalizedText = { en: 'Reload', zh: '装填' };
 const TXT_RECHARGING: LocalizedText = { en: 'Recharging', zh: '充能中' };
 const TXT_MISSION_FAILED: LocalizedText = { en: 'MISSION FAILED', zh: '任务失败' };
 const TXT_MISSION_COMPLETE: LocalizedText = { en: 'MISSION COMPLETE', zh: '任务完成' };
+/** 结算面板标题上方的小标签（失败 / 通关相同） */
+const TXT_DEBRIEF: LocalizedText = { en: 'Debrief', zh: '战后简报' };
 const TXT_PLAY_AGAIN: LocalizedText = { en: 'Play Again', zh: '再来一局' };
+const TXT_RETRY_CHECKPOINT: LocalizedText = { en: 'Retry from checkpoint', zh: '从检查点重试' };
+/** 检查点卡片的小标题（卡片里下一行是章节 / 波次） */
+const TXT_CHECKPOINT: LocalizedText = { en: 'Checkpoint', zh: '检查点' };
 const TXT_MAIN_MENU: LocalizedText = { en: 'Main Menu', zh: '返回菜单' };
 const TXT_COOLDOWN: LocalizedText = { en: 'Cooling down', zh: '冷却中' };
 const TXT_HOLD_F_BEAM: LocalizedText = { en: 'Hold F to fire', zh: '按住 F 照射' };
@@ -52,6 +59,8 @@ const TXT_TAP_PULSE: LocalizedText = { en: 'Tap to pulse', zh: '轻触释放' };
 const TXT_F_SALVO: LocalizedText = { en: 'Press F to fire', zh: 'F 键齐射' };
 const TXT_TAP_SALVO: LocalizedText = { en: 'Tap to fire', zh: '轻触齐射' };
 const TXT_DECK_SPECIAL: LocalizedText = { en: 'SPEC', zh: '特武' };
+const TXT_STAT_LIVES: LocalizedText = { en: 'LIVES', zh: '生命' };
+const TXT_STAT_MISSILES: LocalizedText = { en: 'MSL', zh: '导弹' };
 const TXT_FIRST_PERSON: LocalizedText = { en: 'First-person', zh: '第一人称' };
 const TXT_THIRD_PERSON: LocalizedText = { en: 'Third-person', zh: '第三人称' };
 const TXT_DECK_FIRST_PERSON: LocalizedText = { en: '1ST', zh: '座舱' };
@@ -201,6 +210,8 @@ interface TouchDeckRefs {
   cycleSub: HTMLElement | null;
   camera: HTMLElement | null;
   cameraSub: HTMLElement | null;
+  /** 导弹键：余量写在 data-count，补给进度写在 --tc-meter（外圈进度环） */
+  missile: HTMLElement | null;
 }
 
 interface WeaponSlotEntry {
@@ -217,6 +228,15 @@ type SettlementActions = {
   onExitToMenu: () => void;
 };
 
+/**
+ * 任务失败且有可用检查点时结算面板的主动作：“从检查点重试”。
+ * detail 说明回到哪里（章节 / 波次；可本地化，面板开着时切换语言随之重绘）。
+ */
+export interface SettlementCheckpointRetry {
+  detail: HudText;
+  onRetry: () => void;
+}
+
 type PendingBigMessage = {
   icon: string;
   name: HudText;
@@ -232,6 +252,8 @@ export class HUD {
   private static readonly MAX_DISPLAY_LIVES = 5;
   private static readonly UPGRADE_HINT_STYLE_ID = 'hud-upgrade-hint-style';
   private static readonly SETTLEMENT_STYLE_ID = 'hud-settlement-style';
+  /** 结算面板淡入（0.5 秒）期间键盘不触发自动获得焦点的主动作 */
+  private static readonly SETTLEMENT_KEY_GRACE_MS = 500;
   private static readonly LAYOUT_STYLE_ID = 'hud-layout-style';
   private static readonly TOAST_DEFAULT_MS = 800;
   private initialized: boolean = false;
@@ -253,6 +275,9 @@ export class HUD {
   private missilesDisplay: HTMLDivElement;
   private missileProgressDisplay: HTMLDivElement; // 导弹补给进度条背景
   private missileProgressFill: HTMLDivElement; // 导弹补给进度条填充
+  private livesLabel: HTMLSpanElement; // “生命”标签
+  private missilesLabel: HTMLSpanElement; // “导弹”标签
+  private missileCountDisplay: HTMLSpanElement; // 导弹余量 n/max
   private statusColumn: HTMLDivElement; // 右上状态列
   private topStack: HTMLDivElement; // 顶部中央消息栈
   private topStackObserver: ResizeObserver | null = null;
@@ -303,6 +328,9 @@ export class HUD {
   private enemyCounterMode: HudEnemyCounterMode = 'wave';
   private lastLivesFilled: number | null = null;
   private lastMissilesFilled: number | null = null;
+  /** 最近一次的导弹余量 / 补给进度：触控按键簇出现或重建后据此重写导弹键 */
+  private lastMissileCount: number = 0;
+  private lastMissileProgress: number = 0;
   private resizeHandler!: () => void;
   private readonly textContentCache = new WeakMap<HTMLElement, string>();
   private readonly styleValueCache = new WeakMap<HTMLElement, Map<string, string>>();
@@ -316,7 +344,18 @@ export class HUD {
   private finalScoreValue: number | null = null;
   /** 结算面板当前是失败还是通关（语言切换时重写标题） */
   private settlementKind: 'failed' | 'complete' = 'failed';
+  /** 失败面板当前提供的检查点重试；null 时主动作是“再来一局” */
+  private settlementCheckpoint: SettlementCheckpointRetry | null = null;
+  private settlementShownAt: number = 0;
+  /** 这一次结算面板上已经把回调交出去的动作键（每个只交一次）；面板再次出现时清空 */
+  private readonly settlementDelivered = new Set<HTMLButtonElement>();
+  private settlementKicker!: HTMLDivElement;
   private retryButton!: HTMLButtonElement;
+  private retryTitle!: HTMLSpanElement;
+  /** 检查点卡片（小标题 + retryDetail），有检查点时和 retryTitle 一起放在 retryButton 里 */
+  private retryCard!: HTMLSpanElement;
+  private retryCardLabel!: HTMLSpanElement;
+  private retryDetail!: HTMLSpanElement;
   private exitButton!: HTMLButtonElement;
   private flareLabelText: Text | null = null;
   private autosaveTitle: HTMLSpanElement | null = null;
@@ -652,27 +691,29 @@ export class HUD {
     `;
     this.renderMissilePips(GAME_CONSTANTS.MISSILE.MAX_MISSILES);
 
-    // 导弹补给进度条（导弹UI下方）
+    // 导弹补给进度条（导弹读数内，pip 下方）
     this.missileProgressDisplay = document.createElement('div');
     this.missileProgressDisplay.id = 'hud-missile-reload';
-    this.missileProgressDisplay.style.cssText = `
-      height: 6px;
-      flex: none;
-      box-sizing: border-box;
-      background: rgba(8, 14, 24, 0.55);
-      border-radius: 3px;
-      overflow: hidden;
-      border: 1px solid rgba(255, 255, 255, 0.5);
-    `;
+    this.missileProgressDisplay.setAttribute('data-hud', 'missile-reload');
 
     this.missileProgressFill = document.createElement('div');
+    this.missileProgressFill.className = 'hud-stat-meter-fill';
     this.missileProgressFill.style.cssText = `
       width: 0%;
       height: 100%;
-      background: linear-gradient(90deg, #ffffff, #e0e0e0);
       transition: width 0.5s ease-out;
     `;
     this.missileProgressDisplay.appendChild(this.missileProgressFill);
+
+    // 带标签的读数：生命 = 标签 + pip；导弹 = 标签 + pip + 余量 n/max + 补给进度
+    this.livesLabel = document.createElement('span');
+    this.livesLabel.className = 'hud-stat-label';
+    this.missilesLabel = document.createElement('span');
+    this.missilesLabel.className = 'hud-stat-label';
+    this.missileCountDisplay = document.createElement('span');
+    this.missileCountDisplay.id = 'hud-missile-count';
+    this.missileCountDisplay.className = 'hud-stat-count';
+    this.renderStatLabels();
 
     // 道具倒计时（状态列底部）
     this.powerUpDisplay = document.createElement('div');
@@ -687,18 +728,33 @@ export class HUD {
     `;
     this.setTextContent(this.powerUpDisplay, '');
 
-    // 生命与导弹 pip：桌面 / 横屏上下两行，竖屏并排一行（缩短状态列，给下方消息栈让高度）
+    const livesHead = document.createElement('div');
+    livesHead.className = 'hud-stat-head';
+    livesHead.appendChild(this.livesLabel);
+    const livesStat = document.createElement('div');
+    livesStat.className = 'hud-stat hud-stat-lives';
+    livesStat.setAttribute('data-hud', 'lives-readout');
+    livesStat.append(livesHead, this.livesDisplay);
+
+    const missilesHead = document.createElement('div');
+    missilesHead.className = 'hud-stat-head';
+    missilesHead.append(this.missilesLabel, this.missileCountDisplay);
+    const missilesStat = document.createElement('div');
+    missilesStat.className = 'hud-stat hud-stat-missiles';
+    missilesStat.setAttribute('data-hud', 'missile-readout');
+    missilesStat.append(missilesHead, this.missilesDisplay, this.missileProgressDisplay);
+
+    // 生命与导弹读数：桌面 / 横屏上下两行，竖屏并排一行（缩短状态列，给下方消息栈让高度）
     const pipGroup = document.createElement('div');
     pipGroup.className = 'hud-pip-group';
-    pipGroup.appendChild(this.livesDisplay);
-    pipGroup.appendChild(this.missilesDisplay);
+    pipGroup.appendChild(livesStat);
+    pipGroup.appendChild(missilesStat);
 
     this.statusColumn.appendChild(this.enemiesDisplay);
     this.statusColumn.appendChild(pipGroup);
-    this.statusColumn.appendChild(this.missileProgressDisplay);
     this.statusColumn.appendChild(this.powerUpDisplay);
 
-    // 中央播报（道具 / 友军 / 教学提示）：锚定在准星上方的横幅，不压住准星与锁定环
+    // 中央播报（道具 / 友军 / 教学提示）：横幅位置按视角避让准星与捕获环（见 hudExtrasStyles）
     this.powerUpBigDisplay = document.createElement('div');
     this.powerUpBigDisplay.id = 'hud-callout';
     this.powerUpBigDisplay.setAttribute('data-hud', 'callout');
@@ -733,7 +789,8 @@ export class HUD {
     calloutCard.appendChild(calloutMain);
     this.powerUpBigDisplay.appendChild(calloutCard);
 
-    // 结算覆盖层（失败 / 通关共用）
+    // 结算覆盖层（失败 / 通关共用）。外观是主菜单 / 暂停菜单那一套（样式见 ensureSettlementStyle）；
+    // 行内只留定位、层级与显隐——showGameOver / hideGameOver 切换的就是这里的 opacity 与 pointer-events
     this.ensureSettlementStyle();
     this.gameOverDisplay = document.createElement('div');
     this.gameOverDisplay.id = 'hud-settlement-overlay';
@@ -747,7 +804,6 @@ export class HUD {
       flex-direction: column;
       justify-content: center;
       align-items: center;
-      background: rgba(0, 0, 0, 0.8);
       z-index: 120;
       opacity: 0;
       transition: opacity 0.5s;
@@ -757,55 +813,61 @@ export class HUD {
     `;
     this.settlementPanel = document.createElement('div');
     this.settlementPanel.id = 'hud-settlement-panel';
-    this.settlementPanel.style.cssText = `
-      width: min(360px, calc(100% - 32px));
-      max-width: 360px;
-      box-sizing: border-box;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      text-align: center;
-      background: var(--hud-glass, ${HUD_COLORS.glass});
-      border: 1px solid var(--hud-edge, ${HUD_COLORS.edge});
-      border-radius: var(--hud-radius, 12px);
-      box-shadow: var(--hud-shadow, ${HUD_COLORS.shadow});
-      padding: 28px 20px;
-    `;
+
+    // 面板头：小标签 + 粗体大标题，下面一道细线
+    const settlementHead = document.createElement('div');
+    settlementHead.className = 'hs-head';
+    this.settlementKicker = document.createElement('div');
+    this.settlementKicker.className = 'ms-kicker';
     this.gameOverTitle = document.createElement('div');
     this.gameOverTitle.id = 'game-over-title';
-    this.gameOverTitle.style.cssText = `
-      text-align: center;
-      color: #ff3333;
-      font-size: ${isMobile ? '48px' : '72px'};
-      font-weight: bold;
-      text-shadow: 0 0 20px rgba(255, 0, 0, 0.8), 4px 4px 8px rgba(0, 0, 0, 1);
-      margin-bottom: 30px;
-      animation: pulse 1s ease-in-out infinite;
-    `;
-    this.setTextContent(this.gameOverTitle, tr(TXT_MISSION_FAILED));
+    this.gameOverTitle.className = 'ms-title';
+    settlementHead.append(this.settlementKicker, this.gameOverTitle);
+    this.renderSettlementTitle();
 
+    const settlementBody = document.createElement('div');
+    settlementBody.className = 'hs-body';
     this.finalScoreDisplay = document.createElement('div');
     this.finalScoreDisplay.id = 'final-score';
-    this.finalScoreDisplay.style.cssText = `
-      color: #ffdd00;
-      font-size: ${isMobile ? '24px' : '36px'};
-      font-weight: bold;
-      text-shadow: 2px 2px 4px rgba(0, 0, 0, 1);
-    `;
 
     this.settlementActionsRow = document.createElement('div');
     this.settlementActionsRow.id = 'hud-settlement-actions';
-    this.settlementActionsRow.style.cssText = `
-      display: none;
-      flex-direction: row;
-      gap: 12px;
-      width: 100%;
-      margin-top: 28px;
-      pointer-events: auto;
-    `;
+    this.settlementActionsRow.className = 'cf-actions';
+    // 显隐写在行内：showGameOver / showMissionComplete 改成 flex，hideGameOver 改回 none
+    this.settlementActionsRow.style.display = 'none';
     this.retryButton = this.createSettlementButton('', () => {
-      this.settlementActions?.onRetry();
+      // 有检查点时这个键只做“从检查点重试”（存档原样保留）；否则是原来的“再来一局”
+      if (this.settlementCheckpoint) {
+        this.settlementCheckpoint.onRetry();
+      } else {
+        this.settlementActions?.onRetry();
+      }
     });
+    // 面板一出现这个键就自动获得焦点，而 Space 是开火键：按住不放带来的按键重复、
+    // 以及面板刚出现那一瞬间的按键都不算数，免得替玩家点下去
+    this.retryButton.addEventListener('keydown', (event) => {
+      if (event.key !== ' ' && event.key !== 'Enter') {
+        return;
+      }
+      if (
+        event.repeat ||
+        performance.now() - this.settlementShownAt < HUD.SETTLEMENT_KEY_GRACE_MS
+      ) {
+        event.preventDefault();
+      }
+    });
+    // 有检查点时 retryButton 里放的两块：主按钮样子的动作名，和检查点卡片（小标题 + 章节 / 波次）。
+    // 卡片的小标题只是给眼睛看的版式，读屏时按钮名仍是“从检查点重试 + 位置”
+    this.retryTitle = document.createElement('span');
+    this.retryTitle.className = 'cf-btn cf-btn-primary';
+    this.retryCard = document.createElement('span');
+    this.retryCard.className = 'cf-save';
+    this.retryCardLabel = document.createElement('span');
+    this.retryCardLabel.className = 'cf-save-label';
+    this.retryCardLabel.setAttribute('aria-hidden', 'true');
+    this.retryDetail = document.createElement('span');
+    this.retryDetail.className = 'cf-save-title hud-settlement-detail';
+    this.retryCard.append(this.retryCardLabel, this.retryDetail);
     this.exitButton = this.createSettlementButton('', () => {
       this.settlementActions?.onExitToMenu();
     });
@@ -813,9 +875,8 @@ export class HUD {
     this.settlementActionsRow.appendChild(this.retryButton);
     this.settlementActionsRow.appendChild(this.exitButton);
 
-    this.settlementPanel.appendChild(this.gameOverTitle);
-    this.settlementPanel.appendChild(this.finalScoreDisplay);
-    this.settlementPanel.appendChild(this.settlementActionsRow);
+    settlementBody.append(this.finalScoreDisplay, this.settlementActionsRow);
+    this.settlementPanel.append(settlementHead, settlementBody);
     this.gameOverDisplay.appendChild(this.settlementPanel);
 
     this.respawnOverlay = document.createElement('div');
@@ -915,7 +976,12 @@ export class HUD {
     window.addEventListener('resize', this.resizeHandler);
     window.addEventListener('orientationchange', this.resizeHandler);
     this.unsubscribeLocale ??= onLocaleChange(() => this.refreshLocaleText());
-    // HUD 在开始菜单阶段就已创建：之后（init 之前）切换过语言时，结算文案按当前语言补写
+    // HUD 在开始菜单阶段就已创建：之后（init 之前）切换过语言时，得分 / 速度 / 波次行、
+    // 状态列标签与结算文案按当前语言补写
+    this.renderScore();
+    this.renderSpeed();
+    this.renderWaveLine();
+    this.renderStatLabels();
     this.renderSettlementTitle();
     this.renderSettlementLabels();
     this.applyLayoutDensity();
@@ -961,6 +1027,7 @@ export class HUD {
     this.renderScore();
     this.renderSpeed();
     this.renderWaveLine();
+    this.renderStatLabels();
     this.renderUpgradePoints();
     this.renderSettlementTitle();
     this.renderSettlementLabels();
@@ -1025,17 +1092,35 @@ export class HUD {
   }
 
   private renderSettlementLabels(): void {
-    const retry = tr(TXT_PLAY_AGAIN);
+    const checkpoint = this.settlementCheckpoint;
     const exit = tr(TXT_MAIN_MENU);
-    if (this.retryButton.textContent !== retry) {
-      this.retryButton.textContent = retry;
+    this.settlementPanel.toggleAttribute('data-checkpoint', checkpoint !== null);
+    if (checkpoint) {
+      // 整块是一个按钮：动作名（主按钮的样子）+ 检查点卡片（回到哪里：章节 / 波次）
+      this.retryTitle.textContent = tr(TXT_RETRY_CHECKPOINT);
+      this.retryCardLabel.textContent = tr(TXT_CHECKPOINT);
+      this.retryDetail.textContent = resolveHudText(checkpoint.detail);
+      if (this.retryTitle.parentNode !== this.retryButton) {
+        this.retryButton.textContent = '';
+        this.retryButton.className = 'hs-retry';
+        this.retryButton.append(this.retryTitle, this.retryCard);
+      }
+    } else {
+      const retry = tr(TXT_PLAY_AGAIN);
+      if (this.retryButton.textContent !== retry) {
+        this.retryButton.textContent = retry;
+      }
+      this.retryButton.className = 'cf-btn cf-btn-primary';
     }
     if (this.exitButton.textContent !== exit) {
       this.exitButton.textContent = exit;
     }
   }
 
+  /** 标题、小标签，以及面板的色调（data-tone：失败用红色的顶线与小标签，通关是冰蓝） */
   private renderSettlementTitle(): void {
+    this.settlementPanel.setAttribute('data-tone', this.settlementKind);
+    this.setTextContent(this.settlementKicker, tr(TXT_DEBRIEF));
     this.setTextContent(
       this.gameOverTitle,
       tr(this.settlementKind === 'complete' ? TXT_MISSION_COMPLETE : TXT_MISSION_FAILED)
@@ -1127,26 +1212,18 @@ export class HUD {
   private createSettlementButton(label: string, onClick: () => void): HTMLButtonElement {
     const button = document.createElement('button');
     button.type = 'button';
+    // 样子来自共用的按钮片段（cf-btn：次要按钮；主动作的类名由 renderSettlementLabels 换）
+    button.className = 'cf-btn';
     button.textContent = label;
-    button.style.cssText = `
-      flex: 1;
-      min-height: 48px;
-      pointer-events: auto;
-      cursor: pointer;
-      border: 1px solid var(--hud-edge, ${HUD_COLORS.edge});
-      border-radius: var(--hud-radius, 12px);
-      padding: 12px 16px;
-      font-size: 16px;
-      font-weight: 700;
-      letter-spacing: 0.08em;
-      color: var(--hud-text, ${HUD_COLORS.text});
-      background: var(--hud-glass, ${HUD_COLORS.glass});
-      box-shadow: var(--hud-shadow, ${HUD_COLORS.shadow});
-      backdrop-filter: blur(10px);
-    `;
     button.addEventListener('click', (event) => {
       event.preventDefault();
       event.stopPropagation();
+      // 每个动作在一次结算里只交出去一次：第一下（点击 / Enter / Space）之后同一个键再按都不算，
+      // 存档只交给宿主一次，“再来一局”和“返回菜单”也各只有一次回调，直到面板再次出现
+      if (this.settlementDelivered.has(button)) {
+        return;
+      }
+      this.settlementDelivered.add(button);
       onClick();
     });
     return button;
@@ -1159,32 +1236,198 @@ export class HUD {
 
     const style = document.createElement('style');
     style.id = HUD.SETTLEMENT_STYLE_ID;
-    style.textContent = `
+    // 按钮、小标签 + 大标题、存档卡片的样子来自主菜单的共用片段（换到结算遮罩下）；
+    // 后面这一段只管遮罩、面板的摆放、失败的色调和矮屏时的压缩
+    style.textContent =
+      rescopeMenuCss(menuKitCss() + sheetKitCss(), '#hud-settlement-overlay') +
+      `
       #hud-settlement-overlay {
         z-index: 120;
         box-sizing: border-box;
         padding: env(safe-area-inset-top) env(safe-area-inset-right)
           env(safe-area-inset-bottom) env(safe-area-inset-left);
+        background: rgba(2, 6, 13, 0.66);
+        color: var(--tm-text);
+        font-family: var(--tm-font);
+        -webkit-tap-highlight-color: transparent;
+        -webkit-user-select: none;
+        user-select: none;
+        touch-action: manipulation;
+      }
+
+      /*
+       * 与暂停菜单同样的压暗 + 模糊。模糊只在面板显示时才开：这一层平时是透明的，
+       * 对局中不让它白白占一层全屏的背景滤镜
+       */
+      #hud-settlement-overlay[data-open] {
+        -webkit-backdrop-filter: blur(10px) saturate(0.8);
+        backdrop-filter: blur(10px) saturate(0.8);
       }
 
       #hud-settlement-panel {
+        display: flex;
+        flex-direction: column;
         width: min(360px, calc(100% - 32px));
         max-width: 360px;
-        box-sizing: border-box;
+        max-height: calc(100% - 24px);
+        overflow-x: hidden;
+        overflow-y: auto;
+        overscroll-behavior: contain;
+        background: var(--tm-panel);
+        border: 1px solid rgba(143, 228, 255, 0.36);
+        border-top: 2px solid var(--tm-ice);
+        box-shadow: 0 30px 80px rgba(0, 0, 0, 0.65);
+        text-align: left;
+      }
+
+      #hud-settlement-overlay .hs-head {
+        flex: none;
+        padding: 20px 20px 14px;
+        border-bottom: 1px solid rgba(143, 228, 255, 0.16);
+      }
+
+      #hud-settlement-overlay .ms-title {
+        font-size: 25px;
+      }
+
+      /* 失败：顶线、小标签和标题下的细线换成红色；标题仍是白字，不发光、不闪 */
+      #hud-settlement-panel[data-tone='failed'] {
+        border-top-color: var(--tm-red);
+      }
+
+      #hud-settlement-panel[data-tone='failed'] .hs-head {
+        border-bottom-color: rgba(255, 77, 77, 0.3);
+      }
+
+      #hud-settlement-panel[data-tone='failed'] .ms-kicker {
+        color: var(--tm-red);
+      }
+
+      #hud-settlement-panel[data-tone='failed'] .ms-kicker::before {
+        background: var(--tm-red);
+      }
+
+      #hud-settlement-overlay .hs-body {
+        flex: none;
+        padding: 14px 20px 20px;
+      }
+
+      /* 最终得分：看得清，但排在标题和动作之后 */
+      #final-score {
+        font-size: 15px;
+        font-weight: 700;
+        line-height: 1.3;
+        letter-spacing: 0.04em;
+        font-variant-numeric: tabular-nums;
+        color: var(--tm-muted);
       }
 
       #hud-settlement-actions {
+        margin-top: 14px;
         pointer-events: auto;
       }
 
       #hud-settlement-actions button {
-        min-height: 48px;
         pointer-events: auto;
       }
 
-      @media (max-width: 480px) {
+      /*
+       * 有检查点：第一个动作是一整块按钮——上面是检查点卡片（回到哪里），下面是冰蓝的主按钮，
+       * 点哪里都是“从检查点重试”；“返回菜单”在它下面，各占一行
+       */
+      #hud-settlement-panel[data-checkpoint] #hud-settlement-actions {
+        flex-direction: column;
+        flex-wrap: nowrap;
+      }
+
+      #hud-settlement-panel[data-checkpoint] #hud-settlement-actions .cf-btn {
+        flex: none;
+      }
+
+      #hud-settlement-overlay .hs-retry {
+        display: flex;
+        flex-direction: column-reverse;
+        gap: 10px;
+        padding: 0;
+        border: 0;
+        background: none;
+        color: inherit;
+        text-align: left;
+        cursor: pointer;
+      }
+
+      #hud-settlement-overlay .hs-retry .cf-btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      /* 检查点卡片：与暂停菜单“离开任务”里那张一样，冰蓝色（共用片段里的琥珀色留给会丢进度的地方） */
+      #hud-settlement-overlay .cf-save {
+        margin: 0;
+        border-color: rgba(143, 228, 255, 0.34);
+        border-left-color: var(--tm-ice);
+        background: rgba(143, 228, 255, 0.07);
+      }
+
+      #hud-settlement-overlay .cf-save-label {
+        color: var(--tm-ice);
+      }
+
+      #hud-settlement-overlay .hs-retry:active .cf-save {
+        background: rgba(143, 228, 255, 0.16);
+      }
+
+      @media (hover: hover) {
+        #hud-settlement-overlay .hs-retry:hover .cf-save {
+          border-color: rgba(143, 228, 255, 0.6);
+          border-left-color: var(--tm-ice);
+        }
+      }
+
+      @media (max-width: 420px) {
+        #hud-settlement-overlay .hs-head,
+        #hud-settlement-overlay .hs-body {
+          padding-left: 16px;
+          padding-right: 16px;
+        }
+      }
+
+      /* 手机横屏：收起小标签、收紧留白，卡片 + 两个上下排的动作不用滚动就放得下 */
+      @media (orientation: landscape) and (max-height: 520px) {
+        #hud-settlement-panel {
+          max-height: calc(100% - 16px);
+        }
+
+        #hud-settlement-overlay .hs-head {
+          padding-top: 11px;
+          padding-bottom: 9px;
+        }
+
+        #hud-settlement-overlay .ms-kicker {
+          display: none;
+        }
+
+        #hud-settlement-overlay .ms-title {
+          margin-top: 0;
+          font-size: 20px;
+        }
+
+        #hud-settlement-overlay .hs-body {
+          padding-top: 10px;
+          padding-bottom: 12px;
+        }
+
         #hud-settlement-actions {
-          flex-direction: column;
+          margin-top: 10px;
+        }
+
+        #hud-settlement-overlay .hs-retry {
+          gap: 8px;
+        }
+
+        #hud-settlement-overlay .cf-save {
+          padding: 8px 12px;
         }
       }
     `;
@@ -1646,6 +1889,10 @@ export class HUD {
     const maxMissiles = GAME_CONSTANTS.MISSILE.MAX_MISSILES;
     const filled = Math.max(0, Math.min(count, maxMissiles));
     this.renderMissilePips(filled);
+    this.lastMissileCount = filled;
+    this.setTextContent(this.missileCountDisplay, `${filled}/${maxMissiles}`);
+    HUD.setAttr(this.missileCountDisplay, 'data-empty', filled === 0 ? 'true' : 'false');
+    this.syncDeckMissiles();
   }
 
   /**
@@ -1657,6 +1904,32 @@ export class HUD {
     // 限制在0-1范围
     const clampedProgress = Math.max(0, Math.min(1, progress));
     this.setStyleValue(this.missileProgressFill, 'width', `${clampedProgress * 100}%`);
+    this.lastMissileProgress = clampedProgress;
+    this.syncDeckMissiles();
+  }
+
+  /** 触控导弹键：余量角标（data-count）与补给进度环（--tc-meter），与特武键同一套机制 */
+  private syncDeckMissiles(): void {
+    if (!this.deckMode) {
+      return;
+    }
+    const button = this.getTouchDeck().missile;
+    if (!button) {
+      return;
+    }
+    const full = this.lastMissileCount >= GAME_CONSTANTS.MISSILE.MAX_MISSILES;
+    HUD.setAttr(button, 'data-count', String(this.lastMissileCount));
+    this.setStyleVar(
+      button,
+      '--tc-meter',
+      full ? '0' : String(HUD.quantize(this.lastMissileProgress))
+    );
+  }
+
+  /** 状态列读数的标签（语言切换时重绘） */
+  private renderStatLabels(): void {
+    this.setTextContent(this.livesLabel, tr(TXT_STAT_LIVES));
+    this.setTextContent(this.missilesLabel, tr(TXT_STAT_MISSILES));
   }
 
   /**
@@ -2253,6 +2526,7 @@ export class HUD {
     if (deck.flare) {
       HUD.setAttr(deck.flare, 'data-alert', next);
     }
+    this.syncWarningRows();
   }
 
   /**
@@ -2282,6 +2556,7 @@ export class HUD {
     }
     this.setStyleValue(ui.flash, 'display', 'flex');
     this.flashWarningTimer = HUD.FLASH_WARNING_SECONDS;
+    this.syncWarningRows();
   }
 
   private updateCampaignTimers(deltaTime: number): void {
@@ -2336,6 +2611,17 @@ export class HUD {
     if (this.warningUi) {
       this.setStyleValue(this.warningUi.flash, 'display', 'none');
     }
+    this.syncWarningRows();
+  }
+
+  /**
+   * 告警通道同时显示两行（导弹告警 + 闪烁告警）时在 <html> 上记 data-hud-warning-rows='2'。
+   * 手机竖屏追尾视角下无线电面板和通道共用机体到按键簇之间的那一带：两行时面板收成一行，
+   * 不压住第二行（见 radioStyles）。
+   */
+  private syncWarningRows(): void {
+    const both = this.missileWarningLevel !== 'none' && this.flashWarningTimer > 0;
+    HUD.setRootMarker('data-hud-warning-rows', both ? '2' : null);
   }
 
   /** 语言切换：按新语言重写仍在显示的闪烁告警（不重播动画、不续时；纯字符串原样保留） */
@@ -2580,6 +2866,7 @@ export class HUD {
       this.deckMode = deck;
       this.syncStoresVisibility();
     }
+    this.syncDeckMissiles();
   }
 
   private getTouchDeck(): TouchDeckRefs {
@@ -2605,6 +2892,7 @@ export class HUD {
       cycleSub: child(cycle, '.tc-sub'),
       camera,
       cameraSub: child(camera, '.tc-sub'),
+      missile: find('missile-button'),
     };
     return this.deckRefs;
   }
@@ -2992,9 +3280,14 @@ export class HUD {
   }
 
   /**
-   * 显示游戏结束
+   * 显示游戏结束。
+   * checkpointRetry：有可用检查点时传入，面板的主动作变成“从检查点重试”并写明回到哪里，
+   * 不再提供“再来一局”（它会从头开始、清掉这份存档）；不传 / null 时面板与原来一样。
    */
-  public showGameOver(finalScore: number): void {
+  public showGameOver(
+    finalScore: number,
+    checkpointRetry: SettlementCheckpointRetry | null = null
+  ): void {
     this.ensureInitialized();
     this.hideEventObjective();
     this.clearCombatAlerts();
@@ -3003,19 +3296,15 @@ export class HUD {
     this.hideRespawnOverlay();
     this.hideBriefingWithoutFlush();
     this.settlementKind = 'failed';
+    this.settlementCheckpoint = checkpointRetry;
     this.renderSettlementTitle();
     this.renderSettlementLabels();
-    this.setStyleValue(this.gameOverTitle, 'color', '#ff3333');
-    this.setStyleValue(
-      this.gameOverTitle,
-      'textShadow',
-      '0 0 20px rgba(255, 0, 0, 0.8), 4px 4px 8px rgba(0, 0, 0, 1)'
-    );
     this.finalScoreValue = finalScore;
     this.renderFinalScore();
     this.setStyleValue(this.settlementActionsRow, 'display', 'flex');
     this.setStyleValue(this.gameOverDisplay, 'opacity', '1');
     this.setStyleValue(this.gameOverDisplay, 'pointerEvents', 'auto');
+    this.focusSettlement();
   }
 
   /**
@@ -3030,26 +3319,59 @@ export class HUD {
     this.hideRespawnOverlay();
     this.hideBriefingWithoutFlush();
     this.settlementKind = 'complete';
+    this.settlementCheckpoint = null;
     this.renderSettlementTitle();
     this.renderSettlementLabels();
-    this.setStyleValue(this.gameOverTitle, 'color', '#66ffcc');
-    this.setStyleValue(
-      this.gameOverTitle,
-      'textShadow',
-      '0 0 20px rgba(102, 255, 204, 0.8), 4px 4px 8px rgba(0, 0, 0, 1)'
-    );
     this.finalScoreValue = finalScore;
     this.renderFinalScore();
     this.setStyleValue(this.settlementActionsRow, 'display', 'flex');
     this.setStyleValue(this.gameOverDisplay, 'opacity', '1');
     this.setStyleValue(this.gameOverDisplay, 'pointerEvents', 'auto');
+    this.focusSettlement();
   }
+
+  /**
+   * 结算面板出现（失败 / 通关，有没有检查点都一样）：第一个动作拿到焦点，Enter / Space 由按钮
+   * 自己响应；面板显示期间 Tab / Shift+Tab 只在面板的动作之间循环，焦点走不到盖在下面的控件上
+   */
+  private focusSettlement(): void {
+    this.settlementShownAt = performance.now();
+    this.settlementDelivered.clear();
+    // 样式用：面板显示期间才给遮罩开背景模糊
+    this.gameOverDisplay.setAttribute('data-open', '');
+    document.addEventListener('keydown', this.handleSettlementKeydown, true);
+    this.retryButton.focus({ preventScroll: true });
+  }
+
+  /**
+   * 挂在 document 的捕获阶段，自己移动焦点：InputHandler 在焦点不在表单控件上时会吞掉 Tab
+   * （切换特殊武器），而浏览器默认的 Tab 顺序走完面板的动作之后会走到面板外面去
+   */
+  private readonly handleSettlementKeydown = (event: KeyboardEvent): void => {
+    if (event.key !== 'Tab' || event.ctrlKey || event.metaKey) {
+      return;
+    }
+    const actions = [this.retryButton, this.exitButton];
+    const current = actions.findIndex((action) => action === document.activeElement);
+    const last = actions.length - 1;
+    let next: number;
+    if (event.shiftKey) {
+      next = current <= 0 ? last : current - 1;
+    } else {
+      next = current < 0 || current === last ? 0 : current + 1;
+    }
+    event.preventDefault();
+    actions[next].focus({ preventScroll: true });
+  };
 
   /**
    * 隐藏游戏结束
    */
   public hideGameOver(): void {
     this.ensureInitialized();
+    document.removeEventListener('keydown', this.handleSettlementKeydown, true);
+    this.settlementCheckpoint = null;
+    this.gameOverDisplay.removeAttribute('data-open');
     this.setStyleValue(this.settlementActionsRow, 'display', 'none');
     this.setStyleValue(this.gameOverDisplay, 'opacity', '0');
     this.setStyleValue(this.gameOverDisplay, 'pointerEvents', 'none');
@@ -3063,6 +3385,7 @@ export class HUD {
     }
     this.unsubscribeLocale?.();
     this.unsubscribeLocale = null;
+    document.removeEventListener('keydown', this.handleSettlementKeydown, true);
     if (this.container.parentElement) {
       this.container.remove();
     }
@@ -3093,6 +3416,7 @@ export class HUD {
     }
     HUD.setRootMarker('data-hud-camera', null);
     HUD.setRootMarker('data-hud-boss', null);
+    HUD.setRootMarker('data-hud-warning-rows', null);
     // 直接收起临时元件（不能调用会触发 init() 的公共方法）
     if (this.warningUi) {
       this.warningUi.missile.setAttribute('data-level', 'none');

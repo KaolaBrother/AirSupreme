@@ -10,8 +10,9 @@ import { HUD_COLORS } from './hudPalette';
  * 顶部布局（#hud 已让出安全区，坐标相对安全区）：
  * - 左上信息栏、右上状态列各占一角；中央消息栈（Boss 阶段条 / 简报 / 事件目标 / 竖屏存档提示）
  *   纵向排布，桌面与横屏夹在两侧之间，竖屏排在两侧下方整行。
- * - 中央播报锚定在准星搜索环上方（环半径：桌面 11vmin，竖屏 min(8vmin, 80px)，
- *   与 LockOnIndicator 一致），向上生长，永不压住准星；横屏高度最紧，接在消息栈下方。
+ * - 准星画在机头轴线上（LockOnIndicator）：第一人称在屏幕中心，追尾视角在屏幕上方约 29% 处；
+ *   导引头捕获环以准星为圆心，半径由 LockOnIndicator 写到 <html> 的 --hud-aim-r。
+ *   中央播报与告警通道按视角避让准星和捕获环（见各自的规则）。
  */
 export const HUD_EXTRAS_STYLE_ID = 'hud-extras-style';
 
@@ -151,24 +152,85 @@ const HUD_EXTRAS_CSS = `
   font-size: 12px;
 }
 
-#hud-status .hud-pip-row {
-  padding: 3px 6px;
+/*
+ * 带标签的读数（生命 / 导弹）：标签 + pip（+ 导弹余量 n/max 与补给进度条），
+ * 标签 / 数字沿用挂载物面板（热焰弹一行）的等宽小字样式。
+ * 桌面 / 横屏：标签、pip、余量排成一行，补给进度条在下一行；
+ * 竖屏：标签（与余量）在 pip 上方，两个读数并排，占位与原先的两排 pip 相同。
+ */
+.hud-stat {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 3px 7px;
+  box-sizing: border-box;
+  padding: 3px 7px 4px;
   border-radius: 7px;
   background: rgba(8, 14, 24, 0.5);
+  font-variant-numeric: tabular-nums;
+  text-shadow: none;
+}
+
+.hud-stat-head {
+  display: contents;
+}
+
+.hud-stat-label {
+  order: 1;
+  font-family: var(--hud-mono, monospace);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: 0.1em;
+  white-space: nowrap;
+}
+
+.hud-stat .hud-pip-row {
+  order: 2;
+}
+
+.hud-stat-count {
+  order: 3;
+  min-width: 3ch;
+  font-family: var(--hud-mono, monospace);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.1;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.hud-stat-lives .hud-stat-label {
+  color: var(--hud-lock, ${HUD_COLORS.lock});
+}
+
+.hud-stat-missiles .hud-stat-label,
+.hud-stat-missiles .hud-stat-count {
+  color: var(--hud-weapon, ${HUD_COLORS.weapon});
+}
+
+.hud-stat-missiles .hud-stat-count[data-empty='true'] {
+  color: var(--hud-threat, ${HUD_COLORS.threat});
 }
 
 #hud-missile-reload {
-  width: 120px;
+  order: 4;
+  flex: 0 0 100%;
+  height: 3px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: rgba(255, 179, 71, 0.16);
 }
 
-#hud:not([data-layout-density='desktop']) #hud-missile-reload {
-  width: 100px;
+.hud-stat-meter-fill {
+  background: rgba(255, 179, 71, 0.85);
 }
 
 .hud-pip-group {
   display: flex;
   flex-direction: column;
-  align-items: flex-end;
+  align-items: stretch;
   gap: 6px;
 }
 
@@ -179,7 +241,33 @@ const HUD_EXTRAS_CSS = `
 /* 竖屏：生命与导弹并排一行，状态列更矮，不压到下方整行的消息栈 */
 #hud[data-layout-density='touch-portrait'] .hud-pip-group {
   flex-direction: row;
-  align-items: center;
+  align-items: flex-start;
+}
+
+#hud[data-layout-density='touch-portrait'] .hud-stat {
+  flex-direction: column;
+  flex-wrap: nowrap;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 2px;
+  padding: 2px 6px 3px;
+}
+
+#hud[data-layout-density='touch-portrait'] .hud-stat-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+#hud[data-layout-density='touch-portrait'] .hud-stat-label,
+#hud[data-layout-density='touch-portrait'] .hud-stat-count {
+  font-size: 9px;
+  line-height: 1;
+}
+
+#hud[data-layout-density='touch-portrait'] #hud-missile-reload {
+  flex: 0 0 auto;
+  height: 2px;
 }
 
 /* ------------------------------------------------------------ 中央消息栈（Boss 阶段条 / 简报 / 事件目标） */
@@ -330,37 +418,63 @@ const HUD_EXTRAS_CSS = `
   letter-spacing: 0.04em !important;
 }
 
-/* ------------------------------------------------------------ 中央播报（准星上方的横幅） */
+/* ------------------------------------------------------------ 中央播报（避让准星与捕获环的横幅） */
+/*
+ * 准星与捕获环的位置随视角变化，播报按视角避让：
+ * - 追尾视角（默认）：准星在屏幕上方约 29% 处，捕获环（升级后可达两倍半径）占去它周围的一大圈，
+ *   环的上方没有余地。桌面 / 横屏把播报放在机体下方；竖屏放在捕获环与机体之间。
+ * - 第一人称：准星在屏幕中心。桌面 / 竖屏的播报在捕获环上方向上生长；
+ *   横屏高度最紧，接在顶部消息栈（简报 / 事件目标）下方（栈底由 HUD 写入 --hud-stack-bottom）。
+ * 每条规则都同时写明 top 与 bottom（其一为 auto）：固定定位的容器若上下两端都被钉住，
+ * 会被拉成一整块高的深色底；容器也不拉伸子元素（align-items），卡片高度永远随内容。
+ */
 #hud-callout {
   left: 50%;
-  bottom: calc(50% + 11vmin + 14px);
+  top: calc(50% + 11vmin + 14px);
+  bottom: auto;
   transform: translateX(-50%);
   width: max-content;
   max-width: min(60vw, 760px, calc(100vw - 600px));
   display: flex;
   justify-content: center;
+  align-items: flex-start;
 }
 
-/*
- * 横屏高度最紧：播报接在顶部消息栈（简报 / 事件目标）下方，夹在两侧信息栏之间，
- * 与目标卡永不重叠，且位于准星搜索环上方（栈底由 HUD 写入 --hud-stack-bottom）
- */
+:root[data-hud-camera='first-person'] #hud-callout[data-layout-density='desktop'] {
+  top: auto;
+  bottom: calc(50% + min(var(--hud-aim-r, 13vmin), 16vmin) + 14px);
+  align-items: flex-end;
+}
+
 #hud-callout[data-layout-density='touch-landscape'] {
   left: calc(env(safe-area-inset-left, 0px) + 196px);
   right: calc(env(safe-area-inset-right, 0px) + 196px);
-  top: calc(var(--hud-stack-bottom, 38px) + 6px);
+  top: calc(50% + max(9vmin, 36px) + 8px);
+  bottom: auto;
   transform: none;
   width: auto;
   max-width: none;
+}
+
+:root[data-hud-camera='first-person'] #hud-callout[data-layout-density='touch-landscape'] {
+  top: calc(var(--hud-stack-bottom, 38px) + 6px);
+  bottom: auto;
 }
 
 #hud-callout[data-layout-density='touch-portrait'] {
   left: max(10px, env(safe-area-inset-left));
   right: max(10px, env(safe-area-inset-right));
+  top: auto;
   bottom: calc(50% + min(8vmin, 80px) + 12px);
   transform: none;
   width: auto;
   max-width: none;
+  align-items: flex-end;
+}
+
+:root[data-hud-camera='first-person'] #hud-callout[data-layout-density='touch-portrait'] {
+  top: auto;
+  bottom: calc(50% + min(var(--hud-aim-r, 13vmin), 20vmin) + 12px);
 }
 
 .hud-callout-card {
@@ -813,12 +927,19 @@ const HUD_EXTRAS_CSS = `
   display: none !important;
 }
 
-/* 手机横握：信息栏下方紧贴雷达，改放到雷达右侧 */
+/*
+ * 触屏横握：信息栏正下方 8px 是雷达（与信息栏左缘对齐，手机 84px / 平板 132px，见 RadarMinimap），
+ * 存档提示仍在信息栏下方这一行，只是让到雷达右侧 8px——这里离摇杆区（屏高 38% 以下）、
+ * 屏幕中线上的消息栈与准星、右下的按键簇都有距离。
+ */
 #hud[data-layout-density='touch-landscape'] .hx-autosave {
-  position: fixed;
-  top: auto;
-  left: calc(max(20px, env(safe-area-inset-left)) + 84px);
-  bottom: calc(max(20px, env(safe-area-inset-bottom)) + 139px);
+  left: calc(84px + 8px);
+}
+
+@media (min-width: 700px) and (min-height: 700px) {
+  #hud[data-layout-density='touch-landscape'] .hx-autosave {
+    left: calc(132px + 8px);
+  }
 }
 
 .hx-autosave-label {
@@ -983,11 +1104,16 @@ const HUD_EXTRAS_CSS = `
   100% { box-shadow: 0 0 0 14px rgba(255, 77, 77, 0); border-color: rgba(255, 77, 77, 0.45); }
 }
 
-/* ------------------------------------------------------------ 告警通道（准星下方） */
+/* ------------------------------------------------------------ 告警通道（机体 / 捕获环下方） */
+/*
+ * 追尾视角（默认）：桌面 / 横屏的中央播报紧贴机体下方，告警通道排在它下面（让出播报的高度）；
+ * 竖屏的播报在机体上方，告警通道紧贴机体下方。
+ * 第一人称：准星在屏幕中心，告警通道在捕获环下方。
+ */
 #hud-warning-lane {
   position: fixed;
   left: 50%;
-  top: calc(50% + 11vmin + 18px);
+  top: calc(50% + 11vmin + 96px);
   transform: translateX(-50%);
   display: flex;
   flex-direction: column;
@@ -999,14 +1125,26 @@ const HUD_EXTRAS_CSS = `
   z-index: 6;
 }
 
+#hud[data-camera-mode='first-person'] #hud-warning-lane {
+  top: calc(50% + min(var(--hud-aim-r, 13vmin), 16vmin) + 18px);
+}
+
 #hud[data-layout-density='touch-landscape'] #hud-warning-lane {
-  top: calc(50% + min(9vmin, 90px) + 12px);
+  top: calc(50% + max(9vmin, 36px) + 8px + clamp(36px, 7vmin, 54px));
   gap: 5px;
+}
+
+#hud[data-layout-density='touch-landscape'][data-camera-mode='first-person'] #hud-warning-lane {
+  top: calc(50% + min(var(--hud-aim-r, 13vmin), 16vmin) + 12px);
 }
 
 #hud[data-layout-density='touch-portrait'] #hud-warning-lane {
   top: calc(50% + min(8vmin, 80px) + 14px);
   gap: 6px;
+}
+
+#hud[data-layout-density='touch-portrait'][data-camera-mode='first-person'] #hud-warning-lane {
+  top: calc(50% + min(var(--hud-aim-r, 13vmin), 20vmin) + 14px);
 }
 
 #hud-missile-warning {
@@ -1158,6 +1296,77 @@ const HUD_EXTRAS_CSS = `
   50% { opacity: 1; }
 }
 
+/* ------------------------------------------------------------ 触控导弹键：余量角标 / 补给进度环 / 锁定后“可以发射” */
+/*
+ * 按键本身在 index.html；这里只加状态外观。HUD 把导弹余量写在 data-count、补给进度写在
+ * --tc-meter（与特武键的外圈进度环同一画法）；LockOnIndicator 在按键上切换
+ * is-search / is-track / is-lock + is-ready / is-dry。
+ */
+#missile-button::before {
+  content: '';
+  position: absolute;
+  inset: -6px;
+  border-radius: 50%;
+  background: conic-gradient(
+    var(--hud-weapon, ${HUD_COLORS.weapon}) calc(var(--tc-meter, 0) * 1turn),
+    rgba(143, 228, 255, 0.12) 0
+  );
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 3px));
+  mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 3px));
+  pointer-events: none;
+}
+
+#missile-button[data-count]::after {
+  content: attr(data-count);
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  min-width: 19px;
+  height: 19px;
+  box-sizing: border-box;
+  padding: 0 4px;
+  border-radius: 10px;
+  background: var(--hud-weapon, ${HUD_COLORS.weapon});
+  color: #1a1206;
+  font-family: var(--hud-mono, monospace);
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 19px;
+  text-align: center;
+  text-shadow: none;
+  pointer-events: none;
+}
+
+#missile-button[data-count='0']::after {
+  background: var(--hud-threat, ${HUD_COLORS.threat});
+  color: #ffffff;
+}
+
+#missile-button.is-track {
+  box-shadow: 0 0 12px rgba(255, 179, 71, 0.6);
+}
+
+#missile-button.is-ready {
+  --ring: var(--hud-lock, ${HUD_COLORS.lock});
+  background: rgba(92, 255, 176, 0.3);
+  color: #eafff5;
+  animation: hx-msl-ready 0.7s ease-in-out infinite;
+}
+
+#missile-button.is-ready::after {
+  background: var(--hud-lock, ${HUD_COLORS.lock});
+  color: #062014;
+}
+
+@keyframes hx-msl-ready {
+  0%, 100% {
+    box-shadow: 0 0 0 2px rgba(92, 255, 176, 0.4), 0 0 14px rgba(92, 255, 176, 0.55);
+  }
+  50% {
+    box-shadow: 0 0 0 7px rgba(92, 255, 176, 0.22), 0 0 28px rgba(92, 255, 176, 0.95);
+  }
+}
+
 /* ------------------------------------------------------------ 第一人称：下方面板贴合仪表板 */
 #hud[data-camera-mode='first-person'] #hud-stores,
 #hud[data-camera-mode='first-person'] #hud-camera-mode {
@@ -1170,6 +1379,11 @@ const HUD_EXTRAS_CSS = `
 }
 
 @media (prefers-reduced-motion: reduce) {
+  #missile-button.is-ready {
+    animation: none !important;
+    box-shadow: 0 0 0 3px rgba(92, 255, 176, 0.4), 0 0 18px rgba(92, 255, 176, 0.75);
+  }
+
   #hud-missile-warning,
   #hud-edge-alert,
   #hud-flash-warning,

@@ -20,7 +20,16 @@ type DeviceQualityParams = {
 };
 
 export class GameConfig {
+  /** 平板判定阈值：视口短边（CSS px）。与 index.html 平板触控布局的媒体查询同一数值 */
+  private static readonly TABLET_MIN_SHORT_SIDE = 700;
+  /** 平板的固定模拟步长（Hz）：所有画质档一致，不随 targetFPS 降到 30 */
+  private static readonly TABLET_TARGET_FPS = 60;
+  /** 平板在 auto 画质下的像素比上限（手机 auto 为 performance 档的 1.2） */
+  private static readonly TABLET_AUTO_MAX_PIXEL_RATIO = 1.5;
+
   public static isMobile: boolean = this.detectMobile();
+  /** 平板：触控设备（isMobile）且视口短边 ≥ 700 CSS px；与 isMobile 一样只在启动时判定一次 */
+  public static isTablet: boolean = this.detectTablet();
   private static qualityPreset: QualityPreset = 'auto';
   private static runtimeQualityOverride?: ResolvedQualityPreset;
 
@@ -119,6 +128,9 @@ export class GameConfig {
   }
 
   public static getTargetFPSForPreset(preset: QualityPreset): number {
+    if (this.isTabletDevice()) {
+      return this.TABLET_TARGET_FPS;
+    }
     return this.getQualityProfileForPreset(preset).targetFPS;
   }
 
@@ -162,9 +174,23 @@ export class GameConfig {
       || ('ontouchstart' in window);
   }
 
+  private static detectTablet(): boolean {
+    const shortSide = Math.min(window.innerWidth, window.innerHeight);
+    return this.isMobile && Number.isFinite(shortSide) && shortSide >= this.TABLET_MIN_SHORT_SIDE;
+  }
+
+  /** isTablet 只在触控设备上生效：isMobile 被改成 false 时一律按桌面取值 */
+  private static isTabletDevice(): boolean {
+    return this.isMobile && this.isTablet;
+  }
+
   // 渲染设置
   public static getPixelRatio(): number {
-    return Math.min(window.devicePixelRatio, this.getQualityProfile().maxPixelRatio);
+    let maxPixelRatio = this.getQualityProfile().maxPixelRatio;
+    if (this.isTabletDevice() && this.qualityPreset === 'auto') {
+      maxPixelRatio = Math.max(maxPixelRatio, this.TABLET_AUTO_MAX_PIXEL_RATIO);
+    }
+    return Math.min(window.devicePixelRatio, maxPixelRatio);
   }
 
   public static getShadowEnabled(): boolean {
@@ -188,8 +214,11 @@ export class GameConfig {
     return this.getQualityProfile().projectilePoolSize;
   }
 
-  // 性能目标
+  // 性能目标（同时是固定模拟步长，见 GameLoop.applyQualityProfile）
   public static getTargetFPS(): number {
+    if (this.isTabletDevice()) {
+      return this.TABLET_TARGET_FPS;
+    }
     return this.getQualityProfile().targetFPS;
   }
 
@@ -211,6 +240,11 @@ export const GAME_CONSTANTS = {
     BASE_HEALTH: 200,      // 基础生命值（翻倍）
     BASE_DAMAGE: 12.5,     // 基础伤害（减半）
     BASE_FIRE_RATE: 0.3,   // 基础射击间隔（加倍，降低射速）
+    // 触控辅助飞行（InputState.flightAssist，见 PlayerController.applyAssistedAttitude）
+    ASSIST_MAX_BANK: Math.PI / 4,              // 满偏航时的目标坡度（弧度，45°）
+    ASSIST_PITCH_LIMIT: (75 * Math.PI) / 180,  // 机头相对地平线的俯仰上限（弧度，75°）
+    ASSIST_ROLL_RESPONSE: 5,                   // 坡度逼近目标的响应（1/秒，越大越快）
+    ASSIST_ROLL_MAX_RATE: 2.6,                 // 坡度变化的最大角速度（弧度/秒）
   },
 
   // 子弹参数
@@ -218,6 +252,17 @@ export const GAME_CONSTANTS = {
     SPEED: 100,            // 速度
     MAX_DISTANCE: 500,     // 最大飞行距离
     POOL_SIZE: 200,        // 对象池大小
+  },
+
+  // 触屏机炮辅助瞄准（GunLeadSolver 解算；子弹与机炮十字共用同一个辅助方向，桌面端不启用）
+  GUN_ASSIST: {
+    MAX_RANGE: 480,                          // 目标超过这个距离不辅助（米，略小于子弹射程）
+    FULL_ANGLE: (2.5 * Math.PI) / 180,       // 瞄准点离机头轴线不超过它：辅助方向正对瞄准点；也是偏移上限
+    OUTER_ANGLE: (5 * Math.PI) / 180,        // 从 FULL_ANGLE 到它：偏移平滑减到零；再往外不辅助
+    EASE_TIME: 0.1,                          // 目标出现 / 消失 / 更换时，十字滑到新位置约 95% 所需时间（秒）
+    SWITCH_MARGIN: (0.75 * Math.PI) / 180,   // 换辅助目标：新目标离机头轴线必须近出这么多（防来回跳）
+    REFERENCE_RANGE: 600,                    // 准星参考距离（米）：捕获环中心与无辅助时的十字都在机头前方这么远处
+    CROSS_MIN_RANGE: 100,                    // 辅助生效时十字按瞄准点的距离画（追尾视角才落在目标上），最近按它算
   },
 
   // 相机参数
@@ -255,19 +300,24 @@ export const GAME_CONSTANTS = {
     SPAWN_INTERVAL: 3,     // 敌人生成间隔
   },
 
-  // 导弹参数
+  // 导弹参数（只用于玩家的锁定导弹；Boss / 单位导弹各有自己的参数，不读这里）
   MISSILE: {
-    SPEED: 80,             // 导弹速度
-    DAMAGE: 50,            // 导弹伤害（减半）
-    TURN_SPEED: 2.0,       // 转向速度（弧度/秒）
-    MAX_LIFETIME: 10,      // 最大寿命（秒）
-    LOCK_TIME: 3.0,        // 锁定所需时间（秒）
-    LOCK_BOX_SIZE: 0.15,   // 锁定框大小（屏幕比例）
-    MAX_LOCK_DISTANCE: 600, // 最大锁定距离
-    MAX_FLIGHT_DISTANCE: 2400, // 最大飞行距离（是锁定距离的4倍）
-    STARTING_MISSILES: 2,  // 初始导弹数量
+    SPEED: 200,            // 巡航速度（米/秒）：离架后加速到它
+    LAUNCH_SPEED_BOOST: 20, // 离架初速 = 发射瞬间的载机速度 + 它
+    ACCELERATION: 200,     // 离架后的加速度（米/秒²）
+    MIN_OVERTAKE_SPEED: 80, // 巡航速度至少比发射瞬间的载机快这么多
+    DAMAGE: 80,            // 导弹伤害（CombatSystem 命中结算读取，再乘伤害倍率）
+    TURN_SPEED: 5.0,       // 转向速度（弧度/秒）：巡航时转弯半径 40 米，与旧版（80 米/秒、2.0）相同
+    MAX_LIFETIME: 12,      // 最大寿命（秒）：巡航 12 秒约 2400 米，与最大飞行距离一致
+    MAX_LOCK_DISTANCE: 1200, // 导引头最大锁定距离
+    MAX_FLIGHT_DISTANCE: 2400, // 最大飞行距离（是锁定距离的2倍）
+    LOCK_RING_RATIO: 0.13, // 捕获环半径 / 视口短边（再乘锁定范围升级倍率）
+    LOCK_KEEP_RATIO: 1.6,  // 保持环半径 / 捕获环半径
+    LOCK_GRACE_TIME: 0.5,  // 目标离开保持环后的宽限时间（秒）
+    LOCK_DECAY_RATE: 1.0,  // 目标在捕获环外时锁定进度的衰减速度（每秒）
+    LOCK_REARM_TIME: 0.35, // 两次发射之间的最短间隔（秒）
+    STARTING_MISSILES: 3,  // 初始导弹数量
     MAX_MISSILES: 5,       // 最大导弹数量
-    MISSILE_RESPAWN_TIME: 7.5, // 导弹补给时间（秒）
     MAX_RESPAWN_MISSILES: 5, // 导弹补给上限
   },
 };

@@ -77,6 +77,12 @@ const SWARM_MAX_SPEED = 170;
 const SWARM_ACCELERATION = 280;
 /** 弹出阶段（秒）：只做侧向弹射与点火，不制导 */
 const SWARM_BOOST_TIME = 0.2;
+/** 蜂群最内侧发射点的横向距离（米，机体局部）；第一人称改用更靠外的翼下挂点 */
+const SWARM_LATERAL = 0.9;
+const SWARM_LATERAL_FIRST_PERSON = 1.6;
+/** 蜂群发射口焰缩放（进入 emitMuzzleFlash 前的值）；第一人称大幅压低 */
+const SWARM_FLASH_SCALE = 0.55;
+const SWARM_FLASH_SCALE_FIRST_PERSON = 0.15;
 const SWARM_CONE_COS = Math.cos(THREE.MathUtils.degToRad(42));
 const SWARM_SEEKER_COS = Math.cos(THREE.MathUtils.degToRad(55));
 const SWARM_SEEKER_RANGE = 380;
@@ -265,8 +271,11 @@ export class ProjectileController {
         );
       }
     } else {
-      // 微型导弹：从机腹两侧弹出，向外 / 向上绽开后点火
-      this.tmpA.set(side * (0.9 + (projectile.slot % 4) * 0.18), -0.7, -0.4);
+      // 微型导弹：从机腹两侧弹出，向外 / 向上绽开后点火。
+      // 第一人称时发射点就在眼点下方：改从更靠外的翼下弹出并压低口焰，起飞段不横穿中央视野
+      const firstPerson = fx?.particles.firstPerson === true;
+      const lateral = firstPerson ? SWARM_LATERAL_FIRST_PERSON : SWARM_LATERAL;
+      this.tmpA.set(side * (lateral + (projectile.slot % 4) * 0.18), -0.7, -0.4);
       this.tmpA.applyQuaternion(frame.quaternion);
       projectile.position.copy(frame.position).add(this.tmpA);
       const angle = side * (0.35 + Math.random() * 0.9) + (Math.random() - 0.5) * 0.4;
@@ -290,7 +299,7 @@ export class ProjectileController {
           this.tmpB,
           frame.carry,
           SWARM_FLASH,
-          0.55
+          firstPerson ? SWARM_FLASH_SCALE_FIRST_PERSON : SWARM_FLASH_SCALE
         );
       }
     }

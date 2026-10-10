@@ -10,6 +10,8 @@ import { TOTAL_LEVELS } from '@/features/campaign/CampaignData';
 /**
  * api-spec §8：核心升级线扩展到 10 级，满级终值与旧版（a72359b）5 级满级完全一致，
  * 步长随之减半：(终值 - 基础值) / 10。
+ * 例外（武器批次 W3）：导弹锁定时间的基础值从 1.5 秒降到 1.0 秒，每级 -0.05 秒，
+ * 满级仍是 0.5 秒；点数价格与级数不变。
  */
 const CORE_MAX_LEVEL = 10;
 const LEGACY_CORE_TRACKS: ReadonlyArray<{ type: UpgradeType; base: number; end: number }> = [
@@ -17,10 +19,12 @@ const LEGACY_CORE_TRACKS: ReadonlyArray<{ type: UpgradeType; base: number; end: 
   { type: UpgradeType.DAMAGE, base: 12.5, end: 30 },
   { type: UpgradeType.FIRE_RATE, base: 0.3, end: 0.1 },
   { type: UpgradeType.SPEED, base: 45, end: 85 },
-  { type: UpgradeType.MISSILE_LOCK_TIME, base: 1.5, end: 0.5 },
+  { type: UpgradeType.MISSILE_LOCK_TIME, base: 1.0, end: 0.5 },
   { type: UpgradeType.MISSILE_LOCK_RADIUS, base: 1, end: 2 },
   { type: UpgradeType.MISSILE_RELOAD_TIME, base: 7.5, end: 2.5 },
 ];
+/** 核心升级线的点数价格（锁定时间改基础值前后都是这一档） */
+const CORE_COST_LADDER: readonly number[] = [1, 1, 2, 3, 4, 5, 7, 9, 11, 13];
 const WEAPON_TRACKS: readonly UpgradeType[] = [
   UpgradeType.WEAPON_ROCKETS,
   UpgradeType.WEAPON_LASER,
@@ -117,6 +121,29 @@ describe('PlayerUpgrades', () => {
       expect(upgrades.getUpgradeCost(UpgradeType.MISSILE_LOCK_RADIUS)).toBe(1);
       expect(upgrades.getUpgradeCost(UpgradeType.MISSILE_RELOAD_TIME)).toBe(1);
     });
+
+    it('Missile Lock keeps its 10 levels and its point costs with the faster base time', () => {
+      upgrades.setCampaignLevel(TOTAL_LEVELS);
+      upgrades.addScore(PLENTY_OF_SCORE);
+      expect(UPGRADE_CONFIGS[UpgradeType.MISSILE_LOCK_TIME].maxLevel).toBe(CORE_MAX_LEVEL);
+      expect(UPGRADE_CONFIGS[UpgradeType.MISSILE_LOCK_TIME].costs).toEqual(CORE_COST_LADDER);
+
+      let spent = 0;
+      for (let level = 0; level < CORE_MAX_LEVEL; level++) {
+        const pointsBefore = upgrades.getAvailablePoints();
+        expect(upgrades.getUpgradeCost(UpgradeType.MISSILE_LOCK_TIME)).toBe(
+          CORE_COST_LADDER[level]
+        );
+        expect(upgrades.upgrade(UpgradeType.MISSILE_LOCK_TIME)).toBe(true);
+        spent += pointsBefore - upgrades.getAvailablePoints();
+      }
+
+      // 买满一条线共 56 点，和其它核心线一样
+      expect(spent).toBe(56);
+      expect(upgrades.getUpgradeCost(UpgradeType.MISSILE_LOCK_TIME)).toBe(Infinity);
+      expect(upgrades.upgrade(UpgradeType.MISSILE_LOCK_TIME)).toBe(false);
+      expect(upgrades.getLevel(UpgradeType.MISSILE_LOCK_TIME)).toBe(CORE_MAX_LEVEL);
+    });
   });
 
   describe('Upgrade Values', () => {
@@ -159,11 +186,30 @@ describe('PlayerUpgrades', () => {
       expect(upgrades.getValue(UpgradeType.MISSILE_RELOAD_TIME)).toBe(7);
     });
 
-    it('Missile Lock should decrease by 0.1 per level (1.5 -> 0.5)', () => {
-      upgrades.addScore(10000);
-      expect(upgrades.getValue(UpgradeType.MISSILE_LOCK_TIME)).toBe(1.5);
+    it('Missile Lock should decrease by 0.05 per level (1.0 -> 0.5 over 10 levels)', () => {
+      upgrades.setCampaignLevel(TOTAL_LEVELS);
+      upgrades.addScore(PLENTY_OF_SCORE);
+      expect(upgrades.getValue(UpgradeType.MISSILE_LOCK_TIME)).toBe(1.0);
       upgrades.upgrade(UpgradeType.MISSILE_LOCK_TIME);
-      expect(upgrades.getValue(UpgradeType.MISSILE_LOCK_TIME)).toBeCloseTo(1.4, 2);
+      expect(upgrades.getValue(UpgradeType.MISSILE_LOCK_TIME)).toBeCloseTo(0.95, 6);
+      for (let level = 2; level <= CORE_MAX_LEVEL; level++) {
+        const before = upgrades.getValue(UpgradeType.MISSILE_LOCK_TIME);
+        upgrades.upgrade(UpgradeType.MISSILE_LOCK_TIME);
+        const after = upgrades.getValue(UpgradeType.MISSILE_LOCK_TIME);
+        expect(before - after, `level ${level}`).toBeCloseTo(0.05, 6);
+        expect(after, `level ${level}`).toBeCloseTo(1.0 - 0.05 * level, 6);
+      }
+      expect(upgrades.getValue(UpgradeType.MISSILE_LOCK_TIME)).toBeCloseTo(0.5, 6);
+    });
+
+    it('Missile Lock never drops below 0.5 s however often it is bought', () => {
+      upgrades.setCampaignLevel(TOTAL_LEVELS);
+      upgrades.addScore(PLENTY_OF_SCORE);
+      for (let i = 0; i < 3 * CORE_MAX_LEVEL; i++) {
+        upgrades.upgrade(UpgradeType.MISSILE_LOCK_TIME);
+        expect(upgrades.getValue(UpgradeType.MISSILE_LOCK_TIME)).toBeGreaterThan(0.5 - 1e-9);
+      }
+      expect(upgrades.getValue(UpgradeType.MISSILE_LOCK_TIME)).toBeCloseTo(0.5, 6);
     });
 
     it('Missile Lock Radius should increase by 0.1 per level (1.0x -> 2.0x)', () => {
@@ -179,7 +225,7 @@ describe('PlayerUpgrades', () => {
     });
 
     it.each(LEGACY_CORE_TRACKS)(
-      '$type reaches the legacy level-5 end value $end at level 10 in equal steps',
+      '$type goes from $base to the legacy level-5 end value $end at level 10 in equal steps',
       ({ type, base, end }) => {
         const step = (end - base) / CORE_MAX_LEVEL;
         upgrades.setCampaignLevel(TOTAL_LEVELS);
@@ -260,7 +306,7 @@ describe('PlayerStats', () => {
     });
 
     it('should return base missile lock time', () => {
-      expect(stats.getMissileLockTime()).toBe(1.5);
+      expect(stats.getMissileLockTime()).toBe(1.0);
     });
 
     it('should return base missile lock radius multiplier', () => {
@@ -282,7 +328,17 @@ describe('PlayerStats', () => {
     it('should return upgraded missile lock time', () => {
       stats.getUpgrades().addScore(10000);
       stats.getUpgrades().upgrade(UpgradeType.MISSILE_LOCK_TIME);
-      expect(stats.getMissileLockTime()).toBeCloseTo(1.4, 2);
+      expect(stats.getMissileLockTime()).toBeCloseTo(0.95, 6);
+    });
+
+    it('should return a 0.75 s missile lock time at level 5 of 10', () => {
+      const upgrades = stats.getUpgrades();
+      upgrades.setCampaignLevel(TOTAL_LEVELS);
+      upgrades.addScore(PLENTY_OF_SCORE);
+      for (let i = 0; i < 5; i++) {
+        upgrades.upgrade(UpgradeType.MISSILE_LOCK_TIME);
+      }
+      expect(stats.getMissileLockTime()).toBeCloseTo(0.75, 6);
     });
 
     it('should return upgraded missile lock radius multiplier', () => {
@@ -369,10 +425,12 @@ describe('UPGRADE_CONFIGS', () => {
     }
   });
 
-  it('should keep the legacy base values on the core tracks', () => {
+  it('should keep the legacy base values on the core tracks (missile lock now starts at 1.0 s)', () => {
     for (const { type, base } of LEGACY_CORE_TRACKS) {
       expect(UPGRADE_CONFIGS[type].baseValue, type).toBe(base);
     }
+    expect(UPGRADE_CONFIGS[UpgradeType.MISSILE_LOCK_TIME].baseValue).toBe(1.0);
+    expect(UPGRADE_CONFIGS[UpgradeType.MISSILE_LOCK_TIME].valuePerLevel).toBeCloseTo(-0.05, 9);
   });
 
   it('should have a costs array sized to maxLevel for every track', () => {
