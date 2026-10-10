@@ -15,6 +15,48 @@ export interface InputState {
   throttle: boolean;
   /** 特殊武器扳机（F 键 / 移动端特殊武器按钮）：按住持续照射 / 蓄力 */
   special: boolean;
+  /**
+   * 俯仰模拟量 -1..1（正 = 抬头）。键盘为 ±1，触控摇杆为“径向死区 + 指数曲线”后的连续值。
+   * InputHandler.getState() 总会写入；类型上可选，是为了只写布尔方向的调用方（脚本飞行员、
+   * 测试里的字面量）仍然可用——PlayerController 在缺省或为 0 时退回布尔方向（±1）。
+   */
+  pitchAxis?: number;
+  /** 偏航模拟量 -1..1（正 = 右转），规则同 pitchAxis */
+  yawAxis?: number;
+  /**
+   * 辅助飞行：转向来自触控摇杆（手指按在摇杆上，且键盘没有在转向）时为 true，
+   * PlayerController 走“推右就相对地平线右转”的辅助模型；键盘转向（含平板外接键盘）为 false。
+   */
+  flightAssist?: boolean;
+}
+
+/** 触控摇杆手感参数 */
+export const TOUCH_STICK_TUNING = {
+  /** 径向死区（占行程的比例）：死区内输出 0 */
+  DEAD_ZONE: 0.12,
+  /** 响应曲线指数：小偏转更细腻，满偏转仍是满速 */
+  EXPO: 1.7,
+  /** 模拟量绝对值超过它才置位对应的布尔方向（约等于旧版 0.3 行程的阈值） */
+  DIGITAL_THRESHOLD: 0.08,
+  /** 量不到摇杆尺寸时（未布局 / 测试环境）使用的行程半径（px） */
+  FALLBACK_RADIUS_PX: 54,
+  /** 浮动底座与屏幕 / 安全区边缘的最小间距（px） */
+  EDGE_MARGIN_PX: 6,
+} as const;
+
+/**
+ * 摇杆响应曲线：输入是偏转幅度（0..1，占行程比例），输出 0..1。
+ * 死区内为 0；死区边缘重新从 0 起算，再套指数曲线（满偏转 = 1）。
+ */
+export function shapeStickMagnitude(magnitude: number): number {
+  if (!Number.isFinite(magnitude) || magnitude <= TOUCH_STICK_TUNING.DEAD_ZONE) {
+    return 0;
+  }
+  const rescaled = Math.min(
+    1,
+    (magnitude - TOUCH_STICK_TUNING.DEAD_ZONE) / (1 - TOUCH_STICK_TUNING.DEAD_ZONE)
+  );
+  return Math.pow(rescaled, TOUCH_STICK_TUNING.EXPO);
 }
 
 /** 数字键 → 特殊武器槽位（0 基，对应 SPECIAL_WEAPON_IDS 顺序） */
@@ -31,6 +73,67 @@ const WEAPON_SLOT_KEYS: Readonly<Record<string, number>> = {
   Numpad5: 4,
 };
 
+const KNOB_REST_TRANSFORM = 'translate(-50%, -50%) translate(0px, 0px)';
+
+/** 事件上的触摸点列表；合成事件（测试）里可能缺失或是普通数组 */
+type TouchListLike = ArrayLike<Touch> | null | undefined;
+
+function findTouch(list: TouchListLike, identifier: number): Touch | null {
+  if (!list) {
+    return null;
+  }
+  for (let i = 0; i < list.length; i++) {
+    if (list[i].identifier === identifier) {
+      return list[i];
+    }
+  }
+  return null;
+}
+
+function hasTouches(list: TouchListLike): list is ArrayLike<Touch> {
+  return list != null && list.length > 0;
+}
+
+function touchIdentifier(touch: Touch | null): number | null {
+  return touch && typeof touch.identifier === 'number' ? touch.identifier : null;
+}
+
+/** 本次事件里落在监听元素上的那个触摸点；合成事件的触摸点没有 target 时取第一个 */
+function pickChangedTouch(event: TouchEvent): Touch | null {
+  const changed: TouchListLike = event.changedTouches;
+  if (!hasTouches(changed)) {
+    return null;
+  }
+  const host = event.currentTarget;
+  if (host instanceof Node) {
+    for (let i = 0; i < changed.length; i++) {
+      const target = changed[i].target;
+      if (target instanceof Node && host.contains(target)) {
+        return changed[i];
+      }
+    }
+  }
+  return changed[0];
+}
+
+/**
+ * 记录的那根手指是否确定已经离开屏幕：事件列出了当前所有触摸点，而它不在其中。
+ * （touchend / touchcancel 丢失时的兜底；列表缺失或为空时无法判断，按“仍按着”处理。）
+ */
+function isTouchGone(event: TouchEvent, identifier: number): boolean {
+  const touches: TouchListLike = event.touches;
+  return hasTouches(touches) && findTouch(touches, identifier) === null;
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
+}
+
+function parsePixels(value: string): number {
+  const parsed = Number.parseFloat(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
 /** 焦点在表单控件上时不拦截 Tab（菜单仍可用键盘切换焦点） */
 function isFormControlFocused(): boolean {
   if (typeof document === 'undefined') return false;
@@ -42,20 +145,36 @@ function isFormControlFocused(): boolean {
 
 /**
  * 输入处理器
- * 支持桌面键盘和移动端触摸控制
+ * 支持桌面键盘和移动端触摸控制（触控设备上两者合并，外接键盘同样可用）
  */
 export class InputHandler {
   private keys: Set<string> = new Set();
   private readonly listenerCleanups: Array<() => void> = [];
 
-  // 触摸控制状态
+  // 触摸摇杆：浮动式——手指落在摇杆区任意位置即为原点，之后一直跟踪这根手指直到抬起
   private joystickActive: boolean = false;
-  private joystickX: number = 0;
-  private joystickY: number = 0;
   private joystickTouchId: number | null = null; // 记录摇杆触摸点的标识符
+  private stickOriginX: number = 0;
+  private stickOriginY: number = 0;
+  /** 行程半径（px）：底座直径的一半，按下时测量 */
+  private stickRadius: number = TOUCH_STICK_TUNING.FALLBACK_RADIUS_PX;
+  /** 摇杆输出（死区 + 曲线之后）：正 = 抬头 / 右转 */
+  private stickPitchAxis: number = 0;
+  private stickYawAxis: number = 0;
+  private stickBase: HTMLElement | null = null;
+  private stickKnob: HTMLElement | null = null;
+  private stickZone: HTMLElement | null = null;
+
+  // 触摸按键
   private firePressed: boolean = false;
-  private throttlePressed: boolean = false;
   private missilePressed: boolean = false;
+  private specialPressed: boolean = false;
+  /** 触控加速键是开关：点一下开加力，再点一下关（state.throttle 仍是布尔） */
+  private boostLatched: boolean = false;
+  private throttleButton: HTMLElement | null = null;
+  /** 每个触摸按键的“强制松开”，失焦 / 切到后台 / dispose 时统一调用 */
+  private readonly buttonReleasers: Array<() => void> = [];
+
   private upgradePressed: boolean = false;
   /** 桌面 Esc / P 的按住状态（isPauseToggled 取按下沿） */
   private pausePressed: boolean = false;
@@ -63,7 +182,6 @@ export class InputHandler {
   /** 移动端暂停键的单击锁存：touchstart 置位，游戏消费一次后清除（帧率再低也不丢） */
   private pauseTapQueued: boolean = false;
   private previousUpgradeState: boolean = false;
-  private specialPressed: boolean = false;
 
   // 单次触发的按键（按下沿锁存，update 中消费，帧率再低也不会丢）
   private cameraToggleQueued: boolean = false;
@@ -74,7 +192,7 @@ export class InputHandler {
   private specialTapQueued: boolean = false;
 
   /** getState() 复用的结果对象（每个模拟步调用一次，避免逐帧分配） */
-  private readonly state: InputState = {
+  private readonly state: Required<InputState> = {
     pitchUp: false,
     pitchDown: false,
     yawLeft: false,
@@ -85,6 +203,9 @@ export class InputHandler {
     missile: false,
     throttle: false,
     special: false,
+    pitchAxis: 0,
+    yawAxis: 0,
+    flightAssist: false,
   };
 
   private isMobile: boolean;
@@ -116,6 +237,9 @@ export class InputHandler {
   private setupListeners(): void {
     this.addTrackedListener(window, 'keydown', this.handleKeyDown);
     this.addTrackedListener(window, 'keyup', this.handleKeyUp);
+    // 失焦 / 切到后台时收不到 keyup、touchend：松开所有按住的输入，避免卡键
+    this.addTrackedListener(window, 'blur', this.handleWindowBlur);
+    this.addTrackedListener(document, 'visibilitychange', this.handleVisibilityChange);
 
     if (this.isMobile) {
       this.setupTouchControls();
@@ -163,6 +287,16 @@ export class InputHandler {
     }
   };
 
+  private readonly handleWindowBlur = (): void => {
+    this.releaseHeldInputs();
+  };
+
+  private readonly handleVisibilityChange = (): void => {
+    if (document.visibilityState === 'hidden' || document.hidden) {
+      this.releaseHeldInputs();
+    }
+  };
+
   /**
    * 设置移动端触摸控制
    */
@@ -179,97 +313,10 @@ export class InputHandler {
       return;
     }
 
-    const handleJoystickTouchStart = (e: TouchEvent): void => {
-      e.preventDefault();
-      e.stopPropagation();
-
-      // 获取刚刚触摸的点（使用 changedTouches）
-      if (e.changedTouches.length === 0) return;
-      const touch = e.changedTouches[0];
-
-      // 检查触摸点是否在摇杆元素范围内
-      const rect = joystick.getBoundingClientRect();
-      const isInBounds =
-        touch.clientX >= rect.left &&
-        touch.clientX <= rect.right &&
-        touch.clientY >= rect.top &&
-        touch.clientY <= rect.bottom;
-
-      if (isInBounds) {
-        // 在范围内，记录触摸点并激活
-        this.joystickTouchId = touch.identifier;
-        this.joystickActive = true;
-      }
-    };
-
-    // 触摸移动 - 在文档级别监听，防止触摸移出元素后丢失
-    const handleTouchMove = (e: TouchEvent): void => {
-      if (!this.joystickActive || this.joystickTouchId === null) return;
-
-      e.preventDefault();
-
-      // 找到匹配标识符的触摸点
-      const touch = Array.from(e.touches).find((t) => t.identifier === this.joystickTouchId);
-      if (!touch) return;
-
-      // 检查触摸点是否还在摇杆范围内
-      const rect = joystick.getBoundingClientRect();
-      const isInBounds =
-        touch.clientX >= rect.left &&
-        touch.clientX <= rect.right &&
-        touch.clientY >= rect.top &&
-        touch.clientY <= rect.bottom;
-
-      if (!isInBounds) {
-        // 触摸点移出范围，停用摇杆
-        this.joystickActive = false;
-        this.joystickX = 0;
-        this.joystickY = 0;
-        this.joystickTouchId = null;
-        joystickKnob.style.transform = 'translate(-50%, -50%) translate(0px, 0px)';
-        return;
-      }
-
-      const centerX = rect.left + rect.width / 2;
-      const centerY = rect.top + rect.height / 2;
-      const joystickRadius = rect.width / 2;
-
-      let deltaX = touch.clientX - centerX;
-      let deltaY = touch.clientY - centerY;
-
-      // 限制在圆形范围内
-      const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
-      if (distance > joystickRadius) {
-        deltaX = (deltaX / distance) * joystickRadius;
-        deltaY = (deltaY / distance) * joystickRadius;
-      }
-
-      // 更新摇杆位置（保留CSS中的居中偏移）
-      joystickKnob.style.transform = `translate(-50%, -50%) translate(${deltaX}px, ${deltaY}px)`;
-
-      // 转换为 -1 到 1 的范围
-      this.joystickX = deltaX / joystickRadius;
-      this.joystickY = deltaY / joystickRadius;
-    };
-
-    // 触摸结束 - 在文档级别监听
-    const handleTouchEnd = (e: TouchEvent): void => {
-      if (this.joystickTouchId === null) return;
-
-      // 检查我们的触摸点是否在已释放的触摸点中
-      const ourTouchEnded = Array.from(e.changedTouches).some(
-        (t) => t.identifier === this.joystickTouchId
-      );
-
-      if (ourTouchEnded) {
-        // 我们的触摸点已释放
-        this.joystickActive = false;
-        this.joystickX = 0;
-        this.joystickY = 0;
-        this.joystickTouchId = null;
-        joystickKnob.style.transform = 'translate(-50%, -50%) translate(0px, 0px)';
-      }
-    };
+    this.stickBase = joystick;
+    this.stickKnob = joystickKnob;
+    // 摇杆区：左下方的透明元素，手指落在其中任意位置都能抓住摇杆；页面里没有它时只认摇杆本身
+    this.stickZone = document.getElementById('touch-stick-zone');
 
     const handlePreventMobileScroll = (e: TouchEvent): void => {
       if (e.target instanceof Element && e.target.closest('.mobile-controls')) {
@@ -277,54 +324,46 @@ export class InputHandler {
       }
     };
 
-    this.addTrackedListener(joystick, 'touchstart', handleJoystickTouchStart, { passive: false });
-    this.addTrackedListener(document, 'touchmove', handleTouchMove, { passive: false });
-    this.addTrackedListener(document, 'touchend', handleTouchEnd);
-    this.addTrackedListener(document, 'touchcancel', handleTouchEnd);
-
-    // 开火按钮
-    if (fireButton) {
-      const handleFireStart = (e: TouchEvent): void => {
-        e.preventDefault();
-        this.firePressed = true;
-      };
-      const handleFireEnd = (): void => {
-        this.firePressed = false;
-      };
-      this.addTrackedListener(fireButton, 'touchstart', handleFireStart, { passive: false });
-      this.addTrackedListener(fireButton, 'touchend', handleFireEnd);
-    }
-
-    // 加速按钮
-    if (throttleButton) {
-      const handleThrottleStart = (e: TouchEvent): void => {
-        e.preventDefault();
-        this.throttlePressed = true;
-      };
-      const handleThrottleEnd = (): void => {
-        this.throttlePressed = false;
-      };
-      this.addTrackedListener(throttleButton, 'touchstart', handleThrottleStart, {
+    if (this.stickZone) {
+      this.addTrackedListener(this.stickZone, 'touchstart', this.handleStickStart, {
         passive: false,
       });
-      this.addTrackedListener(throttleButton, 'touchend', handleThrottleEnd);
     }
+    this.addTrackedListener(joystick, 'touchstart', this.handleStickStart, { passive: false });
+    // 移动 / 结束在文档级别监听：手指移出摇杆区后仍然跟踪
+    this.addTrackedListener(document, 'touchmove', this.handleStickMove, { passive: false });
+    this.addTrackedListener(document, 'touchend', this.handleStickEnd);
+    this.addTrackedListener(document, 'touchcancel', this.handleStickEnd);
 
-    // 导弹按钮
-    if (missileButton) {
-      const handleMissileStart = (e: TouchEvent): void => {
-        e.preventDefault();
+    // 开火 / 导弹：按住
+    this.bindTouchButton(
+      fireButton,
+      () => {
+        this.firePressed = true;
+      },
+      () => {
+        this.firePressed = false;
+      }
+    );
+    this.bindTouchButton(
+      missileButton,
+      () => {
         this.missilePressed = true;
-      };
-      const handleMissileEnd = (): void => {
+      },
+      () => {
         this.missilePressed = false;
-      };
-      this.addTrackedListener(missileButton, 'touchstart', handleMissileStart, { passive: false });
-      this.addTrackedListener(missileButton, 'touchend', handleMissileEnd);
-    }
+      }
+    );
+
+    // 加速：开关（点一下开，再点一下关），不用和开火抢同一根拇指
+    this.throttleButton = throttleButton;
+    this.setBoostLatched(false);
+    this.bindTouchButton(throttleButton, () => {
+      this.setBoostLatched(!this.boostLatched);
+    });
 
     // 移动端「升级」舱门打开暂停菜单，而非直接进入商店；单击锁存，短于一帧的轻触也不丢
-    this.bindTapButton(upgradeButton, () => {
+    this.bindTouchButton(upgradeButton, () => {
       this.pauseTapQueued = true;
     });
 
@@ -333,43 +372,264 @@ export class InputHandler {
     const specialButton = document.getElementById('special-button');
     const cycleButton = document.getElementById('cycle-button');
     const flareButton = document.getElementById('flare-button');
-    this.bindTapButton(cameraButton, () => {
+    this.bindTouchButton(cameraButton, () => {
       this.cameraToggleQueued = true;
     });
-    this.bindTapButton(cycleButton, () => {
+    this.bindTouchButton(cycleButton, () => {
       this.weaponCycleQueued = true;
     });
-    this.bindTapButton(flareButton, () => {
+    this.bindTouchButton(flareButton, () => {
       this.flareQueued = true;
     });
-    if (specialButton) {
-      const handleSpecialStart = (e: TouchEvent): void => {
-        e.preventDefault();
+    this.bindTouchButton(
+      specialButton,
+      () => {
         this.specialPressed = true;
         this.specialTapQueued = true;
-      };
-      const handleSpecialEnd = (): void => {
+      },
+      () => {
         this.specialPressed = false;
-      };
-      this.addTrackedListener(specialButton, 'touchstart', handleSpecialStart, { passive: false });
-      this.addTrackedListener(specialButton, 'touchend', handleSpecialEnd);
-      this.addTrackedListener(specialButton, 'touchcancel', handleSpecialEnd);
-    }
+      }
+    );
 
     // 防止页面滚动
     this.addTrackedListener(document, 'touchmove', handlePreventMobileScroll, { passive: false });
   }
 
-  /** 单击按钮：touchstart 锁存一次动作 */
-  private bindTapButton(button: HTMLElement | null, onTap: () => void): void {
+  /** 摇杆区 / 摇杆上的 touchstart：以落点为原点抓住摇杆 */
+  private readonly handleStickStart = (e: TouchEvent): void => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    if (
+      this.joystickActive &&
+      this.joystickTouchId !== null &&
+      !isTouchGone(e, this.joystickTouchId)
+    ) {
+      // 摇杆已被另一根手指占用：第二根手指不抢
+      return;
+    }
+
+    const touch = pickChangedTouch(e);
+    if (!touch || !Number.isFinite(touch.clientX) || !Number.isFinite(touch.clientY)) {
+      // 没有落点坐标就定不了原点
+      return;
+    }
+    this.beginStick(touch);
+  };
+
+  private beginStick(touch: Touch): void {
+    const base = this.stickBase;
+    const knob = this.stickKnob;
+    if (!base || !knob) {
+      return;
+    }
+
+    this.joystickTouchId = touchIdentifier(touch) ?? 0;
+    this.joystickActive = true;
+    this.stickOriginX = touch.clientX;
+    this.stickOriginY = touch.clientY;
+    this.stickPitchAxis = 0;
+    this.stickYawAxis = 0;
+
+    // 先撤掉位移再测量，得到底座的静止位置（.is-active 下没有过渡，立即生效）
+    base.classList.add('is-active');
+    base.style.transform = 'none';
+    const rect = base.getBoundingClientRect();
+    const measured = rect.width > 0 && rect.height > 0;
+    const radius = measured ? rect.width / 2 : TOUCH_STICK_TUNING.FALLBACK_RADIUS_PX;
+    this.stickRadius = radius;
+
+    if (measured) {
+      // 底座移到落点，但整个底座留在屏幕和安全区之内（原点仍是手指落点）
+      const insets = this.readSafeAreaInsets();
+      const margin = TOUCH_STICK_TUNING.EDGE_MARGIN_PX;
+      const minX = insets.left + margin + radius;
+      const maxX = Math.max(minX, window.innerWidth - insets.right - margin - radius);
+      const minY = insets.top + margin + radius;
+      const maxY = Math.max(minY, window.innerHeight - insets.bottom - margin - radius);
+      const centerX = clamp(touch.clientX, minX, maxX);
+      const centerY = clamp(touch.clientY, minY, maxY);
+      const offsetX = centerX - (rect.left + rect.width / 2);
+      const offsetY = centerY - (rect.top + rect.height / 2);
+      base.style.transform = `translate(${offsetX}px, ${offsetY}px)`;
+    }
+    knob.style.transform = KNOB_REST_TRANSFORM;
+  }
+
+  /**
+   * 安全区内边距（px）。JS 读不到 env()，index.html 把它写成摇杆区元素的 padding，这里读计算值。
+   */
+  private readSafeAreaInsets(): { top: number; right: number; bottom: number; left: number } {
+    const zone = this.stickZone;
+    if (!zone) {
+      return { top: 0, right: 0, bottom: 0, left: 0 };
+    }
+    const style = window.getComputedStyle(zone);
+    return {
+      top: parsePixels(style.paddingTop),
+      right: parsePixels(style.paddingRight),
+      bottom: parsePixels(style.paddingBottom),
+      left: parsePixels(style.paddingLeft),
+    };
+  }
+
+  private readonly handleStickMove = (e: TouchEvent): void => {
+    if (!this.joystickActive || this.joystickTouchId === null) return;
+
+    e.preventDefault();
+
+    // 找到匹配标识符的触摸点；它移到哪里都继续跟踪，超出行程只做限幅
+    const touch =
+      findTouch(e.changedTouches, this.joystickTouchId) ??
+      findTouch(e.touches, this.joystickTouchId);
+    if (!touch) return;
+
+    let deltaX = touch.clientX - this.stickOriginX;
+    let deltaY = touch.clientY - this.stickOriginY;
+    if (!Number.isFinite(deltaX) || !Number.isFinite(deltaY)) return;
+
+    // 限制在圆形行程内
+    const radius = this.stickRadius;
+    const distance = Math.hypot(deltaX, deltaY);
+    if (distance > radius) {
+      deltaX = (deltaX / distance) * radius;
+      deltaY = (deltaY / distance) * radius;
+    }
+
+    // 更新摇杆位置（保留CSS中的居中偏移）
+    if (this.stickKnob) {
+      this.stickKnob.style.transform = `translate(-50%, -50%) translate(${deltaX}px, ${deltaY}px)`;
+    }
+
+    this.setStickDeflection(deltaX / radius, deltaY / radius);
+  };
+
+  /** 原始偏转（-1..1，屏幕坐标：x 右正、y 下正）→ 径向死区 + 指数曲线后的俯仰 / 偏航模拟量 */
+  private setStickDeflection(rawX: number, rawY: number): void {
+    const magnitude = Math.min(1, Math.hypot(rawX, rawY));
+    const shaped = shapeStickMagnitude(magnitude);
+    if (shaped <= 0 || magnitude <= 0) {
+      this.stickPitchAxis = 0;
+      this.stickYawAxis = 0;
+      return;
+    }
+    const scale = shaped / magnitude;
+    this.stickYawAxis = clamp(rawX * scale, -1, 1);
+    // 屏幕 y 向下：摇杆上推 = 抬头
+    this.stickPitchAxis = clamp(-rawY * scale, -1, 1);
+  }
+
+  private readonly handleStickEnd = (e: TouchEvent): void => {
+    if (this.joystickTouchId === null) return;
+
+    const changed: TouchListLike = e.changedTouches;
+    if (hasTouches(changed)) {
+      // 只有抓着摇杆的那根手指抬起 / 被系统取消才松开
+      if (findTouch(changed, this.joystickTouchId)) {
+        this.endStick();
+      }
+      return;
+    }
+
+    // 没带触摸点的合成事件：发在摇杆 / 摇杆区上才算松开摇杆
+    const target = e.target;
+    if (
+      target instanceof Node &&
+      (this.stickBase?.contains(target) || this.stickZone?.contains(target))
+    ) {
+      this.endStick();
+    }
+  };
+
+  /** 松开摇杆：输出归零，底座缓动回静止位置（过渡写在 index.html 的 CSS 里） */
+  private endStick(): void {
+    this.joystickActive = false;
+    this.joystickTouchId = null;
+    this.stickPitchAxis = 0;
+    this.stickYawAxis = 0;
+    if (this.stickBase) {
+      this.stickBase.classList.remove('is-active');
+      this.stickBase.style.transform = '';
+    }
+    if (this.stickKnob) {
+      this.stickKnob.style.transform = KNOB_REST_TRANSFORM;
+    }
+  }
+
+  /**
+   * 触摸按键：记住按下它的那根手指，只有这根手指抬起 / 被系统取消（touchcancel）才松开；
+   * 按住期间第二根手指落在同一个键上不算数。单击类按键只传 onPress。
+   */
+  private bindTouchButton(
+    button: HTMLElement | null,
+    onPress: () => void,
+    onRelease?: () => void
+  ): void {
     if (!button) {
       return;
     }
-    const handleTap = (e: TouchEvent): void => {
-      e.preventDefault();
-      onTap();
+
+    let pressed = false;
+    let touchId: number | null = null;
+
+    const release = (): void => {
+      if (!pressed) return;
+      pressed = false;
+      touchId = null;
+      button.classList.remove('is-pressed');
+      onRelease?.();
     };
-    this.addTrackedListener(button, 'touchstart', handleTap, { passive: false });
+
+    const handleStart = (e: TouchEvent): void => {
+      e.preventDefault();
+      if (pressed && touchId !== null && !isTouchGone(e, touchId)) {
+        return;
+      }
+      touchId = touchIdentifier(pickChangedTouch(e));
+      pressed = true;
+      button.classList.add('is-pressed');
+      onPress();
+    };
+
+    const handleEnd = (e: TouchEvent): void => {
+      if (!pressed) return;
+      const changed: TouchListLike = e.changedTouches;
+      if (touchId !== null && hasTouches(changed) && !findTouch(changed, touchId)) {
+        // 抬起的不是按下它的那根手指
+        return;
+      }
+      release();
+    };
+
+    this.addTrackedListener(button, 'touchstart', handleStart, { passive: false });
+    this.addTrackedListener(button, 'touchend', handleEnd);
+    this.addTrackedListener(button, 'touchcancel', handleEnd);
+    this.buttonReleasers.push(release);
+  }
+
+  private setBoostLatched(latched: boolean): void {
+    this.boostLatched = latched;
+    const button = this.throttleButton;
+    if (button) {
+      button.classList.toggle('is-active', latched);
+      button.setAttribute('aria-pressed', latched ? 'true' : 'false');
+    }
+  }
+
+  /** 松开所有“按住”的输入：键盘按键、摇杆、触摸按键、加速开关（窗口失焦 / 切到后台 / 销毁） */
+  private releaseHeldInputs(): void {
+    this.keys.clear();
+    this.pausePressed = false;
+    this.upgradePressed = false;
+    this.endStick();
+    for (const release of this.buttonReleasers) {
+      release();
+    }
+    this.firePressed = false;
+    this.missilePressed = false;
+    this.specialPressed = false;
+    this.setBoostLatched(false);
   }
 
   private addTrackedListener<T extends Event>(
@@ -393,15 +653,9 @@ export class InputHandler {
       cleanup();
     }
     this.listenerCleanups.length = 0;
-    this.keys.clear();
-    this.joystickActive = false;
-    this.joystickX = 0;
-    this.joystickY = 0;
-    this.joystickTouchId = null;
-    this.firePressed = false;
-    this.throttlePressed = false;
-    this.missilePressed = false;
-    this.specialPressed = false;
+    // 页面里的摇杆 / 按键元素会被下一局复用：连同样式状态一起复位
+    this.releaseHeldInputs();
+    this.buttonReleasers.length = 0;
     this.resetActionQueue();
     this.resetPauseState();
     this.resetUpgradeState();
@@ -411,48 +665,56 @@ export class InputHandler {
    * 获取当前输入状态。
    * 返回的是复用对象：每次调用都会覆盖上一次的结果，调用方只在当帧读取；需要跨帧保留请自行复制。
    */
-  public getState(): InputState {
-    if (this.isMobile) {
-      return this.getMobileState();
-    }
-    return this.getDesktopState();
-  }
-
-  /**
-   * 获取移动端输入状态
-   */
-  private getMobileState(): InputState {
-    const threshold = 0.3;
-    const state = this.state;
-    state.pitchUp = this.joystickY < -threshold;
-    state.pitchDown = this.joystickY > threshold;
-    state.yawLeft = this.joystickX < -threshold;
-    state.yawRight = this.joystickX > threshold;
-    state.rollLeft = false;
-    state.rollRight = false;
-    state.fire = this.firePressed;
-    state.missile = this.missilePressed;
-    state.throttle = this.throttlePressed;
-    state.special = this.specialPressed || this.takeSpecialTap();
-    return state;
-  }
-
-  /**
-   * 获取桌面端输入状态
-   */
-  private getDesktopState(): InputState {
+  public getState(): Required<InputState> {
     const keys = this.keys;
     const state = this.state;
-    state.pitchUp = keys.has('KeyW') || keys.has('ArrowUp');
-    state.pitchDown = keys.has('KeyS') || keys.has('ArrowDown');
-    state.yawLeft = keys.has('KeyA');
-    state.yawRight = keys.has('KeyD');
-    state.rollLeft = keys.has('KeyQ');
-    state.rollRight = keys.has('KeyE');
+
+    // 键盘：桌面端的全部输入
+    const keyPitchUp = keys.has('KeyW') || keys.has('ArrowUp');
+    const keyPitchDown = keys.has('KeyS') || keys.has('ArrowDown');
+    const keyYawLeft = keys.has('KeyA');
+    const keyYawRight = keys.has('KeyD');
+    const keyRollLeft = keys.has('KeyQ');
+    const keyRollRight = keys.has('KeyE');
+    state.pitchUp = keyPitchUp;
+    state.pitchDown = keyPitchDown;
+    state.yawLeft = keyYawLeft;
+    state.yawRight = keyYawRight;
+    state.rollLeft = keyRollLeft;
+    state.rollRight = keyRollRight;
     state.fire = keys.has('Space');
     state.missile = keys.has('KeyM') || keys.has('ShiftRight'); // M键或右Shift发射导弹
     state.throttle = keys.has('ShiftLeft') || keys.has('ControlLeft');
-    state.special = keys.has('KeyF') || this.takeSpecialTap();
+    state.pitchAxis = (keyPitchUp ? 1 : 0) - (keyPitchDown ? 1 : 0);
+    state.yawAxis = (keyYawRight ? 1 : 0) - (keyYawLeft ? 1 : 0);
+    state.flightAssist = false;
+    let specialHeld = keys.has('KeyF');
+
+    if (this.isMobile) {
+      // 触控设备：键盘与触控合并。按键取“或”；摇杆与键盘的模拟量取绝对值较大的一方
+      if (Math.abs(this.stickPitchAxis) > Math.abs(state.pitchAxis)) {
+        state.pitchAxis = this.stickPitchAxis;
+      }
+      if (Math.abs(this.stickYawAxis) > Math.abs(state.yawAxis)) {
+        state.yawAxis = this.stickYawAxis;
+      }
+      // 布尔方向由模拟量推导（教程 / 脚本等仍读布尔）
+      const threshold = TOUCH_STICK_TUNING.DIGITAL_THRESHOLD;
+      state.pitchUp = keyPitchUp || state.pitchAxis > threshold;
+      state.pitchDown = keyPitchDown || state.pitchAxis < -threshold;
+      state.yawLeft = keyYawLeft || state.yawAxis < -threshold;
+      state.yawRight = keyYawRight || state.yawAxis > threshold;
+      state.fire = state.fire || this.firePressed;
+      state.missile = state.missile || this.missilePressed;
+      state.throttle = state.throttle || this.boostLatched;
+      specialHeld = specialHeld || this.specialPressed;
+      // 手指按在摇杆上、且键盘没有在转向：辅助飞行
+      const keyboardSteering =
+        keyPitchUp || keyPitchDown || keyYawLeft || keyYawRight || keyRollLeft || keyRollRight;
+      state.flightAssist = this.joystickActive && !keyboardSteering;
+    }
+
+    state.special = specialHeld || this.takeSpecialTap();
     return state;
   }
 
@@ -491,13 +753,19 @@ export class InputHandler {
     return queued;
   }
 
-  /** 清空所有单次动作（暂停 / 剧情卡片 / 换关时调用，避免恢复后误触发） */
+  /**
+   * 清空所有单次动作（暂停 / 剧情卡片 / 换关时调用，避免恢复后误触发）。
+   * 触控加速开关也在这里关掉：这些时刻玩家看不到按键，恢复后不应还悄悄开着加力。
+   */
   public resetActionQueue(): void {
     this.cameraToggleQueued = false;
     this.weaponCycleQueued = false;
     this.weaponSlotQueued = -1;
     this.flareQueued = false;
     this.specialTapQueued = false;
+    if (this.boostLatched) {
+      this.setBoostLatched(false);
+    }
   }
 
   /** 本步是否切换暂停：Esc / P 的按下沿，或一次排队中的移动端暂停键单击（读取即清除） */

@@ -26,17 +26,41 @@
         --hud-radius: 12px;
         --hud-font: 'Arial', sans-serif;
         --hud-mono: 'Consolas', 'Arial Black', monospace;
-        /* 触控布局尺寸：HUD 无线电面板据此避开摇杆与按键簇 */
+        /*
+         * 触控布局尺寸：HUD 无线电面板据此避开摇杆与按键簇。
+         * --touch-deck-w / -h 是按键簇在屏幕上的实际占位（已含 --touch-deck-scale）。
+         */
         --touch-stick-size: 108px;
+        --touch-knob-size: 44px;
         --touch-deck-w: 248px;
         --touch-deck-h: 228px;
+        --touch-deck-scale: 1;
+        /*
+         * 浮动摇杆的触摸区（#touch-stick-zone）：屏幕左侧 42% 宽、从 38% 高处到底边。
+         * 手指落在其中任意位置都会抓住摇杆，其他 HUD 元素（雷达等）据此避让。
+         */
+        --touch-stick-zone-top: 38vh;
+        --touch-stick-zone-width: 42vw;
       }
 
-      @media (orientation: portrait) {
+      /* 手机竖屏（平板竖屏够宽，沿用横屏的按键弧） */
+      @media (orientation: portrait) and (max-width: 699.98px) {
         :root {
           --touch-stick-size: 96px;
+          --touch-knob-size: 40px;
           --touch-deck-w: 210px;
           --touch-deck-h: 240px;
+        }
+      }
+
+      /* 平板（视口短边 ≥ 700px，与 GameConfig.isTablet 同一阈值）：摇杆与按键簇放大 */
+      @media (min-width: 700px) and (min-height: 700px) {
+        :root {
+          --touch-stick-size: 150px;
+          --touch-knob-size: 60px;
+          --touch-deck-scale: 1.35;
+          --touch-deck-w: 334.8px;
+          --touch-deck-h: 307.8px;
         }
       }
 
@@ -173,11 +197,40 @@
       }
 
       /*
+       * 平板：两手握住机身两侧时拇指落在屏幕下沿上方，摇杆与按键簇整体抬高约 10% 屏高，
+       * 并从两侧再收进一些（28px + 安全区）
+       */
+      @media (min-width: 700px) and (min-height: 700px) {
+        .mobile-controls {
+          padding-bottom: max(10vh, calc(env(safe-area-inset-bottom) + 20px));
+          padding-left: calc(28px + env(safe-area-inset-left));
+          padding-right: calc(28px + env(safe-area-inset-right));
+        }
+      }
+
+      /*
+       * 浮动摇杆的触摸区：透明、无子元素，只负责接住手指（InputHandler 以落点为摇杆原点）。
+       * 内边距写成安全区：JS 读不到 env()，InputHandler 读它的计算值，把底座限制在安全区之内。
+       */
+      #touch-stick-zone {
+        position: fixed;
+        left: 0;
+        top: var(--touch-stick-zone-top);
+        bottom: 0;
+        width: var(--touch-stick-zone-width);
+        padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom)
+          env(safe-area-inset-left);
+        pointer-events: auto;
+        touch-action: none;
+      }
+
+      /*
        * 右手按键簇：以右下角为圆心的拇指弧（--x / --y 为按键中心到簇右下角的距离，--s 为直径）
        * 内圈：开火；中圈：导弹 / 特武 / 热焰；外圈：加速 / 切换；最外：视角 / 暂停（低频，远离拇指落点）
-       * landscape: fire 72 · special 60 · missile 58 · throttle 54 · flare 54 · cycle 44 · pause 42 · camera 40
-       * portrait:  fire 66 · special 58 · missile 56 · throttle 52 · flare 52 · cycle 44 · pause 42 · camera 40
-       * joystick 108 / 96
+       * landscape: fire 72 · special 60 · missile 58 · throttle 54 · flare 54 · cycle 44 · pause 44 · camera 44
+       * portrait:  fire 66 · special 58 · missile 56 · throttle 52 · flare 52 · cycle 44 · pause 44 · camera 44
+       * 平板：横屏的那一套整体 ×1.35（最小 59px）
+       * joystick 108 / 96 / 150（平板）
        */
       #joystick {
         width: var(--touch-stick-size);
@@ -187,13 +240,21 @@
         border-radius: 50%;
         border: 2px solid var(--hud-edge);
         pointer-events: auto;
+        touch-action: none;
         position: relative;
         box-shadow: var(--hud-shadow);
+        /* 松手后底座从落点缓动回静止位置；按住期间（.is-active）由 InputHandler 直接写位移 */
+        transition: transform 0.18s ease-out;
+      }
+
+      #joystick.is-active {
+        border-color: rgba(143, 228, 255, 0.6);
+        transition: none;
       }
 
       #joystick-knob {
-        width: 44px;
-        height: 44px;
+        width: var(--touch-knob-size);
+        height: var(--touch-knob-size);
         background: rgba(143, 228, 255, 0.55);
         border-radius: 50%;
         position: absolute;
@@ -201,6 +262,12 @@
         left: 50%;
         transform: translate(-50%, -50%);
         box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+        transition: transform 0.12s ease-out;
+      }
+
+      #joystick.is-active #joystick-knob {
+        background: rgba(143, 228, 255, 0.8);
+        transition: none;
       }
 
       /* 通用按钮容器（开始菜单等也在用），保持原样 */
@@ -212,14 +279,20 @@
         align-items: center;
       }
 
-      /* 触控按键簇：只作用于 #mobile-controls 内的容器 */
+      /*
+       * 触控按键簇：只作用于 #mobile-controls 内的容器。
+       * 按键位置 / 尺寸按未缩放的数值书写，容器以右下角为基点整体缩放（平板 ×1.35，手机 ×1）；
+       * 布局盒取未缩放尺寸，缩放后的占位正好是 --touch-deck-w × --touch-deck-h。
+       */
       #mobile-controls .button-container {
         display: block;
         position: relative;
         flex: none;
         margin: 0;
-        width: var(--touch-deck-w);
-        height: var(--touch-deck-h);
+        width: calc(var(--touch-deck-w) / var(--touch-deck-scale));
+        height: calc(var(--touch-deck-h) / var(--touch-deck-scale));
+        transform: scale(var(--touch-deck-scale));
+        transform-origin: 100% 100%;
         pointer-events: none;
       }
 
@@ -256,7 +329,9 @@
         user-select: none;
       }
 
-      .touch-btn:active {
+      /* .is-pressed 由 InputHandler 在手指按住期间写入（触摸时 :active 不可靠） */
+      .touch-btn:active,
+      .touch-btn.is-pressed {
         box-shadow: inset 0 3px 10px rgba(0, 0, 0, 0.45);
       }
 
@@ -315,6 +390,28 @@
         --glow: rgba(92, 255, 176, 0.22);
       }
 
+      /* 加速是开关键：标签下方一盏指示灯，开着（.is-active，InputHandler 写入）时整键点亮 */
+      #throttle-button::after {
+        content: '';
+        width: 16px;
+        height: 3px;
+        margin-top: 3px;
+        border-radius: 2px;
+        background: rgba(143, 228, 255, 0.22);
+      }
+
+      #throttle-button.is-active {
+        background: rgba(20, 96, 66, 0.86);
+        box-shadow:
+          0 0 0 3px rgba(92, 255, 176, 0.35),
+          0 0 18px rgba(92, 255, 176, 0.6);
+      }
+
+      #throttle-button.is-active::after {
+        background: var(--hud-lock);
+        box-shadow: 0 0 6px var(--hud-lock);
+      }
+
       #cycle-button {
         --s: 44px;
         --x: 196px;
@@ -325,7 +422,7 @@
       }
 
       #camera-button {
-        --s: 40px;
+        --s: 44px;
         --x: 120px;
         --y: 186px;
         --ring: rgba(143, 228, 255, 0.55);
@@ -334,7 +431,7 @@
       }
 
       #upgrade-button {
-        --s: 42px;
+        --s: 44px;
         --x: 40px;
         --y: 204px;
         --ring: var(--hud-sys);
@@ -454,12 +551,8 @@
         opacity: 0.55;
       }
 
-      @media (orientation: portrait) {
-        #joystick-knob {
-          width: 40px;
-          height: 40px;
-        }
-
+      /* 手机竖屏：按键簇改成窄而高的排法（平板竖屏沿用上面的横屏弧） */
+      @media (orientation: portrait) and (max-width: 699.98px) {
         #fire-button {
           --s: 66px;
           --x: 40px;
@@ -511,6 +604,11 @@
           animation: none;
           box-shadow: 0 0 0 4px rgba(255, 77, 77, 0.45);
         }
+
+        #joystick,
+        #joystick-knob {
+          transition: none;
+        }
       }
 
       .hidden {
@@ -531,7 +629,10 @@
 
     <!-- 移动端虚拟控制器（按键文字为英文默认值；main.ts / HUD 按语言设置改写） -->
     <div class="mobile-controls" id="mobile-controls">
-      <!-- 左侧：虚拟摇杆 -->
+      <!-- 左下：浮动摇杆的触摸区（透明）。手指落在其中任意位置，摇杆底座就移到落点 -->
+      <div id="touch-stick-zone" aria-hidden="true"></div>
+
+      <!-- 左侧：虚拟摇杆（静止位置；按住期间跟随落点） -->
       <div id="joystick">
         <div id="joystick-knob"></div>
       </div>
@@ -550,7 +651,13 @@
         <button id="flare-button" class="touch-btn" type="button" aria-label="Flares">
           <span class="tc-main">FLARE</span><span class="tc-sub" aria-hidden="true"></span>
         </button>
-        <button id="throttle-button" class="touch-btn" type="button" aria-label="Boost">
+        <button
+          id="throttle-button"
+          class="touch-btn"
+          type="button"
+          aria-label="Boost"
+          aria-pressed="false"
+        >
           BOOST
         </button>
         <button
