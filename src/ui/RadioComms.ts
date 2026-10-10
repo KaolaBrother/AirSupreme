@@ -70,6 +70,8 @@ const SPEAKER_SEPARATOR: LocalizedText = { en: ': ', zh: '：' };
 const FOLLOW_START_HOLD_SECONDS = 0.8;
 /** 跟读：上移一行的滑动时间（秒）；减少动态效果时不滑动，一次跳一整行 */
 const FOLLOW_SLIDE_SECONDS = 0.25;
+/** 跟读：数整行时容许的浮点误差（行）：3 × 16.9 ÷ 16.9 可能算成 2.9999999999999996 */
+const FOLLOW_LINE_EPSILON = 1e-6;
 /** 跟读只用于手机竖屏追尾视角的窄面板：与 radioStyles 的手机竖屏规则（max-width: 699.98px）一致 */
 const FOLLOW_MAX_WIDTH_PX = 700;
 const HUD_CAMERA_ATTRIBUTE = 'data-hud-camera';
@@ -101,6 +103,19 @@ function readingHoldSeconds(chars: number): number {
   );
 }
 
+function isPositiveFinite(value: number): boolean {
+  return value > 0 && value < Infinity;
+}
+
+/** 一次上移开始 sinceSeconds 秒后滑过了几分之几行（0…1，缓入缓出）；slideSeconds 为 0 = 整行跳 */
+function followSlideProgress(sinceSeconds: number, slideSeconds: number): number {
+  const progress = slideSeconds > 0 ? sinceSeconds / slideSeconds : 1;
+  if (progress >= 1) {
+    return 1;
+  }
+  return progress > 0 ? progress * progress * (3 - 2 * progress) : 0;
+}
+
 /**
  * 正文跟读的位置：正文比面板放得下的行数多时，面板像字幕一样逐行上移，不把后半句截掉。
  * 返回此刻正文该向上滚过多少像素（0 … 多出来的行数 × 行高）；放得下时恒为 0。纯函数，不碰 DOM。
@@ -110,12 +125,16 @@ function readingHoldSeconds(chars: number): number {
  * 最后一屏正好留下读完它所需的时间。逐字显示期间（revealSeconds 之前）不上移：整段文字排好
  * 之后才滚，滚进来的行都已经显示完。静止时总是整行；stepOnly（减少动态效果）时不滑动。
  *
- * @param contentHeight 整段正文不截断时的高度（像素）
- * @param boxHeight 面板里正文可见的高度（像素，整行数 × 行高）
+ * 大小、显示时间不是有限的正数（0、负数、NaN、Infinity）时返回 0，已显示的时间不是正数时也是；
+ * 已显示的时间是 +Infinity 时返回最后的位置。结果总是有限的数，不逐行数（行数再离谱也不会算不完）。
+ *
+ * @param contentHeight 整段正文不截断时的高度（像素；按四舍五入算行数，scrollHeight 是取整的）
+ * @param boxHeight 面板里正文可见的高度（像素；只算放得下的整行，不满一行的那一截不算，至少一行）
  * @param lineHeight 行高（像素）
  * @param elapsedSeconds 这句已显示了多久（逐字 + 停留，秒）
  * @param totalSeconds 这句计划显示多久（逐字 + 停留，秒）
- * @param revealSeconds 逐字显示阶段的时长（秒；没有逐字显示时为 0）
+ * @param revealSeconds 逐字显示阶段的时长（秒；没有逐字显示时为 0，负数、NaN 同样当作没有；
+ *   Infinity = 逐字显示没有尽头，一直不动）
  * @param stepOnly 不做滑动，一次跳一整行
  */
 export function radioFollowOffset(
@@ -127,26 +146,47 @@ export function radioFollowOffset(
   revealSeconds: number = 0,
   stepOnly: boolean = false
 ): number {
-  if (!(lineHeight > 0) || !(contentHeight > 0) || !(boxHeight > 0) || !(totalSeconds > 0)) {
+  if (
+    !isPositiveFinite(contentHeight) ||
+    !isPositiveFinite(boxHeight) ||
+    !isPositiveFinite(lineHeight) ||
+    !isPositiveFinite(totalSeconds) ||
+    !(elapsedSeconds > 0)
+  ) {
     return 0;
   }
   const totalLines = Math.round(contentHeight / lineHeight);
-  const steps = totalLines - Math.max(1, Math.round(boxHeight / lineHeight));
-  if (steps <= 0 || !(elapsedSeconds > 0)) {
+  // 面板行数向下取整：四舍五入会把 2.5 行的面板当成 3 行，少移一行，最后一行文字露不全
+  const boxLines = Math.max(1, Math.floor(boxHeight / lineHeight + FOLLOW_LINE_EPSILON));
+  const steps = totalLines - boxLines;
+  const earliest = revealSeconds > 0 ? revealSeconds : 0;
+  if (!isPositiveFinite(steps) || earliest === Infinity || elapsedSeconds < earliest) {
     return 0;
   }
   const startHold = Math.min(FOLLOW_START_HOLD_SECONDS, totalSeconds / 4);
   const perLine = (totalSeconds - startHold) / totalLines;
   const slide = stepOnly ? 0 : Math.min(FOLLOW_SLIDE_SECONDS, perLine / 2);
-  const earliest = revealSeconds > 0 ? revealSeconds : 0;
-  let lines = 0;
-  for (let step = 1; step <= steps; step += 1) {
-    const at = Math.max(startHold + step * perLine, earliest);
-    if (elapsedSeconds < at) {
-      break;
-    }
-    const progress = slide > 0 ? (elapsedSeconds - at) / slide : 1;
-    lines += progress >= 1 ? 1 : progress * progress * (3 - 2 * progress);
+
+  // 第 k 行在 startHold + k × perLine 开始移出（不早于 earliest）。此刻已经开始移出的行数
+  // 直接算出来；除法在整点上可能差一行，按“到点即移”校正
+  const due = (elapsedSeconds - startHold) / perLine;
+  let started = due >= steps ? steps : due > 0 ? Math.floor(due) : 0;
+  if (started < steps && elapsedSeconds >= startHold + (started + 1) * perLine) {
+    started += 1;
+  } else if (started > 0 && elapsedSeconds < startHold + started * perLine) {
+    started -= 1;
+  }
+  if (started <= 0) {
+    return 0;
+  }
+  // 其中前 held 行本该在逐字显示期间移出，压到 earliest 一起滑；其余各行相隔 perLine（不少于两次
+  // 滑动的时间），只有最后开始的那一行可能还在滑
+  const heldDue = (earliest - startHold) / perLine;
+  const held = heldDue >= started ? started : heldDue > 0 ? Math.floor(heldDue) : 0;
+  let lines = held * followSlideProgress(elapsedSeconds - earliest, slide);
+  if (started > held) {
+    const lastAt = startHold + started * perLine;
+    lines += started - held - 1 + followSlideProgress(elapsedSeconds - lastAt, slide);
   }
   return lines * lineHeight;
 }
@@ -199,6 +239,8 @@ export class RadioComms {
   private followLineHeight: number = 0;
   /** 已经滚到的位置（像素）。只增不减：配音把停留时间拉长时不往回滚 */
   private followOffset: number = 0;
+  /** 正在用的时间表是按多长的显示时间排的（秒）；显示时间变了要不要马上换，见 applyFollow */
+  private followTotal: number = 0;
   /** 量的时候的视角标记：视角一换，面板换了位置和大小，要重量 */
   private followCamera: string | null = null;
 
@@ -725,6 +767,7 @@ export class RadioComms {
     this.followContentHeight = contentHeight;
     this.followBoxHeight = boxHeight;
     this.followLineHeight = lineHeight;
+    this.followTotal = line.revealSeconds + line.holdSeconds;
     this.applyFollow(line);
   }
 
@@ -740,24 +783,45 @@ export class RadioComms {
     this.applyFollow(line);
   }
 
-  /** 只在位置变了的时候写样式：停着的时候不碰 DOM，滑动的 0.25 秒里每帧写一次 transform */
+  /**
+   * 只在位置变了的时候写样式：停着的时候不碰 DOM，滑动的 0.25 秒里每帧写一次 transform。
+   * 配音开口（holdForVoice / releaseVoice）会把显示时间拉长，时间表整体后移；位置只增不减，
+   * 所以要是这时正滑到两行之间，就先按原来的时间表把这一行滑完，停到整行上再换新的时间表
+   * （不然文字会卡在两行之间，直到新的时间表追上来）。
+   */
   private applyFollow(line: ActiveLine): void {
     if (!this.textLine || this.followLineHeight <= 0) {
       return;
     }
-    const offset = radioFollowOffset(
-      this.followContentHeight,
-      this.followBoxHeight,
-      this.followLineHeight,
-      this.elapsedOf(line),
-      line.revealSeconds + line.holdSeconds,
-      line.revealSeconds,
-      this.reducedMotion
-    );
+    const total = line.revealSeconds + line.holdSeconds;
+    let offset = this.followOffsetAt(line, this.followTotal);
+    if (total !== this.followTotal) {
+      // 已经滚到的位置所在（或正滑向）的整行
+      const rest =
+        Math.ceil(this.followOffset / this.followLineHeight - FOLLOW_LINE_EPSILON) *
+        this.followLineHeight;
+      if (offset >= rest) {
+        this.followTotal = total;
+        offset = Math.max(rest, this.followOffsetAt(line, total));
+      }
+    }
     if (offset > this.followOffset) {
       this.followOffset = offset;
       this.textLine.style.transform = `translateY(${-Math.round(offset * 100) / 100}px)`;
     }
+  }
+
+  /** 这句此刻的位置，按显示时间为 totalSeconds 的时间表 */
+  private followOffsetAt(line: ActiveLine, totalSeconds: number): number {
+    return radioFollowOffset(
+      this.followContentHeight,
+      this.followBoxHeight,
+      this.followLineHeight,
+      this.elapsedOf(line),
+      totalSeconds,
+      line.revealSeconds,
+      this.reducedMotion
+    );
   }
 
   private clearFollow(): void {
@@ -771,6 +835,7 @@ export class RadioComms {
     this.followBoxHeight = 0;
     this.followLineHeight = 0;
     this.followOffset = 0;
+    this.followTotal = 0;
   }
 
   /** 呼号、角色名与读屏文本（按当前语言） */
