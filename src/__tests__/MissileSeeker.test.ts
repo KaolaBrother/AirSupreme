@@ -984,11 +984,9 @@ describe('MissileSeeker', () => {
       }
     });
 
-    // FINDING（缺陷，低优先级）：载机坐标为 NaN 时，MissileSeeker.update 里的距离判定
-    // `rangeSq > maxRangeSq` 对 NaN 恒为 false，目标被当成“1200 米以内”而捕获，
-    // getTargetRange() 返回 NaN（HUD 会显示“NaN m”），还能一路锁定。规格要求候选是
-    // 1200 米以内的目标，项目约定要求对 NaN / Infinity 坐标设防。修复后去掉 .fails。
-    it.fails('does not track anything when the aircraft position is not finite', () => {
+    // 曾经的缺陷（b35f8e1 已修）：载机坐标为 NaN 时距离判定对 NaN 恒为 false，目标被当成
+    // “1200 米以内”而捕获，距离读数是 NaN（HUD 会显示“NaN m”），还能一路锁定。
+    it('does not track anything when the aircraft position is not finite', () => {
       rig.origin.set(Number.NaN, 0, 0);
       rig.candidates.push(targetRightOfAim(10));
 

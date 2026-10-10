@@ -128,12 +128,6 @@ export class CombatSystem implements IGameSystem {
         );
       })
     );
-
-    this.eventUnsubscribers.push(
-      EventBus.on(GameEventType.MISSILE_FIRED, ({ payload }) => {
-        this.missileSystem.fire(payload.position, new Vector3(0, 0, -1), payload.target);
-      })
-    );
   }
 
   update(deltaTime: number): void {
