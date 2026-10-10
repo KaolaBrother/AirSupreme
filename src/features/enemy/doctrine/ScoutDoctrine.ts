@@ -68,6 +68,13 @@ export const SCOUT_TUNING = {
   FLANK_BAND: 60,
   FLANK_THROTTLE: 1.3,
   /**
+   * 玩家在转弯（航迹角速度超过这个值，弧度/秒）时朝转弯的内侧绕：玩家的转弯把正后方甩向
+   * 外侧，本机绕向内侧时两者相加；朝外侧绕会被转弯抵消，一直挂在玩家正后方
+   */
+  FLANK_TURN_RATE: 0.03,
+  /** 玩家航迹角速度的平滑时间常数（秒） */
+  TRACK_TURN_SMOOTHING: 0.5,
+  /**
    * 就位（绕到指派方位那一侧）：与指派方位相差超过 ENTER 才绕，绕到 DONE 以内才开始冲刺；
    * 超过 MAX 秒还没到位就让出令牌（不从错的一侧打，也不一直占着令牌）。
    */
@@ -121,6 +128,9 @@ export class ScoutDoctrine extends JetDoctrine {
   private tailChaseTime = 0;
   /** 绕向侧面时走玩家航迹的哪一侧（1 = 右、-1 = 左；0 = 还没选） */
   private flankSide = 0;
+  /** 玩家航迹的方位角（上一步，NaN = 还没有）与平滑后的航迹角速度（弧度/秒，方位角增大为正） */
+  private trackBearing = Number.NaN;
+  private trackTurnRate = 0;
   private jinkVertical = 1;
   private jinkSide = 1;
   private calmTime = 0;
@@ -134,6 +144,9 @@ export class ScoutDoctrine extends JetDoctrine {
     this.tailChaseTime = 0;
     this.flankSide = 0;
     this.calmTime = 0;
+    // 中断（瘫痪 / 拴绳 / 重新生成）期间没有跟踪：重新开始估计航迹角速度
+    this.trackBearing = Number.NaN;
+    this.trackTurnRate = 0;
   }
 
   protected decide(context: DoctrineContext, command: DoctrineCommand): void {
@@ -142,6 +155,7 @@ export class ScoutDoctrine extends JetDoctrine {
       this.orbitSign = context.rng() < 0.5 ? -1 : 1;
       this.heightOffset = (context.rng() - 0.5) * 60;
     }
+    this.trackPlayerTurn(context);
 
     if (this.isThreatened(context) && this.phase !== 'evade') {
       this.enterEvade(context, command);
@@ -205,6 +219,20 @@ export class ScoutDoctrine extends JetDoctrine {
     return tmpTrack.set(context.playerForward.x, 0, context.playerForward.z);
   }
 
+  /** 估计玩家航迹的转弯角速度（逐步差分 + 平滑）；步长为 0 或数值异常时保持原值 */
+  private trackPlayerTurn(context: DoctrineContext): void {
+    const track = this.playerTrack(context);
+    const bearing = Math.atan2(track.x, track.z);
+    if (!Number.isFinite(bearing)) return;
+    const previous = this.trackBearing;
+    this.trackBearing = bearing;
+    if (!(context.dt > 0) || !Number.isFinite(previous)) return;
+    const rate = wrapAngle(bearing - previous) / context.dt;
+    if (!Number.isFinite(rate)) return;
+    const blend = Math.min(1, context.dt / SCOUT_TUNING.TRACK_TURN_SMOOTHING);
+    this.trackTurnRate += (rate - this.trackTurnRate) * blend;
+  }
+
   /**
    * 绕行半径：切不进去、且还在玩家后方扇面里时留在 415 米之外（不贴在尾后），
    * 否则回到冲刺起点的距离。
@@ -220,13 +248,16 @@ export class ScoutDoctrine extends JetDoctrine {
 
   /**
    * 绕向侧面：玩家直线飞行、本机落在后方切不进去时，在随玩家移动的参照系里朝本机所在的
-   * 一侧绕开正后方，绕到切得进去的位置为止。
+   * 一侧绕开正后方，绕到切得进去的位置为止。玩家在转弯时朝转弯的内侧绕。
    */
   private steerFlank(context: DoctrineContext, command: DoctrineCommand): void {
     tmpToSelf.subVectors(context.position, context.playerPosition).setY(0);
     horizontalRight(this.playerTrack(context), tmpRight);
     const lateral = tmpToSelf.dot(tmpRight);
-    if (this.flankSide === 0 || Math.abs(lateral) > 40) {
+    if (Math.abs(this.trackTurnRate) > SCOUT_TUNING.FLANK_TURN_RATE) {
+      // horizontalRight 指向方位角减小的一侧；方位角增大的转弯（turnRate > 0）内侧是 -1
+      this.flankSide = -Math.sign(this.trackTurnRate);
+    } else if (this.flankSide === 0 || Math.abs(lateral) > 40) {
       this.flankSide = Math.abs(lateral) > 1 ? Math.sign(lateral) : this.orbitSign;
     }
     // horizontalRight 指向方位角减小的一侧；从正后方绕到右侧是方位角增大，即 steerOrbit 的 sign = -1

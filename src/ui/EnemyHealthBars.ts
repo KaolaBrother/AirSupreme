@@ -231,8 +231,8 @@ function readDisplayName(mesh: Object3D): string | null {
 
 /**
  * 解析血条标签：Boss 本体 → 战役名；Boss 部件 → 部件名；敌机（含 Boss 召唤的敌机）→
- * ENEMY_CONFIGS 型号名（友军加“友军”前缀）；地面 / 海上 / 空中单位（UNIT_*）→ 网格自带的
- * 型号名（如“主战坦克”），没有时退回按阵营的通用名。
+ * ENEMY_CONFIGS 型号名（友军僚机没有呼号时统一叫“友军僚机”）；地面 / 海上 / 空中单位
+ * （UNIT_*）→ 网格自带的型号名（如“主战坦克”），没有时退回按阵营的通用名。
  */
 function resolveTargetLabel(mesh: Object3D, isFriendly: boolean): string {
   const name = mesh.name || '';

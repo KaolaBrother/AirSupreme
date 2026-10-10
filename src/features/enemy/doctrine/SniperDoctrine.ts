@@ -41,8 +41,8 @@ export const SNIPER_TUNING = {
    * 玩家机头对着它（夹角 CHASED_NOSE_ANGLE 以内）= 玩家在追它：这时不为了保持距离而后退得比
    * 玩家还快，追得近；机头偏开到 PASSING_NOSE_ANGLE 以外 = 玩家只是路过：全程保持距离
    */
-  CHASED_NOSE_ANGLE: 20 * DEG,
-  PASSING_NOSE_ANGLE: 45 * DEG,
+  CHASED_NOSE_ANGLE: 6 * DEG,
+  PASSING_NOSE_ANGLE: 12 * DEG,
   /** 本机当前方位与指派方位相差超过这个角度时不蓄力（弧度）；持令牌空等超过这么久就让出 */
   BEARING_TOLERANCE: 25 * DEG,
   TOKEN_IDLE_SECONDS: 2.5,
