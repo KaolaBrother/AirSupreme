@@ -52,7 +52,7 @@ function isEyeBoss(boss: unknown): boss is EyeBossLike {
 
 /**
  * 战斗 HUD 数据馈送：雷达点（敌机 / 进场传送门 / 僚机 / 地面海上空中单位 / Boss）与
- * 血条快照（敌机、Boss、第三关眼睛、第 6-10 关子目标、僚机）。
+ * 血条快照（敌机、敌方地面海上空中单位、Boss、第三关眼睛、第 6-10 关子目标、僚机）。
  *
  * 雷达点与血条快照都来自复用池，逐帧不分配新对象；雷达限频 20 Hz。
  */
@@ -64,6 +64,8 @@ export class CombatHudFeed {
   private readonly friendlyBars: HealthBarSnapshot[] = [];
   private readonly barPool: HealthBarSnapshot[] = [];
   private barPoolUsed = 0;
+  /** 本次血条快照里敌方单位是否按“目标”样式标记（敌机清空后它们拖住波次） */
+  private unitObjective = false;
 
   constructor(private readonly deps: CombatHudFeedDeps) {}
 
@@ -133,6 +135,11 @@ export class CombatHudFeed {
       this.pushBlip(boss.getMesh().position, 'boss');
     }
 
+    // 展开的关卡地图的地形底图：采样器与关卡号（换关后重新采样；没变时是空操作）
+    presentation.setRadarTerrainSource(
+      this.deps.units.getSurfaceSampler(),
+      this.deps.units.getCurrentLevel()
+    );
     presentation.updateRadar(
       this.deps.getPlayerPosition(),
       this.blips,
@@ -152,8 +159,20 @@ export class CombatHudFeed {
     bar.mesh = mesh;
     bar.currentHealth = current;
     bar.maxHealth = max;
+    bar.objective = false;
     return bar;
   }
+
+  /** 敌方单位的标记（预先绑定，逐帧不创建闭包） */
+  private readonly pushUnitBar = (
+    mesh: THREE.Object3D,
+    currentHealth: number,
+    maxHealth: number
+  ): void => {
+    const bar = this.takeBar(mesh, currentHealth, maxHealth);
+    bar.objective = this.unitObjective;
+    this.enemyBars.push(bar);
+  };
 
   private readonly pushSubTargetBar = (
     mesh: THREE.Object3D,
@@ -187,6 +206,11 @@ export class CombatHudFeed {
         friendlyBars.push(this.takeBar(friendly.getMesh(), health.current, health.max));
       }
     }
+
+    // 敌方地面 / 海上 / 空中单位：与敌机一样有血条、名称与屏幕外箭头；只标可被命中的
+    // （潜航中的潜艇不标）。敌机清空后它们拖住波次时换成“目标”样式。友军 / 平民单位不在此列。
+    this.unitObjective = this.deps.units.isObjectiveActive();
+    this.deps.units.forEachHostileMarker(this.pushUnitBar);
 
     const session = this.deps.session;
     const bossController = this.deps.getBossController();

@@ -4,7 +4,7 @@ import { StartMenu, GameSettings } from '@/ui/StartMenu';
 import { EnemyHealthBars } from '@/ui/EnemyHealthBars';
 import { BossMissileIndicator } from '@/ui/BossMissileIndicator';
 import { LockOnIndicator } from '@/ui/LockOnIndicator';
-import { RadarMinimap, type RadarBlip } from '@/ui/RadarMinimap';
+import { RadarMinimap, type RadarBlip, type RadarTerrainSampler } from '@/ui/RadarMinimap';
 import { HUD_COLORS, injectHudTokens } from '@/ui/theme/hudTokens';
 
 export type { RadarBlip } from '@/ui/RadarMinimap';
@@ -28,6 +28,8 @@ export interface HealthBarSnapshot {
   mesh: Object3D;
   currentHealth: number;
   maxHealth: number;
+  /** 当前目标（敌机清空后拖住波次的敌方单位）：标记换成醒目的“目标”样式 */
+  objective?: boolean;
 }
 
 export interface BossMissileIndicatorSnapshot {
@@ -178,6 +180,15 @@ export class PresentationController {
   public updateRadar(playerPos: Vector3, blips: RadarBlip[], playerRotation: Quaternion): void {
     this.ensureRadar();
     this.radar?.updateBlips(playerPos, blips, playerRotation);
+  }
+
+  /**
+   * 展开的关卡地图的地形底图来源：地表采样器 + 关卡号（关卡号变化时重新采样）。
+   * 透传到 RadarMinimap.setTerrainSource；采样器为 null 时地图只画网格。
+   */
+  public setRadarTerrainSource(sampler: RadarTerrainSampler | null, level: number): void {
+    this.ensureRadar();
+    this.radar?.setTerrainSource(sampler, level);
   }
 
   /**
