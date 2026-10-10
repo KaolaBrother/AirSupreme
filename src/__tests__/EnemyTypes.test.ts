@@ -4,10 +4,10 @@ import {
   EnemyType,
   EnemyAIState,
   ENEMY_CONFIGS,
-  getEnemyTypesForWave,
   getRandomEnemyType,
 } from '@/features/enemy/EnemyTypes';
 import { WINGMAN_CONFIG } from '@/features/enemy/FriendlyAI';
+import { getLevelConfig, getWaveConfig } from '@/features/terrain/LevelConfig';
 
 /**
  * 敌机编制表（敌机舰队重做，规格 §3）。只钉规格里写死的规则：八个机型的键、侦察机 60 血
@@ -163,31 +163,54 @@ describe('EnemyTypes', () => {
     });
   });
 
-  // 波次里出哪些机型：现行的按关卡 / 波次取类型（规格 §4 的固定编成属于后面的里程碑）
-  describe('getEnemyTypesForWave', () => {
-    it('should return SCOUT for level 1 wave 1', () => {
-      const types = getEnemyTypesForWave(1, 1);
-      expect(types).toContain(EnemyType.SCOUT);
+  // 波次里出哪些机型（规格 §4a 规则 2、3）：每一波是写定的编成，不再按关卡 / 波次随机选型；
+  // 每个机型都不早于它的引入关卡出现。经真实生成路径的检查见 EnemyWaveLineups.test.ts。
+  describe('which jets a wave brings (spec §4a)', () => {
+    /** 某关全部波次里出现过的机型 */
+    function typesOfLevel(level: number): Set<EnemyType> {
+      const config = getLevelConfig(level);
+      expect(config, `level ${level}`).toBeDefined();
+      return new Set((config?.waves ?? []).flatMap((wave) => [...wave.lineup]));
+    }
+
+    /** 机型第一次出现的关卡（没有出现为 Infinity） */
+    function firstLevelWith(type: EnemyType): number {
+      for (let level = 1; level <= 10; level++) {
+        if (typesOfLevel(level).has(type)) return level;
+      }
+      return Infinity;
+    }
+
+    it('level 1 wave 1 is exactly two Scouts (rule 3)', () => {
+      expect([...(getWaveConfig(1, 0)?.lineup ?? [])]).toEqual([EnemyType.SCOUT, EnemyType.SCOUT]);
     });
 
-    it('should return FIGHTER for level 1 wave 2+', () => {
-      const types = getEnemyTypesForWave(1, 2);
-      expect(types).toContain(EnemyType.FIGHTER);
+    it('level 1 brings Fighters as well as Scouts, and nothing else (rule 3)', () => {
+      expect([...typesOfLevel(1)].sort()).toEqual([EnemyType.FIGHTER, EnemyType.SCOUT].sort());
     });
 
-    it('should return SNIPER for level 2+', () => {
-      const types = getEnemyTypesForWave(2, 2);
-      expect(types).toContain(EnemyType.SNIPER);
+    it('Snipers first appear on level 2 (rule 3: introduced at level 2)', () => {
+      expect(firstLevelWith(EnemyType.SNIPER)).toBe(2);
     });
 
-    it('should return HEAVY for level 3+', () => {
-      const types = getEnemyTypesForWave(3, 2);
-      expect(types).toContain(EnemyType.HEAVY);
+    it('Heavies first appear on level 2 (rule 3: introduced at level 2)', () => {
+      expect(firstLevelWith(EnemyType.HEAVY)).toBe(2);
     });
 
-    it('should return ACE for level 4+ wave 2+', () => {
-      const types = getEnemyTypesForWave(4, 2);
-      expect(types).toContain(EnemyType.ACE);
+    it('Aces first appear on level 3 (rule 3: introduced at level 3)', () => {
+      expect(firstLevelWith(EnemyType.ACE)).toBe(3);
+    });
+
+    it('a wave is an authored list: the same jets every time it is read (rule 2)', () => {
+      for (let level = 1; level <= 10; level++) {
+        const config = getLevelConfig(level);
+        for (let wave = 0; wave < (config?.totalWaves ?? 0); wave++) {
+          const first = [...(getWaveConfig(level, wave)?.lineup ?? [])];
+          const again = [...(getWaveConfig(level, wave)?.lineup ?? [])];
+          expect(first.length, `level ${level} wave ${wave + 1}`).toBeGreaterThan(0);
+          expect(again, `level ${level} wave ${wave + 1}`).toEqual(first);
+        }
+      }
     });
   });
 
