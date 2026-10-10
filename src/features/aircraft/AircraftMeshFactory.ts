@@ -10,10 +10,20 @@
  * - 机身：LatheGeometry 旋成体 + 椭圆截面缩放（取代旧的盒子拼装）
  * - 翼面：Shape + ExtrudeGeometry 真实平面形（前缘后掠 + 梯形收窄 + 上反/下反角）
  * - 垂尾：Shape + ExtrudeGeometry + 绕机身轴外倾（cant）
+ *
+ * 三个阵营一眼可辨：
+ * - 玩家机：浅灰 / 白机体，橙色尾焰，座舱盖；
+ * - 友军僚机：玩家机同族的独立机体，钢蓝 + 金色识别，金色频闪，座舱盖；
+ * - 敌方无人机：深炮铜 / 炭黑机体（与敌方地面 / 海上单位同族），红色自发光饰条、红色尾焰，
+ *   没有座舱玻璃（红色传感器“独眼”），没有红绿航行灯，全机不出现金 / 黄色。
+ *
+ * 敌机与友军机的根节点声明 userData.hitRadius（米）= 2.5 × 机体缩放，
+ * 以及 userData.faction（Faction.ENEMY / Faction.FRIENDLY，与单位网格的约定一致）。
  */
 
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { Faction } from '@/core/Faction';
 import { EnemyType, ENEMY_CONFIGS } from '@/features/enemy/EnemyTypes';
 
 type EnemyConfig = (typeof ENEMY_CONFIGS)[EnemyType];
@@ -21,6 +31,7 @@ type EnemyConfig = (typeof ENEMY_CONFIGS)[EnemyType];
 interface CachedMaterials {
   body: THREE.MeshStandardMaterial;
   wing: THREE.MeshStandardMaterial;
+  /** 友军：座舱玻璃；敌方无人机：传感器整流罩的不透明外壳 */
   cockpit: THREE.MeshStandardMaterial;
   engine: THREE.MeshBasicMaterial;
   accent: THREE.MeshStandardMaterial;
@@ -46,77 +57,98 @@ function createAircraftMaterial(
   });
 }
 
+/**
+ * 敌方无人机涂装：与敌方地面 / 海上单位同族（取值对齐 UnitMeshKit 的 hHull / hDark / hRed / hGlow）。
+ * 场景没有环境贴图，金属度高的深色机体只剩高光、近乎全黑，所以机体金属度取低值，
+ * 并给一点冷灰自发光下限：夜间 / 深色背景下靠它和红色自发光饰条撑起轮廓。
+ * 全机不出现金 / 黄色（金色只代表友军）；紫色保留给电子干扰机。
+ */
+const HOSTILE_LIVERY = {
+  /** 深炮铜机体（hHull） */
+  hull: 0x3b4048,
+  /** 炭黑翼面 / 传感器整流罩（hDark） */
+  hullDark: 0x1e2228,
+  /** 机体自发光下限的色调（冷灰） */
+  hullEmissive: 0x6c7a8c,
+  /** 红色识别饰条（hRed） */
+  accent: 0xc4252d,
+  /**
+   * 红色辉光：饰条自发光、传感器“独眼”、尾焰。比 hGlow（0xff3b2b）更纯的红：对局用 ACES
+   * 色调映射，亮红会偏橙，这个取值映射后在屏幕上约为 #fe3422，仍是红而不是玩家 / 友军的橙。
+   */
+  glow: 0xff2018,
+  /** 王牌机的精英标记：亮绯红饰条 + 白热灯条 */
+  eliteAccent: 0xe5102e,
+  eliteGlow: 0xff1238,
+  eliteTrim: 0xffe9e0,
+  /** 棱线 / 检修缝 / 喷管壳体的钢灰（深色机体上的边缘高光） */
+  edge: 0x7c8693,
+  /** 挂架与弹体 */
+  weapon: 0x59606a,
+} as const;
+
 function getEnemyMaterialTuning(type: EnemyType): {
-  body: { metalness: number; roughness: number; emissiveIntensity: number };
-  wing: { metalness: number; roughness: number; emissiveIntensity: number };
-  cockpit: { metalness: number; roughness: number; emissiveIntensity: number };
-  accent: { metalness: number; roughness: number; emissiveIntensity: number };
+  /** 机体 / 翼面的冷灰自发光强度 */
+  hullGlow: number;
+  /** 识别饰条的自发光颜色与强度 */
+  accentEmissive: number;
+  accentGlow: number;
+  /** 辉光件（传感器“独眼”、灯条）颜色 */
+  lightColor: number;
   detailColor: number;
-  lightOpacity: number;
   engineOpacity: number;
 } {
   switch (type) {
     case EnemyType.SCOUT:
+      // 机体最小：自发光与尾焰略强，远处仍能看见
       return {
-        body: { metalness: 0.8, roughness: 0.24, emissiveIntensity: 0.007 },
-        wing: { metalness: 0.74, roughness: 0.3, emissiveIntensity: 0.002 },
-        cockpit: { metalness: 0.96, roughness: 0.1, emissiveIntensity: 0.012 },
-        accent: { metalness: 0.86, roughness: 0.22, emissiveIntensity: 0.004 },
-        detailColor: 0xa7b0ba,
-        lightOpacity: 0.14,
-        engineOpacity: 0.22,
-      };
-    case EnemyType.FIGHTER:
-      return {
-        body: { metalness: 0.84, roughness: 0.22, emissiveIntensity: 0.008 },
-        wing: { metalness: 0.78, roughness: 0.26, emissiveIntensity: 0.002 },
-        cockpit: { metalness: 0.96, roughness: 0.1, emissiveIntensity: 0.012 },
-        accent: { metalness: 0.88, roughness: 0.19, emissiveIntensity: 0.004 },
-        detailColor: 0xb3bbc4,
-        lightOpacity: 0.14,
-        engineOpacity: 0.24,
+        hullGlow: 0.36,
+        accentEmissive: HOSTILE_LIVERY.glow,
+        accentGlow: 0.7,
+        lightColor: HOSTILE_LIVERY.glow,
+        detailColor: HOSTILE_LIVERY.edge,
+        engineOpacity: 0.72,
       };
     case EnemyType.HEAVY:
       return {
-        body: { metalness: 0.74, roughness: 0.3, emissiveIntensity: 0.005 },
-        wing: { metalness: 0.7, roughness: 0.34, emissiveIntensity: 0.003 },
-        cockpit: { metalness: 0.92, roughness: 0.14, emissiveIntensity: 0.01 },
-        accent: { metalness: 0.8, roughness: 0.24, emissiveIntensity: 0.003 },
-        detailColor: 0x949da7,
-        lightOpacity: 0.12,
-        engineOpacity: 0.22,
-      };
-    case EnemyType.SNIPER:
-      return {
-        body: { metalness: 0.82, roughness: 0.22, emissiveIntensity: 0.007 },
-        wing: { metalness: 0.76, roughness: 0.28, emissiveIntensity: 0.003 },
-        cockpit: { metalness: 0.96, roughness: 0.08, emissiveIntensity: 0.012 },
-        accent: { metalness: 0.86, roughness: 0.18, emissiveIntensity: 0.004 },
-        detailColor: 0xaab3bc,
-        lightOpacity: 0.13,
-        engineOpacity: 0.21,
+        hullGlow: 0.28,
+        accentEmissive: HOSTILE_LIVERY.glow,
+        accentGlow: 0.6,
+        lightColor: HOSTILE_LIVERY.glow,
+        detailColor: 0x6d7682,
+        engineOpacity: 0.66,
       };
     case EnemyType.ACE:
       return {
-        body: { metalness: 0.86, roughness: 0.2, emissiveIntensity: 0.009 },
-        wing: { metalness: 0.8, roughness: 0.24, emissiveIntensity: 0.003 },
-        cockpit: { metalness: 0.98, roughness: 0.08, emissiveIntensity: 0.012 },
-        accent: { metalness: 0.9, roughness: 0.16, emissiveIntensity: 0.005 },
-        detailColor: 0xaaa6a2,
-        lightOpacity: 0.14,
-        engineOpacity: 0.23,
+        hullGlow: 0.2,
+        accentEmissive: HOSTILE_LIVERY.eliteGlow,
+        accentGlow: 0.85,
+        lightColor: HOSTILE_LIVERY.eliteGlow,
+        detailColor: HOSTILE_LIVERY.edge,
+        engineOpacity: 0.7,
       };
+    case EnemyType.FIGHTER:
+    case EnemyType.SNIPER:
     default:
       return {
-        body: { metalness: 0.7, roughness: 0.3, emissiveIntensity: 0.006 },
-        wing: { metalness: 0.62, roughness: 0.38, emissiveIntensity: 0.003 },
-        cockpit: { metalness: 0.92, roughness: 0.12, emissiveIntensity: 0.01 },
-        accent: { metalness: 0.82, roughness: 0.24, emissiveIntensity: 0.005 },
-        detailColor: 0xcfd6df,
-        lightOpacity: 0.95,
-        engineOpacity: 0.8,
+        hullGlow: 0.3,
+        accentEmissive: HOSTILE_LIVERY.glow,
+        accentGlow: 0.6,
+        lightColor: HOSTILE_LIVERY.glow,
+        detailColor: HOSTILE_LIVERY.edge,
+        engineOpacity: 0.66,
       };
   }
+}
+
+function createHostileHullMaterial(color: number, glow: number): THREE.MeshStandardMaterial {
+  return new THREE.MeshStandardMaterial({
+    color,
+    metalness: 0.34,
+    roughness: 0.56,
+    emissive: HOSTILE_LIVERY.hullEmissive,
+    emissiveIntensity: glow,
+  });
 }
 
 function getOrCreateMaterials(
@@ -130,49 +162,30 @@ function getOrCreateMaterials(
   const tuning = getEnemyMaterialTuning(type);
 
   const materials: CachedMaterials = {
-    body: createAircraftMaterial(
-      bodyColor,
-      tuning.body.metalness,
-      tuning.body.roughness,
-      tuning.body.emissiveIntensity
-    ),
-    wing: createAircraftMaterial(
-      wingColor,
-      tuning.wing.metalness,
-      tuning.wing.roughness,
-      tuning.wing.emissiveIntensity
-    ),
-    cockpit: new THREE.MeshStandardMaterial({
-      color: 0x1f252c,
-      metalness: tuning.cockpit.metalness,
-      roughness: tuning.cockpit.roughness,
-      transparent: true,
-      opacity: 0.88,
-      emissive: 0x486170,
-      emissiveIntensity: tuning.cockpit.emissiveIntensity,
-    }),
+    body: createHostileHullMaterial(bodyColor, tuning.hullGlow),
+    // 翼面的自发光下限更低：暗处机身比翼面亮一档，轮廓有层次
+    wing: createHostileHullMaterial(wingColor, tuning.hullGlow * 0.6),
+    cockpit: createAircraftMaterial(HOSTILE_LIVERY.hullDark, 0.5, 0.36, 0.1),
     engine: (() => {
       const engineMaterial = new THREE.MeshBasicMaterial({
-        color: 0xff6600,
+        color: HOSTILE_LIVERY.glow,
         transparent: true,
         opacity: tuning.engineOpacity,
       });
       registerEngineGlowMaterial(engineMaterial);
       return engineMaterial;
     })(),
-    accent: createAircraftMaterial(
-      accentColor,
-      tuning.accent.metalness,
-      tuning.accent.roughness,
-      tuning.accent.emissiveIntensity
-    ),
-    detail: createAircraftMaterial(tuning.detailColor, 0.45, 0.6, 0),
-    light: new THREE.MeshBasicMaterial({
-      color: 0x7fd7ff,
-      transparent: true,
-      opacity: tuning.lightOpacity,
+    accent: new THREE.MeshStandardMaterial({
+      color: accentColor,
+      metalness: 0.2,
+      roughness: 0.48,
+      emissive: tuning.accentEmissive,
+      emissiveIntensity: tuning.accentGlow,
     }),
-    weapon: createAircraftMaterial(accentColor, 0.88, 0.24, 0.02),
+    // 钢灰边缘高光带一半自发光：暗处仍是一条可见的冷色细线
+    detail: createAircraftMaterial(tuning.detailColor, 0.45, 0.55, 0.5),
+    light: new THREE.MeshBasicMaterial({ color: tuning.lightColor }),
+    weapon: createAircraftMaterial(HOSTILE_LIVERY.weapon, 0.5, 0.45, 0.03),
   };
 
   materialsCache.set(type, materials);
@@ -193,6 +206,33 @@ const signalLightMaterials = {
 const alliedSignalMaterials = {
   strobe: new THREE.MeshBasicMaterial({ color: 0xffd24a, transparent: true, opacity: 0.85 }),
   beacon: new THREE.MeshBasicMaterial({ color: 0xffc23a, transparent: true, opacity: 0.55 }),
+};
+
+/** 一架飞机的四盏包围盒信号灯（左 / 右翼尖、机尾、机腹）各用哪种材质 */
+interface SignalLightSet {
+  port: THREE.Material;
+  starboard: THREE.Material;
+  strobe: THREE.Material;
+  beacon: THREE.Material;
+}
+/** 玩家机：左红右绿航行灯 + 白色双闪 + 红色防撞灯 */
+const playerSignalLights: SignalLightSet = signalLightMaterials;
+/** 友军僚机：左红右绿航行灯 + 金色识别频闪 / 信标 */
+const alliedSignalLights: SignalLightSet = {
+  port: signalLightMaterials.port,
+  starboard: signalLightMaterials.starboard,
+  strobe: alliedSignalMaterials.strobe,
+  beacon: alliedSignalMaterials.beacon,
+};
+/**
+ * 敌方无人机：没有红绿航行灯——两个翼尖都是红色位置灯，机尾 / 机腹是红色呼吸信标。
+ * 复用已有的两种红色材质，不新增逐帧驱动。
+ */
+const hostileSignalLights: SignalLightSet = {
+  port: signalLightMaterials.port,
+  starboard: signalLightMaterials.port,
+  strobe: signalLightMaterials.beacon,
+  beacon: signalLightMaterials.beacon,
 };
 const signalLightGeometry = new THREE.SphereGeometry(0.09, 6, 6);
 const engineGlowMaterials: Array<THREE.Material & { opacity: number }> = [];
@@ -296,17 +336,57 @@ const afterburnerHaloMaterial = new THREE.MeshBasicMaterial({
   depthWrite: false,
 });
 registerEngineGlowMaterial(afterburnerHaloMaterial);
+// 敌方无人机的分层尾焰：红色（白热偏红的核心 + 红色外焰），同样注册进引擎闪烁驱动
+const hostileBurnerCoreMaterial = new THREE.MeshBasicMaterial({
+  color: 0xff7a62,
+  transparent: true,
+  opacity: 0.82,
+  blending: THREE.AdditiveBlending,
+  depthWrite: false,
+});
+registerEngineGlowMaterial(hostileBurnerCoreMaterial);
+const hostileBurnerHaloMaterial = new THREE.MeshBasicMaterial({
+  color: 0xff2014,
+  transparent: true,
+  opacity: 0.36,
+  blending: THREE.AdditiveBlending,
+  depthWrite: false,
+});
+registerEngineGlowMaterial(hostileBurnerHaloMaterial);
+
+/** 喷口的两层叠加尾焰（核心亮盘 + 外层淡焰锥）用哪一组材质 */
+interface ExhaustFlameMaterials {
+  core: THREE.MeshBasicMaterial;
+  halo: THREE.MeshBasicMaterial;
+}
+/** 橙金尾焰：友军僚机 */
+const alliedExhaustFlame: ExhaustFlameMaterials = {
+  core: afterburnerCoreMaterial,
+  halo: afterburnerHaloMaterial,
+};
+/** 红色尾焰：敌方无人机 */
+const hostileExhaustFlame: ExhaustFlameMaterials = {
+  core: hostileBurnerCoreMaterial,
+  halo: hostileBurnerHaloMaterial,
+};
 // 敌机进气道内腔：所有机型同色，模块级共享
 const enemyCavityMaterial = new THREE.MeshStandardMaterial({
   color: 0x161a20,
   metalness: 0.42,
   roughness: 0.72,
 });
+// 王牌机的精英白热灯条（只有王牌机使用，模块级共享）
+const eliteTrimMaterial = new THREE.MeshBasicMaterial({ color: HOSTILE_LIVERY.eliteTrim });
 
 /**
  * 依据机体包围盒追加航空灯组。tailDirection 指向机尾（+1 表示尾部在 +Z）。
+ * lights 决定四盏灯的材质（玩家 / 友军 / 敌方各一组）；网格名三个阵营一致，机库按名字隐藏。
  */
-function addNavigationLights(group: THREE.Group, tailDirection: 1 | -1): void {
+function addNavigationLights(
+  group: THREE.Group,
+  tailDirection: 1 | -1,
+  lights: SignalLightSet
+): void {
   const bounds = new THREE.Box3().setFromObject(group);
   if (bounds.isEmpty()) {
     return;
@@ -317,27 +397,27 @@ function addNavigationLights(group: THREE.Group, tailDirection: 1 | -1): void {
   bounds.max.divide(group.scale);
   const center = bounds.getCenter(new THREE.Vector3());
 
-  const portLight = new THREE.Mesh(signalLightGeometry, signalLightMaterials.port);
+  const portLight = new THREE.Mesh(signalLightGeometry, lights.port);
   portLight.position.set(bounds.min.x + 0.06, center.y + 0.02, center.z);
   portLight.name = 'navLightPort';
   portLight.userData.sharedResource = true;
   group.add(portLight);
 
-  const starboardLight = new THREE.Mesh(signalLightGeometry, signalLightMaterials.starboard);
+  const starboardLight = new THREE.Mesh(signalLightGeometry, lights.starboard);
   starboardLight.position.set(bounds.max.x - 0.06, center.y + 0.02, center.z);
   starboardLight.name = 'navLightStarboard';
   starboardLight.userData.sharedResource = true;
   group.add(starboardLight);
 
   const tailZ = tailDirection > 0 ? bounds.max.z - 0.08 : bounds.min.z + 0.08;
-  const strobeLight = new THREE.Mesh(signalLightGeometry, signalLightMaterials.strobe);
+  const strobeLight = new THREE.Mesh(signalLightGeometry, lights.strobe);
   strobeLight.position.set(center.x, center.y + (bounds.max.y - center.y) * 0.55, tailZ);
   strobeLight.scale.setScalar(0.85);
   strobeLight.name = 'strobeLight';
   strobeLight.userData.sharedResource = true;
   group.add(strobeLight);
 
-  const beaconLight = new THREE.Mesh(signalLightGeometry, signalLightMaterials.beacon);
+  const beaconLight = new THREE.Mesh(signalLightGeometry, lights.beacon);
   beaconLight.position.set(center.x, bounds.min.y + 0.05, center.z);
   beaconLight.scale.setScalar(0.8);
   beaconLight.name = 'beaconLight';
@@ -563,7 +643,7 @@ function addStore(
  * 引擎喷口与分层加力尾焰。
  * exit 为喷口出口平面中心，tailDirection 指向机尾（+1 = 机尾在 +Z）。
  * 组成：收敛喷口外环（可选）+ 深色金属内喉 + 加力核心亮盘（叠加混合）
- * + 外层淡焰锥（叠加混合）。两层焰使用已注册的共享材质，
+ * + 外层淡焰锥（叠加混合）。两层焰使用已注册的共享材质（flame：友军橙金 / 敌方红色），
  * 由 updateAircraftSignals 的引擎闪烁驱动同步抖动。
  */
 function addExhaustDetail(
@@ -571,6 +651,7 @@ function addExhaustDetail(
   exit: [number, number, number],
   radius: number,
   tailDirection: 1 | -1,
+  flame: ExhaustFlameMaterials,
   options?: { nozzle?: boolean; flameLength?: number }
 ): void {
   const withNozzle = options?.nozzle ?? true;
@@ -607,23 +688,17 @@ function addExhaustDetail(
     }
   );
   // 加力核心亮盘（叠加）
-  addMeshPart(
-    group,
-    sharedGeometries.afterburnerDisc,
-    afterburnerCoreMaterial,
-    [exit[0], exit[1], coreZ],
-    {
-      rotation: [0, tailDirection > 0 ? 0 : Math.PI, 0],
-      scale: [radius * 0.58, radius * 0.58, 1],
-      castShadow: false,
-      shared: true,
-    }
-  );
+  addMeshPart(group, sharedGeometries.afterburnerDisc, flame.core, [exit[0], exit[1], coreZ], {
+    rotation: [0, tailDirection > 0 ? 0 : Math.PI, 0],
+    scale: [radius * 0.58, radius * 0.58, 1],
+    castShadow: false,
+    shared: true,
+  });
   // 外层淡焰锥（叠加，锥尖朝尾）
   addMeshPart(
     group,
     sharedGeometries.unitCone,
-    afterburnerHaloMaterial,
+    flame.halo,
     [exit[0], exit[1], coreZ + tailDirection * flameLength * 0.5],
     {
       rotation: [tailDirection * (Math.PI / 2), 0, 0],
@@ -634,18 +709,22 @@ function addExhaustDetail(
   );
 }
 
-/** 垂尾顶端整流舱：沿机身纵轴的小圆柱天线/灯具吊舱 + 共享频闪灯。 */
+/**
+ * 垂尾顶端整流舱：沿机身纵轴的小圆柱天线/灯具吊舱 + 共享信号灯
+ * （lightMaterial：玩家白色频闪 / 友军金色频闪 / 敌方红色信标）。
+ */
 function addFinTipPod(
   group: THREE.Group,
   position: [number, number, number],
-  length: number
+  length: number,
+  lightMaterial: THREE.Material
 ): void {
   addMeshPart(group, sharedGeometries.unitCylinder, canopyFrameMaterial, position, {
     rotation: [Math.PI / 2, 0, 0],
     scale: [0.05, length, 0.05],
     shared: true,
   });
-  const light = new THREE.Mesh(signalLightGeometry, signalLightMaterials.strobe);
+  const light = new THREE.Mesh(signalLightGeometry, lightMaterial);
   light.position.set(position[0], position[1] + 0.04, position[2]);
   light.scale.setScalar(0.45);
   light.castShadow = false;
@@ -1286,7 +1365,7 @@ export function createPlayerMesh(): THREE.Group {
   );
   // 双垂尾顶端天线吊舱（含频闪灯）
   for (const side of [1, -1] as const) {
-    addFinTipPod(group, [side * 0.9, 1.22, 1.2], 0.45);
+    addFinTipPod(group, [side * 0.9, 1.22, 1.2], 0.45, signalLightMaterials.strobe);
   }
   // 机鼻攻角探头（左右各一，向前外侧斜出）
   for (const side of [1, -1] as const) {
@@ -1324,13 +1403,13 @@ export function createPlayerMesh(): THREE.Group {
   });
 
   // 玩家机机头朝 -Z，机尾在 +Z
-  addNavigationLights(group, 1);
+  addNavigationLights(group, 1, playerSignalLights);
 
   return group;
 }
 
 // ---------------------------------------------------------------------------
-// 敌机：五种真实机型轮廓
+// 敌机：五种真实机型轮廓（敌方无人机涂装）；友军僚机机体共用同一套机头 +Z 的构件
 // ---------------------------------------------------------------------------
 
 interface EnemyBuildContext {
@@ -1338,13 +1417,52 @@ interface EnemyBuildContext {
   materials: CachedMaterials;
   weaponMaterial: THREE.MeshStandardMaterial;
   cavityMaterial: THREE.MeshStandardMaterial;
+  /** 喷口叠加尾焰（敌方红色 / 友军橙金） */
+  flame: ExhaustFlameMaterials;
+  /** 垂尾顶端吊舱上的信号灯（敌方红色信标 / 友军金色频闪） */
+  tipLight: THREE.Material;
   bodySize: number;
   bodyLength: number;
   wingSpan: number;
 }
 
-/** 敌机座舱盖：染色玻璃气泡 + 前弓风挡框 + 后拱框 + 中央纵梁 + 菲涅尔式镶边壳。 */
-function addEnemyCanopy(
+/**
+ * 敌方无人机的传感器整流罩，取代座舱盖（无人机没有玻璃舱盖）：不透明的深色鼓包 +
+ * 环绕前半圈的红色“独眼”护目带 + 中央纵脊。参数与座舱盖一致，机体轮廓不变。
+ */
+function addSensorVisor(
+  ctx: EnemyBuildContext,
+  position: [number, number, number],
+  radius: number,
+  scale: [number, number, number]
+): void {
+  const sx = radius * scale[0];
+  const sy = radius * scale[1];
+  const sz = radius * scale[2];
+  addMeshPart(ctx.group, sharedGeometries.unitSphere, ctx.materials.cockpit, position, {
+    scale: [sx, sy, sz],
+    shared: true,
+  });
+  // 护目带：略宽的扁椭球整体前移，只有前半圈露出鼓包表面，后半截埋在鼓包里
+  addMeshPart(
+    ctx.group,
+    sharedGeometries.unitSphere,
+    ctx.materials.light,
+    [position[0], position[1] + sy * 0.3, position[2] + sz * 0.3],
+    { scale: [sx * 1.04, sy * 0.3, sz * 0.78], castShadow: false, shared: true }
+  );
+  // 中央纵脊
+  addMeshPart(
+    ctx.group,
+    sharedGeometries.unitBox,
+    canopyFrameMaterial,
+    [position[0], position[1] + sy * 0.86, position[2] - sz * 0.2],
+    { scale: [0.05, 0.045, sz * 1.0], shared: true }
+  );
+}
+
+/** 友军僚机座舱盖：染色玻璃气泡 + 前弓风挡框 + 后拱框 + 中央纵梁 + 菲涅尔式镶边壳。 */
+function addBubbleCanopy(
   ctx: EnemyBuildContext,
   position: [number, number, number],
   radius: number,
@@ -1423,16 +1541,21 @@ function addEnemyEngine(
     [position[0], position[1], position[2] - radius * 1.2],
     radius * 0.95,
     -1,
+    ctx.flame,
     { flameLength: (options?.glowLength ?? radius * 4) * 0.85 }
   );
 }
 
-/** 敌机两侧进气道：箱体 + 斜切唇口 + 深色内腔（机头 +Z 方向）。 */
+/**
+ * 两侧进气道：箱体 + 斜切唇口 + 深色内腔（机头 +Z 方向）。
+ * 唇口默认用识别色（accent）；lipMaterial 可换成不抢眼的材质。
+ */
 function addIntakePair(
   ctx: EnemyBuildContext,
   position: [number, number, number],
   size: [number, number, number],
-  yaw: number
+  yaw: number,
+  lipMaterial: THREE.Material = ctx.materials.accent
 ): void {
   for (const side of [1, -1] as const) {
     addMeshPart(
@@ -1445,7 +1568,7 @@ function addIntakePair(
     addMeshPart(
       ctx.group,
       new THREE.BoxGeometry(size[0] * 1.05, size[1] * 0.2, size[2] * 0.26),
-      ctx.materials.accent,
+      lipMaterial,
       [side * position[0], position[1] + size[1] * 0.48, position[2] + size[2] * 0.46],
       { rotation: [0.3, -side * yaw, 0] }
     );
@@ -1462,6 +1585,7 @@ function addIntakePair(
 /**
  * SCOUT - 轻型侦察机：纤细机身、平直大展弦比梯形翼、单发、
  * 机鼻下传感器球、V 型尾翼、翼尖侦察吊舱。
+ * 红色识别：两个翼尖吊舱 + 机鼻下的红色“独眼” + 尾部环带。
  */
 function buildScout(ctx: EnemyBuildContext): void {
   const { group, materials, bodyLength, wingSpan } = ctx;
@@ -1487,11 +1611,13 @@ function buildScout(ctx: EnemyBuildContext): void {
     { segments: 10, widthScale: 1.05 }
   );
 
-  // 机鼻下传感器球
-  addMeshPart(group, new THREE.SphereGeometry(0.17, 10, 10), materials.cockpit, [0, -0.26, 3.05]);
+  // 机鼻下传感器球：红色“独眼”
+  addMeshPart(group, new THREE.SphereGeometry(0.17, 10, 10), materials.light, [0, -0.26, 3.05], {
+    castShadow: false,
+  });
 
-  // 座舱
-  addEnemyCanopy(ctx, [0, 0.27, 1.9], 0.26, [0.85, 0.62, 1.5]);
+  // 传感器整流罩（原座舱位置）
+  addSensorVisor(ctx, [0, 0.27, 1.9], 0.26, [0.85, 0.62, 1.5]);
 
   // 平直大展弦比梯形翼（轻微上反）
   addWingPair(
@@ -1563,10 +1689,10 @@ function buildScout(ctx: EnemyBuildContext): void {
 
   // —— 细节强化 ——
   // 主翼前缘涂装条
-  addLeadingEdgeStripPair(group, materials.accent, [0.36, 0.19, 0.14], [2.6, 0.39, -0.1], 0.1);
-  // V 型尾翼顶端天线吊舱（含频闪灯）
+  addLeadingEdgeStripPair(group, materials.accent, [0.36, 0.19, 0.14], [2.6, 0.39, -0.1], 0.14);
+  // V 型尾翼顶端天线吊舱（含信标灯）
   for (const side of [1, -1] as const) {
-    addFinTipPod(group, [side * 0.55, 0.74, -3.2], 0.36);
+    addFinTipPod(group, [side * 0.55, 0.74, -3.2], 0.36, ctx.tipLight);
   }
   // 尾部中队识别带（环绕机身的涂装带）
   addMeshPart(group, sharedGeometries.unitBox, materials.accent, [0, 0, -2.9], {
@@ -1599,6 +1725,7 @@ function buildScout(ctx: EnemyBuildContext): void {
 /**
  * FIGHTER - 鸭式三角翼战斗机（台风/阵风风格）：
  * 大三角主翼、座舱旁鸭翼、单片高垂尾、下颌进气道、双发窄间距。
+ * 红色识别：三角翼前缘的箭头形红边 + 机头棱线 + 背脊条。
  */
 function buildFighter(ctx: EnemyBuildContext): void {
   const { group, materials, weaponMaterial, cavityMaterial, bodyLength } = ctx;
@@ -1632,8 +1759,8 @@ function buildFighter(ctx: EnemyBuildContext): void {
     rotation: [0, -0.07, 0],
   });
 
-  // 座舱
-  addEnemyCanopy(ctx, [0, 0.42, 2.6], 0.3, [0.95, 0.65, 1.6]);
+  // 传感器整流罩（原座舱位置）
+  addSensorVisor(ctx, [0, 0.42, 2.6], 0.3, [0.95, 0.65, 1.6]);
 
   // 大三角主翼
   addWingPair(
@@ -1760,9 +1887,9 @@ function buildFighter(ctx: EnemyBuildContext): void {
 
   // —— 细节强化 ——
   // 三角翼前缘涂装条
-  addLeadingEdgeStripPair(group, materials.accent, [0.55, -0.02, 0.38], [3.3, -0.02, -2.92], 0.13);
-  // 垂尾顶端天线吊舱（含频闪灯）+ 垂尾前缘涂装条
-  addFinTipPod(group, [0, 1.06, -4.2], 0.55);
+  addLeadingEdgeStripPair(group, materials.accent, [0.55, -0.02, 0.38], [3.3, -0.02, -2.92], 0.18);
+  // 垂尾顶端天线吊舱（含信标灯）+ 垂尾前缘涂装条
+  addFinTipPod(group, [0, 1.06, -4.2], 0.55, ctx.tipLight);
   addLeadingEdgeStrip(group, materials.accent, [0, 0.5, -3.3], [0, 1.08, -3.87], 0.09);
   // 背脊涂装条（中队色）
   addMeshPart(group, sharedGeometries.unitBox, materials.accent, [0, 0.49, 0.2], {
@@ -1789,9 +1916,10 @@ function buildFighter(ctx: EnemyBuildContext): void {
 /**
  * HEAVY - 重型打击平台：宽扁机身、后掠下反翼、
  * 双发短舱、四个翼下挂架挂炸弹、外倾双垂尾。
+ * 红色识别：两个短舱进气口像炉膛一样发红（迎头看是一对红眼）+ 红色唇口环 + 机身侧条 + 前缘。
  */
 function buildHeavy(ctx: EnemyBuildContext): void {
-  const { group, materials, weaponMaterial, cavityMaterial, bodyLength, wingSpan } = ctx;
+  const { group, materials, weaponMaterial, bodyLength, wingSpan } = ctx;
   const nose = bodyLength * 0.645;
   const halfSpan = wingSpan / 2;
 
@@ -1815,8 +1943,8 @@ function buildHeavy(ctx: EnemyBuildContext): void {
     { segments: 10, widthScale: 1.65, heightScale: 0.8 }
   );
 
-  // 宽座舱
-  addEnemyCanopy(ctx, [0, 0.56, 4.5], 0.34, [1.25, 0.6, 1.5]);
+  // 宽传感器整流罩（原座舱位置）
+  addSensorVisor(ctx, [0, 0.56, 4.5], 0.34, [1.25, 0.6, 1.5]);
 
   // 后掠下反主翼
   addWingPair(
@@ -1834,7 +1962,7 @@ function buildHeavy(ctx: EnemyBuildContext): void {
     { dihedral: -0.09 }
   );
 
-  // 双发引擎短舱（机身两侧）+ 进气唇口 + 深色内腔
+  // 双发引擎短舱（机身两侧）+ 红色进气唇口 + 发红的进气口内腔
   for (const side of [1, -1] as const) {
     addMeshPart(
       group,
@@ -1853,9 +1981,9 @@ function buildHeavy(ctx: EnemyBuildContext): void {
     addMeshPart(
       group,
       new THREE.CylinderGeometry(0.34, 0.34, 0.1, 10),
-      cavityMaterial,
+      materials.light,
       [side * 1.35, -0.05, -2.78],
-      { rotation: [Math.PI / 2, 0, 0] }
+      { rotation: [Math.PI / 2, 0, 0], castShadow: false }
     );
   }
   // 喷焰（圆柱状尾焰，仅第一个命名 engineGlow）
@@ -1958,7 +2086,9 @@ function buildHeavy(ctx: EnemyBuildContext): void {
   // —— 细节强化 ——
   // 发动机短舱真实喷口（外环 + 内喉 + 分层加力）
   for (const side of [1, -1] as const) {
-    addExhaustDetail(group, [side * 1.35, -0.05, -6.0], 0.36, -1, { flameLength: 1.0 });
+    addExhaustDetail(group, [side * 1.35, -0.05, -6.0], 0.36, -1, ctx.flame, {
+      flameLength: 1.0,
+    });
   }
   // 机腹纵列弹架 + 三枚炸弹
   addMeshPart(group, sharedGeometries.unitBox, weaponMaterial, [0, -0.78, 0.2], {
@@ -1969,7 +2099,7 @@ function buildHeavy(ctx: EnemyBuildContext): void {
     addStore(group, weaponMaterial, materials.detail, [0, -0.97, z], 1.35, 0.16, 1, true);
   }
   // 主翼前缘涂装条
-  addLeadingEdgeStripPair(group, materials.accent, [1.1, 0.39, 0.62], [5.3, 0.1, -1.82], 0.16);
+  addLeadingEdgeStripPair(group, materials.accent, [1.1, 0.39, 0.62], [5.3, 0.1, -1.82], 0.22);
   // 翼尖整流条
   for (const side of [1, -1] as const) {
     addMeshPart(group, sharedGeometries.unitBox, materials.detail, [side * 5.32, 0.02, -1.55], {
@@ -1977,9 +2107,9 @@ function buildHeavy(ctx: EnemyBuildContext): void {
       shared: true,
     });
   }
-  // 双垂尾顶端天线吊舱（含频闪灯）
+  // 双垂尾顶端天线吊舱（含信标灯）
   for (const side of [1, -1] as const) {
-    addFinTipPod(group, [side * 1.05, 1.5, -6.0], 0.5);
+    addFinTipPod(group, [side * 1.05, 1.5, -6.0], 0.5, ctx.tipLight);
   }
   // 机背刀形天线排
   addMeshPart(group, sharedGeometries.unitBox, materials.detail, [0, 0.66, 2.6], {
@@ -2009,6 +2139,7 @@ function buildHeavy(ctx: EnemyBuildContext): void {
 /**
  * SNIPER - 远程截击机（米格-31 风格）：超长尖锐机头、
  * 巨大侧置进气道、双发大间距、双垂尾 + 腹鳍、中置细长后掠翼。
+ * 红色识别：贯穿背脊的一条长红线 + 鼻下狙击炮的红色光电窗与炮口（机头棱线 / 进气唇口是钢灰高光）。
  */
 function buildSniper(ctx: EnemyBuildContext): void {
   const { group, materials, bodyLength } = ctx;
@@ -2034,22 +2165,22 @@ function buildSniper(ctx: EnemyBuildContext): void {
     { segments: 10, widthScale: 1.2, heightScale: 0.95 }
   );
 
-  // 长机头棱线
-  addMeshPart(group, new THREE.BoxGeometry(0.24, 0.04, 2.6), materials.accent, [-0.14, 0, 4.4], {
+  // 长机头棱线（钢灰高光）
+  addMeshPart(group, new THREE.BoxGeometry(0.24, 0.04, 2.6), materials.detail, [-0.14, 0, 4.4], {
     rotation: [0, 0.05, 0],
   });
-  addMeshPart(group, new THREE.BoxGeometry(0.24, 0.04, 2.6), materials.accent, [0.14, 0, 4.4], {
+  addMeshPart(group, new THREE.BoxGeometry(0.24, 0.04, 2.6), materials.detail, [0.14, 0, 4.4], {
     rotation: [0, -0.05, 0],
   });
 
-  // 纵列双座长座舱
-  addEnemyCanopy(ctx, [0, 0.36, 3.3], 0.28, [0.8, 0.55, 2.1]);
+  // 长传感器整流罩（原纵列双座座舱位置）
+  addSensorVisor(ctx, [0, 0.36, 3.3], 0.28, [0.8, 0.55, 2.1]);
 
   // 背脊
   addMeshPart(group, new THREE.BoxGeometry(0.3, 0.14, 4.6), materials.body, [0, 0.4, -0.6]);
 
-  // 巨大侧置进气道
-  addIntakePair(ctx, [0.66, -0.02, 1.7], [0.5, 0.6, 2.6], 0.04);
+  // 巨大侧置进气道（唇口钢灰：红色留给背脊长线）
+  addIntakePair(ctx, [0.66, -0.02, 1.7], [0.5, 0.6, 2.6], 0.04, materials.detail);
 
   // 中置细长后掠翼（轻微下反）
   addWingPair(
@@ -2127,30 +2258,32 @@ function buildSniper(ctx: EnemyBuildContext): void {
   });
 
   // —— 细节强化 ——
-  // 鼻下长身管狙击炮：长炮管 + 炮口套环 + 传感器整流罩 + 光电窗
+  // 鼻下长身管狙击炮：长炮管 + 红色炮口套环 + 传感器整流罩 + 红色光电窗
   addMeshPart(group, sharedGeometries.unitCylinder, nozzleMetalMaterial, [0, -0.16, 5.4], {
     scale: [0.045, 2.4, 0.045],
     rotation: [Math.PI / 2, 0, 0],
     shared: true,
   });
-  addMeshPart(group, sharedGeometries.unitCylinder, nozzleMetalMaterial, [0, -0.16, 6.5], {
+  addMeshPart(group, sharedGeometries.unitCylinder, materials.light, [0, -0.16, 6.5], {
     scale: [0.065, 0.14, 0.065],
     rotation: [Math.PI / 2, 0, 0],
+    castShadow: false,
     shared: true,
   });
   addMeshPart(group, sharedGeometries.unitBox, materials.detail, [0, -0.26, 4.3], {
     scale: [0.16, 0.14, 0.9],
     shared: true,
   });
-  addMeshPart(group, sharedGeometries.unitSphere, materials.cockpit, [0, -0.3, 4.75], {
-    scale: [0.07, 0.06, 0.1],
+  addMeshPart(group, sharedGeometries.unitSphere, materials.light, [0, -0.3, 4.75], {
+    scale: [0.1, 0.085, 0.14],
+    castShadow: false,
     shared: true,
   });
   // 主翼前缘涂装条
-  addLeadingEdgeStripPair(group, materials.accent, [0.75, 0.05, -0.28], [2.2, 0.0, -1.52], 0.1);
-  // 双垂尾顶端天线吊舱（含频闪灯）
+  addLeadingEdgeStripPair(group, materials.accent, [0.75, 0.05, -0.28], [2.2, 0.0, -1.52], 0.14);
+  // 双垂尾顶端天线吊舱（含信标灯）
   for (const side of [1, -1] as const) {
-    addFinTipPod(group, [side * 0.63, 0.95, -5.45], 0.45);
+    addFinTipPod(group, [side * 0.63, 0.95, -5.45], 0.45, ctx.tipLight);
   }
   // 背脊中队涂装条
   addMeshPart(group, sharedGeometries.unitBox, materials.accent, [0, 0.49, -0.6], {
@@ -2173,6 +2306,7 @@ function buildSniper(ctx: EnemyBuildContext): void {
 /**
  * ACE - 前掠翼试验机（苏-47 风格）：前掠主翼、鸭翼、
  * 外倾双垂尾、双发、精英专属的发光饰条。
+ * 精英标记：亮绯红的前掠翼前缘 / 机头棱线 / 机鼻环带 + 白热灯条（翼根、背脊、尾部）。
  */
 function buildAce(ctx: EnemyBuildContext): void {
   const { group, materials, weaponMaterial, bodyLength } = ctx;
@@ -2206,8 +2340,8 @@ function buildAce(ctx: EnemyBuildContext): void {
     rotation: [0, -0.08, 0],
   });
 
-  // 座舱
-  addEnemyCanopy(ctx, [0, 0.46, 2.5], 0.3, [0.95, 0.66, 1.55]);
+  // 传感器整流罩（原座舱位置）
+  addSensorVisor(ctx, [0, 0.46, 2.5], 0.3, [0.95, 0.66, 1.55]);
 
   // 前掠主翼（翼尖朝前，苏-47 标志性轮廓）
   addWingPair(
@@ -2279,19 +2413,25 @@ function buildAce(ctx: EnemyBuildContext): void {
   // 侧置进气道
   addIntakePair(ctx, [0.74, -0.12, 0.9], [0.4, 0.5, 1.6], 0.05);
 
-  // 精英发光饰条：翼根沿前掠前缘 + 背脊 + 尾部环带
-  addMeshPart(group, new THREE.BoxGeometry(1.4, 0.03, 0.12), materials.light, [-1.3, 0.16, -0.7], {
-    rotation: [0, -0.42, 0],
-    castShadow: false,
-  });
-  addMeshPart(group, new THREE.BoxGeometry(1.4, 0.03, 0.12), materials.light, [1.3, 0.16, -0.7], {
+  // 精英白热灯条：翼根沿前掠前缘 + 背脊 + 尾部环带
+  addMeshPart(
+    group,
+    new THREE.BoxGeometry(1.4, 0.03, 0.12),
+    eliteTrimMaterial,
+    [-1.3, 0.16, -0.7],
+    {
+      rotation: [0, -0.42, 0],
+      castShadow: false,
+    }
+  );
+  addMeshPart(group, new THREE.BoxGeometry(1.4, 0.03, 0.12), eliteTrimMaterial, [1.3, 0.16, -0.7], {
     rotation: [0, 0.42, 0],
     castShadow: false,
   });
-  addMeshPart(group, new THREE.BoxGeometry(0.06, 0.03, 2.4), materials.light, [0, 0.52, 0], {
+  addMeshPart(group, new THREE.BoxGeometry(0.06, 0.03, 2.4), eliteTrimMaterial, [0, 0.52, 0], {
     castShadow: false,
   });
-  addMeshPart(group, new THREE.BoxGeometry(0.5, 0.03, 0.08), materials.light, [0, 0.34, -4.2], {
+  addMeshPart(group, new THREE.BoxGeometry(0.5, 0.03, 0.08), eliteTrimMaterial, [0, 0.34, -4.2], {
     castShadow: false,
   });
 
@@ -2359,11 +2499,11 @@ function buildAce(ctx: EnemyBuildContext): void {
       true
     );
   }
-  // 前掠主翼前缘涂装条（精英中队色）
-  addLeadingEdgeStripPair(group, materials.accent, [0.7, 0.09, -0.95], [3.6, 0.14, 0.35], 0.13);
-  // 双垂尾顶端天线吊舱（含频闪灯）
+  // 前掠主翼前缘涂装条（精英绯红）
+  addLeadingEdgeStripPair(group, materials.accent, [0.7, 0.09, -0.95], [3.6, 0.14, 0.35], 0.18);
+  // 双垂尾顶端天线吊舱（含信标灯）
   for (const side of [1, -1] as const) {
-    addFinTipPod(group, [side * 0.82, 1.1, -4.4], 0.5);
+    addFinTipPod(group, [side * 0.82, 1.1, -4.4], 0.5, ctx.tipLight);
   }
   // 机鼻中队识别带
   addMeshPart(group, sharedGeometries.unitBox, materials.accent, [0, 0, 3.6], {
@@ -2377,70 +2517,72 @@ function buildAce(ctx: EnemyBuildContext): void {
   });
 }
 
+/** 命中半径（米）= 2.5 × 机体缩放：缩放 2.0 对应沿用至今的 5 米 */
+const HIT_RADIUS_PER_SCALE = 2.5;
+
 /**
- * 创建敌机模型 - 五种真实机型轮廓（机头朝 +Z，机尾在 -Z）
+ * 创建敌机模型 - 五种真实机型轮廓（机头朝 +Z，机尾在 -Z），敌方无人机涂装。
+ * 各机型大小不同（scaleMultiplier），根节点 userData.hitRadius 随之变化；
+ * 根节点 name 是机型的 EnemyType 字符串（血条标签等按它识别）。
  */
 export function createEnemyMesh(config: EnemyConfig): THREE.Group {
   const group = new THREE.Group();
 
-  let bodyColor: number;
-  let wingColor: number;
-  let accentColor: number;
+  // 机型之间靠红色饰条的位置区分（见各 build 函数），机体色只在同一族里微调
+  let bodyColor: number = HOSTILE_LIVERY.hull;
+  let wingColor: number = 0x2b3036;
+  let accentColor: number = HOSTILE_LIVERY.accent;
   let bodySize = 1.6;
   let bodyLength = 6;
   let wingSpan = 3;
-  let scaleMultiplier = 1;
+  let scaleMultiplier = 2.0;
 
   switch (config.type) {
     case EnemyType.SCOUT:
-      bodyColor = 0xc5ccd3;
-      wingColor = 0x9ea8b3;
-      accentColor = 0x566472;
+      // 最小的机型：机体略浅一档，远处不至于只剩一个黑点
+      bodyColor = 0x464c56;
+      wingColor = 0x33383f;
       bodySize = 1.42;
       bodyLength = 6.2;
       wingSpan = 5.4;
-      scaleMultiplier = 2.0;
+      scaleMultiplier = 1.5;
       break;
     case EnemyType.FIGHTER:
-      bodyColor = 0xc9d0d6;
-      wingColor = 0xa8b2bc;
-      accentColor = 0x56616d;
       bodySize = 1.86;
       bodyLength = 8.4;
       wingSpan = 7.4;
       scaleMultiplier = 2.0;
       break;
     case EnemyType.HEAVY:
-      bodyColor = 0xb0b7bf;
-      wingColor = 0x8f98a3;
-      accentColor = 0x4b5560;
+      bodyColor = 0x363a42;
+      wingColor = 0x272b31;
       bodySize = 2.52;
       bodyLength = 10.6;
       wingSpan = 10.8;
-      scaleMultiplier = 2.0;
+      scaleMultiplier = 3.0;
       break;
     case EnemyType.SNIPER:
-      bodyColor = 0xc2cad2;
-      wingColor = 0x9aa5af;
-      accentColor = 0x4f5d6a;
+      wingColor = 0x2e3339;
       bodySize = 1.6;
       bodyLength = 10.4;
       wingSpan = 6.6;
-      scaleMultiplier = 2.0;
+      scaleMultiplier = 2.1;
       break;
     case EnemyType.ACE:
-      bodyColor = 0xd0d4d8;
-      wingColor = 0xa5adb6;
-      accentColor = 0x7a5046;
+      // 精英：近黑机体 + 亮绯红饰条
+      bodyColor = 0x2a2d34;
+      wingColor = HOSTILE_LIVERY.hullDark;
+      accentColor = HOSTILE_LIVERY.eliteAccent;
       bodySize = 2.04;
       bodyLength = 8.8;
       wingSpan = 7.8;
-      scaleMultiplier = 2.0;
+      scaleMultiplier = 2.2;
       break;
     default:
-      bodyColor = config.color;
-      wingColor = config.color;
-      accentColor = config.color;
+      // 还没有专属机体的机型：通用敌方涂装 + 王牌机轮廓，缩放 2.0
+      bodySize = 2.04;
+      bodyLength = 8.8;
+      wingSpan = 7.8;
   }
 
   group.scale.set(scaleMultiplier, scaleMultiplier, scaleMultiplier);
@@ -2454,6 +2596,8 @@ export function createEnemyMesh(config: EnemyConfig): THREE.Group {
     materials,
     weaponMaterial,
     cavityMaterial,
+    flame: hostileExhaustFlame,
+    tipLight: hostileSignalLights.beacon,
     bodySize,
     bodyLength,
     wingSpan,
@@ -2479,16 +2623,19 @@ export function createEnemyMesh(config: EnemyConfig): THREE.Group {
   }
 
   // 敌机机头朝 +Z，机尾在 -Z
-  addNavigationLights(group, -1);
+  addNavigationLights(group, -1, hostileSignalLights);
 
   group.name = config.type;
+  group.userData.faction = Faction.ENEMY;
+  group.userData.hitRadius = HIT_RADIUS_PER_SCALE * scaleMultiplier;
   return group;
 }
 
 // ---------------------------------------------------------------------------
-// 友军涂装：与敌机同一机体（几何、缩放、命名、命中半径完全一致），仅替换材质——
-// 钢蓝机身 + 金色识别饰条（前缘、机鼻/尾部识别带、背脊条，与 HUD 友军色一致）
-// + 金色镀膜座舱 + 金色识别频闪/信标。敌机为浅灰机身 + 深灰饰条 + 白频闪/红信标。
+// 友军僚机：玩家机同族的独立机体（融合机身、气泡座舱盖、梯形主翼、外倾双垂尾、双发），
+// 不再借用敌机机体。钢蓝机身 + 金色识别（主翼 / 垂尾前缘、背脊条、尾撑识别带，与 HUD 友军色
+// 一致）+ 金色镀膜座舱 + 金色识别频闪 / 信标 + 橙金尾焰。
+// 机头朝 +Z（与敌机一样由 lookAt 驱动），所有部件直接挂在根节点上。
 // ---------------------------------------------------------------------------
 
 const ALLIED_LIVERY = {
@@ -2504,37 +2651,31 @@ const ALLIED_LIVERY = {
   engine: 0xff8a2a,
 } as const;
 
-const friendlyMaterialsCache: Map<EnemyType, CachedMaterials> = new Map();
+/** 友军僚机的机体缩放（命中半径 5 米）与根节点名（血条按它显示“友军战斗机”/ 呼号） */
+const ALLIED_SCALE = 2.0;
+const ALLIED_MESH_NAME = EnemyType.FIGHTER;
 
-function getOrCreateFriendlyMaterials(type: EnemyType): CachedMaterials {
-  const cached = friendlyMaterialsCache.get(type);
-  if (cached) return cached;
-  const tuning = getEnemyMaterialTuning(type);
+let alliedMaterials: CachedMaterials | null = null;
+
+function getOrCreateAlliedMaterials(): CachedMaterials {
+  if (alliedMaterials) return alliedMaterials;
 
   const engine = new THREE.MeshBasicMaterial({
     color: ALLIED_LIVERY.engine,
     transparent: true,
-    opacity: tuning.engineOpacity,
+    opacity: 0.4,
   });
   registerEngineGlowMaterial(engine);
 
-  const materials: CachedMaterials = {
-    body: createAircraftMaterial(
-      ALLIED_LIVERY.body,
-      tuning.body.metalness * 0.85,
-      tuning.body.roughness + 0.06,
-      0.02
-    ),
-    wing: createAircraftMaterial(
-      ALLIED_LIVERY.wing,
-      tuning.wing.metalness * 0.85,
-      tuning.wing.roughness + 0.06,
-      0.015
-    ),
+  alliedMaterials = {
+    // 场景没有环境贴图：金属度取低值并带蓝色自发光下限，背光面也读得出钢蓝，
+    // 不会和深色的敌机混在一起
+    body: createAircraftMaterial(ALLIED_LIVERY.body, 0.3, 0.42, 0.3),
+    wing: createAircraftMaterial(ALLIED_LIVERY.wing, 0.3, 0.46, 0.26),
     cockpit: new THREE.MeshStandardMaterial({
       color: ALLIED_LIVERY.canopy,
-      metalness: tuning.cockpit.metalness,
-      roughness: tuning.cockpit.roughness,
+      metalness: 0.96,
+      roughness: 0.1,
       transparent: true,
       opacity: 0.9,
       emissive: ALLIED_LIVERY.canopyEmissive,
@@ -2550,36 +2691,243 @@ function getOrCreateFriendlyMaterials(type: EnemyType): CachedMaterials {
     }),
     weapon: createAircraftMaterial(ALLIED_LIVERY.weapon, 0.86, 0.26, 0.01),
   };
-
-  friendlyMaterialsCache.set(type, materials);
-  return materials;
+  return alliedMaterials;
 }
 
 /**
- * 创建友军飞机模型：与 createEnemyMesh 相同的机体，换成友军涂装与金色识别灯，
- * 并标记 userData.livery = 'allied'。
+ * 友军僚机机体（玩家机同族）：扁宽融合机身 + 棱线机头 + 气泡座舱盖 + 边条 + 40° 后掠梯形主翼
+ * + 全动平尾 + 外倾双垂尾 + 两侧进气道 + 双发圆喷口；翼下 / 翼尖各一对格斗弹。
  */
-export function createFriendlyMesh(config: EnemyConfig): THREE.Group {
-  const group = createEnemyMesh(config);
-  const enemyMaterials = materialsCache.get(config.type);
-  const alliedMaterials = getOrCreateFriendlyMaterials(config.type);
-  const replacements = new Map<THREE.Material, THREE.Material>([
-    [signalLightMaterials.strobe, alliedSignalMaterials.strobe],
-    [signalLightMaterials.beacon, alliedSignalMaterials.beacon],
-  ]);
-  if (enemyMaterials) {
-    for (const key of Object.keys(enemyMaterials) as Array<keyof CachedMaterials>) {
-      replacements.set(enemyMaterials[key], alliedMaterials[key]);
-    }
+function buildAlliedFighter(ctx: EnemyBuildContext): void {
+  const { group, materials, weaponMaterial } = ctx;
+
+  // 融合机身：扁宽旋成体，尾端收圆，双发喷管从两侧伸出
+  addFuselage(
+    group,
+    [
+      [0.03, -3.85],
+      [0.42, -3.6],
+      [0.56, -2.9],
+      [0.68, -1.6],
+      [0.72, -0.2],
+      [0.66, 1.1],
+      [0.5, 2.3],
+      [0.28, 3.3],
+      [0.08, 4.0],
+      [0.02, 4.3],
+    ],
+    materials.body,
+    1,
+    { segments: 10, widthScale: 1.3, heightScale: 0.9 }
+  );
+
+  // 棱线机头
+  for (const side of [1, -1] as const) {
+    addMeshPart(group, sharedGeometries.unitBox, materials.wing, [side * 0.33, 0, 3.0], {
+      scale: [0.62, 0.06, 2.3],
+      rotation: [0, -side * 0.13, 0],
+      shared: true,
+    });
   }
-  group.traverse((object) => {
-    if (object instanceof THREE.Mesh && !Array.isArray(object.material)) {
-      const replacement = replacements.get(object.material);
-      if (replacement) {
-        object.material = replacement;
-      }
-    }
+
+  // 气泡座舱盖（金色镀膜）
+  addBubbleCanopy(ctx, [0, 0.5, 1.75], 0.5, [0.95, 0.64, 1.75]);
+
+  // 前缘根部延伸（LERX）
+  addWingPair(
+    group,
+    [
+      [0, 0],
+      [0.7, 0.08],
+      [0, 1.9],
+    ],
+    0.06,
+    materials.wing,
+    [0.62, 0.12, 0.9],
+    1
+  );
+
+  // 主翼：~40° 前缘后掠梯形翼，强收窄，轻微下反
+  addWingPair(
+    group,
+    [
+      [0, 1.7],
+      [2.75, -1.0],
+      [2.75, -1.6],
+      [0, -1.7],
+    ],
+    0.08,
+    materials.wing,
+    [0.66, -0.02, -0.5],
+    1,
+    { dihedral: -0.05 }
+  );
+
+  // 全动平尾
+  addWingPair(
+    group,
+    [
+      [0, 0.8],
+      [1.5, -0.25],
+      [1.5, -0.65],
+      [0, -0.85],
+    ],
+    0.06,
+    materials.wing,
+    [0.6, 0, -3.2],
+    1,
+    { dihedral: -0.04 }
+  );
+
+  // 外倾双垂尾
+  addFinPair(
+    group,
+    [
+      [0, 0],
+      [1.75, 0],
+      [1.15, 1.6],
+      [0.45, 1.6],
+    ],
+    0.06,
+    materials.wing,
+    [0.85, 0.3, -3.75],
+    1,
+    0.3
+  );
+
+  // 两侧进气道
+  addIntakePair(ctx, [0.92, -0.12, 0.7], [0.5, 0.48, 1.9], 0.05, materials.wing);
+
+  // 尾部平台与尾撑
+  addMeshPart(group, sharedGeometries.unitBox, materials.body, [0, 0.24, -2.8], {
+    scale: [1.75, 0.14, 2.1],
+    shared: true,
   });
-  group.userData.livery = 'allied';
+  for (const side of [1, -1] as const) {
+    addMeshPart(group, sharedGeometries.unitBox, materials.wing, [side * 1.08, 0, -3.0], {
+      scale: [0.44, 0.3, 1.7],
+      shared: true,
+    });
+  }
+
+  // 双发圆喷口 + 橙金尾焰（仅第一个命名 engineGlow）
+  addEnemyEngine(ctx, [-0.36, -0.02, -3.75], 0.3, { name: 'engineGlow', glowLength: 1.1 });
+  addEnemyEngine(ctx, [0.36, -0.02, -3.75], 0.3, { glowLength: 1.1 });
+
+  // 腹鳍
+  for (const side of [1, -1] as const) {
+    addMeshPart(group, sharedGeometries.unitBox, materials.detail, [side * 0.6, -0.46, -2.6], {
+      scale: [0.05, 0.42, 0.9],
+      rotation: [0, 0, -side * 0.35],
+      shared: true,
+    });
+  }
+
+  // 翼下挂架 + 格斗弹，翼尖发射轨 + 格斗弹
+  for (const side of [1, -1] as const) {
+    addMeshPart(group, sharedGeometries.unitBox, weaponMaterial, [side * 1.7, -0.24, -0.7], {
+      scale: [0.09, 0.24, 0.8],
+      shared: true,
+    });
+    addStore(
+      group,
+      weaponMaterial,
+      materials.detail,
+      [side * 1.7, -0.46, -0.65],
+      1.3,
+      0.08,
+      1,
+      true
+    );
+    addMeshPart(group, sharedGeometries.unitBox, weaponMaterial, [side * 3.44, -0.16, -1.75], {
+      scale: [0.07, 0.09, 1.5],
+      shared: true,
+    });
+    addStore(
+      group,
+      weaponMaterial,
+      materials.detail,
+      [side * 3.44, -0.27, -1.8],
+      1.4,
+      0.075,
+      1,
+      true
+    );
+  }
+
+  // —— 金色识别 ——
+  // 主翼前缘
+  addLeadingEdgeStripPair(group, materials.accent, [0.72, -0.01, 1.14], [3.4, -0.15, -1.52], 0.16);
+  // 垂尾前缘 + 垂尾顶端吊舱（金色识别频闪）
+  addLeadingEdgeStripPair(group, materials.accent, [0.85, 0.3, -2.0], [1.32, 1.83, -2.6], 0.1);
+  for (const side of [1, -1] as const) {
+    addFinTipPod(group, [side * 1.33, 1.86, -2.95], 0.7, ctx.tipLight);
+  }
+  // 背脊整流罩 + 背脊条
+  addMeshPart(group, sharedGeometries.unitBox, materials.body, [0, 0.58, -0.9], {
+    scale: [0.26, 0.14, 2.8],
+    shared: true,
+  });
+  addMeshPart(group, sharedGeometries.unitBox, materials.accent, [0, 0.66, -0.9], {
+    scale: [0.2, 0.025, 2.6],
+    castShadow: false,
+    shared: true,
+  });
+  // 尾撑顶面识别带
+  for (const side of [1, -1] as const) {
+    addMeshPart(group, sharedGeometries.unitBox, materials.accent, [side * 1.08, 0.16, -2.5], {
+      scale: [0.46, 0.03, 0.32],
+      castShadow: false,
+      shared: true,
+    });
+  }
+
+  // 细节：机身侧编队灯条（金色）/ 空速管 / 背部刀形天线
+  for (const side of [1, -1] as const) {
+    addMeshPart(group, sharedGeometries.unitBox, materials.light, [side * 0.94, 0.08, -0.5], {
+      scale: [0.02, 0.05, 1.6],
+      castShadow: false,
+      shared: true,
+    });
+  }
+  addMeshPart(group, sharedGeometries.unitCylinder, materials.detail, [0, 0, 4.48], {
+    scale: [0.016, 0.4, 0.016],
+    rotation: [Math.PI / 2, 0, 0],
+    shared: true,
+  });
+  addMeshPart(group, sharedGeometries.unitBox, materials.detail, [0, 0.74, -1.6], {
+    scale: [0.03, 0.16, 0.24],
+    shared: true,
+  });
+}
+
+/**
+ * 创建友军僚机模型：玩家机同族的独立机体，与 config.type 无关（参数只为保持调用方签名）。
+ * 根节点 name 固定为 'FIGHTER'，userData.faction = Faction.FRIENDLY（尾迹等按它分辨阵营），
+ * userData.hitRadius = 5。
+ */
+export function createFriendlyMesh(_config: EnemyConfig): THREE.Group {
+  const group = new THREE.Group();
+  group.scale.setScalar(ALLIED_SCALE);
+
+  const materials = getOrCreateAlliedMaterials();
+  buildAlliedFighter({
+    group,
+    materials,
+    weaponMaterial: materials.weapon,
+    cavityMaterial: enemyCavityMaterial,
+    flame: alliedExhaustFlame,
+    tipLight: alliedSignalLights.strobe,
+    bodySize: 1.9,
+    bodyLength: 8.2,
+    wingSpan: 6.9,
+  });
+
+  // 机头朝 +Z，机尾在 -Z
+  addNavigationLights(group, -1, alliedSignalLights);
+
+  group.name = ALLIED_MESH_NAME;
+  group.userData.faction = Faction.FRIENDLY;
+  group.userData.hitRadius = HIT_RADIUS_PER_SCALE * ALLIED_SCALE;
   return group;
 }
