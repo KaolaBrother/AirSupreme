@@ -1,6 +1,6 @@
 # AirSupreme - 持续实施计划
 
-最后更新: `2026-10-09`
+最后更新: `2026-10-10`
 状态: `进行中`
 用途: 这是当前项目后续开发的单一计划源。后续非 trivial 改动，应优先对齐这份文件，并在完成重要阶段后更新状态。
 
@@ -149,6 +149,26 @@
   - 验收：`tsc` / `lint` / `test:run` / `build` 全部通过；无头 Chromium 复现脚本证明阻断与主要问题已消失
 - [done] 复验通过后合并 `workflow/ten-level-campaign` → `main` 并推送，同步本地克隆
 - [watch] 后续可选：第 1 个 Boss 威胁偏低、第 10 关波次压力波动、`GameScene` 阴影相机范围、远端过期 WIP 分支（`batch/audio`、`batch/progression`、`batch/story-ui`，需用户确认后删除）
+
+### 操控与武器体验轮次（`workflow/ipad-controls-weapons`，从 `5b4e1ac` 起）
+用户反馈（iPad 实机）：触控手感怪；第 1 关击落两架敌机后雷达剩一个红色方块、找不到目标、卡关；座舱视角几乎看不到外面；导弹锁定系统坏了、开局很难锁定；希望整套玩家武器更清楚、更好玩、更容易上手；点雷达可放大看关卡地图；武器多样性是否足够。
+
+已复现 / 实测的根因（无头之外的真实浏览器，1180×820）：
+- 卡关：第 1 关第 1 波 = 2 架敌机 + 1 辆坦克，波次要等坦克被毁（`UnitController.getWaveHoldCount`）；敌方单位从未进入 `CombatHudFeed.updateHealthBars`，屏幕上没有任何标记（200 m 正对也看不见）；雷达把量程外的点贴边画成普通点；唯一出路是 150 秒静默超时。
+- 锁定：锁定圈画在屏幕中心，但第三人称下机头 / 炮线投影在中心上方约 170 px（圈半径 90 px，触控 74 px）——机头正对目标按住导弹键 5-6 秒始终 `search`；第一人称下一切正常。另：出圈一帧即清零、自动发射不可取消、没有任何机炮准星、导弹 50 伤害打不死 60 血的侦察机。
+- 触控：摇杆被阈值化成 4 个布尔量（满速或不转）、拇指滑出 108 px 即失效、布局固定在手机尺寸贴角、触控无横滚且带输入时不回平、加力只能按住、iPad 上仿真 30 Hz。
+- 座舱：仪表板 + 遮光罩约占 4:3 屏幕下方 40%，没有瞄准标记。
+
+批次（各自独立 worktree，文件互不重叠；共享文件只做局部追加，由主代理合并）：
+- [active] `T - 触控与飞行手感`：模拟量摇杆（径向死区 + 指数曲线）、浮动摇杆（不会掉杆）、平板档布局（短边 ≥ 700 px）、触控辅助飞行（绕世界竖轴偏航 + 自动压坡度 / 回平，键盘不变）、加力点按锁存、`touchcancel` / 失焦复位、键盘与触控合并、平板 60 Hz 仿真 — owned：`src/core/Input/InputHandler.ts`、`src/features/player/PlayerController.ts`、`index.html`、`src/config.ts`（除 `MISSILE`）、`src/core/GameLoop.ts`、`src/main.ts`
+- [active] `M - 目标标记与雷达地图`：敌方地 / 海 / 空单位与敌机同等的血条 + 具体名称 + 屏外箭头，小目标加方括号与距离；敌机清空后高亮剩余目标并提示一次；防卡关 150 s → 60 s（玩家打中即重置）；雷达量程外的点用不同画法；点雷达展开全战场地图（北向上、地形底图、图例），触控端雷达移到左上并在平板放大 — owned：`src/core/hud/CombatHudFeed.ts`、`src/ui/EnemyHealthBars.ts`、`src/ui/RadarMinimap.ts`、`src/core/units/UnitController.ts`、`src/features/units/**`、`src/core/PresentationController.ts`（雷达 / 血条局部）
+- [active] `W - 锁定与武器 HUD`：常显准星画在机头真实指向（两种视角一致），锁定圈以准星为中心；常开搜索、无需“进入锁定模式”；出圈有保持圈 / 宽限 / 衰减而非清零；点按发射（锁定前按住则锁定即发）；锁定反馈（收紧的角括号、LOCK + 距离、提示音、MSL 按钮高亮）；导弹 80 伤害 / 起始 3 枚 / 对敌机近炸 6 m；机炮提前量标记 + 触控端轻度辅助瞄准；导弹读数带标签、MSL 按钮显示数量与装填；教学与图例文案改成真实操作 — owned：`src/ui/LockOnIndicator.ts`、`src/core/GameCoordinator.ts`、`src/ui/HUD.ts`、`src/ui/theme/**`、`src/ui/StartMenu.ts`、`src/features/combat/MissileSystem.ts`、`src/core/systems/CombatSystem.ts`、`src/core/systems/PlayerSystem.ts`（机炮段）、`src/features/upgrade/UpgradeSystem.ts`、`src/core/dev/**`、`src/config.ts`（仅 `MISSILE`）
+- [active] `C - 座舱视角`：审计实测座舱遮挡 38-40%（遮光罩顶在准线下 11°，设计意图是 16°）、HUD 玻璃是空的且偏在准线下方；目标——4:3 遮挡 ≤ 27%、遮光罩顶 ≥ 18°、风挡立柱变细、HUD 玻璃移到准线并框住锁定圈；特殊武器烟雾 / 闪光在第一人称下近镜头淡出；竖屏水平视场不低于约 70° — owned：`src/features/camera/**`、`src/core/camera/PlayerViewController.ts`、`src/features/weapons/WeaponParticleField.ts` / `WeaponFxParticles.ts` / `WeaponFx.ts` / `ProjectileController.ts`、`src/scenes/GameScene.ts`（相机 / resize 段）
+  - 审计另一发现归 `W`：玩家导弹出生在飞行员眼睛后下方 0.3 m，第一人称下从镜头里穿出去（弹体 + 尾焰白球 + 约 2 秒烟雾正好盖住目标）——改为翼下挂点交替发射、直飞 0.2 秒再制导、尾焰 / 烟雾渐入（`GameCoordinator.fireMissile`、`MissileSystem.ts`、`trailRecipes.ts` 玩家导弹段）
+- [next] `X - 测试`（独立测试作者，实现者不写测试）：按新规格更新过期测试并补新行为的规格测试 — owned：`src/__tests__/**`、`*.test.ts`
+- [next] `D - 文档`：README / README.zh-CN、CHANGELOG、`docs/**`
+- 验收：`tsc` / `lint` / `test:run` / `build` 全绿；真实浏览器里 iPad 尺寸下复测——第 1 关第 1 波能找到并击毁坦克、第三人称机头对准即可锁定并点按发射、雷达可点开、座舱视野、触控布局。
+- 待用户决定（本轮不做）：敌机攻击方式多样化（五种敌机目前共用同一种单发子弹；第 5 关之后没有新的波次敌人）。
 
 ## 当前概览
 
