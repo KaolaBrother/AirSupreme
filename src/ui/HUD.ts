@@ -341,6 +341,8 @@ export class HUD {
   /** 失败面板当前提供的检查点重试；null 时主动作是“再来一局” */
   private settlementCheckpoint: SettlementCheckpointRetry | null = null;
   private settlementShownAt: number = 0;
+  /** 这一次结算面板上已经把回调交出去的动作键（每个只交一次）；面板再次出现时清空 */
+  private readonly settlementDelivered = new Set<HTMLButtonElement>();
   private retryButton!: HTMLButtonElement;
   private retryTitle!: HTMLSpanElement;
   private retryDetail!: HTMLSpanElement;
@@ -1230,6 +1232,12 @@ export class HUD {
     button.addEventListener('click', (event) => {
       event.preventDefault();
       event.stopPropagation();
+      // 每个动作在一次结算里只交出去一次：第一下（点击 / Enter / Space）之后同一个键再按都不算，
+      // 存档只交给宿主一次，“再来一局”和“返回菜单”也各只有一次回调，直到面板再次出现
+      if (this.settlementDelivered.has(button)) {
+        return;
+      }
+      this.settlementDelivered.add(button);
       onClick();
     });
     return button;
@@ -3234,6 +3242,7 @@ export class HUD {
    */
   private focusSettlement(): void {
     this.settlementShownAt = performance.now();
+    this.settlementDelivered.clear();
     document.addEventListener('keydown', this.handleSettlementKeydown, true);
     this.retryButton.focus({ preventScroll: true });
   }
