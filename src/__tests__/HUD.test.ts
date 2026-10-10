@@ -1,3 +1,6 @@
+import { readFileSync } from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { GAME_CONSTANTS, GameConfig } from '@/config';
 import { format, getLocale, setLocale, type Locale, type LocalizedText } from '@/i18n';
@@ -37,6 +40,10 @@ type HUDSettlement = HUD & {
 };
 
 const LAYOUT_DENSITIES: LayoutDensity[] = ['desktop', 'touch-landscape', 'touch-portrait'];
+
+const PROJECT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+/** 页面外壳：触控按键簇（#mobile-controls）写在 index.html 里 */
+const INDEX_HTML = readFileSync(path.join(PROJECT_ROOT, 'index.html'), 'utf8');
 
 const FORBIDDEN_LIFE_GLYPHS = /❤️|🖤|♥|❤/u;
 const FORBIDDEN_MISSILE_GLYPHS = /🚀|⬜/u;
@@ -665,6 +672,326 @@ describe('HUD', () => {
     expect(twoHost.innerHTML).not.toBe(atCap);
     expect(twoHost.textContent ?? '').not.toMatch(FORBIDDEN_MISSILE_GLYPHS);
     expect(geometricPips(twoHost).length).toBe(maxMissiles);
+  });
+
+  // 武器批次 W10：状态列里的生命 / 导弹读数带标签；导弹读数还有余量 n/max 与补给进度条；
+  // 触控导弹键显示余量与补给进度。
+  describe('labelled lives and missile readouts', () => {
+    const MAX_MISSILES = GAME_CONSTANTS.MISSILE.MAX_MISSILES;
+    const LIVES_LABEL_EN = 'LIVES';
+    const MISSILES_LABEL_EN = 'MSL';
+    const HAN = /\p{Script=Han}/u;
+
+    function readout(kind: 'lives' | 'missile'): HTMLElement {
+      const element = document.querySelector<HTMLElement>(`#hud [data-hud="${kind}-readout"]`);
+      expect(element, `expected a ${kind} readout in the HUD`).not.toBeNull();
+      return element as HTMLElement;
+    }
+
+    /** 读数里的文字片段（不含 pip），按文档顺序 */
+    function textsIn(root: HTMLElement): string[] {
+      return Array.from(root.querySelectorAll<HTMLElement>('*'))
+        .filter((element) => element.childElementCount === 0)
+        .map((element) => (element.textContent ?? '').trim())
+        .filter((text) => text.length > 0);
+    }
+
+    function litPips(host: HTMLElement): number {
+      return geometricPips(host).filter((pip) => pip.getAttribute('data-hud-pip') === 'on').length;
+    }
+
+    function reloadBar(): { bar: HTMLElement; fill: HTMLElement } {
+      const bar = readout('missile').querySelector<HTMLElement>('[data-hud="missile-reload"]');
+      expect(bar, 'expected a reload bar inside the missile readout').not.toBeNull();
+      const fill = (bar as HTMLElement).firstElementChild as HTMLElement | null;
+      expect(fill, 'expected the reload bar to have a fill').not.toBeNull();
+      return { bar: bar as HTMLElement, fill: fill as HTMLElement };
+    }
+
+    it('shows lives as LIVES plus the pips', () => {
+      hud.init();
+      hud.updateLives(3);
+
+      const lives = readout('lives');
+      expect(textsIn(lives)).toEqual([LIVES_LABEL_EN]);
+      const host = lives.querySelector<HTMLElement>('#hud-lives');
+      expect(host, '#hud-lives inside the lives readout').not.toBeNull();
+      expect(geometricPips(host as HTMLElement)).toHaveLength(5);
+      expect(litPips(host as HTMLElement)).toBe(3);
+    });
+
+    it('shows missiles as MSL plus the pips, an n/max count and a reload bar', () => {
+      hud.init();
+      hud.updateMissiles(2);
+      hud.updateMissileProgress(0.4);
+
+      const missiles = readout('missile');
+      expect(textsIn(missiles)).toEqual([MISSILES_LABEL_EN, `2/${MAX_MISSILES}`]);
+      const host = missiles.querySelector<HTMLElement>('#hud-missiles');
+      expect(host, '#hud-missiles inside the missile readout').not.toBeNull();
+      expect(geometricPips(host as HTMLElement)).toHaveLength(MAX_MISSILES);
+      expect(litPips(host as HTMLElement)).toBe(2);
+      expect(reloadBar().fill.style.width).toBe('40%');
+    });
+
+    it('puts both readouts in the status column', () => {
+      hud.init();
+
+      expect(readout('lives').closest('#hud-status')).not.toBeNull();
+      expect(readout('missile').closest('#hud-status')).not.toBeNull();
+      expect(readout('lives').contains(readout('missile'))).toBe(false);
+    });
+
+    it('keeps #hud-lives and #hud-missiles as the pip hosts, one of each, holding only pips', () => {
+      hud.init();
+      hud.updateLives(2);
+      hud.updateMissiles(4);
+
+      for (const [id, total] of [
+        ['hud-lives', 5],
+        ['hud-missiles', MAX_MISSILES],
+      ] as const) {
+        const hosts = document.querySelectorAll<HTMLElement>(`#${id}`);
+        expect(hosts, id).toHaveLength(1);
+        const pips = geometricPips(hosts[0]);
+        expect(pips, id).toHaveLength(total);
+        expect(hosts[0].children, id).toHaveLength(total);
+        expect((hosts[0].textContent ?? '').trim(), id).toBe('');
+      }
+      expect(litPips(document.getElementById('hud-lives') as HTMLElement)).toBe(2);
+      expect(litPips(document.getElementById('hud-missiles') as HTMLElement)).toBe(4);
+    });
+
+    it.each([
+      [0, 0],
+      [1, 1],
+      [3, 3],
+      [MAX_MISSILES, MAX_MISSILES],
+      [MAX_MISSILES + 4, MAX_MISSILES],
+      [-2, 0],
+    ])('with %i missiles the count reads %i/max and as many pips are lit', (count, shown) => {
+      hud.init();
+      hud.updateMissiles(count);
+
+      const missiles = readout('missile');
+      expect(textsIn(missiles)).toEqual([MISSILES_LABEL_EN, `${shown}/${MAX_MISSILES}`]);
+      expect(litPips(missiles.querySelector<HTMLElement>('#hud-missiles') as HTMLElement)).toBe(
+        shown
+      );
+    });
+
+    it('starts with a count that matches the pips before any update', () => {
+      hud.init();
+
+      const missiles = readout('missile');
+      const lit = litPips(missiles.querySelector<HTMLElement>('#hud-missiles') as HTMLElement);
+      const count = textsIn(missiles)[1] ?? '';
+      // 首次 update 之前计数可以留空；有内容时必须和 pip 一致
+      if (count !== '') {
+        expect(count).toBe(`${lit}/${MAX_MISSILES}`);
+      }
+    });
+
+    it.each([
+      [0, '0%'],
+      [0.25, '25%'],
+      [0.5, '50%'],
+      [1, '100%'],
+      [1.7, '100%'],
+      [-0.3, '0%'],
+    ])('reload progress %s fills the bar to %s', (progress, width) => {
+      hud.init();
+      hud.updateMissiles(1);
+      hud.updateMissileProgress(progress);
+
+      expect(reloadBar().fill.style.width).toBe(width);
+    });
+
+    function expectLabelsIn(locale: Locale): void {
+      const [livesLabel] = textsIn(readout('lives'));
+      const [missilesLabel] = textsIn(readout('missile'));
+      if (locale === 'en') {
+        expect(livesLabel).toBe(LIVES_LABEL_EN);
+        expect(missilesLabel).toBe(MISSILES_LABEL_EN);
+      } else {
+        expect(livesLabel).toMatch(HAN);
+        expect(missilesLabel).toMatch(HAN);
+        expect(livesLabel).not.toBe(missilesLabel);
+      }
+    }
+
+    it.each(LOCALES)('labels both readouts in the interface language (%s)', (locale) => {
+      setLocale(locale);
+      const instance = new HUD();
+      instance.init();
+      instance.updateMissiles(3);
+
+      expectLabelsIn(locale);
+      expect(textsIn(readout('missile'))[1]).toBe(`3/${MAX_MISSILES}`);
+      instance.dispose();
+    });
+
+    // FINDING（缺陷）：HUD 在开始菜单阶段就已创建（PresentationRuntimeLoader），进入战斗时才
+    // init()。标签只在构造函数里和“init 之后的语言切换”时写入：玩家在开始菜单里切换语言再开局，
+    // 生命 / 导弹读数的标签停在创建时的语言（例：界面已是中文，状态列仍显示 LIVES / MSL），
+    // 直到下一次切换语言。HUD.init() 已经为结算文案补写过一次（renderSettlementLabels），
+    // 状态列标签漏了。修复后去掉 .fails。
+    it.fails('uses the language picked in the start menu before the HUD first comes up', () => {
+      // hud 在 beforeEach 里以英文创建，尚未 init
+      setLocale('zh-CN');
+      hud.init();
+
+      expectLabelsIn('zh-CN');
+    });
+
+    it('comes up in English again when the language is switched back before the first mission', () => {
+      setLocale('zh-CN');
+      setLocale('en');
+      hud.init();
+
+      expectLabelsIn('en');
+    });
+
+    it('re-labels both readouts when the language changes, leaving the numbers alone', () => {
+      hud.init();
+      hud.updateLives(2);
+      hud.updateMissiles(4);
+      hud.updateMissileProgress(0.5);
+      const livesHtml = (document.getElementById('hud-lives') as HTMLElement).innerHTML;
+      const missilesHtml = (document.getElementById('hud-missiles') as HTMLElement).innerHTML;
+
+      setLocale('zh-CN');
+      const zhLives = textsIn(readout('lives'));
+      const zhMissiles = textsIn(readout('missile'));
+      expect(zhLives[0]).toMatch(HAN);
+      expect(zhMissiles[0]).toMatch(HAN);
+      expect(zhMissiles[1]).toBe(`4/${MAX_MISSILES}`);
+
+      setLocale('en');
+      expect(textsIn(readout('lives'))).toEqual([LIVES_LABEL_EN]);
+      expect(textsIn(readout('missile'))).toEqual([MISSILES_LABEL_EN, `4/${MAX_MISSILES}`]);
+      expect((document.getElementById('hud-lives') as HTMLElement).innerHTML).toBe(livesHtml);
+      expect((document.getElementById('hud-missiles') as HTMLElement).innerHTML).toBe(missilesHtml);
+      expect(reloadBar().fill.style.width).toBe('50%');
+    });
+
+    it.each(LAYOUT_DENSITIES)('keeps the labels, count and reload bar on %s', (density) => {
+      const instance = createHudFor(density);
+      instance.updateLives(1);
+      instance.updateMissiles(5);
+      instance.updateMissileProgress(0.75);
+
+      expect(textsIn(readout('lives'))).toEqual([LIVES_LABEL_EN]);
+      expect(textsIn(readout('missile'))).toEqual([MISSILES_LABEL_EN, `5/${MAX_MISSILES}`]);
+      expect(reloadBar().fill.style.width).toBe('75%');
+      instance.dispose();
+    });
+
+    describe('touch missile button', () => {
+      /** 页面里真实的触控按键簇（index.html），HUD 初始化之前就在文档里 */
+      function mountShippedMobileControls(): void {
+        const shipped = new DOMParser().parseFromString(INDEX_HTML, 'text/html');
+        const controls = shipped.getElementById('mobile-controls');
+        expect(controls, '#mobile-controls in index.html').not.toBeNull();
+        document.body.appendChild(document.importNode(controls as HTMLElement, true));
+      }
+
+      function missileButton(): HTMLElement {
+        const button = document.getElementById('missile-button');
+        expect(button, '#missile-button in index.html').not.toBeNull();
+        return button as HTMLElement;
+      }
+
+      function meter(): number {
+        const raw = missileButton().style.getPropertyValue('--tc-meter').trim();
+        expect(raw, 'expected --tc-meter on #missile-button').not.toBe('');
+        return Number(raw);
+      }
+
+      function createTouchHud(density: LayoutDensity): HUD {
+        mountShippedMobileControls();
+        return createHudFor(density);
+      }
+
+      it.each(['touch-landscape', 'touch-portrait'] as const)(
+        'shows the missile count on the button (%s)',
+        (density) => {
+          const instance = createTouchHud(density);
+
+          for (const count of [3, 2, 0, MAX_MISSILES]) {
+            instance.updateMissiles(count);
+            expect(missileButton().getAttribute('data-count')).toBe(String(count));
+          }
+          instance.updateMissiles(MAX_MISSILES + 2);
+          expect(missileButton().getAttribute('data-count')).toBe(String(MAX_MISSILES));
+          instance.dispose();
+        }
+      );
+
+      it('shows the reload progress on the button while a missile is on its way', () => {
+        const instance = createTouchHud('touch-landscape');
+        instance.updateMissiles(2);
+
+        instance.updateMissileProgress(0);
+        expect(meter()).toBe(0);
+        instance.updateMissileProgress(0.5);
+        expect(meter()).toBeCloseTo(0.5, 2);
+        instance.updateMissileProgress(0.9);
+        expect(meter()).toBeCloseTo(0.9, 2);
+        instance.updateMissileProgress(3);
+        expect(meter()).toBeCloseTo(1, 2);
+        instance.dispose();
+      });
+
+      it('shows the current stock and progress as soon as the HUD comes up', () => {
+        const instance = createTouchHud('touch-landscape');
+        instance.updateMissiles(1);
+        instance.updateMissileProgress(0.3);
+
+        // 换一种触控布局：按键上的读数还在
+        layoutHud(instance).setLayoutDensity?.('touch-portrait');
+
+        expect(missileButton().getAttribute('data-count')).toBe('1');
+        expect(meter()).toBeCloseTo(0.3, 2);
+        instance.dispose();
+      });
+
+      it('leaves the button’s own label in place', () => {
+        const instance = createTouchHud('touch-landscape');
+        const label = (missileButton().textContent ?? '').trim();
+        expect(label).not.toBe('');
+
+        instance.updateMissiles(4);
+        instance.updateMissileProgress(0.6);
+
+        expect((missileButton().textContent ?? '').trim()).toBe(label);
+        instance.dispose();
+      });
+
+      it('has styles that draw the count badge and the reload ring from those values', () => {
+        const instance = createTouchHud('touch-landscape');
+        const css = Array.from(document.querySelectorAll('style'))
+          .map((style) => style.textContent ?? '')
+          .join('\n');
+        const missileRules = [...css.matchAll(/([^{}]*#missile-button[^{}]*)\{([^}]*)\}/g)].map(
+          (match) => ({ selector: match[1].trim(), body: match[2] })
+        );
+
+        expect(
+          missileRules.some(
+            (rule) =>
+              rule.selector.includes('[data-count]') &&
+              /content:\s*attr\(data-count\)/.test(rule.body)
+          ),
+          'a #missile-button rule that prints data-count'
+        ).toBe(true);
+        expect(
+          missileRules.some((rule) => rule.body.includes('var(--tc-meter')),
+          'a #missile-button rule that draws --tc-meter'
+        ).toBe(true);
+        instance.dispose();
+      });
+    });
   });
 
   it('uses layout density desktop | touch-landscape | touch-portrait, not an isMobile-only chrome switch', () => {

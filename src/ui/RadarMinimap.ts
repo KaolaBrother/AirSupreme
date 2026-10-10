@@ -59,6 +59,19 @@ const STICK_ZONE_TOP_RATIO = 0.38;
 /** 叠放：平时与 HUD 同层；展开关卡地图时升到移动端控件（100）之上、结算面板（120）之下 */
 const Z_INDEX_COLLAPSED = '50';
 const Z_INDEX_EXPANDED = '110';
+/**
+ * 触控端的点击面（#radar-tap-target）：一块透明的圆，盖在折叠的雷达盘上，叠在移动端控件（100）
+ * 之上——左下的摇杆触摸区（#touch-stick-zone，在 #mobile-controls 里）会盖住雷达盘的下半部分
+ * （手机横屏时约 50px），手指落在那里本来会抓住摇杆。落在点击面上的触摸不经过摇杆区，
+ * 所以整个盘都能点开地图、也不会带动摇杆。
+ * 只抬高这块透明的点击面，不抬高雷达盘本身：盘仍在 50，重生遮罩（90）、受击闪红（70）照旧
+ * 盖在它上面；点击面在结算（120）、剧情卡片（150）、暂停菜单（200）之下，被它们挡住。
+ */
+const Z_INDEX_TAP_TARGET = '101';
+const TAP_TARGET_ID = 'radar-tap-target';
+/** 展开徽标：直径与伸出盘外的量（点击面按同样的位置补一块，徽标整个可点） */
+const BADGE_SIZE_PX = 22;
+const BADGE_OVERHANG_PX = 3;
 
 /** 雷达基础量程（米）；预警机等效果通过 setRangeMultiplier 放大 */
 const BASE_RANGE = 800;
@@ -91,6 +104,7 @@ const EXPAND_ICON_SVG =
   '<path d="M9.5 2.5h4v4M13.5 2.5 9 7M6.5 13.5h-4v-4M2.5 13.5 7 9"/></svg>';
 
 const SWALLOWED_EVENTS = ['touchend', 'mousedown', 'mouseup', 'click'] as const;
+const TOUCH_START_OPTIONS: AddEventListenerOptions = { passive: false };
 
 function resolveRadarSize(density: HudLayoutDensity): number {
   if (density === 'desktop') {
@@ -116,11 +130,14 @@ function isTypingTarget(target: EventTarget | null): boolean {
  * - 量程内的目标按类别画实心符号；量程外的贴在盘边，画成更小、更暗的空心符号加一截朝外的短线。
  * - 点击 / 轻触雷达（或按 N）展开屏幕中央的关卡地图（RadarLevelMap），再点地图、按 N 或 Esc 收起；
  *   游戏不暂停。雷达上的指针 / 触摸事件不会冒泡到游戏控件。
+ * - 触控端另有一块透明的点击面盖在盘上（见 Z_INDEX_TAP_TARGET）：整个盘都可点，
+ *   从盘上开始的触摸不会抓住摇杆。
  */
 export class RadarMinimap {
   private container: HTMLDivElement;
   private radarCanvas: HTMLCanvasElement;
   private expandBadge: HTMLDivElement;
+  private tapTarget: HTMLDivElement;
   private ctx: CanvasRenderingContext2D | null = null;
   private size: number = DESKTOP_SIZE_PX;
   private range: number = BASE_RANGE;
@@ -184,10 +201,10 @@ export class RadarMinimap {
     this.expandBadge.innerHTML = EXPAND_ICON_SVG;
     this.expandBadge.style.cssText = `
       position: absolute;
-      right: -3px;
-      bottom: -3px;
-      width: 22px;
-      height: 22px;
+      right: -${BADGE_OVERHANG_PX}px;
+      bottom: -${BADGE_OVERHANG_PX}px;
+      width: ${BADGE_SIZE_PX}px;
+      height: ${BADGE_SIZE_PX}px;
       box-sizing: border-box;
       display: flex;
       align-items: center;
@@ -203,14 +220,37 @@ export class RadarMinimap {
     this.container.appendChild(this.expandBadge);
     document.body.appendChild(this.container);
 
-    this.container.addEventListener('pointerdown', this.onPointerDown);
-    this.container.addEventListener('pointerup', this.onPointerUp);
-    this.container.addEventListener('pointercancel', this.onPointerAbort);
-    this.container.addEventListener('pointerleave', this.onPointerAbort);
-    this.container.addEventListener('touchstart', this.onTouchStart, { passive: false });
-    for (const type of SWALLOWED_EVENTS) {
-      this.container.addEventListener(type, this.swallowEvent);
-    }
+    // 触控端的点击面：透明，形状与雷达盘 + 展开徽标一致；尺寸、位置、显隐在 applyLayout 里跟随雷达
+    this.tapTarget = document.createElement('div');
+    this.tapTarget.id = TAP_TARGET_ID;
+    this.tapTarget.setAttribute('aria-hidden', 'true');
+    this.tapTarget.style.cssText = `
+      position: fixed;
+      display: none;
+      border-radius: 50%;
+      background: transparent;
+      pointer-events: auto;
+      cursor: pointer;
+      touch-action: none;
+      user-select: none;
+      -webkit-user-select: none;
+      -webkit-tap-highlight-color: transparent;
+      z-index: ${Z_INDEX_TAP_TARGET};
+    `;
+    const tapBadge = document.createElement('div');
+    tapBadge.style.cssText = `
+      position: absolute;
+      right: -${BADGE_OVERHANG_PX}px;
+      bottom: -${BADGE_OVERHANG_PX}px;
+      width: ${BADGE_SIZE_PX}px;
+      height: ${BADGE_SIZE_PX}px;
+      border-radius: 50%;
+    `;
+    this.tapTarget.appendChild(tapBadge);
+    document.body.appendChild(this.tapTarget);
+
+    this.bindTapSurface(this.container);
+    this.bindTapSurface(this.tapTarget);
     // 捕获阶段：地图展开时的 Esc 先由雷达处理，不再触发暂停
     window.addEventListener('keydown', this.onKeyDown, true);
 
@@ -336,6 +376,12 @@ export class RadarMinimap {
     style.boxShadow = `var(--hud-shadow, ${HUD_COLORS.shadow}), inset 0 0 14px rgba(143, 228, 255, 0.16)`;
     this.refreshLabel();
 
+    // 点击面只在触控端启用（桌面没有摇杆区盖在雷达上，雷达盘自己接收点击）
+    const tapStyle = this.tapTarget.style;
+    tapStyle.width = `${size}px`;
+    tapStyle.height = `${size}px`;
+    tapStyle.display = this.layoutDensity === 'desktop' ? 'none' : 'block';
+
     if (this.expanded && this.levelMap) {
       this.levelMap.layout(window.innerWidth, window.innerHeight, this.layoutDensity !== 'desktop');
       this.lastMapDrawAt = Number.NEGATIVE_INFINITY;
@@ -400,6 +446,12 @@ export class RadarMinimap {
     this.container.style.top = top;
     this.container.style.bottom = bottom;
     this.container.style.right = 'auto';
+    // 点击面始终与雷达盘重合
+    const tapStyle = this.tapTarget.style;
+    tapStyle.left = left;
+    tapStyle.top = top;
+    tapStyle.bottom = bottom;
+    tapStyle.right = 'auto';
   }
 
   /** 状态栏高度会变（升级点出现）、竖屏消息栈高度会变（目标卡出现 / 换行）：变化时重新定位 */
@@ -444,6 +496,29 @@ export class RadarMinimap {
   }
 
   // ───────────────────────────── 输入 ─────────────────────────────
+
+  /** 雷达盘与触控端的点击面挂同一组监听：点击判定、事件不外传 */
+  private bindTapSurface(surface: HTMLElement): void {
+    surface.addEventListener('pointerdown', this.onPointerDown);
+    surface.addEventListener('pointerup', this.onPointerUp);
+    surface.addEventListener('pointercancel', this.onPointerAbort);
+    surface.addEventListener('pointerleave', this.onPointerAbort);
+    surface.addEventListener('touchstart', this.onTouchStart, TOUCH_START_OPTIONS);
+    for (const type of SWALLOWED_EVENTS) {
+      surface.addEventListener(type, this.swallowEvent);
+    }
+  }
+
+  private unbindTapSurface(surface: HTMLElement): void {
+    surface.removeEventListener('pointerdown', this.onPointerDown);
+    surface.removeEventListener('pointerup', this.onPointerUp);
+    surface.removeEventListener('pointercancel', this.onPointerAbort);
+    surface.removeEventListener('pointerleave', this.onPointerAbort);
+    surface.removeEventListener('touchstart', this.onTouchStart, TOUCH_START_OPTIONS);
+    for (const type of SWALLOWED_EVENTS) {
+      surface.removeEventListener(type, this.swallowEvent);
+    }
+  }
 
   /** 最近刚刷新过且没有被剧情卡片收起：游戏正在进行 */
   private isLive(): boolean {
@@ -770,19 +845,14 @@ export class RadarMinimap {
     window.removeEventListener('resize', this.resizeHandler);
     window.removeEventListener('orientationchange', this.resizeHandler);
     window.removeEventListener('keydown', this.onKeyDown, true);
-    this.container.removeEventListener('pointerdown', this.onPointerDown);
-    this.container.removeEventListener('pointerup', this.onPointerUp);
-    this.container.removeEventListener('pointercancel', this.onPointerAbort);
-    this.container.removeEventListener('pointerleave', this.onPointerAbort);
-    this.container.removeEventListener('touchstart', this.onTouchStart);
-    for (const type of SWALLOWED_EVENTS) {
-      this.container.removeEventListener(type, this.swallowEvent);
-    }
+    this.unbindTapSurface(this.container);
+    this.unbindTapSurface(this.tapTarget);
     this.unsubscribeLocale();
     this.disconnectAnchors();
     this.levelMap?.dispose();
     this.levelMap = null;
     this.expanded = false;
+    this.tapTarget.remove();
     this.container.remove();
   }
 }

@@ -5,7 +5,13 @@ import { BOSS_CONFIGS, BossType, getBossForLevel } from '@/features/boss/BossTyp
 import { getCampaignChapter } from '@/features/campaign/CampaignData';
 import { ENEMY_CONFIGS, EnemyType } from '@/features/enemy/EnemyTypes';
 import { getLocale, onLocaleChange, tr, type Locale, type LocalizedText } from '@/i18n';
-import { OffscreenChevron } from '@/ui/OffscreenChevron';
+import {
+  CHEVRON_MAX_HEIGHT_PX,
+  CHEVRON_MAX_WIDTH_PX,
+  OffscreenChevron,
+  measureChevronFootprint,
+  type ChevronFootprint,
+} from '@/ui/OffscreenChevron';
 import { HUD_COLORS } from '@/ui/theme/hudTokens';
 
 const CAMERA_POSITION_THRESHOLD_SQ = 0.01;
@@ -36,13 +42,40 @@ const TARGET_MARKER_STYLE_ID = 'enemy-target-marker-style';
 const OBJECTIVE_CLASS = 'is-objective';
 
 /**
- * 雷达盘（#radar-minimap）叠在箭头层之上，落在盘下的屏幕外箭头会被整个挡住：
- * 约每秒量一次雷达盘的位置，箭头落进去时横向滑到盘朝屏幕中心的一侧。
- * 留白略大于箭头的半宽（箭头 40px，以中心定位）。
+ * 屏幕外箭头的避让区：雷达盘（#radar-minimap），以及触控布局下的摇杆（#joystick）和每个可见的
+ * 按键（.touch-btn）都叠在箭头层之上，落在它们下面的箭头会被整个挡住。
+ *
+ * 约每秒量一次这些元素的位置（不逐帧读布局）；触摸按下 / 抬起时浮动摇杆会移位，另外补量一次。
+ * 箭头连同距离标签碰到任何一块避让区（外扩 8px）时，朝屏幕中心移出去：沿屏幕边滑到空位，
+ * 或向内越过遮挡，取位移较小的一个；指向不变，整枚箭头留在屏幕内。
+ * 雷达盘单独成块时沿用原有规则：只横向滑到盘朝屏幕中心的一侧，高度不变。
+ * 桌面没有触控控件（#mobile-controls 不显示），避让区只有雷达盘。
  */
 const RADAR_ELEMENT_ID = 'radar-minimap';
-const RADAR_AVOID_PADDING_PX = 22;
-const RADAR_RECT_REFRESH_UPDATES = 30;
+const TOUCH_CONTROLS_ID = 'mobile-controls';
+const TOUCH_STICK_ID = 'joystick';
+const TOUCH_BUTTON_SELECTOR = '.touch-btn';
+const AVOID_MARGIN_PX = 8;
+const AVOID_RECT_REFRESH_UPDATES = 30;
+/** 摇杆松手后缓动回原位（index.html：0.18 秒）：等这么多次刷新再量 */
+const AVOID_SETTLE_UPDATES = 15;
+/** 雷达盘 + 摇杆 + 8 个按键，留一点余量；每块 4 个数（left, top, right, bottom） */
+const AVOID_MAX_RECTS = 16;
+const AVOID_MAX_PASSES = 3;
+/** 换出口的滞回：另一个出口近出这么多才换，目标方位在两个出口的分界附近时箭头不来回跳 */
+const AVOID_SWITCH_BIAS_PX = 24;
+const AVOID_EPSILON_PX = 0.01;
+/** 箭头中心离屏幕边的比例（与原有的贴边位置一致）与整枚箭头离视口边的最小距离 */
+const ARROW_EDGE_PADDING = 0.08;
+const ARROW_VIEWPORT_INSET_PX = 4;
+
+/** 避让时选中的出口（记在每个箭头上，用于滞回） */
+const EXIT_NONE = 0;
+const EXIT_HORIZONTAL = 1;
+const EXIT_VERTICAL = 2;
+type AvoidExit = typeof EXIT_NONE | typeof EXIT_HORIZONTAL | typeof EXIT_VERTICAL;
+
+const TOUCH_LAYOUT_EVENTS = ['touchstart', 'touchend', 'touchcancel'] as const;
 
 /** 八段线性渐变拼出四个角；--ehb-arm / --ehb-w 为角的臂长与线宽 */
 const BRACKET_CORNER_LAYERS = ['left top', 'right top', 'left bottom', 'right bottom']
@@ -329,6 +362,8 @@ interface HealthBarEntry {
   background: HTMLDivElement;
   targetName: HTMLSpanElement;
   chevron: OffscreenChevron | null;
+  /** 箭头上一次避让时走的出口（滞回用） */
+  arrowExit: AvoidExit;
   /** 目标框（第一次需要时创建） */
   bracket: TargetBracket | null;
   bracketShown: boolean;
@@ -375,12 +410,17 @@ export class EnemyHealthBars {
   private readonly lastCameraQuaternion = new Quaternion();
   private readonly lastPlayerPosition = new Vector3();
   private cameraStateInitialized: boolean = false;
-  // 雷达盘在屏幕上的范围（已含留白；right <= left 表示没有雷达）
-  private radarLeft: number = 0;
-  private radarRight: number = 0;
-  private radarTop: number = 0;
-  private radarBottom: number = 0;
-  private radarRectAge: number = RADAR_RECT_REFRESH_UPDATES;
+  // 屏幕外箭头的避让区（left, top, right, bottom，已外扩留白；相距太近的已并成一块）
+  private readonly avoidRects = new Float32Array(AVOID_MAX_RECTS * 4);
+  // 每块避让区是否优先横向出（1 = 雷达盘单独成块；与触控控件并成一块后为 0）
+  private readonly avoidSideways = new Uint8Array(AVOID_MAX_RECTS);
+  private avoidCount: number = 0;
+  private avoidRectAge: number = AVOID_RECT_REFRESH_UPDATES;
+  // 避让计算的复用结果：箭头占位、移出避让区后的中心（px）与走的出口
+  private readonly arrowFootprint: ChevronFootprint = { minX: 0, maxX: 0, minY: 0, maxY: 0 };
+  private arrowPx: number = 0;
+  private arrowPy: number = 0;
+  private arrowExit: AvoidExit = EXIT_NONE;
 
   constructor() {
     this.container = document.createElement('div');
@@ -405,8 +445,29 @@ export class EnemyHealthBars {
     document.body.appendChild(this.container);
     // 切换语言立即重写现有血条的名字（暂停时游戏不调用 update，也要换）
     this.unsubscribeLocale ??= onLocaleChange(() => this.relabelAll());
+    // 捕获阶段：摇杆区自己的监听会拦住冒泡，这里只记一个“该重量了”，不碰事件
+    for (const type of TOUCH_LAYOUT_EVENTS) {
+      window.addEventListener(type, this.onTouchLayoutChange, { capture: true, passive: true });
+    }
+    window.addEventListener('resize', this.onViewportResize);
     this.initialized = true;
   }
+
+  /**
+   * 浮动摇杆按下时移到落点、抬起后缓动回原位：按下后的下一次刷新就重量避让区，
+   * 抬起则等它回到位再量。
+   */
+  private readonly onTouchLayoutChange = (event: Event): void => {
+    const wanted =
+      event.type === 'touchstart'
+        ? AVOID_RECT_REFRESH_UPDATES
+        : AVOID_RECT_REFRESH_UPDATES - AVOID_SETTLE_UPDATES;
+    this.avoidRectAge = Math.max(this.avoidRectAge, wanted);
+  };
+
+  private readonly onViewportResize = (): void => {
+    this.avoidRectAge = AVOID_RECT_REFRESH_UPDATES;
+  };
 
   /**
    * 更新敌人血条
@@ -423,7 +484,7 @@ export class EnemyHealthBars {
   ): void {
     this.init();
     this.syncLabelLocale();
-    this.refreshRadarRect();
+    this.refreshAvoidRects();
 
     const cameraMoved =
       !this.cameraStateInitialized ||
@@ -635,6 +696,7 @@ export class EnemyHealthBars {
         background,
         targetName,
         chevron,
+        arrowExit: EXIT_NONE,
         bracket: null,
         bracketShown: false,
         unitRadius: isFriendly ? 0 : readUnitRadius(enemy.mesh),
@@ -714,6 +776,7 @@ export class EnemyHealthBars {
       this.setStyleValue(barData.bar, 'display', 'block');
       if (barData.chevron) {
         this.resetArrowIndicator(barData.chevron);
+        barData.arrowExit = EXIT_NONE;
       }
 
       if (needsPositionUpdate) {
@@ -755,7 +818,7 @@ export class EnemyHealthBars {
             this.cameraLocal.copy(worldPos).sub(camera.position);
             this.invertedCameraQuaternion.copy(camera.quaternion).invert();
             this.cameraLocal.applyQuaternion(this.invertedCameraQuaternion);
-            this.updateArrowIndicator(barData.chevron, this.cameraLocal, distance);
+            this.updateArrowIndicator(barData, barData.chevron, this.cameraLocal, distance);
           }
         }
       }
@@ -972,13 +1035,14 @@ export class EnemyHealthBars {
    * 使用相机局部坐标系进行角度计算，正确处理敌人在相机后面或下方的情况
    */
   private updateArrowIndicator(
+    barData: HealthBarEntry,
     chevron: OffscreenChevron,
     cameraLocal: Vector3,
     distance: number
   ): void {
     const centerX = 0.5;
     const centerY = 0.5;
-    const edgePadding = 0.08;
+    const edgePadding = ARROW_EDGE_PADDING;
 
     const isOnRight = cameraLocal.x > 0;
     const isAbove = cameraLocal.y > 0;
@@ -1039,23 +1103,6 @@ export class EnemyHealthBars {
       }
     }
 
-    // 雷达盘叠在箭头层之上：会被压住的箭头横向滑到雷达盘朝屏幕中心的一侧（高度与指向不变）
-    if (this.radarRight > this.radarLeft) {
-      const viewportWidth = window.innerWidth;
-      const arrowPx = arrowX * viewportWidth;
-      const arrowPy = arrowY * window.innerHeight;
-      if (
-        viewportWidth > 0 &&
-        arrowPx > this.radarLeft &&
-        arrowPx < this.radarRight &&
-        arrowPy > this.radarTop &&
-        arrowPy < this.radarBottom
-      ) {
-        const radarOnLeft = this.radarLeft + this.radarRight < viewportWidth;
-        arrowX = (radarOnLeft ? this.radarRight : this.radarLeft) / viewportWidth;
-      }
-    }
-
     // 箭头默认指向上方（CSS border-bottom 三角形尖端朝上）
     // atan2(x, y) 给出正确的旋转角度：
     // - 上方 (y>0): atan2(0, 1) = 0°
@@ -1064,9 +1111,18 @@ export class EnemyHealthBars {
     // - 左方 (x<0): atan2(-1, 0) = -90°
     const rotationAngle = Math.atan2(cameraLocal.x, cameraLocal.y) * (180 / Math.PI);
 
+    // 雷达盘 / 摇杆 / 触控按键叠在箭头层之上：整枚箭头（含距离标签）移出它们，并留在屏幕内
+    measureChevronFootprint(rotationAngle, distance, this.arrowFootprint);
+    this.resolveArrowPosition(
+      arrowX * window.innerWidth,
+      arrowY * window.innerHeight,
+      barData.arrowExit
+    );
+    barData.arrowExit = this.arrowExit;
+
     const arrow = chevron.element;
-    this.setStyleValue(arrow, 'left', `${arrowX * 100}%`);
-    this.setStyleValue(arrow, 'top', `${arrowY * 100}%`);
+    this.setStyleValue(arrow, 'left', `${Math.round(this.arrowPx)}px`);
+    this.setStyleValue(arrow, 'top', `${Math.round(this.arrowPy)}px`);
     chevron.update({
       rotationDeg: rotationAngle,
       distance,
@@ -1074,25 +1130,198 @@ export class EnemyHealthBars {
     });
   }
 
-  /** 雷达盘的位置只在布局变化时才变：约每秒量一次，不逐帧读取布局 */
-  private refreshRadarRect(): void {
-    this.radarRectAge += 1;
-    if (this.radarRectAge < RADAR_RECT_REFRESH_UPDATES) {
+  /**
+   * 把箭头中心 (x, y)（px）移到不碰任何避让区的位置，结果写入 arrowPx / arrowPy / arrowExit。
+   * 占位取 arrowFootprint（箭头加距离标签）。每块避让区有两个朝屏幕中心的出口：
+   * 横向（遮挡在左半屏就往右出，否则往左）与纵向（在上半屏就往下出，否则往上），
+   * 取位移较小、且不越出活动范围的一个；previousExit 是这枚箭头上一次走的出口，另一个出口
+   * 要近出一截才换。两个出口都走不通（遮挡几乎占满屏幕）时留在原位。
+   */
+  private resolveArrowPosition(x: number, y: number, previousExit: AvoidExit): void {
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+    const footprint = this.arrowFootprint;
+    this.arrowPx = x;
+    this.arrowPy = y;
+    this.arrowExit = EXIT_NONE;
+    if (
+      !Number.isFinite(x) ||
+      !Number.isFinite(y) ||
+      !(viewportWidth > 0) ||
+      !(viewportHeight > 0)
+    ) {
       return;
     }
-    this.radarRectAge = 0;
-    const rect = document.getElementById(RADAR_ELEMENT_ID)?.getBoundingClientRect();
-    if (rect && rect.width > 0 && rect.height > 0) {
-      this.radarLeft = rect.left - RADAR_AVOID_PADDING_PX;
-      this.radarRight = rect.right + RADAR_AVOID_PADDING_PX;
-      this.radarTop = rect.top - RADAR_AVOID_PADDING_PX;
-      this.radarBottom = rect.bottom + RADAR_AVOID_PADDING_PX;
-    } else {
-      this.radarLeft = 0;
-      this.radarRight = 0;
-      this.radarTop = 0;
-      this.radarBottom = 0;
+
+    // 箭头中心的活动范围：不比原有的贴边位置更靠外，且整枚箭头（含标签）留在视口内
+    const minX = Math.max(
+      viewportWidth * ARROW_EDGE_PADDING,
+      ARROW_VIEWPORT_INSET_PX - footprint.minX
+    );
+    const maxX = Math.min(
+      viewportWidth * (1 - ARROW_EDGE_PADDING),
+      viewportWidth - ARROW_VIEWPORT_INSET_PX - footprint.maxX
+    );
+    const minY = Math.max(
+      viewportHeight * ARROW_EDGE_PADDING,
+      ARROW_VIEWPORT_INSET_PX - footprint.minY
+    );
+    const maxY = Math.min(
+      viewportHeight * (1 - ARROW_EDGE_PADDING),
+      viewportHeight - ARROW_VIEWPORT_INSET_PX - footprint.maxY
+    );
+    if (minX <= maxX) {
+      x = Math.max(minX, Math.min(maxX, x));
     }
+    if (minY <= maxY) {
+      y = Math.max(minY, Math.min(maxY, y));
+    }
+
+    const rects = this.avoidRects;
+    let exit: AvoidExit = EXIT_NONE;
+    for (let pass = 0; pass < AVOID_MAX_PASSES; pass++) {
+      let hit = -1;
+      for (let index = 0; index < this.avoidCount; index++) {
+        const offset = index * 4;
+        if (
+          x + footprint.maxX > rects[offset] + AVOID_EPSILON_PX &&
+          x + footprint.minX < rects[offset + 2] - AVOID_EPSILON_PX &&
+          y + footprint.maxY > rects[offset + 1] + AVOID_EPSILON_PX &&
+          y + footprint.minY < rects[offset + 3] - AVOID_EPSILON_PX
+        ) {
+          hit = offset;
+          break;
+        }
+      }
+      if (hit < 0) {
+        break;
+      }
+      const left = rects[hit];
+      const top = rects[hit + 1];
+      const right = rects[hit + 2];
+      const bottom = rects[hit + 3];
+      const exitX = left + right < viewportWidth ? right - footprint.minX : left - footprint.maxX;
+      const exitY = top + bottom < viewportHeight ? bottom - footprint.minY : top - footprint.maxY;
+      const canExitX = exitX >= minX && exitX <= maxX;
+      const canExitY = exitY >= minY && exitY <= maxY;
+      if (!canExitX && !canExitY) {
+        break;
+      }
+      // 滞回：沿用上一次的出口，除非另一个出口近出一截
+      const biasX = previousExit === EXIT_HORIZONTAL ? AVOID_SWITCH_BIAS_PX : 0;
+      const biasY = previousExit === EXIT_VERTICAL ? AVOID_SWITCH_BIAS_PX : 0;
+      const sideways = this.avoidSideways[hit >> 2] === 1;
+      if (
+        canExitX &&
+        (sideways || !canExitY || Math.abs(exitX - x) - biasX <= Math.abs(exitY - y) - biasY)
+      ) {
+        x = exitX;
+        exit = EXIT_HORIZONTAL;
+      } else {
+        y = exitY;
+        exit = EXIT_VERTICAL;
+      }
+    }
+
+    this.arrowPx = x;
+    this.arrowPy = y;
+    this.arrowExit = exit;
+  }
+
+  /**
+   * 避让区只在布局变化时才变：约每秒量一次（触摸按下 / 抬起、窗口变化时提前），不逐帧读取布局。
+   * 触控控件整组不显示（桌面）时只量雷达盘。
+   */
+  private refreshAvoidRects(): void {
+    this.avoidRectAge += 1;
+    if (this.avoidRectAge < AVOID_RECT_REFRESH_UPDATES) {
+      return;
+    }
+    this.avoidRectAge = 0;
+    this.avoidCount = 0;
+    this.addAvoidRect(document.getElementById(RADAR_ELEMENT_ID), true);
+
+    const controls = document.getElementById(TOUCH_CONTROLS_ID);
+    const controlsRect = controls?.getBoundingClientRect();
+    if (controls && controlsRect && controlsRect.width > 0 && controlsRect.height > 0) {
+      this.addAvoidRect(document.getElementById(TOUCH_STICK_ID), false);
+      const buttons = controls.querySelectorAll(TOUCH_BUTTON_SELECTOR);
+      for (let index = 0; index < buttons.length; index++) {
+        this.addAvoidRect(buttons[index], false);
+      }
+    }
+    this.mergeAvoidRects();
+  }
+
+  /**
+   * 量一个元素并记为避让区（外扩留白，再向外取到整像素：箭头按整像素落位，留白不被小数吃掉）；
+   * 不存在、不显示（空矩形）或坐标非有限的跳过。sideways：这一块优先横向出。
+   */
+  private addAvoidRect(element: Element | null, sideways: boolean): void {
+    if (!element || this.avoidCount >= AVOID_MAX_RECTS) {
+      return;
+    }
+    const rect = element.getBoundingClientRect();
+    if (
+      !(rect.width > 0) ||
+      !(rect.height > 0) ||
+      !Number.isFinite(rect.left) ||
+      !Number.isFinite(rect.top)
+    ) {
+      return;
+    }
+    const offset = this.avoidCount * 4;
+    this.avoidRects[offset] = Math.floor(rect.left - AVOID_MARGIN_PX);
+    this.avoidRects[offset + 1] = Math.floor(rect.top - AVOID_MARGIN_PX);
+    this.avoidRects[offset + 2] = Math.ceil(rect.right + AVOID_MARGIN_PX);
+    this.avoidRects[offset + 3] = Math.ceil(rect.bottom + AVOID_MARGIN_PX);
+    this.avoidSideways[this.avoidCount] = sideways ? 1 : 0;
+    this.avoidCount += 1;
+  }
+
+  /**
+   * 两块避让区之间的空隙放不下一枚箭头（含距离标签）就并成一块（取外接矩形）：
+   * 按键簇并成一整块，箭头不会从一个按键下面被推到另一个按键下面。
+   */
+  private mergeAvoidRects(): void {
+    const rects = this.avoidRects;
+    const sideways = this.avoidSideways;
+    let count = this.avoidCount;
+    let merged = true;
+    while (merged) {
+      merged = false;
+      for (let i = 0; i < count && !merged; i++) {
+        const a = i * 4;
+        for (let j = i + 1; j < count; j++) {
+          const b = j * 4;
+          if (
+            rects[b] - rects[a + 2] >= CHEVRON_MAX_WIDTH_PX ||
+            rects[a] - rects[b + 2] >= CHEVRON_MAX_WIDTH_PX ||
+            rects[b + 1] - rects[a + 3] >= CHEVRON_MAX_HEIGHT_PX ||
+            rects[a + 1] - rects[b + 3] >= CHEVRON_MAX_HEIGHT_PX
+          ) {
+            continue;
+          }
+          rects[a] = Math.min(rects[a], rects[b]);
+          rects[a + 1] = Math.min(rects[a + 1], rects[b + 1]);
+          rects[a + 2] = Math.max(rects[a + 2], rects[b + 2]);
+          rects[a + 3] = Math.max(rects[a + 3], rects[b + 3]);
+          // 并进了触控控件就不再只横向出
+          sideways[i] &= sideways[j];
+          // 用最后一块填掉 j 的位置
+          count -= 1;
+          const last = count * 4;
+          rects[b] = rects[last];
+          rects[b + 1] = rects[last + 1];
+          rects[b + 2] = rects[last + 2];
+          rects[b + 3] = rects[last + 3];
+          sideways[j] = sideways[count];
+          merged = true;
+          break;
+        }
+      }
+    }
+    this.avoidCount = count;
   }
 
   private resetArrowIndicator(chevron: OffscreenChevron): void {
@@ -1217,6 +1446,10 @@ export class EnemyHealthBars {
   public dispose(): void {
     this.unsubscribeLocale?.();
     this.unsubscribeLocale = null;
+    for (const type of TOUCH_LAYOUT_EVENTS) {
+      window.removeEventListener(type, this.onTouchLayoutChange, { capture: true });
+    }
+    window.removeEventListener('resize', this.onViewportResize);
     this.clear();
     if (this.container.parentElement) {
       this.container.remove();
