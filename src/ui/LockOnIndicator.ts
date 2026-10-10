@@ -22,7 +22,7 @@ const MIN_ACQUIRE_RADIUS = 44;
 const MAX_ACQUIRE_RADIUS_RATIO = 0.3;
 /** 准星跑出视口这么多像素后不再绘制（追尾视角急拉杆时机头轴线会甩出屏幕） */
 const OFFSCREEN_MARGIN = 24;
-/** 机炮十字被触屏辅助拉离机头轴线超过这么多像素才换成“辅助中”的样子；回到这么近才换回来 */
+/** 机炮十字被机炮辅助拉离机头轴线超过这么多像素才换成“辅助中”的样子；回到这么近才换回来 */
 const CROSS_ASSIST_ON_PX = 3;
 const CROSS_ASSIST_OFF_PX = 1.5;
 /** 距离读数的取整步长（米），避免每帧改写文字 */
@@ -45,7 +45,7 @@ interface PlacedPosition {
 /**
  * 瞄准与导弹锁定显示：
  * - 机炮准星：画在机头轴线前方 600 米那一点的屏幕位置（第一 / 第三人称都对准弹道），
- *   每个渲染帧更新（renderUpdate）。触屏机炮辅助把弹道拉向目标时，十字跟着移到辅助方向上
+ *   每个渲染帧更新（renderUpdate）。机炮辅助（触屏 / 键盘）把弹道拉向目标时，十字跟着移到辅助方向上
  *   （同样取 600 米处），换成锁定色并套一个小菱形，机头轴线的位置留一个暗标记。
  * - 导引头捕获环：始终以机头轴线为圆心，不随机炮十字移动。只要有导弹，导引头一直工作
  *   （MissileSeeker，每个模拟步 update）。
@@ -142,7 +142,7 @@ export class LockOnIndicator {
     this.setStyleValue(this.container, 'contain', 'layout style paint');
 
     // 准星锚点：机炮十字 + 捕获环 + 提示 + 导弹余量，整体跟随机头轴线的屏幕位置
-    // （十字在触屏辅助生效时相对锚点再偏移，见 renderGunCross）
+    // （十字在机炮辅助生效时相对锚点再偏移，见 renderGunCross）
     this.reticle = this.createAnchor('reticle');
     this.ring = document.createElement('div');
     this.ring.className = 'lk-ring';
@@ -306,7 +306,7 @@ export class LockOnIndicator {
     return this.renderCross;
   }
 
-  /** 机炮十字是否正显示成“辅助中”（被触屏辅助拉离了机头轴线） */
+  /** 机炮十字是否正显示成“辅助中”（被机炮辅助拉离了机头轴线） */
   public isGunCrossAssisted(): boolean {
     return this.crossAssisted && this.renderCross.visible;
   }
@@ -410,8 +410,8 @@ export class LockOnIndicator {
    * @param visible 玩家存活且在飞行（菜单 / 剧情冻结 / 暂停 / 等待复活时为 false）
    * @param leadPoint 机炮提前量点的世界坐标；没有可靠解时传 null
    * @param leadOnTarget 机头是否已压在提前量点上
-   * @param gunAimDirection 触屏辅助下子弹的发射方向（世界坐标单位向量）；机炮十字画在这个方向上。
-   *   没有辅助偏移（含桌面端）时传 null，十字就在机头轴线上
+   * @param gunAimDirection 机炮辅助下子弹的发射方向（世界坐标单位向量）；机炮十字画在这个方向上。
+   *   没有辅助偏移时传 null，十字就在机头轴线上
    * @param gunAimDistance 十字画在该方向上多远处（米）：辅助压住目标时是瞄准点的距离，十字因此
    *   在两种视角下都落在瞄准点上；非正 / 非有限数按准星参考距离处理
    */
@@ -832,7 +832,7 @@ export class LockOnIndicator {
       #lock-on-indicator .lk-e { right: 0; top: 14px; width: 9px; height: 2px; }
       #lock-on-indicator .lk-dot { left: 13px; top: 13px; width: 4px; height: 4px; border-radius: 50%; }
 
-      /* 触屏辅助把十字拉离机头轴线时：十字换成锁定色并套一个小菱形，机头位置留一个暗标记 */
+      /* 机炮辅助把十字拉离机头轴线时：十字换成锁定色并套一个小菱形，机头位置留一个暗标记 */
       #lock-on-indicator .lk-cross {
         will-change: transform;
       }
