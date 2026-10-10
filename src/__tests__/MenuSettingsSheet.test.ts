@@ -1183,16 +1183,10 @@ describe('Settings sheet (batch X5, spec 5)', () => {
       expect(byId('language-row').contains(document.activeElement)).toBe(true);
     });
 
-    // FINDING: changing the language with the arrow keys leaves keyboard focus on the option
-    // that was just DEselected. Sequence: Settings open, focus on the checked "English"
-    // option, press ArrowRight. Expected (radio group, as the other three segmented controls
-    // do): the selection and the focus move together, so focus is on the now-checked "中文".
-    // Observed: the language switch rebuilds the sheet while focus is still on the old option;
-    // SettingsSheet.render() (src/ui/menu/SettingsSheet.ts:101-147) restores focus by the
-    // focused control's data-focus-key ("language:en"), and the follow-up next.focus() in
-    // createSegmented (src/ui/menu/settingsControls.ts:155-158) is skipped because `next` was
-    // detached by the rebuild. Focus ends on "English" (aria-checked=false, tabindex=-1).
-    it.fails('arrow keys on the language options move focus with the selection', () => {
+    // 单选组：方向键换语言时，选中项与键盘焦点一起走（其余三个分段控件也是这样）。
+    // （最初是 FINDING：语言切换会重建面板，焦点被按旧控件的 data-focus-key 放回刚取消选中的
+    // 那一项。已在 src/ui/menu/settingsControls.ts:157-161 修复：先移焦点再选中。）
+    it('arrow keys on the language options move focus with the selection', () => {
       createMenu();
       openSettings();
       (checkedRadio('language-row') as HTMLElement).focus();
@@ -1201,6 +1195,26 @@ describe('Settings sheet (batch X5, spec 5)', () => {
 
       expect(getLocale()).toBe('zh-CN');
       expect(document.activeElement).toBe(checkedRadio('language-row'));
+    });
+
+    it.each([
+      ['ArrowRight', ['zh-CN', 'en', 'zh-CN']],
+      ['ArrowLeft', ['zh-CN', 'en', 'zh-CN']],
+    ] as const)('%s keeps moving focus with the language, wrap included', (key, expected) => {
+      createMenu();
+      const sheet = openSettings();
+      (checkedRadio('language-row') as HTMLElement).focus();
+
+      for (const locale of expected) {
+        press(key);
+
+        expect(getLocale()).toBe(locale);
+        const checked = checkedRadio('language-row') as HTMLElement;
+        expect(readableText(checked)).toBe(locale === 'en' ? 'English' : '中文');
+        expect(document.activeElement, `focus after switching to ${locale}`).toBe(checked);
+        expect(checked.tabIndex, 'the focused option is the one Tab comes back to').toBe(0);
+        expect(sheet.contains(checked)).toBe(true);
+      }
     });
 
     it('keeps focus on another control when the language changes underneath it', () => {
