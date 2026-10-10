@@ -167,8 +167,7 @@ describe('STRIKER lock and pair (spec §3; accepted lock window 400-760 m)', () 
     }
   );
 
-  // 迎着直飞的玩家时，最后一次齐射只打出一发：见下面的 FINDING（距离在两发之间越过 760 米）
-  it.each(PILOTS.slice(1))(
+  it.each(PILOTS)(
     'against a %s player on level 8 (two slots free): every salvo is a pair',
     (_name, fly) => {
       const { salvos } = salvosAgainst(fly);
@@ -200,23 +199,12 @@ describe('STRIKER lock and pair (spec §3; accepted lock window 400-760 m)', () 
     expect(pairWithPlayerMovedTo(600, 600 * Math.sin(40 * DEG))).toBe(2);
   });
 
-  // FINDING: spec §3 STRIKER — "launches a pair of missiles 0.4 s apart (subject to the missile
-  // tokens: if only one token is free it launches one)". With two missile slots free, the second
-  // missile is never launched when the player's range leaves the accepted 400-760 m lock window
-  // during the 0.4 s between the two missiles (expected: 2 missiles; actual: 1 — the lock was
-  // already complete, so this is not the accepted "lock broken inside 400 m" rule). It shows up
-  // in normal play: against a player flying straight (seed 5, the Striker trailing at about
-  // 757 m) the salvo at 132.40 s is a single missile. Reproduce: FleetRig({ level: 8,
-  // capacity: 3, seed: 5 }), one STRIKER 600 m out at 40 degrees, after 1 s the player shadows
-  // it 600 m ahead flying the same way (shadowPilot(striker, -600, 0, 0, 'with-jet')); the moment
-  // the first missile leaves, move the player to 780 m (or 380 m) ahead: no second missile.
-  it.fails(
-    'a player whose range leaves 400-760 m between the two missiles still gets the second one (two slots free)',
-    () => {
-      const counts = [780, 380].map((after) => `${after} m: ${pairWithPlayerMovedTo(after)}`);
-      expect(counts).toEqual(['780 m: 2', '380 m: 2']);
-    }
-  );
+  // 规格 §3：“相隔 0.4 秒打出两枚导弹（受全队导弹名额限制）”——锁定已经完成，第二发只看名额，
+  // 不看两发之间玩家的距离（里程碑 2 时记为已知失败，7aeec56 修好）
+  it('a player whose range leaves 400-760 m between the two missiles still gets the second one (two slots free)', () => {
+    const counts = [780, 380].map((after) => `${after} m: ${pairWithPlayerMovedTo(after)}`);
+    expect(counts).toEqual(['780 m: 2', '380 m: 2']);
+  });
 
   it('does not start a lock on a player beyond 760 m', () => {
     // 玩家每一步都在它机头正前方 800 米、同向飞：够得着就会锁，够不着就不会
@@ -348,33 +336,12 @@ describe('STRIKER reload: turns away for about 10 s, slow and vulnerable (spec �
     }
   );
 
-  it.each(PILOTS.slice(1))(
+  // “掉头装填”读作：最后一发之后 3 秒内，飞行方向离“指向玩家”超过 90 度（背着玩家飞）。
+  // 迎着直飞的玩家（它拖在锁定窗口边缘）曾经做不到（里程碑 2 时记为已知失败，7aeec56 修好）
+  it.each(PILOTS)(
     'against a %s player: it turns away (flying more than 90 degrees off the player) within 3 s of its last missile',
     (_name, fly) => {
       const { reloads: runs } = reloads(fly);
-      expect(runs.length).toBeGreaterThanOrEqual(3);
-      const late = runs
-        .map((run, index) => ({ index: index + 1, at: turnedAwayAt(run) }))
-        .filter((reload) => !(reload.at <= 3));
-      expect(late).toEqual([]);
-    }
-  );
-
-  // FINDING: spec §3 STRIKER — "then turns away to reload for about 10 s". Read as: within 3 s of
-  // its last missile it flies away from the player (more than 90 degrees off the line to the
-  // player) — the same measure the three other player paths above pass. Against a player flying
-  // straight, the Striker trails at the edge of its lock window (745-757 m) when it fires, and
-  // after reloads 2-4 it never turns more than 60-66 degrees off the player; from about +3 s its
-  // heading swings back toward the player (45 down to 22 degrees off, at 835-890 m) while still
-  // reloading, before the 900 m leash takes over. (It is slow, and does not lock again early.)
-  // Minor, and it depends on reading "turns away" as "flies away from the player". Reproduce:
-  // FleetRig({ level: 8, capacity: 3, seed: 5 }), one STRIKER 600 m out at 40 degrees, player
-  // straight at 45 m/s for 150 s, missiles in flight for 3 s; salvos end at 37.87, 62.90, 97.88
-  // and 132.40 s.
-  it.fails(
-    'against a straight player: it turns away (flying more than 90 degrees off the player) within 3 s of its last missile',
-    () => {
-      const { reloads: runs } = reloads(PILOTS[0][1]);
       expect(runs.length).toBeGreaterThanOrEqual(3);
       const late = runs
         .map((run, index) => ({ index: index + 1, at: turnedAwayAt(run) }))
@@ -550,40 +517,25 @@ describe('STRIKER standoff band (spec §3: stays 450-700 m out)', () => {
     }
   });
 
-  // FINDING: spec §3 STRIKER — "Stays 450–700 m out." The spec gives no separate measure for the
-  // Striker; measured the way spec §3a measures the Sniper's standoff band (inside the band for at
-  // least 60 % of the time against a player flying straight at cruise speed or turning gently,
-  // not counting the 10 s reload after each launch, when the spec has it turn away, nor time
-  // beyond the 900 m leash), the band is not held. The Striker flies its standoff orbit at 1.0x
-  // of its base speed (46 m/s, about the player's 45 m/s cruise) and only speeds up beyond 700 m,
-  // so against a player flying straight it either falls behind and trails at 726-860 m (starting
-  // at 120 or -70 degrees: 0 % in the band) or is run over and sits at 340-450 m (starting at 40
-  // degrees: 2-3 %); against a 0.1 rad/s turn it is in the band 17-23 % of the time from 40 or
-  // 120 degrees (59 % and over 60 % from -70 degrees). 11 of the 12 cases (seeds 4 and 5) are
-  // under 60 %. Its accepted 400-760 m lock window still lets it lock from most of those places.
-  // Reproduce: FleetRig({ level: 8, capacity: 3, seed }), seeds 4 and 5, one STRIKER
-  // 600 m out at 40 / 120 / -70 degrees off the nose, player at 45 m/s straight or turning
-  // 0.1 rad/s for 120 s, missiles in flight for 3 s; from t = 10 s count the steps that are not
-  // within 10 s after a launch and not beyond 900 m, and take the share inside 450-700 m.
-  it.fails(
-    'is inside 450-700 m at least 60 % of the time against a straight or gently turning player',
-    () => {
-      const shares: string[] = [];
-      for (const seed of [4, 5]) {
-        for (const yaw of [0, 0.1]) {
-          for (const bearing of [40, 120, -70]) {
-            const share = bandShare(seed, yaw, bearing);
-            if (share < 0.6) {
-              shares.push(
-                `seed ${seed}, turn ${yaw} rad/s, from ${bearing} degrees: ${(share * 100).toFixed(0)} %`
-              );
-            }
+  // 规格 §3：“待在 450–700 米外”。规格没有给导弹机单独的量法，借用 §3a 狙击机距离带的量法：
+  // 迎着巡航直飞或缓转的玩家，在带里的时间至少 60 %（不算每次发射后的 10 秒装填——规格让它
+  // 掉头装填——也不算拴绳以外的时间）。里程碑 2 时做不到（当时记为已知失败，7aeec56 修好）
+  it('is inside 450-700 m at least 60 % of the time against a straight or gently turning player', () => {
+    const shares: string[] = [];
+    for (const seed of [4, 5]) {
+      for (const yaw of [0, 0.1]) {
+        for (const bearing of [40, 120, -70]) {
+          const share = bandShare(seed, yaw, bearing);
+          if (share < 0.6) {
+            shares.push(
+              `seed ${seed}, turn ${yaw} rad/s, from ${bearing} degrees: ${(share * 100).toFixed(0)} %`
+            );
           }
         }
       }
-      expect(shares).toEqual([]);
     }
-  );
+    expect(shares).toEqual([]);
+  });
 });
 
 describe('STRIKER through the real enemy system', () => {

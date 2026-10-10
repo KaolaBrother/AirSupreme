@@ -941,22 +941,17 @@ describe('a pincer as the player sees it when the jets arrive (spec §4a)', () =
     expect(sweep.failures, summary(sweep)).toEqual([]);
   });
 
-  // FINDING (spec §4a, arrival P = "two groups 90–150° apart as seen from the player"):
-  // expected — a player flying straight at cruise speed sees the two groups of every pincer
-  // 90–150° apart when the jets come out of their portals; actual (e662fd7) — the centres are
-  // planned from where the player is when the wave starts, and by the time the jets arrive
-  // (5 s of portal plus the spawn cadence, 110–230 m further on) the angle has drifted out of
-  // the range for some headings: 31 of 148 cases out of range here, seen 76–175° (the main agent
-  // saw ~77° live for a plan of ~96°). The assertion lists level, wave, heading and the angle.
-  it.fails(
-    'every pincer of every level arrives 90–150° apart, whichever way the player is flying at cruise speed',
-    async () => {
-      randomSpy = vi.spyOn(Math, 'random').mockImplementation(seededGameRandom(9090));
-      const sweep = await sweepPincers(CRUISE_SPEED, HEADINGS_DEG);
-      expect(sweep.checked).toBeGreaterThan(100);
-      expect(sweep.failures, summary(sweep)).toEqual([]);
-    }
-  );
+  // Spec §4a, arrival P = "two groups 90–150° apart as seen from the player": a player flying
+  // straight at cruise speed sees the two groups of every pincer 90–150° apart when the jets come
+  // out of their portals. Was a known failure at e662fd7 (31 of 148 out of range, seen 76–175°:
+  // the centres were planned from where the player was when the wave started); fixed in 3c91868.
+  // The assertion lists level, wave, heading and the angle.
+  it('every pincer of every level arrives 90–150° apart, whichever way the player is flying at cruise speed', async () => {
+    randomSpy = vi.spyOn(Math, 'random').mockImplementation(seededGameRandom(9090));
+    const sweep = await sweepPincers(CRUISE_SPEED, HEADINGS_DEG);
+    expect(sweep.checked).toBeGreaterThan(100);
+    expect(sweep.failures, summary(sweep)).toEqual([]);
+  });
 });
 
 // ─────────────────────────────── 规则 7：同时在场上限 ───────────────────────────────

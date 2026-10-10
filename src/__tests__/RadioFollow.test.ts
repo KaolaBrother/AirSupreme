@@ -737,12 +737,10 @@ describe('radioFollowOffset', () => {
       expect(half / ((textLines / 2) * LH)).toBeCloseTo(1, 9);
     });
 
-    // FINDING（偏差，很小；RadioComms 传不进这样的值：scrollHeight 总是有限的、远小于此）。
-    // 函数的说明写着“结果总是有限的数”，项目约定是“位置要防 NaN / Infinity”。期望：内容高是有限的
-    // 最大双精度数（Number.MAX_VALUE）、行高 3px 时，最后的位置是有限的、不超过内容高。
-    // 实际：返回 +Infinity——（行数 − 面板行数）× 行高在浮点里溢出（MAX_VALUE ÷ 3 四舍五入后再乘 3
-    // 超出了 MAX_VALUE）。行高 7px 同样；行高 16.9px 时恰好不溢出。
-    it.fails('returns a finite position for the largest finite content height', () => {
+    // 已修（原为 it.fails，546ae4a 修好：（行数 − 面板行数）× 行高在浮点里溢出成 +Infinity）。
+    // 函数的说明写着“结果总是有限的数”，项目约定是“位置要防 NaN / Infinity”：内容高是有限的
+    // 最大双精度数（Number.MAX_VALUE）、行高 3px / 7px 时，最后的位置是有限的、不超过内容高。
+    it('returns a finite position for the largest finite content height', () => {
       for (const lineHeight of [3, 7]) {
         const offset = guarded([Number.MAX_VALUE, 3 * lineHeight, lineHeight, 100, 8.76, 2.26]);
         expect(Number.isFinite(offset), `line height ${lineHeight}: ${offset}`).toBe(true);

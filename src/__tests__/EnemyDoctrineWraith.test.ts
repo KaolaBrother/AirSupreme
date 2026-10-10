@@ -49,6 +49,10 @@ const CLOAK_MIN_SECONDS = 1.5;
 const TELL_SECONDS = 0.7;
 const VISIBLE_MIN_SECONDS = 4;
 const STAGGER_SECONDS = 1;
+/** 僵直结束后这么久之内应当重新机动（秒）：“僵直 1 秒”不是 1.5 秒 */
+const RESUME_WITHIN = 0.5;
+/** 一轮五连发从首发到末发远不到 1 秒：记录在首发后不到这么久就结束的一轮算没录完（秒） */
+const BURST_RECORD_MARGIN = 1;
 const BURST_ROUNDS = 5;
 /** 隐形时的不透明度（规格：约 12–18%） */
 const CLOAK_OPACITY_MIN = 0.12;
@@ -263,10 +267,15 @@ function fireProblems(log: WraithLog): string[] {
   const problems: string[] = [];
   const tells = log.tells();
   const bursts = groupBursts(log.shots(), 0.5);
+  const end = log.steps.length > 0 ? log.steps[log.steps.length - 1].t : -Infinity;
   for (const burst of bursts) {
     const first = burst[0];
     const tag = `burst at ${first.time.toFixed(2)} s`;
-    if (burst.length !== BURST_ROUNDS) problems.push(`${tag}: ${burst.length} rounds`);
+    // 记录结束时还没打完的一轮（开火不到 1 秒就停了记录）只查有没有多打，不查打满没有
+    const cutOff = end - first.time < BURST_RECORD_MARGIN;
+    if (burst.length > BURST_ROUNDS || (burst.length < BURST_ROUNDS && !cutOff)) {
+      problems.push(`${tag}: ${burst.length} rounds`);
+    }
     for (const shot of burst) {
       const step = log.stepAt(shot.time);
       if (!step) continue;
@@ -536,9 +545,10 @@ describe('WRAITH hit while cloaked: decloaks at once and staggers for 1 s (spec 
     expect(log.steps.slice(-27).every(fullyVisible)).toBe(true);
   });
 
-  // “僵直 1 秒”读作：这 1 秒里它失去控制、不机动（不转向、不加速），1 秒之后才重新机动
+  // “僵直 1 秒”读作：这 1 秒里它失去控制、不机动（不转向、不加速），1 秒一到就重新机动——
+  // 僵直结束后 0.5 秒内航向偏开僵直时的航向 3 度以上，或速率变化 3 米/秒以上（任一方向）
   it.each(PILOTS)(
-    'against a %s player: staggered, it holds its heading without speeding up for 1 s, and manoeuvres again after that',
+    'against a %s player: staggered, it holds its heading without speeding up for 1 s, and manoeuvres again within 0.5 s after that',
     (_name, fly) => {
       for (const seed of [3, 4, 5]) {
         for (const into of [0.1, 0.5, 1.2]) {
@@ -556,22 +566,32 @@ describe('WRAITH hit while cloaked: decloaks at once and staggers for 1 s (spec 
           let steps = 0;
           let turnWhileStaggered = 0;
           let fastestWhileStaggered = 0;
+          let staggeredSpeed = speed;
           let turnAfter = 0;
-          current.run(STAGGER_SECONDS + 2, () => {
+          let speedChangeAfter = 0;
+          current.run(STAGGER_SECONDS + RESUME_WITHIN, () => {
             steps++;
             const turn = angleBetween(heading, wraith.velocity);
             if (steps * DT < STAGGER_SECONDS - 1e-9) {
               turnWhileStaggered = Math.max(turnWhileStaggered, turn);
               fastestWhileStaggered = Math.max(fastestWhileStaggered, wraith.velocity.length());
+              staggeredSpeed = wraith.velocity.length();
             } else {
               turnAfter = Math.max(turnAfter, turn);
+              speedChangeAfter = Math.max(
+                speedChangeAfter,
+                Math.abs(wraith.velocity.length() - staggeredSpeed)
+              );
             }
           });
           expect(turnWhileStaggered / DEG, `${tag}: turned while staggered`).toBeLessThan(2);
           expect(fastestWhileStaggered, `${tag}: speed while staggered`).toBeLessThanOrEqual(
             speed + 1e-6
           );
-          expect(turnAfter / DEG, `${tag}: turned in the 2 s after`).toBeGreaterThan(15);
+          expect(
+            turnAfter / DEG > 3 || speedChangeAfter > 3,
+            `${tag}: manoeuvred within ${RESUME_WITHIN} s of the stagger's end (turned ${(turnAfter / DEG).toFixed(1)} degrees, speed changed ${speedChangeAfter.toFixed(1)} m/s)`
+          ).toBe(true);
         }
       }
     }
@@ -699,55 +719,39 @@ describe('two Wraiths at once', () => {
     }
   });
 
-  // FINDING: spec §2.2 — "Spread out. The director gives simultaneous attackers approach bearings
-  // at least 60° apart as seen from the player whenever two or more hold tokens." Two Wraiths that
-  // hold tokens at the same time strike together from the same place: both fly to the slot
-  // straight behind the player, decloak there and fire back to back. The director does hand them
-  // bearings 60°+ apart (checked below), but the Wraith never flies to its assigned bearing (the
-  // Fighter flies to it, the Heavy and the Sniper fire only from it, the Scout repositions to it).
-  // Measured (level 8, 4 tokens, as on level 8 Normal where Wraith pairs arrive, spec §4a):
-  // every one of the 31 pairs of bursts opened within 1 s of each other (seeds 3 and 9, player
-  // straight or turning 0.1 rad/s) came from bearings less than 60 degrees apart — 46-51 degrees
-  // on the first attack, then 0-10 degrees on every later one (seed 3, straight: bursts at
-  // 13.65 s / 14.10 s 10 degrees apart, 20.48 s / 20.93 s 8 degrees, …), both from about 5
-  // degrees off the player's tail.
-  // Reproduce: FleetRig({ level: 8, capacity: 4, seed: 3 }), WRAITHs at 300 m / 120 degrees and
-  // 320 m / -130 degrees off the nose, player straight at 45 m/s, 60 s; pair each burst of one
-  // Wraith with any burst of the other that opens within 1 s and compare the bearings of the two
-  // first rounds' origins as seen from the player.
-  it.fails(
-    'two Wraiths attacking at the same time do so from bearings at least 60 degrees apart',
-    () => {
-      let pairs = 0;
-      const tooClose: string[] = [];
-      for (const seed of [3, 9]) {
-        for (const [name, fly] of [PILOTS[0], PILOTS[1]]) {
-          const { current, logs } = pairRig(seed, 4, fly);
-          current.run(60);
-          const [first, second] = logs.map((log) => groupBursts(log.shots(), 0.5));
-          for (const a of first) {
-            for (const b of second) {
-              if (Math.abs(a[0].time - b[0].time) > 1) continue;
-              pairs++;
-              const gap = bearingGap(
-                bearingOf(a[0].playerPosition, a[0].origin),
-                bearingOf(b[0].playerPosition, b[0].origin)
+  // 规格 §2.2：“同时持令牌的攻击者，从玩家看进入方位至少相隔 60°”。量法：一架的每一轮与另一架
+  // 1 秒内开始的一轮配对，比较两轮首发的出膛位置从玩家看的方位。里程碑 2 时两架同点同时开火
+  // （当时记为已知失败，75783f8 修好）
+  it('two Wraiths attacking at the same time do so from bearings at least 60 degrees apart', () => {
+    let pairs = 0;
+    const tooClose: string[] = [];
+    for (const seed of [3, 9]) {
+      for (const [name, fly] of [PILOTS[0], PILOTS[1]]) {
+        const { current, logs } = pairRig(seed, 4, fly);
+        current.run(60);
+        const [first, second] = logs.map((log) => groupBursts(log.shots(), 0.5));
+        for (const a of first) {
+          for (const b of second) {
+            if (Math.abs(a[0].time - b[0].time) > 1) continue;
+            pairs++;
+            const gap = bearingGap(
+              bearingOf(a[0].playerPosition, a[0].origin),
+              bearingOf(b[0].playerPosition, b[0].origin)
+            );
+            if (gap < SPEC.MIN_BEARING_GAP) {
+              tooClose.push(
+                `${name}, seed ${seed}: ${a[0].time.toFixed(2)} s / ${b[0].time.toFixed(2)} s, ${(gap / DEG).toFixed(0)} degrees`
               );
-              if (gap < SPEC.MIN_BEARING_GAP) {
-                tooClose.push(
-                  `${name}, seed ${seed}: ${a[0].time.toFixed(2)} s / ${b[0].time.toFixed(2)} s, ${(gap / DEG).toFixed(0)} degrees`
-                );
-              }
             }
           }
         }
       }
-      expect(pairs, 'pairs of simultaneous attacks').toBeGreaterThan(4);
-      expect(tooClose).toEqual([]);
     }
-  );
+    expect(pairs, 'pairs of simultaneous attacks').toBeGreaterThan(4);
+    expect(tooClose).toEqual([]);
+  });
 
-  it('the director does give two Wraiths holding tokens bearings at least 60 degrees apart (premise of the finding above)', () => {
+  it('the director does give two Wraiths holding tokens bearings at least 60 degrees apart (what the Wraiths fly to)', () => {
     let both = 0;
     const { current, logs } = pairRig(3, 4, PILOTS[0][1]);
     const [first, second] = logs.map((log) => log.jet);

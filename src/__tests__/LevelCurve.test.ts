@@ -127,6 +127,18 @@ describe.each(TIERS)('the level curve on %s, as the jets get it (spec §4)', (_t
   });
 });
 
+// “非常简单”比“简单”更温和（5cc1100 重新调校之后仍然如此）：逐关、逐机型比较实际拿到的火力。
+// 逐关不降、第 10 关最高已由上面的 Very Easy 档覆盖。不钉具体倍率。
+describe('Very Easy against Easy, as the jets get it (spec §4 level curve)', () => {
+  it.each(ARMED)('%s: Very Easy firepower is below Easy firepower on every level', (type) => {
+    for (const level of LEVELS) {
+      expect(applied(level, 1, type).firepower, `level ${level}`).toBeLessThan(
+        applied(level, 2, type).firepower
+      );
+    }
+  });
+});
+
 describe('the player’s missile (spec §4 level curve)', () => {
   it('still does 80 damage', () => {
     expect(GAME_CONSTANTS.MISSILE.DAMAGE).toBe(80);
