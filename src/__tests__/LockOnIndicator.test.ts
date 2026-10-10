@@ -1698,4 +1698,216 @@ describe('LockOnIndicator', () => {
       });
     });
   });
+
+  /**
+   * “受干扰”标签（敌机编队第 2 批，规格 §3 JAMMER）：干扰生效期间，捕获环上显示
+   * “JAMMED” / “受干扰”，干扰一停就收起；锁定时间变成 2.0 倍，准星的其余部分照旧。
+   * 干扰从哪里来（800 米内有没有存活的干扰机）不在这里，这里只给一个倍数。
+   */
+  describe('jammed tag', () => {
+    interface JamSource {
+      scale: number;
+    }
+
+    function jam(scale = 2): JamSource {
+      const source: JamSource = { scale };
+      indicator.setLockJamProvider({ getLockTimeScale: () => source.scale });
+      return source;
+    }
+
+    const tag = (): HTMLElement => chrome('jam-tag');
+
+    it('is not shown while nothing is jamming the lock', () => {
+      const { pose, camera, enemy } = centredRig(20);
+
+      run(pose, camera, [], 0.2);
+      expect(isShown(tag())).toBe(false);
+
+      // 跟踪、锁定都一样：没有干扰就没有标签
+      run(pose, camera, [enemy], 0.3);
+      expect(indicator.getLockState()).toBe('track');
+      expect(isShown(tag())).toBe(false);
+      run(pose, camera, [enemy], 1);
+      expect(indicator.isLocked()).toBe(true);
+      expect(isShown(tag())).toBe(false);
+    });
+
+    it('is not shown for a jam source that reports no slowdown', () => {
+      const { pose, camera, enemy } = centredRig(20);
+      jam(1);
+
+      run(pose, camera, [enemy], 0.5);
+
+      expect(isShown(tag())).toBe(false);
+    });
+
+    it.each([
+      ['searching', 0, 0.2, 'search'],
+      ['tracking a target', 1, 0.5, 'track'],
+      ['holding a completed lock', 1, 2.5, 'lock'],
+    ] as const)('is shown on the lock ring while %s', (_name, enemies, seconds, state) => {
+      const { pose, camera, enemy } = centredRig(20);
+      jam();
+
+      run(pose, camera, enemies === 1 ? [enemy] : [], seconds);
+
+      expect(indicator.getLockState()).toBe(state);
+      expect(isShown(tag())).toBe(true);
+      expect(tag().textContent?.trim()).toBe('JAMMED');
+      // 捕获环照常画着
+      expect(isShown(chrome('acquire-ring'))).toBe(true);
+    });
+
+    it.each([
+      ['en', 'JAMMED'],
+      ['zh-CN', '受干扰'],
+    ] as const)('reads in the current language (%s: %s)', (locale, text) => {
+      setLocale(locale);
+      const { pose, camera } = centredRig();
+      jam();
+
+      run(pose, camera, [], 0.1);
+
+      expect(isShown(tag())).toBe(true);
+      expect(tag().textContent?.trim()).toBe(text);
+    });
+
+    it('follows a language switch while it is shown', () => {
+      const { pose, camera } = centredRig();
+      jam();
+      run(pose, camera, [], 0.1);
+      expect(tag().textContent?.trim()).toBe('JAMMED');
+
+      setLocale('zh-CN');
+      run(pose, camera, [], 0.05);
+      expect(isShown(tag())).toBe(true);
+      expect(tag().textContent?.trim()).toBe('受干扰');
+
+      setLocale('en');
+      run(pose, camera, [], 0.05);
+      expect(tag().textContent?.trim()).toBe('JAMMED');
+    });
+
+    it('comes up in the new language after a switch made while it was hidden', () => {
+      const { pose, camera } = centredRig();
+      const source = jam(1);
+      run(pose, camera, [], 0.1);
+      expect(isShown(tag())).toBe(false);
+
+      setLocale('zh-CN');
+      source.scale = 2;
+      run(pose, camera, [], 0.05);
+
+      expect(isShown(tag())).toBe(true);
+      expect(tag().textContent?.trim()).toBe('受干扰');
+    });
+
+    it('goes away on the step the jamming ends and comes back on the step it resumes', () => {
+      const { pose, camera, enemy } = centredRig(20);
+      const source = jam();
+      run(pose, camera, [enemy], 0.3);
+      expect(isShown(tag())).toBe(true);
+
+      source.scale = 1;
+      frame(pose, camera, [enemy]);
+      expect(isShown(tag())).toBe(false);
+
+      source.scale = 2;
+      frame(pose, camera, [enemy]);
+      expect(isShown(tag())).toBe(true);
+    });
+
+    it('goes away once the jam source is disconnected', () => {
+      const { pose, camera } = centredRig();
+      jam();
+      run(pose, camera, [], 0.1);
+      expect(isShown(tag())).toBe(true);
+
+      indicator.setLockJamProvider(null);
+      frame(pose, camera, []);
+
+      expect(isShown(tag())).toBe(false);
+    });
+
+    it.each([
+      ['a desktop window', 1280, 800, false],
+      ['a landscape phone', 844, 390, true],
+      ['a portrait phone', 390, 844, true],
+    ] as const)('sits at the lock ring and moves with it (%s)', (_name, width, height, touch) => {
+      recreate(width, height, touch);
+      jam();
+      const pose = bankedPose();
+      const camera = chaseCamera(pose);
+
+      run(pose, camera, [], 0.1);
+
+      const reticle = anchor('reticle');
+      expect(reticle.contains(tag())).toBe(true);
+      // 标签跟着准星锚点走：锚点就在机头轴线的投影上，也就是捕获环的圆心
+      const centre = screenPositionOf(tag());
+      const nose = noseAxisPixel(pose, camera);
+      expect(Math.abs(centre.x - nose.x)).toBeLessThan(0.75);
+      expect(Math.abs(centre.y - nose.y)).toBeLessThan(0.75);
+      // 竖直偏移不超出环（加上标签自己的高度）：它画在环上，不是屏幕别处的一行字
+      const radius = indicator.getAcquireRadius();
+      expect(radius).toBeCloseTo(expectedAcquireRadius(), 3);
+      const top = parsePx(tag().style.top || '0px');
+      const left = parsePx(tag().style.left || '0px');
+      expect(Math.abs(top)).toBeLessThanOrEqual(radius + 24);
+      expect(Math.abs(left)).toBeLessThanOrEqual(radius + 24);
+    });
+
+    it('is not drawn while the reticle itself is not drawn', () => {
+      const { pose, camera } = centredRig();
+      jam();
+      run(pose, camera, [], 0.1);
+      expect(isShown(tag())).toBe(true);
+
+      render(pose, camera, false);
+
+      expect(isShown(tag())).toBe(false);
+    });
+
+    it('doubles the time the ring takes to complete a lock', () => {
+      const { pose, camera, enemy } = centredRig(20);
+      const framesToLock = (): number => {
+        for (let i = 1; i <= 400; i += 1) {
+          if (frame(pose, camera, [enemy])) return i;
+        }
+        return -1;
+      };
+      const clean = framesToLock();
+      expect(clean * DT).toBeGreaterThan(1.0 - 2 * DT);
+      expect(clean * DT).toBeLessThan(1.0 + 4 * DT);
+
+      // 同一个姿态、同一个目标，重新来一遍，这次受干扰
+      indicator.dispose();
+      indicator = new LockOnIndicator();
+      indicator.init();
+      indicator.setLockTime(1.0);
+      jam();
+      const jammed = framesToLock();
+
+      expect(Math.abs(jammed - 2 * clean)).toBeLessThanOrEqual(2);
+      expect(jammed * DT).toBeGreaterThan(2.0 - 2 * DT);
+      expect(jammed * DT).toBeLessThan(2.0 + 4 * DT);
+    });
+
+    it('fills the progress arc at half the rate and changes nothing else on the ring', () => {
+      const { pose, camera, enemy } = centredRig(20);
+      jam();
+      const radius = indicator.getAcquireRadius();
+      const keepRadius = indicator.getKeepRadius();
+
+      frame(pose, camera, [enemy]);
+      run(pose, camera, [enemy], 1.0);
+
+      expect(indicator.getLockState()).toBe('track');
+      expect(indicator.getLockProgress()).toBeCloseTo(0.5, 1);
+      expect(indicator.getTrackedTarget()).toBe(enemy);
+      expect(indicator.getAcquireRadius()).toBe(radius);
+      expect(indicator.getKeepRadius()).toBe(keepRadius);
+      expect(keepRadius).toBeCloseTo(radius * KEEP_RATIO, 6);
+    });
+  });
 });

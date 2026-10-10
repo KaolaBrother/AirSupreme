@@ -16,6 +16,7 @@ import { resetLocale } from './i18nTestUtils';
  *   准星——十字落在哪里，子弹就打向哪里。用哪一档锥角只看设备：GameConfig.isMobile 为真用触屏档
  *   （2.5° 以内全量，到 5° 减到零；接了实体键盘也一样），其余设备用键盘档（1.25° 以内全量，
  *   到 2.5° 减到零，偏移不超过 1.25°）。提前量标记、机头标记和以机头轴线为圆心的捕获环两边相同；
+ * - 敌机编队第 2 批：隐身中的敌机没有提前量标记，也拿不到机炮辅助，现形之后照常；
  * - C5：第一人称下特殊武器的枪口焰和电磁炮闪屏缩到约 0.55，第三人称不变；
  * - C5：暂停菜单拿到 getSaveStatus 与 onSaveAndExit，对局不在进行时两者都报“不存档”。
  *
@@ -99,10 +100,13 @@ interface Shot {
   direction: THREE.Vector3;
 }
 
+/** 一架普通敌机：活着、没有隐身；cloaked 置真就是一架隐身中的幽灵机 */
 interface FakeEnemy {
   mesh: THREE.Object3D;
   alive: boolean;
+  cloaked: boolean;
   isAlive: () => boolean;
+  isCloaked: () => boolean;
   getMesh: () => THREE.Object3D;
 }
 
@@ -430,7 +434,9 @@ describe('GameCoordinator weapons wiring', () => {
         const enemy: FakeEnemy = {
           mesh,
           alive: true,
+          cloaked: false,
           isAlive: () => enemy.alive,
+          isCloaked: () => enemy.cloaked,
           getMesh: () => mesh,
         };
         enemies.push(enemy);
@@ -917,6 +923,118 @@ describe('GameCoordinator weapons wiring', () => {
           expect(turned).toBeLessThanOrEqual(atMost + 1e-6);
         }
       );
+    });
+
+    // 隐身（敌机编队规格 §3 WRAITH）：隐身期间“不能被锁定，没有雷达光点、血条、目标标记，
+    // 也没有机炮提前量标记”。机炮辅助也不把十字拉向一架看不见的敌机；一现形就照常。
+    // 隐身的时序（何时隐、何时现）不在这里：替身敌机的 cloaked 直接给出“此刻是否隐身”。
+    describe('a cloaked jet', () => {
+      // 设备、是否触屏、落在该设备全量辅助区里的偏角（度）
+      const DEVICES = [
+        ['touch', true, 2],
+        ['desktop', false, 1],
+      ] as const;
+
+      it.each(DEVICES)('gets no lead marker on a %s device', (_device, touch, degrees) => {
+        const rig = createGunRig({ touch });
+        const enemy = rig.addEnemy(rig.pointOffNose(degrees, 300, 40));
+        enemy.cloaked = true;
+
+        rig.run();
+
+        expect(leadMarkerShown()).toBe(false);
+        expect(rig.solver.getPipTarget()).toBeNull();
+      });
+
+      it.each(DEVICES)(
+        'does not pull the cross or the bullets on a %s device',
+        (_device, touch, degrees) => {
+          const rig = createGunRig({ touch });
+          const enemy = rig.addEnemy(rig.pointOffNose(degrees, 300, 40));
+          enemy.cloaked = true;
+
+          rig.run();
+
+          expect(angleBetween(rig.shoot().direction, rig.nose)).toBeLessThan(1e-9);
+          expect(pixelDistance(rig.cross(), rig.nosePixel())).toBeLessThan(1e-6);
+          expect(reticleFlag()).toBe('false');
+          expect(rig.solver.getAssistTarget()).toBeNull();
+        }
+      );
+
+      it.each(DEVICES)(
+        'keeps the full 3° spread next to it on a %s device',
+        (_device, touch, degrees) => {
+          const rig = createGunRig({ touch });
+          const enemy = rig.addEnemy(rig.pointOffNose(degrees, 300));
+          enemy.cloaked = true;
+          rig.run();
+
+          const centre = rig.shoot().direction;
+          random.mockReturnValue(0);
+          const edge = rig.shoot().direction;
+
+          expect(THREE.MathUtils.radToDeg(angleBetween(edge, centre))).toBeCloseTo(1.5, 6);
+        }
+      );
+
+      it.each(DEVICES)(
+        'loses the lead marker on the step it cloaks, and the cross goes back to the nose (%s)',
+        (_device, touch, degrees) => {
+          const rig = createGunRig({ touch });
+          const enemy = rig.addEnemy(rig.pointOffNose(degrees, 300, 40));
+          rig.run();
+          expect(leadMarkerShown()).toBe(true);
+          expect(pixelDistance(rig.cross(), rig.nosePixel())).toBeGreaterThan(5);
+          expect(missDistance(rig.shoot(), enemy.mesh.position)).toBeLessThan(0.02);
+
+          enemy.cloaked = true;
+          rig.step();
+
+          expect(leadMarkerShown()).toBe(false);
+          expect(rig.solver.getPipTarget()).toBeNull();
+          expect(rig.solver.getAssistTarget()).toBeNull();
+
+          // 十字不必瞬间跳回去，但半秒之内回到机头，子弹也沿机头飞
+          rig.run(30);
+          expect(pixelDistance(rig.cross(), rig.nosePixel())).toBeLessThan(1e-6);
+          expect(reticleFlag()).toBe('false');
+          expect(angleBetween(rig.shoot().direction, rig.nose)).toBeLessThan(1e-9);
+        }
+      );
+
+      it.each(DEVICES)('is picked up again once it is visible (%s)', (_device, touch, degrees) => {
+        const rig = createGunRig({ touch });
+        const enemy = rig.addEnemy(rig.pointOffNose(degrees, 300, 40));
+        enemy.cloaked = true;
+        rig.run();
+        expect(leadMarkerShown()).toBe(false);
+
+        enemy.cloaked = false;
+        rig.run();
+
+        expect(leadMarkerShown()).toBe(true);
+        expect(rig.solver.getPipTarget()).toBe(enemy.mesh);
+        expect(missDistance(rig.shoot(), enemy.mesh.position)).toBeLessThan(0.02);
+        expect(pixelDistance(rig.cross(), toPixel(enemy.mesh.position, rig.camera))).toBeLessThan(
+          1.5
+        );
+      });
+
+      it('leaves the assist and the lead marker to a visible jet farther from the nose', () => {
+        const rig = createGunRig({ touch: true });
+        const wraith = rig.addEnemy(rig.pointOffNose(0.8, 300, 180));
+        wraith.cloaked = true;
+        const fighter = rig.addEnemy(rig.pointOffNose(2.2, 300, 0));
+
+        rig.run();
+        const shot = rig.shoot();
+
+        expect(missDistance(shot, fighter.mesh.position)).toBeLessThan(0.02);
+        expect(missDistance(shot, wraith.mesh.position)).toBeGreaterThan(5);
+        expect(rig.solver.getPipTarget()).toBe(fighter.mesh);
+        expect(rig.solver.getAssistTarget()).toBe(fighter.mesh);
+      });
     });
 
     describe('clearing the assist', () => {
