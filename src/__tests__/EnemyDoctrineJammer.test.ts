@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EventBus } from '@/core/EventBus';
+import type { EnemyAI } from '@/features/enemy/EnemyAI';
 import { ENEMY_CONFIGS, EnemyType } from '@/features/enemy/EnemyTypes';
 import {
   DEG,
@@ -22,7 +23,9 @@ vi.setConfig({ testTimeout: SIM_TEST_TIMEOUT });
  * HP 120，没有武器，飞得慢。躲在自己编队身后 300–500 米，让编队挡在它和玩家之间。
  * 至少一架存活的干扰机在玩家 800 米内时，玩家导弹锁定时间 ×2（不叠加）；范围内最后一架
  * 干扰机被击毁 / 离开 800 米后效果结束（§3a：允许晚一个模拟步）。
- * 已接受的出入：“自己的编队” = 其余敌机的平均位置。
+ * “自己的编队”（里程碑 3 起）：和它同一路到场（编组号相同）的其余存活敌机的平均位置；那一路
+ * 没有别的敌机了、或它不属于任何一路（测试台用 spawn 直接生成的敌机）时，退回到场上其余
+ * 非干扰机敌机的平均位置（已接受的出入）。
  *
  * 不在这里：“受干扰”标签、导引头与机炮（CoordinatorJamCloakJetMissiles.test.ts）；
  * 被 EMP 瘫痪的干扰机不干扰（§3a，里程碑 3）。
@@ -44,11 +47,11 @@ function useSeed(seed: number): void {
   randomSpy = vi.spyOn(Math, 'random').mockImplementation(seededGameRandom(seed));
 }
 
-function systemRig(level = 6, seed = 1): SystemRig {
+function systemRig(level = 6, seed = 1, playerSpeed?: number): SystemRig {
   system?.dispose();
   EventBus.clear();
   useSeed(seed);
-  system = new SystemRig({ level, difficulty: 3 });
+  system = new SystemRig({ level, difficulty: 3, playerSpeed });
   system.missiles.flightSeconds = 3;
   return system;
 }
@@ -77,11 +80,11 @@ function jammerInRange(rig: SystemRig): boolean {
   );
 }
 
-/** 其余（非干扰机）存活敌机的平均位置；没有为 null */
-function centroidOfOthers(rig: SystemRig, out = new THREE.Vector3()): THREE.Vector3 | null {
+/** 这些敌机里存活的非干扰机的平均位置；没有为 null */
+function centroidOf(jets: readonly EnemyAI[], out = new THREE.Vector3()): THREE.Vector3 | null {
   out.set(0, 0, 0);
   let count = 0;
-  for (const jet of rig.jets) {
+  for (const jet of jets) {
     if (!jet.isAlive() || jet.getConfig().type === EnemyType.JAMMER) continue;
     out.add(jet.getMesh().position);
     count++;
@@ -89,8 +92,50 @@ function centroidOfOthers(rig: SystemRig, out = new THREE.Vector3()): THREE.Vect
   return count > 0 ? out.multiplyScalar(1 / count) : null;
 }
 
+/** 其余（非干扰机）存活敌机的平均位置；没有为 null */
+function centroidOfOthers(rig: SystemRig, out = new THREE.Vector3()): THREE.Vector3 | null {
+  return centroidOf(rig.jets, out);
+}
+
+/**
+ * 记下 EnemySystem 每一步交给干扰机的编队中心，以及同一时刻 expected() 算出的应有值
+ * （仍调用原方法，不改变它的行为）
+ */
+function recordGroupCenters(rig: SystemRig, jammer: EnemyAI, expected: () => THREE.Vector3 | null) {
+  const original = jammer.setGroupCenter.bind(jammer);
+  const calls: Array<{
+    time: number;
+    given: THREE.Vector3 | null;
+    expected: THREE.Vector3 | null;
+  }> = [];
+  vi.spyOn(jammer, 'setGroupCenter').mockImplementation((center) => {
+    const want = expected();
+    calls.push({
+      time: rig.time,
+      given: center ? center.clone() : null,
+      expected: want ? want.clone() : null,
+    });
+    original(center);
+  });
+  const check = (label: string) => {
+    expect(calls.length, `${label}: calls`).toBeGreaterThan(0);
+    for (const call of calls) {
+      const tag = `${label} at ${call.time.toFixed(2)} s`;
+      if (call.expected === null) {
+        expect(call.given, tag).toBeNull();
+      } else {
+        expect(call.given, tag).not.toBeNull();
+        const gap = call.given ? call.given.distanceTo(call.expected) : Infinity;
+        expect(gap, tag).toBeLessThan(1e-6);
+      }
+    }
+    calls.length = 0;
+  };
+  return { calls, check };
+}
+
 describe('JAMMER: HP 120, unarmed, slow (spec §3)', () => {
-  it('has 120 HP at base and is slower than the player cruise speed and than every armed type but the Heavy', () => {
+  it('has 120 HP at base and is slower than the player’s base top speed (45 m/s) and than every armed type but the Heavy', () => {
     const jammer = ENEMY_CONFIGS[EnemyType.JAMMER];
     expect(jammer.health).toBe(120);
     expect(jammer.speed).toBeLessThan(45);
@@ -156,43 +201,14 @@ describe('JAMMER: HP 120, unarmed, slow (spec §3)', () => {
   });
 });
 
-describe('JAMMER station behind its own group (spec §3; accepted: group = centroid of the other jets)', () => {
-  it('the enemy system gives it, every step, the mean position of the other living jets — and none when they are all dead', () => {
+describe('JAMMER station behind its own group (spec §3; own group = the jets it arrived with, else the other jets)', () => {
+  it('outside any wave group, the enemy system gives it, every step, the mean position of the other living jets — and none when they are all dead', () => {
     const rig = systemRig(6, 3);
     const others = [EnemyType.FIGHTER, EnemyType.SCOUT, EnemyType.SNIPER].map((type, index) =>
       rig.spawn(type, pointAround(rig.player, 500, (index * 60 - 30) * DEG))
     );
     const jammer = rig.spawn(EnemyType.JAMMER, pointAround(rig.player, 800, 0));
-    const original = jammer.setGroupCenter.bind(jammer);
-    const calls: Array<{
-      time: number;
-      given: THREE.Vector3 | null;
-      expected: THREE.Vector3 | null;
-    }> = [];
-    vi.spyOn(jammer, 'setGroupCenter').mockImplementation((center) => {
-      const expected = centroidOfOthers(rig);
-      calls.push({
-        time: rig.time,
-        given: center ? center.clone() : null,
-        expected: expected ? expected.clone() : null,
-      });
-      original(center);
-    });
-
-    const check = (label: string) => {
-      expect(calls.length, `${label}: calls`).toBeGreaterThan(0);
-      for (const call of calls) {
-        const tag = `${label} at ${call.time.toFixed(2)} s`;
-        if (call.expected === null) {
-          expect(call.given, tag).toBeNull();
-        } else {
-          expect(call.given, tag).not.toBeNull();
-          const gap = call.given ? call.given.distanceTo(call.expected) : Infinity;
-          expect(gap, tag).toBeLessThan(1e-6);
-        }
-      }
-      calls.length = 0;
-    };
+    const { calls, check } = recordGroupCenters(rig, jammer, () => centroidOfOthers(rig));
 
     let steps = 0;
     rig.run(5, () => {
@@ -213,13 +229,42 @@ describe('JAMMER station behind its own group (spec §3; accepted: group = centr
     expect(Number.isFinite(jammer.getMesh().position.length())).toBe(true);
   });
 
+  it('in a wave group (as a pincer side arrives), it gets the mean position of its own side, not of the other side; once its side is down, the other jets', () => {
+    const rig = systemRig(6, 3);
+    const ownSide = [EnemyType.SNIPER, EnemyType.STRIKER].map((type, index) =>
+      rig.spawn(type, pointAround(rig.player, 500, (index * 40 + 10) * DEG))
+    );
+    const otherSide = [EnemyType.FIGHTER, EnemyType.FIGHTER].map((type, index) =>
+      rig.spawn(type, pointAround(rig.player, 500, (index * 40 - 150) * DEG))
+    );
+    const jammer = rig.spawn(EnemyType.JAMMER, pointAround(rig.player, 800, 30 * DEG));
+    // 与 LevelManager 给一波里的两路编组号的方式一样：同一路同一个号，两路不同
+    for (const jet of [...ownSide, jammer]) jet.setGroupId(3);
+    for (const jet of otherSide) jet.setGroupId(4);
+    const { check } = recordGroupCenters(rig, jammer, () =>
+      ownSide.some((jet) => jet.isAlive()) ? centroidOf(ownSide) : centroidOfOthers(rig)
+    );
+
+    rig.run(5);
+    check('own side alive');
+
+    ownSide[0].takeDamage(1e6);
+    rig.run(3);
+    check('one of its side shot down');
+
+    ownSide[1].takeDamage(1e6);
+    rig.run(3);
+    check('its side all shot down');
+  });
+
   /**
    * 编队的站位：从第 15 秒起，干扰机离编队中心 300–500 米，并且编队挡在它和玩家之间
    * （从编队中心看，干扰机在“玩家 → 编队中心”方向两侧 45 度以内，而且比编队离玩家更远）
-   * 的时间占比。规格没有给干扰机单独的量法，借用 §3a 狙击机距离带的量法（≥ 60 %）。
+   * 的时间占比。规格没有给干扰机单独的量法，借用 §3a 狙击机距离带的量法：迎着巡航速度直飞
+   * 或缓转的玩家，至少 60 %。
    */
-  function stationShare(group: EnemyType[], yaw: number, seed: number) {
-    const rig = systemRig(6, seed);
+  function stationShare(group: EnemyType[], yaw: number, seed: number, playerSpeed: number) {
+    const rig = systemRig(6, seed, playerSpeed);
     rig.pilot = (active) => active.turnPlayer(yaw * DT);
     group.forEach((type, index) =>
       rig.spawn(type, pointAround(rig.player, 600, (20 + index * 25) * DEG))
@@ -248,52 +293,119 @@ describe('JAMMER station behind its own group (spec §3; accepted: group = centr
     return held / counted;
   }
 
-  it('control: behind a Sniper, a Striker and a Fighter, it holds the station at least 60 % of the time against a straight or gently turning player', () => {
-    for (const seed of [1, 2, 3]) {
-      for (const yaw of [0, 0.1]) {
-        const share = stationShare(
-          [EnemyType.SNIPER, EnemyType.STRIKER, EnemyType.FIGHTER],
-          yaw,
-          seed
-        );
-        expect(share, `seed ${seed}, turn ${yaw} rad/s`).toBeGreaterThanOrEqual(0.6);
+  /**
+   * 玩家的“巡航速度”：不推油门时稳定在最大速度的一半——基础机 22.5 米/秒，速度升满
+   * （45 + 10 × 4 = 85）时 42.5 米/秒。两头各量一次：22.5 米/秒，以及 45 米/秒（基础机的极速，
+   * 略高于升满时的巡航；本文件和舰队测试台其余的距离带测试都按这个速度飞）
+   */
+  const PLAYER_SPEEDS = [22.5, 45] as const;
+  /** §3a 量法的范围：直飞与缓转（0.1 rad/s） */
+  const STRAIGHT_OR_GENTLE = [0, 0.1] as const;
+  const SEEDS = [1, 2, 3, 4, 5, 6] as const;
+
+  /** 这些速度 × 转向 × 种子下守不住（< 60 %）的那几次 */
+  function stationMisses(group: EnemyType[], speeds: readonly number[]) {
+    const misses: string[] = [];
+    for (const speed of speeds) {
+      for (const yaw of STRAIGHT_OR_GENTLE) {
+        for (const seed of SEEDS) {
+          const share = stationShare(group, yaw, seed, speed);
+          if (share < 0.6) {
+            misses.push(
+              `${speed} m/s, turn ${yaw} rad/s, seed ${seed}: ${(share * 100).toFixed(0)} %`
+            );
+          }
+        }
       }
     }
+    return misses;
+  }
+
+  const THREE_FIGHTERS = [EnemyType.FIGHTER, EnemyType.FIGHTER, EnemyType.FIGHTER];
+  const MIXED = [EnemyType.SNIPER, EnemyType.STRIKER, EnemyType.FIGHTER];
+
+  /*
+   * 不量绕圈（0.3 rad/s）：它不在借用的 §3a 量法范围内（只有直飞与缓转），而且做不到——
+   * 玩家以 45 米/秒绕圈时，编队中心后方 400 米那个点跟着编队绕玩家转，实测每秒移动 123–182 米
+   * （四分位，中位 143–152 米/秒；直飞 / 缓转时中位 54–73 米/秒），§2 规则 6 只许干扰机飞到
+   * 1.3 × 38 = 49.4 米/秒，没有哪种飞法守得住。
+   */
+
+  // 第 6 关“干扰机 + 打击机”那一波的编成（两架战斗机、两架打击机、一架干扰机，一路到场）
+  it('behind two Fighters and two Strikers (the level 6 Jammer + Strikers wave), it holds the station at least 60 % of the time against a straight or gently turning player at 22.5 or 45 m/s', () => {
+    expect(
+      stationMisses(
+        [EnemyType.FIGHTER, EnemyType.FIGHTER, EnemyType.STRIKER, EnemyType.STRIKER],
+        PLAYER_SPEEDS
+      )
+    ).toEqual([]);
+  });
+
+  // 三架战斗机、玩家 45 米/秒：里程碑 2 时记为已知失败（直飞 2–3 %、缓转 0 %，离编队 560–670 米），
+  // 4d91d40 重写了站位后直飞 99–100 %、缓转 87–92 %。22.5 米/秒见下面的 FINDING
+  it('behind three Fighters, it holds the station at least 60 % of the time against a straight or gently turning player at 45 m/s', () => {
+    expect(stationMisses(THREE_FIGHTERS, [45])).toEqual([]);
+  });
+
+  // 狙击机 + 打击机 + 战斗机、玩家 22.5 米/秒：63–94 %。45 米/秒见下面的 FINDING
+  it('behind a Sniper, a Striker and a Fighter, it holds the station at least 60 % of the time against a straight or gently turning player at 22.5 m/s', () => {
+    expect(stationMisses(MIXED, [22.5])).toEqual([]);
   });
 
   // FINDING: spec §3 JAMMER — "Keeps 300–500 m behind its own group, with the group between
-  // itself and the player" (accepted: the group is the centroid of the other enemy jets). The
-  // spec gives no separate measure; measured like spec §3a's Sniper standoff band (at least 60 %
-  // of the time, from t = 15 s), a Jammer whose group is three Fighters does not hold it: the
-  // share is 2-3 % against a player flying straight at cruise speed, 0 % against a 0.1 rad/s
-  // turn and 9-12 % against a 0.3 rad/s circle (seeds 1-3); it sits 560-670 m from the group's
-  // centre (median 585-659 m) instead of 300-500 m. The Fighters keep pace with the player
-  // (45 m/s); the Jammer (base 38 m/s) flies at 1.0x of its base speed once it is within 260 m
-  // of its station, so it falls back until it is 260 m short and hurries again — although spec
-  // §2 rule 6 lets it fly at up to 1.3x (49.4 m/s). Against a straight player it is then also
-  // outside its own 800 m jamming range about half the time. Reproduce: SystemRig({ level: 6,
-  // difficulty: 3 }) with Math.random = seededGameRandom(seed); three FIGHTERs 600 m out at 20,
-  // 45 and 70 degrees, one JAMMER 900 m out at 40 degrees; player at 45 m/s straight or turning
-  // 0.1 / 0.3 rad/s for 120 s; from t = 15 s take the share of steps where the Jammer is
-  // 300-500 m from the Fighters' centroid and within 45 degrees behind it as seen from the player.
+  // itself and the player". The spec gives no separate measure; measured like spec §3a's Sniper
+  // standoff band (at least 60 % of the time against a player flying straight at cruise speed or
+  // turning gently, from t = 15 s), a Jammer whose group is a Sniper, a Striker and a Fighter does
+  // not hold it against a fast player: at 45 m/s, 5 of 12 runs are under 60 % (seeds 1-6 at
+  // 2162554): straight seeds 2 / 5 / 6 at 30 / 30 / 34 %, 0.1 rad/s seeds 1 / 4 at 59 / 30 %; at
+  // 42.5 m/s (the cruise speed of a jet with its speed upgrades maxed) 3 of 12: 0.1 rad/s seeds
+  // 1 / 3 / 4 at 59 / 59 / 26 %; at 40 m/s 2 of 12 (59 / 59 %); at 22.5 and 35 m/s none. In the
+  // 45 m/s straight misses the group's centre stands ~350-370 m from the player (the Sniper and
+  // the Striker keep their standoff) and the Jammer trails its station: a median 524-540 m from
+  // the centre, more than 500 m for 61-64 % of the time, and so outside its own 800 m jamming
+  // range for 71-84 % of the run. In the 0.1 rad/s seed-4 miss it is at the right distance but
+  // not behind the group (outside 45 degrees of the player -> group line) for 70 % of the time.
+  // Minor: tens of metres past the band at the median, and only against fast players; its side
+  // effect is that it rarely jams them. The group is right: these jets are spawned outside any
+  // wave, so the enemy system hands the Jammer the centroid of all other living jets — the point
+  // this test measures from (checked by the first test in this block). Reproduce: SystemRig({
+  // level: 6, difficulty: 3, playerSpeed: 45 }) with Math.random = seededGameRandom(seed); a
+  // SNIPER, a STRIKER and a FIGHTER 600 m out at 20, 45 and 70 degrees, one JAMMER 900 m out at
+  // 40 degrees; player straight or turning 0.1 rad/s for 120 s; from t = 15 s take the share of
+  // steps where the Jammer is 300-500 m from the others' centroid and within 45 degrees behind it
+  // as seen from the player.
   it.fails(
-    'behind three Fighters, it holds the station at least 60 % of the time against a straight, gently turning or circling player',
+    'behind a Sniper, a Striker and a Fighter, it holds the station at least 60 % of the time against a straight or gently turning player at 45 m/s',
     () => {
-      const misses: string[] = [];
-      for (const seed of [1, 2, 3]) {
-        for (const yaw of [0, 0.1, 0.3]) {
-          const share = stationShare(
-            [EnemyType.FIGHTER, EnemyType.FIGHTER, EnemyType.FIGHTER],
-            yaw,
-            seed
-          );
-          if (share < 0.6)
-            misses.push(`seed ${seed}, turn ${yaw} rad/s: ${(share * 100).toFixed(0)} %`);
-        }
-      }
-      expect(misses).toEqual([]);
+      expect(stationMisses(MIXED, [45])).toEqual([]);
     }
   );
+
+  // FINDING: spec §3 JAMMER — "Keeps 300–500 m behind its own group, with the group between
+  // itself and the player". Measured as above (spec §3a's measure, at least 60 %), a Jammer whose
+  // group is three Fighters does not hold it against a player turning gently at the base cruise
+  // speed: at 22.5 m/s and 0.1 rad/s, seeds 1 / 3 are at 57 / 42 % (seeds 2, 4, 5, 6: 66-73 %);
+  // straight at 22.5 m/s it is 89-94 %, and at 45 m/s 87-100 % (seeds 1-6 at 2162554). The
+  // distance is right (median 353 m from the centre, outside 300-500 m for 7-19 % of the time);
+  // it is the "group between itself and the player" half that fails: the Fighters sit close
+  // behind the slow-turning player, the player -> group line swings, and the Jammer is more than
+  // 45 degrees off it for 38 / 45 % of the time. Minor. Reproduce: as above with playerSpeed
+  // 22.5, three FIGHTERs 600 m out at 20, 45 and 70 degrees, the player turning 0.1 rad/s.
+  it.fails(
+    'behind three Fighters, it holds the station at least 60 % of the time against a straight or gently turning player at 22.5 m/s',
+    () => {
+      expect(stationMisses(THREE_FIGHTERS, [22.5])).toEqual([]);
+    }
+  );
+
+  /*
+   * 没有测的情形（规格问题，见报告）：一路只有打击机的干扰机（第 5 关第 6 波
+   * pincer([STRIKER, STRIKER, JAMMER], …)）。规格 §3 打击机“stays 450–700 m out”，干扰机在它们
+   * 身后 300–500 米，就是离玩家 750–1200 米；§2 规则 4 拴绳在 900 米把它直线拉回。两条规则只在
+   * 很窄的一段上同时成立（打击机 ≤ 600 米、干扰机贴着 300 米），测哪一边都等于替规格做选择。
+   * 2162554 上（种子 1，玩家 45 米/秒）：直飞 7 %（90 % 的时间离玩家 850 米以上、42 % 的时间被
+   * 拴绳拉回，不在 800 米干扰半径内），缓转 13 %、绕圈 37 %（被拉近到离编队不足 300 米）。
+   */
 });
 
 describe('JAMMER jamming through the real enemy system (spec §3; §3a: one step late is accepted)', () => {
