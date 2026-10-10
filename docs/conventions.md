@@ -16,7 +16,7 @@
 ## Testing and review
 
 - Meaningful changes finish with `npx tsc --noEmit`, `npm run lint`, `npm run test:run`, `npm run build`.
-- Whoever implements a behavior does not author its tests.
+- Whoever implements a behavior does not author its tests. Test authors test against the spec and never edit production code; a defect they find is recorded as an `it.fails` case with a `FINDING:` comment that quotes the rule it breaks, and becomes a plain test once the fix lands. Implementers list the tests their change makes stale instead of editing them.
 - Do not merge to `main` unless explicitly asked. Confirm the current branch with `git branch --show-current`.
 
 ## Agent execution
@@ -27,7 +27,7 @@
 
 ## Adding content
 
-- New enemy type: `EnemyTypes.ts` enum + `ENEMY_CONFIGS`, then wave rules in spawn selection.
+- New enemy type: `EnemyTypes.ts` enum + `ENEMY_CONFIGS`; a doctrine in `src/features/enemy/doctrine/` (extend `JetDoctrine`, tuning as an exported `*_TUNING` constant) registered in `createJetDoctrine`; an airframe and scale in `createEnemyMesh` (`AircraftMeshFactory.ts`; the hit radius follows the scale); then wave rules in spawn selection. The Hangar picks the type up from the enum.
 - Cannon / missile tuning: `GAME_CONSTANTS` in `src/config.ts` and the upgrade tracks in `src/features/upgrade/UpgradeSystem.ts`.
 - New special weapon: `SpecialWeaponId` / `SPECIAL_WEAPON_IDS` (`src/core/CombatContracts.ts`), `SPECIAL_WEAPON_CONFIGS` + stat table (`src/features/weapons/WeaponTypes.ts`), fire logic in `WeaponSystem`, the unlock chapter (`unlockedWeapons` in `CampaignData.ts`) and an upgrade track (`WEAPON_UPGRADE_TYPES`).
 - New unit: `UnitType` + `UNIT_CONFIGS` (`src/features/units/UnitTypes.ts`), a mesh in `UnitMeshFactory`, a behaviour in `updateUnitBehavior` (`UnitBehaviors.ts` / `UnitBehaviorsAir.ts`), wave placement in `UnitDeployments.ts`, a first-contact line in `UNIT_FIRST_CONTACT_RADIO`.
