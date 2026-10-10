@@ -636,6 +636,9 @@ export class StartMenu {
       }
       this.inHangar = true;
       this.setVisible(false);
+      // 模块已经到了：先让“机库”按钮恢复可用。机库建不出渲染器时 show() 会当场回调
+      // resumeFromHangar，焦点要落回这个按钮——停用着的按钮接不住焦点
+      this.title.setBusy(null);
       preview.show();
     } catch (error) {
       if (!this.isDisposed) {

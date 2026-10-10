@@ -49,8 +49,9 @@ const KEYBOARD_GROUPS: readonly KeyGroup[] = [
       { keys: ['A', 'D'], action: { en: 'Yaw (nose left / right)', zh: '偏航（机头左右）' } },
       { keys: ['Q', 'E'], action: { en: 'Roll (bank the wings)', zh: '翻滚（机翼倾斜）' } },
       {
-        // 加速只认左侧的 Shift / Ctrl；右 Shift 是导弹
-        keys: ['Shift'],
+        // 加速只认左侧的 Shift / Ctrl，右 Shift 是导弹：键帽写明左右（两种语言同一写法），
+        // 说明里再用文字说一遍
+        keys: ['L Shift', 'L Ctrl'],
         action: { en: 'Boost: hold left Shift or left Ctrl', zh: '加速：按住左 Shift 或左 Ctrl' },
       },
     ],
@@ -63,10 +64,10 @@ const KEYBOARD_GROUPS: readonly KeyGroup[] = [
         action: { en: 'Fire guns (hold to keep firing)', zh: '开火（按住连射）' },
       },
       {
-        keys: ['M'],
+        keys: ['M', 'R Shift'],
         action: {
-          en: 'Missile: fire when the ring is green. Right Shift fires too.',
-          zh: '导弹：环变绿后发射，右 Shift 也可以',
+          en: 'Missile: fire when the ring is green (M or right Shift)',
+          zh: '导弹：环变绿后发射（M 或右 Shift）',
         },
         note: MISSILE_NOTE,
       },
