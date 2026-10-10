@@ -45,7 +45,10 @@ const CONTROL_LEGEND: ReadonlyArray<{
   { keys: ['Q', 'E'], action: { en: 'Roll (bank the wings)', zh: '翻滚（机翼倾斜）' } },
   { keys: [{ en: 'Space', zh: '空格' }], action: { en: 'Fire guns', zh: '开火' } },
   { keys: ['Shift'], action: { en: 'Boost', zh: '加速' } },
-  { keys: ['M'], action: { en: 'Fire missile', zh: '发射导弹' } },
+  {
+    keys: ['M'],
+    action: { en: 'Missile (fire when the ring is green)', zh: '导弹（环变绿后发射）' },
+  },
   { keys: ['F'], action: { en: 'Special weapon (hold)', zh: '特殊武器（可长按）' } },
   { keys: ['Tab', 'X'], action: { en: 'Cycle special weapon', zh: '切换特殊武器' } },
   { keys: ['1', '5'], joiner: ' – ', action: { en: 'Select special weapon', zh: '选择特殊武器' } },

@@ -41,6 +41,8 @@ export interface DevHookAccess {
   getStats(): PlayerStats;
   isStoryHold(): boolean;
   getUpgradeMenuVisible(): boolean;
+  /** 瞄准 / 导弹状态：准星屏幕位置、捕获环与保持环半径、锁定状态与进度、导弹余量 */
+  getAimState?(): Record<string, unknown>;
   clickHangarContinue(): void;
   /** 瞬移之后：同步插值状态、相机就位、清掉拖尾 */
   onPlayerTeleported(): void;
@@ -148,6 +150,7 @@ export function installDevHooks(access: DevHookAccess): void {
       score: access.getScore(),
       upgradePoints: access.getStats().getUpgrades().getAvailablePoints(),
       campaignLevel: access.getStats().getUpgrades().getCampaignLevel(),
+      aim: access.getAimState?.() ?? null,
       cameraMode: access.getView().getMode(),
       cameraBlend: round(access.getView().getBlend()),
       weapons: {

@@ -52,6 +52,8 @@ const TXT_TAP_PULSE: LocalizedText = { en: 'Tap to pulse', zh: '轻触释放' };
 const TXT_F_SALVO: LocalizedText = { en: 'Press F to fire', zh: 'F 键齐射' };
 const TXT_TAP_SALVO: LocalizedText = { en: 'Tap to fire', zh: '轻触齐射' };
 const TXT_DECK_SPECIAL: LocalizedText = { en: 'SPEC', zh: '特武' };
+const TXT_STAT_LIVES: LocalizedText = { en: 'LIVES', zh: '生命' };
+const TXT_STAT_MISSILES: LocalizedText = { en: 'MSL', zh: '导弹' };
 const TXT_FIRST_PERSON: LocalizedText = { en: 'First-person', zh: '第一人称' };
 const TXT_THIRD_PERSON: LocalizedText = { en: 'Third-person', zh: '第三人称' };
 const TXT_DECK_FIRST_PERSON: LocalizedText = { en: '1ST', zh: '座舱' };
@@ -201,6 +203,8 @@ interface TouchDeckRefs {
   cycleSub: HTMLElement | null;
   camera: HTMLElement | null;
   cameraSub: HTMLElement | null;
+  /** 导弹键：余量写在 data-count，补给进度写在 --tc-meter（外圈进度环） */
+  missile: HTMLElement | null;
 }
 
 interface WeaponSlotEntry {
@@ -253,6 +257,9 @@ export class HUD {
   private missilesDisplay: HTMLDivElement;
   private missileProgressDisplay: HTMLDivElement; // 导弹补给进度条背景
   private missileProgressFill: HTMLDivElement; // 导弹补给进度条填充
+  private livesLabel: HTMLSpanElement; // “生命”标签
+  private missilesLabel: HTMLSpanElement; // “导弹”标签
+  private missileCountDisplay: HTMLSpanElement; // 导弹余量 n/max
   private statusColumn: HTMLDivElement; // 右上状态列
   private topStack: HTMLDivElement; // 顶部中央消息栈
   private topStackObserver: ResizeObserver | null = null;
@@ -303,6 +310,9 @@ export class HUD {
   private enemyCounterMode: HudEnemyCounterMode = 'wave';
   private lastLivesFilled: number | null = null;
   private lastMissilesFilled: number | null = null;
+  /** 最近一次的导弹余量 / 补给进度：触控按键簇出现或重建后据此重写导弹键 */
+  private lastMissileCount: number = 0;
+  private lastMissileProgress: number = 0;
   private resizeHandler!: () => void;
   private readonly textContentCache = new WeakMap<HTMLElement, string>();
   private readonly styleValueCache = new WeakMap<HTMLElement, Map<string, string>>();
@@ -652,27 +662,29 @@ export class HUD {
     `;
     this.renderMissilePips(GAME_CONSTANTS.MISSILE.MAX_MISSILES);
 
-    // 导弹补给进度条（导弹UI下方）
+    // 导弹补给进度条（导弹读数内，pip 下方）
     this.missileProgressDisplay = document.createElement('div');
     this.missileProgressDisplay.id = 'hud-missile-reload';
-    this.missileProgressDisplay.style.cssText = `
-      height: 6px;
-      flex: none;
-      box-sizing: border-box;
-      background: rgba(8, 14, 24, 0.55);
-      border-radius: 3px;
-      overflow: hidden;
-      border: 1px solid rgba(255, 255, 255, 0.5);
-    `;
+    this.missileProgressDisplay.setAttribute('data-hud', 'missile-reload');
 
     this.missileProgressFill = document.createElement('div');
+    this.missileProgressFill.className = 'hud-stat-meter-fill';
     this.missileProgressFill.style.cssText = `
       width: 0%;
       height: 100%;
-      background: linear-gradient(90deg, #ffffff, #e0e0e0);
       transition: width 0.5s ease-out;
     `;
     this.missileProgressDisplay.appendChild(this.missileProgressFill);
+
+    // 带标签的读数：生命 = 标签 + pip；导弹 = 标签 + pip + 余量 n/max + 补给进度
+    this.livesLabel = document.createElement('span');
+    this.livesLabel.className = 'hud-stat-label';
+    this.missilesLabel = document.createElement('span');
+    this.missilesLabel.className = 'hud-stat-label';
+    this.missileCountDisplay = document.createElement('span');
+    this.missileCountDisplay.id = 'hud-missile-count';
+    this.missileCountDisplay.className = 'hud-stat-count';
+    this.renderStatLabels();
 
     // 道具倒计时（状态列底部）
     this.powerUpDisplay = document.createElement('div');
@@ -687,18 +699,33 @@ export class HUD {
     `;
     this.setTextContent(this.powerUpDisplay, '');
 
-    // 生命与导弹 pip：桌面 / 横屏上下两行，竖屏并排一行（缩短状态列，给下方消息栈让高度）
+    const livesHead = document.createElement('div');
+    livesHead.className = 'hud-stat-head';
+    livesHead.appendChild(this.livesLabel);
+    const livesStat = document.createElement('div');
+    livesStat.className = 'hud-stat hud-stat-lives';
+    livesStat.setAttribute('data-hud', 'lives-readout');
+    livesStat.append(livesHead, this.livesDisplay);
+
+    const missilesHead = document.createElement('div');
+    missilesHead.className = 'hud-stat-head';
+    missilesHead.append(this.missilesLabel, this.missileCountDisplay);
+    const missilesStat = document.createElement('div');
+    missilesStat.className = 'hud-stat hud-stat-missiles';
+    missilesStat.setAttribute('data-hud', 'missile-readout');
+    missilesStat.append(missilesHead, this.missilesDisplay, this.missileProgressDisplay);
+
+    // 生命与导弹读数：桌面 / 横屏上下两行，竖屏并排一行（缩短状态列，给下方消息栈让高度）
     const pipGroup = document.createElement('div');
     pipGroup.className = 'hud-pip-group';
-    pipGroup.appendChild(this.livesDisplay);
-    pipGroup.appendChild(this.missilesDisplay);
+    pipGroup.appendChild(livesStat);
+    pipGroup.appendChild(missilesStat);
 
     this.statusColumn.appendChild(this.enemiesDisplay);
     this.statusColumn.appendChild(pipGroup);
-    this.statusColumn.appendChild(this.missileProgressDisplay);
     this.statusColumn.appendChild(this.powerUpDisplay);
 
-    // 中央播报（道具 / 友军 / 教学提示）：锚定在准星上方的横幅，不压住准星与锁定环
+    // 中央播报（道具 / 友军 / 教学提示）：横幅位置按视角避让准星与捕获环（见 hudExtrasStyles）
     this.powerUpBigDisplay = document.createElement('div');
     this.powerUpBigDisplay.id = 'hud-callout';
     this.powerUpBigDisplay.setAttribute('data-hud', 'callout');
@@ -961,6 +988,7 @@ export class HUD {
     this.renderScore();
     this.renderSpeed();
     this.renderWaveLine();
+    this.renderStatLabels();
     this.renderUpgradePoints();
     this.renderSettlementTitle();
     this.renderSettlementLabels();
@@ -1646,6 +1674,10 @@ export class HUD {
     const maxMissiles = GAME_CONSTANTS.MISSILE.MAX_MISSILES;
     const filled = Math.max(0, Math.min(count, maxMissiles));
     this.renderMissilePips(filled);
+    this.lastMissileCount = filled;
+    this.setTextContent(this.missileCountDisplay, `${filled}/${maxMissiles}`);
+    HUD.setAttr(this.missileCountDisplay, 'data-empty', filled === 0 ? 'true' : 'false');
+    this.syncDeckMissiles();
   }
 
   /**
@@ -1657,6 +1689,32 @@ export class HUD {
     // 限制在0-1范围
     const clampedProgress = Math.max(0, Math.min(1, progress));
     this.setStyleValue(this.missileProgressFill, 'width', `${clampedProgress * 100}%`);
+    this.lastMissileProgress = clampedProgress;
+    this.syncDeckMissiles();
+  }
+
+  /** 触控导弹键：余量角标（data-count）与补给进度环（--tc-meter），与特武键同一套机制 */
+  private syncDeckMissiles(): void {
+    if (!this.deckMode) {
+      return;
+    }
+    const button = this.getTouchDeck().missile;
+    if (!button) {
+      return;
+    }
+    const full = this.lastMissileCount >= GAME_CONSTANTS.MISSILE.MAX_MISSILES;
+    HUD.setAttr(button, 'data-count', String(this.lastMissileCount));
+    this.setStyleVar(
+      button,
+      '--tc-meter',
+      full ? '0' : String(HUD.quantize(this.lastMissileProgress))
+    );
+  }
+
+  /** 状态列读数的标签（语言切换时重绘） */
+  private renderStatLabels(): void {
+    this.setTextContent(this.livesLabel, tr(TXT_STAT_LIVES));
+    this.setTextContent(this.missilesLabel, tr(TXT_STAT_MISSILES));
   }
 
   /**
@@ -2580,6 +2638,7 @@ export class HUD {
       this.deckMode = deck;
       this.syncStoresVisibility();
     }
+    this.syncDeckMissiles();
   }
 
   private getTouchDeck(): TouchDeckRefs {
@@ -2605,6 +2664,7 @@ export class HUD {
       cycleSub: child(cycle, '.tc-sub'),
       camera,
       cameraSub: child(camera, '.tc-sub'),
+      missile: find('missile-button'),
     };
     return this.deckRefs;
   }

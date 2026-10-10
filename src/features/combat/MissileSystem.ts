@@ -3,12 +3,28 @@ import { ParticleSystem, getVfxTextures } from '@/features/effects/ParticleSyste
 import { GAME_CONSTANTS } from '@/config';
 import { getLogger } from '@/core/utils/Logger';
 import { getDeclaredHitRadius } from '@/core/CombatContracts';
+import {
+  beginPlayerMissileTrail,
+  endPlayerMissileTrail,
+} from '@/features/effects/particles/recipes/trailRecipes';
 
 const log = getLogger('MissileSystem');
 // 稍微加密尾迹步进，让烟线更连续
 const MISSILE_TRAIL_INTERVAL = 0.03;
 // 海面和云层背景较亮，玩家导弹默认需要高于中性的尾迹强度
 const MISSILE_TRAIL_VISIBILITY_INTENSITY = 1.25;
+/** 离架后沿发射方向直飞这么久才开始制导（秒）：导弹先飞离载机，不会贴着镜头急转 */
+const MISSILE_BOOST_TIME = 0.2;
+/** 尾焰锥与引擎光晕在这段飞行时间内从无到有（秒）：第一人称离架瞬间不会有一团白光糊住视野 */
+const MISSILE_FLAME_FADE_START = 0.05;
+const MISSILE_FLAME_FADE_END = 0.35;
+/** 离架后这段时间不出烟（秒），之后在 RAMP 时间内把尾迹渐入 */
+const MISSILE_TRAIL_DELAY = 0.3;
+const MISSILE_TRAIL_RAMP_TIME = 0.6;
+/** 未声明命中半径的目标（普通敌机）的近炸距离（米） */
+const MISSILE_PROXIMITY_RADIUS = 6;
+/** 预热模型至少被真实渲染这么多次后才撤下 */
+const MISSILE_WARM_DRAWS = 2;
 
 // 弹体轴向范围（+Z 朝前）：喷口缘 → 弹尖，总长 2.8
 const MISSILE_TAIL_Z = -1.02;
@@ -474,10 +490,10 @@ export class Missile {
   public target: THREE.Object3D | null;
   public active: boolean = true;
   public lifetime: number = 0;
-  public maxLifetime: number = 10; // 10秒后自毁
+  public maxLifetime: number = GAME_CONSTANTS.MISSILE.MAX_LIFETIME; // 超过寿命后自毁
 
   private turnSpeed: number = GAME_CONSTANTS.MISSILE.TURN_SPEED; // 转向速度（弧度/秒）
-  private speed: number = 80; // 导弹速度
+  private speed: number = GAME_CONSTANTS.MISSILE.SPEED; // 导弹速度
   private particleSystem: ParticleSystem;
   private startPosition: THREE.Vector3; // 记录发射位置
   private maxFlightDistance: number = GAME_CONSTANTS.MISSILE.MAX_FLIGHT_DISTANCE; // 最大飞行距离
@@ -505,9 +521,14 @@ export class Missile {
   private readonly trailColor = new THREE.Color();
   private readonly enemyWorldPos = new THREE.Vector3();
 
+  /**
+   * @param direction 发射方向（载机机头方向）。导弹先沿它直飞 MISSILE_BOOST_TIME 秒再开始制导；
+   *                  方向非法（零向量 / 非有限数）时退回旧行为：直接指向目标，没有目标则朝 -Z。
+   */
   constructor(
     scene: THREE.Scene,
     position: THREE.Vector3,
+    direction: THREE.Vector3,
     target: THREE.Object3D | null,
     particleSystem: ParticleSystem,
     enemies: THREE.Object3D[] = []
@@ -530,8 +551,11 @@ export class Missile {
     this.velocity = new THREE.Vector3();
     this.active = true;
 
-    // 设置初始速度朝向目标
-    if (this.target) {
+    // 初始速度：沿发射方向离架；方向非法时指向目标
+    const directionLength = direction.length();
+    if (Number.isFinite(directionLength) && directionLength > 1e-4) {
+      this.velocity.copy(direction).multiplyScalar(this.speed / directionLength);
+    } else if (this.target) {
       this.target.getWorldPosition(this.targetWorldPos);
       this.targetDirection.subVectors(this.targetWorldPos, position).normalize();
       this.velocity.copy(this.targetDirection).multiplyScalar(this.speed);
@@ -544,6 +568,8 @@ export class Missile {
       this.lookTarget.copy(this.mesh.position).add(this.velocity);
       this.mesh.lookAt(this.lookTarget);
     }
+    // 尾焰从零渐入（见 updateVisuals）
+    this.updateVisuals();
   }
 
   /**
@@ -611,8 +637,8 @@ export class Missile {
       }
     }
 
-    // 如果有目标，追踪目标
-    if (this.target && this.target.parent) {
+    // 如果有目标，追踪目标（离架后的直飞段不制导）
+    if (this.lifetime >= MISSILE_BOOST_TIME && this.target && this.target.parent) {
       this.huntTarget(deltaTime);
     }
 
@@ -679,16 +705,32 @@ export class Missile {
   }
 
   private emitTrail(): void {
+    // 离架后先不出烟，再渐入：发射点附近不留一团挡住目标的烟
+    const ramp = THREE.MathUtils.clamp(
+      (this.lifetime - MISSILE_TRAIL_DELAY) / MISSILE_TRAIL_RAMP_TIME,
+      0,
+      1
+    );
+    if (ramp <= 0) {
+      return;
+    }
+
     this.trailPosition.copy(this.mesh.position);
     this.backwardDirection.copy(this.velocity).normalize().multiplyScalar(-1.5);
     this.trailPosition.add(this.backwardDirection);
     this.trailColor.setHSL(0.08 + Math.random() * 0.03, 1, 0.6);
-    this.particleSystem.createMissileTrail(
-      this.trailPosition,
-      this.velocity,
-      this.trailColor,
-      MISSILE_TRAIL_VISIBILITY_INTENSITY
-    );
+    // 玩家导弹用更轻的尾迹配方（见 trailRecipes），只作用于下面这一次调用
+    beginPlayerMissileTrail(ramp);
+    try {
+      this.particleSystem.createMissileTrail(
+        this.trailPosition,
+        this.velocity,
+        this.trailColor,
+        MISSILE_TRAIL_VISIBILITY_INTENSITY
+      );
+    } finally {
+      endPlayerMissileTrail();
+    }
   }
 
   private updateVisuals(): void {
@@ -697,24 +739,35 @@ export class Missile {
     const flicker = 0.5 + 0.28 * Math.sin(t * 52) + 0.22 * Math.sin(t * 87 + 1.7);
     const flickerB = 0.5 + 0.5 * Math.sin(t * 64 + 0.9);
     const speedPulse = THREE.MathUtils.clamp(this.velocity.length() / this.speed, 0.8, 1.15);
+    // 离架渐入：0.05 秒前完全不可见，0.35 秒时达到正常亮度
+    const launchFade = THREE.MathUtils.smoothstep(
+      this.lifetime,
+      MISSILE_FLAME_FADE_START,
+      MISSILE_FLAME_FADE_END
+    );
+    const flamesVisible = launchFade > 0.001;
+    this.flameOuter.visible = flamesVisible;
+    this.flameMid.visible = flamesVisible;
+    this.flameInner.visible = flamesVisible;
+    this.engineGlow.visible = flamesVisible;
 
     this.accentMaterial.emissiveIntensity = 0.55 + flicker * 0.5;
     this.nozzleMaterial.emissiveIntensity = 0.3 + flicker * 0.45;
 
     // 三层尾焰：焰口锚定喷管，焰长随速度脉动伸缩，径向随闪烁抖动
-    this.flameOuterMaterial.opacity = 0.16 + flicker * 0.16;
+    this.flameOuterMaterial.opacity = (0.16 + flicker * 0.16) * launchFade;
     const outerScale = 0.85 + flicker * 0.3;
     this.flameOuter.scale.set(outerScale, outerScale, (0.8 + flicker * 0.45) * speedPulse);
 
-    this.flameMidMaterial.opacity = 0.5 + flicker * 0.35;
+    this.flameMidMaterial.opacity = (0.5 + flicker * 0.35) * launchFade;
     const midScale = 0.85 + flicker * 0.3;
     this.flameMid.scale.set(midScale, midScale, (0.82 + flicker * 0.42) * speedPulse);
 
-    this.flameInnerMaterial.opacity = 0.72 + flickerB * 0.28;
+    this.flameInnerMaterial.opacity = (0.72 + flickerB * 0.28) * launchFade;
     const innerScale = 0.88 + flickerB * 0.3;
     this.flameInner.scale.set(innerScale, innerScale, (0.85 + flickerB * 0.45) * speedPulse);
 
-    this.engineGlowMaterial.opacity = 0.5 + flicker * 0.4;
+    this.engineGlowMaterial.opacity = (0.5 + flicker * 0.4) * launchFade;
     const glowScale = 0.9 + flicker * 0.5;
     this.engineGlow.scale.set(glowScale, glowScale, 1);
   }
@@ -776,6 +829,10 @@ export class MissileSystem {
   private missiles: Missile[] = [];
   private readonly collisionTargetPosition = new THREE.Vector3();
   private enemies: THREE.Object3D[] = []; // 存储敌人列表，用于重新锁定
+  /** 预热用的隐形导弹模型及其材质（材质一直保留，着色器程序才不会被渲染器回收） */
+  private warmModel: THREE.Group | null = null;
+  private readonly warmMaterials: THREE.Material[] = [];
+  private warmDraws = 0;
 
   constructor(scene: THREE.Scene, particleSystem?: ParticleSystem) {
     this.scene = scene;
@@ -795,12 +852,13 @@ export class MissileSystem {
   }
 
   /**
-   * 发射导弹
+   * 发射导弹：从 position 沿 direction 离架，直飞一小段后追踪 target
    */
-  public fire(position: THREE.Vector3, _direction: THREE.Vector3, target?: THREE.Object3D): void {
+  public fire(position: THREE.Vector3, direction: THREE.Vector3, target?: THREE.Object3D): void {
     const missile = new Missile(
       this.scene,
       position,
+      direction,
       target || null,
       this.particleSystem,
       this.enemies
@@ -809,9 +867,49 @@ export class MissileSystem {
   }
 
   /**
+   * 预热（关卡加载时调用，可重复调用）：把一枚缩到看不见、放在地表以下的导弹模型留在场景里
+   * 渲染几帧，让渲染器提前编译导弹用到的着色器、上传几何体与涂装贴图，
+   * 这些工作原本都压在第一次发射的那一帧。之后模型撤下，材质保留到 dispose。
+   */
+  public prewarm(): void {
+    if (!this.warmModel) {
+      const group = new THREE.Group();
+      const materials = createMissileAnimatedMaterials();
+      assembleMissileModel(group, materials);
+      this.warmMaterials.push(
+        materials.accent,
+        materials.nozzle,
+        materials.flameOuter,
+        materials.flameMid,
+        materials.flameInner,
+        materials.engineGlow
+      );
+      for (const node of group.children) {
+        // 不做视锥剔除：无论相机朝向都会真正提交绘制
+        node.frustumCulled = false;
+      }
+      const probe = group.children[0];
+      probe.onBeforeRender = () => {
+        this.warmDraws++;
+      };
+      group.scale.setScalar(0.001);
+      group.position.set(0, -4000, 0);
+      this.warmModel = group;
+    }
+    this.warmDraws = 0;
+    if (!this.warmModel.parent) {
+      this.scene.add(this.warmModel);
+    }
+  }
+
+  /**
    * 更新所有导弹
    */
   public update(deltaTime: number): void {
+    if (this.warmModel?.parent && this.warmDraws >= MISSILE_WARM_DRAWS) {
+      this.scene.remove(this.warmModel);
+    }
+
     const missiles = this.missiles;
     // 更新所有导弹
     for (let i = 0; i < missiles.length; i++) {
@@ -857,8 +955,8 @@ export class MissileSystem {
         }
 
         const distance = missile.mesh.position.distanceTo(targetWorldPos);
-        // 大型目标（Boss 部件 / 舰船）按声明的命中半径判定；未声明时沿用 2 米
-        const hitDistance = Math.max(2, getDeclaredHitRadius(targetMesh, 2));
+        // 大型目标（Boss 部件 / 舰船）按声明的命中半径判定；未声明的（普通敌机）用近炸距离
+        const hitDistance = Math.max(2, getDeclaredHitRadius(targetMesh, MISSILE_PROXIMITY_RADIUS));
 
         if (distance < hitDistance) {
           missile.active = false;
@@ -891,5 +989,13 @@ export class MissileSystem {
       missile.dispose(this.scene);
     }
     this.missiles = [];
+    if (this.warmModel) {
+      this.scene.remove(this.warmModel);
+      this.warmModel = null;
+    }
+    for (const material of this.warmMaterials) {
+      material.dispose();
+    }
+    this.warmMaterials.length = 0;
   }
 }

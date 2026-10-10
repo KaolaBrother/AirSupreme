@@ -96,13 +96,19 @@ export function createPilotStats(): PilotStats {
 /** 机炮弹速与射程（玩家子弹不继承载机速度） */
 const BULLET_SPEED = GAME_CONSTANTS.PROJECTILE.SPEED;
 const GUN_RANGE = GAME_CONSTANTS.PROJECTILE.MAX_DISTANCE * 0.9;
-/** 锁定距离（LockOnIndicator：最大飞行距离的一半）留一点余量 */
-const MISSILE_HOLD_RANGE = GAME_CONSTANTS.MISSILE.MAX_FLIGHT_DISTANCE / 2 - 100;
+/** 导引头锁定距离留一点余量 */
+const MISSILE_HOLD_RANGE = GAME_CONSTANTS.MISSILE.MAX_LOCK_DISTANCE - 100;
 /** 机炮开火锥（度）：在命中半径对应的张角之外再放宽一点，模拟“大致瞄准就按住开火” */
 const FIRE_CONE_SLACK_DEG = 2.5;
 const FIRE_CONE_MIN_DEG = 4;
-/** 导弹：目标在机头 10° 内才按住锁定 */
+/** 导弹：目标在机头 10° 内（大致是导引头捕获环的范围）才去按导弹键 */
 const MISSILE_CONE_DEG = 10;
+/**
+ * 导弹是“按一下发射一枚”：导引头常开，按住到锁定完成的那一刻发射，一次按键只发射一次。
+ * 飞行员按住 HOLD 秒（盖过基础锁定时间 1 秒）再松开 GAP 秒，形成下一次按下。
+ */
+const MISSILE_PRESS_HOLD = 1.4;
+const MISSILE_PRESS_GAP = 0.25;
 /** 键盘转向速率（弧度/秒），小误差时按“点按”占空比微调（玩家同样靠点按细调准星） */
 const YAW_RATE = GAME_CONSTANTS.PLAYER.YAW_SPEED;
 const PITCH_RATE = GAME_CONSTANTS.PLAYER.PITCH_SPEED;
@@ -268,6 +274,8 @@ export class ScriptedPilot {
   private extending = false;
   private extendTimer = 0;
   private wasSpecial = false;
+  /** 导弹键的按压节拍计时（秒）：见 MISSILE_PRESS_HOLD / MISSILE_PRESS_GAP */
+  private missilePressTimer = 0;
   /** checkTerrain 的附带结果：越过前方地形所需的最小爬升（sin）、是否迎面岩壁 */
   private terrainRequiredSlope = -1;
   private terrainWall = false;
@@ -312,6 +320,7 @@ export class ScriptedPilot {
     this.flareTimer = 0;
     this.specialPressed = false;
     this.chargeHeld = false;
+    this.missilePressTimer = 0;
     this.aimErrorYaw = 0;
     this.aimErrorPitch = 0;
   }
@@ -463,14 +472,23 @@ export class ScriptedPilot {
         targetDistance < MISSILE_HOLD_RANGE &&
         rawAngle < THREE.MathUtils.degToRad(MISSILE_CONE_DEG)
       ) {
-        input.missile = true;
-        this.stats.missileSeconds += dt;
+        this.missilePressTimer += dt;
+        if (this.missilePressTimer >= MISSILE_PRESS_HOLD + MISSILE_PRESS_GAP) {
+          this.missilePressTimer = 0;
+        }
+        if (this.missilePressTimer < MISSILE_PRESS_HOLD) {
+          input.missile = true;
+          this.stats.missileSeconds += dt;
+        }
+      } else {
+        this.missilePressTimer = 0;
       }
       this.useSpecial(world.special, targetDistance, rawAngle, world, input);
       if (input.special && !this.wasSpecial) this.stats.specialPresses++;
     } else {
       this.lastAim.kind = target ? target.kind : 'none';
       this.lastAim.distance = distance;
+      this.missilePressTimer = 0;
       this.releaseSpecial(world.special, input);
     }
 

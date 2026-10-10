@@ -4,7 +4,8 @@ import { HUD_COLORS, HUD_LAYERS, HUD_TONE_COLORS } from './hudPalette';
  * 无线电通讯面板样式。
  *
  * 位置避开准星与雷达：桌面贴底、紧挨雷达右侧；手机横握夹在摇杆与右侧按键簇之间；
- * 竖屏放到顶部状态栏下方。按键簇宽度由 index.html 的 --touch-deck-w / --touch-stick-size 提供。
+ * 竖屏第一人称放到顶部状态栏下方，竖屏追尾视角（准星在屏幕上方）放到按键簇上方。
+ * 按键簇尺寸由 index.html 的 --touch-deck-w / --touch-deck-h / --touch-stick-size 提供。
  */
 export const RADIO_STYLE_ID = 'radio-comms-style';
 
@@ -234,6 +235,16 @@ ${toneBlock('muted', '195, 204, 214')}
   top: calc(var(--hud-stack-bottom, calc(128px + env(safe-area-inset-top, 0px))) + 8px);
   bottom: auto;
   width: auto;
+}
+
+/*
+ * 竖屏追尾视角：准星与导弹捕获环在屏幕上方约 29% 处，正好是消息栈下方这一带，
+ * 面板留在那里会盖住准星和正在瞄的目标。改放到触控按键簇上方、向上生长
+ * （按键簇高度由 index.html 的 --touch-deck-h 提供；第一人称准星在屏幕中心，仍用上面的位置）
+ */
+:root:not([data-hud-camera='first-person']) #radio-comms[data-density='touch-portrait'] {
+  top: auto;
+  bottom: calc(max(20px, env(safe-area-inset-bottom)) + var(--touch-deck-h, 240px) + 8px);
 }
 
 #radio-comms:not([data-density='desktop']) .rc-panel {

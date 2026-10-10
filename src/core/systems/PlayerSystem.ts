@@ -24,6 +24,8 @@ const RESPAWN_HEADING_OFFSETS: readonly number[] = [
 
 export class PlayerSystem implements IGameSystem {
   readonly name = 'PlayerSystem';
+  /** 触屏辅助瞄准生效时的基础散布（度，总张角）；未辅助时为 3 度 */
+  private static readonly ASSISTED_BASE_SPREAD_DEG = 1.2;
   /** 航迹样本的最低离地高度（米）：贴地 / 宽限期抬升中的位置不算安全点 */
   private static readonly RESPAWN_ALTITUDE_BUFFER = 10;
   /** 复活点离地高度（米）：峡谷 / 火山等高耸地形上留出改出空间 */
@@ -131,6 +133,8 @@ export class PlayerSystem implements IGameSystem {
   private pendingDamageOptions: PlayerHitFeedbackMetadata | null = null;
 
   private fireCooldown: number = 0;
+  /** 触屏机炮辅助瞄准点（世界坐标，提前量点）；null 时子弹沿机头方向发射 */
+  private gunAimAssistPoint: THREE.Vector3 | null = null;
   private readonly previousVisualPosition = new THREE.Vector3();
   private readonly currentVisualPosition = new THREE.Vector3();
   private readonly interpolatedVisualPosition = new THREE.Vector3();
@@ -857,7 +861,21 @@ export class PlayerSystem implements IGameSystem {
     const baseFireRate = this.stats.getFireRate();
     this.fireCooldown = baseFireRate / this.stats.getRapidFireMultiplier();
 
-    const baseSpread = 3;
+    // 触屏辅助：目标的提前量点已经在机头轴线附近时，子弹朝该点发射，并收窄基础散布
+    const assistPoint = this.gunAimAssistPoint;
+    let assisted = false;
+    if (assistPoint) {
+      const dx = assistPoint.x - position.x;
+      const dy = assistPoint.y - position.y;
+      const dz = assistPoint.z - position.z;
+      const length = Math.sqrt(dx * dx + dy * dy + dz * dz);
+      if (Number.isFinite(length) && length > 1) {
+        forward.set(dx / length, dy / length, dz / length);
+        assisted = true;
+      }
+    }
+
+    const baseSpread = assisted ? PlayerSystem.ASSISTED_BASE_SPREAD_DEG : 3;
     const spreadAngle = this.stats.getSpreadAngle() + baseSpread;
     const spreadRad = ((spreadAngle / 2) * Math.PI) / 180;
     const randomAngle = (Math.random() - 0.5) * 2 * spreadRad;
@@ -868,6 +886,15 @@ export class PlayerSystem implements IGameSystem {
       direction: forward,
       damage: this.stats.getDamage(),
     });
+  }
+
+  /**
+   * 触屏机炮辅助瞄准：给出提前量点（世界坐标）后，下一次开火朝该点发射；传 null 关闭。
+   * 是否满足辅助条件（夹角 / 距离）由调用方判断（见 GunLeadSolver）；桌面端始终传 null。
+   * 传入的向量按引用保存，调用方每步刷新。
+   */
+  setGunAimAssist(point: THREE.Vector3 | null): void {
+    this.gunAimAssistPoint = point;
   }
 
   activateShield(scene: THREE.Scene): void {
