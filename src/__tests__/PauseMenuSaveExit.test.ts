@@ -798,11 +798,8 @@ describe('PauseMenu Save & Exit behaviour', () => {
       expect(bench.onExitToMenu).toHaveBeenCalledTimes(1);
     });
 
-    // 发现 F1（规格 S7：不存档的三种状态下，“退出”只调用一次 onExitToMenu，绝不调用 onSaveAndExit）：
-    // 实现里只要两个回调都接了，确认页的主按钮一律先调用 onSaveAndExit，再按它的结果决定是否退出——
-    // 屏幕上写着“不保存 / 没有可保存的进度”，按下去却仍然发起了一次存档。
-    // 实现修正后这些用例会转为通过，届时去掉 .fails。
-    it.fails.each(UNSAVED_KINDS)('%s: Exit never calls onSaveAndExit', (kind) => {
+    // 屏幕上写着“不保存 / 没有可保存的进度”时，“退出”只退出：两个回调都接着也不发起存档
+    it.each(UNSAVED_KINDS)('%s: Exit never calls onSaveAndExit', (kind) => {
       bench.openConfirm({ kind });
 
       button('Exit').click();
@@ -810,15 +807,16 @@ describe('PauseMenu Save & Exit behaviour', () => {
       expect(bench.onSaveAndExit).not.toHaveBeenCalled();
     });
 
-    // F1 的后果：那次不该有的存档调用若返回 failed，本来就不存档的对局停在“保存失败”页，而不是退出。
-    it.fails(
-      'no-save-mode: Exit leaves even if a save attempt would fail, because none is made',
-      () => {
-        bench.openConfirm({ kind: 'no-save-mode' }, { kind: 'failed' });
+    // 没有那次存档调用，也就不会因为它“失败”而把本来就不存档的对局拦在“保存失败”页
+    it.each(UNSAVED_KINDS)(
+      '%s: Exit leaves even if a save attempt would fail, because none is made',
+      (kind) => {
+        bench.openConfirm({ kind }, { kind: 'failed' });
 
         button('Exit').click();
 
         expect(bench.onExitToMenu).toHaveBeenCalledTimes(1);
+        expect(bench.onSaveAndExit).not.toHaveBeenCalled();
         expect(copy()).not.toContain(SAVE_FAILED_TITLE_EN);
       }
     );
@@ -963,8 +961,10 @@ describe('PauseMenu Save & Exit behaviour', () => {
           button('Cancel')
         );
 
+        // 重新说明之后这一页不再承诺存档：“退出”只退出，不再发起第二次存档
         button('Exit').click();
         expect(bench.onExitToMenu).toHaveBeenCalledTimes(1);
+        expect(bench.onSaveAndExit).toHaveBeenCalledTimes(1);
       }
     );
 
@@ -1214,11 +1214,10 @@ describe('PauseMenu Save & Exit behaviour', () => {
   });
 
   describe('S9: a language switch keeps focus on the button the player had moved to', () => {
-    // 发现 F2（规格 S9：切换语言原地重绘，并把焦点保持在同一个逻辑按钮上）：
-    // 重绘时实现按“初始焦点规则”重新落焦（会存档 → 主按钮；不存档 → 取消；失败页 → 返回），
-    // 玩家用方向键 / Tab 移到另一个按钮之后切换语言，焦点被拉回初始按钮。
-    // 焦点仍在初始按钮上的情形是对的（见上面两种语言的用例）。实现修正后这些用例会转为通过，届时去掉 .fails。
-    it.fails('saved confirm view: Cancel stays focused', () => {
+    // 初始焦点规则（会存档 → 主按钮；不存档 → 取消；失败页 → 返回）只在打开页面时决定焦点：
+    // 玩家用方向键 / Tab 移到另一个按钮之后切换语言，重绘后焦点仍在那个按钮上，不被拉回初始按钮。
+    // 焦点还在初始按钮上的情形见上面两种语言的用例。
+    it('saved confirm view: Cancel stays focused', () => {
       bench.openConfirm(saved('wave'));
       press(pair()[1], 'ArrowLeft');
       expect(document.activeElement, 'moved to Cancel').toBe(pair()[0]);
@@ -1230,7 +1229,7 @@ describe('PauseMenu Save & Exit behaviour', () => {
       expect(document.activeElement, 'focus stays on Cancel').toBe(cancel);
     });
 
-    it.fails('no-save confirm view: Exit stays focused', () => {
+    it('no-save confirm view: Exit stays focused', () => {
       bench.openConfirm({ kind: 'no-save-mode' });
       press(pair()[0], 'ArrowRight');
       expect(document.activeElement, 'moved to Exit').toBe(pair()[1]);
@@ -1242,7 +1241,7 @@ describe('PauseMenu Save & Exit behaviour', () => {
       expect(document.activeElement, 'focus stays on Exit').toBe(exit);
     });
 
-    it.fails('Save Failed view: Exit Anyway stays focused', () => {
+    it('Save Failed view: Exit Anyway stays focused', () => {
       bench.openSaveFailed();
       press(pair()[0], 'ArrowRight');
       expect(document.activeElement, 'moved to Exit Anyway').toBe(pair()[1]);
