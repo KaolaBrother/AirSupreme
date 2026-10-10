@@ -29,10 +29,12 @@ export function bridgeUnitFireToEventBus(system: UnitSystem): () => void;
 
 `GameCoordinator`'s handlers for `WAVE_START`, `WAVE_COMPLETE`, `LEVEL_COMPLETE`, `ENEMY_DEATH` and `PLAYER_DEATH` forward to `CampaignFlowController` (and `WAVE_START` to `UnitController.spawnForWave`); `PLAYER_HIT` also drives camera shake and the damage pulse. Everything else in the campaign is wired with direct callbacks (`on…` properties) and `…Deps` interfaces.
 
+The controls and weapons round (touch flight, unit markers, always-on seeker, Save & Exit, new menu) also added and changed **no** event types or payloads. One wiring note: nothing emits `MISSILE_FIRED` — the player's missile is launched by a direct call (`GameCoordinator.launchMissile` → `MissileSystem.fire`), as it already was before this round — and the coordinator's own listener for it is gone (`launchMissile` reports the tutorial's missile step itself). The type and `CombatSystem`'s listener for it are still there. `MISSILE_HIT` is unchanged.
+
 ## Config
 
-- Runtime constants: `src/config.ts` (`GAME_CONSTANTS` — `PLAYER`, `PROJECTILE`, `CAMERA`, `WORLD`, `POWERUP`, `LEVEL`, `MISSILE`; `GameConfig` device / quality profiles)
-- External JSON: `public/config/game-config.json` via `src/core/utils/ConfigLoader.ts`
+- Runtime constants: `src/config.ts` (`GAME_CONSTANTS` — `PLAYER`, `PROJECTILE`, `GUN_ASSIST`, `CAMERA`, `WORLD`, `POWERUP`, `LEVEL`, `MISSILE`; `GameConfig` device / quality profiles)
+- External JSON: `public/config/game-config.json` via `src/core/utils/ConfigLoader.ts`. Its `missile` block is not read by any runtime code: the player's missile takes its numbers from `GAME_CONSTANTS.MISSILE`, and the base lock and reload times come from the upgrade tracks (`UPGRADE_CONFIGS`)
 
 ```typescript
 import { configLoader } from '@/core/utils/ConfigLoader';
@@ -688,11 +690,20 @@ export interface CampaignFlowDeps {
   getScore(): number;
 }
 
+/** 暂停菜单“保存并退出”的去向（describeExitSave 的预告与 saveForExit 的实际结果同一形状） */
+export type CampaignExitSave =
+  | { kind: 'saved'; stage: CheckpointKind; position: LocalizedText }
+  | { kind: 'no-save-mode' | 'not-started' | 'complete' | 'failed' };
+
 export class CampaignFlowController {
   constructor(deps: CampaignFlowDeps);
   setupNewRun(level: number): void;
   beginNewRun(level: number): void;
   resumeFromCheckpoint(save: CampaignSaveData): void;
+  /** “保存并退出”的预告（只读，不写存档）：会存到哪里，或者为什么不存 */
+  describeExitSave(): CampaignExitSave;
+  /** 暂停菜单“保存并退出”：把此刻的快照重写在当前进度的检查点位置上；写入后读回确认 */
+  saveForExit(): CampaignExitSave;
   handleWaveStart(wave: number): void;
   handleWaveComplete(wave: number): void;
   handleLevelComplete(level: number): void;
@@ -716,6 +727,7 @@ The sequence it drives is in [architecture.md → Campaign flow](architecture.md
 - **Resume.** `resumeFromCheckpoint` on a `'hangar'` save sets the level, syncs progression and opens the hangar; Launch continues as after a boss kill (chapter card without prologue or tutorial, then combat). `'level-start'` / `'wave'` saves resume at the saved wave, `'boss'` saves (or `wave >= totalWaves`) at the boss briefing. The "Resumed: …" toast is a bilingual object built from `describeCheckpointText(save)`.
 - **Boss outro.** `handleBossDefeated` plays the `boss-defeated` stinger, then waits on game time advanced by `tick` (pauses and story holds freeze it): at least `BOSS_OUTRO_MIN_SECONDS` (1.6 s), then until `presentation.isRadioBusy()` is false, with a watchdog ceiling of `min(BOSS_OUTRO_MAX_SECONDS (75 s), max(1.6 s, getRadioBacklogSeconds()) + BOSS_OUTRO_SLACK_SECONDS (6 s))` taken when the outro starts. At the ceiling the debrief opens and the line being spoken finishes. If the player dies or leaves meanwhile, the outro is dropped.
 - **Autosave labels** are `HudText`: `{ text: 'Level {level} · Wave {wave}' | 'Level {level} · Before the boss' | 'Level {level} cleared', params }` (with their Chinese forms), so a toast on screen follows a language switch. Only `'wave'` checkpoints add the `checkpoint` stinger.
+- **Save & Exit.** The controller keeps an _exit point_ `{ kind, level, wave }`: the position of the most recent checkpoint (taken from the save on resume, set by every checkpoint write). When the last wave is cleared it becomes `{ kind: 'boss', level, wave: totalWaves }` before the `'boss'` checkpoint is written; it is `null` before the first checkpoint and after the campaign is complete. `describeExitSave()` is a read-only preview: `'no-save-mode'` in Boss mode; with no exit point `'complete'` after a victory, otherwise `'not-started'`; else `'saved'` with the checkpoint kind and the position text (the same wording as `describeCheckpointText`). `saveForExit()` writes a checkpoint at the exit point with the snapshot of that moment (score, lives, missiles, upgrades, special weapons and ammo, flares, camera view, stats), shows no autosave toast, then loads the stored checkpoint and returns `'failed'` unless it is the one just written (the write succeeded, the record reads back, `savedAt` is not older than the call, and kind, level, wave and score match). Continuing from it restarts that wave, the boss fight or the hangar stop. `'failed'` only ever comes from `saveForExit()`.
 - **Swift's join line.** `handleWingmanLaunched('swift')` plays `onWingmanEvent('swift', 'joined')` the first time Swift launches in a campaign run, then patches `swiftJoined: true` into the stored checkpoint (the `'level-start'` checkpoint is written just before the flight launches); every later checkpoint carries the flag, and `resumeFromCheckpoint` reads it with `isSwiftJoinAnnounced(save)`.
 
 ## Wingmen
@@ -1038,6 +1050,8 @@ public getWeaponUpgradeLevel(id: SpecialWeaponId): number; // 0..5
 
 `PlayerSystem.takeCombatDamage(amount, feedback?)` applies `getArmorReduction()` before damaging the player.
 
+The missile tracks feed the seeker: `MISSILE_LOCK_TIME` is 1.0 s at tier 0 and drops 0.05 s per tier (0.5 s at tier 10), read with `PlayerStats.getMissileLockTime()`; `MISSILE_LOCK_RADIUS` is the acquire-ring multiplier (1.0 → 2.0); `MISSILE_RELOAD_TIME` is 7.5 s minus 0.5 s per tier. See [Missiles and gun aim](#missiles-and-gun-aim).
+
 ## Units
 
 Source: `src/features/units/UnitTypes.ts`, `UnitDeployments.ts`, `UnitSystem.ts`, `UnitEntity.ts`, `UnitMeshFactory.ts`. Unit stats (health, speed, hit radius, score, penalty) live in `UNIT_CONFIGS`; per-wave spawns in the deployment tables.
@@ -1126,6 +1140,14 @@ export type UnitEventKind =
   | 'cannon' | 'missile-launch' | 'flak-burst' | 'rocket-salvo' | 'ciws' | 'bomb-drop'
   | 'sub-surface' | 'sub-dive';
 export const MAX_UNITS = 80;
+/** forEachAliveHostile 的访问函数：网格、当前 / 最大血量、作战域、此刻是否可被命中 */
+export type HostileUnitVisitor = (
+  mesh: THREE.Object3D,
+  health: number,
+  maxHealth: number,
+  domain: UnitDomain,
+  targetable: boolean
+) => void;
 
 export class UnitSystem implements IGameSystem {
   readonly name = 'UnitSystem';
@@ -1156,6 +1178,8 @@ export class UnitSystem implements IGameSystem {
   findByMesh(object: THREE.Object3D): UnitInstance | null; // root or any descendant
   hitTest(point: THREE.Vector3, padding = 0): UnitInstance | null; // radius-aware point test
   getAliveHostileCount(): number; // incl. submerged — wave gating
+  /** 逐个访问存活的敌方单位（HUD 目标标记 / 波次提示用），不分配；targetable 为 false = 潜航中的潜艇 */
+  forEachAliveHostile(visit: HostileUnitVisitor): void;
   getHostileRadarBonus(): number; // enemy-jet accuracy bonus while enemy radar stations live
   getRadarRangeMultiplier(): number; // > 1 while an ALLY_AWACS lives
   getRadarBlips(): Array<{ position: THREE.Vector3; kind: UnitRadarKind }>;
@@ -1189,7 +1213,24 @@ export class UnitSystem implements IGameSystem {
 }
 ```
 
-Faction rules: damage from a player source (`cannon | missile | rocket | laser | swarm | railgun | emp`) counts as `byPlayer`; `applyAreaDamage` with a player source spares friendly units, and `'enemy-fire'` / `'boss'` spare enemy units. The system draws its own explosions — use `onExplosion` for camera shake and sound only. `UnitController` (`src/core/units/UnitController.ts`) is the runtime wrapper the coordinator talks to.
+Faction rules: damage from a player source (`cannon | missile | rocket | laser | swarm | railgun | emp`) counts as `byPlayer`; `applyAreaDamage` with a player source spares friendly units, and `'enemy-fire'` / `'boss'` spare enemy units. The system draws its own explosions — use `onExplosion` for camera shake and sound only. `UnitController` (`src/core/units/UnitController.ts`) is the runtime wrapper the coordinator talks to. `UnitMeshFactory.createUnitMesh` puts the unit's bilingual name on `mesh.userData.displayName` (`UNIT_CONFIGS[type].name`), which the HUD reads for the unit's health-bar label.
+
+Wave hold, objective and markers (`UnitController`):
+
+```typescript
+/** HUD 目标标记的访问函数：网格、当前 / 最大血量（只给可被命中的敌方单位） */
+export type HostileMarkerVisitor = (mesh: THREE.Object3D, health: number, maxHealth: number) => void;
+
+public getWaveHoldCount(): number; // alive hostile units incl. submerged; 0 once the wave is released
+public isObjectiveActive(): boolean; // jets cleared, hostile units still hold the wave, not released
+public forEachHostileMarker(visit: HostileMarkerVisitor): void; // targetable hostile units only
+public getSurfaceSampler(): UnitSurfaceSampler | null; // the level map's terrain source
+public collectLockTargets(out: THREE.Object3D[]): void; // hostile-unit aim points for the seeker and gun aim
+```
+
+- **Stall release.** Once the jets are cleared and hostile units still hold the wave, a timer runs on game time; at `WAVE_STALL_LIMIT_SECONDS` (60 s) the wave is released with a "Remaining targets have left the area" flash. `UnitSystem.onUnitDamaged` with `byPlayer` on an `ENEMY` unit restarts the timer, so a player who is attacking is never cut off.
+- **Objective.** While that hold lasts, `isObjectiveActive()` is true and `CombatHudFeed` flags the unit health-bar snapshots `objective`; `EnemyHealthBars` switches their bracket and off-screen arrow to the objective style. One hint per wave goes out through `presentation.flashWarning(text, 'sys')`, worded for what is left (ground / ship / air / mixed, or a submerged submarine).
+- **Markers.** `forEachHostileMarker` visits the unit root meshes that can be hit right now; a submerged submarine still holds the wave but is not visited.
 
 ## Special weapons
 
@@ -1332,6 +1373,167 @@ export class CountermeasureSystem implements IDecoyProvider {
 
 `SpecialWeaponsController` (`src/core/combat/SpecialWeaponsController.ts`) owns one `WeaponSystem` and one `CountermeasureSystem`, implements `IDecoyProvider` for units and for every boss (both boss controllers run a `BossFlareDecoyRedirector` on it, see [Bosses](#bosses)), and exposes `handleInput(input, cycleRequested, slotRequested, flareRequested, aircraft, canFire)`, `syncProgression(stats, unlocked): SpecialWeaponId[]`, `refill()`, `clearInFlight()`, `exportState()` and `importState(state, flareCharges)` to the coordinator. Its short notices go through `SpecialWeaponsDeps.notify(icon: string, text: HudText)`, which the coordinator wires to `HUD.showPowerUpBig(icon, text, 0.9, true)`: "No special weapons yet", "Weapon not unlocked yet" and, on a weapon switch, the selected weapon's bilingual `SpecialWeaponConfig.name` (not the already-localised `getHudState().name`), so a notice on screen follows a language switch.
 
+## Missiles and gun aim
+
+Source: `src/features/combat/MissileSeeker.ts`, `MissileSystem.ts`, `GunLeadSolver.ts`, `src/ui/LockOnIndicator.ts`, `src/core/systems/PlayerSystem.ts`. Tuning lives in `GAME_CONSTANTS.MISSILE` and `GAME_CONSTANTS.GUN_ASSIST` (`src/config.ts`). `GameCoordinator` drives them from `updateGunAim` and `handleMissileInput` in the simulation step and from `renderAimHud` in the render frame.
+
+```typescript
+// MissileSeeker.ts — pure logic, no DOM
+/** 屏幕像素坐标（左上原点）；visible=false 表示点在相机后方或坐标非法 */
+export interface ScreenPoint {
+  x: number;
+  y: number;
+  visible: boolean;
+}
+export function projectToScreen(
+  world: Vector3,
+  camera: Camera,
+  viewportWidth: number,
+  viewportHeight: number,
+  out: ScreenPoint
+): boolean;
+
+export class MissileSeeker {
+  /** 本次 update 内发生的事件（下一次 update 开始时清零） */
+  public readonly events = {
+    /** 开始跟踪一个新目标（含换目标） */
+    acquired: false,
+    /** 锁定完成 */
+    locked: false,
+    /** 目标离开保持环超过宽限时间而丢失（被击毁 / 回收不算） */
+    lost: false,
+    /** lost 时目标是否已经完成锁定 */
+    lostWhileLocked: false,
+  };
+  /** 锁定所需时间（秒），下限 0.2 防止除零 */
+  public setLockTime(seconds: number): void;
+  /** 捕获环半径（像素） */
+  public setAcquireRadius(pixels: number): void;
+  public getKeepRadius(): number; // acquire radius × LOCK_KEEP_RATIO
+  public setViewport(width: number, height: number): void;
+  /** 静默清空（复活 / 剧情冻结 / 没有导弹时）：不产生任何事件 */
+  public reset(): void;
+  /** 当前跟踪目标（锁定中或已锁定） */
+  public getTarget(): Object3D | null;
+  /** 已完成锁定的目标；未锁定时为 null */
+  public getLockedTarget(): Object3D | null;
+  public isLocked(): boolean;
+  /** 锁定进度 0..1 */
+  public getProgress(): number;
+  /** 跟踪目标到载机的距离（米）；无目标时为 0 */
+  public getTargetRange(): number;
+  /**
+   * @param origin 载机世界坐标（距离判定）
+   * @param aim 准星的屏幕位置；visible=false 时不捕获新目标
+   * @param candidates 本步的全部可锁定对象（必须是完整列表：不在表里的目标立即丢弃）
+   */
+  public update(
+    deltaTime: number,
+    origin: Vector3,
+    aim: Readonly<ScreenPoint>,
+    candidates: readonly Object3D[],
+    camera: Camera
+  ): void;
+}
+
+// MissileSystem.ts
+/**
+ * 发射导弹：从 position 沿 direction 离架，直飞一小段后追踪 target。
+ * launcherSpeed 为发射瞬间载机沿 direction 的速度（米/秒），导弹继承它并继续加速（见 Missile）。
+ */
+public fire(
+  position: THREE.Vector3,
+  direction: THREE.Vector3,
+  target?: THREE.Object3D,
+  launcherSpeed: number = 0
+): void;
+public prewarm(): void; // level load: renders a hidden missile so the first launch does not compile shaders
+
+// LockOnIndicator.ts — owns the MissileSeeker and draws the reticle, rings, gun cross and lead marker
+export type LockOnCue = 'no-lock' | 'no-missile';
+public getSeeker(): MissileSeeker;
+public setLockTime(time: number): void;
+public setLockCircleScale(scale: number): void; // 1..2, the lock-radius upgrade
+public setMissileCount(count: number): void; // 0 switches the seeker off
+/** 放弃当前跟踪 / 锁定（阵亡、复活、剧情冻结）：不触发丢锁提示 */
+public cancelLockOn(): void;
+/** 在准星下方短暂显示“未锁定 / 无导弹” */
+public showCue(kind: LockOnCue): void;
+/**
+ * 模拟步：推进导引头（没有导弹时导引头关闭，见 setMissileCount）。
+ * @param candidates 本步全部可锁定对象（完整列表：不在表里的目标立即丢弃）
+ * @param playerQuaternion 载机姿态，准星取机头轴线；传 null 时以相机视线（视口中心）为准星
+ * @returns 是否已完成锁定
+ */
+public update(
+  playerPosition: Vector3,
+  candidates: readonly Object3D[],
+  camera: Camera,
+  deltaTime: number,
+  playerQuaternion: Quaternion | null
+): boolean;
+public renderUpdate(
+  visible: boolean,
+  playerPosition: Vector3,
+  playerQuaternion: Quaternion,
+  camera: Camera,
+  leadPoint: Vector3 | null,
+  leadOnTarget: boolean,
+  gunAimDirection: Vector3 | null = null,
+  gunAimDistance: number = AIM_DISTANCE
+): void;
+
+// GunLeadSolver.ts — pure logic
+/**
+ * @param muzzle 炮口世界坐标
+ * @param forward 机头方向（单位向量）
+ * @param targets 候选：前 airCount 个是空中目标（可显示提前量标记），其余只参与触屏辅助
+ * @param assistEnabled 是否计算触屏辅助瞄准点
+ */
+public update(
+  deltaTime: number,
+  muzzle: Vector3,
+  forward: Vector3,
+  targets: readonly Object3D[],
+  airCount: number,
+  assistEnabled: boolean
+): void;
+
+// PlayerSystem.ts
+/** @param weight 辅助强度 0..1：1 时基础散布收到最窄，0 时与未辅助相同 */
+setGunAimAssist(direction: THREE.Vector3 | null, weight: number = 1): void;
+```
+
+`GAME_CONSTANTS.MISSILE`:
+
+| Key                                     | Value          | Meaning                                                                         |
+| --------------------------------------- | -------------- | ------------------------------------------------------------------------------- |
+| `SPEED`                                 | 200            | Cruise speed, m/s                                                               |
+| `LAUNCH_SPEED_BOOST`                    | 20             | Launch speed = the launcher's speed + this                                      |
+| `ACCELERATION`                          | 200            | m/s² up to cruise speed                                                         |
+| `MIN_OVERTAKE_SPEED`                    | 80             | Cruise speed is at least the launcher's speed + this                            |
+| `DAMAGE`                                | 80             | Multiplied by the combat damage multiplier (Damage Boost)                       |
+| `TURN_SPEED`                            | 5.0            | rad/s                                                                           |
+| `MAX_LIFETIME` / `MAX_FLIGHT_DISTANCE`  | 12 s / 2,400 m | The missile is removed at either limit                                          |
+| `MAX_LOCK_DISTANCE`                     | 1,200          | Seeker range, m                                                                 |
+| `LOCK_RING_RATIO`                       | 0.13           | Acquire-ring radius ÷ viewport short side, before the lock-radius upgrade scale |
+| `LOCK_KEEP_RATIO`                       | 1.6            | Keep-ring radius ÷ acquire-ring radius                                          |
+| `LOCK_GRACE_TIME`                       | 0.5            | Seconds outside the keep ring before the target is lost                         |
+| `LOCK_DECAY_RATE`                       | 1.0            | Lock progress lost per second between the two rings                             |
+| `LOCK_REARM_TIME`                       | 0.35           | Minimum seconds between two launches                                            |
+| `STARTING_MISSILES`                     | 3              | Missile count at the start of a run and after a respawn                         |
+| `MAX_MISSILES` / `MAX_RESPAWN_MISSILES` | 5 / 5          | Carried maximum / the count the timed reload fills up to                        |
+
+`LOCK_TIME`, `LOCK_BOX_SIZE` and `MISSILE_RESPAWN_TIME` are gone: lock time, ring size and reload time come from the upgrade tracks (see [Upgrades](#upgrades)).
+
+`GAME_CONSTANTS.GUN_ASSIST`: `MAX_RANGE` 480 m, `FULL_ANGLE` 2.5°, `OUTER_ANGLE` 5°, `EASE_TIME` 0.1 s, `SWITCH_MARGIN` 0.75°, `REFERENCE_RANGE` 600 m, `CROSS_MIN_RANGE` 100 m.
+
+- **Seeker.** It runs whenever the player has a missile; there is no "start lock" step. The reticle is the screen position of the point `GUN_ASSIST.REFERENCE_RANGE` ahead on the nose axis. The acquire ring is centred on it with radius `clamp(short side × LOCK_RING_RATIO × lock-radius scale, 44 px, 0.3 × short side)`, which `LockOnIndicator` also publishes as `--hud-aim-r` on `<html>`. The candidate inside the ring that is closest to the reticle on screen is tracked. Progress rises by `1 / lockTime` per second inside the acquire ring, decays at `LOCK_DECAY_RATE` between the acquire ring and the keep ring, and a completed lock holds anywhere inside the keep ring. Outside the keep ring, behind the camera or beyond `MAX_LOCK_DISTANCE`, the target is lost after `LOCK_GRACE_TIME` (`events.lost`). A target that is missing from the candidate list is dropped at once with no `lost` event. A candidate that is closer to the reticle replaces the current target only after it has stayed so for 0.25 s (0.6 s once locked); while the current target is still inside the acquire ring the newcomer must also be closer by at least `max(12 px, 25% of the acquire radius)`. Progress then starts from zero.
+- **Candidates.** `GameCoordinator.collectLockCandidates()` rebuilds the full list every step: the boss controller's `appendLockTargets` during a boss fight, the meshes of live enemy jets, then `UnitController.collectLockTargets`.
+- **Launch.** One press fires one missile. With a completed lock the press fires at once and the lock stays; the next launch needs a new press and `LOCK_REARM_TIME`. A press while the seeker is still locking fires the moment the lock completes if the input is still held. A press with nothing tracked, or a release before the lock completes, shows `showCue('no-lock')`; a press with no missiles shows `showCue('no-missile')`. With the Rapid Fire power-up (`PowerUpType.MULTISHOT`) one press fires up to three missiles 0.1 s apart. Each missile leaves from alternate wing pylons along the nose, and `PlayerSystem.getSpeed()` is passed as `launcherSpeed`.
+- **Flight.** A missile starts at `min(cruise, launcherSpeed + LAUNCH_SPEED_BOOST)` and accelerates at `ACCELERATION` to `cruise = max(SPEED, launcherSpeed + MIN_OVERTAKE_SPEED)`. It flies straight for 0.2 s, then steers with lead on the target's estimated velocity at `TURN_SPEED`. The hit test covers the segment travelled in the step; targets without a declared hit radius use a 6 m proximity radius. A missile whose target is gone re-acquires the nearest enemy.
+- **Gun lead and assist.** `GunLeadSolver` estimates each target's velocity from successive positions and solves the intercept for `PROJECTILE.SPEED`. The nearest airborne target within 500 m and 40° of the nose gets the lead marker; `isPipOnTarget()` tells the indicator when the nose is on it. With `assistEnabled` — `GameCoordinator` passes `GameConfig.isMobile` — the solver also returns an assist direction: it points at the lead point while that is within `FULL_ANGLE` of the nose, the offset fades to zero by `OUTER_ANGLE`, there is none beyond `MAX_RANGE`, and it eases over `EASE_TIME` when the target changes. `PlayerSystem.setGunAimAssist(direction, weight)` makes the next shots leave along that direction and narrows the base spread from 3° towards 1.2° with `weight`; with `null` shots leave along the nose. `renderUpdate` draws the gun cross on the same direction, so the cross and the bullets agree.
+
 ## Camera
 
 Source: `src/features/camera/CameraRig.ts`. `ThirdPersonCamera` stays exported for back-compat.
@@ -1394,6 +1596,10 @@ export class CameraRig {
 ```
 
 `PlayerViewController` (`src/core/camera/PlayerViewController.ts`) wraps the rig for the coordinator (`toggleMode`, `setMode`, `snapToTarget`, `setFlightState`, `addShake`, `addExplosionShake(position, scale)`, `getBlend`) and drives `updatePlayerAfterburner` (`AircraftMeshFactory`). Friendly wingmen use `createFriendlyMesh(config)` (same airframe and hit radii as `createEnemyMesh`).
+
+Field of view: the rig is the only writer of `camera.fov`. It adds a speed / boost kick to the base FOV, and when `camera.aspect < 1` (portrait) it raises the vertical FOV so that the horizontal field stays at about 70°, capped at 95° vertical; landscape is unaffected.
+
+Cockpit (`CockpitModel.ts`): the structure is modelled in a cockpit frame pitched 4° nose-down about the eye point, so the glare shield is a thin eave low in the view; the HUD combiner glass (0.30 × 0.30 m, 0.6 m ahead on the view axis) is not pitched and frames the DOM-layer gun cross and seeker ring. In first person the special-weapon effects are toned down: `FIRST_PERSON_FLASH_SCALE` (0.55, `GameCoordinator`) scales the muzzle flash and the railgun screen flash, swarm missiles leave from further out under the wings, and weapon particles fade by view depth near the camera (`WeaponParticleField`).
 
 ## Bosses
 
@@ -1977,26 +2183,62 @@ export class RadioComms {
 `RadioComms` shows a line immediately when idle (the short gap between lines counts as busy), lets `'high'` interrupt, ignores duplicate text and caps its queue. Voiced timing: `holdForVoice` keeps the line up until its voice has finished plus a short tail, and the next line waits for `releaseVoice` (or a safety cap); without a voice the reading-time timing is unchanged. An interrupted normal line that was not delivered (its voice had not finished, or a text-only line had not been held long enough) goes back to the front of the normal queue — once: a replay that is interrupted again is dropped; a line whose voice finished counts as delivered. Whether an urgent line may interrupt a voiced one is the caller's decision (`isVoicing()`; the presentation never does). On a language switch the line on screen (callsign, text, screen-reader text) is rewritten in the new language. Each speaker's portrait glyph comes from `getSpeakerGlyph(speakerId)` (`src/ui/theme/hudGlyphs.ts`), which has an entry for every `CampaignSpeakerId`.
 
 ```typescript
-// RadarMinimap
+// RadarMinimap (#radar-minimap) — RadarBlipKind / RadarBlip live in src/ui/radarGlyphs.ts and are re-exported
 export type RadarBlipKind =
   | 'enemy' | 'spawning' | 'ally' | 'boss' | 'pickup'
   | 'enemy-ground' | 'enemy-sea' | 'neutral' | 'ally-unit';
+/** 地表采样器：世界 (x, z) → 表面高度与是否为可航行水域（与 UnitSurfaceSampler 同形） */
+export type RadarTerrainSampler = (x: number, z: number) => { y: number; water: boolean };
 public setRangeMultiplier(multiplier: number): void;
 public getRangeMultiplier(): number;
+/** 关卡地图的地形底图来源：地表采样器 + 关卡号。可以每帧调用；关卡号变化时收起地图并作废底图缓存 */
+public setTerrainSource(sampler: RadarTerrainSampler | null, level: number): void;
+public isMapExpanded(): boolean;
+public toggleMap(): void;
+public setMapExpanded(expanded: boolean): void;
 // PresentationController passthrough
 public setRadarRangeMultiplier(multiplier: number): void;
+public setRadarTerrainSource(sampler: RadarTerrainSampler | null, level: number): void;
+// HealthBarSnapshot (PresentationController) adds `objective?: boolean` — see Units
 
-// StartMenu — rows use stable ids #<key>-row / #<key>-value, independent of the interface language:
-// language, difficulty, sfx, music, voice, quality, camera, tutorial, lives, level (1..TOTAL_LEVELS,
-// caption #level-chapter), mode, testscore; #continue-btn shows describeCheckpoint(save)
+// StartMenu (#start-menu) — a shell over src/ui/menu/: TitleScreen, SettingsSheet, HowToPlaySheet
+public setOnStart(callback: (settings: GameSettings) => void): void;
 public setOnContinue(callback: (save: CampaignSaveData) => void): void;
+/**
+ * “进入战场”过场（约 0.3 秒）播完且菜单已隐藏后兑现。onStart / onContinue 仍在点击的调用栈上同步触发
+ * （音频解锁依赖这一点）。没有过场在播（减少动态效果、或菜单已被 hide()）时立即兑现。
+ */
+public whenLaunched(): Promise<void>;
+public reloadFromStorage(): void;
+public show(): void;
+public hide(): void;
+public dispose(): void;
 // GameSettings (same file) mirrors StartFlowSettings field by field, including voiceVolume and language
+// Title screen buttons: #continue-btn (only with a save; shows describeCheckpoint(save)), #start-btn,
+// #preview-btn (Hangar), #settings-btn, #howto-btn.
+// Settings sheet (#settings-sheet): rows keep the stable ids #<key>-row / #<key>-value, independent of the
+// interface language: difficulty, lives, camera, tutorial, sfx, music, voice, quality, language, and under
+// Advanced: level (1..TOTAL_LEVELS, caption #level-chapter), mode, testscore; #advanced-badge marks overrides.
+// How to Play sheet: #howto-sheet. New-campaign confirm: #new-campaign-confirm.
 
 // PauseMenu
 export interface IPauseMenuOptions {
   onContinue: () => void;
   onUpgrade: () => void;
+  /** 回到主菜单（菜单在存档成功、无需存档或玩家选择“仍然退出”之后调用） */
   onExitToMenu: () => void;
+  /**
+   * “保存并退出”的预告（只读，不写存档）：会存到哪里，或者本局为什么不存。
+   * 与 onSaveAndExit 成对提供才启用；缺一个时菜单自己不存档，按钮仍叫“返回菜单”，
+   * 确认页只读已有检查点、如实说明“继续战役”会从哪里开始。
+   */
+  getSaveStatus?: () => CampaignExitSave;
+  /**
+   * 执行存档并返回真实结果。只在预告是 'saved'（确认页写着“保存并退出”）时调用；不存档的对局
+   * 直接 onExitToMenu，不会调用它。'saved' 随即调用 onExitToMenu；'failed' 时菜单停在失败页，
+   * 由玩家选择仍然退出或返回；其余结果（预告说会存、结果却没存）回到确认页重新说明，不退出。
+   */
+  onSaveAndExit?: () => CampaignExitSave;
   applyAudio: (sfx: number, music: number) => void;
   /** 角色配音音量 0..1（立即生效）；缺省不显示语音一行 */
   applyVoice?: (voice: number) => void;
@@ -2004,8 +2246,15 @@ export interface IPauseMenuOptions {
   loadSettings: () => StartFlowSettings;
   saveSettings: (partial: Partial<StartFlowSettings>) => void;
 }
+// Default view: Resume, Upgrades, Settings, then Save & Exit when getSaveStatus().kind === 'saved',
+// otherwise Main Menu. Either opens the Leave Mission confirm: it names the save position and what
+// Continue Campaign will do, or says why nothing is saved ('no-save-mode' / 'not-started' / 'complete').
+// A 'failed' result shows the Save Failed view (Back / Exit Anyway). handleEscape() returns to the
+// default view from any sub-view.
 // Settings view rows: Sound effects, Music, Voice (only with applyVoice), Graphics, Language.
 // The Language row saves { language }, then setLocale(); every open menu re-renders through onLocaleChange.
+// GameCoordinator wires getSaveStatus / onSaveAndExit to campaign.describeExitSave() / saveForExit()
+// while a game is being played, and answers { kind: 'no-save-mode' } otherwise.
 
 // UpgradeMenu
 export type UpgradeMenuMode = 'pause' | 'hangar';
@@ -2025,13 +2274,26 @@ public hide(): void;
 public dispose(): void;
 ```
 
-Mobile buttons in `index.html`: `#camera-button`, `#special-button`, `#cycle-button`, `#flare-button` (plus the existing `#fire-button`, `#missile-button`, `#throttle-button`, `#upgrade-button`). The HTML ships English labels (FIRE, MSL, SPEC, FLARE, BOOST, SWAP, VIEW, PAUSE); `src/main.ts` rewrites labels and `aria-label`s for the current language, except the special button's main label while the HUD shows a weapon code there.
+Mobile controls in `index.html`: the stick (`#touch-stick-zone`, `#joystick`, `#joystick-knob`; see [Input](#input)) and the buttons `#camera-button`, `#special-button`, `#cycle-button`, `#flare-button` (plus the existing `#fire-button`, `#missile-button`, `#throttle-button`, `#upgrade-button`). `#throttle-button` (BOOST) is a latch and carries `aria-pressed`; `#missile-button` shows the missile count (`data-count`) and a reload ring (`--tc-meter`) written by the HUD, and the lock state as classes written by `LockOnIndicator` (`is-search`, plus `is-track` while tracking; `is-lock` + `is-ready` when locked; `is-dry` with no missiles). The HTML ships English labels (FIRE, MSL, SPEC, FLARE, BOOST, SWAP, VIEW, PAUSE); `src/main.ts` rewrites labels and `aria-label`s for the current language, except the special button's main label while the HUD shows a weapon code there.
 
-HUD layout (`HUD.ts`, `theme/hudExtrasStyles.ts`, `theme/radioStyles.ts`): `#hud` is inset by `env(safe-area-inset-*)`, and positions and sizes are CSS keyed by `HudLayoutDensity`, so a rotation re-lays out. The right status column `#hud-status` stacks the wave line, lives, missiles, missile reload and power-up timer (lives and missile pips side by side in portrait). The centre message stack `#hud-top-stack` holds the boss strip, briefing, event objective and, in portrait, the autosave toast; on phones in portrait it is a full-width row under the status band, and the radio panel follows its bottom through the `--hud-stack-bottom` variable on `<html>`. In portrait the autosave toast waits (hidden, timer paused) while a briefing is up or while the boss strip and an objective share the stack. Centre callouts (`showPowerUpBig`) are a banner above the lock ring — in touch-landscape just below the message stack — instead of a full-screen block, and the ENEMIES / LEFT counter has the same dark backing as the cockpit panel.
+HUD layout (`HUD.ts`, `theme/hudExtrasStyles.ts`, `theme/radioStyles.ts`): `#hud` is inset by `env(safe-area-inset-*)`, and positions and sizes are CSS keyed by `HudLayoutDensity`, so a rotation re-lays out. The right status column `#hud-status` stacks the wave line, the lives readout (label + pips, `data-hud="lives-readout"`), the missile readout (label, `#hud-missile-count` as `n/max`, pips and the reload meter, `data-hud="missile-readout"`) and the power-up timer (the two readouts side by side in portrait). The centre message stack `#hud-top-stack` holds the boss strip, briefing, event objective and, in portrait, the autosave toast; on phones in portrait it is a full-width row under the status band, and the radio panel follows its bottom through the `--hud-stack-bottom` variable on `<html>`. In portrait the autosave toast waits (hidden, timer paused) while a briefing is up or while the boss strip and an objective share the stack. Centre callouts (`showPowerUpBig`, `#hud-callout`) are a banner, not a full-screen block, placed per camera mode so that it clears the reticle and the seeker ring (whose radius `LockOnIndicator` publishes as `--hud-aim-r` on `<html>`; the HUD marks the mode with `data-hud-camera`): in the chase view, where the reticle sits about 29% down the screen, the banner goes below the jet on desktop and touch-landscape and between the ring and the jet in portrait; in first person, where the reticle is at the centre, it grows upward from above the ring on desktop and portrait and sits under the message stack in touch-landscape. The warning lane (`#hud-warning-lane`) sits below the jet in the chase view (under the callout on desktop and touch-landscape) and below the ring in first person. The ENEMIES / LEFT counter has the same dark backing as the cockpit panel.
 
 Health bars (`src/ui/EnemyHealthBars.ts`) show a friendly AI jet's pilot callsign when its mesh carries `userData.displayName` (`LocalizedText` or string — set from `WingmanProfile.callsign`), ahead of the per-name label cache, and rename every bar at once on a language switch. Bars come in three sizes: boss body (120 × 10 px, with its name), boss part (44 × 5 px on a dark track) and everything else (60 × 6 px, with its name). Of the boss parts in view, only the one nearest the reticle shows its name, with hysteresis (another part must be under 80 % of its distance to take over); parts no longer draw their own off-screen chevrons.
 
-`ModelPreview` builds every boss from its own mesh factory through a lazy `Record<BossType, loader>` (bosses 6–10 from `MagmaColossusMesh`, `AbyssalLeviathanMesh`, `TempestZeppelinMesh`, `PhantomWingMesh`, `OraclePrimeMesh`), scales the visible geometry (hidden parts and sprites excluded) to a fixed bounding sphere, and disposes each previewed model's geometries, materials and instance buffers once, skipping shared resources. The sphere is framed in the part of the canvas above the name label: after the name is written (and again on resize and on a language switch) `frameCamera()` reads the label's top from the DOM, keeps 8 px clear of it and of the canvas top (the region reaches at least halfway down the canvas), backs the camera off until the sphere fits the region's height (or the canvas width, if narrower), and moves the projection centre into the region with `setViewOffset`; before the canvas has a layout it frames the whole canvas. The name label stays on one line when it fits (18 px type below 600 px width), and a landscape viewport up to 520 px tall uses two columns: the canvas on the left, the controls on the right.
+Hostile ground / sea / air units are fed to the same bars by `CombatHudFeed` (through `UnitController.forEachHostileMarker`) and are labelled with the unit's own name from `mesh.userData.displayName`. On top of the bar, a unit gets:
+
+- a **target bracket** — four corners in the threat colour with the range in metres (rounded to 10 m) — while it projects smaller than about 22 px on screen, hidden again above 28 px;
+- the **objective style** when its snapshot carries `objective: true`: the bracket is always shown, thicker and pulsing, and its off-screen arrow blinks in the threat colour (class `is-objective`; no animation under reduced motion);
+- an **off-screen arrow** (`OffscreenChevron`) whose distance label stays horizontal on the arrow's tail side. Arrows avoid the radar dial (`#radar-minimap`) and, in touch layouts, the stick (`#joystick`) and every visible `.touch-btn`: the rectangles are re-measured about once a second (and on touch start / end, because the floating stick moves), and an arrow that would land under one slides along the screen edge or inward, whichever is the shorter move, keeping its bearing.
+
+Radar (`RadarMinimap`, `RadarLevelMap`, `radarGlyphs.ts`):
+
+- The dial (`#radar-minimap`) is heading-up: forward is up and a contact on the player's right is drawn on the right. `BASE_RANGE` is 800 m across the dial (about 400 m from the centre to the rim), scaled by `setRangeMultiplier` (0.25–4). Desktop: 120 px, bottom-left. Touch layouts: top-left under the status cabin, 84 px on phones and 132 px when the viewport's shorter side is at least 700 px, with a separate tap surface `#radar-tap-target` so touches on the dial do not start the stick.
+- In-range contacts are filled glyphs (`drawRadarBlip`); a contact beyond range is clamped to the rim and drawn by `drawRadarRimMarker` as a smaller, dimmer, hollow glyph of the same class with a short tick pointing outward.
+- A click or tap on the dial, or the N key (not with Ctrl / Meta / Alt, not while typing), toggles the level map (`#radar-map`); Esc closes it and is captured so it does not also pause. The map collapses on a level change and when radar updates stop for 1.5 s. It does not pause the game.
+- The level map is north-up (world −Z at the top) and fixed-scale: the battlefield boundary circle, 500 m and 1000 m rings around the player, the player's arrow rotated by heading, every radar contact with the same glyphs drawn larger, a legend, and a 64 × 64 land / water underlay sampled once per level from the `RadarTerrainSampler` (a plain grid without one). The panel is 72% of the viewport's shorter side (200–560 px), nearly opaque, redrawn at 20 Hz.
+
+`ModelPreview` builds every boss from its own mesh factory through a lazy `Record<BossType, loader>` (bosses 6–10 from `MagmaColossusMesh`, `AbyssalLeviathanMesh`, `TempestZeppelinMesh`, `PhantomWingMesh`, `OraclePrimeMesh`), scales the visible geometry (hidden parts and sprites excluded) to a fixed bounding sphere, and disposes each previewed model's geometries, materials and instance buffers once, skipping shared resources. The sphere is framed in the part of the canvas above the name label: after the name is written (and again on resize and on a language switch) `frameCamera()` reads the label's top from the DOM, keeps 8 px clear of it and of the canvas top (the region reaches at least halfway down the canvas), backs the camera off until the sphere fits the region's height (or the canvas width, if narrower), and moves the projection centre into the region with `setViewOffset`; before the canvas has a layout it frames the whole canvas. The name label stays on one line when it fits (18 px type up to 600 px width); in a landscape viewport up to 520 px tall the header is compressed and the hint line hidden so the stand gets the height. The menu calls this screen the **Hangar** (`#model-preview`, opened from `#preview-btn`): arrow buttons, the Left / Right keys or a horizontal swipe change model, a mouse drag rotates it, `#rotate-toggle` switches auto-rotate, and Esc or the back button returns to the menu. Its `WebGLRenderer` exists only while it is shown — created in `show()`, released with its context in `hide()` — so it never coexists with the title screen's hero renderer or a game's.
 
 ## Input
 
@@ -2050,8 +2312,33 @@ export interface InputState {
   throttle: boolean;
   /** 特殊武器扳机（F 键 / 移动端特殊武器按钮）：按住持续照射 / 蓄力 */
   special: boolean;
+  /**
+   * 俯仰模拟量 -1..1（正 = 抬头）。键盘为 ±1，触控摇杆为“径向死区 + 指数曲线”后的连续值。
+   * InputHandler.getState() 总会写入；类型上可选，是为了只写布尔方向的调用方（脚本飞行员、
+   * 测试里的字面量）仍然可用——PlayerController 在缺省或为 0 时退回布尔方向（±1）。
+   */
+  pitchAxis?: number;
+  /** 偏航模拟量 -1..1（正 = 右转），规则同 pitchAxis */
+  yawAxis?: number;
+  /**
+   * 辅助飞行：转向来自触控摇杆（手指按在摇杆上，且键盘没有在转向）时为 true，
+   * PlayerController 走“推右就相对地平线右转”的辅助模型；键盘转向（含平板外接键盘）为 false。
+   */
+  flightAssist?: boolean;
 }
-public getState(): InputState; // reused object — read it in the same step
+
+/** 触控摇杆手感参数 */
+export const TOUCH_STICK_TUNING = {
+  DEAD_ZONE: 0.12, // radial dead zone, as a fraction of the travel
+  EXPO: 1.7, // response-curve exponent
+  DIGITAL_THRESHOLD: 0.08, // |axis| above this also sets the boolean direction
+  FALLBACK_RADIUS_PX: 54, // travel radius when the stick cannot be measured
+  EDGE_MARGIN_PX: 6, // floating base keeps this far from the screen / safe-area edge
+} as const;
+/** 摇杆响应曲线：输入是偏转幅度（0..1，占行程比例），输出 0..1 */
+export function shapeStickMagnitude(magnitude: number): number;
+
+public getState(): Required<InputState>; // reused object — read it in the same step
 public consumeCameraToggle(): boolean; // V / #camera-button
 public consumeWeaponCycle(): boolean; // Tab / X / #cycle-button
 public consumeWeaponSlot(): number; // Digit1-5 / Numpad1-5 → 0..4, -1 when none
@@ -2063,6 +2350,12 @@ public resetPauseState(): void; // clears the held key edge and a queued pause t
 ```
 
 The mobile pause button (`#upgrade-button`, labelled PAUSE) latches its tap on `touchstart` like the other tap buttons, so a tap shorter than one simulation step still pauses; the desktop keys keep their held-key edge detection.
+
+Axes and assist. `getState()` always writes `pitchAxis`, `yawAxis` and `flightAssist`. The keyboard gives ±1. On a touch device the stick's shaped value is merged with the keyboard — the larger magnitude wins per axis, buttons are OR-ed — and the boolean directions are derived from the merged axes (`DIGITAL_THRESHOLD`). `flightAssist` is true only while a finger is on the stick and no pitch / yaw / roll key is down; `PlayerController` then flies the assisted model (`applyAssistedAttitude`), whose three channels are independent: yaw about the world vertical in proportion to `yawAxis`; pitch about the level right axis in proportion to `pitchAxis`, not increasing past `ASSIST_PITCH_LIMIT` (75°) from the horizon; bank easing toward `−yawAxis × ASSIST_MAX_BANK` (45°), so the wings level when the stick centres (`ASSIST_ROLL_RESPONSE`, `ASSIST_ROLL_MAX_RATE`; all in `GAME_CONSTANTS.PLAYER`). Without the flag it keeps the body-axis model (`applyManualAttitude`), unchanged for the keyboard. Callers that only set the boolean directions (the scripted pilot, test literals) still work: a missing or zero axis falls back to ±1 from the booleans.
+
+Floating stick. A touch anywhere in `#touch-stick-zone` (or on `#joystick`) becomes the stick's origin: the base moves under the finger, kept `EDGE_MARGIN_PX` inside the screen and the safe area. The touch is then followed at document level by its identifier, so sliding out of the zone does not drop the stick and a second finger cannot take it over. Deflection is `shapeStickMagnitude` of the distance over the stick's travel radius.
+
+Tap latches. A press of fire (Space, `#fire-button`) or missile (`KeyM` / `ShiftRight`, `#missile-button`) is queued until the next `getState()`, which reports it and clears it, so a press shorter than one simulation step is still seen once; a `touchcancel` withdraws a queued touch tap. `#throttle-button` toggles a boost latch (`aria-pressed`, class `is-active`) instead of being held. `resetActionQueue()` clears the queued fire / missile taps along with the other one-shot actions and switches the boost latch off. A window `blur` or the page becoming hidden releases every held key, button and the stick.
 
 Desktop bindings: `KeyW`/`ArrowUp`, `KeyS`/`ArrowDown` pitch · `KeyA`/`KeyD` yaw · `KeyQ`/`KeyE` roll · `Space` fire · `KeyM`/`ShiftRight` missile · `ShiftLeft`/`ControlLeft` throttle · `KeyF` special · `KeyV` camera · `Tab`/`KeyX` cycle (Tab's default is prevented unless a form control has focus) · `Digit1`–`Digit5`/`Numpad1`–`Numpad5` slot · `KeyG` flares · `Escape`/`KeyP` pause · `KeyU` upgrade.
 
@@ -2138,7 +2431,7 @@ export function resetSharedAudioContextForTests(): void;
 - `unlockAudioFromUserGesture()` — create (if needed) and resume on the user-gesture stack. Unlock itself does not occupy a holder, so `AudioManager` / `MusicSystem` can take over later.
 - `resetSharedAudioContextForTests()` — test isolation only: clear holders, close a live context, drop the singleton. Not a runtime API.
 
-Call sites: `StartMenu.startGame()` and `src/main.ts` `bootGame` call `unlockAudioFromUserGesture()`; `MenuMusic` calls it after the first menu gesture; `AudioManager.resume()` / `MusicSystem.resume()` call `resumeSharedAudioContext()` after `initContext()`; both dispose paths call `releaseSharedAudioContext(this)`.
+Call sites: `StartMenu.launch()` and `src/main.ts` `bootGame` call `unlockAudioFromUserGesture()`; `MenuMusic` calls it after the first menu gesture; `AudioManager.resume()` / `MusicSystem.resume()` call `resumeSharedAudioContext()` after `initContext()`; both dispose paths call `releaseSharedAudioContext(this)`.
 
 ## Missile lock audio
 
@@ -2156,7 +2449,7 @@ public playMissileLockBreak(): void;
 public playMissileDry(): void;
 ```
 
-`GameCoordinator` calls `playMissileDry()` when missile count is 0 and the missile input is held, and `playMissileLockBreak()` on transition into lock state `'break'`.
+`GameCoordinator.handleMissileInput` calls `playMissileDry()` on a missile press with no missiles, on a press with nothing tracked and on a release before the lock completes; `playMissileLockBreak()` when the seeker reports `events.lost`; `playMissileLockConfirm()` on `events.locked`; and the self-throttled `playMissileLock()` while a target is tracked but not yet locked. See [Missiles and gun aim](#missiles-and-gun-aim).
 
 ## Browser debug handles
 
@@ -2167,3 +2460,5 @@ Dev builds only (`import.meta.env.DEV`): `GameCoordinator` dynamically imports `
 - `voice` — `state()` (`VoiceSystem.getDebugState()`), `sample()` (voice and music bus RMS in dBFS, the music's voice-duck level, current line and phase, pack language), `say(lineId, kind = 'radio')`, `radio(key: GenericRadioKey)` and `wingman(id: WingmanId, event: WingmanEvent)`.
 - `balance` — the scripted-pilot balance harness (`installBalanceHarness`, `src/core/dev/BalanceHarness.ts`, with the pilot in `ScriptedPilot.ts`), used to measure the difficulty curve and progression. The pilot's terrain look-ahead also checks lines 14 m either side of its path for walls, so it steers around obstacles such as the Sky Ladder pylons.
 - `grantPowerUp(type = 'DAMAGE')` — emits `POWERUP_COLLECTED` with that power-up's config (unknown types fall back to `DAMAGE`), so the real pickup handler runs (HUD timer, effect, sound); returns the type granted.
+
+`getState()` also carries an `aim` block from `DevHookAccess.getAimState?()` (`null` when the access object does not provide it): `reticle` and `gunCross` as screen pixels (`null` while off screen), `gunCrossAssisted`, `acquireRadius` and `keepRadius` in pixels, `lockState`, `lockProgress`, `hasTarget`, `missiles`, `leadPip` and `gunAssist`. The scripted pilot presses the missile key in a hold-and-release cadence (1.4 s held, 0.25 s released), because one press fires one missile.
