@@ -168,6 +168,8 @@
 - [active] `P1 - 标记与雷达触控修补`（合并后浏览器复测发现）：屏外箭头会藏在摇杆 / 按键簇下面；箭头距离文字在左右边缘被裁；手机横屏雷达下半截被摇杆区盖住点不到；地图面板太透、看不清；玩家出界时地图标记的夹取 — owned：`src/ui/EnemyHealthBars.ts`、`src/ui/OffscreenChevron.ts`、`src/ui/RadarMinimap.ts`、`src/ui/RadarLevelMap.ts`、`src/ui/radarGlyphs.ts`
 - [next] `P2 - 触控版式收口`（等 `W` 合并后再做，文件与 `W` 重叠）：自动存档提示压在摇杆上（`hudExtrasStyles.ts` `.hx-autosave` 触控横屏规则）；无线电面板在平板档仍按 20 px 边距并落在摇杆区（`radioStyles.ts`）；`ScriptedPilot.clearInput()` 补 `pitchAxis` / `yawAxis` / `flightAssist` 复位；第一人称特殊武器枪口闪光 / 轨道炮全屏闪光缩放（`GameCoordinator.ts` 约 2285 行）
 - [active] `X - 测试`（独立测试作者，实现者不写测试）：`X1` 触控输入 / 辅助飞行 / 平板档 / 版式契约；`X2` 目标标记 / 雷达 / 地图 / 座舱 / 第一人称特效（含 5 个按新规格重写的过期测试）；`X3` 锁定与武器（等 `W`）— owned：`src/__tests__/**`、`*.test.ts`
+- [active] `U1 - 主菜单重做`（用户追加：“主入口太业余、满屏选项；要惊艳、好看、有动态”）：电影感标题页（即时可见的 CSS / canvas 动态背景 + 懒加载淡入的 3D 主机实时画面）、只留 继续 / 新战役 / 机库 / 设置 / 玩法 几个动作；全部设置收进分组抽屉（游戏 / 音频 / 显示 / 高级，一项不删、持久化与接线不变）；玩法说明分键盘 / 触控；新战役覆盖存档前确认；加载与“进入战场”过场同一视觉语言 — owned：`src/ui/StartMenu.ts`（合并时整文件取本批版本，`W` 只改了一行图例文案且已并入本批规格）、新目录 `src/ui/menu/**`、`src/ui/ModelPreview.ts`、`src/main.ts`（加载壳）、`index.html`（仅 `#loading-screen`）
+- [active] `U2 - 保存并退出`（用户追加：“没有保存并退出”）：实测暂停菜单只有“返回菜单”，确认文案写“当前进度将丢失”，退出时也确实不写档（波次中买的升级会丢）。改为“保存并退出”——退出瞬间按当前状态写检查点、继续时重打当前波，文案只说真实发生的事；不存档的模式如实说明 — owned：`src/ui/PauseMenu.ts`、`src/core/campaign/CampaignFlowController.ts`、`src/ui/CheckpointResumeButton.ts`；`GameCoordinator.ensurePauseMenu()` 的接线等 `W` 合并后由 `P2` 落
 - [next] `D - 文档`：README / README.zh-CN、CHANGELOG、`docs/**`
 - 验收：`tsc` / `lint` / `test:run` / `build` 全绿；真实浏览器里 iPad 尺寸下复测——第 1 关第 1 波能找到并击毁坦克、第三人称机头对准即可锁定并点按发射、雷达可点开、座舱视野、触控布局。
 - 待用户决定（本轮不做）：敌机攻击方式多样化（五种敌机目前共用同一种单发子弹；第 5 关之后没有新的波次敌人）。
