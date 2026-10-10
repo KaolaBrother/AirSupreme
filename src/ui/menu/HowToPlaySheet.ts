@@ -5,7 +5,7 @@ import { MenuSheet, type SheetOpener } from './MenuSheet';
 
 /**
  * 操作说明面板：键盘 / 触屏两页，默认显示与当前设备相符的那一页。
- * 内容与 InputHandler 的实际按键、index.html 的触控按键簇一致。
+ * 内容与 InputHandler 的实际按键、index.html 的触控按键簇一致；改按键时两处一起改。
  */
 
 export type HowToPlayView = 'keyboard' | 'touch';
@@ -29,26 +29,48 @@ const MISSILE_NOTE: LocalizedText = {
   zh: '导引头一直在工作。把目标保持在锁定环内，环变绿就是锁定完成。',
 };
 
+/** 触屏机炮的辅助瞄准（GAME_CONSTANTS.GUN_ASSIST，只在触控设备上启用） */
+const GUN_ASSIST_NOTE: LocalizedText = {
+  en: 'Aim assist: when a target is close to your nose, the gun cross slides onto it and your shots follow.',
+  zh: '辅助瞄准：目标靠近机头时，机炮十字会滑到目标上，子弹跟着十字走。',
+};
+
 const KEYBOARD_GROUPS: readonly KeyGroup[] = [
   {
     title: { en: 'Flight', zh: '飞行' },
     entries: [
-      { keys: ['W', 'S'], action: { en: 'Pitch (nose up / down)', zh: '俯仰（机头上下）' } },
+      {
+        keys: ['W', 'S'],
+        action: {
+          en: 'Pitch (nose up / down). ↑ / ↓ work too.',
+          zh: '俯仰（机头上下），↑ / ↓ 也可以',
+        },
+      },
       { keys: ['A', 'D'], action: { en: 'Yaw (nose left / right)', zh: '偏航（机头左右）' } },
       { keys: ['Q', 'E'], action: { en: 'Roll (bank the wings)', zh: '翻滚（机翼倾斜）' } },
-      { keys: ['Shift'], action: { en: 'Boost', zh: '加速' } },
+      {
+        // 加速只认左侧的 Shift / Ctrl；右 Shift 是导弹
+        keys: ['Shift'],
+        action: { en: 'Boost: hold left Shift or left Ctrl', zh: '加速：按住左 Shift 或左 Ctrl' },
+      },
     ],
   },
   {
     title: { en: 'Weapons', zh: '武器' },
     entries: [
-      { keys: [{ en: 'Space', zh: '空格' }], action: { en: 'Fire guns', zh: '开火' } },
+      {
+        keys: [{ en: 'Space', zh: '空格' }],
+        action: { en: 'Fire guns (hold to keep firing)', zh: '开火（按住连射）' },
+      },
       {
         keys: ['M'],
-        action: { en: 'Missile (fire when the ring is green)', zh: '导弹（环变绿后发射）' },
+        action: {
+          en: 'Missile: fire when the ring is green. Right Shift fires too.',
+          zh: '导弹：环变绿后发射，右 Shift 也可以',
+        },
         note: MISSILE_NOTE,
       },
-      { keys: ['F'], action: { en: 'Special weapon (hold)', zh: '特殊武器（可长按）' } },
+      { keys: ['F'], action: { en: 'Special weapon (tap or hold)', zh: '特殊武器（点按或长按）' } },
       { keys: ['Tab', 'X'], action: { en: 'Cycle special weapon', zh: '切换特殊武器' } },
       {
         keys: ['1', '5'],
@@ -66,7 +88,14 @@ const KEYBOARD_GROUPS: readonly KeyGroup[] = [
         keys: ['N'],
         action: { en: 'Level map (or click the radar)', zh: '关卡地图（也可以点击雷达）' },
       },
-      { keys: ['Esc'], action: { en: 'Pause', zh: '暂停' } },
+      {
+        keys: ['Esc', 'P'],
+        action: {
+          en: 'Pause menu: upgrades, settings and Save & Exit',
+          zh: '暂停菜单：升级、设置、保存并退出',
+        },
+      },
+      { keys: ['U'], action: { en: 'Upgrades (pauses the game)', zh: '升级（同时暂停游戏）' } },
     ],
   },
 ];
@@ -75,6 +104,8 @@ interface TouchButton {
   id: string;
   label: LocalizedText;
   action: LocalizedText;
+  /** 这一条下面的补充说明 */
+  note?: LocalizedText;
   /** 与 index.html 的按键簇一致：中心到簇右下角的距离与直径（px，未缩放） */
   x: number;
   y: number;
@@ -87,6 +118,7 @@ const TOUCH_BUTTONS: readonly TouchButton[] = [
     id: 'fire',
     label: { en: 'FIRE', zh: '开火' },
     action: { en: 'Guns. Hold to keep firing.', zh: '机炮，按住连射。' },
+    note: GUN_ASSIST_NOTE,
     x: 44,
     y: 44,
     size: 72,
@@ -99,6 +131,7 @@ const TOUCH_BUTTONS: readonly TouchButton[] = [
       en: 'Missile. Tap when the ring is green.',
       zh: '导弹。锁定环变绿后点按发射。',
     },
+    note: MISSILE_NOTE,
     x: 132,
     y: 36,
     size: 58,
@@ -155,7 +188,10 @@ const TOUCH_BUTTONS: readonly TouchButton[] = [
   {
     id: 'pause',
     label: { en: 'PAUSE', zh: '暂停' },
-    action: { en: 'Pause the game.', zh: '暂停游戏。' },
+    action: {
+      en: 'Opens the pause menu: upgrades, settings and Save & Exit.',
+      zh: '打开暂停菜单：升级、设置、保存并退出都在这里。',
+    },
     x: 40,
     y: 204,
     size: 44,
@@ -352,8 +388,8 @@ export class HowToPlaySheet {
         'p',
         'hp-text',
         tr({
-          en: 'Touch anywhere on the left side: a floating stick appears under your thumb. Slide up or down to pitch, left or right to turn.',
-          zh: '在屏幕左侧任意位置按下，浮动摇杆就出现在拇指下方。上下滑动控制俯仰，左右滑动控制转向。',
+          en: 'Touch anywhere in the lower-left area: a floating stick appears under your thumb. Slide up or down to pitch, left or right to turn.',
+          zh: '在屏幕左下区域任意位置按下，浮动摇杆就出现在拇指下方。上下滑动控制俯仰，左右滑动控制转向。',
         })
       )
     );
@@ -369,8 +405,8 @@ export class HowToPlaySheet {
       term.append(chip);
       row.append(term, ' ', el('dd', 'hp-row-action', tr(button.action)));
       list.append(row);
-      if (button.id === 'missile') {
-        list.append(el('div', 'hp-note', tr(MISSILE_NOTE)));
+      if (button.note) {
+        list.append(el('div', 'hp-note', tr(button.note)));
       }
     }
     buttons.append(list);

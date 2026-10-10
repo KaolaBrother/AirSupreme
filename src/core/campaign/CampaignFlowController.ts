@@ -1,4 +1,5 @@
 import type { GameSessionState } from '@/core/GameSessionState';
+import { GameStatus } from '@/core/GameState';
 import {
   CAMPAIGN_SAVE_VERSION,
   clearCampaignCheckpoint,
@@ -310,7 +311,8 @@ export class CampaignFlowController {
 
     if (level >= TOTAL_LEVELS) {
       const finalScore = this.deps.getScore();
-      if (!isBossMode) {
+      // 本局已经判了任务失败（同一步里先阵亡、后击破）：不记通关，也不动检查点
+      if (!isBossMode && !this.isRunOver()) {
         this.victory = true;
         // 立即记录通关并清除检查点（结局演出中途退出也不会留下过期存档）
         markCampaignCompleted(finalScore);
@@ -446,6 +448,7 @@ export class CampaignFlowController {
 
   /** 把“雨燕已入列”补写进当前检查点（入关检查点写在她升空之前） */
   private persistSwiftJoined(): void {
+    if (this.isRunOver()) return;
     const save = loadCampaignCheckpoint();
     if (!save || save.swiftJoined === true) return;
     saveCampaignCheckpoint({ ...save, swiftJoined: true });
@@ -541,9 +544,18 @@ export class CampaignFlowController {
   }
 
   /**
+   * 本局已经结束（结算面板已经亮出）。阵亡与清波 / 清关 / 击破 Boss 可能落在同一个模拟步里，
+   * 协调器会把这一步跑完，这些进度事件于是在任务失败之后才到：此后本局不再写、改写或清除检查点，
+   * 也不再记通关——面板上写的“从检查点重试 · …”和存储里的那一份保持一致，直到玩家自己选。
+   */
+  private isRunOver(): boolean {
+    return this.deps.session.getStatus() === GameStatus.GAME_OVER;
+  }
+
+  /**
    * 写检查点（正常模式）。announce：显示存档提示（HUD + 存档音效）；机库“出击”时的重写不提示
    * （紧接着就是章节卡片）。'hangar' 的 level 是即将开始的那一关。
-   * 返回交给存储的那份快照；存储没有接受（Boss 模式、存储不可用或已满）时为 null。
+   * 返回交给存储的那份快照；存储没有接受（Boss 模式、本局已结束、存储不可用或已满）时为 null。
    */
   private writeCheckpoint(
     kind: CheckpointKind,
@@ -552,7 +564,7 @@ export class CampaignFlowController {
     announce: boolean = true
   ): CampaignCheckpointInput | null {
     const session = this.deps.session;
-    if (session.isBossMode()) return null;
+    if (session.isBossMode() || this.isRunOver()) return null;
     this.exitPoint = { kind, level, wave };
     const data = this.deps.captureCheckpoint(kind, level, wave);
     data.stats = this.getRunStats();

@@ -29,12 +29,12 @@ export function bridgeUnitFireToEventBus(system: UnitSystem): () => void;
 
 `GameCoordinator`'s handlers for `WAVE_START`, `WAVE_COMPLETE`, `LEVEL_COMPLETE`, `ENEMY_DEATH` and `PLAYER_DEATH` forward to `CampaignFlowController` (and `WAVE_START` to `UnitController.spawnForWave`); `PLAYER_HIT` also drives camera shake and the damage pulse. Everything else in the campaign is wired with direct callbacks (`on…` properties) and `…Deps` interfaces.
 
-The controls and weapons round (touch flight, unit markers, always-on seeker, Save & Exit, new menu) also added and changed **no** event types or payloads. One wiring note: nothing emits `MISSILE_FIRED` — the player's missile is launched by a direct call (`GameCoordinator.launchMissile` → `MissileSystem.fire`), as it already was before this round — and the coordinator's own listener for it is gone (`launchMissile` reports the tutorial's missile step itself). The type and `CombatSystem`'s listener for it are still there. `MISSILE_HIT` is unchanged.
+The controls and weapons round (touch flight, unit markers, always-on seeker, Save & Exit, new menu) also added and changed **no** event types or payloads. One wiring note: nothing emits `MISSILE_FIRED` and nothing listens for it — the player's missile is launched by a direct call (`GameCoordinator.launchMissile` → `MissileSystem.fire`), as it already was before this round, and the listeners the coordinator and `CombatSystem` had for it are gone (`launchMissile` reports the tutorial's missile step itself). Only the type and its payload are still declared in `EventBus.ts`. `MISSILE_HIT` is unchanged.
 
 ## Config
 
 - Runtime constants: `src/config.ts` (`GAME_CONSTANTS` — `PLAYER`, `PROJECTILE`, `GUN_ASSIST`, `CAMERA`, `WORLD`, `POWERUP`, `LEVEL`, `MISSILE`; `GameConfig` device / quality profiles)
-- External JSON: `public/config/game-config.json` via `src/core/utils/ConfigLoader.ts`. Its `missile` block is not read by any runtime code: the player's missile takes its numbers from `GAME_CONSTANTS.MISSILE`, and the base lock and reload times come from the upgrade tracks (`UPGRADE_CONFIGS`)
+- External JSON: `public/config/game-config.json` via `src/core/utils/ConfigLoader.ts`. `src/main.ts` loads it at start-up (`configLoader.load()`, merged over the loader's built-in defaults), but no runtime code calls the getters below, so none of its blocks reaches the game. Its `missile` block is one example: the player's missile takes its numbers from `GAME_CONSTANTS.MISSILE`, and the base lock and reload times come from the upgrade tracks (`UPGRADE_CONFIGS`)
 
 ```typescript
 import { configLoader } from '@/core/utils/ConfigLoader';
@@ -2028,7 +2028,7 @@ EMP visuals: `empFlash` decays over 0.5 s (`ScreenEffectsState`); the post-FX gr
 
 ## HUD, story overlay, radio, radar, menus
 
-Source: `src/ui/HUD.ts`, `StoryOverlay.ts`, `RadioComms.ts`, `RadarMinimap.ts`, `StartMenu.ts`, `UpgradeMenu.ts`, `CheckpointResumeButton.ts`, `src/core/PresentationController.ts`.
+Source: `src/ui/HUD.ts`, `StoryOverlay.ts`, `RadioComms.ts`, `RadarMinimap.ts`, `StartMenu.ts`, `UpgradeMenu.ts`, `src/core/PresentationController.ts`.
 
 ```typescript
 // HUD — 可本地化文案
@@ -2251,6 +2251,10 @@ export interface IPauseMenuOptions {
 // Continue Campaign will do, or says why nothing is saved ('no-save-mode' / 'not-started' / 'complete').
 // A 'failed' result shows the Save Failed view (Back / Exit Anyway). handleEscape() returns to the
 // default view from any sub-view.
+// Looks: the main menu's own style fragments re-scoped to #pause-menu —
+// rescopeMenuCss(menuKitCss() + sheetKitCss(), '#pause-menu') (src/ui/menu/menuStyles.ts, sheetStyles.ts).
+// The confirm shows the save position as a card. Save & Exit is the primary (ice-blue) button; amber
+// marks only an exit that discards progress ('no-save-mode', or no save wiring) and the Save Failed view.
 // Settings view rows: Sound effects, Music, Voice (only with applyVoice), Graphics, Language.
 // The Language row saves { language }, then setLocale(); every open menu re-renders through onLocaleChange.
 // GameCoordinator wires getSaveStatus / onSaveAndExit to campaign.describeExitSave() / saveForExit()
@@ -2268,11 +2272,27 @@ export interface UpgradeMenuShowOptions {
 public show(options?: UpgradeMenuShowOptions): void; // no argument = the old pause behaviour
 public getMode(): UpgradeMenuMode;
 
-// CheckpointResumeButton — "Continue from checkpoint" / "从检查点继续" under the MISSION FAILED settlement
-public show(save: CampaignSaveData, onResume: (save: CampaignSaveData) => void): void;
-public hide(): void;
-public dispose(): void;
+// HUD settlement panel (MISSION FAILED / MISSION COMPLETE)
+/** 绑定结算按钮回调（再来一局 / 返回菜单） */
+public setSettlementActions(actions: { onRetry: () => void; onExitToMenu: () => void }): void;
+/**
+ * 任务失败且有可用检查点时结算面板的主动作：“从检查点重试”。
+ * detail 说明回到哪里（章节 / 波次；可本地化，面板开着时切换语言随之重绘）。
+ */
+export interface SettlementCheckpointRetry {
+  detail: HudText;
+  onRetry: () => void;
+}
+/**
+ * 显示游戏结束。
+ * checkpointRetry：有可用检查点时传入，面板的主动作变成“从检查点重试”并写明回到哪里，
+ * 不再提供“再来一局”（它会从头开始、清掉这份存档）；不传 / null 时面板与原来一样。
+ */
+public showGameOver(finalScore: number, checkpointRetry?: SettlementCheckpointRetry | null): void;
+public showMissionComplete(finalScore: number): void;
 ```
+
+Game over and the checkpoint. `GameCoordinator.resolveCheckpointRetry()` builds the `SettlementCheckpointRetry` when the run is in normal mode, `onContinueFromCheckpoint` was supplied and a valid checkpoint is stored (`hasCampaignCheckpoint()` / `loadCampaignCheckpoint()`): `detail` is `describeCheckpointText(save)` and `onRetry` calls `onContinueFromCheckpoint(save)`. The panel then shows **Retry from checkpoint** / 从检查点重试 as its primary action with the position under it, then **Main Menu**; the **Play Again** action bound through `setSettlementActions` is not offered, and nothing on the panel deletes the save. In Boss mode, or with no checkpoint, `checkpointRetry` is `null` and the panel is **Play Again** / **Main Menu**. `CheckpointResumeButton` (the floating button under the old panel) no longer exists.
 
 Mobile controls in `index.html`: the stick (`#touch-stick-zone`, `#joystick`, `#joystick-knob`; see [Input](#input)) and the buttons `#camera-button`, `#special-button`, `#cycle-button`, `#flare-button` (plus the existing `#fire-button`, `#missile-button`, `#throttle-button`, `#upgrade-button`). `#throttle-button` (BOOST) is a latch and carries `aria-pressed`; `#missile-button` shows the missile count (`data-count`) and a reload ring (`--tc-meter`) written by the HUD, and the lock state as classes written by `LockOnIndicator` (`is-search`, plus `is-track` while tracking; `is-lock` + `is-ready` when locked; `is-dry` with no missiles). The HTML ships English labels (FIRE, MSL, SPEC, FLARE, BOOST, SWAP, VIEW, PAUSE); `src/main.ts` rewrites labels and `aria-label`s for the current language, except the special button's main label while the HUD shows a weapon code there.
 
@@ -2284,7 +2304,7 @@ Hostile ground / sea / air units are fed to the same bars by `CombatHudFeed` (th
 
 - a **target bracket** — four corners in the threat colour with the range in metres (rounded to 10 m) — while it projects smaller than about 22 px on screen, hidden again above 28 px;
 - the **objective style** when its snapshot carries `objective: true`: the bracket is always shown, thicker and pulsing, and its off-screen arrow blinks in the threat colour (class `is-objective`; no animation under reduced motion);
-- an **off-screen arrow** (`OffscreenChevron`) whose distance label stays horizontal on the arrow's tail side. Arrows avoid the radar dial (`#radar-minimap`) and, in touch layouts, the stick (`#joystick`) and every visible `.touch-btn`: the rectangles are re-measured about once a second (and on touch start / end, because the floating stick moves), and an arrow that would land under one slides along the screen edge or inward, whichever is the shorter move, keeping its bearing.
+- an **off-screen arrow** (`OffscreenChevron`) whose distance label stays horizontal on the arrow's tail side. Arrows are kept out from under the chrome drawn above them by `ChevronAvoidance` (`src/ui/ChevronAvoidance.ts`); `EnemyHealthBars` and `BossMissileIndicator` (the arrows that point at a boss's missiles) each hold one instance and follow the same rules. The areas avoided are the radar dial (`#radar-minimap`), the HUD panels (`#hud-score`, `#hud-speed`, `#hud-upgrades`, `#hud-status`, `#hud-health` and every block showing in `#hud-top-stack`) and, in touch layouts, the stick (`#joystick`) and every visible `.touch-btn`. The rectangles are re-measured about once a second (and on touch start / end, because the floating stick moves), and an arrow whose footprint — distance label included — touches one of them (with an 8 px margin) slides along the screen edge or inward past it, whichever is the shorter move, keeping its bearing and staying whole on screen.
 
 Radar (`RadarMinimap`, `RadarLevelMap`, `radarGlyphs.ts`):
 
@@ -2293,7 +2313,7 @@ Radar (`RadarMinimap`, `RadarLevelMap`, `radarGlyphs.ts`):
 - A click or tap on the dial, or the N key (not with Ctrl / Meta / Alt, not while typing), toggles the level map (`#radar-map`); Esc closes it and is captured so it does not also pause. The map collapses on a level change and when radar updates stop for 1.5 s. It does not pause the game.
 - The level map is north-up (world −Z at the top) and fixed-scale: the battlefield boundary circle, 500 m and 1000 m rings around the player, the player's arrow rotated by heading, every radar contact with the same glyphs drawn larger, a legend, and a 64 × 64 land / water underlay sampled once per level from the `RadarTerrainSampler` (a plain grid without one). The panel is 72% of the viewport's shorter side (200–560 px), nearly opaque, redrawn at 20 Hz.
 
-`ModelPreview` builds every boss from its own mesh factory through a lazy `Record<BossType, loader>` (bosses 6–10 from `MagmaColossusMesh`, `AbyssalLeviathanMesh`, `TempestZeppelinMesh`, `PhantomWingMesh`, `OraclePrimeMesh`), scales the visible geometry (hidden parts and sprites excluded) to a fixed bounding sphere, and disposes each previewed model's geometries, materials and instance buffers once, skipping shared resources. The sphere is framed in the part of the canvas above the name label: after the name is written (and again on resize and on a language switch) `frameCamera()` reads the label's top from the DOM, keeps 8 px clear of it and of the canvas top (the region reaches at least halfway down the canvas), backs the camera off until the sphere fits the region's height (or the canvas width, if narrower), and moves the projection centre into the region with `setViewOffset`; before the canvas has a layout it frames the whole canvas. The name label stays on one line when it fits (18 px type up to 600 px width); in a landscape viewport up to 520 px tall the header is compressed and the hint line hidden so the stand gets the height. The menu calls this screen the **Hangar** (`#model-preview`, opened from `#preview-btn`): arrow buttons, the Left / Right keys or a horizontal swipe change model, a mouse drag rotates it, `#rotate-toggle` switches auto-rotate, and Esc or the back button returns to the menu. Its `WebGLRenderer` exists only while it is shown — created in `show()`, released with its context in `hide()` — so it never coexists with the title screen's hero renderer or a game's.
+`ModelPreview` builds every boss from its own mesh factory through a lazy `Record<BossType, loader>` (bosses 6–10 from `MagmaColossusMesh`, `AbyssalLeviathanMesh`, `TempestZeppelinMesh`, `PhantomWingMesh`, `OraclePrimeMesh`), scales the visible geometry (hidden parts and sprites excluded) to a fixed bounding sphere — centred on the visible bounding box, its radius the farthest visible vertex from that centre, so the model stays inside it at every rotation — and disposes each previewed model's geometries, materials and instance buffers once, skipping shared resources. `hideSignalLights()` (`src/ui/menu/modelDisposal.ts`) first hides the jet factory's signal-light balls (`navLightPort`, `navLightStarboard`, `strobeLight`, `beaconLight`) on that instance, so they are neither drawn nor framed; `MenuHeroScene` does the same for the title screen's jet. The sphere is framed in the part of the canvas above the name label: after the name is written (and again on resize and on a language switch) `frameCamera()` reads the label's top from the DOM, keeps 8 px clear of it and of the canvas top (the region reaches at least halfway down the canvas), backs the camera off until the sphere's outline is 70% of the canvas's shorter side — the same size for every model — or, where the region is too small for that, until it fits the region's height or width with a margin, and moves the projection centre into the region with `setViewOffset`; before the canvas has a layout it frames the whole canvas. A model whose factory or chunk fails to load writes `Could not load: {name}` / `无法加载：{name}` into the name label and leaves the other models and the way back working. If `show()` cannot create its renderer (no WebGL context) it calls `hide()`, which runs the `setOnBack` callback and so brings the menu back, and rethrows. The name label stays on one line when it fits (18 px type up to 600 px width); in a landscape viewport up to 520 px tall the header is compressed and the hint line hidden so the stand gets the height. The menu calls this screen the **Hangar** (`#model-preview`, opened from `#preview-btn`): arrow buttons, the Left / Right keys or a horizontal swipe change model, a mouse drag rotates it, `#rotate-toggle` switches auto-rotate, and Esc or the back button returns to the menu. Its `WebGLRenderer` exists only while it is shown — created in `show()`, released with its context in `hide()` — so it never coexists with the title screen's hero renderer or a game's.
 
 ## Input
 
@@ -2355,7 +2375,7 @@ Axes and assist. `getState()` always writes `pitchAxis`, `yawAxis` and `flightAs
 
 Floating stick. A touch anywhere in `#touch-stick-zone` (or on `#joystick`) becomes the stick's origin: the base moves under the finger, kept `EDGE_MARGIN_PX` inside the screen and the safe area. The touch is then followed at document level by its identifier, so sliding out of the zone does not drop the stick and a second finger cannot take it over. Deflection is `shapeStickMagnitude` of the distance over the stick's travel radius.
 
-Tap latches. A press of fire (Space, `#fire-button`) or missile (`KeyM` / `ShiftRight`, `#missile-button`) is queued until the next `getState()`, which reports it and clears it, so a press shorter than one simulation step is still seen once; a `touchcancel` withdraws a queued touch tap. `#throttle-button` toggles a boost latch (`aria-pressed`, class `is-active`) instead of being held. `resetActionQueue()` clears the queued fire / missile taps along with the other one-shot actions and switches the boost latch off. A window `blur` or the page becoming hidden releases every held key, button and the stick.
+Tap latches. A press of fire (Space, `#fire-button`) or missile (`KeyM` / `ShiftRight`, `#missile-button`) is queued until the next `getState()`, which reports it and clears it, so a press shorter than one simulation step is still seen once: a key-down is queued at once, and a touch press that `getState()` has not read yet is queued when the finger lifts. A touch that ends in `touchcancel` is not counted as a press and leaves a tap that was already queued in place. `#throttle-button` toggles a boost latch (`aria-pressed`, class `is-active`) instead of being held. `resetActionQueue()` clears the queued fire / missile taps along with the other one-shot actions and switches the boost latch off. A window `blur` or the page becoming hidden releases every held key, button and the stick, and clears the queued fire / missile taps.
 
 Desktop bindings: `KeyW`/`ArrowUp`, `KeyS`/`ArrowDown` pitch · `KeyA`/`KeyD` yaw · `KeyQ`/`KeyE` roll · `Space` fire · `KeyM`/`ShiftRight` missile · `ShiftLeft`/`ControlLeft` throttle · `KeyF` special · `KeyV` camera · `Tab`/`KeyX` cycle (Tab's default is prevented unless a form control has focus) · `Digit1`–`Digit5`/`Numpad1`–`Numpad5` slot · `KeyG` flares · `Escape`/`KeyP` pause · `KeyU` upgrade.
 
@@ -2374,6 +2394,8 @@ interface GameCoordinatorOptions {
   onContinueFromCheckpoint?: (save: CampaignSaveData) => void;
 }
 ```
+
+`onRetry` is the settlement panel's **Play Again** and `onExitToMenu` its **Main Menu**. `onContinueFromCheckpoint` is what the panel's **Retry from checkpoint** calls after a failed mission with a checkpoint (see [HUD, story overlay, radio, radar, menus](#hud-story-overlay-radio-radar-menus)); `src/main.ts` passes its `continueFromCheckpoint`. Both restarts end in `bootGame`, which returns at once while an earlier boot is still in progress, so a double press cannot start two games.
 
 ## HUD tokens and layout
 

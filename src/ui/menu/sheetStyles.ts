@@ -3,87 +3,9 @@
  * 设置控件（步进器 / 分段选择 / 音量格条 / 开关 / 高级折叠）、操作说明（按键表 / 触屏示意图）。
  * 颜色与字体变量在 menuStyles.ts 的 #start-menu 上定义。
  */
-export const SHEET_CSS = `
-/* ================================================================ 面板容器 */
-#start-menu .ms-layer {
-  position: absolute;
-  inset: 0;
-  z-index: 5;
-  display: flex;
-  justify-content: flex-start;
-  align-items: stretch;
-}
 
-#start-menu .ms-layer[hidden] {
-  display: none;
-}
-
-/* 关闭动画播放期间不拦截点击：收起面板后可以立刻点标题画面上的按钮 */
-#start-menu .ms-layer:not(.is-open) {
-  pointer-events: none;
-}
-
-#start-menu .ms-scrim {
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(90deg, rgba(2, 6, 13, 0.7) 0%, rgba(2, 6, 13, 0.42) 100%);
-  opacity: 0;
-  transition: opacity 0.24s ease;
-}
-
-#start-menu .ms-layer.is-open .ms-scrim {
-  opacity: 1;
-}
-
-#start-menu .ms-panel {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  width: min(600px, 100%);
-  height: 100%;
-  padding-left: env(safe-area-inset-left);
-  background:
-    linear-gradient(180deg, rgba(143, 228, 255, 0.07) 0%, rgba(143, 228, 255, 0) 180px),
-    linear-gradient(180deg, rgba(9, 18, 32, 0.97) 0%, rgba(5, 11, 21, 0.97) 100%);
-  border-right: 1px solid rgba(143, 228, 255, 0.3);
-  box-shadow: 30px 0 70px rgba(0, 0, 0, 0.55);
-  outline: none;
-  opacity: 0;
-  transform: translate3d(-36px, 0, 0);
-  transition: transform 0.26s var(--tm-ease), opacity 0.2s ease;
-}
-
-#start-menu .ms-layer.is-open .ms-panel {
-  opacity: 1;
-  transform: none;
-}
-
-/* 面板右上角的切角亮线 */
-#start-menu .ms-panel::after {
-  content: '';
-  position: absolute;
-  right: -1px;
-  top: 0;
-  width: 2px;
-  height: 96px;
-  background: linear-gradient(180deg, var(--tm-ice), rgba(143, 228, 255, 0));
-  pointer-events: none;
-}
-
-#start-menu .ms-head {
-  flex: none;
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 16px;
-  padding: max(22px, env(safe-area-inset-top)) 22px 14px 28px;
-  border-bottom: 1px solid rgba(143, 228, 255, 0.16);
-}
-
-#start-menu .ms-heading {
-  min-width: 0;
-}
-
+/** 共用片段（暂停菜单也用）：小标签 + 大标题 */
+const HEADING_CSS = `
 #start-menu .ms-kicker {
   display: flex;
   align-items: center;
@@ -106,6 +28,7 @@ export const SHEET_CSS = `
 #start-menu .ms-title {
   margin: 7px 0 0;
   font-family: var(--tm-display);
+  font-stretch: 115%;
   font-size: 28px;
   font-weight: 900;
   line-height: 1.05;
@@ -117,122 +40,10 @@ export const SHEET_CSS = `
 #start-menu .ms-title:lang(zh) {
   letter-spacing: 0.18em;
 }
+`;
 
-#start-menu .ms-close {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 46px;
-  height: 46px;
-  border: 1px solid rgba(143, 228, 255, 0.34);
-  border-radius: 3px;
-  background: rgba(143, 228, 255, 0.06);
-  color: var(--tm-text);
-  cursor: pointer;
-  transition: background 0.16s ease, border-color 0.16s ease, transform 0.12s ease;
-}
-
-#start-menu .ms-close:active {
-  transform: scale(0.94);
-  background: rgba(143, 228, 255, 0.26);
-}
-
-#start-menu .ms-body {
-  flex: 1;
-  min-height: 0;
-  padding: 6px 22px 28px 28px;
-  overflow-x: hidden;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  -webkit-overflow-scrolling: touch;
-  touch-action: pan-y;
-  scrollbar-width: thin;
-  scrollbar-color: rgba(143, 228, 255, 0.35) transparent;
-}
-
-#start-menu .ms-body::after {
-  content: '';
-  display: block;
-  height: env(safe-area-inset-bottom);
-}
-
-#start-menu .ms-foot {
-  flex: none;
-  padding: 14px 22px max(18px, env(safe-area-inset-bottom)) 28px;
-  border-top: 1px solid rgba(143, 228, 255, 0.16);
-}
-
-#start-menu .ms-foot:empty {
-  display: none;
-}
-
-@media (hover: hover) {
-  #start-menu .ms-close:hover {
-    background: rgba(143, 228, 255, 0.18);
-    border-color: var(--tm-ice);
-  }
-}
-
-/* ---------------------------------------------------------------- 确认框 */
-#start-menu .ms-layer[data-variant='dialog'] {
-  z-index: 6;
-  justify-content: center;
-  align-items: center;
-  padding:
-    max(16px, env(safe-area-inset-top))
-    max(16px, env(safe-area-inset-right))
-    max(16px, env(safe-area-inset-bottom))
-    max(16px, env(safe-area-inset-left));
-}
-
-#start-menu .ms-layer[data-variant='dialog'] .ms-scrim {
-  background: rgba(2, 6, 13, 0.74);
-}
-
-#start-menu .ms-layer[data-variant='dialog'] .ms-panel {
-  width: min(520px, 100%);
-  height: auto;
-  max-height: 100%;
-  padding-left: 0;
-  border: 1px solid rgba(143, 228, 255, 0.36);
-  border-top: 2px solid var(--tm-amber);
-  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.65);
-  transform: translate3d(0, 14px, 0) scale(0.97);
-}
-
-#start-menu .ms-layer[data-variant='dialog'].is-open .ms-panel {
-  transform: none;
-}
-
-#start-menu .ms-layer[data-variant='dialog'] .ms-panel::after {
-  display: none;
-}
-
-#start-menu .ms-layer[data-variant='dialog'] .ms-head {
-  padding: 20px 18px 12px 24px;
-}
-
-#start-menu .ms-layer[data-variant='dialog'] .ms-kicker {
-  color: var(--tm-amber);
-}
-
-#start-menu .ms-layer[data-variant='dialog'] .ms-kicker::before {
-  background: var(--tm-amber);
-}
-
-#start-menu .ms-layer[data-variant='dialog'] .ms-title {
-  font-size: 23px;
-}
-
-#start-menu .ms-layer[data-variant='dialog'] .ms-body {
-  padding: 16px 24px 18px;
-}
-
-#start-menu .ms-layer[data-variant='dialog'] .ms-foot {
-  padding: 14px 24px 20px;
-}
-
+/** 共用片段：确认框的说明文字、存档卡片与按钮 */
+const CONFIRM_CSS = `
 #start-menu .cf-text {
   margin: 0;
   font-size: 15px;
@@ -301,6 +112,17 @@ export const SHEET_CSS = `
   background: rgba(143, 228, 255, 0.24);
 }
 
+/* 不丢东西的主操作（暂停菜单的“保存并退出”）：与标题画面主按钮同一块冰蓝 */
+#start-menu .cf-btn-primary {
+  border-color: #9fe8ff;
+  background: linear-gradient(180deg, #dcf7ff 0%, #9fe8ff 46%, #72d0f1 100%);
+  color: var(--tm-ink);
+}
+
+#start-menu .cf-btn-primary:active {
+  background: #c4f0ff;
+}
+
 #start-menu .cf-btn-danger {
   border-color: var(--tm-amber);
   background: var(--tm-amber);
@@ -317,36 +139,20 @@ export const SHEET_CSS = `
     border-color: var(--tm-ice);
   }
 
+  #start-menu .cf-btn-primary:hover {
+    background: linear-gradient(180deg, #f1fcff 0%, #b9efff 46%, #8ddcf7 100%);
+    border-color: #ffffff;
+  }
+
   #start-menu .cf-btn-danger:hover {
     background: #ffc670;
     border-color: #ffc670;
   }
 }
+`;
 
-/* ================================================================ 设置 */
-#start-menu .st-group {
-  margin-top: 20px;
-}
-
-#start-menu .st-group-title {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin: 0 0 2px;
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.3em;
-  text-transform: uppercase;
-  color: var(--tm-ice);
-}
-
-#start-menu .st-group-title::after {
-  content: '';
-  flex: 1;
-  height: 1px;
-  background: linear-gradient(90deg, rgba(143, 228, 255, 0.4), rgba(143, 228, 255, 0));
-}
-
+/** 共用片段：设置行与步进器 */
+const SETTING_ROW_CSS = `
 #start-menu .st-row {
   display: flex;
   align-items: center;
@@ -490,6 +296,239 @@ export const SHEET_CSS = `
   background: var(--tm-ice);
   box-shadow: 0 0 6px rgba(143, 228, 255, 0.6);
 }
+`;
+
+/**
+ * 面板之外也用的部分（选择器仍以 #start-menu 开头，换容器见 menuStyles.ts 的 rescopeMenuCss）：
+ * 标题、确认框内容、设置行与步进器。
+ */
+export function sheetKitCss(): string {
+  return HEADING_CSS + CONFIRM_CSS + SETTING_ROW_CSS;
+}
+
+export const SHEET_CSS = `
+/* ================================================================ 面板容器 */
+#start-menu .ms-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  justify-content: flex-start;
+  align-items: stretch;
+}
+
+#start-menu .ms-layer[hidden] {
+  display: none;
+}
+
+/* 关闭动画播放期间不拦截点击：收起面板后可以立刻点标题画面上的按钮 */
+#start-menu .ms-layer:not(.is-open) {
+  pointer-events: none;
+}
+
+#start-menu .ms-scrim {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, rgba(2, 6, 13, 0.7) 0%, rgba(2, 6, 13, 0.42) 100%);
+  opacity: 0;
+  transition: opacity 0.24s ease;
+}
+
+#start-menu .ms-layer.is-open .ms-scrim {
+  opacity: 1;
+}
+
+#start-menu .ms-panel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: min(600px, 100%);
+  height: 100%;
+  padding-left: env(safe-area-inset-left);
+  background: var(--tm-panel);
+  border-right: 1px solid rgba(143, 228, 255, 0.3);
+  box-shadow: 30px 0 70px rgba(0, 0, 0, 0.55);
+  outline: none;
+  opacity: 0;
+  transform: translate3d(-36px, 0, 0);
+  transition: transform 0.26s var(--tm-ease), opacity 0.2s ease;
+}
+
+#start-menu .ms-layer.is-open .ms-panel {
+  opacity: 1;
+  transform: none;
+}
+
+/* 面板右上角的切角亮线 */
+#start-menu .ms-panel::after {
+  content: '';
+  position: absolute;
+  right: -1px;
+  top: 0;
+  width: 2px;
+  height: 96px;
+  background: linear-gradient(180deg, var(--tm-ice), rgba(143, 228, 255, 0));
+  pointer-events: none;
+}
+
+#start-menu .ms-head {
+  flex: none;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  padding: max(22px, env(safe-area-inset-top)) 22px 14px 28px;
+  border-bottom: 1px solid rgba(143, 228, 255, 0.16);
+}
+
+#start-menu .ms-heading {
+  min-width: 0;
+}
+
+${HEADING_CSS}
+
+#start-menu .ms-close {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 46px;
+  height: 46px;
+  border: 1px solid rgba(143, 228, 255, 0.34);
+  border-radius: 3px;
+  background: rgba(143, 228, 255, 0.06);
+  color: var(--tm-text);
+  cursor: pointer;
+  transition: background 0.16s ease, border-color 0.16s ease, transform 0.12s ease;
+}
+
+#start-menu .ms-close:active {
+  transform: scale(0.94);
+  background: rgba(143, 228, 255, 0.26);
+}
+
+#start-menu .ms-body {
+  flex: 1;
+  min-height: 0;
+  padding: 6px 22px 28px 28px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(143, 228, 255, 0.35) transparent;
+}
+
+#start-menu .ms-body::after {
+  content: '';
+  display: block;
+  height: env(safe-area-inset-bottom);
+}
+
+#start-menu .ms-foot {
+  flex: none;
+  padding: 14px 22px max(18px, env(safe-area-inset-bottom)) 28px;
+  border-top: 1px solid rgba(143, 228, 255, 0.16);
+}
+
+#start-menu .ms-foot:empty {
+  display: none;
+}
+
+@media (hover: hover) {
+  #start-menu .ms-close:hover {
+    background: rgba(143, 228, 255, 0.18);
+    border-color: var(--tm-ice);
+  }
+}
+
+/* ---------------------------------------------------------------- 确认框 */
+#start-menu .ms-layer[data-variant='dialog'] {
+  z-index: 6;
+  justify-content: center;
+  align-items: center;
+  padding:
+    max(16px, env(safe-area-inset-top))
+    max(16px, env(safe-area-inset-right))
+    max(16px, env(safe-area-inset-bottom))
+    max(16px, env(safe-area-inset-left));
+}
+
+#start-menu .ms-layer[data-variant='dialog'] .ms-scrim {
+  background: rgba(2, 6, 13, 0.74);
+}
+
+#start-menu .ms-layer[data-variant='dialog'] .ms-panel {
+  width: min(520px, 100%);
+  height: auto;
+  max-height: 100%;
+  padding-left: 0;
+  border: 1px solid rgba(143, 228, 255, 0.36);
+  border-top: 2px solid var(--tm-amber);
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.65);
+  transform: translate3d(0, 14px, 0) scale(0.97);
+}
+
+#start-menu .ms-layer[data-variant='dialog'].is-open .ms-panel {
+  transform: none;
+}
+
+#start-menu .ms-layer[data-variant='dialog'] .ms-panel::after {
+  display: none;
+}
+
+#start-menu .ms-layer[data-variant='dialog'] .ms-head {
+  padding: 20px 18px 12px 24px;
+}
+
+#start-menu .ms-layer[data-variant='dialog'] .ms-kicker {
+  color: var(--tm-amber);
+}
+
+#start-menu .ms-layer[data-variant='dialog'] .ms-kicker::before {
+  background: var(--tm-amber);
+}
+
+#start-menu .ms-layer[data-variant='dialog'] .ms-title {
+  font-size: 23px;
+}
+
+#start-menu .ms-layer[data-variant='dialog'] .ms-body {
+  padding: 16px 24px 18px;
+}
+
+#start-menu .ms-layer[data-variant='dialog'] .ms-foot {
+  padding: 14px 24px 20px;
+}
+
+${CONFIRM_CSS}
+
+/* ================================================================ 设置 */
+#start-menu .st-group {
+  margin-top: 20px;
+}
+
+#start-menu .st-group-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0 0 2px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: var(--tm-ice);
+}
+
+#start-menu .st-group-title::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, rgba(143, 228, 255, 0.4), rgba(143, 228, 255, 0));
+}
+
+${SETTING_ROW_CSS}
 
 /* ---------------------------------------------------------------- 分段选择 */
 #start-menu .st-seg {

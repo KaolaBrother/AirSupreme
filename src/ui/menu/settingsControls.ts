@@ -14,6 +14,8 @@ export interface StepperOptions {
   increaseLabel: string;
   /** 数值下方的刻度格数（难度 5 格、生命 9 格…）；0 = 不显示 */
   pips?: number;
+  /** 左右方向键是否调整数值（默认是）；暂停菜单不接管方向键，传 false */
+  arrowKeys?: boolean;
   onStep: (direction: 1 | -1) => void;
 }
 
@@ -86,7 +88,9 @@ export function createStepper(options: StepperOptions): StepperHandle {
   }
 
   root.append(decrease, readout, increase);
-  bindArrowSteps(root, decrease, increase);
+  if (options.arrowKeys !== false) {
+    bindArrowSteps(root, decrease, increase);
+  }
 
   return {
     root,
@@ -151,11 +155,10 @@ export function createSegmented<T extends string>(
     const step = event.key === 'ArrowRight' ? 1 : -1;
     const next = buttons[(Math.max(0, current) + step + buttons.length) % buttons.length];
     event.preventDefault();
+    // 先移焦点再选中：语言切换会重建面板，面板按 data-focus-key 把焦点放回重建前的那个控件——
+    // 焦点得先落在新选中的这一项上，重建后才会跟着它走
+    next.focus();
     next.click();
-    // 语言切换会重建面板：重建后的焦点由面板按 data-focus-key 放回，这里只管没重建的情况
-    if (next.isConnected) {
-      next.focus();
-    }
   });
 
   return {

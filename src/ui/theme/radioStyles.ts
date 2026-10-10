@@ -251,8 +251,9 @@ ${toneBlock('muted', '195, 204, 214')}
  * 手机竖屏追尾视角：机体下方的告警通道（第一行在屏幕中线下方约 45–75px）到按键簇之间，
  * 最多放得下两行正文；第三行会盖住导弹告警。
  * 通道同时显示两行（导弹告警 + 闪烁告警，HUD 在 <html> 上记 data-hud-warning-rows='2'）时，
- * 第二行下沿到按键簇只剩约 50px：面板收成一行正文，不显示头像和呼号行（左侧的色条仍标出
- * 说话方的阵营），底边不动、向上让出第二行；告警一收起就恢复
+ * 第二行下沿到按键簇只剩约 50px，底部有安全区的 iPhone 上只剩约 39px：面板收成一行正文，
+ * 不显示头像和呼号行（左侧的色条仍标出说话方的阵营），内边距和行高收紧（整条约 21px 高），
+ * 底边不动、向上让出第二行；告警一收起就恢复
  */
 @media (orientation: portrait) and (max-width: 699.98px) {
   :root:not([data-hud-camera='first-person']) #radio-comms[data-density='touch-portrait'] .rc-text {
@@ -266,17 +267,26 @@ ${toneBlock('muted', '195, 204, 214')}
 
   :root[data-hud-warning-rows='2']:not([data-hud-camera='first-person']) #radio-comms[data-density='touch-portrait'] .rc-text {
     -webkit-line-clamp: 1;
+    line-height: 1.3;
   }
 
   :root[data-hud-warning-rows='2']:not([data-hud-camera='first-person']) #radio-comms[data-density='touch-portrait'] .rc-panel {
-    padding-top: 5px;
-    padding-bottom: 5px;
+    padding-top: 1px;
+    padding-bottom: 1px;
+  }
+}
+
+/* 矮一些的手机（如 360×800）：第二行下沿到按键簇只剩约 33px，收小的面板再贴近按键簇 4px */
+@media (orientation: portrait) and (max-width: 699.98px) and (max-height: 819.98px) {
+  :root[data-hud-warning-rows='2']:not([data-hud-camera='first-person']) #radio-comms[data-density='touch-portrait'] {
+    bottom: calc(max(20px, env(safe-area-inset-bottom)) + var(--touch-deck-h, 240px) + 4px);
   }
 }
 
 /*
- * 手机横握同理：面板贴在屏幕底边，告警通道的第二行下沿离底边只剩约 50px，
- * 两行同时显示时同样收成一行正文（平板横屏的告警通道离面板很远，不需要）
+ * 手机横握同理：面板贴在屏幕底边，告警通道的第二行下沿离底边只剩约 50px
+ * （底部有安全区的 iPhone 上扣掉安全区只剩约 31px），两行同时显示时同样收成一行正文
+ * （平板横屏的告警通道离面板很远，不需要）
  */
 @media (orientation: landscape) and (max-height: 699.98px) {
   :root[data-hud-warning-rows='2'] #radio-comms[data-density='touch-landscape'] .rc-portrait,
@@ -286,11 +296,19 @@ ${toneBlock('muted', '195, 204, 214')}
 
   :root[data-hud-warning-rows='2'] #radio-comms[data-density='touch-landscape'] .rc-text {
     -webkit-line-clamp: 1;
+    line-height: 1.3;
   }
 
   :root[data-hud-warning-rows='2'] #radio-comms[data-density='touch-landscape'] .rc-panel {
-    padding-top: 5px;
-    padding-bottom: 5px;
+    padding-top: 1px;
+    padding-bottom: 1px;
+  }
+}
+
+/* 矮一些的手机（如 800×360）：第二行下沿离底边只剩约 37px，收小的面板再往底边靠 6px */
+@media (orientation: landscape) and (max-height: 379.98px) {
+  :root[data-hud-warning-rows='2'] #radio-comms[data-density='touch-landscape'] {
+    bottom: max(6px, env(safe-area-inset-bottom));
   }
 }
 

@@ -13,7 +13,7 @@ import { GunLeadSolver } from '@/features/combat/GunLeadSolver';
  * - θ ≥ 5°、超过 480 米、没有可靠解、不是触屏：不偏移；
  * - 目标出现 / 消失 / 更换时滑过去（约 0.1 秒到 95%），压住一个目标时不滞后；
  * - 另一个目标要比当前目标离机头近出 0.75° 才接手；reset() 回到机头轴线；
- * - 输入不是有限数：不辅助。
+ * - 输入（位置、方向、距离）不是有限数：不辅助；时间步长不是有限数的一帧坏帧则是跳过去。
  *
  * 只走公开接口：update / reset / getAssistDirection / getAssistWeight / getAssistTarget /
  * getRenderAssistDirection / getRenderAssistDistance。没有辅助时 getAssistDirection 可以是 null，
@@ -977,19 +977,171 @@ describe('gun aim assist', () => {
       }
     );
 
-    // FINDING（C2 “输入不是有限数：不辅助”，按字面把时间步长也算作输入）：压住目标时来一步
-    // 不是有限数的时间步长，偏移和强度原样留着——子弹与十字仍然偏着 2°、强度仍是 1。
-    // NaN / -Infinity 时解算器其实已经把目标放掉了（getAssistTarget() 为 null），但偏移不衰减，
-    // 步长一直坏就一直偏着，不会滑回机头；+Infinity 时照常辅助。
-    // 期望：这一步不辅助（偏移为零、强度为零），与炮口位置 / 机头方向不是有限数时的处理一致。
-    // 如果时间步长不在这条规则的范围内（解算器的注释写的是“非有限时不衰减也不前进”），删掉这条即可。
-    it.fails.each(BAD)('gives no assist on a step whose time step is %s', (dt) => {
-      const { rig } = settledRig();
+    // 时间步长不是有限数（裁定）：“输入不是有限数：不辅助”说的是空间量（位置、方向、距离）。
+    // 时间步长坏掉只是一帧坏帧：解算器应当把这一步跳过去——不衰减、不前进——下一步照常；
+    // 游戏循环本身不会给出这样的步长。
+    describe('a time step that is not a finite number', () => {
+      interface Scene {
+        rig: Rig;
+        mover: Mover;
+      }
 
-      observe(rig, dt);
+      interface Outputs {
+        /** 这一步子弹的方向 */
+        bullet: THREE.Vector3;
+        /** 渲染帧十字的方向 */
+        cross: THREE.Vector3;
+        weight: number;
+        /** 十字画在多远 */
+        range: number;
+      }
 
-      expect(shiftDeg(rig)).toBe(0);
-      expect(rig.solver.getAssistWeight()).toBe(0);
+      const SCENES: Record<string, () => Scene> = {
+        // 静止目标，辅助已经滑到位
+        'a held target': () => {
+          const rig = createRig();
+          const mover = addMover(rig, atAngle(rig, 2, 300));
+          run(rig, SETTLE_STEPS);
+          expect(shiftDeg(rig)).toBeCloseTo(2, 6);
+          return { rig, mover };
+        },
+        // 静止目标，辅助正滑到一半
+        'a target the assist is still sliding onto': () => {
+          const rig = createRig();
+          const mover = addMover(rig, atAngle(rig, 2, 300));
+          run(rig, 5);
+          const weight = rig.solver.getAssistWeight();
+          expect(weight).toBeGreaterThan(0.2);
+          expect(weight).toBeLessThan(0.9);
+          return { rig, mover };
+        },
+        // 横穿的目标：压住的是提前量点，离机体本身 2° 多
+        'a crossing target': () => {
+          const rig = createRig();
+          const mover = addMover(rig, atAngle(rig, 3.5, 300, 180), new THREE.Vector3(4, 0, 0));
+          run(rig, SETTLE_STEPS);
+          expect(errorDeg(rig, leadPointOf(rig, mover))).toBeLessThan(1e-4);
+          expect(errorDeg(rig, mover.object.position)).toBeGreaterThan(1.5);
+          return { rig, mover };
+        },
+      };
+
+      function outputs(rig: Rig): Outputs {
+        return {
+          bullet: assisted(rig),
+          cross: rendered(rig, 1),
+          weight: rig.solver.getAssistWeight(),
+          range: rig.solver.getRenderAssistDistance(1),
+        };
+      }
+
+      function expectUnchanged(now: Outputs, before: Outputs, label: string): void {
+        expect(toDeg(angleBetween(now.bullet, before.bullet)), `${label}: bullet`).toBeLessThan(
+          1e-9
+        );
+        expect(toDeg(angleBetween(now.cross, before.cross)), `${label}: cross`).toBeLessThan(1e-9);
+        expect(Math.abs(now.weight - before.weight), `${label}: strength`).toBeLessThan(1e-9);
+        expect(Math.abs(now.range - before.range), `${label}: cross range`).toBeLessThan(1e-6);
+      }
+
+      it.each([
+        [Number.NaN, 'a held target'],
+        [Number.POSITIVE_INFINITY, 'a held target'],
+        [Number.NEGATIVE_INFINITY, 'a held target'],
+        [Number.NaN, 'a target the assist is still sliding onto'],
+        [Number.NEGATIVE_INFINITY, 'a target the assist is still sliding onto'],
+        [Number.NaN, 'a crossing target'],
+        [Number.NEGATIVE_INFINITY, 'a crossing target'],
+      ])('one step of %s changes nothing with %s', (dt, scene) => {
+        const { rig } = SCENES[scene]();
+        const before = outputs(rig);
+        expect(toDeg(angleBetween(before.bullet, rig.forward))).toBeGreaterThan(0.05);
+
+        observe(rig, dt);
+
+        // 子弹与十字的方向、辅助强度、十字的距离都原样留着：既不衰减，也不前进
+        expectUnchanged(outputs(rig), before, 'the bad step');
+      });
+
+      it.each(
+        Object.keys(SCENES).flatMap((scene) => BAD.map((dt): [number, string] => [dt, scene]))
+      )('lets no bad number out after one step of %s with %s', (dt, scene) => {
+        const { rig, mover } = SCENES[scene]();
+
+        observe(rig, dt);
+
+        for (let i = 0; i < SETTLE_STEPS; i += 1) {
+          step(rig);
+          const label = `good step ${i}`;
+          expectFiniteDirection(assisted(rig), `${label}: bullet`);
+          expectFiniteDirection(rendered(rig, 1), `${label}: cross`);
+          expectFiniteDirection(rendered(rig, 0.5), `${label}: cross between steps`);
+          expect(shiftDeg(rig), label).toBeLessThanOrEqual(FULL_DEG + 1e-9);
+          const weight = rig.solver.getAssistWeight();
+          expect(weight >= 0 && weight <= 1, `${label}: strength ${weight}`).toBe(true);
+          for (const alpha of [0, 0.5, 1]) {
+            const range = rig.solver.getRenderAssistDistance(alpha);
+            expect(
+              range >= CROSS_MIN_RANGE && range <= REFERENCE_RANGE,
+              `${label}: cross range ${range} at alpha ${alpha}`
+            ).toBe(true);
+          }
+        }
+        // 最后仍然压在这个目标上
+        expect(rig.solver.getAssistTarget()).toBe(mover.object);
+        expect(errorDeg(rig, leadPointOf(rig, mover))).toBeLessThan(1e-4);
+        expect(rig.solver.getAssistWeight()).toBeCloseTo(1, 6);
+      });
+
+      /** 坏掉的一步之后接着走好步：每一步都还压着目标，输出与坏步之前一样 */
+      function expectCarriesOn(dt: number): void {
+        const { rig, mover } = SCENES['a held target']();
+        const before = outputs(rig);
+
+        observe(rig, dt);
+
+        for (let i = 0; i < 6; i += 1) {
+          step(rig);
+          expect(rig.solver.getAssistTarget(), `good step ${i}`).toBe(mover.object);
+          expectUnchanged(outputs(rig), before, `good step ${i}`);
+        }
+      }
+
+      it('carries straight on with the held target after one step of Infinity', () => {
+        expectCarriesOn(Number.POSITIVE_INFINITY);
+      });
+
+      // FINDING（裁定里的“下一步照常”）：坏步是 NaN / -Infinity 时，坏步本身什么都没变，但解算器在
+      // 这一步把目标放掉了（getAssistTarget() 为 null，提前量标记也消失），接下来的两个好步按
+      // “目标消失”处理：静止目标压在 2° 处时，偏移 2° → 1.21° → 0.74°，强度 1 → 0.61 → 0.37，
+      // 十字的距离 300 → 418 → 490 米；第三个好步才重新接上，再用约 0.1 秒滑回去——
+      // 一帧坏帧让十字和子弹离开目标最多 1.26°，前后约 0.15 秒。没有 NaN 漏出来，最后也回到目标上
+      // （上面那条用例）。步长为 0 或负数时表现相同。
+      // 期望：坏步被跳过，下一个好步仍然压着同一个目标，偏移、强度、十字距离与坏步之前一样。
+      // 如果坏帧之后短暂松开再接上是可以接受的，删掉这条即可。
+      it.fails.each([Number.NaN, Number.NEGATIVE_INFINITY])(
+        'carries straight on with the held target after one step of %s',
+        (dt) => {
+          expectCarriesOn(dt);
+        }
+      );
+
+      // FINDING（裁定里的“坏的一步什么都不改变”）：+Infinity 没有被跳过，而是被当成一步无限长的
+      // 好步——滑动在这一步里直接走完（滑到一半时：偏移 1.26° → 2°，强度 0.63 → 1，十字距离
+      // 410 → 300 米）；横穿的目标速度估计被这一步拉低（位移 ÷ ∞ = 0），提前量点朝机体缩回去
+      // 约三分之一：子弹与十字在这一步里离开提前量点 0.8°，之后几步才追回来。
+      // 期望：与 NaN / -Infinity 一样，这一步不衰减也不前进，输出原样留着。
+      it.fails.each(['a target the assist is still sliding onto', 'a crossing target'])(
+        'one step of Infinity changes nothing with %s',
+        (scene) => {
+          const { rig } = SCENES[scene]();
+          const before = outputs(rig);
+
+          observe(rig, Number.POSITIVE_INFINITY);
+
+          expectUnchanged(outputs(rig), before, 'the bad step');
+        }
+      );
     });
 
     it.each([0, -DT, Number.NaN, Number.POSITIVE_INFINITY])(

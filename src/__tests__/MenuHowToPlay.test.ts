@@ -80,6 +80,37 @@ describe('How to Play sheet (batch X5, spec 6)', () => {
       .filter((text) => words.every((word) => word.test(text)));
   }
 
+  /** 键盘页的一行：按键帽（dt 里的 kbd）与它的说明（dd）。按语义结构找，不靠样式类名 */
+  interface KeyRow {
+    caps: string[];
+    action: string;
+    /** 按键帽与说明连在一起读到的文字 */
+    text: string;
+  }
+
+  function keyRows(): KeyRow[] {
+    return Array.from(panelOf('keyboard').querySelectorAll('dd')).map((action) => {
+      const term = action.previousElementSibling;
+      expect(term?.tagName, 'each description follows its keys').toBe('DT');
+      const caps = Array.from(term?.querySelectorAll('kbd') ?? []).map((cap) =>
+        (cap.textContent ?? '').trim()
+      );
+      const actionText = readableText(action).trim();
+      return { caps, action: actionText, text: `${readableText(term).trim()} ${actionText}` };
+    });
+  }
+
+  /** 说明里提到某件事的那些行（至少一行） */
+  function rowsAbout(topic: Readonly<Record<Locale, RegExp>>, locale: Locale): KeyRow[] {
+    const rows = keyRows().filter((row) => topic[locale].test(row.action));
+    expect(rows.length, `a row about ${String(topic.en)}`).toBeGreaterThan(0);
+    return rows;
+  }
+
+  function textOf(rows: readonly KeyRow[]): string {
+    return rows.map((row) => row.text).join(' ');
+  }
+
   beforeEach(() => {
     originalIsMobile = GameConfig.isMobile;
     prepareMenuEnvironment();
@@ -294,10 +325,15 @@ describe('How to Play sheet (batch X5, spec 6)', () => {
       const keys = Array.from(panelOf('keyboard').querySelectorAll('kbd')).map((key) =>
         (key.textContent ?? '').trim()
       );
-      for (const key of ['W', 'S', 'A', 'D', 'Q', 'E', 'Shift', 'M', 'F', 'G', 'V', 'Tab', 'Esc']) {
+      for (const key of ['W', 'S', 'A', 'D', 'Q', 'E', 'M', 'F', 'G', 'V', 'Tab', 'Esc']) {
         expect(keys, key).toContain(key);
       }
       expect(keys).toContain(locale === 'en' ? 'Space' : '空格');
+      // Shift 的键帽怎么写不钉死（"Shift"、"L Shift" 都行）；哪一个 Shift 做什么在下面一组里查
+      expect(
+        keys.some((key) => /shift/i.test(key)),
+        'a Shift key cap'
+      ).toBe(true);
     });
 
     it.each(LOCALES)(
@@ -322,6 +358,152 @@ describe('How to Play sheet (batch X5, spec 6)', () => {
       const sheet = openHowTo();
       click(tab('touch'));
       expect(sheet.textContent ?? '').not.toMatch(/\p{Extended_Pictographic}/u);
+    });
+  });
+
+  /**
+   * 文字与实际按键一致（src/core/Input/InputHandler.ts、src/ui/RadarMinimap.ts）：
+   * 加速 = 左 Shift / 左 Ctrl；导弹 = M / 右 Shift；暂停 = Esc / P；升级 = U；关卡地图 = N。
+   * 只查说了什么，不查键帽上的写法、措辞与排版。
+   */
+  describe('the keys it names are the keys the game listens to', () => {
+    const LEFT_SHIFT: Readonly<Record<Locale, RegExp>> = {
+      en: /\b(?:left|l)[\s.-]*shift\b/i,
+      'zh-CN': /左(?:侧|边)?\s*shift|\bl[\s.-]*shift\b/i,
+    };
+    const RIGHT_SHIFT: Readonly<Record<Locale, RegExp>> = {
+      en: /\b(?:right|r)[\s.-]*shift\b/i,
+      'zh-CN': /右(?:侧|边)?\s*shift|\br[\s.-]*shift\b/i,
+    };
+    const BOOST: Readonly<Record<Locale, RegExp>> = { en: /boost/i, 'zh-CN': /加速/ };
+    const MISSILE: Readonly<Record<Locale, RegExp>> = { en: /missile/i, 'zh-CN': /导弹/ };
+    const PAUSE: Readonly<Record<Locale, RegExp>> = { en: /pause menu/i, 'zh-CN': /暂停菜单/ };
+    const UPGRADES: Readonly<Record<Locale, RegExp>> = { en: /^upgrades?\b/i, 'zh-CN': /^升级/ };
+    const LEVEL_MAP: Readonly<Record<Locale, RegExp>> = { en: /\bmap\b/i, 'zh-CN': /地图/ };
+    const AIM_ASSIST: Readonly<Record<Locale, RegExp>> = { en: /aim assist/i, 'zh-CN': /辅助瞄准/ };
+
+    function openKeyboardPage(locale: Locale): void {
+      setLocale(locale);
+      createMenu('desktop');
+      openHowTo();
+      expectShowing('keyboard');
+    }
+
+    it.each(LOCALES)('boost: says it is the left Shift, and never the right one (%s)', (locale) => {
+      openKeyboardPage(locale);
+
+      const boost = rowsAbout(BOOST, locale);
+
+      expect(
+        boost.some((row) => row.caps.some((cap) => /shift/i.test(cap))),
+        'a Shift key cap on the boost row'
+      ).toBe(true);
+      // 只写 "Shift" 不够：右 Shift 发射导弹，玩家得知道是哪一个
+      expect(textOf(boost)).toMatch(LEFT_SHIFT[locale]);
+      expect(textOf(boost)).not.toMatch(RIGHT_SHIFT[locale]);
+    });
+
+    it.each(LOCALES)('boost: Ctrl is offered as well (%s)', (locale) => {
+      openKeyboardPage(locale);
+
+      expect(textOf(rowsAbout(BOOST, locale))).toMatch(/\b(?:ctrl|control)\b/i);
+    });
+
+    it.each(LOCALES)('missile: M, with Right Shift as the other key (%s)', (locale) => {
+      openKeyboardPage(locale);
+
+      const missile = rowsAbout(MISSILE, locale);
+
+      expect(missile.some((row) => row.caps.includes('M'))).toBe(true);
+      expect(textOf(missile)).toMatch(RIGHT_SHIFT[locale]);
+      expect(textOf(missile)).not.toMatch(LEFT_SHIFT[locale]);
+    });
+
+    it.each(LOCALES)('no other row hands a Shift key a second job (%s)', (locale) => {
+      openKeyboardPage(locale);
+
+      const shiftRows = keyRows().filter((row) => /shift/i.test(row.text));
+
+      expect(shiftRows.length).toBeGreaterThan(0);
+      for (const row of shiftRows) {
+        expect(BOOST[locale].test(row.action) || MISSILE[locale].test(row.action), row.text).toBe(
+          true
+        );
+      }
+    });
+
+    it.each(LOCALES)('pause: Esc and P both open the pause menu (%s)', (locale) => {
+      openKeyboardPage(locale);
+
+      const pause = rowsAbout(PAUSE, locale);
+
+      expect(pause.some((row) => row.caps.includes('Esc') && row.caps.includes('P'))).toBe(true);
+    });
+
+    it.each(LOCALES)('upgrades are on U, the level map on N (%s)', (locale) => {
+      openKeyboardPage(locale);
+
+      expect(rowsAbout(UPGRADES, locale).some((row) => row.caps.includes('U'))).toBe(true);
+      const map = rowsAbout(LEVEL_MAP, locale);
+      expect(map.some((row) => row.caps.includes('N'))).toBe(true);
+      // 关卡地图不在升级那一行，升级也不在地图那一行
+      expect(map.some((row) => row.caps.includes('U'))).toBe(false);
+    });
+
+    it.each(LOCALES)('no key cap is listed for two different actions (%s)', (locale) => {
+      openKeyboardPage(locale);
+
+      const seen = new Map<string, string>();
+      for (const row of keyRows()) {
+        for (const cap of row.caps) {
+          expect(seen.get(cap), `"${cap}" is listed for "${row.action}" as well`).toBeUndefined();
+          seen.set(cap, row.action);
+        }
+      }
+      expect(seen.size).toBeGreaterThan(0);
+    });
+
+    it.each(LOCALES)('every row has at least one key and says what it does (%s)', (locale) => {
+      openKeyboardPage(locale);
+
+      const rows = keyRows();
+
+      expect(rows.length).toBeGreaterThan(0);
+      for (const row of rows) {
+        expect(row.caps.length, row.text).toBeGreaterThan(0);
+        expect(row.caps.every((cap) => cap.length > 0)).toBe(true);
+        expect(row.action).not.toBe('');
+      }
+    });
+
+    it.each(LOCALES)('aim assist is explained on the touch page only (%s)', (locale) => {
+      // 机炮辅助瞄准只在触控设备上启用（GameCoordinator 用 GameConfig.isMobile 开关）
+      setLocale(locale);
+      createMenu('touch');
+      openHowTo();
+      expectShowing('touch');
+
+      expect(readableText(panelOf('touch'))).toMatch(AIM_ASSIST[locale]);
+
+      // 键盘页不许诺它：桌面端没有这个辅助
+      click(tab('keyboard'));
+      expectShowing('keyboard');
+      expect(readableText(panelOf('keyboard'))).toMatch(BOOST[locale]);
+      expect(readableText(panelOf('keyboard'))).not.toMatch(AIM_ASSIST[locale]);
+    });
+
+    it.each(LOCALES)('the touch page says the radar opens the level map (%s)', (locale) => {
+      setLocale(locale);
+      createMenu('touch');
+      openHowTo();
+
+      // 用文字说，不只画在示意图里：示意图（role="img"）里面的字读屏读不到
+      const sentences = Array.from(panelOf('touch').querySelectorAll<HTMLElement>('*'))
+        .filter((node) => node.children.length === 0 && node.closest('svg, [role="img"]') === null)
+        .map((node) => (node.textContent ?? '').trim())
+        .filter((text) => (locale === 'en' ? /radar/i : /雷达/).test(text));
+
+      expect(sentences.some((text) => LEVEL_MAP[locale].test(text))).toBe(true);
     });
   });
 

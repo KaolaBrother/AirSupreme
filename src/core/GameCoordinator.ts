@@ -865,7 +865,12 @@ export class GameCoordinator {
 
     this.resourceRegistry.addUnsubscriber(
       EventBus.on(GameEventType.LEVEL_COMPLETE, ({ payload }) => {
-        if (this.sessionState.isBossMode() || this.sessionState.isInBossBattle()) {
+        // 本局已结束（阵亡与清关落在同一个模拟步）：不再在结算面板底下开 Boss 战
+        if (
+          !this.sessionState.isPlaying() ||
+          this.sessionState.isBossMode() ||
+          this.sessionState.isInBossBattle()
+        ) {
           return;
         }
         this.campaign.handleLevelComplete(payload.level);
