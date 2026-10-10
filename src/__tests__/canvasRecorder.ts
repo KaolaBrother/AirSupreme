@@ -31,6 +31,11 @@ export interface PaintedShape {
   alpha: number;
   lineWidth: number;
   text?: string;
+  /** 文字：画它时的字体、对齐方式，以及 fillText 的 maxWidth（没给时为 undefined） */
+  font?: string;
+  textAlign?: string;
+  textBaseline?: string;
+  maxWidth?: number;
 }
 
 interface RawOp {
@@ -160,7 +165,7 @@ function createRecorder(canvas: HTMLCanvasElement): {
         lineWidth: state.lineWidth,
       });
     },
-    fillText: (text, x, y) => {
+    fillText: (text, x, y, maxWidth) => {
       shapes.push({
         paint: 'text',
         subpaths: [{ points: [{ x: num(x), y: num(y) }], arcs: [] }],
@@ -168,6 +173,10 @@ function createRecorder(canvas: HTMLCanvasElement): {
         alpha: state.globalAlpha,
         lineWidth: state.lineWidth,
         text: String(text),
+        font: state.font,
+        textAlign: state.textAlign,
+        textBaseline: state.textBaseline,
+        maxWidth: typeof maxWidth === 'number' ? maxWidth : undefined,
       });
     },
     createImageData: (width, height) => ({
@@ -299,6 +308,57 @@ export function centreOf(shapes: readonly PaintedShape[]): Point {
 export function extentOf(shapes: readonly PaintedShape[]): number {
   const box = boundsOf(shapes);
   return Math.max(box.maxX - box.minX, box.maxY - box.minY);
+}
+
+/** 一个字符的宽度（em），按 Arial Bold 取、略偏宽：估出来的文字框宁大勿小 */
+function glyphWidthEm(char: string): number {
+  if (char >= '0' && char <= '9') return 0.556;
+  if (char === ' ') return 0.278;
+  if (char === 'm' || char === 'M' || char === 'W') return 0.944;
+  if (char > '⹿') return 1;
+  if (char >= 'A' && char <= 'Z') return 0.722;
+  return 0.611;
+}
+
+/**
+ * 一段 fillText 文字占的框：宽度按字宽估（不超过 maxWidth），高度取一个字号（em 框），
+ * 按画它时的 textAlign / textBaseline 摆在锚点周围。
+ */
+export function textBoxOf(shape: PaintedShape): Box {
+  const anchor = shape.subpaths[0]?.points[0];
+  if (shape.paint !== 'text' || !anchor) {
+    throw new Error('textBoxOf needs a fillText shape');
+  }
+  const size = Number(/(\d+(?:\.\d+)?)px/.exec(shape.font ?? '')?.[1] ?? Number.NaN);
+  if (!Number.isFinite(size)) {
+    throw new Error(`cannot read a pixel size from the font "${shape.font}"`);
+  }
+  let width = 0;
+  for (const char of shape.text ?? '') width += glyphWidthEm(char) * size;
+  if (shape.maxWidth !== undefined) width = Math.min(width, shape.maxWidth);
+
+  const align = shape.textAlign ?? 'start';
+  const minX =
+    align === 'center'
+      ? anchor.x - width / 2
+      : align === 'right' || align === 'end'
+        ? anchor.x - width
+        : anchor.x;
+  const baseline = shape.textBaseline ?? 'alphabetic';
+  const minY =
+    baseline === 'top' || baseline === 'hanging'
+      ? anchor.y
+      : baseline === 'middle'
+        ? anchor.y - size / 2
+        : baseline === 'bottom' || baseline === 'ideographic'
+          ? anchor.y - size
+          : anchor.y - size * 0.8;
+  return { minX, minY, maxX: minX + width, maxY: minY + size };
+}
+
+/** 两个框之间的空隙（px）；相交或相接时 ≤ 0 */
+export function gapBetweenBoxes(a: Box, b: Box): number {
+  return Math.max(a.minX - b.maxX, b.minX - a.maxX, a.minY - b.maxY, b.minY - a.maxY);
 }
 
 function signature(shape: PaintedShape): string {

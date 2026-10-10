@@ -13,8 +13,12 @@ import {
   boundsOf,
   centreOf,
   copyShapes,
+  gapBetweenBoxes,
   installCanvasRecording,
   isLineSegment,
+  textBoxOf,
+  type Arc,
+  type Box,
   type CanvasRecorder,
   type CanvasRecording,
   type PaintedShape,
@@ -754,6 +758,231 @@ describe('RadarMinimap level map', () => {
       frame();
       frame();
       expect(texts().some((text) => /enem|hostile/i.test(text))).toBe(true);
+    });
+
+    // ───────────────────────────── 距离环的标注与顶上的那一条 ─────────────────────────────
+
+    /*
+     * 以玩家为圆心的两圈距离环各带一个标注（“500 m” / “1000 m”），平时写在环的正北。地图顶上那一条
+     * 放着指北的 “N”、标题和关闭提示：玩家往北飞，标注会一路升进这一条里——这时它改写在环的
+     * 正南，任何时候都不和 “N”、标题、关闭提示叠在一起。
+     * （“N” 画在静态层上、不动；动的是标注。）
+     *
+     * 文字占多大由 canvasRecorder 的 textBoxOf 估：一个字号高，宽度按 Arial Bold 的字宽、偏宽。
+     */
+    describe.each([
+      ['a tablet in landscape (1180×820)', { width: 1180, height: 820, touch: true }],
+      ['a tablet in portrait (820×1180)', { width: 820, height: 1180, touch: true }],
+      ['a phone in landscape (844×390)', { width: 844, height: 390, touch: true }],
+    ] as const)('range ring labels on %s', (_name, target) => {
+      const RINGS: ReadonlyArray<[metres: number, text: string]> = [
+        [500, '500 m'],
+        [1000, '1000 m'],
+      ];
+      /** 玩家走过的列（世界 X）：贴着地图左右两边（标题、关闭提示下面）、正中（“N” 下面）和之间 */
+      const COLUMNS_M = [-1400, -1150, -600, -40, 0, 40, 600, 1150, 1400];
+      /** 每一列从南到北，一步 4 米（大面板上不到 1px） */
+      const NORTH_STEP_M = 4;
+
+      interface HeaderText {
+        name: string;
+        box: Box;
+      }
+      interface RingLabel {
+        text: string;
+        box: Box;
+        ring: Arc;
+        side: 'north' | 'south' | 'elsewhere';
+      }
+
+      let side: number;
+      let scale: number;
+      let header: HeaderText[];
+      /** 顶上那一条的下沿：“N”、标题、关闭提示里最低的一个 */
+      let bandBottom: number;
+      /** 标注写在正北时，离环顶多远（从一个四周都空着的位置量出来） */
+      let northGap: number;
+
+      function labelsFor(player: THREE.Vector3): RingLabel[] {
+        const shapes = drawn([], NORTH, player);
+        const arcs = shapes
+          .filter((shape) => shape.paint === 'stroke')
+          .flatMap((shape) => shape.subpaths.flatMap((sub) => sub.arcs));
+        const labels: RingLabel[] = [];
+        for (const shape of shapes) {
+          const ringOf = RINGS.find(([, text]) => text === shape.text);
+          if (shape.paint !== 'text' || !ringOf) continue;
+          const ring = arcs.find((arc) => Math.abs(arc.r - ringOf[0] * scale) < 1);
+          expect(ring, `the ${ringOf[1]} ring is drawn with its label`).toBeTruthy();
+          const box = textBoxOf(shape);
+          const above = (ring as Arc).y - (ring as Arc).r - box.maxY;
+          const below = box.minY - ((ring as Arc).y + (ring as Arc).r);
+          labels.push({
+            text: ringOf[1],
+            box,
+            ring: ring as Arc,
+            side:
+              above >= 0 && above <= 6 ? 'north' : below >= 0 && below <= 6 ? 'south' : 'elsewhere',
+          });
+        }
+        return labels;
+      }
+
+      beforeEach(() => {
+        open(target);
+        side = px(map.style.width);
+        scale = pixelsPerMetre();
+
+        // 地图正方形里、不是距离标注的文字：“N”、标题、关闭提示（图例在正方形下面）
+        header = layerShapes()
+          .filter(
+            (shape) =>
+              shape.paint === 'text' &&
+              !RINGS.some(([, text]) => text === shape.text) &&
+              shape.subpaths[0].points[0].y < side
+          )
+          .map((shape) => ({ name: `"${shape.text}"`, box: textBoxOf(shape) }));
+        // 静态层重画过的话同一段文字会记两次：按内容去重
+        header = header.filter(
+          (entry, index) =>
+            header.findIndex(
+              (other) => other.name === entry.name && other.box.minX === entry.box.minX
+            ) === index
+        );
+        expect(header.map((entry) => entry.name)).toContain('"N"');
+        expect(header.length, 'the N mark, the title and the close hint').toBeGreaterThanOrEqual(3);
+        bandBottom = Math.max(...header.map((entry) => entry.box.maxY));
+
+        const [open500] = labelsFor(new THREE.Vector3(0, 100, 600));
+        expect(open500.side, 'in the open the label is due north of its ring').toBe('north');
+        northGap = open500.ring.y - open500.ring.r - open500.box.maxY;
+      });
+
+      it('lays the header out as the tests assume: N above the boundary, title left, hint right', () => {
+        const north = header.find((entry) => entry.name === '"N"') as HeaderText;
+        expect(Math.abs((north.box.minX + north.box.maxX) / 2 - side / 2)).toBeLessThan(1);
+        expect(north.box.maxY, 'N sits above the boundary circle').toBeLessThanOrEqual(
+          side / 2 - BOUNDARY_RADIUS_M * scale
+        );
+        const others = header.filter((entry) => entry !== north);
+        expect(
+          others.some((entry) => entry.box.maxX < side * 0.4),
+          'a title on the left'
+        ).toBe(true);
+        expect(
+          others.some((entry) => entry.box.minX > side * 0.6),
+          'a close hint on the right'
+        ).toBe(true);
+        for (const entry of header) {
+          expect(entry.box.minY, `${entry.name} is inside the map`).toBeGreaterThanOrEqual(0);
+          expect(entry.box.maxY, `${entry.name} is in the top strip`).toBeLessThan(side * 0.15);
+        }
+      });
+
+      it('never draws a ring label over the N, the title or the close hint, wherever the player flies', () => {
+        const problems: string[] = [];
+        /** 这一圈下来，标注要是总写在正北，会压到顶上哪几样东西 */
+        const wouldHit = new Map<string, number>();
+        const placed = new Map<string, number>();
+        let frames = 0;
+
+        for (const x of COLUMNS_M) {
+          for (let z = 1440; z >= -1440; z -= NORTH_STEP_M) {
+            const labels = labelsFor(new THREE.Vector3(x, 150, z));
+            frames++;
+            const where = `player at (${x}, ${z})`;
+            if (labels.length !== RINGS.length) {
+              problems.push(`${where}: ${labels.length} ring labels`);
+              continue;
+            }
+            for (const label of labels) {
+              placed.set(
+                `${label.text} ${label.side}`,
+                (placed.get(`${label.text} ${label.side}`) ?? 0) + 1
+              );
+              if (label.side === 'elsewhere') {
+                problems.push(
+                  `${where}: ${label.text} is neither due north nor due south of its ring`
+                );
+              }
+              if (Math.abs((label.box.minX + label.box.maxX) / 2 - label.ring.x) > 1) {
+                problems.push(`${where}: ${label.text} is not centred on its ring`);
+              }
+              if (label.box.minY < 0 || label.box.maxY > side) {
+                problems.push(`${where}: ${label.text} leaves the map (y ${label.box.minY}..)`);
+              }
+              for (const entry of header) {
+                const gap = gapBetweenBoxes(label.box, entry.box);
+                if (gap < 1) {
+                  problems.push(
+                    `${where}: ${label.text} is ${gap.toFixed(1)} px from ${entry.name}`
+                  );
+                }
+              }
+
+              // 写在正北的话会在哪里
+              const height = label.box.maxY - label.box.minY;
+              const northBottom = label.ring.y - label.ring.r - northGap;
+              const northBox: Box = {
+                minX: label.box.minX,
+                maxX: label.box.maxX,
+                minY: northBottom - height,
+                maxY: northBottom,
+              };
+              for (const entry of header) {
+                if (gapBetweenBoxes(northBox, entry.box) < 0) {
+                  wouldHit.set(entry.name, (wouldHit.get(entry.name) ?? 0) + 1);
+                }
+              }
+              if (northBox.minY < bandBottom - 1 && label.side !== 'south') {
+                problems.push(
+                  `${where}: ${label.text} is ${label.side} although due north its top ` +
+                    `(y ${northBox.minY.toFixed(1)}) is inside the header strip (to y ${bandBottom})`
+                );
+              }
+              if (northBox.minY >= bandBottom + 4 && label.side !== 'north') {
+                problems.push(
+                  `${where}: ${label.text} is ${label.side} although due north is free ` +
+                    `(top y ${northBox.minY.toFixed(1)}, header strip to y ${bandBottom})`
+                );
+              }
+            }
+            const [first, second] = labels;
+            if (gapBetweenBoxes(first.box, second.box) < 1) {
+              problems.push(`${where}: the two ring labels overlap`);
+            }
+          }
+        }
+
+        expect(frames).toBeGreaterThan(5000);
+        expect(problems.slice(0, 12), `${problems.length} problems`).toEqual([]);
+        // 这一趟确实让两个标注都扫过了顶上那一条，并且每样东西都被扫到过
+        for (const [, text] of RINGS) {
+          expect(placed.get(`${text} north`) ?? 0, `${text} due north`).toBeGreaterThan(100);
+          expect(placed.get(`${text} south`) ?? 0, `${text} due south`).toBeGreaterThan(100);
+        }
+        for (const entry of header) {
+          expect(
+            wouldHit.get(entry.name) ?? 0,
+            `positions where a label due north would have covered ${entry.name}`
+          ).toBeGreaterThan(0);
+        }
+      });
+
+      it('switches a label from north to south exactly once as the player flies north', () => {
+        for (const x of [-1400, 0, 1400]) {
+          for (const [, text] of RINGS) {
+            const sides: string[] = [];
+            for (let z = 1440; z >= -1440; z -= NORTH_STEP_M) {
+              const label = labelsFor(new THREE.Vector3(x, 150, z)).find(
+                (entry) => entry.text === text
+              ) as RingLabel;
+              if (sides[sides.length - 1] !== label.side) sides.push(label.side);
+            }
+            expect(sides, `${text}, flying north along x = ${x}`).toEqual(['north', 'south']);
+          }
+        }
+      });
     });
 
     // ───────────────────────────── 看得清、不出界（P4） ─────────────────────────────
