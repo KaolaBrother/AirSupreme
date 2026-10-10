@@ -4,6 +4,7 @@
 - [API](api.md) — EventBus, config, logger, localisation, and in-process contracts (crash surface and respawn, terrain detail and batching, campaign, radio budget, wingmen, enemy AI, save, settings, units, weapons, missiles and gun aim, camera, bosses, music, voice, HUD, input)
 - [Voice lines](voice-lines.md) — voice packs, manifest and provenance, regenerating lines
 - [Conventions](conventions.md)
+- [Enemy fleet spec](enemy-fleet-spec.md) — behaviour contract for the enemy fleet redesign: looks, common rules, roster, wave line-ups, level curve, dev hooks (tests cite its sections)
 - [Decisions](decisions/)
   - [0001 — Campaign presentation adapter and controller extraction](decisions/0001-campaign-presentation-adapter.md)
   - [0002 — Bilingual text in place, and pre-recorded voice packs keyed by line id](decisions/0002-bilingual-text-and-voice-packs.md)
