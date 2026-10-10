@@ -350,6 +350,8 @@ async function main(): Promise<void> {
     log.info('📱 Mobile: virtual stick and buttons');
 
     window.addEventListener('beforeunload', () => {
+      // beforeunload 排在 pagehide 之前，而协调器释放后不再响应页面事件：先把战役进度存下
+      game?.saveCampaignInBackground();
       game?.dispose();
     });
   } catch (error) {
