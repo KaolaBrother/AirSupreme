@@ -9,6 +9,7 @@ import { RadarMinimap } from '@/ui/RadarMinimap';
 import { RadioComms } from '@/ui/RadioComms';
 import { HUD_TONE_COLORS } from '@/ui/theme/hudPalette';
 import { installCanvasRecording, type CanvasRecording } from './canvasRecorder';
+import { FOLLOW_PHONES, FOLLOW_TEXT } from './radioFollowTestUtils';
 import { parseShippedDocument } from './touchTestUtils';
 
 /**
@@ -2062,6 +2063,69 @@ describe('radio box under a two-row warning lane', () => {
           // 两者都靠左（左右是重叠的）：雷达整个在面板上方
           expect(radarBox.left).toBeLessThan(box.right);
           expect(box.top - (radarBox.top + radarBox.size)).toBeGreaterThanOrEqual(CLEARANCE);
+        }
+      );
+    });
+
+    // RadioFollow.test.ts 按这几个尺寸算长台词逐行上移时“每一行看得到多久”：面板里同时可见的行数、
+    // 正文一栏的宽度、字号、行高和字体都从这里的样式表核对，那边只是把数列出来。
+    describe('the text column the radio follow tests rest on', () => {
+      it.each(FOLLOW_PHONES.map((size) => [`${size.width}×${size.height}`, size] as const))(
+        'is as wide and as many lines high on %s as FOLLOW_PHONES says',
+        (_size, expected) => {
+          const scene = phone(expected.width, expected.height);
+          stage(scene);
+          const rules = pageRules();
+          const viewport: Viewport = { width: scene.width, height: scene.height };
+          const panel = need<HTMLElement>(document, '#radio-comms .rc-panel');
+          const text = need<HTMLElement>(document, '#radio-comms .rc-text');
+          const pixels = (value: string | undefined): number => {
+            const width = value?.match(/(?:^|\s)([\d.]+)px/);
+            return width ? Number(width[1]) : 0;
+          };
+          /** 左右的内边距 / 外边距：简写（如 padding: 0）按四个方向展开后一并参与层叠 */
+          const spacing = (
+            element: Element,
+            property: 'padding' | 'margin',
+            side: 'left' | 'right'
+          ): number =>
+            parseFloat(
+              cascaded(rules, element, `${property}-${side}`, viewport, { property, side }) ?? '0'
+            );
+          const padding = (side: 'left' | 'right'): number => spacing(panel, 'padding', side);
+          /** 面板的左右边框只由 border / border-left / border-right 给出 */
+          const border = (side: 'left' | 'right'): number =>
+            pixels(
+              cascaded(rules, panel, `border-${side}`, viewport) ??
+                cascaded(rules, panel, 'border', viewport)
+            );
+
+          expect(lineLimit(scene, rules)).toBe(expected.lines);
+
+          // 头像不显示，正文自己没有左右留白：一栏的宽度 = 面板宽 − 面板的左右内边距和边框
+          expect(partShown('.rc-portrait', scene, rules)).toBe(false);
+          for (const side of ['left', 'right'] as const) {
+            expect(spacing(text, 'padding', side), `text padding-${side}`).toBe(0);
+            expect(spacing(text, 'margin', side), `text margin-${side}`).toBe(0);
+          }
+          const box = measure(scene, {}, rules).radioBox(LONG_MESSAGE, NORMAL_LINE_HEIGHT.low);
+          const column =
+            box.right -
+            box.left -
+            padding('left') -
+            padding('right') -
+            border('left') -
+            border('right');
+          expect(column).toBeCloseTo(expected.column, 6);
+
+          // 折行估算用的字：13px 的 Arial、1.3 倍行高，不加字距，长词可以在词内断开
+          const fontSize = inheritedValue(text, 'font-size', scene, rules);
+          expect(fontSize).toBe(`${FOLLOW_TEXT.fontPx}px`);
+          const lineHeight = Number(inheritedValue(text, 'line-height', scene, rules));
+          expect(FOLLOW_TEXT.fontPx * lineHeight).toBeCloseTo(FOLLOW_TEXT.lineHeightPx, 9);
+          expect(inheritedValue(text, 'font-family', scene, rules)).toMatch(/^'Arial'/);
+          expect(inheritedValue(text, 'letter-spacing', scene, rules) ?? 'normal').toBe('normal');
+          expect(cascaded(rules, text, 'word-break', viewport)).toBe('break-word');
         }
       );
     });
