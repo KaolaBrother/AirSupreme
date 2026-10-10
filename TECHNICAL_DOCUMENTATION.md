@@ -7,13 +7,14 @@ AirSupreme 是一个基于 Three.js 和 TypeScript 的 3D 飞机战斗游戏。
 ### 当前实现状态（2026-10）
 
 - 十关故事战役已集成：十章剧情（章节卡片、无线电、任务结算、结局）、第 6-10 关环境与 Boss、17 种地面 / 海上 / 空中单位、5 种特殊武器与热焰弹、第一 / 第三人称相机组、分级升级与机库、自动存档与继续战役、程序化音乐与新音效、实例化粒子与 HDR 后处理（详见下文「十关战役系统」与 `CHANGELOG.md`）
-- 界面默认英文，简体中文可在开始菜单 / 暂停菜单实时切换（`src/i18n/`，文案就地双语 `LocalizedText`）；国际化角色阵容与具名僚机渡鸦 / 雨燕；无线电与剧情旁白有英文与普通话配音（`VoiceSystem`，语音包在 `public/voice/`）；难度曲线与 Boss 血量按脚本飞行员实测重新调校（见下文「界面语言」「角色配音」「具名僚机」与「平衡与难度曲线」）
+- 界面默认英文，简体中文可在主菜单的设置面板 / 暂停菜单实时切换（`src/i18n/`，文案就地双语 `LocalizedText`）；国际化角色阵容与具名僚机渡鸦 / 雨燕；无线电与剧情旁白有英文与普通话配音（`VoiceSystem`，语音包在 `public/voice/`）；难度曲线与 Boss 血量按脚本飞行员实测重新调校（见下文「界面语言」「角色配音」「具名僚机」与「平衡与难度曲线」）
 - 主流程：`main.ts -> StartMenu -> 动态导入 GameCoordinator -> 按需初始化战斗 / 表现层 runtime`；开始菜单「继续战役」与失败结算「从检查点继续」都由 `main.ts` 以检查点重新开局
 - `GameCoordinator` 负责装配；战役接线拆到 `src/core/` 下的控制器（`CampaignFlowController`、`UnitController`、`SpecialWeaponsController`、`PlayerViewController`、`CombatVfxController`、`CombatHudFeed`、`AdvancedBossController`），剧情 / HUD / 音乐 / 音效统一经 `ICampaignPresentation`（见 `docs/decisions/0001-campaign-presentation-adapter.md`）
 - 战斗 runtime、Boss 控制器、升级菜单、presentation runtime，以及相机组、单位、特殊武器、尾迹、剧情界面与第 6-10 关 Boss 都在按需加载路径上
 - `PresentationRuntimeLoader` 负责按需创建 `HUD / EnemyHealthBars / LockOnIndicator / BossMissileIndicator / PresentationController`
 - 普通弹道碰撞链路已支持 `source/tone` 透传，玩家机炮、敌弹、Boss 炮弹、导弹命中可按来源映射不同反馈；对单位与 Boss 部件按命中半径判定
 - 独立终验之后的两波修复已合并（`2e9941d..0cd1735`）：复活沿航迹后退 + 坠毁宽限、移动端暂停锁存、僚机编队整队出击与编队位、Boss 击破即存机库检查点、紧急告警配音限频与 Boss 收尾等完台词、HUD 可本地化文案与手机布局、Boss 导弹伤害随难度、热焰弹诱骗全部 Boss 导弹、关卡曲线与波次重调、地形静态合批与植被分块 LOD（见下文各节与 `CHANGELOG.md` 的「终验修复」）；随后的收尾打磨（`0cd1735..f6ce2d3`）让闪烁告警 / Boss 状态条 / 道具倒计时 / 中央大字提示随语言切换重绘、高炮与八爪鱼眼睛光弹伤害随难度缩放、复活时避开竖直结构、Boss 战敌人计数只计在场敌方、模型预览在名称标签上方取景，中文界面的教学改称「教程」（见「收尾打磨」）
+- 操控与武器体验一轮已合并（分支 `workflow/ipad-controls-weapons`）：触屏浮动摇杆、飞行辅助与平板档位，常开的导弹导引头（按一下发射一枚）与继承载机速度的导弹，机炮提前量标记与触屏瞄准辅助，敌方单位的目标标记与「当前目标」提示，机头朝上的雷达与关卡地图，压低的第一人称座舱，暂停菜单「保存并退出」，以及新的主菜单（标题画面、设置与操作说明面板、机库）（见下文「操控、瞄准与导弹」「HUD、雷达与移动端」「主菜单」与 `CHANGELOG.md` 的「操控与武器体验」）
 - 测试：位于 `src/__tests__`；测试数量与结果以 `npm run test:run` 的实际输出为准
 
 ### 技术栈
@@ -144,7 +145,7 @@ AirSupreme 是一个基于 Three.js 和 TypeScript 的 3D 飞机战斗游戏。
 
 ```typescript
 {
-  speed: 40,                    // 速度（导弹的50%）
+  speed: 40,                    // 速度（米/秒）
   turnSpeed: 1.5,              // 转向速度
   health: 60,
   damage: 10,
@@ -169,7 +170,7 @@ AirSupreme 是一个基于 Three.js 和 TypeScript 的 3D 飞机战斗游戏。
 
 ```typescript
 {
-  speed: 55,                    // 速度（导弹的69%）
+  speed: 55,                    // 速度（米/秒）
   turnSpeed: 2.0,
   health: 100,
   damage: 15,
@@ -238,8 +239,8 @@ AirSupreme 是一个基于 Three.js 和 TypeScript 的 3D 飞机战斗游戏。
 
 ```typescript
 {
-  speed: 70,                    // 接近导弹速度
-  turnSpeed: 2.4,              // 接近导弹转向
+  speed: 70,                    // 敌机中最快
+  turnSpeed: 2.4,              // 敌机中转向最快
   health: 160,
   damage: 25,
   attackCooldown: 0.4,
@@ -349,7 +350,7 @@ if (tmpAxis.lengthSq() > 1e-8) {
 - 核心：`src/i18n/index.ts`，导入时不访问 `document` / `window`。`Locale = 'en' | 'zh-CN'`，`DEFAULT_LOCALE = 'en'`；双语文案 `LocalizedText { en, zh }`（两个字段都必填）；`tr(text, params?)` = `localize` + `format`（`{name}` 占位符，未提供的保持原样）；`localize` 对纯字符串原样返回；`normalizeLocale` 把 `zh` / `zh-cn` / `zh-hans…` 规整为 `'zh-CN'`，其余一律回到英文；`setLocale` 语言未变化时不通知，变化时同步 `<html lang>` 并逐个通知 `onLocaleChange` 的订阅者（某个订阅者抛错不影响其余）。
 - 数据约定：文案就地双语，不用键值字符串表（见 `docs/decisions/0002-bilingual-text-and-voice-packs.md`）。`UnitConfig.name`、`BossConfig.name`、`EnemyConfig.name`、`SpecialWeaponConfig.name` / `description`、`UpgradeConfig.name` / `description` / `unit`、`PowerUpConfig.name` / `description`、`LevelConfig.name` / `description`、`DifficultyProfile.label` 与战役剧本的全部面向玩家字段都是 `LocalizedText`，在显示处用 `tr()` 取当前语言；交给 HUD 的快照（如 `WeaponSystem.getHudState().name`）在生成时就是当前语言的字符串。逐帧路径把双语对象提升为模块常量，不做逐帧分配。
 - 设置与启动：`StartFlowSettings.language`（缺省英文，不跟随浏览器；旧存档与无法识别的值按英文读取）随开始流程设置持久化；`main.ts` 在任何界面渲染之前 `setLocale(loadStartFlowSettings().language)`，并写入对应语言的页面标题、加载画面与触控按键文字（含读屏标签）。`index.html` 本身以 `lang="en"` 与英文默认文案发布。
-- 切换：开始菜单与暂停菜单的「Language / 语言」一行（选项名 `LANGUAGE_ENDONYMS`：English / 中文，`stepLanguage` 循环切换）保存设置后调用 `setLocale`。订阅者：开始 / 暂停 / 升级菜单原位重绘，HUD 重写自身文字与结算面板，血条立即改名（暂停中也生效），模型预览重建列表并按新名称标签重新取景，无线电重写当前台词，`VoiceSystem` 停下当前配音并按新语言重新预取，`main.ts` 改写页面外壳。剧情卡片在显示时按当前语言写成，切换后从下一张起换语言。HUD 的 `showBriefing` / `showAutosave` / `flashWarning` / `setBossStatus` / `showPowerUp` / `showPowerUpBig` 接受 `HudText`（纯字符串、`LocalizedText` 或 `{ text, params }`），保留原文，显示期间切换语言时原位重绘（不重播动画、不重置计时；排在简报之后的大字提示在显示时取语言）：协调器交给 HUD 的有入关 / Boss 简报的双语原文、存档提示的 `{ text, params }` 与「继续：…」的双语对象（`describeCheckpointText`）、道具倒计时的道具名、误伤扣分告警（`{ text, params }`），以及中央大字提示（僚机被击落、拾取道具及其「获得道具！」副标题、升级反馈与升级点、护送结果、教学提示、事件波次播报、「已击坠」等）；Boss 战控制器交出的有「返回作战区域」提示、Boss 方位播报（双语拼好）与友军支援、激光预警的大字提示；`UnitController` 交出停火、导弹来袭与「残余目标脱离战区」告警；`SpecialWeaponsController` 经 `SpecialWeaponsDeps.notify(icon, text: HudText)` 交出「尚无特殊武器」「武器尚未解锁」与切换武器时武器配置里的双语名称；第 6-10 关 Boss 的阶段名与特殊攻击预警经 `IAdvancedBoss.onPhaseChange` / `onHazardWarning` 以 `HudText` 传出。第 6-10 关 Boss 的状态提示由 Boss 按当前语言生成（`getStatusLabel`，按状态与语言缓存），控制器每 0.25 秒推送一次，Boss 在场时还订阅 `onLocaleChange` 立即重推。事件波次 / 教学的完成提示（约 2-3 秒）保留双语原文，每次 HUD 刷新时取当前语言。
+- 切换：主菜单设置面板的「Language / 语言」分段选择与暂停菜单的「Language / 语言」一行（选项名 `LANGUAGE_ENDONYMS`：English / 中文；暂停菜单用 `stepLanguage` 循环切换）保存设置后调用 `setLocale`。订阅者：主菜单 / 暂停 / 升级菜单原位重绘，HUD 重写自身文字与结算面板，血条立即改名（暂停中也生效），模型预览重建列表并按新名称标签重新取景，无线电重写当前台词，`VoiceSystem` 停下当前配音并按新语言重新预取，`main.ts` 改写页面外壳。剧情卡片在显示时按当前语言写成，切换后从下一张起换语言。HUD 的 `showBriefing` / `showAutosave` / `flashWarning` / `setBossStatus` / `showPowerUp` / `showPowerUpBig` 接受 `HudText`（纯字符串、`LocalizedText` 或 `{ text, params }`），保留原文，显示期间切换语言时原位重绘（不重播动画、不重置计时；排在简报之后的大字提示在显示时取语言）：协调器交给 HUD 的有入关 / Boss 简报的双语原文、存档提示的 `{ text, params }` 与「继续：…」的双语对象（`describeCheckpointText`）、道具倒计时的道具名、误伤扣分告警（`{ text, params }`），以及中央大字提示（僚机被击落、拾取道具及其「获得道具！」副标题、升级反馈与升级点、护送结果、教学提示、事件波次播报、「已击坠」等）；Boss 战控制器交出的有「返回作战区域」提示、Boss 方位播报（双语拼好）与友军支援、激光预警的大字提示；`UnitController` 交出停火、导弹来袭与「残余目标脱离战区」告警；`SpecialWeaponsController` 经 `SpecialWeaponsDeps.notify(icon, text: HudText)` 交出「尚无特殊武器」「武器尚未解锁」与切换武器时武器配置里的双语名称；第 6-10 关 Boss 的阶段名与特殊攻击预警经 `IAdvancedBoss.onPhaseChange` / `onHazardWarning` 以 `HudText` 传出。第 6-10 关 Boss 的状态提示由 Boss 按当前语言生成（`getStatusLabel`，按状态与语言缓存），控制器每 0.25 秒推送一次，Boss 在场时还订阅 `onLocaleChange` 立即重推。事件波次 / 教学的完成提示（约 2-3 秒）保留双语原文，每次 HUD 刷新时取当前语言。
 - 英文排版：大字公告与简报标题换行，英文剧情标题字号更小，叙事衬线字体拉丁优先（`:lang(zh)` 时回到 CJK 衬线）；打字机停顿用 Unicode 标点类别，中英文句读都会停顿。
 
 ### 角色配音（VoiceSystem）
@@ -359,7 +360,7 @@ if (tmpAxis.lengthSq() > 1e-8) {
 - 链路：无线电台词经逐句按说话人的带通与底噪（`RADIO_PROFILES`，指挥部 / 预警机较宽较干净，座舱、护卫舰与民用频道更窄、底噪更重，神谕的频道更宽）→ 共用电台级（带限、存在感峰值、软饱和、压缩器），自然说完时补一声静噪尾音；旁白走高通 + 轻压缩的干净链路；解码后按门限 RMS（`measureVoiceGainDb`）归一化响度；语音音量 × 总线电平 → 与音效、音乐共用的输出限幅。无线电台词在开麦提示音之后才开口。
 - 闪避：说话时经 `voiceDuckBridge`（`src/core/Audio/VoiceDucking.ts`，保持型闪避，新请求覆盖未执行的旧请求）把 `MusicSystem` 总线末端的配音闪避级压低（无线电比旁白压得更深），说完后延迟一会儿再平滑恢复，连续几句无线电之间音乐不回弹；停下 / 暂停时立即恢复。
 - 暂停与容错：`pause()` 淡出并记住断点，`resume()` 从断点续播；实时看门狗在收不到 `onended` 时按说完处理，无线电队列与打字机不会卡住；切换语言时 `stopAll()` 并按新语言重新预取最近一批。缓存：解码缓冲区与编码数据各一个 LRU；`prefetch(ids)` 去重，前几句立即解码，其余只取编码数据。
-- 音量：`StartFlowSettings.voiceVolume`（0..1，缺省 `DEFAULT_VOICE_VOLUME`），开始菜单「Voice volume / 语音音量」与暂停菜单「Voice / 语音」一行（10% 步进，实时生效并持久化）；为 0 时不加载语音，无线电与剧情卡片只显示文字。
+- 音量：`StartFlowSettings.voiceVolume`（0..1，缺省 `DEFAULT_VOICE_VOLUME`），主菜单设置面板的「Voice volume / 语音音量」与暂停菜单「Voice / 语音」一行（10% 步进，实时生效并持久化）；为 0 时不加载语音，无线电与剧情卡片只显示文字。
 - 诊断：`createOutputAnalyser()` / `getDebugState()`；开发构建的 `window.__AIR_SUPREME_DEV__.voice` 提供 `state()`、`sample()`（人声 / 音乐电平与闪避量）、`say(id, kind)`、`radio(key)`、`wingman(id, event)`。
 
 ### 具名僚机（Wingmen）
@@ -374,7 +375,7 @@ if (tmpAxis.lengthSq() > 1e-8) {
 ### 平衡与难度曲线
 
 - 逐关强度：`getLevelScaling(level)` 读取 `src/core/Difficulty.ts` 中的 `LEVEL_CURVE` 表（每列一关，第 1 关为基准 1.0 / 0，逐关单调变难）。压力主要来自同一时刻的火力密度：敌机火力（伤害 ÷ 冷却）相对第 1 关约为 2 倍（第 2-3 关）、2.5-2.9 倍（第 4-5 关），第 6 关起上一个台阶（约 5.1 倍），到第 10 关约 9.8 倍；命中加成到 +0.27，射击提前量 `enemyAimLead` 到 0.94，同屏敌机加成 `concurrentEnemyBonus` 到 +2；血量涨幅压低（第 10 关敌机 1.27 倍、单位 1.18 倍），以免关卡越拖越长。单位伤害 = `enemyDamageMultiplier × unitDamageShare`（份额从 1.0 降到第 10 关的 0.6：单位单发伤害大，涨幅放缓）。得分倍率 `scoreMultiplier` 从 1.0 升到 2.08，使升级预算跟上。
-- 难度档：`getDifficultyProfile(1..5)` 在关卡曲线之上整体缩放敌人；基础数值按“专家”手感编写，默认档 3（「普通」，英文 Normal）由脚本飞行员实测调校：每分钟受到的伤害约为最大生命值的 20-25%（第 1-2 关）、约 30%（第 3-6 关），升到 35-40%（第 8-10 关），不会躲避的脚本飞行员每关（不含坠地）阵亡 0-2 次。档名为 `LocalizedText`，中英文逐档对应：Very Easy 非常简单 / Easy 简单 / Normal 普通 / Hard 困难 / Expert 专家；开始菜单的难度行与「继续战役」说明直接取 `getDifficultyProfile(level).label`。
+- 难度档：`getDifficultyProfile(1..5)` 在关卡曲线之上整体缩放敌人；基础数值按“专家”手感编写，默认档 3（「普通」，英文 Normal）由脚本飞行员实测调校：每分钟受到的伤害约为最大生命值的 20-25%（第 1-2 关）、约 30%（第 3-6 关），升到 35-40%（第 8-10 关），不会躲避的脚本飞行员每关（不含坠地）阵亡 0-2 次。档名为 `LocalizedText`，中英文逐档对应：Very Easy 非常简单 / Easy 简单 / Normal 普通 / Hard 困难 / Expert 专家；主菜单设置面板的难度项与「继续战役」说明直接取 `getDifficultyProfile(level).label`。
 - 敌机：开火距离上限 `FIRE_RANGE` 与偏航 + 俯仰散布（`EnemyAI.ts`，见上文「精度系统」），射击提前量见上文「地形避让、EMP 瘫痪与关卡强度」；同时在场的敌机上限 = 按设备固定的基础值（`GameConfig.getMaxEnemies()`，桌面 6 / 移动端 5）+ 关卡加成，与画质无关。
 - 波次与单位：第 1 关为教学关（敌机逐波缓升、战斗机从第 3 波开始、不部署高炮与地空导弹车）；第 2-10 关每波敌机减少，后期重型机上限降低；敌方地面 / 海上单位与轰炸机基础血量约降四成（武装直升机约四分之一），慢速单位不再把关卡拖长。具体数值以源码为准（`LevelConfig.enemiesPerWave`、`UnitDeployments`、`UNIT_CONFIGS`）。
 - Boss：血量、伤害与射速按实测击杀时间与承伤平滑（`BOSS_CONFIGS`）；导弹单发伤害 `missileDamage` 在 Boss 战开始时按难度档的 `enemyDamageMultiplier` 缩放（见下文「Boss 系统」）。
@@ -411,7 +412,8 @@ if (tmpAxis.lengthSq() > 1e-8) {
 - 阵营：敌方 `Faction.ENEMY`、友军 `Faction.FRIENDLY`、平民 `Faction.CIVILIAN`（`areHostile` 对平民恒为 false）。
 - 行为：坦克追踪开炮；地空导弹车锁定 → 发射（导弹有能量模型，会被热焰弹诱骗）；高炮提前量弹幕，玩家不在射界时转打友军战机；雷达站旋转并提高敌机精度；炮艇蛇形高速机动并开火；护卫舰垂发 + 近防；潜艇潜航 / 上浮锁定发射（潜航时不可命中）；武装直升机贴地侧滑扫射、被击落时自旋坠落；轰炸机高空直线航路轰炸友军地面 / 海上单位、尾炮自卫；自杀无人机编队巡航后俯冲撞击；友军护卫舰近防拦截导弹、对空对舰射击；友军预警机盘旋；护送目标与平民沿航线行进，抵达或驶出后离场。EMP 瘫痪时停火、停车、锁定中断，无人机断电坠落。
 - 部署：`getWaveDeployment(level, waveIndex)` 返回本波 `UnitSpawnSpec[]`（放置方式 `ahead` / `flank` / `around` / `water` / `route` / `high-altitude`）；无水地形不部署海上单位；本关会部署的模型在关卡加载时预热。
-- 波次门控：`LevelManager.setWaveHoldProvider(() => units.getWaveHoldCount())`——存活敌方单位（含潜航潜艇）拖住波次；敌机清空后残留单位拖住超过时限则放行。
+- 波次门控：`LevelManager.setWaveHoldProvider(() => units.getWaveHoldCount())`——存活敌方单位（含潜航潜艇）拖住波次；敌机清空后残留单位拖住超过时限则放行。时限 `WAVE_STALL_LIMIT_SECONDS` 为 60 秒（按游戏时间），玩家每次击伤敌方单位都重新计时，正在进攻的玩家不会被打断；放行时闪烁「残余目标脱离战区」。
+- 当前目标：敌机清空而敌方单位仍拖住波次期间 `UnitController.isObjectiveActive()` 为真——每波发一次提示（按剩下的是地面 / 海上 / 空中 / 混合目标或潜航的潜艇措辞，经 `presentation.flashWarning`），`CombatHudFeed` 把这些单位的血条快照标为 `objective`，`EnemyHealthBars` 换成目标样式（见下文「HUD、雷达与移动端」）。`forEachHostileMarker` 只给出此刻可以命中的敌方单位：潜航的潜艇仍拖住波次，但没有标记。
 - 命中：玩家子弹逐颗做半径命中（瞄准点 `userData.aimPoint` + `hitRadius`）；锁定导弹对单位瞄准点判定；玩家火力穿过友军单位、会误伤平民；敌方子弹经 `applyHostileFireToUnit` 命中友军单位。
 - 得分：玩家击毁敌方单位 → `scoreValue × 关卡得分倍率`；玩家击毁平民 / 友军 → 扣除 `penalty`（总分不低于 0）并告警；任何原因的平民 / 友军损失都计入结算；护送目标抵达 → 奖励分。
 - 雷达与告警：SAM 锁定 → `PlayerLockState`（`none` / `locking` / `incoming`）→ HUD 导弹告警；友军预警机在线 → 雷达量程倍率；潜航潜艇以声呐接触显示在雷达上；每类单位第一次出现播首次遭遇台词（整局有效，新开一局 `resetFirstContacts()`）。
@@ -427,12 +429,25 @@ if (tmpAxis.lengthSq() > 1e-8) {
 - 热焰弹：`CountermeasureSystem` 实现 `IDecoyProvider`；`deploy` 从机尾两侧抛出一扇燃烧的热焰弹，诱骗强度随燃尽衰减；充能制，容量由「热焰弹挂架」升级决定（`setCapacity`），回复时间见 `setRechargeTime`。SAM 导弹（`UnitSystem.setDecoyProvider`）与第 1-10 关 Boss 导弹（`BossFlareDecoyRedirector`：第 6-10 关由 `AdvancedBossController`、第 1-5 关由 `BossBattleController` 运行，规则相同）据此偏转。
 - 视角与画质：`setViewMode('first-person')` 缩小枪口特效、前移光束起点；`setEffectDensity` 随粒子预算（画质预设）变化。HUD 由 `SpecialWeaponsController` 以约 12 Hz 轮询 `getHudState()` 推送。
 
+### 操控、瞄准与导弹
+
+签名与常量表见 `docs/api.md` 的「Input」与「Missiles and gun aim」；数值以 `src/config.ts` 的 `GAME_CONSTANTS.PLAYER` / `MISSILE` / `GUN_ASSIST` 为准。
+
+- 输入（`src/core/Input/InputHandler.ts`）：`getState()` 除布尔方向外带模拟量 `pitchAxis` / `yawAxis`（-1..1）与 `flightAssist`。触屏摇杆是浮动的——拇指落在 `#touch-stick-zone`（视口左侧 42%、从 38% 高度往下）里的任意位置，摇杆底座就移到落点；位移经径向死区（`TOUCH_STICK_TUNING.DEAD_ZONE` 0.12）与指数曲线（`EXPO` 1.7，`shapeStickMagnitude`）整形。触屏设备上键盘与触屏输入合并：每个轴取绝对值较大的一路，按键相或。开火 / 导弹的按下锁存到下一次 `getState()`，短于一个模拟步长的轻触也不会丢；BOOST 是开关式锁存；窗口失焦或页面隐藏时释放全部按住的输入。
+- 飞行辅助（`src/features/player/PlayerController.ts`）：手指在摇杆上、且没有按下俯仰 / 偏航 / 滚转键时 `flightAssist` 为真，走 `applyAssistedAttitude`——偏航绕世界竖直轴，俯仰相对地平线不超过 `ASSIST_PITCH_LIMIT`（75°），坡度趋向 `-yawAxis × ASSIST_MAX_BANK`（45°），摇杆回中即改平。键盘仍走原来的机体轴操纵（`applyManualAttitude`）。
+- 设备档位（`GameConfig`）：`isMobile`（触屏设备）与 `isTablet`（触屏且视口短边不小于 700 CSS 像素），启动时判定一次。平板在各画质档下的目标帧率（`getTargetFPS()` / `getTargetFPSForPreset()`，`GameLoop` 的模拟步长由它决定）都是 60，`auto` 画质的像素比上限为 1.5。
+- 导引头（`src/features/combat/MissileSeeker.ts`，纯逻辑，由 `LockOnIndicator` 持有）：只要有导弹就一直工作，没有「按住锁定」这一步。准星是机头轴线前方 600 米（`GUN_ASSIST.REFERENCE_RANGE`）那一点的屏幕位置；捕获环以它为圆心，半径 = 视口短边 × `LOCK_RING_RATIO`（0.13）× 锁定范围升级倍率（下限 44 像素，上限为短边的 30%）。环内离准星最近的候选成为跟踪目标；目标在捕获环内时进度按 `1 / 锁定时间` 增长（锁定时间来自升级线：基础 1.0 秒，每级减 0.05 秒），在捕获环与保持环（捕获环的 1.6 倍）之间按 `LOCK_DECAY_RATE` 回落，完成的锁定在保持环内一直保持；出了保持环、转到相机后方或超过 `MAX_LOCK_DISTANCE`（1200 米）时，经 0.5 秒宽限后丢锁；不在候选表里的目标（被击毁 / 回收 / 隐形）立即丢弃。候选表每步由 `GameCoordinator.collectLockCandidates()` 重建：Boss 战中的 Boss 锁定目标、存活敌机、敌方单位瞄准点（`UnitController.collectLockTargets`）。
+- 发射（`GameCoordinator.handleMissileInput`）：一次按键只发射一枚。已锁定时按下立即发射，锁定保留，下一枚要再按一次且间隔不少于 `LOCK_REARM_TIME`（0.35 秒）；锁定完成前按下并按住，则在锁定完成的那一刻发射；环内没有目标、或锁定完成前松手，提示「未锁定」（NO LOCK）；没有导弹时提示「无导弹」（NO MSL）。「快速射击」道具（`PowerUpType.MULTISHOT`）生效时一次按键齐射至多三枚（间隔 0.1 秒）。导弹从左右翼下挂架交替离架，载机当前速度作为 `launcherSpeed` 交给 `MissileSystem.fire(position, direction, target?, launcherSpeed)`。
+- 导弹飞行（`src/features/combat/MissileSystem.ts`）：离架初速 = 载机速度 + 20 米/秒，按 200 米/秒² 加速到巡航速度 `max(200, 载机速度 + 80)` 米/秒；先沿机头方向直飞 0.2 秒再制导，按目标的估计速度取前置量，转向速度 5.0 弧度/秒；命中判定按每一步扫过的线段计算，未声明命中半径的目标用 6 米近炸半径；寿命 12 秒、最大飞行距离 2400 米。伤害 80（再乘伤害倍率）；开局与复活后 3 枚，上限 5 枚。
+- 机炮提前量与触屏辅助（`src/features/combat/GunLeadSolver.ts`，纯逻辑，由协调器持有）：用相邻两步的位置差估计目标速度，解出子弹与目标的相遇点；机头前方 40° 以内、500 米以内最近的空中目标得到提前量标记。触屏设备（`GameConfig.isMobile`）上还解出辅助方向：瞄准点离机头轴线不超过 2.5° 时正对瞄准点，到 5° 平滑减为零，目标超过 480 米不辅助；`PlayerSystem.setGunAimAssist(direction, weight)` 让子弹沿它发射，并把基础散布从 3° 最多收窄到 1.2°。桌面端不辅助（始终传 `null`）。
+- 显示（`src/ui/LockOnIndicator.ts`）：`update(...)` 在模拟步推进导引头；`renderUpdate(...)` 在每个渲染帧（`GameCoordinator.renderAimHud`）按插值后的机体位姿摆放机炮十字、捕获环、目标角标与提前量标记，两种视角下都对准弹道。锁定状态 `search` / `track` / `lock` / `break` / `dry` 同时写到触屏导弹键的样式上。
+
 ### 相机系统
 
 - `CameraRig`（`src/features/camera/CameraRig.ts`）：第三人称追尾（机体局部偏移 (0, 5, 15)，与帧率无关的指数平滑；竖直穿越时以平滑滚转代替 lookAt 翻转）与第一人称座舱（飞行员眼点，姿态完全跟随机体四元数）。
 - 切换：`CAMERA_BLEND_SECONDS`（0.55 秒）smootherstep 位置 / 姿态混合，路径带轻微上拱；混合接近座舱时才隐藏机体外壳（`PLAYER_EXTERIOR_LAYER = 3`，相机关闭该层）并显示座舱模型。
-- 座舱：`CockpitModel`（遮光罩、三块 MFD、UFC、两块圆表、告警灯、HUD 组合玻璃、风挡立柱；静态部件按材质合并）与 `CockpitDisplays`（显示屏图集纹理）。
-- 震动：`CameraShake` 创伤模型（trauma 0..1 累加并线性衰减，实际幅度为 trauma²，确定性平滑噪声，不用 `Math.random`）；`computeExplosionShake(distance, scale, radius)` 按距离二次衰减。FOV 随速度比与加力平滑放大；目标位姿含 NaN / Infinity 时保持上一帧；传送 / 复活 / 读档后 `snapToTarget()`。
+- 座舱：`CockpitModel`（遮光罩、三块 MFD、UFC、两块圆表、告警灯、HUD 组合玻璃、风挡立柱；静态部件按材质合并）与 `CockpitDisplays`（显示屏图集纹理）。座舱框架整体下俯 4°，遮光罩收成一道薄檐、风挡立柱变细，画面上半部基本通透，HUD 组合玻璃框住机炮十字与导引头捕获环。第一人称下自己的武器特效也让开视野：特殊武器的枪口闪光与轨道炮的屏幕闪光按 `FIRST_PERSON_FLASH_SCALE`（0.55）减弱，蜂群导弹从更靠外的位置离架，贴近镜头的武器粒子淡出。
+- 震动：`CameraShake` 创伤模型（trauma 0..1 累加并线性衰减，实际幅度为 trauma²，确定性平滑噪声，不用 `Math.random`）；`computeExplosionShake(distance, scale, radius)` 按距离二次衰减。FOV 随速度比与加力平滑放大；竖屏（宽高比小于 1）时提高竖直视场角，使水平视场保持约 70°（竖直上限 95°）；目标位姿含 NaN / Infinity 时保持上一帧；传送 / 复活 / 读档后 `snapToTarget()`。
 - 接线：`PlayerViewController`（`src/core/camera/`）按需加载；V / 视角按钮 → `toggleMode()`；`onModeChanged` → 武器视角、HUD 视角标签 + 切换音、写回设置；渲染步推进玩家加力尾焰（`updatePlayerAfterburner`），护盾按 `1 - 0.7 × blend` 淡化。友军僚机使用盟军涂装（`createFriendlyMesh`，与敌机同机体、同命中半径）。
 
 ### Boss 系统（第 6-10 关）
@@ -461,6 +476,7 @@ if (tmpAxis.lengthSq() > 1e-8) {
 - 检查点类型：`level-start`（章节卡片之后，wave 0）、`wave`（第 k 波结束后，wave = k + 1，最后一波除外）、`boss`（全部波次清空后，wave = 总波数）、`hangar`（第 1-9 关击破 Boss 时，level 为下一关、wave 为 0；机库「出击」时静默重写一次）；只在正常模式写入。`describeCheckpoint(data, locale?)` 默认按当前语言（传入 locale 时按该语言）生成「第6关 · 熔炉之心 · 第3波」「… · Boss 战」或「第2关 · 沙漠风暴 · 机库整备」（英文为 `Ch. 6 · Heart of the Forge · Wave 3` / `… · Boss` / `Ch. 2 · Sandstorm · Hangar`）；`describeCheckpointText(data)` 返回双语版本。
 - 内容：关卡、波次、难度、分数、生命、导弹、`PlayerUpgrades.export()`、`WeaponSystem.exportState()`、热焰弹、视角、本局统计（击落、平民损失、阵亡、游戏时间），以及可选的 `swiftJoined`（本局雨燕的入列台词是否已播；没有这个字段的旧存档由 `isSwiftJoinAnnounced` 按关卡推断：level > 3 视为已播）。`hangar` 检查点的快照把升级上限（`campaignLevel`）与武器解锁改写为下一关的值。加入 `hangar` 与 `swiftJoined` 之前的存档照常读取（`CAMPAIGN_SAVE_VERSION` 仍为 1）。
 - 继续：开始菜单「继续战役」/ 失败结算「从检查点继续」→ `main.ts` 用存档的难度 / 关卡 / 生命 / 视角重新开局（`resume`）→ `restoreCheckpoint`（reset → import → 关卡上限 → 武器解锁 → 武器等级 → importState → 分数 / 生命 / 导弹 / 视角）→ `resumeFromCheckpoint` 回到存档波次或 Boss 战前；`hangar` 检查点回到机库，「出击」后与刚打完上一关一样进入章节卡片与战斗（不播序章与教学，弹药与热焰弹在章节开始时补满；其余检查点读档后的第一次 `prepareLevel` 保留存档里的弹药）。
+- 保存并退出：每次写检查点时 `CampaignFlowController` 同时记下本局的退出点（`{ kind, level, wave }`；最后一波清空后退出点先移到 Boss，第一个检查点之前与战役通关之后为空）。暂停菜单用 `describeExitSave()`（只读）决定显示「保存并退出」还是「返回菜单」并写出确认文案——结果 `CampaignExitSave` 为 `saved`（附存档位置）/ `no-save-mode`（Boss 模式）/ `not-started` / `complete`；确认后 `saveForExit()` 用此刻的快照在退出点重写检查点（不弹存档提示），再读回核对，存储里不是刚写的那份时返回 `failed`，菜单给出「返回 / 仍然退出」。从这份存档继续时回到该波或 Boss 战的开头（`hangar` 退出点回到机库），分数、生命、导弹与升级是退出时的值；存档格式没有新增字段。
 - 清除：普通模式新开一局、通关第 10 章；`recordLevelReached` / `markCampaignCompleted` 维护进度记录。
 
 ### 音乐与音效
@@ -485,11 +501,19 @@ if (tmpAxis.lengthSq() > 1e-8) {
 ### HUD、雷达与移动端
 
 - HUD 新面板：`updateWeaponPanel`（特殊武器挂架）、`updateFlares`、`showAutosave`、`setCameraMode`、`setBossStatus`（`null` 收起）、`setMissileWarning`、`flashWarning`；自动存档提示与闪烁告警的计时由 `hud.update(dt)` 推进（暂停时冻结）。`showBriefing(BriefingRequest)`、`showAutosave(label?)`、`flashWarning(text, tone)`、`setBossStatus(label, phase?)`、`showPowerUp(name, icon, duration)` 与 `showPowerUpBig(icon, name, minDisplayTime?, hideSubtext?, variant?)` 接受 `HudText`（见「界面语言」）；道具倒计时逐帧只读缓存好的文字。`setEnemyCounterMode(mode: HudEnemyCounterMode)`（`'wave' | 'boss'`）：波次中计数为「敌人 n · 剩余 m」（`ENEMIES n · LEFT m`）；Boss 战（Boss 模式或战役 Boss 关，由 `GameCoordinator.updateUI` 设置）只显示在场的敌方「敌人 n」——存活敌机（含 Boss 放出的）加存活敌方单位（含 Boss 无人机），不显示本关波次的「剩余」。
-- HUD 布局：`#hud` 按 `env(safe-area-inset-*)` 内缩，位置与尺寸按 `HudLayoutDensity` 写在 CSS 里（旋转屏幕即重新布局）。右侧状态列 `#hud-status`：波次、生命、导弹、导弹装填与道具计时（竖屏时生命与导弹点并排）；中央消息栈 `#hud-top-stack`：Boss 条、简报、事件目标与竖屏下的存档提示，手机竖屏时是状态带下方的整行，无线电面板经 `<html>` 上的 `--hud-stack-bottom` 跟在栈底；竖屏下简报显示期间、或 Boss 条与事件目标同在栈里时，存档提示暂缓（隐藏、计时暂停），有空间后完整显示。中央大字提示（`showPowerUpBig`）改为锁定圈上方的横幅（横屏手机上在消息栈下方），不挡准星；ENEMIES / LEFT 计数器与驾驶舱信息栏同样的深色底。
-- 雷达：`RadarBlipKind` 新增 `enemy-ground`（红色方块）、`enemy-sea`（红色菱形）、`ally-unit`（金色三角）、`neutral`（灰色空心圆）；`setRangeMultiplier` 由友军预警机驱动；`CombatHudFeed` 用池化对象生成雷达点（20 Hz）与血条快照（含第 6-10 关 Boss 子目标）。
-- 移动端：`index.html` 拇指弧按键簇新增 `#special-button`、`#flare-button`、`#cycle-button`、`#camera-button`；按键文字默认英文（FIRE / MSL / SPEC / FLARE / BOOST / SWAP / VIEW / PAUSE），`main.ts` 按语言改写（中文为 开火 / 导弹 / 特武 / 热焰 / 加速 / 切换 / 视角 / 暂停）；HUD 写入按钮的武器代号、外圈进度（`--tc-meter`）、空弹 / 告警状态（`data-alert`）与视角状态。暂停键（`#upgrade-button`）与其他单击键一样在 `touchstart` 时锁存，直到 `InputHandler.isPauseToggled()` 读取（`resetPauseState()` 清除），低帧率下短于一个模拟步长的轻触也不会丢；桌面 Esc / P 仍取按下沿。
-- 血条：友军 AI 战机的 `mesh.userData.displayName`（僚机呼号）优先于按名称缓存的标签；敌机显示机型，Boss 显示名称，单位显示阵营标签，都按当前语言，切换语言时所有血条立即改名。三种尺寸：Boss 本体 120 × 10 像素（带名称）、Boss 部件 44 × 5 像素（深色底槽）、其他目标 60 × 6 像素（带名称）；视野内的 Boss 部件只有离准星最近的一个显示名称（带滞回：新部件离准星的距离须小于当前焦点的 80% 才切换），部件不再各自产生屏外箭头；名称标签用样式居中，不再逐次测量文字宽度。
-- 模型预览：`ModelPreview` 经 `Record<BossType, loader>` 按需导入每个 Boss 自己的网格工厂（第 6-10 关来自 `MagmaColossusMesh` / `AbyssalLeviathanMesh` / `TempestZeppelinMesh` / `PhantomWingMesh` / `OraclePrimeMesh`），把可见几何（排除隐藏部件与精灵）缩放到固定半径的包围球，切换模型时逐一释放几何体、材质与实例缓冲（跳过共享资源）。取景只用名称标签上方的区域：写入名称后（以及改变窗口大小、切换语言时）`frameCamera()` 从 DOM 读取标签上沿，与标签、画布上沿各留 8 像素（区域至少延伸到画布一半高度），相机后退到包围球放得进区域高度（画布更窄时按画布宽度），再用 `setViewOffset` 把投影中心移到区域中心；画布尚未布局时按整个画布取景。名称标签放得下时单行显示（宽度 600 像素以下字号 18 像素）；横屏且高度不超过 520 像素的视口改为左右两栏：画布在左、按钮列在右。
+- HUD 布局：`#hud` 按 `env(safe-area-inset-*)` 内缩，位置与尺寸按 `HudLayoutDensity` 写在 CSS 里（旋转屏幕即重新布局）。右侧状态列 `#hud-status`：波次、生命读数（标签 + 生命点）、导弹读数（标签、`n/上限` 计数、导弹点与装填进度）与道具计时（竖屏时两个读数并排）；中央消息栈 `#hud-top-stack`：Boss 条、简报、事件目标与竖屏下的存档提示，手机竖屏时是状态带下方的整行，无线电面板经 `<html>` 上的 `--hud-stack-bottom` 跟在栈底；竖屏下简报显示期间、或 Boss 条与事件目标同在栈里时，存档提示暂缓（隐藏、计时暂停），有空间后完整显示。中央大字提示（`showPowerUpBig`，`#hud-callout`）是横幅，按视角摆放，避开准星与导引头捕获环（捕获环半径由 `LockOnIndicator` 写到 `<html>` 的 `--hud-aim-r`，视角由 HUD 写到 `data-hud-camera`）：追尾视角下准星在屏幕上方约 29% 处，横幅放在座机下方（竖屏时在捕获环与座机之间）；第一人称下准星在屏幕中央，横幅从捕获环上方向上展开（横屏手机上在消息栈下方）。闪烁告警栏 `#hud-warning-lane` 在追尾视角下位于座机下方，第一人称下位于捕获环下方；ENEMIES / LEFT 计数器与驾驶舱信息栏同样的深色底。
+- 雷达：`RadarBlipKind` 新增 `enemy-ground`（红色方块）、`enemy-sea`（红色菱形）、`ally-unit`（金色三角）、`neutral`（灰色空心圆）；`setRangeMultiplier` 由友军预警机驱动；`CombatHudFeed` 用池化对象生成雷达点（20 Hz）与血条快照（含第 6-10 关 Boss 子目标与可命中的敌方单位）。雷达盘（`#radar-minimap`）机头朝上：前方在上，右侧的目标画在右侧（原先左右画反）；`BASE_RANGE` 800 米是整个盘面的跨度（圆心到盘缘约 400 米）；量程外的目标贴在盘缘，画成同类的空心小符号并带一道朝外的短线（`drawRadarRimMarker`）。桌面端 120 像素、位于左下角；触屏布局在左上角状态舱下方，手机 84 像素、视口短边 ≥ 700 像素时 132 像素，并有单独的点按面 `#radar-tap-target`（点雷达不会带出摇杆）。
+- 关卡地图（`RadarLevelMap`，`#radar-map`，由 `RadarMinimap` 持有）：点击 / 轻触雷达或按 N 键开合，Esc 关闭（被雷达截获，不会同时暂停）；换关或雷达停止更新 1.5 秒后自动收起；打开时游戏不暂停。地图北向朝上、比例固定：战场边界圆、以玩家为圆心的 500 / 1000 米距离环、按航向旋转的玩家箭头、全部雷达目标（与雷达盘共用 `radarGlyphs.ts` 的符号，画得更大）、图例，以及每关采样一次的 64 × 64 陆地 / 水面底图（`CombatHudFeed` 把 `UnitController.getSurfaceSampler()` 交给 `PresentationController.setRadarTerrainSource`；没有采样器时只画网格）。面板为视口短边的 72%（200-560 像素），20 Hz 重绘。
+- 移动端：`index.html` 拇指弧按键簇新增 `#special-button`、`#flare-button`、`#cycle-button`、`#camera-button`；按键文字默认英文（FIRE / MSL / SPEC / FLARE / BOOST / SWAP / VIEW / PAUSE），`main.ts` 按语言改写（中文为 开火 / 导弹 / 特武 / 热焰 / 加速 / 切换 / 视角 / 暂停）；HUD 写入按钮的武器代号、外圈进度（`--tc-meter`）、空弹 / 告警状态（`data-alert`）与视角状态，以及导弹键的余量（`data-count`）与装填外圈；`LockOnIndicator` 把锁定状态写成导弹键的样式类。摇杆是浮动式的（触摸区 `#touch-stick-zone`，见「操控、瞄准与导弹」）；BOOST（`#throttle-button`）是开关式锁存，带 `aria-pressed`。视口宽高都不小于 700 像素时（与 `GameConfig.isTablet` 同一阈值）摇杆与按键簇放大并抬离底边，尺寸都是 `:root` 上的 CSS 变量（`--touch-stick-size`、`--touch-deck-scale` 等）。暂停键（`#upgrade-button`）与其他单击键一样在 `touchstart` 时锁存，直到 `InputHandler.isPauseToggled()` 读取（`resetPauseState()` 清除），低帧率下短于一个模拟步长的轻触也不会丢；桌面 Esc / P 仍取按下沿。
+- 血条：友军 AI 战机的 `mesh.userData.displayName`（僚机呼号）优先于按名称缓存的标签；敌机显示机型，Boss 显示名称，单位显示自己的型号名（`UnitMeshFactory` 写入的 `userData.displayName`，没有时退回阵营通用名），都按当前语言，切换语言时所有血条立即改名。三种尺寸：Boss 本体 120 × 10 像素（带名称）、Boss 部件 44 × 5 像素（深色底槽）、其他目标 60 × 6 像素（带名称）；视野内的 Boss 部件只有离准星最近的一个显示名称（带滞回：新部件离准星的距离须小于当前焦点的 80% 才切换），部件不再各自产生屏外箭头；名称标签用样式居中，不再逐次测量文字宽度。可命中的敌方地面 / 海上 / 空中单位也进入血条（`CombatHudFeed` 经 `UnitController.forEachHostileMarker`）：在屏幕上小于约 22 像素时加一个威胁色的目标角标并标出距离（取整到 10 米，大于 28 像素时收起）；快照带 `objective` 时换成目标样式——角标常显、加粗并脉动，屏外箭头闪烁（减少动态效果时不做动画）。屏外箭头（`OffscreenChevron`）的距离文字保持水平，箭头避开雷达盘，触屏布局下还避开摇杆与每个可见的触控按键。
+- 机库（模型预览）：主菜单的「机库」就是 `ModelPreview`（`#model-preview`）。它经 `Record<BossType, loader>` 按需导入每个 Boss 自己的网格工厂（第 6-10 关来自 `MagmaColossusMesh` / `AbyssalLeviathanMesh` / `TempestZeppelinMesh` / `PhantomWingMesh` / `OraclePrimeMesh`），把可见几何（排除隐藏部件与精灵）缩放到固定半径的包围球，切换模型时逐一释放几何体、材质与实例缓冲（跳过共享资源）。取景只用名称标签上方的区域：写入名称后（以及改变窗口大小、切换语言时）`frameCamera()` 从 DOM 读取标签上沿，与标签、画布上沿各留 8 像素（区域至少延伸到画布一半高度），相机后退到包围球放得进区域高度（画布更窄时按画布宽度），再用 `setViewOffset` 把投影中心移到区域中心；画布尚未布局时按整个画布取景。名称标签放得下时单行显示（宽度 600 像素以下字号 18 像素）；横屏且高度不超过 520 像素的视口压缩页眉并隐藏提示行，把高度留给展台。左右箭头按钮、左 / 右方向键或横向滑动切换模型，鼠标拖动旋转，`#rotate-toggle` 开关自动旋转，Esc 或返回按钮回到主菜单。渲染器只在显示期间存在（`show()` 创建，`hide()` 连同 WebGL 上下文一起释放）。
+
+### 主菜单
+
+- 结构：`StartMenu`（`src/ui/StartMenu.ts`，`#start-menu`）是一层外壳，界面由 `src/ui/menu/` 下的模块组成——`TitleScreen`（标题画面：继续战役 / 新战役 / 机库 / 设置 / 操作说明）、`SettingsSheet`（设置面板）、`HowToPlaySheet`（操作说明，键盘 / 触屏两个标签页）、`MenuSheet`（三者共用的面板容器；「新战役」会覆盖存档时的确认对话框也用它，默认按钮是「保留存档」）、`MenuBackdrop`（CSS 与 2D 画布绘制的背景）与 `MenuHero`（按需加载 `MenuHeroScene`，在标题后面实时渲染玩家战机）。有检查点时才显示「继续战役」，并作为默认高亮的按钮。
+- 设置面板：分「游戏」（难度、生命、视角、教程）、「音频」（音效 / 音乐 / 语音音量）、「显示」（画质、语言）、「高级」（起始关卡、游戏模式、测试分数）四组，每次改动立即保存（`StartFlowSettings`）；「高级」每次打开面板时折叠，其中任一项不是默认值时显示「已修改」标记。
+- WebGL 上下文：菜单隐藏或机库打开时，标题画面的战机场景停止；机库（`ModelPreview`，同样按需加载）的渲染器只在显示期间存在——菜单任何时候至多持有一个 WebGL 上下文，游戏运行时不持有。
+- 进入战场：`StartMenu.launch()` 在点击的调用栈上同步解锁音频并触发 `onStart` / `onContinue`；`main.ts` 的 `launchFromMenu` 立即显示进入战场的画面，等 `startMenu.whenLaunched()`（约 0.3 秒的过场；减少动态效果时立即完成）之后再启动游戏。
 
 ---
 
@@ -497,7 +521,7 @@ if (tmpAxis.lengthSq() > 1e-8) {
 
 ```
 src/
-├── main.ts                       # 入口：先应用已保存的语言，StartMenu、MenuMusic、按需导入 GameCoordinator、继续战役
+├── main.ts                       # 入口：先应用已保存的语言，StartMenu、MenuMusic、launchFromMenu、按需导入 GameCoordinator、继续战役
 ├── i18n/                         # 本地化核心：LocalizedText、tr / localize / format、getLocale / setLocale / onLocaleChange
 ├── Game.ts                       # 向后兼容导出（re-export GameCoordinator）
 ├── Game.legacy.ts                # 旧实现（已废弃）
@@ -528,7 +552,7 @@ src/
 │   ├── weapons/                  # WeaponTypes、WeaponSystem、CountermeasureSystem、控制器与特效
 │   ├── boss/                     # BossTypes、BossContracts、BossAI、各关 Boss AI / Mesh / 特效、BossMissileSystem、BossAim
 │   ├── camera/                   # CameraRig、CockpitModel、CockpitDisplays、CameraShake、ThirdPersonCamera
-│   ├── combat/                   # ProjectilePool、BossProjectilePool、MissileSystem、HealthSystem、AutoAimSystem
+│   ├── combat/                   # ProjectilePool、BossProjectilePool、MissileSystem、MissileSeeker、GunLeadSolver、HealthSystem、AutoAimSystem
 │   ├── effects/                  # ParticleSystem、particles/、postfx/、ContrailSystem、ShieldRipple、SpawnPortal …
 │   ├── levels/                   # LevelManager
 │   ├── terrain/                  # LevelConfig、TerrainGenerator、environments/、worldscape/（含 staticBatch、vegetation、clouds）
@@ -537,7 +561,7 @@ src/
 │   ├── powerups/                 # PowerUpSystem、BalloonPowerUp
 │   └── upgrade/                  # UpgradeSystem
 ├── scenes/                       # GameScene（渲染器、光照、后处理）
-├── ui/                           # HUD、StartMenu、PauseMenu、UpgradeMenu、StoryOverlay、RadioComms、RadarMinimap、CheckpointResumeButton、EnemyHealthBars、LockOnIndicator、ModelPreview、theme/ …
+├── ui/                           # HUD、StartMenu（外壳）与 menu/（标题画面、设置 / 操作说明面板、实时战机场景）、PauseMenu、UpgradeMenu、StoryOverlay、RadioComms、RadarMinimap、RadarLevelMap、radarGlyphs、CheckpointResumeButton、EnemyHealthBars、OffscreenChevron、LockOnIndicator、ModelPreview（机库）、theme/ …
 └── __tests__/                    # Vitest 测试
 
 public/voice/                     # 配音包：en/、zh/（<台词 id>.mp3）、manifest.json、provenance.json
@@ -546,6 +570,18 @@ public/voice/                     # 配音包：en/、zh/（<台词 id>.mp3）�
 ---
 
 ## 最近更新记录
+
+### 2026-10: 操控与武器体验
+
+**主要变更**（分支 `workflow/ipad-controls-weapons`，逐项见 `CHANGELOG.md` 的「操控与武器体验」）:
+
+1. **触屏操控** - 浮动摇杆（径向死区 + 指数曲线）、`InputState.pitchAxis` / `yawAxis` / `flightAssist` 与飞行辅助（`PlayerController.applyAssistedAttitude`）、开火 / 导弹点按锁存、BOOST 开关式锁存、键盘与触屏输入合并、窗口失焦 / 页面隐藏时释放按住的输入、平板档位（`GameConfig.isTablet`：60 Hz 模拟步长、放大的摇杆与按键簇）
+2. **导弹** - 常开的导引头 `MissileSeeker`（捕获环 / 保持环 / 宽限 / 进度回落）取代「按住锁定」；按一下发射一枚；`MissileSystem.fire` 新增 `launcherSpeed`，导弹继承载机速度并加速到巡航速度（不低于 200 米/秒，原为 80）、带前置量与近炸；左右挂架交替离架；伤害 50 → 80、转向 2.0 → 5.0 弧度/秒、初始 2 → 3 枚；基础锁定时间 1.0 秒（升级到 0.5 秒）
+3. **机炮** - `GunLeadSolver`：提前量标记与触屏瞄准辅助（`GAME_CONSTANTS.GUN_ASSIST`、`PlayerSystem.setGunAimAssist`），机炮十字每个渲染帧对准弹道
+4. **目标与雷达** - 敌方单位的血条、目标角标与「当前目标」提示，波次放行时限 150 → 60 秒且击伤敌方单位即重新计时；雷达改为机头朝上（修正左右画反）、盘缘标记量程外目标；关卡地图 `RadarLevelMap`（N 键 / 点雷达）
+5. **座舱与视角** - 座舱压低、遮光罩与立柱变细，第一人称下自己的武器特效减弱，竖屏保持约 70° 水平视场，大字提示与告警栏按视角避开准星
+6. **菜单与存档** - 主菜单重做为 `StartMenu` 外壳 + `src/ui/menu/`（标题画面、设置 / 操作说明面板、实时战机场景），模型预览改为「机库」（`ModelPreview`），`StartMenu.whenLaunched()`；暂停菜单「保存并退出」（`CampaignFlowController.describeExitSave` / `saveForExit`、`IPauseMenuOptions.getSaveStatus` / `onSaveAndExit`）
+7. **修复** - 第 1 关的坦克没有标记、波次迟迟不结束；雷达左右颠倒
 
 ### 2026-10: 收尾打磨
 
@@ -928,5 +964,5 @@ const history = loggerManager.exportHistory();
 
 ---
 
-**文档更新日期**: 2026-10-09
-**项目版本**: 2.2.1 + Unreleased（十关故事战役、英文默认与角色配音）
+**文档更新日期**: 2026-10-10
+**项目版本**: 2.2.1 + Unreleased（十关故事战役、英文默认与角色配音、操控与武器体验）

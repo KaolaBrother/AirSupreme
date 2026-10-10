@@ -1,7 +1,7 @@
 # Documentation Index
 
 - [Architecture](architecture.md) — system structure, campaign controllers, data flow, language and voice
-- [API](api.md) — EventBus, config, logger, localisation, and in-process contracts (crash surface and respawn, terrain detail and batching, campaign, radio budget, wingmen, enemy AI, save, settings, units, weapons, camera, bosses, music, voice, HUD, input)
+- [API](api.md) — EventBus, config, logger, localisation, and in-process contracts (crash surface and respawn, terrain detail and batching, campaign, radio budget, wingmen, enemy AI, save, settings, units, weapons, missiles and gun aim, camera, bosses, music, voice, HUD, input)
 - [Voice lines](voice-lines.md) — voice packs, manifest and provenance, regenerating lines
 - [Conventions](conventions.md)
 - [Decisions](decisions/)
