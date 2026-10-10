@@ -254,6 +254,17 @@ export const GAME_CONSTANTS = {
     POOL_SIZE: 200,        // 对象池大小
   },
 
+  // 触屏机炮辅助瞄准（GunLeadSolver 解算；子弹与机炮十字共用同一个辅助方向，桌面端不启用）
+  GUN_ASSIST: {
+    MAX_RANGE: 480,                          // 目标超过这个距离不辅助（米，略小于子弹射程）
+    FULL_ANGLE: (2.5 * Math.PI) / 180,       // 瞄准点离机头轴线不超过它：辅助方向正对瞄准点；也是偏移上限
+    OUTER_ANGLE: (5 * Math.PI) / 180,        // 从 FULL_ANGLE 到它：偏移平滑减到零；再往外不辅助
+    EASE_TIME: 0.1,                          // 目标出现 / 消失 / 更换时，十字滑到新位置约 95% 所需时间（秒）
+    SWITCH_MARGIN: (0.75 * Math.PI) / 180,   // 换辅助目标：新目标离机头轴线必须近出这么多（防来回跳）
+    REFERENCE_RANGE: 600,                    // 准星参考距离（米）：捕获环中心与无辅助时的十字都在机头前方这么远处
+    CROSS_MIN_RANGE: 100,                    // 辅助生效时十字按瞄准点的距离画（追尾视角才落在目标上），最近按它算
+  },
+
   // 相机参数
   CAMERA: {
     FOV: 75,
@@ -289,12 +300,15 @@ export const GAME_CONSTANTS = {
     SPAWN_INTERVAL: 3,     // 敌人生成间隔
   },
 
-  // 导弹参数
+  // 导弹参数（只用于玩家的锁定导弹；Boss / 单位导弹各有自己的参数，不读这里）
   MISSILE: {
-    SPEED: 80,             // 导弹速度
+    SPEED: 200,            // 巡航速度（米/秒）：离架后加速到它
+    LAUNCH_SPEED_BOOST: 20, // 离架初速 = 发射瞬间的载机速度 + 它
+    ACCELERATION: 200,     // 离架后的加速度（米/秒²）
+    MIN_OVERTAKE_SPEED: 80, // 巡航速度至少比发射瞬间的载机快这么多
     DAMAGE: 80,            // 导弹伤害（CombatSystem 命中结算读取，再乘伤害倍率）
-    TURN_SPEED: 2.0,       // 转向速度（弧度/秒）
-    MAX_LIFETIME: 10,      // 最大寿命（秒）
+    TURN_SPEED: 5.0,       // 转向速度（弧度/秒）：巡航时转弯半径 40 米，与旧版（80 米/秒、2.0）相同
+    MAX_LIFETIME: 12,      // 最大寿命（秒）：巡航 12 秒约 2400 米，与最大飞行距离一致
     MAX_LOCK_DISTANCE: 1200, // 导引头最大锁定距离
     MAX_FLIGHT_DISTANCE: 2400, // 最大飞行距离（是锁定距离的2倍）
     LOCK_RING_RATIO: 0.13, // 捕获环半径 / 视口短边（再乘锁定范围升级倍率）

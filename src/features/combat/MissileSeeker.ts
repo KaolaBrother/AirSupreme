@@ -170,6 +170,12 @@ export class MissileSeeker {
     camera: Camera
   ): void {
     this.clearEvents();
+    // 载机坐标不是有限数：距离无从判定（NaN 的比较恒为 false，会把目标当成“在射程内”，
+    // 距离读数也成了 NaN），这一步什么都不跟踪
+    if (!Number.isFinite(origin.x) || !Number.isFinite(origin.y) || !Number.isFinite(origin.z)) {
+      if (this.target) this.clearTarget();
+      return;
+    }
     const dt = Number.isFinite(deltaTime) && deltaTime > 0 ? deltaTime : 0;
     const acquireRadius = this.acquireRadius;
     const keepRadius = this.getKeepRadius();

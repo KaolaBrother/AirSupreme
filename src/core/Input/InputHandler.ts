@@ -190,6 +190,12 @@ export class InputHandler {
   private flareQueued: boolean = false;
   /** F / 特殊武器按钮的按下沿：低帧率下即使按键短于一帧，下一次模拟步也能看到一次扣扳机 */
   private specialTapQueued: boolean = false;
+  /**
+   * 开火 / 导弹的按下沿（Space、M / 右 Shift、触控键）：从按下到松开都落在两个模拟步之间的轻触，
+   * 下一步仍读到一次“按住”，再下一步读到松开。getState 每步都把它读掉（按住期间不留到松开之后）。
+   */
+  private fireTapQueued: boolean = false;
+  private missileTapQueued: boolean = false;
 
   /** getState() 复用的结果对象（每个模拟步调用一次，避免逐帧分配） */
   private readonly state: Required<InputState> = {
@@ -273,6 +279,10 @@ export class InputHandler {
       this.weaponSlotQueued = WEAPON_SLOT_KEYS[code];
     } else if (code === 'KeyF') {
       this.specialTapQueued = true;
+    } else if (code === 'Space') {
+      this.fireTapQueued = true;
+    } else if (code === 'KeyM' || code === 'ShiftRight') {
+      this.missileTapQueued = true;
     }
   };
 
@@ -335,23 +345,32 @@ export class InputHandler {
     this.addTrackedListener(document, 'touchend', this.handleStickEnd);
     this.addTrackedListener(document, 'touchcancel', this.handleStickEnd);
 
-    // 开火 / 导弹：按住
+    // 开火 / 导弹：按住；按下沿另外锁存，短于一个模拟步的轻触也不丢。
+    // 被系统取消（touchcancel / 失焦）的那一下不算按过
     this.bindTouchButton(
       fireButton,
       () => {
         this.firePressed = true;
+        this.fireTapQueued = true;
       },
-      () => {
+      (cancelled) => {
         this.firePressed = false;
+        if (cancelled) {
+          this.fireTapQueued = false;
+        }
       }
     );
     this.bindTouchButton(
       missileButton,
       () => {
         this.missilePressed = true;
+        this.missileTapQueued = true;
       },
-      () => {
+      (cancelled) => {
         this.missilePressed = false;
+        if (cancelled) {
+          this.missileTapQueued = false;
+        }
       }
     );
 
@@ -560,11 +579,12 @@ export class InputHandler {
   /**
    * 触摸按键：记住按下它的那根手指，只有这根手指抬起 / 被系统取消（touchcancel）才松开；
    * 按住期间第二根手指落在同一个键上不算数。单击类按键只传 onPress。
+   * onRelease 的参数：这次松开是不是被取消的（touchcancel / 失焦 / 切到后台 / 销毁），而非手指抬起。
    */
   private bindTouchButton(
     button: HTMLElement | null,
     onPress: () => void,
-    onRelease?: () => void
+    onRelease?: (cancelled: boolean) => void
   ): void {
     if (!button) {
       return;
@@ -573,12 +593,12 @@ export class InputHandler {
     let pressed = false;
     let touchId: number | null = null;
 
-    const release = (): void => {
+    const release = (cancelled: boolean): void => {
       if (!pressed) return;
       pressed = false;
       touchId = null;
       button.classList.remove('is-pressed');
-      onRelease?.();
+      onRelease?.(cancelled);
     };
 
     const handleStart = (e: TouchEvent): void => {
@@ -599,13 +619,13 @@ export class InputHandler {
         // 抬起的不是按下它的那根手指
         return;
       }
-      release();
+      release(e.type === 'touchcancel');
     };
 
     this.addTrackedListener(button, 'touchstart', handleStart, { passive: false });
     this.addTrackedListener(button, 'touchend', handleEnd);
     this.addTrackedListener(button, 'touchcancel', handleEnd);
-    this.buttonReleasers.push(release);
+    this.buttonReleasers.push(() => release(true));
   }
 
   private setBoostLatched(latched: boolean): void {
@@ -629,6 +649,8 @@ export class InputHandler {
     this.firePressed = false;
     this.missilePressed = false;
     this.specialPressed = false;
+    this.fireTapQueued = false;
+    this.missileTapQueued = false;
     this.setBoostLatched(false);
   }
 
@@ -682,8 +704,13 @@ export class InputHandler {
     state.yawRight = keyYawRight;
     state.rollLeft = keyRollLeft;
     state.rollRight = keyRollRight;
-    state.fire = keys.has('Space');
-    state.missile = keys.has('KeyM') || keys.has('ShiftRight'); // M键或右Shift发射导弹
+    // 开火 / 导弹 = 按住，或上一次采样之后有过一次按下（读取即清除）
+    const fireTap = this.fireTapQueued;
+    const missileTap = this.missileTapQueued;
+    this.fireTapQueued = false;
+    this.missileTapQueued = false;
+    state.fire = keys.has('Space') || fireTap;
+    state.missile = keys.has('KeyM') || keys.has('ShiftRight') || missileTap; // M键或右Shift发射导弹
     state.throttle = keys.has('ShiftLeft') || keys.has('ControlLeft');
     state.pitchAxis = (keyPitchUp ? 1 : 0) - (keyPitchDown ? 1 : 0);
     state.yawAxis = (keyYawRight ? 1 : 0) - (keyYawLeft ? 1 : 0);
@@ -763,6 +790,8 @@ export class InputHandler {
     this.weaponSlotQueued = -1;
     this.flareQueued = false;
     this.specialTapQueued = false;
+    this.fireTapQueued = false;
+    this.missileTapQueued = false;
     if (this.boostLatched) {
       this.setBoostLatched(false);
     }

@@ -248,16 +248,19 @@ const DEFAULT_CONFIG: GameConfigData = {
     waveDelay: 5,
     spawnInterval: 3,
   },
+  // 运行时没有任何代码读取这一段：玩家导弹以 GAME_CONSTANTS.MISSILE（src/config.ts）为准，
+  // 锁定时间 / 补给时间的基础值在 UpgradeSystem。这里与 game-config.json 只是和它们保持同样的数值
+  // （lockBoxSize 对应 LOCK_RING_RATIO）。
   missile: {
-    speed: 80,
-    damage: 50,
-    turnSpeed: 2.0,
-    maxLifetime: 10,
-    lockTime: 3.0,
-    lockBoxSize: 0.15,
-    maxLockDistance: 600,
+    speed: 200,
+    damage: 80,
+    turnSpeed: 5.0,
+    maxLifetime: 12,
+    lockTime: 1.0,
+    lockBoxSize: 0.13,
+    maxLockDistance: 1200,
     maxFlightDistance: 2400,
-    startingMissiles: 2,
+    startingMissiles: 3,
     maxMissiles: 5,
     respawnTime: 7.5,
     maxRespawnMissiles: 5,

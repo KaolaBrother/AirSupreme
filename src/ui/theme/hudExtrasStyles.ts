@@ -927,12 +927,19 @@ const HUD_EXTRAS_CSS = `
   display: none !important;
 }
 
-/* 手机横握：信息栏下方紧贴雷达，改放到雷达右侧 */
+/*
+ * 触屏横握：信息栏正下方 8px 是雷达（与信息栏左缘对齐，手机 84px / 平板 132px，见 RadarMinimap），
+ * 存档提示仍在信息栏下方这一行，只是让到雷达右侧 8px——这里离摇杆区（屏高 38% 以下）、
+ * 屏幕中线上的消息栈与准星、右下的按键簇都有距离。
+ */
 #hud[data-layout-density='touch-landscape'] .hx-autosave {
-  position: fixed;
-  top: auto;
-  left: calc(max(20px, env(safe-area-inset-left)) + 84px);
-  bottom: calc(max(20px, env(safe-area-inset-bottom)) + 139px);
+  left: calc(84px + 8px);
+}
+
+@media (min-width: 700px) and (min-height: 700px) {
+  #hud[data-layout-density='touch-landscape'] .hx-autosave {
+    left: calc(132px + 8px);
+  }
 }
 
 .hx-autosave-label {

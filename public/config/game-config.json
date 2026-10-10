@@ -39,15 +39,15 @@
     "spawnInterval": 3
   },
   "missile": {
-    "speed": 80,
-    "damage": 50,
-    "turnSpeed": 2.0,
-    "maxLifetime": 10,
-    "lockTime": 3.0,
-    "lockBoxSize": 0.15,
-    "maxLockDistance": 600,
+    "speed": 200,
+    "damage": 80,
+    "turnSpeed": 5.0,
+    "maxLifetime": 12,
+    "lockTime": 1.0,
+    "lockBoxSize": 0.13,
+    "maxLockDistance": 1200,
     "maxFlightDistance": 2400,
-    "startingMissiles": 2,
+    "startingMissiles": 3,
     "maxMissiles": 5,
     "respawnTime": 7.5,
     "maxRespawnMissiles": 5

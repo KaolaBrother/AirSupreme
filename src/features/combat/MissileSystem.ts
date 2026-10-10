@@ -23,6 +23,8 @@ const MISSILE_TRAIL_DELAY = 0.3;
 const MISSILE_TRAIL_RAMP_TIME = 0.6;
 /** 未声明命中半径的目标（普通敌机）的近炸距离（米） */
 const MISSILE_PROXIMITY_RADIUS = 6;
+/** 估算出的目标速度超过它（米/秒）视为目标被瞬移 / 回收复用，本步不取前置量 */
+const MISSILE_TARGET_SPEED_LIMIT = 300;
 /** 预热模型至少被真实渲染这么多次后才撤下 */
 const MISSILE_WARM_DRAWS = 2;
 
@@ -493,7 +495,14 @@ export class Missile {
   public maxLifetime: number = GAME_CONSTANTS.MISSILE.MAX_LIFETIME; // 超过寿命后自毁
 
   private turnSpeed: number = GAME_CONSTANTS.MISSILE.TURN_SPEED; // 转向速度（弧度/秒）
-  private speed: number = GAME_CONSTANTS.MISSILE.SPEED; // 导弹速度
+  /** 巡航速度：不低于 SPEED，也不低于发射瞬间的载机速度 + MIN_OVERTAKE_SPEED */
+  private cruiseSpeed: number = GAME_CONSTANTS.MISSILE.SPEED;
+  /** 当前速率：离架时为载机速度 + LAUNCH_SPEED_BOOST，按 ACCELERATION 加速到巡航速度 */
+  private currentSpeed: number = GAME_CONSTANTS.MISSILE.SPEED;
+  /** 飞行方向（单位向量）；velocity = heading × currentSpeed */
+  private readonly heading = new THREE.Vector3(0, 0, -1);
+  /** 本步移动前的位置：命中判定按这一步扫过的线段算，高速时不会从目标身上跳过去 */
+  private readonly previousPosition = new THREE.Vector3();
   private particleSystem: ParticleSystem;
   private startPosition: THREE.Vector3; // 记录发射位置
   private maxFlightDistance: number = GAME_CONSTANTS.MISSILE.MAX_FLIGHT_DISTANCE; // 最大飞行距离
@@ -513,7 +522,11 @@ export class Missile {
   private visualPulseTime: number = 0;
   private readonly targetWorldPos = new THREE.Vector3();
   private readonly targetDirection = new THREE.Vector3();
-  private readonly currentDirection = new THREE.Vector3();
+  /** 目标上一步的位置与由此估算的速度（前置量用）；换目标 / 丢目标时作废 */
+  private readonly targetLastPos = new THREE.Vector3();
+  private readonly targetVelocity = new THREE.Vector3();
+  private sampledTarget: THREE.Object3D | null = null;
+  private readonly steerLateral = new THREE.Vector3();
   private readonly lookTarget = new THREE.Vector3();
   private readonly orientationHelper = new THREE.Object3D();
   private readonly trailPosition = new THREE.Vector3();
@@ -524,6 +537,8 @@ export class Missile {
   /**
    * @param direction 发射方向（载机机头方向）。导弹先沿它直飞 MISSILE_BOOST_TIME 秒再开始制导；
    *                  方向非法（零向量 / 非有限数）时退回旧行为：直接指向目标，没有目标则朝 -Z。
+   * @param launcherSpeed 发射瞬间载机沿机头方向的速度（米/秒）。导弹继承它，再加上
+   *                  LAUNCH_SPEED_BOOST 作为离架初速，之后按 ACCELERATION 加速到巡航速度。
    */
   constructor(
     scene: THREE.Scene,
@@ -531,7 +546,8 @@ export class Missile {
     direction: THREE.Vector3,
     target: THREE.Object3D | null,
     particleSystem: ParticleSystem,
-    enemies: THREE.Object3D[] = []
+    enemies: THREE.Object3D[] = [],
+    launcherSpeed: number = 0
   ) {
     this.particleSystem = particleSystem;
     this.target = target;
@@ -539,6 +555,7 @@ export class Missile {
 
     // 记录发射位置
     this.startPosition = position.clone();
+    this.previousPosition.copy(position);
 
     // 导弹模型 - 使用父容器来正确控制朝向（+Z 朝前）
     this.mesh = new THREE.Group();
@@ -551,17 +568,30 @@ export class Missile {
     this.velocity = new THREE.Vector3();
     this.active = true;
 
-    // 初始速度：沿发射方向离架；方向非法时指向目标
+    // 离架速度继承载机速度；巡航速度始终明显高于载机（加力 / 速度升级 / 加速道具之后也是）
+    const inherited = Number.isFinite(launcherSpeed) ? Math.max(0, launcherSpeed) : 0;
+    this.cruiseSpeed = Math.max(
+      GAME_CONSTANTS.MISSILE.SPEED,
+      inherited + GAME_CONSTANTS.MISSILE.MIN_OVERTAKE_SPEED
+    );
+    this.currentSpeed = Math.min(
+      this.cruiseSpeed,
+      inherited + GAME_CONSTANTS.MISSILE.LAUNCH_SPEED_BOOST
+    );
+
+    // 初始方向：沿发射方向离架；方向非法时指向目标
     const directionLength = direction.length();
     if (Number.isFinite(directionLength) && directionLength > 1e-4) {
-      this.velocity.copy(direction).multiplyScalar(this.speed / directionLength);
+      this.heading.copy(direction).multiplyScalar(1 / directionLength);
     } else if (this.target) {
       this.target.getWorldPosition(this.targetWorldPos);
-      this.targetDirection.subVectors(this.targetWorldPos, position).normalize();
-      this.velocity.copy(this.targetDirection).multiplyScalar(this.speed);
-    } else {
-      this.velocity.set(0, 0, -this.speed);
+      this.targetDirection.subVectors(this.targetWorldPos, position);
+      const targetDistance = this.targetDirection.length();
+      if (Number.isFinite(targetDistance) && targetDistance > 1e-4) {
+        this.heading.copy(this.targetDirection).multiplyScalar(1 / targetDistance);
+      }
     }
+    this.velocity.copy(this.heading).multiplyScalar(this.currentSpeed);
 
     // 立即设置导弹朝向（与速度方向一致）
     if (this.velocity.length() > 0) {
@@ -605,6 +635,7 @@ export class Missile {
    */
   public update(deltaTime: number): void {
     this.lifetime += deltaTime;
+    this.previousPosition.copy(this.mesh.position);
 
     // 检查飞行距离（超过最大飞行距离则自毁）
     const flightDistance = this.mesh.position.distanceTo(this.startPosition);
@@ -637,12 +668,24 @@ export class Missile {
       }
     }
 
-    // 如果有目标，追踪目标（离架后的直飞段不制导）
-    if (this.lifetime >= MISSILE_BOOST_TIME && this.target && this.target.parent) {
-      this.huntTarget(deltaTime);
+    // 离架后一路加速到巡航速度
+    this.currentSpeed = Math.min(
+      this.cruiseSpeed,
+      this.currentSpeed + GAME_CONSTANTS.MISSILE.ACCELERATION * deltaTime
+    );
+
+    // 如果有目标，追踪目标（离架后的直飞段只记录目标运动、不制导）
+    if (this.target && this.target.parent) {
+      const tracked = this.sampleTarget(deltaTime);
+      if (tracked && this.lifetime >= MISSILE_BOOST_TIME) {
+        this.huntTarget(deltaTime);
+      }
+    } else {
+      this.sampledTarget = null;
     }
 
     // 移动导弹
+    this.velocity.copy(this.heading).multiplyScalar(this.currentSpeed);
     this.mesh.position.addScaledVector(this.velocity, deltaTime);
     this.visualPulseTime += deltaTime;
     this.updateVisuals();
@@ -668,40 +711,116 @@ export class Missile {
   }
 
   /**
-   * 追踪目标
+   * 读取目标的世界坐标（写入 targetWorldPos），并用与上一步的位置差估算目标速度。
+   * 坐标非法时返回 false（本步不制导）。换目标后的第一步、以及估算速度大得不合理
+   * （目标被瞬移 / 回收复用）时，速度按零处理。
    */
-  private huntTarget(deltaTime: number): void {
-    if (!this.target) return;
+  private sampleTarget(deltaTime: number): boolean {
+    const target = this.target;
+    if (!target) return false;
 
     // 使用 getWorldPosition 获取实时世界坐标（解决 Boss 部件位置不更新的问题）
-    this.target.getWorldPosition(this.targetWorldPos);
+    const position = this.targetWorldPos;
+    target.getWorldPosition(position);
+    if (
+      !Number.isFinite(position.x) ||
+      !Number.isFinite(position.y) ||
+      !Number.isFinite(position.z)
+    ) {
+      this.sampledTarget = null;
+      return false;
+    }
 
-    // 计算到目标的方向
-    this.targetDirection.subVectors(this.targetWorldPos, this.mesh.position).normalize();
+    const velocity = this.targetVelocity;
+    if (this.sampledTarget === target && deltaTime > 1e-4) {
+      velocity.subVectors(position, this.targetLastPos).multiplyScalar(1 / deltaTime);
+      if (!(velocity.lengthSq() <= MISSILE_TARGET_SPEED_LIMIT * MISSILE_TARGET_SPEED_LIMIT)) {
+        velocity.set(0, 0, 0);
+      }
+    } else {
+      velocity.set(0, 0, 0);
+    }
+    this.targetLastPos.copy(position);
+    this.sampledTarget = target;
+    return true;
+  }
 
-    // 获取当前速度方向
-    this.currentDirection.copy(this.velocity).normalize();
+  /**
+   * 追踪目标：三维前置追踪，飞行方向每步至多转动 turnSpeed × deltaTime。
+   * - 瞄准点 = 目标位置 + 目标速度 × 预计飞行时间（距离 / 巡航速度），对横向飞行的目标
+   *   走拦截航线而不是尾追。
+   * - 瞄准点落在自己的转弯圆以内（贴脸发射 / 掠过目标之后）时，转向速度抬高到
+   *   “沿一段圆弧正好飞到瞄准点”所需的值（2 × 速度 × sin(偏角) / 距离），
+   *   导弹不会绕着目标打转。
+   */
+  private huntTarget(deltaTime: number): void {
+    const heading = this.heading;
+    const aim = this.targetDirection;
 
-    // 计算转向角度（限制转向速度）
-    const turnAngle = this.turnSpeed * deltaTime;
-    const targetRotation = Math.atan2(this.targetDirection.x, this.targetDirection.z);
-    const currentRotation = Math.atan2(this.currentDirection.x, this.currentDirection.z);
+    // 到目标的距离 → 预计飞行时间 → 前置瞄准点
+    aim.subVectors(this.targetWorldPos, this.mesh.position);
+    const range = aim.length();
+    const leadTime = range / this.cruiseSpeed;
+    aim.addScaledVector(this.targetVelocity, leadTime);
+    const aimDistance = aim.length();
+    if (!Number.isFinite(aimDistance) || aimDistance < 1e-4) {
+      return;
+    }
+    aim.multiplyScalar(1 / aimDistance);
 
-    // 计算需要旋转的角度（选择最短路径）
-    let rotationDiff = targetRotation - currentRotation;
-    while (rotationDiff > Math.PI) rotationDiff -= Math.PI * 2;
-    while (rotationDiff < -Math.PI) rotationDiff += Math.PI * 2;
+    const cos = THREE.MathUtils.clamp(heading.dot(aim), -1, 1);
+    // heading 之外、指向瞄准点一侧的分量；长度即 sin(偏角)
+    const lateral = this.steerLateral.copy(aim).addScaledVector(heading, -cos);
+    let sin = lateral.length();
+    if (sin < 1e-5) {
+      if (cos > 0) {
+        // 已经对准
+        return;
+      }
+      // 瞄准点在正后方：水平掉头（飞行方向竖直时任取一个水平方向）
+      lateral.set(-heading.z, 0, heading.x);
+      if (lateral.lengthSq() < 1e-8) lateral.set(1, 0, 0);
+      lateral.normalize();
+      sin = 1;
+    } else {
+      lateral.multiplyScalar(1 / sin);
+    }
 
-    // 限制转向速度
-    rotationDiff = Math.max(-turnAngle, Math.min(turnAngle, rotationDiff));
+    const arcTurnSpeed = (2 * this.currentSpeed * (cos >= 0 ? sin : 1)) / aimDistance;
+    const maxAngle = Math.max(this.turnSpeed, arcTurnSpeed) * deltaTime;
+    const angle = Math.acos(cos);
+    if (!(maxAngle > 0)) {
+      return;
+    }
+    if (angle <= maxAngle) {
+      heading.copy(aim);
+      return;
+    }
+    heading
+      .multiplyScalar(Math.cos(maxAngle))
+      .addScaledVector(lateral, Math.sin(maxAngle))
+      .normalize();
+  }
 
-    // 应用新的旋转
-    const newRotation = currentRotation + rotationDiff;
-    this.velocity.set(
-      Math.sin(newRotation) * this.speed,
-      this.targetDirection.y * this.speed, // 保留部分垂直方向
-      Math.cos(newRotation) * this.speed
-    );
+  /**
+   * 本步扫过的线段（移动前 → 当前位置）上离 point 最近的点写入 out，返回两者的距离。
+   * 巡航时一步要飞好几米，只比较当前位置会从小目标身上跳过去。
+   */
+  public closestApproach(point: THREE.Vector3, out: THREE.Vector3): number {
+    const from = this.previousPosition;
+    out.subVectors(this.mesh.position, from);
+    const lengthSq = out.lengthSq();
+    let t = 1;
+    if (lengthSq > 1e-8) {
+      t = THREE.MathUtils.clamp(
+        ((point.x - from.x) * out.x + (point.y - from.y) * out.y + (point.z - from.z) * out.z) /
+          lengthSq,
+        0,
+        1
+      );
+    }
+    out.multiplyScalar(t).add(from);
+    return out.distanceTo(point);
   }
 
   private emitTrail(): void {
@@ -738,7 +857,8 @@ export class Missile {
     // 双频叠加的高频火焰闪烁（0..1 左右波动）
     const flicker = 0.5 + 0.28 * Math.sin(t * 52) + 0.22 * Math.sin(t * 87 + 1.7);
     const flickerB = 0.5 + 0.5 * Math.sin(t * 64 + 0.9);
-    const speedPulse = THREE.MathUtils.clamp(this.velocity.length() / this.speed, 0.8, 1.15);
+    // 尾焰长度随速度变化：离架时最短，加速到巡航速度时达到正常长度
+    const speedPulse = THREE.MathUtils.clamp(this.currentSpeed / this.cruiseSpeed, 0.8, 1.15);
     // 离架渐入：0.05 秒前完全不可见，0.35 秒时达到正常亮度
     const launchFade = THREE.MathUtils.smoothstep(
       this.lifetime,
@@ -828,6 +948,7 @@ export class MissileSystem {
   private particleSystem: ParticleSystem;
   private missiles: Missile[] = [];
   private readonly collisionTargetPosition = new THREE.Vector3();
+  private readonly collisionClosestPoint = new THREE.Vector3();
   private enemies: THREE.Object3D[] = []; // 存储敌人列表，用于重新锁定
   /** 预热用的隐形导弹模型及其材质（材质一直保留，着色器程序才不会被渲染器回收） */
   private warmModel: THREE.Group | null = null;
@@ -852,16 +973,23 @@ export class MissileSystem {
   }
 
   /**
-   * 发射导弹：从 position 沿 direction 离架，直飞一小段后追踪 target
+   * 发射导弹：从 position 沿 direction 离架，直飞一小段后追踪 target。
+   * launcherSpeed 为发射瞬间载机沿 direction 的速度（米/秒），导弹继承它并继续加速（见 Missile）。
    */
-  public fire(position: THREE.Vector3, direction: THREE.Vector3, target?: THREE.Object3D): void {
+  public fire(
+    position: THREE.Vector3,
+    direction: THREE.Vector3,
+    target?: THREE.Object3D,
+    launcherSpeed: number = 0
+  ): void {
     const missile = new Missile(
       this.scene,
       position,
       direction,
       target || null,
       this.particleSystem,
-      this.enemies
+      this.enemies,
+      launcherSpeed
     );
     this.missiles.push(missile);
   }
@@ -954,13 +1082,15 @@ export class MissileSystem {
           continue;
         }
 
-        const distance = missile.mesh.position.distanceTo(targetWorldPos);
+        // 按本步扫过的线段取最近点，而不是只看当前位置
+        const closest = this.collisionClosestPoint;
+        const distance = missile.closestApproach(targetWorldPos, closest);
         // 大型目标（Boss 部件 / 舰船）按声明的命中半径判定；未声明的（普通敌机）用近炸距离
         const hitDistance = Math.max(2, getDeclaredHitRadius(targetMesh, MISSILE_PROXIMITY_RADIUS));
 
         if (distance < hitDistance) {
           missile.active = false;
-          const impactPosition = missile.mesh.position.clone().lerp(targetWorldPos, 0.35);
+          const impactPosition = closest.clone().lerp(targetWorldPos, 0.35);
           this.particleSystem.createMissileImpact(impactPosition, 1.55);
           onHit(targetMesh, impactPosition);
           break;

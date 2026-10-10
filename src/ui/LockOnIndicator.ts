@@ -11,8 +11,8 @@ import {
   type LockOnState,
 } from '@/ui/theme/hudTokens';
 
-/** 准星 = 机头轴线前方这么远的一点投到屏幕上的位置（米） */
-const AIM_DISTANCE = 600;
+/** 准星 = 机头轴线前方这么远的一点投到屏幕上的位置（米）；机炮辅助的十字从同一个距离拉近 */
+const AIM_DISTANCE = GAME_CONSTANTS.GUN_ASSIST.REFERENCE_RANGE;
 /** 丢锁后的红色提示时长 */
 const BREAK_TREATMENT_MS = 260;
 /** “未锁定 / 无导弹”提示的显示时长 */
@@ -22,6 +22,9 @@ const MIN_ACQUIRE_RADIUS = 44;
 const MAX_ACQUIRE_RADIUS_RATIO = 0.3;
 /** 准星跑出视口这么多像素后不再绘制（追尾视角急拉杆时机头轴线会甩出屏幕） */
 const OFFSCREEN_MARGIN = 24;
+/** 机炮十字被触屏辅助拉离机头轴线超过这么多像素才换成“辅助中”的样子；回到这么近才换回来 */
+const CROSS_ASSIST_ON_PX = 3;
+const CROSS_ASSIST_OFF_PX = 1.5;
 /** 距离读数的取整步长（米），避免每帧改写文字 */
 const RANGE_STEP = 10;
 const ARC_RADIUS = 46;
@@ -41,9 +44,11 @@ interface PlacedPosition {
 
 /**
  * 瞄准与导弹锁定显示：
- * - 机炮准星：始终画在机头轴线前方 600 米那一点的屏幕位置（第一 / 第三人称都对准弹道），
- *   每个渲染帧更新（renderUpdate）。
- * - 导引头捕获环：以准星为圆心。只要有导弹，导引头一直工作（MissileSeeker，每个模拟步 update）。
+ * - 机炮准星：画在机头轴线前方 600 米那一点的屏幕位置（第一 / 第三人称都对准弹道），
+ *   每个渲染帧更新（renderUpdate）。触屏机炮辅助把弹道拉向目标时，十字跟着移到辅助方向上
+ *   （同样取 600 米处），换成锁定色并套一个小菱形，机头轴线的位置留一个暗标记。
+ * - 导引头捕获环：始终以机头轴线为圆心，不随机炮十字移动。只要有导弹，导引头一直工作
+ *   （MissileSeeker，每个模拟步 update）。
  * - 跟踪：目标上的角标随进度收紧 + 进度弧；锁定：角标变锁定色 + “锁定”标签与距离；
  *   丢锁：短暂的红色提示；“未锁定 / 无导弹”提示显示在准星下方。
  * - 准星旁显示导弹余量；机炮提前量标记（由 GunLeadSolver 给出世界坐标）。
@@ -64,6 +69,7 @@ export class LockOnIndicator {
   private container: HTMLDivElement;
   private reticle: HTMLDivElement;
   private ring: HTMLDivElement;
+  private cross: HTMLDivElement;
   private cue: HTMLDivElement;
   private count: HTMLDivElement;
   private countLabel: HTMLSpanElement;
@@ -94,6 +100,10 @@ export class LockOnIndicator {
   private shownRange: number = -1;
   private shownBoxSize: number = -1;
   private shownArcOffset: number = -1;
+  /** 机炮十字相对机头轴线的屏幕偏移（已写进样式的值）与“辅助中”的样子是否生效 */
+  private crossShiftX: number = 0;
+  private crossShiftY: number = 0;
+  private crossAssisted: boolean = false;
 
   private viewportWidth: number = window.innerWidth;
   private viewportHeight: number = window.innerHeight;
@@ -104,8 +114,10 @@ export class LockOnIndicator {
   private readonly worldPosition = new Vector3();
   /** 模拟步里导引头使用的准星位置 */
   private readonly simAim: ScreenPoint = { x: 0, y: 0, visible: false };
-  /** 最近一个渲染帧画出的准星位置 */
+  /** 最近一个渲染帧画出的准星位置（机头轴线；捕获环的圆心） */
   private readonly renderAim: ScreenPoint = { x: 0, y: 0, visible: false };
+  /** 最近一个渲染帧画出的机炮十字位置（没有辅助偏移时与 renderAim 相同） */
+  private readonly renderCross: ScreenPoint = { x: 0, y: 0, visible: false };
   private readonly scratchScreen: ScreenPoint = { x: 0, y: 0, visible: false };
   private readonly textContentCache = new WeakMap<Element, string>();
   private readonly styleValueCache = new WeakMap<Element, Map<string, string>>();
@@ -130,6 +142,7 @@ export class LockOnIndicator {
     this.setStyleValue(this.container, 'contain', 'layout style paint');
 
     // 准星锚点：机炮十字 + 捕获环 + 提示 + 导弹余量，整体跟随机头轴线的屏幕位置
+    // （十字在触屏辅助生效时相对锚点再偏移，见 renderGunCross）
     this.reticle = this.createAnchor('reticle');
     this.ring = document.createElement('div');
     this.ring.className = 'lk-ring';
@@ -147,6 +160,15 @@ export class LockOnIndicator {
       tick.className = part;
       cross.appendChild(tick);
     }
+    // “辅助中”的小菱形（只在十字被拉离机头轴线时显示）
+    const assistMark = document.createElement('b');
+    assistMark.className = 'lk-assist';
+    cross.appendChild(assistMark);
+    this.cross = cross;
+    // 机头轴线标记：十字被拉走时留在原位，让玩家仍然看得到机头指向
+    const noseMark = document.createElement('div');
+    noseMark.className = 'lk-nose';
+    noseMark.dataset.lockChrome = 'nose-mark';
     this.cue = document.createElement('div');
     this.cue.className = 'lk-cue';
     this.cue.dataset.lockChrome = 'cue';
@@ -161,7 +183,7 @@ export class LockOnIndicator {
       this.count.appendChild(pip);
       this.countPips.push(pip);
     }
-    this.reticle.append(this.ring, cross, this.cue, this.count);
+    this.reticle.append(this.ring, noseMark, cross, this.cue, this.count);
 
     // 目标锚点：角标 + 进度弧 + “锁定 / 距离”标签
     this.targetAnchor = this.createAnchor('target');
@@ -224,6 +246,8 @@ export class LockOnIndicator {
     window.addEventListener('resize', this.resizeHandler);
     window.addEventListener('orientationchange', this.resizeHandler);
     this.unsubscribeLocale = onLocaleChange(() => this.renderStaticText());
+    // 指示器在开始菜单阶段就已创建：之后（init 之前）切换过语言时，固定文案按当前语言补写
+    this.renderStaticText();
     this.initialized = true;
   }
 
@@ -272,9 +296,19 @@ export class LockOnIndicator {
     return this.seeker.getProgress();
   }
 
-  /** 最近一个渲染帧的准星屏幕位置（像素） */
+  /** 最近一个渲染帧的准星屏幕位置（像素）：机头轴线，也是捕获环的圆心 */
   public getAimScreen(): Readonly<ScreenPoint> {
     return this.renderAim;
+  }
+
+  /** 最近一个渲染帧的机炮十字屏幕位置（像素）：没有辅助偏移时与 getAimScreen 相同 */
+  public getGunCrossScreen(): Readonly<ScreenPoint> {
+    return this.renderCross;
+  }
+
+  /** 机炮十字是否正显示成“辅助中”（被触屏辅助拉离了机头轴线） */
+  public isGunCrossAssisted(): boolean {
+    return this.crossAssisted && this.renderCross.visible;
   }
 
   /** 捕获环半径（像素） */
@@ -396,6 +430,10 @@ export class LockOnIndicator {
    * @param visible 玩家存活且在飞行（菜单 / 剧情冻结 / 暂停 / 等待复活时为 false）
    * @param leadPoint 机炮提前量点的世界坐标；没有可靠解时传 null
    * @param leadOnTarget 机头是否已压在提前量点上
+   * @param gunAimDirection 触屏辅助下子弹的发射方向（世界坐标单位向量）；机炮十字画在这个方向上。
+   *   没有辅助偏移（含桌面端）时传 null，十字就在机头轴线上
+   * @param gunAimDistance 十字画在该方向上多远处（米）：辅助压住目标时是瞄准点的距离，十字因此
+   *   在两种视角下都落在瞄准点上；非正 / 非有限数按准星参考距离处理
    */
   public renderUpdate(
     visible: boolean,
@@ -403,11 +441,14 @@ export class LockOnIndicator {
     playerQuaternion: Quaternion,
     camera: Camera,
     leadPoint: Vector3 | null,
-    leadOnTarget: boolean
+    leadOnTarget: boolean,
+    gunAimDirection: Vector3 | null = null,
+    gunAimDistance: number = AIM_DISTANCE
   ): void {
     if (!visible || this.paused) {
       this.setStyleValue(this.container, 'display', 'none');
       this.renderAim.visible = false;
+      this.renderCross.visible = false;
       return;
     }
     this.init();
@@ -424,6 +465,7 @@ export class LockOnIndicator {
       this.place(this.reticle, aim.x, aim.y);
     }
     this.setStyleValue(this.reticle, 'visibility', aimOnScreen ? 'visible' : 'hidden');
+    this.renderGunCross(aimOnScreen, playerPosition, camera, gunAimDirection, gunAimDistance);
 
     if (this.cueKind !== null) {
       if (now < this.cueUntilMs) {
@@ -452,6 +494,72 @@ export class LockOnIndicator {
     if (leadShown) {
       this.setAttr(this.leadAnchor, 'data-on', leadOnTarget ? 'true' : 'false');
     }
+  }
+
+  /**
+   * 机炮十字：没有辅助方向时就在机头轴线上（与捕获环同心，样子不变）；有辅助方向时画在该方向
+   * 前方 distance 米处，并在偏移看得出来时换成“辅助中”的样子（机头位置留暗标记）。
+   * 只移动十字：准星锚点、捕获环、提示和导引头用的准星位置都留在机头轴线上。
+   */
+  private renderGunCross(
+    aimOnScreen: boolean,
+    playerPosition: Vector3,
+    camera: Camera,
+    direction: Vector3 | null,
+    distance: number
+  ): void {
+    const aim = this.renderAim;
+    let shiftX = 0;
+    let shiftY = 0;
+    let shown = aimOnScreen;
+    if (aimOnScreen && direction) {
+      const reach = Number.isFinite(distance) && distance > 0 ? distance : AIM_DISTANCE;
+      const point = this.aimWorld.copy(direction).multiplyScalar(reach).add(playerPosition);
+      // 方向含 NaN / Infinity：按没有辅助处理（PlayerSystem 同样回落到机头方向）
+      if (Number.isFinite(point.x) && Number.isFinite(point.y) && Number.isFinite(point.z)) {
+        const screen = this.scratchScreen;
+        if (
+          projectToScreen(point, camera, this.viewportWidth, this.viewportHeight, screen) &&
+          this.isNearViewport(screen.x, screen.y)
+        ) {
+          shiftX = screen.x - aim.x;
+          shiftY = screen.y - aim.y;
+        } else {
+          // 辅助方向落在相机后方 / 视口之外：不画十字（画在机头上会指错弹道）
+          shown = false;
+        }
+      }
+    }
+
+    const shift = Math.sqrt(shiftX * shiftX + shiftY * shiftY);
+    const assisted =
+      shown && shift >= (this.crossAssisted ? CROSS_ASSIST_OFF_PX : CROSS_ASSIST_ON_PX);
+    this.crossAssisted = assisted;
+    this.setAttr(this.reticle, 'data-gun-assist', assisted ? 'true' : 'false');
+    // '' = 跟随准星锚点的可见性（锚点隐藏时不能单独显示出来）
+    this.setStyleValue(this.cross, 'visibility', shown ? '' : 'hidden');
+    if (shown) {
+      this.shiftCross(shiftX, shiftY);
+    }
+
+    const cross = this.renderCross;
+    cross.x = aim.x + shiftX;
+    cross.y = aim.y + shiftY;
+    cross.visible = shown;
+  }
+
+  /** 十字相对准星锚点的偏移；变化不足 0.25 像素时不改写样式，回到原位时去掉 transform */
+  private shiftCross(x: number, y: number): void {
+    const settled = Math.abs(this.crossShiftX - x) < 0.25 && Math.abs(this.crossShiftY - y) < 0.25;
+    // 回到原位的最后一小段必须写到 0，否则十字会停在离机头轴线不到 0.25 像素的地方
+    const returning = x === 0 && y === 0 && (this.crossShiftX !== 0 || this.crossShiftY !== 0);
+    if (settled && !returning) {
+      return;
+    }
+    this.crossShiftX = x;
+    this.crossShiftY = y;
+    this.cross.style.transform =
+      x === 0 && y === 0 ? '' : `translate3d(${x.toFixed(1)}px, ${y.toFixed(1)}px, 0)`;
   }
 
   /** 目标角标：跟踪时随进度收紧并画进度弧；锁定后固定在最小尺寸并显示标签；丢锁时原地变红 */
@@ -743,6 +851,43 @@ export class LockOnIndicator {
       #lock-on-indicator .lk-w { left: 0; top: 14px; width: 9px; height: 2px; }
       #lock-on-indicator .lk-e { right: 0; top: 14px; width: 9px; height: 2px; }
       #lock-on-indicator .lk-dot { left: 13px; top: 13px; width: 4px; height: 4px; border-radius: 50%; }
+
+      /* 触屏辅助把十字拉离机头轴线时：十字换成锁定色并套一个小菱形，机头位置留一个暗标记 */
+      #lock-on-indicator .lk-cross {
+        will-change: transform;
+      }
+      #lock-on-indicator [data-gun-assist="true"] .lk-cross i {
+        background: var(--hud-lock, ${HUD_COLORS.lock});
+        box-shadow: 0 0 5px rgba(${lockRgb}, 0.85), 0 0 2px rgba(0, 0, 0, 0.95);
+      }
+      #lock-on-indicator .lk-assist {
+        display: none;
+        position: absolute;
+        left: 10.5px;
+        top: 10.5px;
+        width: 9px;
+        height: 9px;
+        box-sizing: border-box;
+        border: 1px solid var(--hud-lock, ${HUD_COLORS.lock});
+        transform: rotate(45deg);
+      }
+      #lock-on-indicator .lk-nose {
+        display: none;
+        position: absolute;
+        left: -4px;
+        top: -4px;
+        width: 8px;
+        height: 8px;
+        box-sizing: border-box;
+        border: 1px solid var(--hud-weapon, ${HUD_COLORS.weapon});
+        border-radius: 50%;
+        box-shadow: 0 0 2px rgba(0, 0, 0, 0.9);
+        opacity: 0.6;
+      }
+      #lock-on-indicator [data-gun-assist="true"] .lk-assist,
+      #lock-on-indicator [data-gun-assist="true"] .lk-nose {
+        display: block;
+      }
 
       /* 导引头捕获环 */
       #lock-on-indicator .lk-ring {
