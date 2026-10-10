@@ -2426,11 +2426,13 @@ export class GameCoordinator {
    * 后台标签页可能被浏览器整个丢弃（iPad 的 Safari 常见），丢弃时页面收不到任何事件，
    * 所以在转入后台的那一刻写。
    *
-   * 写法就是暂停菜单的“保存并退出”（CampaignFlowController.saveForExit：此刻的快照重写在当前进度的
-   * 检查点位置上，不显示存档提示），只是不退出——对局原样继续，回到页面时什么都没变；之后
-   * “继续战役”与保存并退出之后一样，从那一波 / Boss 战 / 机库重新开始。
+   * 写法和暂停菜单的“保存并退出”一样（CampaignFlowController.saveInBackground：此刻的快照重写在
+   * 当前进度的检查点位置上，不显示存档提示），只是不退出——对局原样继续，回到页面时什么都没变；
+   * 之后“继续战役”与保存并退出之后一样，从那一波 / Boss 战 / 机库重新开始。
    * 只在“保存并退出”会写的时候写：对局进行中（不在菜单，没有任务失败 / 任务完成），不是 Boss 模式，
    * 已经到过第一个检查点且战役尚未通关。剧情卡片 / 结算 / 机库期间照样写（机库里买的升级不会丢）。
+   * 与“保存并退出”只差一条：转入后台不是玩家自己选的，所以覆盖同一位置的检查点时生命数不会
+   * 写得比已存的少（见 saveInBackground）。
    *
    * 一次转入后台只写一次（visibilitychange 与 pagehide 会前后脚到），页面重新可见后才有下一次。
    * 不向外抛错：存储不可用（隐私模式）时不能打断页面的事件处理。
@@ -2444,7 +2446,7 @@ export class GameCoordinator {
       return;
     }
     try {
-      this.campaign.saveForExit();
+      this.campaign.saveInBackground();
     } catch (error) {
       console.error('Background campaign save failed', error);
     }
