@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { GameConfig } from '@/config';
-import type { BossConfig } from '@/features/boss/BossTypes';
+import { getBossForLevel, type BossConfig } from '@/features/boss/BossTypes';
+import { EnemyType } from '@/features/enemy/EnemyTypes';
 import { setLocale, type Locale } from '@/i18n';
 import { StartMenu } from '@/ui/StartMenu';
 import { LOCALES, resetLocale, textIn } from './i18nTestUtils';
@@ -142,6 +143,7 @@ vi.mock('@/features/aircraft/AircraftMeshFactory', async () => {
   };
   return {
     createPlayerMesh: () => box('player'),
+    createFriendlyMesh: () => box('friendly'),
     createEnemyMesh: (config: { type: string }) => box(`enemy:${config.type}`),
     updateAircraftSignals: () => undefined,
     updatePlayerAfterburner: () => undefined,
@@ -256,6 +258,20 @@ describe('Hangar (batch X5, spec 9)', () => {
     const scene = renderer ? last(renderer.frames)?.scene : undefined;
     expect(scene, 'a frame was drawn').toBeDefined();
     return (scene as THREE.Scene).children.filter((child) => child.type === 'Group');
+  }
+
+  /** 展台上的模型是哪个工厂替身造的（替身把自己的标记写在模型的名字上）；展台空着就是 undefined */
+  function builtOnStage(): string | undefined {
+    const tags: string[] = [];
+    for (const model of stageModels()) {
+      model.traverse((object) => {
+        if (models.created.includes(object.name)) {
+          tags.push(object.name);
+        }
+      });
+    }
+    expect(tags.length, 'one model at most').toBeLessThanOrEqual(1);
+    return tags[0];
   }
 
   function hangarRenderer(): FakeRenderer {
@@ -616,6 +632,9 @@ describe('Hangar (batch X5, spec 9)', () => {
       expect(new Set(names).size, `every page shows a different model: ${names.join(', ')}`).toBe(
         total
       );
+      // 每一页都真的载入了：没有哪一页停在“无法加载”
+      expect(names.join(' | ')).not.toMatch(/could not load|无法加载/i);
+      expect(consoleError, 'no model failed to load').not.toHaveBeenCalled();
 
       click('next-btn');
       await modelLoaded();
@@ -691,7 +710,7 @@ describe('Hangar (batch X5, spec 9)', () => {
       expect(modelName()).not.toMatch(/loading|加载/i);
     });
 
-    it('names the kind of model shown (player, enemy, boss, ordnance)', async () => {
+    it('names the kind of model shown (player, ally, enemy, boss, ordnance)', async () => {
       createMenu();
       await openHangar();
       const { total } = page();
@@ -703,8 +722,10 @@ describe('Hangar (batch X5, spec 9)', () => {
       }
 
       expect(kinds[0]).toBe('Player');
-      expect(new Set(kinds)).toEqual(new Set(['Player', 'Enemy', 'Boss', 'Ordnance']));
       expect(kinds.every((kind) => kind.length > 0)).toBe(true);
+      // 同一类的模型挨在一起，各类按这个先后出现一次：没有哪一页夹在别的类别中间
+      const runs = kinds.filter((kind, index) => index === 0 || kind !== kinds[index - 1]);
+      expect(runs).toEqual(['Player', 'Ally', 'Enemy', 'Boss', 'Ordnance']);
     });
 
     it('a sideways swipe on the stage switches models; a tap does not', async () => {
@@ -754,6 +775,230 @@ describe('Hangar (batch X5, spec 9)', () => {
       expect(stageModels()).toHaveLength(1);
       expect(page().index).toBe(1);
       expect(modelName()).toBe(COPY.firstModel.en);
+    });
+  });
+
+  describe('what is on show', () => {
+    // 这一轮定下来的展出清单，共 22 页：玩家机在最前，友军僚机第二，然后是八种敌机（原有的五种
+    // 在前，新加的干扰机 / 导弹攻击机 / 幽灵机跟在后面），十个 Boss 按关卡先后，最后是两种导弹。
+    // 清单写在这里，不从机库自己的数组里抄。
+    type Kind = 'player' | 'ally' | 'enemy' | 'boss' | 'ordnance';
+    const KIND_LABEL: Readonly<Record<Kind, { en: string; zh: string }>> = {
+      player: { en: 'Player', zh: '玩家' },
+      ally: { en: 'Ally', zh: '友军' },
+      enemy: { en: 'Enemy', zh: '敌机' },
+      boss: { en: 'Boss', zh: 'Boss' },
+      ordnance: { en: 'Ordnance', zh: '弹药' },
+    };
+    const WINGMAN = { en: 'Allied Wingman', zh: '友军僚机' } as const;
+    const ENEMY_JETS = [
+      'SCOUT',
+      'FIGHTER',
+      'HEAVY',
+      'SNIPER',
+      'ACE',
+      'JAMMER',
+      'STRIKER',
+      'WRAITH',
+    ] as const;
+    const NEW_ENEMY_JETS = [
+      { type: 'JAMMER', en: 'Jammer', zh: '电子干扰机' },
+      { type: 'STRIKER', en: 'Striker', zh: '导弹攻击机' },
+      { type: 'WRAITH', en: 'Wraith', zh: '幽灵机' },
+    ] as const;
+    const CAMPAIGN_LEVELS = 10;
+    const CJK = /[一-鿿]/;
+
+    /** 每一页该由哪个工厂造、属于哪一类 */
+    function exhibits(): Array<{ built: string; kind: Kind }> {
+      const bosses = Array.from({ length: CAMPAIGN_LEVELS }, (_, level) =>
+        getBossForLevel(level + 1)
+      );
+      return [
+        { built: 'player', kind: 'player' },
+        { built: 'friendly', kind: 'ally' },
+        ...ENEMY_JETS.map((type) => ({ built: `enemy:${type}`, kind: 'enemy' as const })),
+        ...bosses.map((type) => ({ built: `boss:${type}`, kind: 'boss' as const })),
+        { built: 'missile:player', kind: 'ordnance' },
+        { built: 'missile:boss', kind: 'ordnance' },
+      ];
+    }
+
+    function kindShown(): string {
+      return readableText(byId('aircraft-type'));
+    }
+
+    interface PageSeen {
+      built: string | undefined;
+      name: { en: string; zh: string };
+      kind: { en: string; zh: string };
+    }
+
+    /** 从第一页起逐页看一遍：谁造的、两种语言下的名称与类别（看完每一页都切回英文） */
+    async function walkEveryPage(): Promise<PageSeen[]> {
+      const { total } = page();
+      const seen: PageSeen[] = [];
+      for (let index = 1; index <= total; index++) {
+        expect(page().index).toBe(index);
+        const english = { name: modelName(), kind: kindShown() };
+        setLocale('zh-CN');
+        expect(page().index, 'a language switch keeps the page').toBe(index);
+        seen.push({
+          built: builtOnStage(),
+          name: { en: english.name, zh: modelName() },
+          kind: { en: english.kind, zh: kindShown() },
+        });
+        setLocale('en');
+        if (index < total) {
+          click('next-btn');
+          await modelLoaded();
+        }
+      }
+      return seen;
+    }
+
+    /** 往后翻到名称是 name 的那一页；翻完一圈都没有就失败 */
+    async function goToModelNamed(name: string): Promise<number> {
+      const { total } = page();
+      for (let turned = 0; turned < total && modelName() !== name; turned++) {
+        click('next-btn');
+        await modelLoaded();
+      }
+      expect(modelName(), `a page named "${name}"`).toBe(name);
+      return page().index;
+    }
+
+    it('the list above accounts for every enemy type the game has', () => {
+      // 游戏里再加机型时，它在机库里排第几页要先定下来，再补进上面的清单
+      expect([...ENEMY_JETS].sort()).toEqual(Object.values(EnemyType).map(String).sort());
+    });
+
+    it('shows the player jet, the wingman, the eight enemy jets, the ten bosses by level and the two missiles, in that order', async () => {
+      createMenu();
+      await openHangar();
+      const expected = exhibits();
+      expect(expected).toHaveLength(22);
+      expect(page()).toEqual({ index: 1, total: 22 });
+
+      const seen = await walkEveryPage();
+
+      expect(seen.map((shown) => shown.built)).toEqual(expected.map((exhibit) => exhibit.built));
+      expect(seen.map((shown) => shown.kind.en)).toEqual(
+        expected.map((exhibit) => KIND_LABEL[exhibit.kind].en)
+      );
+      expect(consoleError, 'no model failed to load').not.toHaveBeenCalled();
+    });
+
+    it('every page has a name and a kind in both languages', async () => {
+      createMenu();
+      await openHangar();
+      const expected = exhibits();
+
+      const seen = await walkEveryPage();
+
+      expect(seen).toHaveLength(expected.length);
+      seen.forEach((shown, index) => {
+        const where = `page ${index + 1} (${shown.name.en})`;
+        expect(shown.name.en, `${where}: English name`).toMatch(/[A-Za-z]/);
+        expect(shown.name.en, `${where}: English name`).not.toMatch(CJK);
+        expect(shown.name.zh, `${where}: Chinese name`).toMatch(CJK);
+        for (const name of [shown.name.en, shown.name.zh]) {
+          expect(name, where).not.toMatch(/loading|could not load|加载|\{|\}|undefined/i);
+        }
+        expect(shown.kind, `${where}: kind`).toEqual(KIND_LABEL[expected[index].kind]);
+      });
+      for (const locale of ['en', 'zh'] as const) {
+        const names = seen.map((shown) => shown.name[locale]);
+        expect(new Set(names).size, `no two pages share a name (${locale}): ${names}`).toBe(
+          names.length
+        );
+      }
+    });
+
+    it.each(LOCALES)(
+      'the wingman has the second page, under its own name and kind (%s)',
+      async (locale) => {
+        setLocale(locale);
+        createMenu();
+        await openHangar();
+
+        click('next-btn');
+        await modelLoaded();
+
+        expect(page().index).toBe(2);
+        expect(modelName()).toBe(textIn(WINGMAN, locale));
+        expect(kindShown()).toBe(textIn(KIND_LABEL.ally, locale));
+        expect(byId('aircraft-type').dataset.type).toBe('ally');
+        expect(stageModels()).toHaveLength(1);
+      }
+    );
+
+    it('the wingman is built by the friendly-aircraft factory, not by an enemy builder', async () => {
+      createMenu();
+      await openHangar();
+
+      await goToModelNamed(WINGMAN.en);
+
+      expect(builtOnStage()).toBe('friendly');
+      expect(models.created).toEqual(['player', 'friendly']);
+    });
+
+    it('the wingman is an ally only on its own page: the pages either side say player and enemy', async () => {
+      createMenu();
+      await openHangar();
+      const tag = byId('aircraft-type');
+      expect(kindShown()).toBe(KIND_LABEL.player.en);
+      expect(tag.dataset.type).not.toBe('ally');
+
+      click('next-btn');
+      await modelLoaded();
+      expect(kindShown()).toBe(KIND_LABEL.ally.en);
+
+      click('next-btn');
+      await modelLoaded();
+      expect(page().index).toBe(3);
+      expect(kindShown()).toBe(KIND_LABEL.enemy.en);
+      expect(tag.dataset.type).not.toBe('ally');
+      expect(builtOnStage()).toMatch(/^enemy:/);
+
+      click('prev-btn');
+      await modelLoaded();
+      expect(modelName()).toBe(WINGMAN.en);
+      expect(kindShown()).toBe(KIND_LABEL.ally.en);
+      expect(tag.dataset.type).toBe('ally');
+    });
+
+    it.each(NEW_ENEMY_JETS.map((jet) => [jet.en, jet.zh, jet] as const))(
+      'has a page for the %s (%s), an enemy jet with its own model',
+      async (_english, _chinese, jet) => {
+        createMenu();
+        await openHangar();
+
+        const index = await goToModelNamed(jet.en);
+
+        expect(kindShown()).toBe(KIND_LABEL.enemy.en);
+        expect(builtOnStage()).toBe(`enemy:${jet.type}`);
+        expect(stageModels()).toHaveLength(1);
+
+        setLocale('zh-CN');
+        expect(page().index).toBe(index);
+        expect(modelName()).toBe(jet.zh);
+        expect(kindShown()).toBe(KIND_LABEL.enemy.zh);
+        expect(stageModels()).toHaveLength(1);
+      }
+    );
+
+    it('opened in Chinese, the new pages are found under their Chinese names as well', async () => {
+      setLocale('zh-CN');
+      createMenu();
+      await openHangar();
+
+      for (const exhibit of [WINGMAN, ...NEW_ENEMY_JETS]) {
+        await goToModelNamed(exhibit.zh);
+        expect(stageModels()).toHaveLength(1);
+      }
+
+      expect(consoleError).not.toHaveBeenCalled();
     });
   });
 
