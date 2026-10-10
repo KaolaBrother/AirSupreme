@@ -57,6 +57,11 @@ export interface DevHookAccess {
   getMusic(): MusicSystem;
   playGenericRadio(key: GenericRadioKey): void;
   onWingmanEvent(id: WingmanId, event: WingmanEvent): void;
+  /**
+   * 把战役放到第 level 关、第 waveIndex 波（从 0 起），走读档续玩的同一条入关路径；
+   * 返回是否已开始（关卡不存在、不在战斗中、Boss 模式时为 false）。
+   */
+  startLevel?(level: number, waveIndex: number): boolean;
 }
 
 interface Vec3Like {
@@ -145,6 +150,10 @@ export function installDevHooks(access: DevHookAccess): void {
       levelState: levelManager?.getState() ?? null,
       terrainId: levelManager?.getCurrentLevelConfig()?.terrain ?? null,
       waveIndex: levelManager?.getCurrentWaveIndex() ?? null,
+      // 本波的编成与到场方式；waveGroupCenters 为各路群中心（夹击两个，其余一个）
+      waveArrival: levelManager?.getCurrentWaveConfig()?.arrival ?? null,
+      waveLineup: levelManager?.getCurrentWaveConfig()?.lineup ?? null,
+      waveGroupCenters: levelManager?.getWaveGroupCenters() ?? [],
       jetsAlive: enemySystem?.getAliveEnemyCount() ?? 0,
       friendlies: enemySystem?.getFriendlyAIs().length ?? 0,
       unitsAlive: units.length,
@@ -479,6 +488,26 @@ export function installDevHooks(access: DevHookAccess): void {
     },
     setTimeScale: (scale: number) => access.gameLoop.setTimeScale(scale),
     continueHangar: () => access.clickHangarContinue(),
+    /**
+     * 直接去某一关的某一波（验收后期关卡用）：wave 为 HUD 上显示的波次号（从 1 起，缺省 1）。
+     * 走读档续玩的同一条路径（清场 → 加载关卡 → 入关简报 → 开波），并解锁到该关为止的武器；
+     * 已买的升级、升级点、分数与生命数不变。剧情卡片 / 机库打开时不执行。
+     * 返回 { level, wave, waveIndex }，没有执行时返回 false。
+     */
+    startLevel: (level: number, wave: number = 1) => {
+      if (access.isStoryHold() || access.getUpgradeMenuVisible() || !access.startLevel) {
+        return false;
+      }
+      const levelId = Math.floor(Number(level));
+      const waveIndex = Number.isFinite(wave) ? Math.max(0, Math.floor(wave) - 1) : 0;
+      if (!Number.isFinite(levelId) || !access.startLevel(levelId, waveIndex)) return false;
+      const session = access.getSession();
+      return {
+        level: session.getLevel(),
+        wave: session.getWave() + 1,
+        waveIndex: session.getWave(),
+      };
+    },
     /** 直接扣血（无视无敌模式，测试阵亡 / 结算 / 检查点继续） */
     damagePlayer: (amount: number) => {
       originalTakeDamage(Number.isFinite(amount) ? amount : 0);

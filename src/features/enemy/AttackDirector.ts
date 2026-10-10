@@ -21,7 +21,15 @@ export const ATTACK_DIRECTOR_RULES = {
   BOSS_FIGHT_TOKENS: 2,
   /** 令牌数上限：6 架均匀分布时正好两两相隔 60° */
   MAX_TOKENS: 6,
+  /**
+   * 成对机型（侦察机）交还令牌后，它那一侧还被记住这么久（秒）：期间另一架新领到令牌的
+   * 成对机型仍然取它的对面——两架一前一后地打，也是一左一右
+   */
+  PAIR_MEMORY_SECONDS: 3.5,
 } as const;
+
+/** 记住的成对机型数（最近持过令牌的几架） */
+const PAIR_MEMORY_SLOTS = 4;
 
 /** 导演眼里的一架敌机（EnemyAI 实现；测试里可以用假对象） */
 export interface IDirectedJet {
@@ -66,12 +74,29 @@ export class AttackDirector {
   /** 逐步复用：本步持令牌的敌机（按方位分配顺序排好）与它们的指派方位 */
   private readonly holders: IDirectedJet[] = [];
   private readonly bearings: number[] = [];
+  /** 最近持过令牌的成对机型：是谁、指派在哪个方位、多久以前（秒） */
+  private readonly pairJets: Array<IDirectedJet | null> = [];
+  private readonly pairBearings: number[] = [];
+  private readonly pairAges: number[] = [];
+
+  constructor() {
+    for (let i = 0; i < PAIR_MEMORY_SLOTS; i++) {
+      this.pairJets.push(null);
+      this.pairBearings.push(Number.NaN);
+      this.pairAges.push(Infinity);
+    }
+  }
 
   /** 清空记账（换关 / 清场）；各敌机的 orders 由它们自己在重新生成时复位 */
   public reset(): void {
     this.sequence = 0;
     this.holders.length = 0;
     this.bearings.length = 0;
+    for (let i = 0; i < PAIR_MEMORY_SLOTS; i++) {
+      this.pairJets[i] = null;
+      this.pairBearings[i] = Number.NaN;
+      this.pairAges[i] = Infinity;
+    }
   }
 
   /**
@@ -137,6 +162,50 @@ export class AttackDirector {
         this.assignBearings(playerPosition);
       }
     }
+    this.rememberPairs(step);
+  }
+
+  /** 记下本步持令牌的成对机型各自的指派方位；没再持有的逐步变旧 */
+  private rememberPairs(step: number): void {
+    const jets = this.pairJets;
+    const ages = this.pairAges;
+    for (let i = 0; i < PAIR_MEMORY_SLOTS; i++) {
+      if (jets[i] === null) continue;
+      ages[i] += step;
+      if (ages[i] > ATTACK_DIRECTOR_RULES.PAIR_MEMORY_SECONDS) jets[i] = null;
+    }
+    const holders = this.holders;
+    for (let i = 0; i < holders.length; i++) {
+      const jet = holders[i];
+      if (!jet.getAttackRequest()?.pairsOpposite || !Number.isFinite(jet.orders.bearing)) continue;
+      // 它自己的格子；没有就用空格子，再没有就顶掉最旧的
+      let slot = -1;
+      for (let j = 0; j < PAIR_MEMORY_SLOTS; j++) {
+        if (jets[j] === jet) {
+          slot = j;
+          break;
+        }
+        if (slot < 0 || (jets[slot] !== null && (jets[j] === null || ages[j] > ages[slot]))) {
+          slot = j;
+        }
+      }
+      jets[slot] = jet;
+      this.pairBearings[slot] = jet.orders.bearing;
+      ages[slot] = 0;
+    }
+  }
+
+  /** 另一架成对机型最近（PAIR_MEMORY_SECONDS 内）的指派方位；没有时返回 NaN */
+  private recentPairBearing(jet: IDirectedJet): number {
+    let bearing = Number.NaN;
+    let age = Infinity;
+    for (let i = 0; i < PAIR_MEMORY_SLOTS; i++) {
+      const other = this.pairJets[i];
+      if (other === null || other === jet || !(this.pairAges[i] < age)) continue;
+      bearing = this.pairBearings[i];
+      age = this.pairAges[i];
+    }
+    return bearing;
   }
 
   /** 本步持令牌的敌机数（update 之后有效） */
@@ -242,8 +311,8 @@ export class AttackDirector {
    * 一架持令牌敌机期望的方位：
    * - 原地开火的机型（优先级 0）：它当前所在的方位；
    * - 条令给了期望方位（战斗机：玩家的六点钟）：用它；
-   * - 其余（侦察机）：沿用上一步的指派；刚领到时，若已有一架成对机型在场就取它的对面，
-   *   否则取自己当前所在的方位。
+   * - 其余（侦察机）：沿用上一步的指派；刚领到时，若已有一架成对机型持令牌（或几秒前刚交还）
+   *   就取它的对面，否则取自己当前所在的方位。
    */
   private desiredBearing(jet: IDirectedJet, index: number, playerPosition: Vector3): number {
     const request = jet.getAttackRequest();
@@ -258,6 +327,8 @@ export class AttackDirector {
           return wrapAngle(this.bearings[i] + Math.PI);
         }
       }
+      const recent = this.recentPairBearing(jet);
+      if (Number.isFinite(recent)) return wrapAngle(recent + Math.PI);
     }
     return actual;
   }
