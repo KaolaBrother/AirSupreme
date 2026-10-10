@@ -16,7 +16,8 @@ import {
  * 模拟每步只读一次输入，按下和松开都落在两次读取之间的轻触以前会丢。现在开火 / 导弹的每一次按下
  * 至少让一次 getState() 读到 true（哪怕松开先于读取）；按住期间每次读取都是 true；看到松开之后的
  * 下一次读取就是 false（轻触恰好一次 true，没有多出来的第二次）；读取之前就被 touchcancel 的触摸
- * 不算按过；resetActionQueue() 与失焦 / 切到后台会清掉还没读到的那一下；两次读取之间的两下算一下。
+ * 不算按过，也不抹掉同一步里更早完成的那一下；resetActionQueue() 与失焦 / 切到后台会清掉还没读到的
+ * 那一下；两次读取之间的两下算一下。
  *
  * 控件与按键映射（读自 InputHandler）：开火 = #fire-button、Space；导弹 = #missile-button、KeyM、
  * ShiftRight。左 Shift / 左 Ctrl 是加速（按住），不走这个锁存。
@@ -552,32 +553,88 @@ describe('fire and missile tap latch (InputHandler)', () => {
       }
     );
 
-    for (const control of BUTTON_CONTROLS) {
-      // FINDING（L1 缺陷，实现未满足规格）：这个键上的 touchcancel 会把整个待读锁存清掉，于是同一步里
-      // 更早、已经正常抬起的那一下也跟着丢了（读到 false, false, false）。按规格，那一下是一次完整的
-      // 按下，应当让下一次读取为 true；被取消的只是后一次触摸。修好之后把 it.fails 改回 it。
-      it.fails(
-        `${control.label}: a tap completed before a later cancelled touch still counts`,
-        () => {
-          const input = open(control);
-          tap(control);
-          press(control);
-          cancel(control);
-          expect(reads(input, control.field, 3)).toEqual([true, false, false]);
-        }
-      );
-    }
+    // 被取消的触摸只是“不算按过”：它不能把同一步里更早、已经正常完成的那一下也抹掉。
+    // （曾经的缺陷：这个键上的 touchcancel 会清掉整个待读锁存，下面两组读到的是 false, false, false。）
+    it.each(BUTTON_CONTROLS)(
+      '$label: a tap completed before a later cancelled touch still counts',
+      (control) => {
+        const input = open(control);
+        tap(control);
+        press(control);
+        cancel(control);
+        expect(reads(input, control.field, 3)).toEqual([true, false, false]);
+      }
+    );
 
-    for (const [code, buttonId, field] of KEY_AND_BUTTON) {
-      // FINDING（同一个缺陷）：触控键上的 touchcancel 也清掉了键盘刚刚按出来、还没读到的那一下
-      it.fails(`a ${code} tap followed by a cancelled touch on #${buttonId} still counts`, () => {
+    it.each(KEY_AND_BUTTON)(
+      'a %s tap followed by a cancelled touch on #%s still counts',
+      (code, buttonId, field) => {
         const input = openDevice('touch');
         pressKey(code);
         releaseKey(code);
         screen.cancel(touchDown(buttonId));
         expect(reads(input, field, 3)).toEqual([true, false, false]);
-      });
-    }
+      }
+    );
+
+    it.each(BUTTON_CONTROLS)(
+      '$label: cancelled touches around two completed taps change nothing',
+      (control) => {
+        const input = open(control);
+        press(control);
+        cancel(control);
+        tap(control);
+        press(control);
+        cancel(control);
+        tap(control);
+        press(control);
+        cancel(control);
+        expect(reads(input, control.field, 3)).toEqual([true, false, false]);
+      }
+    );
+
+    it.each(BUTTON_CONTROLS)(
+      '$label: a tap, then a touch that is read while held and then cancelled',
+      (control) => {
+        const input = open(control);
+        tap(control);
+        press(control);
+        expect(reads(input, control.field, 2)).toEqual([true, true]);
+
+        cancel(control);
+        expect(reads(input, control.field, 3)).toEqual([false, false, false]);
+      }
+    );
+
+    it.each(BUTTON_CONTROLS)(
+      '$label: a touch cancelled on the other weapon button does not cancel a press not read yet',
+      (control) => {
+        const input = open(control);
+        press(control);
+        screen.cancel(touchDown(OTHER_BUTTON[control.field]));
+        release(control);
+
+        const state = snapshot(input);
+        expect(state[control.field]).toBe(true);
+        expect(state[OTHER_FIELD[control.field]]).toBe(false);
+        expect(reads(input, control.field, 2)).toEqual([false, false]);
+      }
+    );
+
+    it.each(KEY_AND_BUTTON)(
+      'a %s tap is still seen once after a touch is cancelled on the other weapon button',
+      (code, _buttonId, field) => {
+        const input = openDevice('touch');
+        pressKey(code);
+        releaseKey(code);
+        screen.cancel(touchDown(OTHER_BUTTON[field]));
+
+        const state = snapshot(input);
+        expect(state[field]).toBe(true);
+        expect(state[OTHER_FIELD[field]]).toBe(false);
+        expect(reads(input, field, 2)).toEqual([false, false]);
+      }
+    );
   });
 
   // ───────────────────────────── 键盘与触控一起用 ─────────────────────────────
@@ -688,6 +745,21 @@ describe('fire and missile tap latch (InputHandler)', () => {
       trigger();
       expect(reads(input, control.field, 3)).toEqual([false, false, false]);
     });
+
+    it.each(CONTROLS)(
+      '$label: drops a completed tap together with a press that is still down',
+      (control) => {
+        const input = open(control);
+        tap(control);
+        press(control);
+        trigger();
+        expect(reads(input, control.field, 1)).toEqual([false]);
+
+        // 松开事件在复位之后才到
+        release(control);
+        expect(reads(input, control.field, 3)).toEqual([false, false, false]);
+      }
+    );
 
     it.each(CONTROLS)(
       '$label: drops an unread press, and its late release is not a press',
