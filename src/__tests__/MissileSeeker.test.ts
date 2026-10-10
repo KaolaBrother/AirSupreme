@@ -997,6 +997,284 @@ describe('MissileSeeker', () => {
       expectHealthy(rig.seeker);
     });
   });
+
+  /**
+   * 干扰（敌机编队第 2 批，规格 §3 JAMMER）：“玩家的导弹锁定时间变为 2.0 倍（不叠加）……
+   * 导引头的其余部分不变。”导引头只从一个窄接口读“锁定要慢多少”；800 米、是否存活、
+   * 不叠加这些判定不在这里（见 CoordinatorJamCloakJetMissiles.test.ts）。
+   */
+  describe('jamming', () => {
+    /** 干扰来源：scale 是当前的锁定时间倍数，测试里随时可以改 */
+    interface JamSource {
+      scale: number;
+    }
+
+    function jam(target: Rig, scale = 2): JamSource {
+      const source: JamSource = { scale };
+      target.seeker.setJamProvider({ getLockTimeScale: () => source.scale });
+      return source;
+    }
+
+    /** 两台一样的台架：一台不受干扰，一台受干扰（倍数 2） */
+    function pair(): { clean: Rig; jammed: Rig; source: JamSource } {
+      const clean = createRig();
+      const jammed = createRig();
+      return { clean, jammed, source: jam(jammed) };
+    }
+
+    it.each([1.0, 0.75, 0.5])('takes twice the %s s lock time to lock', (lockTime) => {
+      jam(rig);
+      rig.seeker.setLockTime(lockTime);
+      acquire(rig, targetRightOfAim(20));
+
+      const used = framesUntil(rig, () => rig.seeker.isLocked(), 6);
+
+      expect(used * DT).toBeGreaterThan(2 * lockTime - 2 * DT);
+      expect(used * DT).toBeLessThan(2 * lockTime + 3 * DT);
+      expect(rig.seeker.getProgress()).toBe(1);
+    });
+
+    it('fills at exactly half the normal rate on every step', () => {
+      const { clean, jammed } = pair();
+      acquire(clean, targetRightOfAim(20));
+      acquire(jammed, targetRightOfAim(20));
+
+      for (let i = 0; i < frames(0.9); i += 1) {
+        tick(clean);
+        tick(jammed);
+        expect(jammed.seeker.getProgress() * 2, `step ${i}`).toBeCloseTo(
+          clean.seeker.getProgress(),
+          9
+        );
+      }
+      expect(clean.seeker.getProgress()).toBeGreaterThan(0.85);
+      expect(jammed.seeker.isLocked()).toBe(false);
+    });
+
+    it('reports being jammed only while the lock is being slowed', () => {
+      expect(rig.seeker.isJammed()).toBe(false);
+
+      const source = jam(rig);
+      expect(rig.seeker.isJammed()).toBe(true);
+
+      source.scale = 1;
+      expect(rig.seeker.isJammed()).toBe(false);
+
+      source.scale = 2;
+      rig.seeker.setJamProvider(null);
+      expect(rig.seeker.isJammed()).toBe(false);
+    });
+
+    it('locks in the normal time again once the jam source is disconnected', () => {
+      jam(rig);
+      rig.seeker.setJamProvider(null);
+      acquire(rig, targetRightOfAim(20));
+
+      const used = framesUntil(rig, () => rig.seeker.isLocked());
+
+      expect(used * DT).toBeGreaterThan(LOCK_TIME - 2 * DT);
+      expect(used * DT).toBeLessThan(LOCK_TIME + 3 * DT);
+    });
+
+    it('goes back to the normal rate on the very update the jamming ends, keeping the progress made', () => {
+      const source = jam(rig);
+      acquire(rig, targetRightOfAim(20));
+      run(rig, 0.5);
+      const before = rig.seeker.getProgress();
+      expect(before).toBeCloseTo(0.25, 1);
+
+      source.scale = 1;
+      tick(rig);
+
+      expect(rig.seeker.getProgress() - before).toBeCloseTo(DT / LOCK_TIME, 9);
+      // 剩下的 0.75 按正常速度补满
+      const used = framesUntil(rig, () => rig.seeker.isLocked());
+      expect(used * DT).toBeGreaterThan((1 - before) * LOCK_TIME - 3 * DT);
+      expect(used * DT).toBeLessThan((1 - before) * LOCK_TIME + 3 * DT);
+    });
+
+    it('slows down from the very update the jamming starts, keeping the progress made', () => {
+      const source = jam(rig, 1);
+      acquire(rig, targetRightOfAim(20));
+      run(rig, 0.4);
+      const before = rig.seeker.getProgress();
+      expect(before).toBeCloseTo(0.4, 1);
+
+      source.scale = 2;
+      tick(rig);
+
+      expect(rig.seeker.getProgress() - before).toBeCloseTo(DT / (2 * LOCK_TIME), 9);
+      // 剩下的 0.6 要花两倍的时间
+      const used = framesUntil(rig, () => rig.seeker.isLocked(), 4);
+      expect(used * DT).toBeGreaterThan((1 - before) * 2 * LOCK_TIME - 4 * DT);
+      expect(used * DT).toBeLessThan((1 - before) * 2 * LOCK_TIME + 4 * DT);
+    });
+
+    describe('nothing else about the seeker changes', () => {
+      it('has the same acquire ring and keep ring', () => {
+        const { clean, jammed } = pair();
+
+        expect(jammed.seeker.getAcquireRadius()).toBe(clean.seeker.getAcquireRadius());
+        expect(jammed.seeker.getKeepRadius()).toBe(clean.seeker.getKeepRadius());
+
+        // 环内 2 像素的捕获，环外 2 像素的不捕获
+        const inside = targetRightOfAim(RADIUS - 2);
+        const outside = targetRightOfAim(RADIUS + 2);
+        jammed.candidates.push(outside);
+        run(jammed, 0.5);
+        expect(jammed.seeker.getTarget()).toBeNull();
+        jammed.candidates.push(inside);
+        tick(jammed);
+        expect(jammed.seeker.getTarget()).toBe(inside);
+      });
+
+      it.each<[string, Array<[number, number, number]>, number | null]>([
+        [
+          'the one nearest the reticle of three',
+          [
+            [60, 0, 300],
+            [-25, 10, 700],
+            [0, 80, 150],
+          ],
+          1,
+        ],
+        ['nothing when the only aircraft is outside the ring', [[RADIUS + 30, 0, 300]], null],
+        ['nothing beyond 1200 m', [[0, 0, MAX_RANGE + 60]], null],
+        ['a target just inside 1200 m', [[0, 0, MAX_RANGE - 60]], 0],
+      ])('picks %s', (_name, layout, expectedIndex) => {
+        const { clean, jammed } = pair();
+        const place = (target: Rig): THREE.Object3D[] => {
+          const placed = layout.map(([dx, dy, depth]) =>
+            targetAt(CENTER_X + dx, CENTER_Y + dy, depth)
+          );
+          target.candidates.push(...placed);
+          return placed;
+        };
+        const cleanTargets = place(clean);
+        const jammedTargets = place(jammed);
+
+        run(clean, 0.5);
+        run(jammed, 0.5);
+
+        const picked = jammed.seeker.getTarget();
+        expect(picked === null ? null : jammedTargets.indexOf(picked)).toBe(expectedIndex);
+        const cleanPick = clean.seeker.getTarget();
+        expect(cleanPick === null ? null : cleanTargets.indexOf(cleanPick)).toBe(expectedIndex);
+      });
+
+      it('holds a completed lock inside the keep ring and breaks it after the same grace', () => {
+        const { clean, jammed } = pair();
+        const cleanEnemy = targetRightOfAim(20);
+        const jammedEnemy = targetRightOfAim(20);
+        lock(clean, cleanEnemy);
+        acquire(jammed, jammedEnemy);
+        expect(framesUntil(jammed, () => jammed.seeker.isLocked(), 6)).toBeGreaterThan(0);
+
+        moveRightOfAim(jammedEnemy, RADIUS * KEEP_RATIO - 5);
+        for (let i = 0; i < frames(3); i += 1) {
+          tick(jammed);
+          expect(jammed.seeker.isLocked(), `frame ${i}`).toBe(true);
+        }
+
+        moveRightOfAim(cleanEnemy, RADIUS * KEEP_RATIO + 5);
+        moveRightOfAim(jammedEnemy, RADIUS * KEEP_RATIO + 5);
+        const cleanFrames = framesUntil(clean, () => !clean.seeker.isLocked(), 3);
+        const jammedFrames = framesUntil(jammed, () => !jammed.seeker.isLocked(), 3);
+
+        expect(jammedFrames).toBe(cleanFrames);
+        expect(jammedFrames * DT).toBeGreaterThan(GRACE_TIME - 2 * DT);
+        expect(jammedFrames * DT).toBeLessThan(GRACE_TIME + 3 * DT);
+      });
+
+      it('loses unfinished progress between the rings at the normal rate', () => {
+        const { clean, jammed } = pair();
+        const cleanEnemy = targetRightOfAim(20);
+        const jammedEnemy = targetRightOfAim(20);
+        acquire(clean, cleanEnemy);
+        acquire(jammed, jammedEnemy);
+        // 两边攒到同样的进度：受干扰的一边要花两倍时间
+        run(clean, 0.4);
+        run(jammed, 0.8);
+        expect(jammed.seeker.getProgress()).toBeCloseTo(clean.seeker.getProgress(), 9);
+
+        moveRightOfAim(cleanEnemy, RADIUS * 1.3);
+        moveRightOfAim(jammedEnemy, RADIUS * 1.3);
+        for (let i = 0; i < frames(0.3); i += 1) {
+          tick(clean);
+          tick(jammed);
+          expect(jammed.seeker.getProgress(), `step ${i}`).toBeCloseTo(
+            clean.seeker.getProgress(),
+            9
+          );
+        }
+        expect(jammed.seeker.getProgress()).toBeLessThan(0.2);
+        expect(jammed.seeker.getTarget()).toBe(jammedEnemy);
+      });
+
+      it('hands over to a clearly better target after the same dwell', () => {
+        const { clean, jammed } = pair();
+        const switchFrames = (target: Rig): number => {
+          acquire(target, targetRightOfAim(70));
+          const challenger = targetRightOfAim(5);
+          target.candidates.push(challenger);
+          return framesUntil(target, () => target.seeker.getTarget() === challenger, 2);
+        };
+
+        const cleanFrames = switchFrames(clean);
+        const jammedFrames = switchFrames(jammed);
+
+        expect(cleanFrames).toBeGreaterThan(0);
+        expect(jammedFrames).toBe(cleanFrames);
+        expect(jammedFrames * DT).toBeGreaterThan(SWITCH_DWELL_TRACKING - 2 * DT);
+        expect(jammedFrames * DT).toBeLessThan(SWITCH_DWELL_TRACKING + 3 * DT);
+      });
+
+      it('leaves a lock that was already complete alone when the jamming starts', () => {
+        const source = jam(rig, 1);
+        const enemy = targetRightOfAim(20);
+        lock(rig, enemy);
+
+        source.scale = 2;
+        for (let i = 0; i < frames(2); i += 1) {
+          tick(rig);
+          expect(rig.seeker.isLocked(), `frame ${i}`).toBe(true);
+          expect(rig.seeker.events.lost).toBe(false);
+        }
+        expect(rig.seeker.getLockedTarget()).toBe(enemy);
+        expect(rig.seeker.getProgress()).toBe(1);
+      });
+
+      it('still drops a target the step it leaves the candidate list', () => {
+        jam(rig);
+        const enemy = targetRightOfAim(20);
+        acquire(rig, enemy);
+        run(rig, 0.8);
+        expect(rig.seeker.getProgress()).toBeGreaterThan(0.3);
+
+        rig.candidates.length = 0;
+        tick(rig);
+
+        expect(rig.seeker.getTarget()).toBeNull();
+        expect(rig.seeker.getProgress()).toBe(0);
+      });
+    });
+
+    // 干扰只会让锁定变慢：读数坏了（非有限数、零、负数、小于 1）不能让锁定卡死，也不能让它变快
+    it.each([Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, 0, -2, 0.5, 1])(
+      'treats a jam reading of %s as no jamming',
+      (scale) => {
+        jam(rig, scale);
+        acquire(rig, targetRightOfAim(20));
+
+        const used = framesUntil(rig, () => rig.seeker.isLocked());
+
+        expect(used * DT).toBeGreaterThan(LOCK_TIME - 2 * DT);
+        expect(used * DT).toBeLessThan(LOCK_TIME + 3 * DT);
+        expect(rig.seeker.isJammed()).toBe(false);
+        expectHealthy(rig.seeker);
+      }
+    );
+  });
 });
 
 describe('projectToScreen', () => {
