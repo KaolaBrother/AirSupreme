@@ -33,6 +33,12 @@ const TERRAIN_CLEARANCE = 32;
 const TERRAIN_MIN_CLEARANCE = 12;
 /** 绝对兜底：穿入地形时直接抬到地表以上（米） */
 const TERRAIN_HARD_FLOOR = 5;
+/**
+ * 竖直构件判定（米）：地表比本机高出这么多 = 天梯主干 / 支柱 / 锚塔这类竖直构件（主干顶在
+ * 7000 米）。爬不过去，也不能一步抬到构件顶上（那是瞬移到几千米高空、再花几分钟飞回战场）：
+ * 前瞻遇到时改为侧滑绕开，贴地兜底遇到时退回本步之前的水平位置。
+ */
+const TERRAIN_WALL_HEIGHT = 200;
 
 /**
  * 开火距离上限（米）：超出则不开火。子弹射程 500 米，但远距离点射只在玩家直线飞行时
@@ -724,8 +730,10 @@ export class EnemyAI {
   private integrateMotion(deltaTime: number, speedLimit: number = Infinity): void {
     this.applyTerrainAvoidance();
     if (speedLimit < Infinity) this.limitSpeed(speedLimit);
+    const fromX = this.mesh.position.x;
+    const fromZ = this.mesh.position.z;
     this.mesh.position.addScaledVector(this.velocity, deltaTime);
-    this.enforceTerrainFloor();
+    this.enforceTerrainFloor(fromX, fromZ);
 
     if (this.velocity.lengthSq() > 0) {
       tmpTarget.copy(this.mesh.position).add(this.velocity);
@@ -1135,15 +1143,21 @@ export class EnemyAI {
   /**
    * 前瞻地形避让：沿当前水平速度在若干时间点采样地表，若预计高度低于“地表 + 安全高度”，
    * 把竖直速度抬升为爬升速度（与亏欠高度成正比，上限为本机速度）。
+   * 前方是竖直构件（高出本机 TERRAIN_WALL_HEIGHT 以上）时不去爬它，水平速度转向较空的一侧。
    */
   private applyTerrainAvoidance(): void {
     if (!this.terrainSampler) return;
     const position = this.mesh.position;
     const velocity = this.velocity;
     let required = this.sampleTerrain(position.x, position.z) + TERRAIN_MIN_CLEARANCE;
+    let wallAhead = false;
     for (const t of TERRAIN_LOOKAHEAD_SECONDS) {
       const ground = this.sampleTerrain(position.x + velocity.x * t, position.z + velocity.z * t);
       if (ground === -Infinity) continue;
+      if (ground - position.y > TERRAIN_WALL_HEIGHT) {
+        wallAhead = true;
+        continue;
+      }
       // 预计 t 秒后的高度若低于地表 + 安全高度，则需要提前爬升
       const predictedY = position.y + Math.max(0, velocity.y) * t;
       const deficit = ground + TERRAIN_CLEARANCE - predictedY;
@@ -1151,6 +1165,7 @@ export class EnemyAI {
         required = Math.max(required, position.y + deficit);
       }
     }
+    if (wallAhead) this.sidestepWall();
     if (!Number.isFinite(required) || position.y >= required) return;
     const deficit = required - position.y;
     const climbRate = Math.min(Math.max(this.config.speed, 20), deficit * 2.2 + 8);
@@ -1159,17 +1174,48 @@ export class EnemyAI {
     }
   }
 
-  /** 硬兜底：位置一旦落到地表以下，直接抬到地表上方（避免穿模 / 卡在岩壁里） */
-  private enforceTerrainFloor(): void {
+  /**
+   * 前方是竖直构件：水平速度原地转 90° 侧滑（竖直速度不变），转向构件较空的一侧
+   * （沿左右两侧各取一个采样点，取地表较低的一侧，相同则向右）。
+   */
+  private sidestepWall(): void {
+    const position = this.mesh.position;
+    const velocity = this.velocity;
+    const speed = Math.hypot(velocity.x, velocity.z);
+    if (!(speed > 1e-3) || !Number.isFinite(speed)) return;
+    const ux = velocity.x / speed;
+    const uz = velocity.z / speed;
+    const reach = speed * TERRAIN_LOOKAHEAD_SECONDS[1];
+    // 水平右侧为 (-z, x)，左侧为 (z, -x)
+    const right = this.sampleTerrain(position.x - uz * reach, position.z + ux * reach);
+    const left = this.sampleTerrain(position.x + uz * reach, position.z - ux * reach);
+    const sign = right <= left ? 1 : -1;
+    velocity.x = -uz * speed * sign;
+    velocity.z = ux * speed * sign;
+  }
+
+  /**
+   * 硬兜底：位置一旦落到地表以下，直接抬到地表上方（避免穿模 / 卡在岩壁里）。
+   * 需要一步抬高 TERRAIN_WALL_HEIGHT 以上（撞进竖直构件）时不抬，退回本步之前的水平位置
+   * (fromX, fromZ)；那里本身也在地表以下时（例如出生点就在构件里）照旧抬到地表上方。
+   */
+  private enforceTerrainFloor(fromX: number, fromZ: number): void {
     if (!this.terrainSampler) return;
     const position = this.mesh.position;
     const ground = this.sampleTerrain(position.x, position.z);
     if (ground === -Infinity) return;
     const floor = ground + TERRAIN_HARD_FLOOR;
-    if (position.y < floor) {
-      position.y = floor;
-      if (this.velocity.y < 0) this.velocity.y = 0;
+    if (position.y >= floor) return;
+    if (floor - position.y > TERRAIN_WALL_HEIGHT && Number.isFinite(fromX + fromZ)) {
+      const fromGround = this.sampleTerrain(fromX, fromZ);
+      if (position.y >= fromGround + TERRAIN_HARD_FLOOR) {
+        position.x = fromX;
+        position.z = fromZ;
+        return;
+      }
     }
+    position.y = floor;
+    if (this.velocity.y < 0) this.velocity.y = 0;
   }
 
   /**
