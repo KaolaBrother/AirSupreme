@@ -85,46 +85,130 @@
         display: block;
       }
 
-      /* 加载画面 */
+      /*
+       * 加载画面 / “进入战场”画面 / 启动失败画面（同一个 #loading-screen，内容由 main.ts 替换）。
+       * 与标题画面同一套视觉：黄昏夜空渐变、倾斜的 AIR SUPREME 字标、四角取景框线。
+       * 动画只用 transform / opacity：游戏启动占着主线程时进度条仍在合成线程上走。
+       */
       #loading-screen {
         position: fixed;
         top: 0;
         left: 0;
         width: 100%;
         height: 100%;
-        background: rgba(8, 14, 24, 1);
+        padding: max(28px, env(safe-area-inset-top)) max(24px, env(safe-area-inset-right))
+          max(28px, env(safe-area-inset-bottom)) max(24px, env(safe-area-inset-left));
+        background:
+          radial-gradient(
+            ellipse 90% 60% at 62% 66%,
+            rgba(255, 178, 112, 0.2) 0%,
+            rgba(132, 92, 146, 0.09) 46%,
+            rgba(0, 0, 0, 0) 72%
+          ),
+          linear-gradient(180deg, #030812 0%, #06142c 30%, #0c2c54 60%, #142238 82%, #070d19 100%);
         display: flex;
         flex-direction: column;
         align-items: center;
         justify-content: center;
         color: var(--hud-text);
         z-index: 1000;
+        transition: opacity 0.32s ease;
       }
 
+      #loading-screen.is-leaving {
+        opacity: 0;
+        pointer-events: none;
+      }
+
+      /* 四角的取景框线 */
+      #loading-screen::before {
+        content: '';
+        position: absolute;
+        top: max(14px, env(safe-area-inset-top));
+        right: max(14px, env(safe-area-inset-right));
+        bottom: max(14px, env(safe-area-inset-bottom));
+        left: max(14px, env(safe-area-inset-left));
+        background:
+          linear-gradient(var(--hud-sys), var(--hud-sys)) left top / 22px 1px,
+          linear-gradient(var(--hud-sys), var(--hud-sys)) left top / 1px 22px,
+          linear-gradient(var(--hud-sys), var(--hud-sys)) right top / 22px 1px,
+          linear-gradient(var(--hud-sys), var(--hud-sys)) right top / 1px 22px,
+          linear-gradient(var(--hud-sys), var(--hud-sys)) left bottom / 22px 1px,
+          linear-gradient(var(--hud-sys), var(--hud-sys)) left bottom / 1px 22px,
+          linear-gradient(var(--hud-sys), var(--hud-sys)) right bottom / 22px 1px,
+          linear-gradient(var(--hud-sys), var(--hud-sys)) right bottom / 1px 22px;
+        background-repeat: no-repeat;
+        opacity: 0.46;
+        pointer-events: none;
+      }
+
+      #loading-screen .loading-core {
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        max-width: 100%;
+        text-align: center;
+      }
+
+      /* 字标：AIR 小号宽字距，SUPREME 倾斜的重磅金属渐变字 */
       #loading-screen h1 {
-        font-size: 48px;
-        margin-bottom: 20px;
-        letter-spacing: 0.18em;
-        color: var(--hud-sys);
-        text-shadow: 0 0 18px rgba(143, 228, 255, 0.45);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        font-family: 'Arial Black', system-ui, 'Arial', sans-serif;
+        font-weight: 900;
+        line-height: 0.92;
+        text-transform: uppercase;
+      }
+
+      #loading-screen .loading-air {
+        font-size: clamp(15px, 4.4vmin, 32px);
+        letter-spacing: 0.56em;
+        text-indent: 0.56em;
+        color: #f4fbff;
+        transform: skewX(-9deg);
+      }
+
+      #loading-screen .loading-supreme {
+        margin-top: 0.12em;
+        padding: 0.04em 0.1em 0.06em;
+        font-size: clamp(40px, 12vmin, 96px);
+        letter-spacing: 0.012em;
+        transform: skewX(-9deg);
+        background: linear-gradient(
+          180deg,
+          #ffffff 0%,
+          #eaf8ff 34%,
+          #a9e2f8 51%,
+          #5fb2d6 53.5%,
+          #bfeaff 76%,
+          #8fe4ff 100%
+        );
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+        -webkit-text-fill-color: transparent;
+        filter: drop-shadow(0 3px 0 rgba(2, 8, 16, 0.55))
+          drop-shadow(0 0 26px rgba(143, 228, 255, 0.3));
       }
 
       #loading-screen p {
-        font-size: 18px;
+        font-size: 16px;
         color: var(--hud-muted);
       }
 
       /* 副标题：英文用拉丁衬线 + 大写字距，中文（<html lang="zh-CN">）沿用 CJK 衬线与宽字距 */
       #loading-screen .loading-sub {
-        margin: -8px 0 22px;
+        margin: clamp(10px, 2.4vmin, 20px) 0 0;
         padding: 0 16px;
         font-family:
           'Iowan Old Style', 'Palatino Linotype', Palatino, Georgia, 'Times New Roman',
           'Noto Serif SC', 'Noto Serif CJK SC', 'Source Han Serif SC', 'Songti SC', serif;
-        font-size: 16px;
+        font-size: clamp(12px, 2.6vmin, 19px);
         font-weight: 700;
-        letter-spacing: 0.32em;
-        text-indent: 0.32em;
+        letter-spacing: 0.4em;
+        text-indent: 0.4em;
         text-transform: uppercase;
         text-align: center;
         color: var(--hud-text);
@@ -134,33 +218,34 @@
         font-family:
           'Noto Serif SC', 'Noto Serif CJK SC', 'Source Han Serif SC', 'Songti SC', 'STSong',
           'SimSun', serif;
-        font-size: 20px;
-        letter-spacing: 0.6em;
-        text-indent: 0.6em;
+        font-size: clamp(14px, 3vmin, 22px);
+        letter-spacing: 0.62em;
+        text-indent: 0.62em;
       }
 
-      /* 手机竖屏：标题收一号，避免 AIR SUPREME 超出屏幕宽度 */
-      @media (max-width: 480px) {
-        #loading-screen h1 {
-          font-size: 34px;
-          letter-spacing: 0.12em;
-          text-align: center;
-        }
+      #loading-screen .loading-status {
+        margin-top: 12px;
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.3em;
+        text-indent: 0.3em;
+        text-transform: uppercase;
+        color: rgba(183, 231, 255, 0.7);
       }
 
       .loading-bar {
-        width: min(280px, 70vw);
-        height: 4px;
-        margin-top: 28px;
+        position: relative;
+        width: min(300px, 70vw);
+        height: 3px;
+        margin-top: clamp(22px, 5vmin, 38px);
         background: rgba(143, 228, 255, 0.16);
-        border: 1px solid var(--hud-edge);
         overflow: hidden;
       }
 
       .loading-bar-fill {
         height: 100%;
         width: 36%;
-        background: var(--hud-sys);
+        background: linear-gradient(90deg, rgba(143, 228, 255, 0), var(--hud-sys));
         box-shadow: 0 0 12px rgba(143, 228, 255, 0.8);
         animation: loading-slide 1.2s ease-in-out infinite;
       }
@@ -171,6 +256,98 @@
         }
         100% {
           transform: translateX(320%);
+        }
+      }
+
+      /* —— 消息（进入战场 / 启动失败）：小标题 + 标题 + 说明 —— */
+      #loading-screen .loading-message {
+        animation: loading-rise 0.3s ease-out both;
+      }
+
+      @keyframes loading-rise {
+        from {
+          opacity: 0;
+          transform: translateY(10px);
+        }
+        to {
+          opacity: 1;
+          transform: none;
+        }
+      }
+
+      #loading-screen .loading-kicker {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 14px;
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.36em;
+        text-indent: 0.36em;
+        text-transform: uppercase;
+        color: var(--hud-sys);
+      }
+
+      #loading-screen .loading-kicker::before,
+      #loading-screen .loading-kicker::after {
+        content: '';
+        width: 26px;
+        height: 2px;
+        background: var(--hud-sys);
+        box-shadow: 0 0 8px rgba(143, 228, 255, 0.8);
+      }
+
+      #loading-screen .loading-message h1 {
+        display: block;
+        font-size: clamp(24px, 6vmin, 46px);
+        line-height: 1.08;
+        letter-spacing: 0.06em;
+        color: #f4fbff;
+        text-shadow: 0 0 26px rgba(143, 228, 255, 0.35);
+        transform: skewX(-9deg);
+      }
+
+      #loading-screen .loading-message h1:lang(zh) {
+        letter-spacing: 0.2em;
+        text-indent: 0.2em;
+      }
+
+      #loading-screen .loading-line {
+        max-width: 34em;
+        margin-top: 16px;
+        line-height: 1.5;
+      }
+
+      #loading-screen .loading-note {
+        max-width: 34em;
+        margin-top: 14px;
+        font-size: 14px;
+        line-height: 1.5;
+        color: rgba(183, 231, 255, 0.62);
+      }
+
+      #loading-screen .loading-message[data-tone='error'] .loading-kicker {
+        color: var(--hud-threat);
+      }
+
+      #loading-screen .loading-message[data-tone='error'] .loading-kicker::before,
+      #loading-screen .loading-message[data-tone='error'] .loading-kicker::after {
+        background: var(--hud-threat);
+        box-shadow: 0 0 8px rgba(255, 77, 77, 0.8);
+      }
+
+      #loading-screen .loading-message[data-tone='error'] h1 {
+        text-shadow: 0 0 26px rgba(255, 77, 77, 0.35);
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        #loading-screen {
+          transition: none;
+        }
+
+        #loading-screen .loading-message,
+        .loading-bar-fill {
+          animation: none;
         }
       }
 
@@ -619,11 +796,13 @@
   <body>
     <!-- 加载画面（英文默认值；main.ts 按语言设置改写） -->
     <div id="loading-screen">
-      <h1>AIR SUPREME</h1>
-      <div class="loading-sub">The Skydome War</div>
-      <p class="loading-status">Loading…</p>
-      <div class="loading-bar">
-        <div class="loading-bar-fill"></div>
+      <div class="loading-core">
+        <h1><span class="loading-air">AIR</span> <span class="loading-supreme">SUPREME</span></h1>
+        <div class="loading-sub">The Skydome War</div>
+        <div class="loading-bar">
+          <div class="loading-bar-fill"></div>
+        </div>
+        <p class="loading-status">Loading…</p>
       </div>
     </div>
 
