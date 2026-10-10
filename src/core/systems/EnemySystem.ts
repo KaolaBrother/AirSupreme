@@ -7,6 +7,8 @@ import {
   getFormationSlotOffset,
   type FormationSlotOffset,
 } from '@/features/enemy/FriendlyAI';
+import { AttackDirector, getAttackTokenCount } from '@/features/enemy/AttackDirector';
+import type { IJetThreatProvider } from '@/features/enemy/JetThreat';
 import { Faction } from '@/core/Faction';
 import type { DifficultyProfile } from '@/core/Difficulty';
 import { GameSessionState } from '@/core/GameSessionState';
@@ -26,6 +28,8 @@ const PLAYER_VELOCITY_DECAY = 0.6;
 const FRIENDLY_SPAWN_BEHIND_SLOT = 12;
 /** 机头方向的水平分量低于此值（俯仰约 78° 以上）时，入场航向改用平滑速度的水平方向 */
 const MIN_HEADING_HORIZONTAL = 0.2;
+/** 没有威胁提供者时，玩家速度高于此值（米/秒）才用速度方向当机头方向 */
+const MIN_FORWARD_SPEED = 2;
 
 export class EnemySystem implements IGameSystem {
   readonly name = 'EnemySystem';
@@ -44,6 +48,14 @@ export class EnemySystem implements IGameSystem {
   /** 入场位姿计算复用的编队位偏移 */
   private readonly spawnSlotOffset: FormationSlotOffset = { side: -1, along: 0, lateral: 0, up: 0 };
 
+  /** 攻击令牌导演：波次敌机与 Boss 小兵都从这里领令牌与进入方位 */
+  private readonly attackDirector = new AttackDirector();
+  /** 玩家对敌机的威胁（锁定 / 来袭导弹 / 机头方向 / 是否可被攻击）；未接入时视为无威胁 */
+  private threatProvider: IJetThreatProvider | null = null;
+  /** 难度档 1..5（3 = 普通）：决定令牌数的加减 */
+  private difficultyLevel = 3;
+  private readonly playerForward = new THREE.Vector3(0, 0, -1);
+
   constructor(scene: THREE.Scene, sessionState?: GameSessionState) {
     this.levelManager = new LevelManager(scene);
     this.sessionState = sessionState ?? new GameSessionState();
@@ -51,12 +63,35 @@ export class EnemySystem implements IGameSystem {
 
   init(): void {
     this.levelManager.onEnemySpawned = (enemy) => {
-      enemy.onFire = (position, direction, damage) => {
+      enemy.onFire = (position, direction, damage, shot) => {
+        if (shot) {
+          // 条令开火：带上弹种 / 弹速 / 是否静音（shot 对象只在回调期间有效，逐项取值）
+          EventBus.emit(GameEventType.ENEMY_FIRED, {
+            position,
+            direction,
+            damage,
+            faction: Faction.ENEMY,
+            owner: enemy.getMesh(),
+            weapon: shot.weapon,
+            speed: shot.speed,
+            quiet: shot.quiet,
+          });
+          return;
+        }
         EventBus.emit(GameEventType.ENEMY_FIRED, {
           position,
           direction,
           damage,
           faction: Faction.ENEMY,
+          owner: enemy.getMesh(),
+        });
+      };
+
+      enemy.onTell = (cue, position, duration) => {
+        EventBus.emit(GameEventType.ENEMY_TELL, {
+          kind: cue,
+          position: position.clone(),
+          duration,
           owner: enemy.getMesh(),
         });
       };
@@ -114,6 +149,7 @@ export class EnemySystem implements IGameSystem {
     for (let i = 0; i < this.friendlyAIs.length; i++) {
       friendlyMeshes.push(this.friendlyAIs[i].getMesh());
     }
+    this.directEnemies(deltaTime, playerPosition);
     this.levelManager.update(deltaTime, playerPosition, friendlyMeshes);
 
     // 僚机索敌目标：存活敌机 + 额外目标（Boss 本体 / 部件等），每步收集一次
@@ -143,6 +179,60 @@ export class EnemySystem implements IGameSystem {
         this.friendlyAIs.splice(i, 1);
       }
     }
+  }
+
+  /**
+   * 敌机更新之前的一步：把战场态势（玩家机头方向、玩家对每架敌机的威胁、关卡、是否 Boss 战）
+   * 写给每架敌机，再由导演发放 / 收回攻击令牌并指派进入方位。玩家不可被攻击（复活中）时
+   * 令牌数为 0：所有敌机停火。
+   */
+  private directEnemies(deltaTime: number, playerPosition: THREE.Vector3): void {
+    const enemies = this.levelManager.getEnemies();
+    const provider = this.threatProvider;
+    const level = this.sessionState.getLevel();
+    const bossFight = this.sessionState.isBossMode() || this.sessionState.isInBossBattle();
+    const targetable = provider ? provider.isPlayerTargetable() : true;
+    const lockedTarget = provider && targetable ? provider.getLockedTarget() : null;
+
+    let forward: THREE.Vector3 | null = null;
+    if (provider && provider.getPlayerForward(this.playerForward)) {
+      forward = this.playerForward;
+    } else if (this.playerVelocity.lengthSq() > MIN_FORWARD_SPEED * MIN_FORWARD_SPEED) {
+      // 没有提供者：用平滑速度的方向近似机头方向
+      forward = this.playerForward.copy(this.playerVelocity).normalize();
+    }
+
+    for (let i = 0; i < enemies.length; i++) {
+      const enemy = enemies[i];
+      const mesh = enemy.getMesh();
+      enemy.setCombatSituation(
+        forward,
+        lockedTarget === mesh,
+        provider !== null && targetable && provider.isMissileInbound(mesh),
+        level,
+        bossFight
+      );
+    }
+
+    this.attackDirector.update(
+      deltaTime,
+      enemies,
+      targetable ? playerPosition : null,
+      targetable ? getAttackTokenCount(level, this.difficultyLevel, bossFight) : 0
+    );
+  }
+
+  /**
+   * 接入玩家威胁提供者（GameCoordinator 实现：导引头锁定目标、在飞导弹、机头方向、是否复活中）。
+   * 传 null 断开：敌机视为不受威胁、玩家始终可被攻击。
+   */
+  setThreatProvider(provider: IJetThreatProvider | null): void {
+    this.threatProvider = provider;
+  }
+
+  /** 攻击令牌导演（调试 / 测试用） */
+  getAttackDirector(): AttackDirector {
+    return this.attackDirector;
   }
 
   /**
@@ -213,6 +303,7 @@ export class EnemySystem implements IGameSystem {
 
   dispose(): void {
     this.levelManager.clear();
+    this.attackDirector.reset();
     this.friendlyAIs = [];
     this.friendlyMeshBuffer.length = 0;
     this.friendlyTargetBuffer.length = 0;
@@ -249,11 +340,13 @@ export class EnemySystem implements IGameSystem {
   /** 加载关卡；startWave > 0 时从第 N 波继续（读档） */
   loadLevel(levelId: number, startWave: number = 0): void {
     this.levelManager.loadLevel(levelId, startWave);
+    this.attackDirector.reset();
     this.resetPlayerMotion();
   }
 
   setDifficultyProfile(profile: DifficultyProfile): void {
     this.levelManager.setDifficultyProfile(profile);
+    this.difficultyLevel = profile.level;
   }
 
   getCurrentLevelConfig(): import('@/features/terrain/LevelConfig').LevelConfig | null {
@@ -354,10 +447,24 @@ export class EnemySystem implements IGameSystem {
     this.friendlyAIs = [];
   }
 
+  /**
+   * 在指定位置生成一架敌机（Boss 召唤小兵；开发钩子传 counted = false，不计入关卡的已生成数）。
+   */
   spawnEnemyAt(
     type: import('@/features/enemy/EnemyTypes').EnemyType,
-    position: THREE.Vector3
+    position: THREE.Vector3,
+    counted: boolean = true
   ): void {
-    this.levelManager.spawnEnemyAtPosition(type, position);
+    if (counted) {
+      this.levelManager.spawnEnemyAtPosition(type, position);
+    } else {
+      this.levelManager.spawnEnemyAtPosition(type, position, false);
+    }
+  }
+
+  /** 开发钩子：移除所有在场敌机（不计分、不触发击杀事件），返回移除的架数 */
+  removeAllEnemies(): number {
+    this.attackDirector.reset();
+    return this.levelManager.removeAllEnemies();
   }
 }

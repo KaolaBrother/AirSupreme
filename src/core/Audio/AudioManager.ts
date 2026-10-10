@@ -117,6 +117,7 @@ export enum SoundType {
   PHASE_ALARM = 'PHASE_ALARM',
   DEBRIEF_TALLY = 'DEBRIEF_TALLY',
   UNIT_DESTROYED = 'UNIT_DESTROYED',
+  LANCE_CHARGE = 'LANCE_CHARGE', // 敌方狙击机蓄力
 }
 
 type HitProfile = 'player' | 'enemy' | 'boss' | 'environment';
@@ -232,6 +233,7 @@ const NEW_SOUND_POLICIES: Partial<Record<SoundType, SoundPolicy>> = {
     duckAmount: 0.22,
     duckDurationMs: 320,
   },
+  [SoundType.LANCE_CHARGE]: { minIntervalMs: 250, maxConcurrent: 2 },
 };
 
 /** 音效总线的粘合压缩：密集战斗时压住叠加峰值，阈值以下保持单位增益 */
@@ -2708,6 +2710,46 @@ export class AudioManager {
 
         osc.start(startTime);
         osc.stop(startTime + 0.4);
+      }
+    } catch {
+      // Ignore
+    }
+  }
+
+  /**
+   * 敌方狙击机蓄力：一声在 chargeSeconds 内逐渐升高、到点戛然而止的啸叫（一次性，不需要 stop；
+   * 蓄力被打断时它自己播完）。与玩家电磁炮的蓄力音分开，互不抢占。
+   */
+  public playLanceCharge(chargeSeconds: number = 1.3): void {
+    const seconds = Number.isFinite(chargeSeconds)
+      ? Math.max(0.4, Math.min(3, chargeSeconds))
+      : 1.3;
+    const sound = this.beginSound(SoundType.LANCE_CHARGE, seconds * 1000);
+    if (!sound) return;
+    const { now, context, sfxGain } = sound;
+
+    try {
+      const end = now + seconds;
+      const gain = context.createGain();
+      gain.gain.setValueAtTime(0, now);
+      gain.gain.linearRampToValueAtTime(0.07 * this.sfxVolume, now + 0.08);
+      gain.gain.linearRampToValueAtTime(0.2 * this.sfxVolume, end - 0.05);
+      gain.gain.linearRampToValueAtTime(0, end);
+      gain.connect(sfxGain);
+
+      // 两个振荡器：主音从低到高，泛音高八度偏一点，听起来像电容充能
+      const voices: Array<[OscillatorType, number, number]> = [
+        ['sawtooth', 320, 1280],
+        ['sine', 646, 2580],
+      ];
+      for (const [type, from, to] of voices) {
+        const osc = context.createOscillator();
+        osc.type = type;
+        osc.frequency.setValueAtTime(from, now);
+        osc.frequency.exponentialRampToValueAtTime(to, end);
+        osc.connect(gain);
+        osc.start(now);
+        osc.stop(end + 0.02);
       }
     } catch {
       // Ignore

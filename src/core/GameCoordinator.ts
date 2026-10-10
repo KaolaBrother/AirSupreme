@@ -13,9 +13,10 @@ import { MusicSystem } from '@/core/Audio/MusicSystem';
 import { VoiceSystem } from '@/core/Audio/VoiceSystem';
 import type { ParticleSystem } from '@/features/effects/ParticleSystem';
 import { PlayerStats, UpgradeType } from '@/features/upgrade/UpgradeSystem';
-import { FriendlyAI } from '@/features/enemy/FriendlyAI';
+import { FriendlyAI, WINGMAN_CONFIG } from '@/features/enemy/FriendlyAI';
 import type { EnemyAI } from '@/features/enemy/EnemyAI';
-import { EnemyType, ENEMY_CONFIGS } from '@/features/enemy/EnemyTypes';
+import { EnemyType } from '@/features/enemy/EnemyTypes';
+import type { IJetThreatProvider } from '@/features/enemy/JetThreat';
 import { PowerUpType, POWER_UP_CONFIGS } from '@/features/powerups/PowerUpSystem';
 import type { UpgradeMenu } from '@/ui/UpgradeMenu';
 import type { PauseMenu } from '@/ui/PauseMenu';
@@ -29,7 +30,12 @@ import type { BossMinionKind } from '@/features/boss/BossContracts';
 import { createPlayerMesh, createFriendlyMesh } from '@/features/aircraft/AircraftMeshFactory';
 import { getDifficultyProfile, getLevelScaling } from '@/core/Difficulty';
 import { Faction } from '@/core/Faction';
-import type { CombatTarget, DamageSource, SpecialWeaponId } from '@/core/CombatContracts';
+import {
+  getDeclaredHitRadius,
+  type CombatTarget,
+  type DamageSource,
+  type SpecialWeaponId,
+} from '@/core/CombatContracts';
 import { getLevelConfig, LevelWaveEventType } from '@/features/terrain/LevelConfig';
 import { WORLDSCAPE_WATER_Y } from '@/features/terrain/TerrainGenerator';
 import { LevelState } from '@/features/levels/LevelManager';
@@ -493,6 +499,25 @@ export class GameCoordinator {
     quaternion: new THREE.Quaternion(),
   };
   private readonly hitPosition = new THREE.Vector3();
+  /**
+   * 玩家对敌机的威胁（交给 EnemySystem）：导引头已锁定的目标、在飞的玩家导弹、机头方向、
+   * 是否可被攻击。敌机条令只看这个窄接口，不接触 HUD / 锁定指示器 / 导弹系统。
+   */
+  private readonly jetThreatProvider: IJetThreatProvider = {
+    getLockedTarget: () => {
+      // 表现层运行时按需加载：指示器还没到位时视为没有锁定
+      const indicator: LockOnIndicator | undefined = this.lockOnIndicator;
+      return indicator ? indicator.getSeeker().getLockedTarget() : null;
+    },
+    isMissileInbound: (target) =>
+      this.combatSystem?.getMissileSystem().hasActiveMissileToward(target) ?? false,
+    getPlayerForward: (out) => {
+      out.set(0, 0, -1).applyQuaternion(this.playerAircraft.quaternion);
+      return Number.isFinite(out.x) && Number.isFinite(out.y) && Number.isFinite(out.z);
+    },
+    isPlayerTargetable: () =>
+      this.playerAircraft.visible && !this.playerSystem.isPlayerRespawning(),
+  };
   /** 友机入场：玩家机头方向（之后复用为 lookAt 目标点）与入场航向 */
   private readonly friendlySpawnForward = new THREE.Vector3();
   private readonly friendlySpawnHeading = new THREE.Vector3();
@@ -692,6 +717,7 @@ export class GameCoordinator {
         const enemySystem = new EnemySystem(this.gameScene.scene, this.sessionState);
         enemySystem.init();
         enemySystem.setDifficultyProfile(getDifficultyProfile(this.sessionState.getDifficulty()));
+        enemySystem.setThreatProvider(this.jetThreatProvider);
         this.enemySystem = enemySystem;
         return enemySystem;
       });
@@ -775,8 +801,24 @@ export class GameCoordinator {
 
     this.resourceRegistry.addUnsubscriber(
       EventBus.on(GameEventType.ENEMY_FIRED, ({ payload }) => {
-        this.audioManager.playShoot('enemy');
+        // 同一次齐射里的后续弹（高炮弹扇面）不再各响一声、各闪一次
+        if (payload.quiet) return;
+        if (payload.weapon === 'heavy-shell') {
+          this.audioManager.playTankCannon();
+        } else if (payload.weapon === 'lance') {
+          this.audioManager.playShoot('boss');
+        } else {
+          this.audioManager.playShoot('enemy');
+        }
         this.vfx.muzzleFlashNear(payload.position, payload.direction);
+      })
+    );
+
+    this.resourceRegistry.addUnsubscriber(
+      EventBus.on(GameEventType.ENEMY_TELL, ({ payload }) => {
+        if (payload.kind === 'lance-charge') {
+          this.audioManager.playLanceCharge(payload.duration);
+        }
       })
     );
 
@@ -1034,11 +1076,10 @@ export class GameCoordinator {
 
   /** 生成一架友军喷气机；先入场的友机按编队顺序领取僚机身份（血条显示呼号） */
   private spawnFriendlyJet(): { friendly: FriendlyAI; wingman: WingmanProfile | null } {
-    const enemyTypes = Object.values(EnemyType);
-    const randomType = enemyTypes[Math.floor(Math.random() * enemyTypes.length)];
-    const config = ENEMY_CONFIGS[randomType];
+    // 僚机用自己固定的一份数值（战斗机级），与敌机机型表脱钩：不再随机借用敌机机型
+    const config = WINGMAN_CONFIG;
 
-    // 友军僚机使用盟军涂装（同机体 / 同命中半径）
+    // 友军僚机使用盟军涂装与自己的机体
     const mesh = createFriendlyMesh(config);
     const enemySystem = this.enemySystem;
 
@@ -2470,7 +2511,8 @@ export class GameCoordinator {
       mesh,
       faction: Faction.ENEMY,
       kind: 'air',
-      hitRadius: 5,
+      // 机体工厂按机型大小声明 userData.hitRadius；没声明时沿用 5 米
+      hitRadius: getDeclaredHitRadius(mesh, 5),
       isAlive: () => enemy.isAlive() && mesh.visible,
       applyDamage: (amount: number, _source: DamageSource, hitPoint?: THREE.Vector3) => {
         if (!enemy.isAlive()) return;
