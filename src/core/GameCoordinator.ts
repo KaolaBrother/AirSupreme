@@ -15,7 +15,7 @@ import type { ParticleSystem } from '@/features/effects/ParticleSystem';
 import { PlayerStats, UpgradeType } from '@/features/upgrade/UpgradeSystem';
 import { FriendlyAI, WINGMAN_CONFIG } from '@/features/enemy/FriendlyAI';
 import type { EnemyAI } from '@/features/enemy/EnemyAI';
-import { EnemyType } from '@/features/enemy/EnemyTypes';
+import { EnemyType, isEliteEnemyType } from '@/features/enemy/EnemyTypes';
 import { JET_MISSILE_SPEC } from '@/features/enemy/EnemyWeapons';
 import type { IJetThreatProvider } from '@/features/enemy/JetThreat';
 import type { IJetMissileLauncher } from '@/features/enemy/MissileDirector';
@@ -78,7 +78,9 @@ import { getCampaignChapter, getUnlockedWeaponsThrough } from '@/features/campai
 import { format, tr, type LocalizedText } from '@/i18n';
 import {
   DEFAULT_ONBOARDING_BEAT_PROFILE,
+  FIRST_CONTACT_HINT_HOLD_MS,
   ONBOARDING_TEXT_LIBRARY,
+  getFirstContactHints,
   type OnboardingMessageSource,
   type OnboardingWaveBeatProfile,
 } from '@/ui/OnboardingManager';
@@ -228,8 +230,8 @@ const TUTORIAL_OBJECTIVE_TEXT = {
 const WAVE_OBJECTIVE_TEXT = {
   eliteTitle: { en: 'Wave {wave} · Elite hunt', zh: '第 {wave} 波 · 精英歼灭' },
   eliteObjective: {
-    en: 'Take out heavies and aces first to shorten the danger window.',
-    zh: '优先打穿重型/王牌，压缩高威胁窗口。',
+    en: 'Take out the elite jets first to shorten the danger window.',
+    zh: '优先打掉精英敌机，压缩高威胁窗口。',
   },
   eliteClearedObjective: {
     en: 'Main threats down. Mop up the rest.',
@@ -295,6 +297,8 @@ export class GameCoordinator {
   private static readonly TUTORIAL_HINT_MED_MS = 1500;
   private static readonly TUTORIAL_HINT_LONG_MS = 1700;
   private static readonly WAVE_EVENT_START_COOLDOWN_MS = 1000;
+  /** 首次遭遇提示与前一条大字提示之间的间隔（毫秒） */
+  private static readonly FIRST_CONTACT_HINT_GAP_MS = 250;
   private static readonly WAVE_EVENT_COMPLETE_COOLDOWN_MS = 900;
   private static readonly RESPAWN_OVERLAY_MS = 2000;
   private static readonly UPGRADE_FEEDBACK: Record<
@@ -554,7 +558,7 @@ export class GameCoordinator {
     getLockTimeScale: () => this.enemySystem?.getLockTimeScale() ?? 1,
   };
   /** 画凝结尾的敌机（隐形中的除外），逐步复用 */
-  private readonly contrailEnemyBuffer: THREE.Object3D[] = [];
+  private readonly uncloakedEnemyBuffer: THREE.Object3D[] = [];
   /** 友机入场：玩家机头方向（之后复用为 lookAt 目标点）与入场航向 */
   private readonly friendlySpawnForward = new THREE.Vector3();
   private readonly friendlySpawnHeading = new THREE.Vector3();
@@ -930,6 +934,7 @@ export class GameCoordinator {
         this.audioManager.playWaveStart();
         this.handleWaveStartUnits(payload.level, payload.wave);
         this.campaign.handleWaveStart(payload.wave);
+        this.scheduleFirstContactHints(payload.level, payload.wave);
       })
     );
 
@@ -1294,7 +1299,8 @@ export class GameCoordinator {
       deltaTime,
       this.playerAircraft,
       this.playerAircraft.position,
-      enemyMeshes,
+      // 友军单位的索敌名单：隐形中的敌机不在其中（已经打出去的炮弹照样会命中）
+      this.collectUncloakedEnemyMeshes(),
       friendlyMeshes,
       this.enemySystem?.getLevelManager().areWaveJetsCleared() ?? false
     );
@@ -1361,7 +1367,7 @@ export class GameCoordinator {
       deltaTime,
       this.playerSystem.getHealth().getHealthPercent(),
       this.enemySystem?.getEnemies() ?? GameCoordinator.NO_ENEMIES,
-      this.collectContrailEnemyMeshes(),
+      this.collectUncloakedEnemyMeshes(),
       friendlyMeshes
     );
     this.campaign.tick(deltaTime);
@@ -1392,9 +1398,12 @@ export class GameCoordinator {
     return buffer;
   }
 
-  /** 画凝结尾的敌机：存活、没有隐形的（隐形机隐形时只留一条稀疏的粒子淡尾迹） */
-  private collectContrailEnemyMeshes(): THREE.Object3D[] {
-    const buffer = this.contrailEnemyBuffer;
+  /**
+   * 存活、没有隐形的敌机网格（复用数组）：画凝结尾的敌机（隐形机隐形时只留一条稀疏的粒子淡尾迹），
+   * 也是友军单位的索敌名单。
+   */
+  private collectUncloakedEnemyMeshes(): THREE.Object3D[] {
+    const buffer = this.uncloakedEnemyBuffer;
     buffer.length = 0;
     for (const enemy of this.enemySystem?.getEnemies() ?? GameCoordinator.NO_ENEMIES) {
       if (enemy.isAlive() && !enemy.isCloaked()) buffer.push(enemy.getMesh());
@@ -1845,10 +1854,10 @@ export class GameCoordinator {
 
     switch (this.waveEventState.type) {
       case LevelWaveEventType.ELITE_HUNT: {
-        const eliteAlive = aliveEnemies.filter((enemy) => {
-          const type = enemy.getConfig().type;
-          return type === EnemyType.HEAVY || type === EnemyType.ACE || type === EnemyType.SNIPER;
-        }).length;
+        // 精英名单见 ELITE_ENEMY_TYPES；在场的 + 本波还没现身的，开场第一秒就是本波的精英总数
+        const eliteAlive =
+          aliveEnemies.filter((enemy) => isEliteEnemyType(enemy.getConfig().type)).length +
+          (this.enemySystem?.getLevelManager().countEliteJetsToCome() ?? 0);
 
         return {
           title: tr(text.eliteTitle, { wave: waveNumber }),
@@ -2634,6 +2643,8 @@ export class GameCoordinator {
         this.requestPlayerHitMarker(hitPoint ?? mesh.position);
       },
       applyStun: (seconds: number) => enemy.applyStun(seconds),
+      // 隐形中：蜂群导弹的自动索敌选不到它（已经在飞的、范围伤害与光束照打）
+      isSeekable: () => !enemy.isCloaked(),
     };
     this.enemyTargets.set(enemy, target);
     return target;
@@ -2741,6 +2752,34 @@ export class GameCoordinator {
   }
 
   /** 开发构建专用的调试钩子（import.meta.env.DEV 为 false 时整段被裁剪） */
+  /**
+   * 开发钩子 startLevel：把战役放到第 level 关第 waveIndex 波（从 0 起），走读档续玩的同一条
+   * 入关路径（prepareLevel → startLevelCombat），并解锁到该关为止的武器。只在战斗中可用。
+   */
+  private devStartLevel(level: number, waveIndex: number): boolean {
+    const config = getLevelConfig(level);
+    if (
+      !import.meta.env.DEV ||
+      !config ||
+      !this.enemySystem ||
+      !this.sessionState.isPlaying() ||
+      this.sessionState.isBossMode()
+    ) {
+      return false;
+    }
+    const startWave = Number.isFinite(waveIndex)
+      ? Math.max(0, Math.min(config.totalWaves - 1, Math.floor(waveIndex)))
+      : 0;
+    const upgrades = this.playerStats.getUpgrades();
+    upgrades.setCampaignLevel(level);
+    upgrades.setUnlockedWeapons(getUnlockedWeaponsThrough(level));
+    void this.prepareLevel(level, startWave).then(() => {
+      if (this.isDisposed) return;
+      this.startLevelCombat(level, startWave, false);
+    });
+    return true;
+  }
+
   private installDevHooks(): void {
     if (import.meta.env.DEV) {
       void import('@/core/dev/DevHooks').then(({ installDevHooks }) => {
@@ -2797,6 +2836,7 @@ export class GameCoordinator {
           getMusic: () => this.musicSystem,
           playGenericRadio: (key) => this.presentation.genericRadio(key),
           onWingmanEvent: (id, event) => this.presentation.onWingmanEvent(id, event),
+          startLevel: (level, waveIndex) => this.devStartLevel(level, waveIndex),
         });
       });
     }
@@ -3136,6 +3176,41 @@ export class GameCoordinator {
     this.updatePlayerFacingObjective();
   }
 
+  /**
+   * 首次遭遇提示：某机型在战役里第一次出现的那一波开场时，用大字提示通道显示一行文字（无语音）。
+   * 排在本波的事件提示之后；只跟关卡和波次有关，所以读档重打这一波照样显示，别的波次不显示。
+   */
+  private scheduleFirstContactHints(level: number, wave: number): void {
+    if (this.sessionState.isBossMode() || this.sessionState.isInBossBattle()) {
+      return;
+    }
+    const hints = getFirstContactHints(level, wave);
+    if (hints.length === 0) {
+      return;
+    }
+    const beat = this.getCurrentWaveOnboardingBeat();
+    let delayMs =
+      Math.max(0, beat.eventPromptDelayMs) +
+      Math.max(0, beat.eventPromptHoldMs) +
+      GameCoordinator.FIRST_CONTACT_HINT_GAP_MS;
+    for (const hint of hints) {
+      this.scheduleTimeout(() => {
+        const levelManager = this.enemySystem?.getLevelManager();
+        if (
+          !this.sessionState.isPlaying() ||
+          this.sessionState.isInBossBattle() ||
+          this.sessionState.getLevel() !== level ||
+          levelManager?.getCurrentWaveIndex() !== wave ||
+          levelManager.getState() !== LevelState.WAVE_ACTIVE
+        ) {
+          return;
+        }
+        this.hud.showPowerUpBig('', hint, FIRST_CONTACT_HINT_HOLD_MS / 1000, true);
+      }, delayMs);
+      delayMs += FIRST_CONTACT_HINT_HOLD_MS + GameCoordinator.FIRST_CONTACT_HINT_GAP_MS;
+    }
+  }
+
   private handleWaveEventStart(eventType: LevelWaveEventType, wave: number): void {
     this.waveCompletionObjective = null;
     this.escortWaveState.active = false;
@@ -3398,10 +3473,10 @@ export class GameCoordinator {
         return {
           title: tr(text.eliteTitle, { wave: waveNumber }),
           objective: tr({
-            en: 'Take out heavies and aces first to break their attack.',
-            zh: '优先打穿重型与王牌，切断高威胁线。',
+            en: 'Take out the elite jets first to break their attack.',
+            zh: '优先打掉精英敌机，切断高威胁线。',
           }),
-          status: tr({ en: 'Priority: heavies / aces', zh: '优先：重型/王牌' }),
+          status: tr({ en: 'Priority: elite jets', zh: '优先：精英敌机' }),
         };
       case LevelWaveEventType.INTERCEPT:
         return {

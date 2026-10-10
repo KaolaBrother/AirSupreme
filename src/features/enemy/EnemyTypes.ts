@@ -325,7 +325,24 @@ export const ENEMY_CONFIGS: Record<EnemyType, EnemyConfig> = {
 };
 
 /**
+ * “精英歼灭”波次计入目标的机型（目标面板的计数、提示文案都以这一份为准）。
+ */
+export const ELITE_ENEMY_TYPES: readonly EnemyType[] = [
+  EnemyType.HEAVY,
+  EnemyType.ACE,
+  EnemyType.SNIPER,
+  EnemyType.STRIKER,
+  EnemyType.JAMMER,
+  EnemyType.WRAITH,
+];
+
+export function isEliteEnemyType(type: EnemyType): boolean {
+  return ELITE_ENEMY_TYPES.includes(type);
+}
+
+/**
  * 根据关卡和波次获取敌人配置
+ * （旧的随机选型表：波次编成已改为 LevelConfig 里逐波写定的 waves，游戏流程不再调用）
  */
 export function getEnemyTypesForWave(level: number, wave: number): EnemyType[] {
   const types: EnemyType[] = [];

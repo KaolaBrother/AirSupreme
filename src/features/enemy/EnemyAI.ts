@@ -147,6 +147,8 @@ export class EnemyAI {
   private missileInbound = false;
   private level = 1;
   private bossFight = false;
+  /** 玩家现在可以被攻击（复活中 / 剧情停顿 / 阵亡时为 false：任何武器都不开火） */
+  private playerTargetable = true;
   /** 狙击机的瞄准光束（首次蓄力时创建） */
   private lanceBeam: LanceBeam | null = null;
   /** 全队导弹令牌：本机现在可以发射的导弹数（EnemySystem 的导弹导演读写） */
@@ -155,6 +157,7 @@ export class EnemyAI {
   private missileLocking = false;
   /** 同伴（非干扰机）的平均位置：干扰机躲在它们身后（EnemySystem 每步写入） */
   private readonly groupCenter = new THREE.Vector3();
+  private groupId = 0;
   private hasGroup = false;
   /** 隐形机的淡出 / 眼灯特效（首次隐形时创建）与当前机体不透明度 */
   private cloakFade: CloakFade | null = null;
@@ -259,6 +262,8 @@ export class EnemyAI {
     friendlyMeshes?: THREE.Object3D[],
     fireTarget: THREE.Vector3 | null = null
   ): void {
+    // 步长不是有限数（NaN / Infinity）：整步跳过，位置与朝向保持原样
+    if (!Number.isFinite(deltaTime)) return;
     this.capturePreviousVisualState();
     if (!this.ensureFinitePosition()) {
       return;
@@ -270,8 +275,9 @@ export class EnemyAI {
       this.friendlyMeshes = friendlyMeshes;
     }
 
+    const weaponsFree = fireTarget !== null && this.playerTargetable;
     if (this.doctrine) {
-      this.updateWithDoctrine(deltaTime, playerPosition, fireTarget !== null);
+      this.updateWithDoctrine(deltaTime, playerPosition, weaponsFree);
       return;
     }
 
@@ -303,7 +309,7 @@ export class EnemyAI {
 
     this.attackCooldown = Math.max(0, this.attackCooldown - deltaTime);
 
-    if (!stunned && this.attackCooldown <= 0 && fireTarget) {
+    if (!stunned && this.attackCooldown <= 0 && fireTarget && weaponsFree) {
       const toTarget = tmpDirection.subVectors(fireTarget, this.mesh.position).normalize();
       const forward = tmpForward.copy(this.velocity).normalize();
       const dot = toTarget.dot(forward);
@@ -575,14 +581,17 @@ export class EnemyAI {
 
   /**
    * 战场态势（EnemySystem 每步在 update 之前写入）：玩家机头方向、玩家对本机的威胁、
-   * 当前关卡与是否在 Boss 战。没有条令的敌机不使用这些。
+   * 当前关卡、是否在 Boss 战，以及玩家现在能不能被攻击。
+   * playerTargetable 为 false（复活中 / 剧情停顿 / 阵亡）时本机任何武器都不开火——不需要令牌的
+   * 防御性射击（重型机尾炮）也一样——也不开始锁定或蓄力；飞行照常。
    */
   public setCombatSituation(
     playerForward: THREE.Vector3 | null,
     lockedOn: boolean,
     missileInbound: boolean,
     level: number,
-    bossFight: boolean
+    bossFight: boolean,
+    playerTargetable = true
   ): void {
     if (playerForward && isFiniteVector(playerForward) && playerForward.lengthSq() > 1e-8) {
       this.playerForward.copy(playerForward).normalize();
@@ -591,6 +600,7 @@ export class EnemyAI {
     this.missileInbound = missileInbound;
     this.level = Number.isFinite(level) ? level : 1;
     this.bossFight = bossFight;
+    this.playerTargetable = playerTargetable;
   }
 
   /** 本机的条令；旧三状态行为（僚机）为 null */
@@ -641,6 +651,18 @@ export class EnemyAI {
     return cloak !== null && cloak.hidden && this.isAlive();
   }
 
+  /**
+   * 波次编组号：同一波同一路到场的敌机相同；0 = 不属于任何编组（Boss 召唤 / 开发钩子）。
+   * 干扰机据此找“自己那一路”。
+   */
+  public setGroupId(id: number): void {
+    this.groupId = Number.isFinite(id) && id > 0 ? Math.floor(id) : 0;
+  }
+
+  public getGroupId(): number {
+    return this.groupId;
+  }
+
   /** 同伴（非干扰机）的平均位置；null = 场上没有可以躲在身后的同伴 */
   public setGroupCenter(center: THREE.Vector3 | null): void {
     if (center && isFiniteVector(center)) {
@@ -663,6 +685,7 @@ export class EnemyAI {
    * 攻击冷却与 EMP 瘫痪照常计时。velocity 非有限时改为沿机头方向按配置速度飞行。
    */
   public updateKinematic(deltaTime: number): void {
+    if (!Number.isFinite(deltaTime)) return;
     this.capturePreviousVisualState();
     if (!this.ensureFinitePosition()) {
       return;

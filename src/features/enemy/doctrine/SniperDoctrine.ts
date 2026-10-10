@@ -1,7 +1,12 @@
 import { Vector3 } from 'three';
 import { ENEMY_WEAPON_SPECS } from '../EnemyWeapons';
 import { JetDoctrine } from './JetDoctrine';
-import type { DoctrineCommand, DoctrineContext, DoctrineTell } from './DoctrineTypes';
+import {
+  DOCTRINE_RULES,
+  type DoctrineCommand,
+  type DoctrineContext,
+  type DoctrineTell,
+} from './DoctrineTypes';
 import { angularDistance, bearingBetween, leadPoint } from './DoctrineMath';
 
 const DEG = Math.PI / 180;
@@ -28,8 +33,16 @@ export const SNIPER_TUNING = {
   CHARGE_MAX_DISTANCE: 620,
   /** 长枪弹提前量的最长预测时间（秒） */
   LANCE_MAX_LEAD_SECONDS: 3,
-  /** 蓄力时收油门稳住机身 */
+  /** 蓄力时收油门稳住机身：收到与玩家同速为止，最低到这个值（玩家悬停 / 很慢时） */
   CHARGE_THROTTLE: 0.6,
+  /** 站位半径误差的归一化宽度（米）：比通用的盘旋更紧，站位带只有 140 米宽 */
+  STANDOFF_BAND: 80,
+  /**
+   * 玩家机头对着它（夹角 CHASED_NOSE_ANGLE 以内）= 玩家在追它：这时不为了保持距离而后退得比
+   * 玩家还快，追得近；机头偏开到 PASSING_NOSE_ANGLE 以外 = 玩家只是路过：全程保持距离
+   */
+  CHASED_NOSE_ANGLE: 20 * DEG,
+  PASSING_NOSE_ANGLE: 45 * DEG,
   /** 本机当前方位与指派方位相差超过这个角度时不蓄力（弧度）；持令牌空等超过这么久就让出 */
   BEARING_TOLERANCE: 25 * DEG,
   TOKEN_IDLE_SECONDS: 2.5,
@@ -155,9 +168,36 @@ export class SniperDoctrine extends JetDoctrine {
     return seconds * (context.cadenceScale > 0 ? context.cadenceScale : 1);
   }
 
+  /**
+   * 保持站位：在随玩家移动的参照系里绕玩家盘旋，油门在 0.6×–1.3× 之间取够用的值——
+   * 玩家直线飞过 / 飞远时跟得住 380–520 米的站位带，而不是被甩到身后；玩家悬停、或把机头
+   * 对准它追过来时与原地盘旋一样（追得近，逼近到 220 米内它才逃）。
+   * 返回蓄力时该用的油门：收到与“要跟的那部分玩家速度”同速，最低 0.6×。
+   */
+  private steerStandoff(context: DoctrineContext, command: DoctrineCommand): number {
+    const noseOff = this.playerNoseAngle(context);
+    const passing =
+      (noseOff - SNIPER_TUNING.CHASED_NOSE_ANGLE) /
+      (SNIPER_TUNING.PASSING_NOSE_ANGLE - SNIPER_TUNING.CHASED_NOSE_ANGLE);
+    const approachYield = 1 - (passing > 1 ? 1 : passing < 0 ? 0 : passing);
+    const followed = this.steerOrbitMoving(
+      context,
+      command,
+      this.orbitRadius,
+      this.orbitSign,
+      this.heightOffset,
+      DOCTRINE_RULES.MAX_THROTTLE,
+      SNIPER_TUNING.STANDOFF_BAND,
+      context.baseSpeed,
+      approachYield
+    );
+    const match = context.baseSpeed > 0 ? followed / context.baseSpeed : 0;
+    return Math.min(DOCTRINE_RULES.MAX_THROTTLE, Math.max(SNIPER_TUNING.CHARGE_THROTTLE, match));
+  }
+
   /** 盘旋待机；可以开火时申请令牌，领到且方位合适就开始蓄力 */
   private decideOrbit(context: DoctrineContext, command: DoctrineCommand): void {
-    this.steerOrbit(context, command, this.orbitRadius, this.orbitSign, this.heightOffset);
+    const chargeThrottle = this.steerStandoff(context, command);
 
     const ready =
       this.shotCooldown <= 0 &&
@@ -201,7 +241,7 @@ export class SniperDoctrine extends JetDoctrine {
     this.setPhase('charge');
     command.cue = 'lance-charge';
     command.cueDuration = SNIPER_TUNING.CHARGE_SECONDS;
-    command.throttle = SNIPER_TUNING.CHARGE_THROTTLE;
+    command.throttle = chargeThrottle;
     this.updateTell(context);
   }
 
@@ -211,11 +251,11 @@ export class SniperDoctrine extends JetDoctrine {
     if (!context.hasToken) {
       this.abortCharge(context, command);
       this.setPhase('orbit');
-      this.steerOrbit(context, command, this.orbitRadius, this.orbitSign, this.heightOffset);
+      this.steerStandoff(context, command);
       return;
     }
-    this.steerOrbit(context, command, this.orbitRadius, this.orbitSign, this.heightOffset);
-    command.throttle = SNIPER_TUNING.CHARGE_THROTTLE;
+    // 航向照旧，只是收油门稳住机身
+    command.throttle = this.steerStandoff(context, command);
 
     this.chargeTime += context.dt;
     this.updateTell(context);
