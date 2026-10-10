@@ -41,6 +41,7 @@ const AUTO_ROTATE_SPEED = 0.6;
 interface AircraftMeshFactoryModule {
   createPlayerMesh: () => Group;
   createEnemyMesh: (config: (typeof ENEMY_CONFIGS)[EnemyType]) => Group;
+  createFriendlyMesh: (config: (typeof ENEMY_CONFIGS)[EnemyType]) => Group;
 }
 
 /**
@@ -152,7 +153,7 @@ function computeVisibleRadius(root: Object3D, center: Vector3): number {
   return Math.sqrt(maxDistanceSq);
 }
 
-type AircraftCategory = 'player' | 'enemy' | 'boss' | 'missile';
+type AircraftCategory = 'player' | 'ally' | 'enemy' | 'boss' | 'missile';
 
 interface AircraftInfo {
   id: string;
@@ -163,6 +164,7 @@ interface AircraftInfo {
 
 const CATEGORY_LABELS: Readonly<Record<AircraftCategory, LocalizedText>> = {
   player: { en: 'Player', zh: '玩家' },
+  ally: { en: 'Ally', zh: '友军' },
   enemy: { en: 'Enemy', zh: '敌机' },
   boss: { en: 'Boss', zh: 'Boss' },
   missile: { en: 'Ordnance', zh: '弹药' },
@@ -455,6 +457,7 @@ const PREVIEW_CSS = `
   color: var(--mp-ice);
 }
 
+#model-preview .mp-type[data-type='ally'] { color: var(--hud-ally, #f4d35e); }
 #model-preview .mp-type[data-type='enemy'] { color: var(--hud-threat, #ff4d4d); }
 #model-preview .mp-type[data-type='boss'] { color: var(--hud-weapon, #ffb347); }
 #model-preview .mp-type[data-type='missile'] { color: var(--hud-ally, #f4d35e); }
@@ -798,6 +801,17 @@ export class ModelPreview {
       createMesh: async () => {
         const { createPlayerMesh } = await this.loadAircraftMeshFactory();
         return createPlayerMesh();
+      },
+    });
+
+    // 友军僚机：专用机体，与传入的敌机配置无关（战斗里僚机借用任意一种敌机的数值）
+    this.aircrafts.push({
+      id: 'allied_wingman',
+      name: tr({ en: 'Allied Wingman', zh: '友军僚机' }),
+      type: 'ally',
+      createMesh: async () => {
+        const { createFriendlyMesh } = await this.loadAircraftMeshFactory();
+        return createFriendlyMesh(ENEMY_CONFIGS[EnemyType.FIGHTER]);
       },
     });
 
