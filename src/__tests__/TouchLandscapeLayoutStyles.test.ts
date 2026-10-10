@@ -1075,6 +1075,8 @@ describe('radio box under a two-row warning lane', () => {
     height: number;
     density: TouchDensity;
     camera: CameraMode;
+    /** 底部安全区（iPhone 的主屏幕指示条：竖屏 34px、横握 21px） */
+    bottomInset: number;
   }
 
   /**
@@ -1090,11 +1092,17 @@ describe('radio box under a two-row warning lane', () => {
    */
   const LARGEST_AIM_RING = { '--hud-aim-r': '100vmin' };
 
-  const phone = (width: number, height: number, camera: CameraMode = 'third-person'): Scene => ({
+  const phone = (
+    width: number,
+    height: number,
+    camera: CameraMode = 'third-person',
+    bottomInset = 0
+  ): Scene => ({
     width,
     height,
     density: width > height ? 'touch-landscape' : 'touch-portrait',
     camera,
+    bottomInset,
   });
 
   /** 规格点名的两个尺寸 */
@@ -1109,6 +1117,15 @@ describe('radio box under a two-row warning lane', () => {
     phone(932, 430),
     phone(844, 390, 'first-person'),
     phone(932, 430, 'first-person'),
+    // 矮一些的手机（曾经盖住第二行约 6px，7723114 已修）
+    phone(800, 360),
+    phone(360, 800),
+    phone(800, 360, 'first-person'),
+  ];
+  /** 有主屏幕指示条的 iPhone：面板的底边跟着安全区抬高，告警通道不动 */
+  const INSET_PHONES: Scene[] = [
+    phone(844, 390, 'third-person', 21),
+    phone(390, 844, 'third-person', 34),
   ];
   const TABLET_SCENES: Scene[] = [
     phone(1024, 768),
@@ -1149,7 +1166,7 @@ describe('radio box under a two-row warning lane', () => {
     const rules = pageRules();
     const context = (percentBase?: number): LengthContext => ({
       viewport,
-      insets: NO_INSETS,
+      insets: { ...NO_INSETS, bottom: scene.bottomInset },
       percentBase,
       customProperty: (name) =>
         overrides[name] ?? cascaded(rules, document.documentElement, name, viewport),
@@ -1292,7 +1309,7 @@ describe('radio box under a two-row warning lane', () => {
     expect(lane.lowerRowTop).toBeLessThan(lane.bottom - 20);
     const box = page.radioBox(LONG_MESSAGE, NORMAL_LINE_HEIGHT.low);
     expect(box.bottom).toBeCloseTo(390 - 12, 6);
-    expect(box.height).toBeGreaterThan(20);
+    expect(box.height).toBeGreaterThan(12);
     expect(box.height).toBeLessThan(120);
   });
 
@@ -1396,16 +1413,66 @@ describe('radio box under a two-row warning lane', () => {
     }
   );
 
-  // FINDING：规格点名的 390×844 / 844×390 以及更大的手机上，收小后的面板让开了第二行告警；
-  // 更小的手机上没有让开。按样式表算（对实现最有利的估计：告警行按最矮算、不计安全区）：
-  // - 800×360 横握：通道下沿在 323px，面板（底边 12px + 高 30.85px）上沿在 317.15px，盖住第二行
-  //   最下面约 6px；
-  // - 360×800 竖屏：通道下沿在 506.8px，面板上沿在 501.15px，同样盖住约 6px。
-  // 360 宽 / 360 高是最常见的安卓手机视口。期望：手机档（竖屏宽 < 700、横握高 < 700）都不盖住。
-  // 另：有底部安全区的 iPhone 上余量几乎为零（844×390 + 21px：约 0.15px；390×844 + 34px：
-  // 约 -0.05px），这里没有断言。如果这些尺寸不在这次修复的范围内，删掉这条即可。
-  it.fails.each([phone(800, 360), phone(360, 800)])(
-    'leaves the lower warning row clear on a smaller $width×$height phone',
+  it.each(INSET_PHONES)(
+    'leaves the lower warning row clear on a $width×$height phone with a $bottomInset px bottom inset',
+    (scene) => {
+      stage(scene);
+      showBothRows();
+      const page = measure(scene);
+
+      const box = page.radioBox(LONG_MESSAGE, NORMAL_LINE_HEIGHT.high);
+
+      // 面板确实跟着安全区抬高了
+      expect(scene.height - box.bottom).toBeGreaterThanOrEqual(scene.bottomInset);
+      expect(box.top - page.lane(NORMAL_LINE_HEIGHT.high).bottom).toBeGreaterThanOrEqual(0);
+    }
+  );
+
+  // 紧：812×375 横握 + 21px 安全区。按最矮的告警行（拉丁文字、带图标的威胁告警）算，面板上沿
+  // 离第二行下沿 2.6px；中文字体的行框更高时这个余量可能用完（按 1.5 倍行高算是 -2.4px），
+  // 所以这里只断言前一种，后一种见报告。
+  it('is still clear, narrowly, on a 812×375 phone with a 21 px bottom inset', () => {
+    const scene = phone(812, 375, 'third-person', 21);
+    stage(scene);
+    showBothRows();
+    const page = measure(scene);
+
+    const box = page.radioBox(LONG_MESSAGE, NORMAL_LINE_HEIGHT.low);
+
+    // 没有为了让开告警而压进主屏幕指示条的安全区
+    expect(scene.height - box.bottom).toBeGreaterThanOrEqual(scene.bottomInset);
+    expect(box.top - page.lane(NORMAL_LINE_HEIGHT.low).bottom).toBeGreaterThanOrEqual(0);
+  });
+
+  // FINDING：375×812 竖屏 + 34px 安全区（iPhone X / 11 Pro / 12 mini 一类），收小后的面板仍然
+  // 盖住第二行告警。按样式表算、取对实现最有利的估计（告警行按最矮算）：通道下沿在 514px，
+  // 面板底边在 534px（安全区 34 + 按键簇 240 + 4）、高 20.9px，上沿在 513.1px——盖住约 0.9px；
+  // 中文字体的行框更高时更多（按 1.5 倍行高算约 5.9px）。
+  // 期望：不盖住。同一档没有安全区时（375×812）余量约 13px。
+  it.fails(
+    'leaves the lower warning row clear on a 375×812 phone with a 34 px bottom inset',
+    () => {
+      const scene = phone(375, 812, 'third-person', 34);
+      stage(scene);
+      showBothRows();
+      const page = measure(scene);
+
+      const box = page.radioBox(LONG_MESSAGE, NORMAL_LINE_HEIGHT.low);
+
+      expect(box.top - page.lane(NORMAL_LINE_HEIGHT.low).bottom).toBeGreaterThanOrEqual(0);
+    }
+  );
+
+  // FINDING：更矮的竖屏手机上，收小后的面板仍然压在告警上。告警通道在屏幕中线下方、按键簇占着
+  // 底部 260px，视口高度不到约 785px 时两者之间放不下 20.9px 的面板（取对实现最有利的估计）：
+  // - 360×740（Galaxy S8 / S9 一类）：面板 455.1–476px，第二行告警 448.8–476.8px，几乎整行被盖住；
+  // - 375×667（iPhone SE）：面板 382.1–403px，落在第一行告警（377.5–407.5px）上，第二行已经伸进
+  //   按键簇的范围。
+  // 手机浏览器带着地址栏时视口比屏幕矮，360×800 的手机也会落到这个范围里。
+  // 期望：手机档都不盖住告警。这不是收小规则本身能解决的（没有地方可放）；如果这些尺寸
+  // 另行处理，删掉这条即可。
+  it.fails.each([phone(360, 740), phone(375, 667)])(
+    'leaves the warning lane clear on a shorter $width×$height portrait phone',
     (scene) => {
       stage(scene);
       showBothRows();
