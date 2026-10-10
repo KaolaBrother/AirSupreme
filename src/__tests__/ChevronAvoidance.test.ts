@@ -298,6 +298,9 @@ interface SceneOptions {
   rollStep?: number;
 }
 
+/** 没有遮挡时的箭头位置：按“箭头种类 | 视口 | 目标布置”记下，见 unobstructed() */
+const UNOBSTRUCTED = new Map<string, DrawnChevron[]>();
+
 describe('off-screen chevrons and the touch controls', () => {
   let originalInnerWidth: number;
   let originalInnerHeight: number;
@@ -422,7 +425,7 @@ describe('off-screen chevrons and the touch controls', () => {
     huds = [];
   }
 
-  afterEach(() => {
+  afterEach(async () => {
     disposeScene();
     styles.stop();
     vi.restoreAllMocks();
@@ -433,6 +436,10 @@ describe('off-screen chevrons and the touch controls', () => {
       configurable: true,
       value: originalInnerHeight,
     });
+    // 这个文件的用例全是同步的，一条接一条不会让出事件循环；整套测试并行跑、机器忙的时候它会
+    // 跑过一分钟，vitest 的工作线程就收不到主线程对进度上报的回执（Timeout calling
+    // "onTaskUpdate"，60 秒）。每条用例之后让出一次。
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
   });
 
   // ───────────────────────────── 夹具：控件与雷达 ─────────────────────────────
@@ -830,9 +837,25 @@ describe('off-screen chevrons and the touch controls', () => {
     return chevrons;
   }
 
-  /** 没有任何遮挡时箭头画在哪里 */
+  /**
+   * 没有任何遮挡时箭头画在哪里。同一种箭头、同一个视口、同一组目标的结果只算一次（很多用例拿它
+   * 作对照）；再问时照样把场景清空、把目标重新摆好，只是不再画一遍。
+   */
   function unobstructed(target: Viewport, options: SceneOptions = {}): DrawnChevron[] {
-    return chevronsWith(target, () => undefined, options);
+    const key = `${kind}|${target.width}x${target.height}|${JSON.stringify(options)}`;
+    const known = UNOBSTRUCTED.get(key);
+    if (!known) {
+      const chevrons = chevronsWith(target, () => undefined, options);
+      UNOBSTRUCTED.set(key, chevrons);
+      return structuredClone(chevrons);
+    }
+    disposeScene();
+    document.body.innerHTML = '';
+    rects.clear();
+    setViewport(target);
+    createScene(options);
+    disposeScene();
+    return structuredClone(known);
   }
 
   const centresOf = (chevrons: readonly DrawnChevron[]): Point[] =>
