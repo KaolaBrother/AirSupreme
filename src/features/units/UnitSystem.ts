@@ -14,7 +14,12 @@ import { getWaveDeployment } from './UnitDeployments';
 import { UnitEntity, isPlayerDamageSource, type UnitHost, type UnitInstance } from './UnitEntity';
 import { createUnitMesh } from './UnitMeshFactory';
 import { setUnitBeaconPhase } from './UnitMeshKit';
-import { UnitMissilePool, isFiniteVector, type UnitMissileEnv } from './UnitMissiles';
+import {
+  UnitMissilePool,
+  isFiniteVector,
+  type UnitMissileEnv,
+  type UnitMissileLaunchOptions,
+} from './UnitMissiles';
 import {
   UNIT_GUN_PROJECTILE_SPEED,
   UNIT_SUB_PERISCOPE_DEPTH,
@@ -132,10 +137,12 @@ export class UnitSystem implements IGameSystem {
   onCivilianHit?: (unit: UnitInstance) => void;
   onEscortResult?: (success: boolean, unit: UnitInstance) => void;
   onLockWarning?: (unit: UnitInstance, phase: 'locking' | 'launched') => void;
+  /** cause 'jet-missile'：敌机发射的导弹，source 为发射者标签（'jet:<机型>'） */
   onPlayerDamaged?: (
     damage: number,
-    cause: 'sam' | 'kamikaze' | 'bomb',
-    position: THREE.Vector3
+    cause: 'sam' | 'kamikaze' | 'bomb' | 'jet-missile',
+    position: THREE.Vector3,
+    source?: string
   ) => void;
   onFirstContact?: (type: UnitType) => void;
   onExplosion?: (
@@ -168,6 +175,8 @@ export class UnitSystem implements IGameSystem {
   private decoyProvider: IDecoyProvider | null = null;
   private routeProvider: UnitRouteProvider | null = null;
   private scaling: LevelScaling = getLevelScaling(1);
+  /** 有敌机正在用导弹锁定玩家（EnemySystem 每步经 UnitController 写入） */
+  private jetMissileLock = false;
   private readonly seenTypes = new Set<UnitType>();
   private time = 0;
   private frame = 0;
@@ -972,7 +981,50 @@ export class UnitSystem implements IGameSystem {
     for (const unit of this.units) {
       if (unit.isAlive() && unit.lockPhase === 'locking' && unit.lockOnPlayer) return 'locking';
     }
+    if (this.jetMissileLock) return 'locking';
     return 'none';
+  }
+
+  /**
+   * 敌机（不是单位）的导弹锁定：锁定期间玩家告警为“锁定中”，发射后由导弹自己变成“来袭”。
+   * 调用方每步写入当前是否有敌机在锁定。
+   */
+  setJetMissileLock(active: boolean): void {
+    this.jetMissileLock = active;
+  }
+
+  /**
+   * 敌机发射追踪玩家的导弹：进同一个导弹池，告警、热焰弹、EMP、近防炮照常生效。
+   * baseDamage 为基础伤害，这里乘以与防空导弹相同的关卡 / 难度倍率；source 为发射者标签。
+   * 池满或参数非法返回 false。
+   */
+  launchJetMissile(
+    from: THREE.Vector3,
+    direction: THREE.Vector3,
+    baseDamage: number,
+    options: UnitMissileLaunchOptions & { source: string }
+  ): boolean {
+    if (!(baseDamage > 0) || !Number.isFinite(baseDamage)) return false;
+    return this.missiles.launch(
+      from,
+      direction,
+      'player',
+      baseDamage * this.getDamageMultiplier(),
+      options
+    );
+  }
+
+  /** 正在追踪玩家的敌机导弹数（全队导弹令牌的记账） */
+  countJetMissilesInFlight(): number {
+    return this.missiles.countSourcedTargetingPlayer();
+  }
+
+  /** 单位 / 敌机导弹的伤害倍率：敌机伤害倍率 × 单位伤害份额 */
+  private getDamageMultiplier(): number {
+    const share = this.scaling.unitDamageShare;
+    const value =
+      this.scaling.enemyDamageMultiplier * (Number.isFinite(share) && share > 0 ? share : 1);
+    return Number.isFinite(value) && value > 0 ? value : 1;
   }
 
   destroyMissilesInRadius(center: THREE.Vector3, radius: number): number {
@@ -1029,6 +1081,7 @@ export class UnitSystem implements IGameSystem {
     this.unitsById.clear();
     this.allies.length = 0;
     this.hostiles.length = 0;
+    this.jetMissileLock = false;
     this.missiles.clear();
     this.shots.clear();
     this.jetTracks.clear();
@@ -1090,10 +1143,7 @@ export class UnitSystem implements IGameSystem {
         return system.hostiles;
       },
       get damageMultiplier() {
-        const share = system.scaling.unitDamageShare;
-        const value =
-          system.scaling.enemyDamageMultiplier * (Number.isFinite(share) && share > 0 ? share : 1);
-        return Number.isFinite(value) && value > 0 ? value : 1;
+        return system.getDamageMultiplier();
       },
       get cooldownMultiplier() {
         const value = system.scaling.enemyCooldownMultiplier;
@@ -1210,8 +1260,13 @@ export class UnitSystem implements IGameSystem {
         return system.particleSystem;
       },
       sampleSurfaceY: (x, z) => system.surface(x, z, 'air').y,
-      onPlayerHit: (damage, position) => {
-        if (system.playerActive) system.onPlayerDamaged?.(damage, 'sam', position.clone());
+      onPlayerHit: (damage, position, source) => {
+        if (!system.playerActive) return;
+        if (source) {
+          system.onPlayerDamaged?.(damage, 'jet-missile', position.clone(), source);
+        } else {
+          system.onPlayerDamaged?.(damage, 'sam', position.clone());
+        }
       },
       onUnitHit: (target, damage, position) => {
         target.applyDamage(damage, 'unit-fire', position);

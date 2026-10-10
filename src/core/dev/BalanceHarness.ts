@@ -399,10 +399,11 @@ export function installBalanceHarness(access: DevHookAccess): BalanceHarnessApi 
     if (!system || system === wrappedUnitSystem) return;
     wrappedUnitSystem = system;
     const original = system.onPlayerDamaged;
-    system.onPlayerDamaged = (damage, cause, position) => {
-      pendingUnitCause = cause;
+    system.onPlayerDamaged = (damage, cause, position, source) => {
+      // 敌机导弹带发射者标签（'jet:<机型>'），与机炮伤害记在同一个机型名下
+      pendingUnitCause = source ?? `unit-${cause}`;
       try {
-        original?.(damage, cause, position);
+        original?.(damage, cause, position, source);
       } finally {
         pendingUnitCause = null;
       }
@@ -439,7 +440,7 @@ export function installBalanceHarness(access: DevHookAccess): BalanceHarnessApi 
 
   /** 找出最可能命中玩家的那颗子弹（伤害吻合、预测位置最近） */
   const attributeHit = (damage: number): string => {
-    if (pendingUnitCause) return `unit-${pendingUnitCause}`;
+    if (pendingUnitCause) return pendingUnitCause;
     const armor = access.getStats().getArmorReduction();
     const player = access.getPlayerAircraft().position;
     let best: ShotRecord | null = null;

@@ -71,11 +71,14 @@ export interface GameEventPayloads {
     /** 同一次齐射里的后续弹：不单独播放开火音与枪口焰 */
     quiet?: boolean;
   };
-  /** 敌机招牌攻击的预警开始（狙击机蓄力）：用于播放提示音；画面上的预警由敌机自己画 */
+  /**
+   * 敌机招牌攻击的预警开始（狙击机蓄力 / 隐形机现形）：用于播放提示音；画面上的预警由敌机
+   * 自己画
+   */
   [GameEventType.ENEMY_TELL]: {
-    kind: 'lance-charge';
+    kind: 'lance-charge' | 'decloak';
     position: Vector3;
-    /** 预警时长（秒）：到点开火 */
+    /** 预警时长（秒）：到点才可能开火 */
     duration: number;
     owner?: Object3D;
   };

@@ -118,6 +118,7 @@ export enum SoundType {
   DEBRIEF_TALLY = 'DEBRIEF_TALLY',
   UNIT_DESTROYED = 'UNIT_DESTROYED',
   LANCE_CHARGE = 'LANCE_CHARGE', // 敌方狙击机蓄力
+  WRAITH_DECLOAK = 'WRAITH_DECLOAK', // 敌方隐形机现形
 }
 
 type HitProfile = 'player' | 'enemy' | 'boss' | 'environment';
@@ -234,6 +235,7 @@ const NEW_SOUND_POLICIES: Partial<Record<SoundType, SoundPolicy>> = {
     duckDurationMs: 320,
   },
   [SoundType.LANCE_CHARGE]: { minIntervalMs: 250, maxConcurrent: 2 },
+  [SoundType.WRAITH_DECLOAK]: { minIntervalMs: 200, maxConcurrent: 2 },
 };
 
 /** 音效总线的粘合压缩：密集战斗时压住叠加峰值，阈值以下保持单位增益 */
@@ -2741,6 +2743,44 @@ export class AudioManager {
       const voices: Array<[OscillatorType, number, number]> = [
         ['sawtooth', 320, 1280],
         ['sine', 646, 2580],
+      ];
+      for (const [type, from, to] of voices) {
+        const osc = context.createOscillator();
+        osc.type = type;
+        osc.frequency.setValueAtTime(from, now);
+        osc.frequency.exponentialRampToValueAtTime(to, end);
+        osc.connect(gain);
+        osc.start(now);
+        osc.stop(end + 0.02);
+      }
+    } catch {
+      // Ignore
+    }
+  }
+
+  /**
+   * 敌方隐形机现形：一声从高到低的滑音加一下低沉的嗡鸣，在 tellSeconds 内收尾（一次性）。
+   * 与蓄力啸叫（越来越高）和导弹告警（短促的哔声）都不一样：听到它就回头看。
+   */
+  public playDecloak(tellSeconds: number = 0.7): void {
+    const seconds = Number.isFinite(tellSeconds) ? Math.max(0.3, Math.min(2, tellSeconds)) : 0.7;
+    const sound = this.beginSound(SoundType.WRAITH_DECLOAK, seconds * 1000);
+    if (!sound) return;
+    const { now, context, sfxGain } = sound;
+
+    try {
+      const end = now + seconds;
+      const gain = context.createGain();
+      gain.gain.setValueAtTime(0, now);
+      gain.gain.linearRampToValueAtTime(0.2 * this.sfxVolume, now + 0.04);
+      gain.gain.exponentialRampToValueAtTime(Math.max(0.0001, 0.05 * this.sfxVolume), end - 0.05);
+      gain.gain.linearRampToValueAtTime(0, end);
+      gain.connect(sfxGain);
+
+      // 高音下滑（显形）+ 低音嗡鸣（压迫感）
+      const voices: Array<[OscillatorType, number, number]> = [
+        ['sawtooth', 1900, 380],
+        ['triangle', 150, 78],
       ];
       for (const [type, from, to] of voices) {
         const osc = context.createOscillator();

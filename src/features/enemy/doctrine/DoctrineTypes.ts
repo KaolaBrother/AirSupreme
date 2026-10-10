@@ -64,13 +64,27 @@ export interface DoctrineContext {
   missileInbound: boolean;
 
   // ---- 导演的指令 ----
-  /** 持有攻击令牌：只有持令牌时才可以对玩家开火 */
+  /** 有可以攻击的玩家（玩家在场、未在重生）：防御性射击也只在这时打出 */
+  weaponsFree: boolean;
+  /** 持有攻击令牌：只有持令牌时才可以对玩家发动攻击 */
   hasToken: boolean;
   /**
    * 指派的进入方位（弧度，atan2(x, z)：从玩家指向攻击者应在的方向，世界坐标）；
    * 没有令牌时为 NaN。
    */
   attackBearing: number;
+
+  /**
+   * 全队导弹令牌：本机现在可以发射的导弹数（EnemySystem 每步按条令的 getMissileRequest 发放；
+   * Boss 战恒为 0）
+   */
+  missileGrant: number;
+
+  // ---- 同伴 ----
+  /** 场上有其他（非干扰机）敌机：干扰机躲在它们身后 */
+  hasGroup: boolean;
+  /** 其他（非干扰机）敌机的平均位置；hasGroup 为 false 时无意义 */
+  groupCenter: Vector3;
 
   /** 当前关卡（1..10） */
   level: number;
@@ -89,10 +103,12 @@ export interface ShotRequest {
   damageScale: number;
   /** 同一次齐射里的后续弹：不单独播放开火音与枪口焰 */
   quiet: boolean;
+  /** 防御性射击（重型机尾炮）：不需要攻击令牌 */
+  defensive: boolean;
 }
 
 /** 条令触发的一次性提示（音效等） */
-export type DoctrineCue = 'lance-charge';
+export type DoctrineCue = 'lance-charge' | 'decloak';
 
 /** 条令每步的输出。EnemyAI 持有并复用；每步开始时已被重置 */
 export interface DoctrineCommand {
@@ -105,6 +121,10 @@ export interface DoctrineCommand {
   /** 本步的射击请求：前 shotCount 个有效 */
   shots: ShotRequest[];
   shotCount: number;
+  /** 本步正在用导弹锁定玩家（HUD 的“锁定中”预警） */
+  missileLock: boolean;
+  /** 本步发射的导弹数（0 或 1），沿机头方向离架 */
+  missileLaunch: number;
   /** 本次攻击航路结束：交还令牌 */
   releaseToken: boolean;
   /** 本步触发的提示；没有为 null */
@@ -122,6 +142,19 @@ export interface DoctrineTell {
   progress: number;
   /** 光束已冻结：长枪弹将沿这条线飞 */
   frozen: boolean;
+}
+
+/** 隐形机的隐形状态（对象由条令持有并复用） */
+export interface CloakState {
+  /** 机体不透明度倍数：1 = 完全可见，隐形时约 0.15 */
+  opacity: number;
+  /**
+   * 对玩家的传感器隐形：不能被锁定，没有雷达光点、血条、目标标记和机炮前置标记。
+   * 只在完全隐形期间为 true（淡出途中与现形预警期间都还看得见）。
+   */
+  hidden: boolean;
+  /** 现形预警的红色眼灯强度 0..1（不在预警中为 0） */
+  flare: number;
 }
 
 /** 条令向导演提出的令牌请求（对象由条令持有并复用） */
@@ -152,6 +185,12 @@ export interface IEnemyDoctrine {
   getAttackRequest(): Readonly<AttackRequest>;
   /** 当前需要显示的预警；没有为 null */
   getTell(): Readonly<DoctrineTell> | null;
+  /** 想要的全队导弹令牌数（0 = 现在不需要）；上一步 update 之后的状态 */
+  getMissileRequest(): number;
+  /** 隐形状态；不会隐形的机型为 null */
+  getCloak(): Readonly<CloakState> | null;
+  /** 本机刚受到伤害（隐形机：立刻现形并僵直） */
+  notifyHit(): void;
 }
 
 /** 导演写在每架敌机上的指令与记账（对象由 EnemyAI 持有，导演读写） */

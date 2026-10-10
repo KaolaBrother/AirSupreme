@@ -2,7 +2,12 @@ import { Vector3 } from 'three';
 import type { Camera, Object3D, Quaternion } from 'three';
 import { GAME_CONSTANTS } from '@/config';
 import { onLocaleChange, tr, type LocalizedText } from '@/i18n';
-import { MissileSeeker, projectToScreen, type ScreenPoint } from '@/features/combat/MissileSeeker';
+import {
+  MissileSeeker,
+  projectToScreen,
+  type ILockJamProvider,
+  type ScreenPoint,
+} from '@/features/combat/MissileSeeker';
 import {
   HUD_COLORS,
   detectHudLayoutDensity,
@@ -34,6 +39,7 @@ const TXT_LOCK: LocalizedText = { en: 'LOCK', zh: '锁定' };
 const TXT_NO_LOCK: LocalizedText = { en: 'NO LOCK', zh: '未锁定' };
 const TXT_NO_MISSILE: LocalizedText = { en: 'NO MSL', zh: '无导弹' };
 const TXT_MISSILE: LocalizedText = { en: 'MSL', zh: '导弹' };
+const TXT_JAMMED: LocalizedText = { en: 'JAMMED', zh: '受干扰' };
 
 export type LockOnCue = 'no-lock' | 'no-missile';
 
@@ -52,6 +58,7 @@ interface PlacedPosition {
  * - 跟踪：目标上的角标随进度收紧 + 进度弧；锁定：角标变锁定色 + “锁定”标签与距离；
  *   丢锁：短暂的红色提示；“未锁定 / 无导弹”提示显示在准星下方。
  * - 准星旁显示导弹余量；机炮提前量标记（由 GunLeadSolver 给出世界坐标）。
+ * - 敌方干扰机拖慢锁定期间，捕获环内侧上沿显示“受干扰”标签。
  * 所有元素 pointer-events: none。
  */
 export class LockOnIndicator {
@@ -71,6 +78,8 @@ export class LockOnIndicator {
   private ring: HTMLDivElement;
   private cross: HTMLDivElement;
   private cue: HTMLDivElement;
+  private jam: HTMLDivElement;
+  private jammed: boolean = false;
   private count: HTMLDivElement;
   private countLabel: HTMLSpanElement;
   private readonly countPips: HTMLElement[] = [];
@@ -173,6 +182,11 @@ export class LockOnIndicator {
     this.cue.className = 'lk-cue';
     this.cue.dataset.lockChrome = 'cue';
     this.setStyleValue(this.cue, 'display', 'none');
+    // “受干扰”标签：敌方干扰机拖慢锁定期间显示在捕获环内侧上沿
+    this.jam = document.createElement('div');
+    this.jam.className = 'lk-jam';
+    this.jam.dataset.lockChrome = 'jam-tag';
+    this.setStyleValue(this.jam, 'display', 'none');
     this.count = document.createElement('div');
     this.count.className = 'lk-count';
     this.count.dataset.lockChrome = 'missile-count';
@@ -183,7 +197,7 @@ export class LockOnIndicator {
       this.count.appendChild(pip);
       this.countPips.push(pip);
     }
-    this.reticle.append(this.ring, noseMark, cross, this.cue, this.count);
+    this.reticle.append(this.ring, noseMark, cross, this.cue, this.jam, this.count);
 
     // 目标锚点：角标 + 进度弧 + “锁定 / 距离”标签
     this.targetAnchor = this.createAnchor('target');
@@ -329,6 +343,24 @@ export class LockOnIndicator {
     this.seeker.setLockTime(time);
   }
 
+  /** 接入导引头的干扰来源（敌方干扰机）；传 null 断开 */
+  public setLockJamProvider(provider: ILockJamProvider | null): void {
+    this.seeker.setJamProvider(provider);
+    this.applyJammed(this.seeker.isJammed());
+  }
+
+  /** 是否正显示“受干扰”标签 */
+  public isJammed(): boolean {
+    return this.jammed;
+  }
+
+  private applyJammed(jammed: boolean): void {
+    if (this.jammed === jammed) return;
+    this.jammed = jammed;
+    this.setStyleValue(this.jam, 'display', jammed ? 'block' : 'none');
+    this.setAttr(this.container, 'data-jammed', jammed ? 'true' : 'false');
+  }
+
   /**
    * 设置捕获环尺寸倍率（锁定范围升级）
    * @param scale 倍率，最小 1.0，最大 2.0
@@ -382,6 +414,8 @@ export class LockOnIndicator {
     playerQuaternion: Quaternion | null
   ): boolean {
     this.init();
+    // 干扰标签跟着效果走：没有导弹（导引头关闭）时也照常显示 / 收起
+    this.applyJammed(this.seeker.isJammed());
     if (this.missileCount <= 0) {
       return false;
     }
@@ -642,6 +676,9 @@ export class LockOnIndicator {
     this.setStyleValue(this.ring, 'width', diameter);
     this.setStyleValue(this.ring, 'height', diameter);
 
+    // “受干扰”标签贴在捕获环内侧上沿
+    this.setStyleValue(this.jam, 'top', `${Math.round(6 - radius)}px`);
+
     // 导弹余量贴在捕获环右下方
     const offset = Math.round(radius * 0.72);
     this.setStyleValue(this.count, 'left', `${offset + 6}px`);
@@ -722,6 +759,7 @@ export class LockOnIndicator {
   private renderStaticText(): void {
     this.setTextContent(this.countLabel, tr(TXT_MISSILE));
     this.setTextContent(this.targetLabelTag, tr(TXT_LOCK));
+    this.setTextContent(this.jam, tr(TXT_JAMMED));
     if (this.cueKind !== null) {
       this.setTextContent(
         this.cue,
@@ -910,6 +948,22 @@ export class LockOnIndicator {
         font-weight: 700;
         letter-spacing: 0.16em;
         white-space: nowrap;
+      }
+
+      /* “受干扰”标签（捕获环内侧上沿）：紫色只用于电子干扰 */
+      #lock-on-indicator .lk-jam {
+        position: absolute;
+        left: 0;
+        transform: translateX(-50%);
+        padding: 1px 7px;
+        border-radius: 4px;
+        background: rgba(8, 14, 24, 0.6);
+        color: #cfa6ff;
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.16em;
+        white-space: nowrap;
+        text-shadow: 0 1px 2px rgba(0, 0, 0, 0.95);
       }
 
       /* 准星旁的导弹余量 */

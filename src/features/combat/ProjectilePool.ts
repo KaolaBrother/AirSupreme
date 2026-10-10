@@ -99,6 +99,15 @@ function distanceToSegment(point: Vector3, from: Vector3, to: Vector3): number {
   return point.distanceTo(sweepToTarget);
 }
 
+/** 光晕精灵相对弹体中心的前移量（弹体本地 Z，单位随弹体缩放） */
+const DEFAULT_GLOW_OFFSET_Z = 0.1;
+/** 敌机高炮弹的外观：球体缩放（半径 0.5 的球 → 直径 SHELL_SCALE 米）、球体颜色、弹芯光晕 */
+const SHELL_SCALE = 4.6;
+const SHELL_BODY_COLOR = 0xff3210;
+/** 弹芯光晕的大小（相对球体直径）与前移量（相对球体直径，留在球体之内） */
+const SHELL_CORE_SCALE = 1.15;
+const SHELL_CORE_OFFSET_Z = 0.3;
+
 /**
  * 子弹对象池
  * 使用对象池模式避免频繁创建/销毁对象
@@ -135,7 +144,7 @@ export class ProjectilePool {
     this.enemyGeometry = new OctahedronGeometry(0.22, 0);
     this.friendlyGeometry = new BoxGeometry(0.14, 0.14, 1.05);
     // 敌机高炮弹：发光圆球；长枪弹：细长的针
-    this.shellGeometry = new SphereGeometry(0.5, 10, 8);
+    this.shellGeometry = new SphereGeometry(0.5, 16, 12);
     this.lanceGeometry = new BoxGeometry(0.16, 0.16, 3.2);
 
     // 拖尾面片：预旋转为沿 Z 轴展开，v=0（亮端）朝 +Z（弹头方向）
@@ -165,7 +174,8 @@ export class ProjectilePool {
     this.playerGlowMaterial = makeGlowMaterial(0xffe08a);
     this.enemyGlowMaterial = makeGlowMaterial(0xff7a30);
     this.friendlyGlowMaterial = makeGlowMaterial(0x8af4ff);
-    this.shellGlowMaterial = makeGlowMaterial(0xff5a26);
+    // 高炮弹的炽热弹芯：淡黄白色，叠在红橙色的球体上
+    this.shellGlowMaterial = makeGlowMaterial(0xffe2b0);
     this.lanceGlowMaterial = makeGlowMaterial(0xff3020);
     this.playerTailMaterial = makeTailMaterial(0xffc96a);
     this.enemyTailMaterial = makeTailMaterial(0xff5a1e);
@@ -184,7 +194,7 @@ export class ProjectilePool {
       mesh.visible = false;
 
       const glow = new Sprite(this.playerGlowMaterial);
-      glow.position.z = 0.1;
+      glow.position.z = DEFAULT_GLOW_OFFSET_Z;
       mesh.add(glow);
 
       const tail = new Group();
@@ -234,10 +244,12 @@ export class ProjectilePool {
     glowScale: number,
     tailWidth: number,
     tailLength: number,
-    tailCenterZ: number
+    tailCenterZ: number,
+    glowOffsetZ: number = DEFAULT_GLOW_OFFSET_Z
   ): void {
     projectile.glow.material = glowMaterial;
     projectile.glow.scale.set(glowScale, glowScale, 1);
+    projectile.glow.position.z = glowOffsetZ;
     for (const tailPlane of projectile.tail.children) {
       (tailPlane as Mesh).material = tailMaterial;
     }
@@ -410,11 +422,13 @@ export class ProjectilePool {
   private applyProjectileVisual(projectile: Projectile, faction?: string): void {
     const material = projectile.mesh.material as MeshBasicMaterial;
     if (projectile.kind === 'heavy-shell') {
-      // 高炮弹：又大又慢的红橙色光球，缓慢脉动，没有拖尾——一眼能看出“躲开它”
+      // 高炮弹：又大又慢的红橙色光球（直径约 4.6 米），中心一团炽热的黄白色弹芯，缓慢脉动，
+      // 没有拖尾——250 米外也是一个看得清的红球，和机炮的小曳光弹一眼分得开。
+      // 球体用普通混合、不透明：在明亮的天空 / 地表前仍然是红橙色（加色混合会被洗成黄白）。
       projectile.mesh.geometry = this.shellGeometry;
-      material.color.set(0xff6a2a);
-      projectile.baseOpacity = 0.95;
-      projectile.baseScale.set(2.4, 2.4, 2.4);
+      material.color.set(SHELL_BODY_COLOR);
+      projectile.baseOpacity = 1;
+      projectile.baseScale.set(SHELL_SCALE, SHELL_SCALE, SHELL_SCALE);
       projectile.widthPulseScale = 0.12;
       projectile.lengthPulseScale = -0.12;
       projectile.opacityPulseScale = 0.05;
@@ -422,14 +436,17 @@ export class ProjectilePool {
       projectile.stretchFrequency = 0.2;
       projectile.travelLengthBoost = 0;
       projectile.travelWidthBoost = 0;
+      // 弹芯光晕放在球心前方（朝飞行方向）：迎面飞来的炮弹，光晕比球心离镜头更近，
+      // 透明物体按远近排序后它画在球体之上
       this.applyTracerDress(
         projectile,
         this.shellGlowMaterial,
         this.enemyTailMaterial,
-        3.2,
+        SHELL_CORE_SCALE,
         0.001,
         0.001,
-        0
+        0,
+        SHELL_CORE_OFFSET_Z
       );
     } else if (projectile.kind === 'lance') {
       // 长枪弹：细长的红白色针 + 很长的拖尾

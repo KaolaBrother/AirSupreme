@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { GAME_CONSTANTS } from '@/config';
 import { EnemyConfig, EnemyAIState, ENEMY_TRAIL_COLOR } from './EnemyTypes';
-import { ENEMY_WEAPON_SPECS, type EnemyWeaponKind } from './EnemyWeapons';
+import { ENEMY_WEAPON_SPECS, JET_MISSILE_SPEC, type EnemyWeaponKind } from './EnemyWeapons';
 import {
   DOCTRINE_RULES,
   createAttackOrders,
@@ -14,6 +14,7 @@ import {
   type IEnemyDoctrine,
 } from './doctrine/DoctrineTypes';
 import { createDoctrineCommand, resetDoctrineCommand } from './doctrine/JetDoctrine';
+import { CloakFade } from './effects/CloakFade';
 import { LanceBeam } from './effects/LanceBeam';
 import { HealthSystem } from '@/features/combat/HealthSystem';
 import { ParticleTrailRenderer } from '@/features/effects/ParticleTrailRenderer';
@@ -57,6 +58,8 @@ const DOCTRINE_ACCELERATION = 0.9;
 /** 条令给出的转向倍数的允许范围 */
 const DOCTRINE_MIN_TURN_SCALE = 0.2;
 const DOCTRINE_MAX_TURN_SCALE = 2;
+/** 隐形（不透明度低于一半）时粒子尾迹每这么多步才采一个点：只留一条稀疏的淡尾迹 */
+const CLOAK_TRAIL_STRIDE = 4;
 
 /** 一发子弹的弹种信息（条令开火时随 onFire 传出；旧的三状态开火不带） */
 export interface EnemyShotInfo {
@@ -146,6 +149,17 @@ export class EnemyAI {
   private bossFight = false;
   /** 狙击机的瞄准光束（首次蓄力时创建） */
   private lanceBeam: LanceBeam | null = null;
+  /** 全队导弹令牌：本机现在可以发射的导弹数（EnemySystem 的导弹导演读写） */
+  private missileGrant = 0;
+  /** 上一步条令正在用导弹锁定玩家（HUD“锁定中”预警的来源） */
+  private missileLocking = false;
+  /** 同伴（非干扰机）的平均位置：干扰机躲在它们身后（EnemySystem 每步写入） */
+  private readonly groupCenter = new THREE.Vector3();
+  private hasGroup = false;
+  /** 隐形机的淡出 / 眼灯特效（首次隐形时创建）与当前机体不透明度 */
+  private cloakFade: CloakFade | null = null;
+  private cloakOpacity = 1;
+  private trailStep = 0;
 
   // 回调
   /** shot 只在条令开火时提供（弹种 / 弹速 / 是否静音），且只在回调期间有效 */
@@ -157,6 +171,8 @@ export class EnemyAI {
   ) => void;
   /** 条令触发的一次性提示（蓄力音等） */
   public onTell?: (cue: DoctrineCue, position: THREE.Vector3, duration: number) => void;
+  /** 条令发射一枚追踪导弹：离架点与方向只在回调期间有效（接收方自己复制） */
+  public onMissileLaunch?: (position: THREE.Vector3, direction: THREE.Vector3) => void;
   public onDestroy?: (position: THREE.Vector3) => void;
   private readonly previousVisualPosition = new THREE.Vector3();
   private readonly currentVisualPosition = new THREE.Vector3();
@@ -210,8 +226,12 @@ export class EnemyAI {
         distance: Infinity,
         lockedOn: false,
         missileInbound: false,
+        weaponsFree: false,
         hasToken: false,
         attackBearing: Number.NaN,
+        missileGrant: 0,
+        hasGroup: false,
+        groupCenter: new THREE.Vector3(),
         level: 1,
         bossFight: false,
         rng: options.rng ?? Math.random,
@@ -322,6 +342,7 @@ export class EnemyAI {
 
     const stunned = this.stunTimer > 0;
     resetDoctrineCommand(command);
+    this.missileLocking = false;
     if (stunned) {
       this.stunTimer = Math.max(0, this.stunTimer - deltaTime);
     } else {
@@ -334,8 +355,11 @@ export class EnemyAI {
     this.attackCooldown = Math.max(0, this.attackCooldown - deltaTime);
 
     if (!stunned) {
-      // 没有令牌的敌机不对玩家开火（条令自己也守这条；这里是硬保证）
-      if (context.hasToken) this.emitDoctrineShots(command);
+      // 没有令牌的敌机不对玩家发动攻击（条令自己也守这条；这里是硬保证）。
+      // 防御性射击（重型机尾炮）不需要令牌，但同样要有可攻击的玩家。
+      if (context.weaponsFree) this.emitDoctrineShots(command, context.hasToken);
+      if (command.missileLaunch > 0) this.launchMissile(context.hasToken);
+      this.missileLocking = command.missileLock && context.hasToken;
       if (command.releaseToken && this.orders.hasToken) {
         releaseAttackOrders(this.orders, DOCTRINE_RULES.TOKEN_RELEASE_COOLDOWN);
       }
@@ -344,6 +368,7 @@ export class EnemyAI {
       }
     }
     this.updateTellEffect(stunned ? null : doctrine);
+    this.updateCloak(doctrine);
 
     this.trail.update(deltaTime);
     this.captureCurrentVisualState();
@@ -391,9 +416,14 @@ export class EnemyAI {
     context.playerForward.copy(this.playerForward);
     context.lockedOn = this.lockedOn;
     context.missileInbound = this.missileInbound;
-    const hasToken = this.orders.hasToken && weaponsFree && hasPlayer;
+    // 阵亡后的最后一步也会走到这里：不再开火
+    context.weaponsFree = weaponsFree && hasPlayer && this.isAlive();
+    const hasToken = this.orders.hasToken && context.weaponsFree;
     context.hasToken = hasToken;
     context.attackBearing = hasToken ? this.orders.bearing : Number.NaN;
+    context.missileGrant = hasToken ? this.missileGrant : 0;
+    context.hasGroup = this.hasGroup;
+    if (this.hasGroup) context.groupCenter.copy(this.groupCenter);
     context.level = this.level;
     context.bossFight = this.bossFight;
   }
@@ -480,10 +510,11 @@ export class EnemyAI {
   }
 
   /** 把条令本步的射击请求交给 onFire（弹种 / 弹速 / 是否静音随 shot 传出） */
-  private emitDoctrineShots(command: DoctrineCommand): void {
+  private emitDoctrineShots(command: DoctrineCommand, hasToken: boolean): void {
     if (!this.onFire) return;
     for (let i = 0; i < command.shotCount; i++) {
       const shot = command.shots[i];
+      if (!hasToken && !shot.defensive) continue;
       const damage = this.config.damage * shot.damageScale;
       // 无武装机型（伤害为 0）不发射
       if (!(damage > 0)) continue;
@@ -492,6 +523,34 @@ export class EnemyAI {
       sharedShotInfo.quiet = shot.quiet;
       this.onFire(this.mesh.position.clone(), shot.direction.clone(), damage, sharedShotInfo);
     }
+  }
+
+  /**
+   * 条令发射一枚导弹：交还一个导弹令牌，沿当前飞行方向从机头前方离架。
+   * 没有攻击令牌时不发射（令牌照样交还：这一发作废）。
+   */
+  private launchMissile(hasToken: boolean): void {
+    this.missileGrant = Math.max(0, this.missileGrant - 1);
+    if (!hasToken || !this.onMissileLaunch) return;
+    const direction = tmpDirection.copy(this.velocity);
+    const lengthSq = direction.lengthSq();
+    if (!(lengthSq > 1e-8) || !Number.isFinite(lengthSq)) return;
+    direction.multiplyScalar(1 / Math.sqrt(lengthSq));
+    const origin = tmpTarget
+      .copy(this.mesh.position)
+      .addScaledVector(direction, JET_MISSILE_SPEC.MUZZLE_OFFSET);
+    this.onMissileLaunch(origin, direction);
+  }
+
+  /** 隐形机的淡出 / 淡入与现形眼灯：按条令报告的隐形状态更新机体材质（瘫痪时也更新） */
+  private updateCloak(doctrine: IEnemyDoctrine): void {
+    const cloak = doctrine.getCloak();
+    if (!cloak) return;
+    this.cloakOpacity = cloak.opacity;
+    if (!this.cloakFade && (cloak.opacity < 1 || cloak.flare > 0)) {
+      this.cloakFade = new CloakFade(this.mesh);
+    }
+    this.cloakFade?.apply(cloak.opacity, cloak.flare);
   }
 
   /** 预警特效（狙击机的瞄准光束）：条令报告有预警就显示 / 更新，否则隐藏 */
@@ -510,6 +569,8 @@ export class EnemyAI {
     this.doctrine?.interrupt();
     releaseAttackOrders(this.orders, 0);
     this.lanceBeam?.hide();
+    this.missileLocking = false;
+    this.missileGrant = 0;
   }
 
   /**
@@ -550,6 +611,44 @@ export class EnemyAI {
 
   public hasAttackToken(): boolean {
     return this.orders.hasToken;
+  }
+
+  /** 条令想要的全队导弹令牌数；没有条令时为 0 */
+  public getMissileRequest(): number {
+    return this.doctrine ? this.doctrine.getMissileRequest() : 0;
+  }
+
+  public getMissileGrant(): number {
+    return this.missileGrant;
+  }
+
+  /** 导弹导演发放 / 收回本机的导弹令牌 */
+  public setMissileGrant(count: number): void {
+    this.missileGrant = Number.isFinite(count) && count > 0 ? Math.floor(count) : 0;
+  }
+
+  /** 正在用导弹锁定玩家（上一步的状态）：HUD“锁定中”预警的来源 */
+  public isMissileLocking(): boolean {
+    return this.missileLocking && this.isAlive();
+  }
+
+  /**
+   * 隐形中（对玩家的传感器隐形）：不能被锁定，没有雷达光点、血条、目标标记与机炮前置标记。
+   * 仍然会被子弹和导弹打中；淡出途中与现形预警期间不算。
+   */
+  public isCloaked(): boolean {
+    const cloak = this.doctrine ? this.doctrine.getCloak() : null;
+    return cloak !== null && cloak.hidden && this.isAlive();
+  }
+
+  /** 同伴（非干扰机）的平均位置；null = 场上没有可以躲在身后的同伴 */
+  public setGroupCenter(center: THREE.Vector3 | null): void {
+    if (center && isFiniteVector(center)) {
+      this.groupCenter.copy(center);
+      this.hasGroup = true;
+    } else {
+      this.hasGroup = false;
+    }
   }
 
   /** 是否有正在显示的招牌攻击预警（狙击机瞄准光束） */
@@ -619,7 +718,10 @@ export class EnemyAI {
     } else {
       this.engineWorldPos.copy(this.mesh.position);
     }
-    this.trail.addPoint(this.engineWorldPos);
+    // 隐形时只留一条稀疏的淡尾迹
+    if (this.cloakOpacity >= 0.5 || ++this.trailStep % CLOAK_TRAIL_STRIDE === 0) {
+      this.trail.addPoint(this.engineWorldPos);
+    }
   }
 
   /** 总速率超过上限时只压水平分量（保留避让地形所需的爬升率） */
@@ -973,6 +1075,8 @@ export class EnemyAI {
    */
   public takeDamage(damage: number): void {
     this.health.takeDamage(damage);
+    // 挨打的反应（隐形机：立刻现形并僵直）
+    if (damage > 0 && this.isAlive()) this.doctrine?.notifyHit();
   }
 
   /**
@@ -1074,6 +1178,9 @@ export class EnemyAI {
     this.standDown();
     this.lockedOn = false;
     this.missileInbound = false;
+    this.hasGroup = false;
+    this.cloakOpacity = 1;
+    this.cloakFade?.apply(1, 0);
 
     // 重置状态
     this.selectNewState();
@@ -1100,6 +1207,9 @@ export class EnemyAI {
     this.standDown();
     this.lanceBeam?.dispose();
     this.lanceBeam = null;
+    // 换回共享材质并释放本机的淡出克隆（要在下面清理子对象之前）
+    this.cloakFade?.dispose();
+    this.cloakFade = null;
 
     // 清理 mesh 的所有子对象
     while (this.mesh.children.length > 0) {
