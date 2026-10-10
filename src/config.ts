@@ -292,16 +292,18 @@ export const GAME_CONSTANTS = {
   // 导弹参数
   MISSILE: {
     SPEED: 80,             // 导弹速度
-    DAMAGE: 50,            // 导弹伤害（减半）
+    DAMAGE: 80,            // 导弹伤害（CombatSystem 命中结算读取，再乘伤害倍率）
     TURN_SPEED: 2.0,       // 转向速度（弧度/秒）
     MAX_LIFETIME: 10,      // 最大寿命（秒）
-    LOCK_TIME: 3.0,        // 锁定所需时间（秒）
-    LOCK_BOX_SIZE: 0.15,   // 锁定框大小（屏幕比例）
-    MAX_LOCK_DISTANCE: 600, // 最大锁定距离
-    MAX_FLIGHT_DISTANCE: 2400, // 最大飞行距离（是锁定距离的4倍）
-    STARTING_MISSILES: 2,  // 初始导弹数量
+    MAX_LOCK_DISTANCE: 1200, // 导引头最大锁定距离
+    MAX_FLIGHT_DISTANCE: 2400, // 最大飞行距离（是锁定距离的2倍）
+    LOCK_RING_RATIO: 0.13, // 捕获环半径 / 视口短边（再乘锁定范围升级倍率）
+    LOCK_KEEP_RATIO: 1.6,  // 保持环半径 / 捕获环半径
+    LOCK_GRACE_TIME: 0.5,  // 目标离开保持环后的宽限时间（秒）
+    LOCK_DECAY_RATE: 1.0,  // 目标在捕获环外时锁定进度的衰减速度（每秒）
+    LOCK_REARM_TIME: 0.35, // 两次发射之间的最短间隔（秒）
+    STARTING_MISSILES: 3,  // 初始导弹数量
     MAX_MISSILES: 5,       // 最大导弹数量
-    MISSILE_RESPAWN_TIME: 7.5, // 导弹补给时间（秒）
     MAX_RESPAWN_MISSILES: 5, // 导弹补给上限
   },
 };

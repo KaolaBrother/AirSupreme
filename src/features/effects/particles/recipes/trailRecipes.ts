@@ -67,6 +67,33 @@ export function emitTrail(fx: ParticleEmitter, position: THREE.Vector3, color: T
   fx.emit(ParticleType.GLOW, position, g);
 }
 
+/** 通用导弹尾迹（敌方单位 / 坠毁烟柱等）的烟：不透明度与末尺寸倍率 */
+const MISSILE_SMOKE_ALPHA = 0.42;
+const MISSILE_SMOKE_SIZE_END = 4.2;
+/**
+ * 玩家导弹的烟更轻更细：导弹从座舱视点侧下方约 1.6 米的挂架离架，烟团末半径
+ * （1.25 × 2.4 / 2 = 1.5 米）不超过这个偏移，第一人称时烟带不会压到准星指向的目标上。
+ */
+const PLAYER_MISSILE_SMOKE_ALPHA = 0.25;
+const PLAYER_MISSILE_SMOKE_SIZE_END = 2.4;
+
+/** 玩家导弹尾迹的渐入系数；null 表示通用配方（下一次 emitMissileTrail 不受影响） */
+let playerMissileTrailRamp: number | null = null;
+
+/**
+ * 让紧随其后的一次 emitMissileTrail 使用玩家导弹配方：ramp 0..1 是离架后的渐入系数
+ * （尾焰亮度、烟的不透明度随它从零升到玩家导弹的正常值）。调用方必须在发射尾迹后立刻
+ * 调用 endPlayerMissileTrail。这样做是因为 ParticleSystem.createMissileTrail 的签名里
+ * 没有配方参数；其它调用方（敌方单位导弹等）不调用这对函数，外观保持不变。
+ */
+export function beginPlayerMissileTrail(ramp: number): void {
+  playerMissileTrailRamp = Number.isFinite(ramp) ? THREE.MathUtils.clamp(ramp, 0, 1) : 1;
+}
+
+export function endPlayerMissileTrail(): void {
+  playerMissileTrailRamp = null;
+}
+
 /**
  * 导弹尾迹：亮尾焰（加色 HDR）+ 滞留烟带（沿速度回填，间距 ~1.4m 保证连续）
  * direction 可以是速度（含大小）或单位方向。
@@ -79,6 +106,13 @@ export function emitMissileTrail(
   intensity: number = 1
 ): void {
   if (!isFiniteVector(position) || !isFiniteVector(direction)) return;
+  const playerRamp = playerMissileTrailRamp;
+  // 通用配方：glowScale = 1、烟按通用常量，与改动前逐项相同
+  const glowScale = playerRamp ?? 1;
+  const smokeAlpha =
+    playerRamp === null ? MISSILE_SMOKE_ALPHA : PLAYER_MISSILE_SMOKE_ALPHA * playerRamp;
+  const smokeSizeEnd = playerRamp === null ? MISSILE_SMOKE_SIZE_END : PLAYER_MISSILE_SMOKE_SIZE_END;
+  if (glowScale <= 0) return;
   const k = THREE.MathUtils.clamp(intensity, 0.6, 2);
   const speed = direction.length();
   scratchDirection.copy(direction);
@@ -91,7 +125,7 @@ export function emitMissileTrail(
   flame.size = 1.1 * k;
   flame.sizeEnd = 0.6;
   flame.color = scratchColor.copy(color);
-  flame.intensity = 4.2;
+  flame.intensity = 4.2 * glowScale;
   flame.axis = scratchAxis.copy(scratchDirection).multiplyScalar(-1);
   flame.stretch = 1.6;
   flame.cell = VfxCell.PETAL;
@@ -102,7 +136,7 @@ export function emitMissileTrail(
   glow.life = 0.06;
   glow.size = 1.8 * k;
   glow.color = scratchColor.copy(color);
-  glow.intensity = 2.2;
+  glow.intensity = 2.2 * glowScale;
   fx.emit(ParticleType.GLOW, position, glow);
 
   // 烟带：按速度回填（发射间隔 ~0.03s）
@@ -119,11 +153,11 @@ export function emitMissileTrail(
     smoke.velocity = scratchVelocity;
     smoke.life = rand(1.4, 2.2);
     smoke.size = 1 * k;
-    smoke.sizeEnd = 4.2;
+    smoke.sizeEnd = smokeSizeEnd;
     const light = rand(0.72, 0.84);
     smoke.color = scratchColor.setRGB(light, light, light * 1.02);
     smoke.colorEnd = scratchColorEnd.setRGB(light + 0.08, light + 0.08, light + 0.1);
-    smoke.alpha = 0.42;
+    smoke.alpha = smokeAlpha;
     smoke.drag = 1.2;
     smoke.gravityScale = -0.03;
     fx.emit(ParticleType.SMOKE, scratchPosition, smoke);
