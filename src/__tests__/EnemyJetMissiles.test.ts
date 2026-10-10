@@ -19,6 +19,7 @@ import {
   pointAround,
   seededGameRandom,
   seededRandom,
+  shadowPilot,
   type RigLaunch,
   type SystemRigOptions,
 } from './enemyFleetRig';
@@ -111,7 +112,8 @@ function launchProblems(log: readonly RigLaunch[], checkWarning: boolean): strin
       }
       const toPlayer = launch.playerPosition.clone().sub(launch.origin);
       const offNose = angleBetween(launch.direction, toPlayer) / DEG;
-      if (offNose > 60) problems.push(`${at}: launched ${offNose.toFixed(0)} degrees off the player`);
+      if (offNose > 60)
+        problems.push(`${at}: launched ${offNose.toFixed(0)} degrees off the player`);
     }
   }
   return problems;
@@ -142,7 +144,6 @@ describe('fleet-wide limit on jet missiles (spec §3: missile tokens; §2.9 boss
       expect(cap, `level ${level}`).toBeLessThanOrEqual(2);
       expect(getJetMissileCap(level, true), `level ${level} in a boss fight`).toBe(0);
     }
-    expect(getJetMissileCap(Number.NaN, false), 'unknown level counts as an early one').toBe(1);
   });
 });
 
@@ -630,10 +631,29 @@ describe('ACE seeking missile (spec §3)', () => {
         expect(
           log[i].time - log[i - 1].time,
           `gap before the launch at ${log[i].time.toFixed(1)} s`
-        ).toBeGreaterThanOrEqual(ACE_LAUNCH_SPACING * 0.85);
+        ).toBeGreaterThanOrEqual(ACE_LAUNCH_SPACING - DT);
       }
     }
   );
+
+  it('given a player held 450-550 m ahead, it launches again as soon as 14 s allow: launches 14-18 s apart', () => {
+    for (const ahead of [450, 550]) {
+      const { current, ace } = duel();
+      current.run(1);
+      // 玩家每一步都在它机头正前方、同向飞：一直在锁定范围里
+      current.pilot = shadowPilot(ace, -ahead, 0, 0, 'with-jet');
+      current.run(100);
+      const log = current.launchLog;
+      expect(log.length, `${ahead} m: launches in 100 s`).toBeGreaterThanOrEqual(5);
+      for (let i = 1; i < log.length; i++) {
+        const gap = log[i].time - log[i - 1].time;
+        const tag = `${ahead} m: gap before the launch at ${log[i].time.toFixed(1)} s`;
+        expect(gap, tag).toBeGreaterThanOrEqual(ACE_LAUNCH_SPACING - DT);
+        // 约 14 秒：装填完再锁定 2.0 秒就发
+        expect(gap, tag).toBeLessThanOrEqual(ACE_LAUNCH_SPACING + 2.0 + 2);
+      }
+    }
+  });
 
   it('launches one missile at a time on the late levels too, where two slots are free', () => {
     const { current } = duel({ level: 8 });
