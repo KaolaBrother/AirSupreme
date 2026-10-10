@@ -4,7 +4,7 @@ import { HUD_COLORS, HUD_LAYERS, HUD_TONE_COLORS } from './hudPalette';
  * 无线电通讯面板样式。
  *
  * 位置避开准星与雷达：桌面贴底、紧挨雷达右侧；手机横握夹在摇杆与右侧按键簇之间；
- * 竖屏第一人称放到顶部状态栏下方，竖屏追尾视角（准星在屏幕上方）放到按键簇上方。
+ * 竖屏第一人称放到顶部状态栏下方，竖屏追尾视角（准星在屏幕上方）放到按键簇左侧、摇杆上方。
  * 按键簇尺寸由 index.html 的 --touch-deck-w / --touch-deck-h / --touch-stick-size 提供。
  */
 export const RADIO_STYLE_ID = 'radio-comms-style';
@@ -248,75 +248,110 @@ ${toneBlock('muted', '195, 204, 214')}
 }
 
 /*
- * 手机竖屏追尾视角：机体下方的告警通道（第一行在屏幕中线下方约 45–75px）到按键簇之间，
- * 最多放得下两行正文；第三行会盖住导弹告警。
- * 通道同时显示两行（导弹告警 + 闪烁告警，HUD 在 <html> 上记 data-hud-warning-rows='2'）时，
- * 第二行下沿到按键簇只剩约 50px，底部有安全区的 iPhone 上只剩约 39px：面板收成一行正文，
- * 不显示头像和呼号行（左侧的色条仍标出说话方的阵营），内边距和行高收紧（整条约 21px 高），
- * 底边不动、向上让出第二行；告警一收起就恢复
+ * 手机竖屏追尾视角（宽度不到 700px）：按键簇上方那一带是机体和告警通道（第一行在屏幕中线下方
+ * 约 45–75px），整行的面板放在那里会压住导弹告警、横在画面中间。面板改放到按键簇左侧、
+ * 静止摇杆上方 14px（平板竖屏的面板也在这一处），不显示头像；告警通道显示几行都在这里，不再变。
+ * 这一栏很窄（屏宽 − 254px），左右内边距收到 6px；正文的行数上限按视口高度分档（见下面几条）：
+ * 面板到了上限，上沿离两行告警（导弹告警 + 闪烁告警）的下沿仍至少 12px。算法（屏宽按 430px
+ * 以内，两行告警按中文字体的 67px 高）：
+ *   面板高 = 行数 × 16.9px + 8px（带呼号行再加 18.6px）
+ *   可用高 = 50vh − 8vmin − 203px − max(20px, 底部安全区)
+ * 五行及以上的档按底部有 34px 安全区算，四行及以下的档（没有主屏幕指示条的手机、带着工具栏的
+ * 手机浏览器）按没有安全区算
  */
 @media (orientation: portrait) and (max-width: 699.98px) {
-  :root:not([data-hud-camera='first-person']) #radio-comms[data-density='touch-portrait'] .rc-text {
-    -webkit-line-clamp: 2;
-  }
-
-  :root[data-hud-warning-rows='2']:not([data-hud-camera='first-person']) #radio-comms[data-density='touch-portrait'] .rc-portrait,
-  :root[data-hud-warning-rows='2']:not([data-hud-camera='first-person']) #radio-comms[data-density='touch-portrait'] .rc-head {
-    display: none;
-  }
-
-  :root[data-hud-warning-rows='2']:not([data-hud-camera='first-person']) #radio-comms[data-density='touch-portrait'] .rc-text {
-    -webkit-line-clamp: 1;
-    line-height: 1.3;
-  }
-
-  :root[data-hud-warning-rows='2']:not([data-hud-camera='first-person']) #radio-comms[data-density='touch-portrait'] .rc-panel {
-    padding-top: 1px;
-    padding-bottom: 1px;
-  }
-}
-
-/*
- * 矮一些的手机（如 360×800；底部有安全区的 375×812 上按键簇跟着安全区抬高，第二行下沿到按键簇
- * 只剩 24px）：收小的面板去掉上下内边距（约 19px 高），离按键簇只留 2px
- */
-@media (orientation: portrait) and (max-width: 699.98px) and (max-height: 819.98px) {
-  :root[data-hud-warning-rows='2']:not([data-hud-camera='first-person']) #radio-comms[data-density='touch-portrait'] {
-    bottom: calc(max(20px, env(safe-area-inset-bottom)) + var(--touch-deck-h, 240px) + 2px);
-  }
-
-  :root[data-hud-warning-rows='2']:not([data-hud-camera='first-person']) #radio-comms[data-density='touch-portrait'] .rc-panel {
-    padding-top: 0;
-    padding-bottom: 0;
-  }
-}
-
-/*
- * 更矮的竖屏手机（视口不到 790px 高：360×740、375×667，以及带着地址栏的手机浏览器）：
- * 告警通道第二行的下沿已经贴着、甚至伸进按键簇，两者之间放不下面板。两行告警同时显示时，
- * 收小的面板改放到按键簇左侧、静止摇杆的上方（平板竖屏的面板也在这一处）；这一栏很窄，
- * 正文放到四行，上沿仍在第二行告警之下
- */
-@media (orientation: portrait) and (max-width: 699.98px) and (max-height: 789.98px) {
-  :root[data-hud-warning-rows='2']:not([data-hud-camera='first-person']) #radio-comms[data-density='touch-portrait'] {
+  :root:not([data-hud-camera='first-person']) #radio-comms[data-density='touch-portrait'] {
     right: calc(max(20px, env(safe-area-inset-right)) + var(--touch-deck-w, 210px) + 14px);
     bottom: calc(max(20px, env(safe-area-inset-bottom)) + var(--touch-stick-size, 96px) + 14px);
   }
 
-  :root[data-hud-warning-rows='2']:not([data-hud-camera='first-person']) #radio-comms[data-density='touch-portrait'] .rc-text {
-    -webkit-line-clamp: 4;
+  :root:not([data-hud-camera='first-person']) #radio-comms[data-density='touch-portrait'] .rc-portrait,
+  :root:not([data-hud-camera='first-person']) #radio-comms[data-density='touch-portrait'] .rc-head,
+  :root:not([data-hud-camera='first-person']) #radio-comms[data-density='touch-portrait'] .rc-name,
+  :root:not([data-hud-camera='first-person']) #radio-comms[data-density='touch-portrait'] .rc-signal {
+    display: none;
   }
 
-  :root[data-hud-warning-rows='2']:not([data-hud-camera='first-person']) #radio-comms[data-density='touch-portrait'] .rc-panel {
+  /*
+   * 呼号行（够高的档才显示，见下）：只留呼号；字距收到 0.06em，最长的呼号在 360px 宽的屏上
+   * 也放得下，再长就截断
+   */
+  :root:not([data-hud-camera='first-person']) #radio-comms[data-density='touch-portrait'] .rc-callsign {
+    flex: 0 1 auto;
+    min-width: 0;
+    line-height: 1.3;
+    letter-spacing: 0.06em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  :root:not([data-hud-camera='first-person']) #radio-comms[data-density='touch-portrait'] .rc-text {
+    -webkit-line-clamp: 4;
+    line-height: 1.3;
+  }
+
+  :root:not([data-hud-camera='first-person']) #radio-comms[data-density='touch-portrait'] .rc-panel {
     padding-top: 3px;
+    padding-right: 6px;
     padding-bottom: 3px;
+    padding-left: 6px;
+  }
+}
+
+/* 不到 666px 高（如带着工具栏的手机浏览器）：四行放不下，逐档减到一行 */
+@media (orientation: portrait) and (max-width: 699.98px) and (max-height: 665.98px) {
+  :root:not([data-hud-camera='first-person']) #radio-comms[data-density='touch-portrait'] .rc-text {
+    -webkit-line-clamp: 3;
+  }
+}
+
+@media (orientation: portrait) and (max-width: 699.98px) and (max-height: 632.98px) {
+  :root:not([data-hud-camera='first-person']) #radio-comms[data-density='touch-portrait'] .rc-text {
+    -webkit-line-clamp: 2;
+  }
+}
+
+@media (orientation: portrait) and (max-width: 699.98px) and (max-height: 598.98px) {
+  :root:not([data-hud-camera='first-person']) #radio-comms[data-density='touch-portrait'] .rc-text {
+    -webkit-line-clamp: 1;
+  }
+}
+
+/* 够高的档多放几行；从六行起有地方显示呼号行（呼号用说话方的强调色，不显示军衔姓名和信号格） */
+@media (orientation: portrait) and (max-width: 699.98px) and (min-height: 728px) {
+  :root:not([data-hud-camera='first-person']) #radio-comms[data-density='touch-portrait'] .rc-text {
+    -webkit-line-clamp: 5;
+  }
+}
+
+@media (orientation: portrait) and (max-width: 699.98px) and (min-height: 799px) {
+  :root:not([data-hud-camera='first-person']) #radio-comms[data-density='touch-portrait'] .rc-head {
+    display: flex;
+  }
+
+  :root:not([data-hud-camera='first-person']) #radio-comms[data-density='touch-portrait'] .rc-text {
+    -webkit-line-clamp: 6;
+  }
+}
+
+@media (orientation: portrait) and (max-width: 699.98px) and (min-height: 833px) {
+  :root:not([data-hud-camera='first-person']) #radio-comms[data-density='touch-portrait'] .rc-text {
+    -webkit-line-clamp: 7;
+  }
+}
+
+@media (orientation: portrait) and (max-width: 699.98px) and (min-height: 867px) {
+  :root:not([data-hud-camera='first-person']) #radio-comms[data-density='touch-portrait'] .rc-text {
+    -webkit-line-clamp: 8;
   }
 }
 
 /*
- * 手机横握同理：面板贴在屏幕底边，告警通道的第二行下沿离底边只剩约 50px
- * （底部有安全区的 iPhone 上扣掉安全区只剩约 31px），两行同时显示时同样收成一行正文
- * （平板横屏的告警通道离面板很远，不需要）
+ * 手机横握：面板贴在屏幕底边，告警通道的第二行下沿离底边只剩约 50px（底部有安全区的 iPhone 上
+ * 扣掉安全区只剩约 31px）。通道同时显示两行（导弹告警 + 闪烁告警，HUD 在 <html> 上记
+ * data-hud-warning-rows='2'）时面板收成一行正文，不显示头像和呼号行，内边距和行高收紧；
+ * 告警一收起就恢复（平板横屏的告警通道离面板很远，不需要）
  */
 @media (orientation: landscape) and (max-height: 699.98px) {
   :root[data-hud-warning-rows='2'] #radio-comms[data-density='touch-landscape'] .rc-portrait,

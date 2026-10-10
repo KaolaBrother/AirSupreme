@@ -12,8 +12,10 @@ import { resetLocale } from './i18nTestUtils';
 
 /**
  * 协调器的武器接线（GameCoordinator）：
- * - C2 / C3 / C4：触屏设备上每个模拟步把解算器的辅助方向与强度交给 PlayerSystem，渲染帧把同一个
- *   方向交给准星——十字落在哪里，子弹就打向哪里；桌面端不偏移；
+ * - C2 / C3 / C4：每个模拟步把解算器的辅助方向与强度交给 PlayerSystem，渲染帧把同一个方向交给
+ *   准星——十字落在哪里，子弹就打向哪里。用哪一档锥角只看设备：GameConfig.isMobile 为真用触屏档
+ *   （2.5° 以内全量，到 5° 减到零；接了实体键盘也一样），其余设备用键盘档（1.25° 以内全量，
+ *   到 2.5° 减到零，偏移不超过 1.25°）。提前量标记、机头标记和以机头轴线为圆心的捕获环两边相同；
  * - C5：第一人称下特殊武器的枪口焰和电磁炮闪屏缩到约 0.55，第三人称不变；
  * - C5：暂停菜单拿到 getSaveStatus 与 onSaveAndExit，对局不在进行时两者都报“不存档”。
  *
@@ -255,6 +257,28 @@ function leadMarkerShown(): boolean {
   const marker = lockRoot().querySelector('[data-lock-anchor="lead"]');
   expect(marker, 'expected the lead marker anchor').toBeTruthy();
   return isShown(marker as Element);
+}
+
+/** 准星上的一个部件：acquire-ring（捕获环）、nose-mark（机头标记）、gun-cross（机炮十字） */
+function lockChrome(name: string): HTMLElement {
+  const matches = lockRoot().querySelectorAll<HTMLElement>(`[data-lock-chrome="${name}"]`);
+  expect(matches.length, `expected exactly one [data-lock-chrome="${name}"]`).toBe(1);
+  return matches[0];
+}
+
+/** 元素（及祖先）内联 transform 里的平移之和 = 它的锚点在视口里的像素位置 */
+function screenPositionOf(element: Element): Pixel {
+  const position = { x: 0, y: 0 };
+  const root = lockRoot();
+  for (let node: Element | null = element; node && node !== root; node = node.parentElement) {
+    const transform = (node as HTMLElement).style?.transform ?? '';
+    const match = transform.match(/translate(?:3d)?\(\s*(-?[\d.]+)px\s*,\s*(-?[\d.]+)px/);
+    if (match) {
+      position.x += Number(match[1]);
+      position.y += Number(match[2]);
+    }
+  }
+  return position;
 }
 
 describe('GameCoordinator weapons wiring', () => {
@@ -662,25 +686,141 @@ describe('GameCoordinator weapons wiring', () => {
       });
     });
 
+    // 桌面（键盘）：同一套辅助，锥角小一半——瞄准点离机头 1.25° 以内全量，到 2.5° 减到零
     describe('on a desktop', () => {
-      it.each(SETUPS)('does not shift the cross or the bullets (%s)', (_name, view, makePose) => {
-        const rig = createGunRig({ touch: false, view, pose: makePose() });
-        const enemy = rig.addEnemy(rig.pointOffNose(2, 300, 40));
+      it.each(SETUPS)(
+        'pulls the cross onto an enemy 1° off the nose and puts the bullet through it (%s)',
+        (_name, view, makePose) => {
+          const rig = createGunRig({ touch: false, view, pose: makePose() });
+          const enemy = rig.addEnemy(rig.pointOffNose(1, 300, 40));
 
-        for (let i = 0; i < SETTLE_STEPS; i += 1) {
-          rig.step();
-          expect(pixelDistance(rig.cross(), rig.nosePixel()), `step ${i}`).toBeLessThan(1e-6);
-          expect(reticleFlag(), `step ${i}`).toBe('false');
+          rig.run();
+          const shot = rig.shoot();
+
+          // 子弹从炮口出发、正对敌机
+          expect(missDistance(shot, enemy.mesh.position)).toBeLessThan(0.02);
+          // 十字就画在敌机身上
+          const onEnemy = toPixel(enemy.mesh.position, rig.camera);
+          expect(pixelDistance(rig.cross(), onEnemy)).toBeLessThan(1.5);
+          expect(pixelDistance(rig.cross(), rig.nosePixel())).toBeGreaterThan(5);
+          expect(reticleFlag()).toBe('true');
         }
-        const shot = rig.shoot();
+      );
 
-        expect(angleBetween(shot.direction, rig.nose)).toBeLessThan(1e-9);
-        expect(missDistance(shot, enemy.mesh.position)).toBeGreaterThan(9);
+      it.each(SETUPS)(
+        'goes only part of the way to an enemy 2° off the nose, the cross staying on the bullet’s path (%s)',
+        (_name, view, makePose) => {
+          const rig = createGunRig({ touch: false, view, pose: makePose() });
+          const enemy = rig.addEnemy(rig.pointOffNose(2, 300, 200));
+
+          rig.run();
+          const shot = rig.shoot();
+
+          const along = (range: number): Pixel =>
+            toPixel(shot.position.clone().addScaledVector(shot.direction, range), rig.camera);
+          expect(distanceToSegment(rig.cross(), along(100), along(600))).toBeLessThan(1);
+          // 子弹离开了机头轴线，但转过去的不到 1.25°，也没有到敌机那里
+          const turned = angleBetween(shot.direction, rig.nose);
+          expect(turned).toBeGreaterThan(rad(0.1));
+          expect(turned).toBeLessThan(rad(1.25));
+          expect(missDistance(shot, enemy.mesh.position)).toBeGreaterThan(3);
+          expect(
+            pixelDistance(rig.cross(), toPixel(enemy.mesh.position, rig.camera))
+          ).toBeGreaterThan(5);
+        }
+      );
+
+      it.each([1.3, 1.6, 2, 2.4])(
+        'never turns the bullets as much as 1.25° for an enemy %s° off the nose',
+        (degrees) => {
+          const rig = createGunRig({ touch: false });
+          rig.addEnemy(rig.pointOffNose(degrees, 300, 130));
+
+          let turned = 0;
+          for (let i = 0; i < SETTLE_STEPS; i += 1) {
+            rig.step();
+            turned = angleBetween(rig.shoot().direction, rig.nose);
+            expect(turned, `step ${i}`).toBeLessThan(rad(1.25));
+          }
+          // 滑动结束后子弹确实偏向了敌机
+          expect(turned).toBeGreaterThan(rad(0.01));
+        }
+      );
+
+      it.each([2.6, 3.5, 4.5])(
+        'leaves the cross and the bullets on the nose for an enemy %s° off the nose',
+        (degrees) => {
+          const rig = createGunRig({ touch: false });
+          rig.addEnemy(rig.pointOffNose(degrees, 300, 40));
+
+          for (let i = 0; i < SETTLE_STEPS; i += 1) {
+            rig.step();
+            expect(pixelDistance(rig.cross(), rig.nosePixel()), `step ${i}`).toBeLessThan(1e-6);
+            expect(reticleFlag(), `step ${i}`).toBe('false');
+          }
+          expect(angleBetween(rig.shoot().direction, rig.nose)).toBeLessThan(1e-9);
+        }
+      );
+
+      it('leaves the cross on the nose for an enemy beyond 480 m', () => {
+        const rig = createGunRig({ touch: false, view: 'third-person' });
+        rig.addEnemy(rig.pointOffNose(0.8, 490));
+
+        rig.run();
+
+        expect(angleBetween(rig.shoot().direction, rig.nose)).toBeLessThan(1e-9);
+        expect(pixelDistance(rig.cross(), rig.nosePixel())).toBeLessThan(1e-6);
+        expect(reticleFlag()).toBe('false');
       });
 
-      it('keeps the full 3° spread next to a target', () => {
+      it('keeps cross and bullet together on every step while the assist slides in', () => {
         const rig = createGunRig({ touch: false });
-        rig.addEnemy(rig.pointOffNose(1.5, 300));
+        rig.addEnemy(rig.pointOffNose(1.2, 300));
+
+        let shifted = 0;
+        for (let i = 0; i < 24; i += 1) {
+          rig.step();
+          const shot = rig.shoot();
+          const onPath = toPixel(
+            shot.position.clone().addScaledVector(shot.direction, 400),
+            rig.camera
+          );
+          expect(pixelDistance(rig.cross(), onPath), `step ${i}`).toBeLessThan(1);
+          if (pixelDistance(rig.cross(), rig.nosePixel()) > 1) shifted += 1;
+        }
+        expect(shifted).toBeGreaterThan(10);
+      });
+
+      it('narrows the bullet spread while it holds the target', () => {
+        const rig = createGunRig({ touch: false });
+        rig.addEnemy(rig.pointOffNose(1, 300));
+        rig.run();
+
+        const centre = rig.shoot().direction;
+        random.mockReturnValue(0);
+        const edge = rig.shoot().direction;
+
+        expect(THREE.MathUtils.radToDeg(angleBetween(edge, centre))).toBeCloseTo(0.6, 2);
+      });
+
+      it('narrows the spread only part of the way while the assist fades', () => {
+        const rig = createGunRig({ touch: false });
+        rig.addEnemy(rig.pointOffNose(1.875, 300));
+        rig.run();
+
+        const centre = rig.shoot().direction;
+        random.mockReturnValue(0);
+        const edge = rig.shoot().direction;
+
+        const half = THREE.MathUtils.radToDeg(angleBetween(edge, centre));
+        expect(half).toBeGreaterThan(0.65);
+        expect(half).toBeLessThan(1.45);
+      });
+
+      it('keeps the full 3° spread next to an enemy outside its cone', () => {
+        const rig = createGunRig({ touch: false });
+        // 3°：触屏档会收窄散布，键盘档不会
+        rig.addEnemy(rig.pointOffNose(3, 300));
         rig.run();
 
         const centre = rig.shoot().direction;
@@ -690,15 +830,93 @@ describe('GameCoordinator weapons wiring', () => {
         expect(THREE.MathUtils.radToDeg(angleBetween(edge, centre))).toBeCloseTo(1.5, 6);
       });
 
-      it('still offers the lead marker', () => {
+      it('assists on a ground unit’s aim point but offers no lead marker for it', () => {
         const rig = createGunRig({ touch: false });
-        const enemy = rig.addEnemy(rig.pointOffNose(2, 300));
+        const aimObject = rig.addUnit(rig.pointOffNose(1, 300, 270), 'ground');
+
+        rig.run();
+        const shot = rig.shoot();
+
+        expect(missDistance(shot, aimObject.position)).toBeLessThan(0.02);
+        expect(pixelDistance(rig.cross(), toPixel(aimObject.position, rig.camera))).toBeLessThan(
+          1.5
+        );
+        expect(leadMarkerShown()).toBe(false);
+      });
+
+      it.each(SETUPS)(
+        'keeps the reticle, the lock ring and the nose marker on the nose axis while the cross is pulled away (%s)',
+        (_name, view, makePose) => {
+          const rig = createGunRig({ touch: false, view, pose: makePose() });
+          rig.step();
+          const noseMark = lockChrome('nose-mark');
+          const before = {
+            aim: { ...rig.nosePixel() },
+            ring: screenPositionOf(lockChrome('acquire-ring')),
+            radius: indicator.getAcquireRadius(),
+          };
+          expect(pixelDistance(rig.cross(), rig.nosePixel())).toBeLessThan(1e-6);
+          expect(getComputedStyle(noseMark).display).toBe('none');
+
+          rig.addEnemy(rig.pointOffNose(1.2, 300, 40));
+          rig.run();
+
+          expect(pixelDistance(rig.cross(), rig.nosePixel())).toBeGreaterThan(5);
+          // 准星锚点和捕获环没有跟着十字走，环也没有变大变小
+          expect(rig.nosePixel()).toEqual(before.aim);
+          expect(screenPositionOf(lockChrome('acquire-ring'))).toEqual(before.ring);
+          expect(indicator.getAcquireRadius()).toBe(before.radius);
+          // 它们在真正的机头轴线上：机头前方 600 米那一点
+          const trueNose = toPixel(
+            rig.pose.position.clone().addScaledVector(rig.nose, 600),
+            rig.camera
+          );
+          expect(pixelDistance(rig.nosePixel(), trueNose)).toBeLessThan(0.5);
+          expect(
+            pixelDistance(screenPositionOf(lockChrome('acquire-ring')), trueNose)
+          ).toBeLessThan(0.5);
+          // 机头标记亮出来，留在机头轴线上
+          expect(getComputedStyle(noseMark).display).not.toBe('none');
+          expect(pixelDistance(screenPositionOf(noseMark), trueNose)).toBeLessThan(0.5);
+        }
+      );
+
+      it.each([2, 4])('still offers the lead marker (enemy %s° off the nose)', (degrees) => {
+        const rig = createGunRig({ touch: false });
+        const enemy = rig.addEnemy(rig.pointOffNose(degrees, 300));
 
         rig.run();
 
         expect(rig.solver.getPipTarget()).toBe(enemy.mesh);
         expect(leadMarkerShown()).toBe(true);
       });
+    });
+
+    // 用哪一档只看 GameConfig.isMobile：同一块屏幕、同一架敌机，只换这个标志。
+    // 触屏设备接了实体键盘也仍然是触屏档——协调器不看别的
+    describe('the device decides the cone', () => {
+      it.each([
+        // 敌机离机头的角度、设备、子弹转向敌机的角度下限与上限（度）
+        [1, 'touch', 1, 1],
+        [1, 'desktop', 1, 1],
+        [1.2, 'desktop', 1.2, 1.2],
+        [2, 'touch', 2, 2],
+        [2, 'desktop', 0.1, 1.24],
+        [4, 'touch', 0.1, 2.5],
+        [4, 'desktop', 0, 0],
+      ] as const)(
+        'an enemy %s° off the nose on a %s device: the bullets turn %s° to %s° towards it',
+        (degrees, device, atLeast, atMost) => {
+          const rig = createGunRig({ touch: device === 'touch' });
+          rig.addEnemy(rig.pointOffNose(degrees, 300, 40));
+
+          rig.run();
+          const turned = THREE.MathUtils.radToDeg(angleBetween(rig.shoot().direction, rig.nose));
+
+          expect(turned).toBeGreaterThanOrEqual(atLeast - 1e-6);
+          expect(turned).toBeLessThanOrEqual(atMost + 1e-6);
+        }
+      );
     });
 
     describe('clearing the assist', () => {
