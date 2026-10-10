@@ -9,6 +9,7 @@ import {
   getEnemyTypesForWave,
 } from '@/features/enemy/EnemyTypes';
 import { EnemyAI } from '@/features/enemy/EnemyAI';
+import { createJetDoctrine } from '@/features/enemy/doctrine/createJetDoctrine';
 import { WORLDSCAPE_WATER_Y, type TerrainGenerator } from '@/features/terrain/TerrainGenerator';
 import type {
   TerrainEnvironment,
@@ -38,6 +39,9 @@ const WAVE_GROUP_SPREAD = 60;
 const WAVE_GROUP_CENTER_ATTEMPTS = 12;
 /** 玩家位置单步变化折算速度超过该值（米/秒）视为瞬移，不用于提前量 */
 const PLAYER_TELEPORT_SPEED = 250;
+/** 条令开火节奏倍率（难度档 × 关卡曲线的冷却倍率）的允许范围 */
+const MIN_CADENCE_SCALE = 0.5;
+const MAX_CADENCE_SCALE = 2.5;
 
 export enum LevelState {
   IDLE = 'IDLE',
@@ -108,6 +112,9 @@ export class LevelManager {
   private currentWaveEvent: LevelWaveEventType | null = null;
   private difficultyProfile: DifficultyProfile | null = null;
   private currentWaveBeatProfile: OnboardingWaveBeatProfile = DEFAULT_ONBOARDING_BEAT_PROFILE;
+
+  /** 开发钩子：暂停常规波次（不生成、不结算、不进入下一波），在场敌机照常飞 */
+  private waveSpawningHeld = false;
 
   /** 额外的“未清场”数量（如存活的敌方地面 / 海上单位）：大于 0 时波次不会完成 */
   private waveHoldProvider: (() => number) | null = null;
@@ -402,7 +409,7 @@ export class LevelManager {
     }
 
     // 更新波次延迟
-    if (this.waveDelayTimer > 0 && this.currentLevel) {
+    if (!this.waveSpawningHeld && this.waveDelayTimer > 0 && this.currentLevel) {
       this.waveDelayTimer -= deltaTime;
       if (this.waveDelayTimer <= 0) {
         // 检查是否还有下一波（当前波次索引 + 1 >= 总波次数）
@@ -420,7 +427,7 @@ export class LevelManager {
     this.trackPlayerVelocity(deltaTime, playerPosition);
 
     // 生成敌人
-    if (this.state === LevelState.WAVE_ACTIVE && this.currentLevel) {
+    if (!this.waveSpawningHeld && this.state === LevelState.WAVE_ACTIVE && this.currentLevel) {
       const maxEnemies = this.currentLevel.enemiesPerWave[this.currentWave] || 0;
       const aliveEnemies = this.enemies.filter((e) => e.isAlive()).length;
       const maxConcurrentEnemies = this.getMaxConcurrentEnemies();
@@ -694,6 +701,32 @@ export class LevelManager {
   }
 
   /**
+   * 开发钩子（clearJets）：移除所有在场敌机与传送门，不计分、不触发击杀事件，
+   * 也不改动波次计数（配合 setWaveSpawningHeld 单独研究某个机型）。返回移除的架数。
+   */
+  public removeAllEnemies(): number {
+    const removed = this.enemies.length;
+    for (const enemy of this.enemies) {
+      enemy.dispose();
+    }
+    this.enemies = [];
+    for (const portal of this.activePortals) {
+      portal.dispose();
+    }
+    this.activePortals = [];
+    return removed;
+  }
+
+  /** 开发钩子（holdWaves）：暂停 / 恢复常规波次的生成与结算 */
+  public setWaveSpawningHeld(held: boolean): void {
+    this.waveSpawningHeld = held === true;
+  }
+
+  public isWaveSpawningHeld(): boolean {
+    return this.waveSpawningHeld;
+  }
+
+  /**
    * 清除所有敌人
    */
   public clear(): void {
@@ -882,12 +915,12 @@ export class LevelManager {
       return enemy;
     }
 
-    // 创建新敌人 - 使用统一的工厂函数
+    // 创建新敌人 - 使用统一的工厂函数；每架敌机带一份自己机型的条令
     const config = this.getAdjustedEnemyConfig(type);
     const mesh = createEnemyMesh(config);
     this.scene.add(mesh);
 
-    const enemy = new EnemyAI(mesh, config, this.scene);
+    const enemy = new EnemyAI(mesh, config, this.scene, { doctrine: createJetDoctrine(type) });
     enemy.setTerrainSampler(this.terrainHeightSampler);
     this.enemies.push(enemy);
 
@@ -895,13 +928,18 @@ export class LevelManager {
   }
 
   /**
-   * 在指定位置生成敌人（用于 Boss 召唤）
+   * 在指定位置生成敌人（用于 Boss 召唤）。
+   * counted = false（开发钩子）：不计入“已生成”总数，HUD 的剩余敌机数不受影响。
    */
-  public spawnEnemyAtPosition(type: EnemyType, position: Vector3): EnemyAI | null {
+  public spawnEnemyAtPosition(
+    type: EnemyType,
+    position: Vector3,
+    counted: boolean = true
+  ): EnemyAI | null {
     const enemy = this.getOrCreateEnemy(type);
     enemy.reset(position);
     enemy.getMesh().visible = true;
-    this.totalEnemiesSpawned++;
+    if (counted) this.totalEnemiesSpawned++;
 
     this.onEnemySpawned?.(enemy);
     return enemy;
@@ -1006,10 +1044,19 @@ export class LevelManager {
     return {
       ...baseConfig,
       health: Math.max(1, Math.round(baseConfig.health * healthMultiplier)),
-      damage: Math.max(1, Math.round(baseConfig.damage * damageMultiplier * 10) / 10),
+      // 无武装机型（基础伤害 0）保持 0，其余至少 1
+      damage:
+        baseConfig.damage > 0
+          ? Math.max(1, Math.round(baseConfig.damage * damageMultiplier * 10) / 10)
+          : 0,
       attackCooldown: Math.max(0.1, baseConfig.attackCooldown * cooldownMultiplier),
       accuracy: Math.min(0.95, baseConfig.accuracy + accuracyBonus),
       aimLead: Math.max(0, Math.min(1, scaling.enemyAimLead)),
+      // 条令里两次点射 / 齐射 / 蓄力之间的间隔按同一个冷却倍率缩放（预警时长不变）
+      cadenceScale: Math.max(
+        MIN_CADENCE_SCALE,
+        Math.min(MAX_CADENCE_SCALE, Number.isFinite(cooldownMultiplier) ? cooldownMultiplier : 1)
+      ),
     };
   }
 }

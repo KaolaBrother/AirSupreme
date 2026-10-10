@@ -1111,6 +1111,15 @@ export class MissileSystem {
     return count;
   }
 
+  /** 是否有在飞的导弹正追踪这个目标（敌机条令据此规避；只读，不分配） */
+  public hasActiveMissileToward(target: THREE.Object3D): boolean {
+    for (let i = 0; i < this.missiles.length; i++) {
+      const missile = this.missiles[i];
+      if (missile.active && missile.target === target) return true;
+    }
+    return false;
+  }
+
   /**
    * 清除所有导弹
    */

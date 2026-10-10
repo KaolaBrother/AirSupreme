@@ -1,6 +1,20 @@
 import * as THREE from 'three';
 import { GAME_CONSTANTS } from '@/config';
-import { EnemyConfig, EnemyType, EnemyAIState } from './EnemyTypes';
+import { EnemyConfig, EnemyAIState, ENEMY_TRAIL_COLOR } from './EnemyTypes';
+import { ENEMY_WEAPON_SPECS, type EnemyWeaponKind } from './EnemyWeapons';
+import {
+  DOCTRINE_RULES,
+  createAttackOrders,
+  releaseAttackOrders,
+  type AttackOrders,
+  type AttackRequest,
+  type DoctrineCommand,
+  type DoctrineContext,
+  type DoctrineCue,
+  type IEnemyDoctrine,
+} from './doctrine/DoctrineTypes';
+import { createDoctrineCommand, resetDoctrineCommand } from './doctrine/JetDoctrine';
+import { LanceBeam } from './effects/LanceBeam';
 import { HealthSystem } from '@/features/combat/HealthSystem';
 import { ParticleTrailRenderer } from '@/features/effects/ParticleTrailRenderer';
 import { getLogger } from '@/core/utils/Logger';
@@ -36,6 +50,35 @@ const MAX_LEAD_SECONDS = 4;
 /** 目标速度估计的合理上限（米/秒）：更大视为瞬移（复活 / 传送），不做提前 */
 const MAX_TARGET_SPEED = 250;
 
+/** 条令飞行：俯仰上限（正弦，约 44°）——机头不会竖直上下 */
+const DOCTRINE_MAX_PITCH_SIN = 0.7;
+/** 条令飞行：速率每秒最多变化“基础速度 × 这个比例” */
+const DOCTRINE_ACCELERATION = 0.9;
+/** 条令给出的转向倍数的允许范围 */
+const DOCTRINE_MIN_TURN_SCALE = 0.2;
+const DOCTRINE_MAX_TURN_SCALE = 2;
+
+/** 一发子弹的弹种信息（条令开火时随 onFire 传出；旧的三状态开火不带） */
+export interface EnemyShotInfo {
+  weapon: EnemyWeaponKind;
+  /** 弹速（米/秒） */
+  speed: number;
+  /** 同一次齐射里的后续弹：不单独播放开火音与枪口焰 */
+  quiet: boolean;
+}
+
+export interface EnemyAIOptions {
+  /**
+   * 机型条令：给了就由它决定往哪飞、飞多快、何时开火；不给则沿用旧的三状态
+   * （追逐 / 固定方向 / 盘旋）行为——僚机（FriendlyAI）走的就是这条路。
+   */
+  doctrine?: IEnemyDoctrine | null;
+  /** 尾迹颜色（缺省为敌方红橙） */
+  trailColor?: number;
+  /** 条令用的 0..1 随机数来源（缺省 Math.random；测试 / 回放时注入种子） */
+  rng?: () => number;
+}
+
 // 每帧复用的临时对象（所有敌机实例共享，update 内同步使用）
 const tmpDirection = new THREE.Vector3();
 const tmpForward = new THREE.Vector3();
@@ -44,6 +87,9 @@ const tmpAxis = new THREE.Vector3();
 const tmpQuaternion = new THREE.Quaternion();
 const WORLD_UP = new THREE.Vector3(0, 1, 0);
 const lookHelper = new THREE.Object3D();
+const tmpDesired = new THREE.Vector3();
+/** onFire 的弹种信息：同步回调内读取，不要保存引用 */
+const sharedShotInfo: EnemyShotInfo = { weapon: 'bullet', speed: BULLET_SPEED, quiet: false };
 
 function isFiniteVector(vector: THREE.Vector3): boolean {
   return Number.isFinite(vector.x) && Number.isFinite(vector.y) && Number.isFinite(vector.z);
@@ -83,8 +129,34 @@ export class EnemyAI {
   private stunTimer: number = 0;
   private readonly engineWorldPos = new THREE.Vector3();
 
+  // 条令（可选）与导演的指令
+  private readonly scene: THREE.Scene;
+  private readonly doctrine: IEnemyDoctrine | null;
+  private readonly doctrineContext: DoctrineContext | null;
+  private readonly doctrineCommand: DoctrineCommand | null;
+  /** 攻击令牌导演写在本机上的指令（没有条令的敌机不参与，始终没有令牌） */
+  public readonly orders: AttackOrders = createAttackOrders();
+  /** 条令飞行的当前空速（米/秒）：在 0.6×–1.3× 基础速度之间平滑变化 */
+  private airspeed: number;
+  // 战场态势（EnemySystem 每步写入）
+  private readonly playerForward = new THREE.Vector3(0, 0, -1);
+  private lockedOn = false;
+  private missileInbound = false;
+  private level = 1;
+  private bossFight = false;
+  /** 狙击机的瞄准光束（首次蓄力时创建） */
+  private lanceBeam: LanceBeam | null = null;
+
   // 回调
-  public onFire?: (position: THREE.Vector3, direction: THREE.Vector3, damage: number) => void;
+  /** shot 只在条令开火时提供（弹种 / 弹速 / 是否静音），且只在回调期间有效 */
+  public onFire?: (
+    position: THREE.Vector3,
+    direction: THREE.Vector3,
+    damage: number,
+    shot?: Readonly<EnemyShotInfo>
+  ) => void;
+  /** 条令触发的一次性提示（蓄力音等） */
+  public onTell?: (cue: DoctrineCue, position: THREE.Vector3, duration: number) => void;
   public onDestroy?: (position: THREE.Vector3) => void;
   private readonly previousVisualPosition = new THREE.Vector3();
   private readonly currentVisualPosition = new THREE.Vector3();
@@ -93,38 +165,69 @@ export class EnemyAI {
   private readonly currentVisualQuaternion = new THREE.Quaternion();
   private readonly interpolatedVisualQuaternion = new THREE.Quaternion();
 
-  constructor(mesh: THREE.Group, config: EnemyConfig, scene: THREE.Scene) {
+  constructor(
+    mesh: THREE.Group,
+    config: EnemyConfig,
+    scene: THREE.Scene,
+    options: EnemyAIOptions = {}
+  ) {
     this.mesh = mesh;
     this.config = config;
+    this.scene = scene;
     this.health = new HealthSystem(config.health);
     this.targetPosition = null;
 
     // 初始化速度（向前）
     this.velocity = new THREE.Vector3(0, 0, -config.speed);
+    this.airspeed = config.speed;
 
     // 初始化固定方向虚拟追踪点（随机）
     this.fixedDirectionTarget = this.generateFixedDirectionTarget();
 
-    // 创建尾迹效果（根据敌机类型选择颜色）
-    const trailColor = this.getTrailColor(config.type);
-    this.trail = new ParticleTrailRenderer(scene, mesh, trailColor);
+    // 创建尾迹效果（阵营色：敌方红橙；僚机由 FriendlyAI 传入淡蓝）
+    this.trail = new ParticleTrailRenderer(scene, mesh, options.trailColor ?? ENEMY_TRAIL_COLOR);
 
     // 选择初始状态
     this.selectNewState();
     this.stateTimer = this.randomStateDuration();
 
+    this.doctrine = options.doctrine ?? null;
+    if (this.doctrine) {
+      this.doctrineContext = {
+        dt: 0,
+        position: this.mesh.position,
+        forward: new THREE.Vector3(0, 0, -1),
+        speed: config.speed,
+        baseSpeed: config.speed,
+        turnRate: config.turnSpeed,
+        accuracy: config.accuracy,
+        aimLead: config.aimLead ?? 0,
+        cadenceScale: config.cadenceScale ?? 1,
+        hasPlayer: false,
+        playerPosition: new THREE.Vector3(),
+        playerVelocity: new THREE.Vector3(),
+        playerForward: new THREE.Vector3(0, 0, -1),
+        distance: Infinity,
+        lockedOn: false,
+        missileInbound: false,
+        hasToken: false,
+        attackBearing: Number.NaN,
+        level: 1,
+        bossFight: false,
+        rng: options.rng ?? Math.random,
+      };
+      this.doctrineCommand = createDoctrineCommand();
+    } else {
+      this.doctrineContext = null;
+      this.doctrineCommand = null;
+    }
+
     // 设置死亡回调
     this.health.onDeath = () => {
+      this.standDown();
       this.onDestroy?.(this.mesh.position.clone());
     };
     this.syncVisualState();
-  }
-
-  /**
-   * 获取尾迹颜色（统一白色，符合真实）
-   */
-  private getTrailColor(_type: EnemyType): number {
-    return 0xffffff; // 白色（符合真实飞机尾迹）
   }
 
   /**
@@ -145,6 +248,11 @@ export class EnemyAI {
 
     if (friendlyMeshes) {
       this.friendlyMeshes = friendlyMeshes;
+    }
+
+    if (this.doctrine) {
+      this.updateWithDoctrine(deltaTime, playerPosition, fireTarget !== null);
+      return;
     }
 
     const stunned = this.stunTimer > 0;
@@ -193,6 +301,262 @@ export class EnemyAI {
     this.captureCurrentVisualState();
   }
 
+  // ---------------------------------------------------------------------------------------------
+  // 条令飞行
+  // ---------------------------------------------------------------------------------------------
+
+  /**
+   * 条令驱动的一步：填写战场快照 → 条令决策 → 按转向角速度 / 油门 / 加速度限制执行 →
+   * 运动积分（地形避让、贴地兜底与旧路径相同）→ 发出本步的射击 → 交还令牌 / 提示 / 预警特效。
+   * EMP 瘫痪期间不决策、不转向、不开火（保持惯性滑行）。
+   */
+  private updateWithDoctrine(
+    deltaTime: number,
+    playerPosition: THREE.Vector3 | null,
+    weaponsFree: boolean
+  ): void {
+    const doctrine = this.doctrine;
+    const context = this.doctrineContext;
+    const command = this.doctrineCommand;
+    if (!doctrine || !context || !command) return;
+
+    const stunned = this.stunTimer > 0;
+    resetDoctrineCommand(command);
+    if (stunned) {
+      this.stunTimer = Math.max(0, this.stunTimer - deltaTime);
+    } else {
+      this.fillDoctrineContext(context, deltaTime, playerPosition, weaponsFree);
+      doctrine.update(context, command);
+      this.steerByCommand(context, command, deltaTime);
+    }
+
+    this.integrateMotion(deltaTime, this.config.speed * DOCTRINE_RULES.MAX_THROTTLE);
+    this.attackCooldown = Math.max(0, this.attackCooldown - deltaTime);
+
+    if (!stunned) {
+      // 没有令牌的敌机不对玩家开火（条令自己也守这条；这里是硬保证）
+      if (context.hasToken) this.emitDoctrineShots(command);
+      if (command.releaseToken && this.orders.hasToken) {
+        releaseAttackOrders(this.orders, DOCTRINE_RULES.TOKEN_RELEASE_COOLDOWN);
+      }
+      if (command.cue) {
+        this.onTell?.(command.cue, this.mesh.position, command.cueDuration);
+      }
+    }
+    this.updateTellEffect(stunned ? null : doctrine);
+
+    this.trail.update(deltaTime);
+    this.captureCurrentVisualState();
+  }
+
+  private fillDoctrineContext(
+    context: DoctrineContext,
+    deltaTime: number,
+    playerPosition: THREE.Vector3 | null,
+    weaponsFree: boolean
+  ): void {
+    const config = this.config;
+    const speed = this.velocity.length();
+    if (speed > 1e-6 && Number.isFinite(speed)) {
+      context.forward.copy(this.velocity).multiplyScalar(1 / speed);
+    } else {
+      // 没有速度（或被写坏）：取机头方向（本地 +Z）
+      context.forward.set(0, 0, 1).applyQuaternion(this.mesh.quaternion);
+      if (!isFiniteVector(context.forward) || context.forward.lengthSq() < 1e-8) {
+        context.forward.set(0, 0, -1);
+      }
+      context.forward.normalize();
+    }
+    context.dt = deltaTime > 0 ? deltaTime : 0;
+    context.speed = Number.isFinite(speed) ? speed : 0;
+    context.baseSpeed = config.speed;
+    context.turnRate = config.turnSpeed;
+    context.accuracy = config.accuracy;
+    context.aimLead = config.aimLead ?? 0;
+    context.cadenceScale = config.cadenceScale ?? 1;
+
+    const hasPlayer = playerPosition !== null && isFiniteVector(playerPosition);
+    context.hasPlayer = hasPlayer;
+    if (hasPlayer) {
+      context.playerPosition.copy(playerPosition);
+      context.distance = this.mesh.position.distanceTo(playerPosition);
+    } else {
+      context.distance = Infinity;
+    }
+    if (this.hasTargetVelocity) {
+      context.playerVelocity.copy(this.targetVelocity);
+    } else {
+      context.playerVelocity.set(0, 0, 0);
+    }
+    context.playerForward.copy(this.playerForward);
+    context.lockedOn = this.lockedOn;
+    context.missileInbound = this.missileInbound;
+    const hasToken = this.orders.hasToken && weaponsFree && hasPlayer;
+    context.hasToken = hasToken;
+    context.attackBearing = hasToken ? this.orders.bearing : Number.NaN;
+    context.level = this.level;
+    context.bossFight = this.bossFight;
+  }
+
+  /**
+   * 执行条令的飞行指令：机头以“转向角速度 × 倍数”转向期望方向（俯仰受限），
+   * 空速以有限的加速度趋向“基础速度 × 油门（0.6–1.3）”。
+   */
+  private steerByCommand(
+    context: DoctrineContext,
+    command: DoctrineCommand,
+    deltaTime: number
+  ): void {
+    const forward = context.forward;
+    const desired = tmpDesired.copy(command.direction);
+    const lengthSq = desired.lengthSq();
+    if (lengthSq > 1e-10 && Number.isFinite(lengthSq)) {
+      desired.multiplyScalar(1 / Math.sqrt(lengthSq));
+    } else {
+      desired.copy(forward);
+    }
+
+    // 俯仰限制：竖直分量超出上限时压回去，保持水平方向不变
+    if (Math.abs(desired.y) > DOCTRINE_MAX_PITCH_SIN) {
+      const horizontal = Math.hypot(desired.x, desired.z);
+      const horizontalTarget = Math.sqrt(1 - DOCTRINE_MAX_PITCH_SIN * DOCTRINE_MAX_PITCH_SIN);
+      if (horizontal > 1e-6) {
+        const scale = horizontalTarget / horizontal;
+        desired.x *= scale;
+        desired.z *= scale;
+      } else {
+        const forwardHorizontal = Math.hypot(forward.x, forward.z);
+        if (forwardHorizontal > 1e-6) {
+          desired.x = (forward.x / forwardHorizontal) * horizontalTarget;
+          desired.z = (forward.z / forwardHorizontal) * horizontalTarget;
+        } else {
+          desired.x = 0;
+          desired.z = horizontalTarget;
+        }
+      }
+      desired.y = Math.sign(desired.y) * DOCTRINE_MAX_PITCH_SIN;
+    }
+
+    const turnScale = Math.min(
+      DOCTRINE_MAX_TURN_SCALE,
+      Math.max(DOCTRINE_MIN_TURN_SCALE, Number.isFinite(command.turnScale) ? command.turnScale : 1)
+    );
+    const maxAngle = this.config.turnSpeed * turnScale * deltaTime;
+    const cos = Math.min(1, Math.max(-1, forward.dot(desired)));
+    const angle = Math.acos(cos);
+    if (angle > maxAngle && angle > 1e-5) {
+      tmpAxis.crossVectors(forward, desired);
+      if (tmpAxis.lengthSq() < 1e-10) {
+        // 正好反向：绕竖轴掉头（机头接近竖直时绕 X 轴）
+        tmpAxis.copy(WORLD_UP);
+        if (Math.abs(forward.y) > 0.99) tmpAxis.set(1, 0, 0);
+      }
+      tmpQuaternion.setFromAxisAngle(tmpAxis.normalize(), maxAngle);
+      desired.copy(forward).applyQuaternion(tmpQuaternion).normalize();
+    }
+
+    const baseSpeed = this.config.speed;
+    const throttle = Math.min(
+      DOCTRINE_RULES.MAX_THROTTLE,
+      Math.max(
+        DOCTRINE_RULES.MIN_THROTTLE,
+        Number.isFinite(command.throttle) ? command.throttle : 1
+      )
+    );
+    const targetSpeed = baseSpeed * throttle;
+    const maxDelta = baseSpeed * DOCTRINE_ACCELERATION * deltaTime;
+    const delta = targetSpeed - this.airspeed;
+    this.airspeed += Math.min(maxDelta, Math.max(-maxDelta, delta));
+    // 换了配置（setConfig）或数值异常时回到允许范围
+    this.airspeed = Math.min(
+      baseSpeed * DOCTRINE_RULES.MAX_THROTTLE,
+      Math.max(baseSpeed * DOCTRINE_RULES.MIN_THROTTLE, this.airspeed)
+    );
+    if (!Number.isFinite(this.airspeed)) this.airspeed = baseSpeed;
+
+    if (isFiniteVector(desired)) {
+      this.velocity.copy(desired).multiplyScalar(this.airspeed);
+    }
+  }
+
+  /** 把条令本步的射击请求交给 onFire（弹种 / 弹速 / 是否静音随 shot 传出） */
+  private emitDoctrineShots(command: DoctrineCommand): void {
+    if (!this.onFire) return;
+    for (let i = 0; i < command.shotCount; i++) {
+      const shot = command.shots[i];
+      const damage = this.config.damage * shot.damageScale;
+      // 无武装机型（伤害为 0）不发射
+      if (!(damage > 0)) continue;
+      sharedShotInfo.weapon = shot.weapon;
+      sharedShotInfo.speed = ENEMY_WEAPON_SPECS[shot.weapon].speed;
+      sharedShotInfo.quiet = shot.quiet;
+      this.onFire(this.mesh.position.clone(), shot.direction.clone(), damage, sharedShotInfo);
+    }
+  }
+
+  /** 预警特效（狙击机的瞄准光束）：条令报告有预警就显示 / 更新，否则隐藏 */
+  private updateTellEffect(doctrine: IEnemyDoctrine | null): void {
+    const tell = doctrine ? doctrine.getTell() : null;
+    if (tell && tell.kind === 'lance-beam') {
+      this.lanceBeam ??= new LanceBeam(this.scene);
+      this.lanceBeam.show(this.mesh.position, tell.aimPoint, tell.progress, tell.frozen);
+    } else if (this.lanceBeam) {
+      this.lanceBeam.hide();
+    }
+  }
+
+  /** 中断条令（取消蓄力 / 点射）、交还令牌、收起预警特效：瘫痪、阵亡、重新生成时调用 */
+  private standDown(): void {
+    this.doctrine?.interrupt();
+    releaseAttackOrders(this.orders, 0);
+    this.lanceBeam?.hide();
+  }
+
+  /**
+   * 战场态势（EnemySystem 每步在 update 之前写入）：玩家机头方向、玩家对本机的威胁、
+   * 当前关卡与是否在 Boss 战。没有条令的敌机不使用这些。
+   */
+  public setCombatSituation(
+    playerForward: THREE.Vector3 | null,
+    lockedOn: boolean,
+    missileInbound: boolean,
+    level: number,
+    bossFight: boolean
+  ): void {
+    if (playerForward && isFiniteVector(playerForward) && playerForward.lengthSq() > 1e-8) {
+      this.playerForward.copy(playerForward).normalize();
+    }
+    this.lockedOn = lockedOn;
+    this.missileInbound = missileInbound;
+    this.level = Number.isFinite(level) ? level : 1;
+    this.bossFight = bossFight;
+  }
+
+  /** 本机的条令；旧三状态行为（僚机）为 null */
+  public getDoctrine(): IEnemyDoctrine | null {
+    return this.doctrine;
+  }
+
+  /** 条令当前阶段的简短名字（调试 / 开发钩子）；瘫痪时为 'stunned'，没有条令时为 'legacy' */
+  public getDoctrinePhase(): string {
+    if (!this.doctrine) return 'legacy';
+    return this.stunTimer > 0 ? 'stunned' : this.doctrine.getPhase();
+  }
+
+  /** 条令向导演提出的令牌请求；没有条令时为 null（不受导演管） */
+  public getAttackRequest(): Readonly<AttackRequest> | null {
+    return this.doctrine ? this.doctrine.getAttackRequest() : null;
+  }
+
+  public hasAttackToken(): boolean {
+    return this.orders.hasToken;
+  }
+
+  /** 是否有正在显示的招牌攻击预警（狙击机瞄准光束） */
+  public isTelegraphing(): boolean {
+    return this.lanceBeam !== null && this.lanceBeam.isVisible();
+  }
+
   /**
    * 外部操纵的运动学步进（僚机编队飞行等）：调用方先写好 velocity，本步与 update 一样做
    * 地形避让、位置积分、贴地兜底、按速度方向的四元数朝向、尾迹与渲染插值状态，
@@ -231,9 +595,13 @@ export class EnemyAI {
     return false;
   }
 
-  /** 地形避让 → 位置积分 → 贴地兜底 → 机头转向速度方向（四元数 slerp）→ 尾迹采样点 */
-  private integrateMotion(deltaTime: number): void {
+  /**
+   * 地形避让 → 位置积分 → 贴地兜底 → 机头转向速度方向（四元数 slerp）→ 尾迹采样点。
+   * speedLimit（条令飞行时给出）：避让抬高竖直速度后，压低水平速度使总速率不超过它。
+   */
+  private integrateMotion(deltaTime: number, speedLimit: number = Infinity): void {
     this.applyTerrainAvoidance();
+    if (speedLimit < Infinity) this.limitSpeed(speedLimit);
     this.mesh.position.addScaledVector(this.velocity, deltaTime);
     this.enforceTerrainFloor();
 
@@ -252,6 +620,17 @@ export class EnemyAI {
       this.engineWorldPos.copy(this.mesh.position);
     }
     this.trail.addPoint(this.engineWorldPos);
+  }
+
+  /** 总速率超过上限时只压水平分量（保留避让地形所需的爬升率） */
+  private limitSpeed(limit: number): void {
+    const velocity = this.velocity;
+    if (!(limit > 0) || !(velocity.lengthSq() > limit * limit)) return;
+    const vertical = Math.max(-limit, Math.min(limit, velocity.y));
+    const horizontal = Math.hypot(velocity.x, velocity.z);
+    const allowed = Math.sqrt(Math.max(0, limit * limit - vertical * vertical));
+    const scale = horizontal > 1e-6 ? allowed / horizontal : 0;
+    velocity.set(velocity.x * scale, vertical, velocity.z * scale);
   }
 
   /**
@@ -604,10 +983,14 @@ export class EnemyAI {
     this.terrainSampler = typeof sampler === 'function' ? sampler : null;
   }
 
-  /** EMP 瘫痪：期间不开火、不切换机动状态（保持惯性） */
+  /**
+   * EMP 瘫痪：期间不开火、不切换机动状态（保持惯性）。条令敌机同时交还攻击令牌、
+   * 取消蓄力 / 点射并收起预警特效。
+   */
   public applyStun(seconds: number): void {
     if (!Number.isFinite(seconds) || seconds <= 0 || !this.isAlive()) return;
     this.stunTimer = Math.max(this.stunTimer, Math.min(6, seconds));
+    this.standDown();
   }
 
   public isStunned(): boolean {
@@ -686,7 +1069,11 @@ export class EnemyAI {
 
     // 重置速度（向前）
     this.velocity = new THREE.Vector3(0, 0, -this.config.speed);
+    this.airspeed = this.config.speed;
     this.stunTimer = 0;
+    this.standDown();
+    this.lockedOn = false;
+    this.missileInbound = false;
 
     // 重置状态
     this.selectNewState();
@@ -708,6 +1095,11 @@ export class EnemyAI {
 
     // 清理尾迹
     this.trail.dispose();
+
+    // 交还令牌、清理预警特效
+    this.standDown();
+    this.lanceBeam?.dispose();
+    this.lanceBeam = null;
 
     // 清理 mesh 的所有子对象
     while (this.mesh.children.length > 0) {
