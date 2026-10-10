@@ -21,10 +21,10 @@ import {
 } from './menuTestUtils';
 
 /**
- * 批次 X5 追加 · 机库载入飞机模型工厂（玩家机与五种敌机共用的那个模块）。
+ * 批次 X5 追加 · 机库载入飞机模型工厂（玩家机、友军僚机与八种敌机共用的那个模块）。
  *
- * - 载入失败：那一页写明“无法加载：{名称}”；失败的那一次不留着，之后再翻到玩家机 / 敌机的页会
- *   重新 import()，import 能成了就照常显示。
+ * - 载入失败：那一页写明“无法加载：{名称}”；失败的那一次不留着，之后再翻到玩家机 / 僚机 / 敌机的
+ *   页会重新 import()，import 能成了就照常显示。
  * - 载入还在路上或已经成功：之后的请求共用这一次，不再 import()。
  *
  * 这里的“载入失败 / 又能载入了”是在模块这一层模拟的（替身模块的工厂抛错 / 不再抛错）。
@@ -120,6 +120,7 @@ async function aircraftFactoryModule(): Promise<Record<string, unknown>> {
   };
   return {
     createPlayerMesh: () => box('player'),
+    createFriendlyMesh: () => box('friendly'),
     createEnemyMesh: (config: { type: string }) => box(`enemy:${config.type}`),
     updateAircraftSignals: () => undefined,
     updatePlayerAfterburner: () => undefined,
@@ -127,10 +128,19 @@ async function aircraftFactoryModule(): Promise<Record<string, unknown>> {
 }
 
 const PLAYER_JET = { en: 'Player jet', zh: '玩家飞机' } as const;
+const WINGMAN = { en: 'Allied Wingman', zh: '友军僚机' } as const;
 const FAILED = { en: 'Could not load: {name}', zh: '无法加载：{name}' } as const;
 const FAILED_LABEL = /^(?:Could not load: |无法加载：)(.+)$/;
-/** 第 1 页是玩家机，第 2 – 6 页是敌机：都靠这个模块。用例只在这几页之间翻 */
-const LAST_AIRCRAFT_PAGE = 6;
+/** 第 1 页是玩家机，第 2 页是友军僚机，第 3 – 10 页是八种敌机：都靠这个模块。用例只在这几页之间翻 */
+const WINGMAN_PAGE = 2;
+const FIRST_ENEMY_PAGE = 3;
+const LAST_AIRCRAFT_PAGE = 10;
+/** 替身模块给每一页造的模型上的标记 */
+const BUILT_BY = { wingman: /^friendly$/, enemy: /^enemy:/ } as const;
+
+function builtFor(pageNumber: number): RegExp {
+  return pageNumber === WINGMAN_PAGE ? BUILT_BY.wingman : BUILT_BY.enemy;
+}
 
 describe('Hangar: loading the aircraft factory (batch X5 follow-up 2)', () => {
   let menu: StartMenu | null = null;
@@ -191,6 +201,14 @@ describe('Hangar: loading the aircraft factory (batch X5 follow-up 2)', () => {
   async function turn(button: 'next-btn' | 'prev-btn'): Promise<void> {
     click(button);
     await pageSettled();
+  }
+
+  /** 一页一页往后翻到第 target 页（每一页都等到有结果） */
+  async function goToPage(target: number): Promise<void> {
+    while (page() < target) {
+      await turn('next-btn');
+    }
+    expect(page()).toBe(target);
   }
 
   /** 机库渲染器此刻画的场景里的模型（最外层的转台组；灯光不是 Group） */
@@ -317,16 +335,33 @@ describe('Hangar: loading the aircraft factory (batch X5 follow-up 2)', () => {
       expect(rejections.seen).toEqual([]);
     });
 
+    it.each(LOCALES)(
+      'the wingman page says so as well, under its own name (%s)',
+      async (locale) => {
+        setLocale(locale);
+        download.failing = true;
+        createMenu();
+        await openHangar();
+
+        await turn('next-btn');
+
+        expect(page()).toBe(WINGMAN_PAGE);
+        expect(modelName()).toBe(textIn(FAILED, locale).replace('{name}', textIn(WINGMAN, locale)));
+        expect(stageModels()).toHaveLength(0);
+        expect(consoleError, 'one report per page that failed').toHaveBeenCalledTimes(2);
+        expect(rejections.seen).toEqual([]);
+      }
+    );
+
     it('an enemy page says so as well, under its own name', async () => {
       download.failing = true;
       createMenu();
       await openHangar();
 
-      await turn('next-btn');
+      await goToPage(FIRST_ENEMY_PAGE);
 
-      expect(page()).toBe(2);
       expect(failedName()).toMatch(/\S/);
-      expect(failedName()).not.toBe(PLAYER_JET.en);
+      expect([PLAYER_JET.en, WINGMAN.en]).not.toContain(failedName());
       expect(stageModels()).toHaveLength(0);
       expect(rejections.seen).toEqual([]);
     });
@@ -347,23 +382,46 @@ describe('Hangar: loading the aircraft factory (batch X5 follow-up 2)', () => {
       expect(consoleError, 'only the one failure was reported').toHaveBeenCalledTimes(1);
     });
 
-    it('an enemy model shows on a later visit once the import works', async () => {
+    it.each([
+      ['the wingman', WINGMAN_PAGE],
+      ['an enemy jet', FIRST_ENEMY_PAGE],
+    ] as const)('%s shows on a later visit once the import works', async (_what, target) => {
+      download.failing = true;
+      createMenu();
+      await openHangar();
+      await goToPage(target);
+      const name = failedName();
+      expect(name).toMatch(/\S/);
+
+      download.failing = false;
+      await turn('next-btn');
+      expect(page()).toBe(target + 1);
+      expect(failedName(), 'the page after it loads').toBeUndefined();
+      await turn('prev-btn');
+
+      expect(page()).toBe(target);
+      expect(modelName()).toBe(name);
+      expect(builtModelOnStage()).toMatch(builtFor(target));
+    });
+
+    it('the wingman page that failed shows on the next visit, on the import the player jet made', async () => {
       download.failing = true;
       createMenu();
       await openHangar();
       await turn('next-btn');
-      const enemy = failedName();
-      expect(enemy).toMatch(/\S/);
+      expect(failedName()).toBe(WINGMAN.en);
 
+      // 离开机库再进来：第 1 页（玩家机）这回载入成功，僚机那一页用的就是这一次
+      press('Escape');
       download.failing = false;
+      await openHangar();
+      const imports = download.count;
       await turn('next-btn');
-      expect(page()).toBe(3);
-      expect(failedName(), 'the page after it loads').toBeUndefined();
-      await turn('prev-btn');
 
-      expect(page()).toBe(2);
-      expect(modelName()).toBe(enemy);
-      expect(builtModelOnStage()).toMatch(/^enemy:/);
+      expect(page()).toBe(WINGMAN_PAGE);
+      expect(modelName()).toBe(WINGMAN.en);
+      expect(builtModelOnStage()).toMatch(BUILT_BY.wingman);
+      expect(download.count, 'the wingman page needed no import of its own').toBe(imports);
     });
 
     it('the page that failed is the one that recovers: no need to visit another first', async () => {
@@ -397,6 +455,9 @@ describe('Hangar: loading the aircraft factory (batch X5 follow-up 2)', () => {
 
       expect(download.count, 'one failed import, one that worked').toBe(2);
       expect(download.built).toHaveLength(LAST_AIRCRAFT_PAGE - 1);
+      expect(download.built[0], 'the wingman page was the one that tried again').toMatch(
+        BUILT_BY.wingman
+      );
     });
 
     it('while the import keeps failing, every visit tries again and says so again', async () => {
@@ -404,12 +465,12 @@ describe('Hangar: loading the aircraft factory (batch X5 follow-up 2)', () => {
       createMenu();
       await openHangar();
       await turn('next-btn');
-      const enemy = failedName();
+      const second = failedName();
       await turn('prev-btn');
 
       expect(page()).toBe(1);
       expect(failedName()).toBe(PLAYER_JET.en);
-      expect(enemy).not.toBe(PLAYER_JET.en);
+      expect(second).toBe(WINGMAN.en);
       expect(download.count, 'one attempt per visit').toBe(3);
       expect(consoleError).toHaveBeenCalledTimes(3);
       expect(stageModels()).toHaveLength(0);
@@ -445,6 +506,25 @@ describe('Hangar: loading the aircraft factory (batch X5 follow-up 2)', () => {
       expect(failedName()).toBeUndefined();
       expect(stageModels()).toHaveLength(1);
       expect(builtModelOnStage(), 'the model on show came from that one import').toMatch(/^enemy:/);
+      expect(download.count).toBe(1);
+      expect(consoleError).not.toHaveBeenCalled();
+    });
+
+    it('the wingman asked for while the player jet is still on its way is served by the same import', async () => {
+      const release = holdDownload();
+      createMenu();
+      await enterHangar();
+      click('next-btn');
+      await downloadPending(1);
+      expect(page()).toBe(WINGMAN_PAGE);
+      expect(isStillLoading()).toBe(true);
+
+      release();
+      await pageSettled();
+
+      expect(modelName()).toBe(WINGMAN.en);
+      expect(stageModels()).toHaveLength(1);
+      expect(builtModelOnStage()).toMatch(BUILT_BY.wingman);
       expect(download.count).toBe(1);
       expect(consoleError).not.toHaveBeenCalled();
     });
@@ -561,7 +641,7 @@ describe('Hangar: loading the aircraft factory (batch X5 follow-up 2)', () => {
 
       for (let visited = 2; visited <= LAST_AIRCRAFT_PAGE; visited++) {
         await turn('next-btn');
-        expect(builtModelOnStage(), `page ${visited}`).toMatch(/^enemy:/);
+        expect(builtModelOnStage(), `page ${visited}`).toMatch(builtFor(visited));
       }
       await turn('prev-btn');
 
@@ -576,9 +656,12 @@ describe('Hangar: loading the aircraft factory (batch X5 follow-up 2)', () => {
       anyFurtherImportDownloadsAgain();
       download.failing = true;
       await turn('next-btn');
-      expect(page()).toBe(2);
+      expect(page()).toBe(WINGMAN_PAGE);
       expect(failedName()).toBeUndefined();
-      expect(builtModelOnStage()).toMatch(/^enemy:/);
+      expect(builtModelOnStage()).toMatch(BUILT_BY.wingman);
+      await turn('next-btn');
+      expect(failedName()).toBeUndefined();
+      expect(builtModelOnStage()).toMatch(BUILT_BY.enemy);
       press('Escape');
       await openHangar();
 

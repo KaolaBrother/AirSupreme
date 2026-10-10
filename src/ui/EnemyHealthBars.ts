@@ -1,5 +1,6 @@
 import { Quaternion, Vector3 } from 'three';
 import type { Camera, Object3D } from 'three';
+import { getDeclaredHitRadius } from '@/core/CombatContracts';
 import { Faction } from '@/core/Faction';
 import { BOSS_CONFIGS, BossType, getBossForLevel } from '@/features/boss/BossTypes';
 import { getCampaignChapter } from '@/features/campaign/CampaignData';
@@ -288,6 +289,13 @@ const BAR_METRICS: Readonly<Record<BarKind, BarMetrics>> = {
 
 /** 部件名称换焦点的滞回：新部件离准星的距离需小于当前焦点的 80% 才切换，避免来回跳 */
 const PART_FOCUS_SWITCH_RATIO_SQ = 0.8 * 0.8;
+
+/**
+ * 喷气机（敌机 / 僚机）血条的基准：命中半径 5 米（缩放 2.0 的机体）时，血条的参考点在机体
+ * 中心上方 2 米；更大 / 更小的机体按命中半径等比变化。
+ */
+const JET_BAR_BASE_OFFSET = 2;
+const JET_BAR_BASE_HIT_RADIUS = 5;
 
 function getBarKind(name: string): BarKind {
   if (name.includes('BOSS')) return 'boss';
@@ -1131,9 +1139,16 @@ export class EnemyHealthBars {
 
   private getBarHeightOffset(enemyMesh: Object3D): number {
     const name = enemyMesh.name || '';
-    const isBoss = name.includes('BOSS');
-    const isEye = name.includes('boss_eye');
-    return isBoss ? 15 : isEye ? 5 : 2;
+    if (name.includes('BOSS')) return 15;
+    if (name.includes('boss_eye')) return 5;
+    // 喷气机（网格名是机型）：偏移跟着机体大小走，大块头（重型机）的血条和名称不再落在机身里
+    if (Object.prototype.hasOwnProperty.call(ENEMY_CONFIGS, name)) {
+      return (
+        (JET_BAR_BASE_OFFSET * getDeclaredHitRadius(enemyMesh, JET_BAR_BASE_HIT_RADIUS)) /
+        JET_BAR_BASE_HIT_RADIUS
+      );
+    }
+    return 2;
   }
 
   private getBarPositionFromScreen(

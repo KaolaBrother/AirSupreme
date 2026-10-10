@@ -17,7 +17,7 @@ A 3D air-combat game built with Three.js + TypeScript, playable on desktop and m
 - **Touch controls for phones and tablets** — a floating analog stick with flight assist, tap-to-fire missiles, a latching **BOOST**, and a larger layout on tablets (see _Controls_)
 - **Five special weapons + flares**, unlocked as the story advances
 - **Ground, sea and air units** in three factions — hostile, friendly and civilian; hostile units carry on-screen markers, and the radar opens into a level map (**N** or tap the radar)
-- **Autosave checkpoints, Save & Exit and Continue** — leave a mission from the pause pod and keep the run; continue from the main menu, or retry from the checkpoint after a failed mission
+- **Autosave checkpoints, Save & Exit and Continue** — leave a mission from the pause pod and keep the run, which is also saved when the page is hidden or closed; continue from the main menu, or retry from the checkpoint after a failed mission
 - **Hangar between chapters** — tiered upgrades whose caps open up chapter by chapter
 - **Procedural soundtrack** — 23 tracks and 7 stingers synthesized live with Web Audio, plus a new SFX set
 - **Tutorial toggle**
@@ -132,7 +132,7 @@ Friendly units: Allied Convoy (escort), Allied Frigate (its close-in guns shoot 
 
 **Wingmen**: your named flight launches with you shortly after every level starts — Raven in chapters 1–2, Raven and Swift from chapter 3 (`WINGMEN`, `src/core/campaign/Wingmen.ts`); continuing from a checkpoint before a boss launches it with the boss briefing. Any further friendly jets (reinforcements, boss-fight support, the Call Wingman pickup, escorts) are ordinary allied fighters; only in Boss mode, where no flight launches, do the first of them fly under Raven's and Swift's callsigns. A wingman's callsign shows on its health bar. With nothing to fight, the wingmen hold formation slots ahead of you, one on each side, clear of the chase camera's line of sight to your jet, and new friendlies join on their own side. Swift reports in over the radio once per campaign, the first time she flies with you; if a wingman is shot down, the other one calls it (or Skydome, if the other is not airborne), and the downed wingman sits out the rest of the level (the flight is back together at the next level, or when you continue from a checkpoint).
 
-**Target markers**: every hostile unit you can shoot carries a health bar with its own name (a submerged submarine has none until it surfaces). A unit too far away to make out gets a corner bracket with its range in metres, and one that is off screen gets an edge arrow with its distance; these arrows, and the ones that point at a boss's missiles, keep clear of the radar, the HUD panels, the stick and the touch buttons. When units are the objective (see _Hostile_ above) their brackets and arrows turn bold and pulse.
+**Target markers**: every hostile unit you can shoot carries a health bar with its own name (a submerged submarine has none until it surfaces). A unit too far away to make out gets a corner bracket with its range in metres, and one that is off screen gets an edge arrow with its distance; these arrows, and the ones that point at a boss's missiles, keep clear of the radar, the HUD panels, the stick and the touch buttons — and, on a phone held upright, of the radio box while a message is showing. When units are the objective (see _Hostile_ above) their brackets and arrows turn bold and pulse.
 
 **Radar**: the dial is heading-up — whatever is ahead of you is at the top, whatever is on your right is on the right. Contacts inside its range are drawn as filled symbols; contacts beyond it sit on the rim as smaller, dimmer, hollow symbols with a short tick pointing outward. Click or tap the radar, or press **N**, to open the **level map**: north-up, the whole battlefield with its boundary circle, 500 m and 1000 m rings around you, your heading arrow, every radar contact, a legend and, where the level has terrain, a land / water backdrop. The game keeps running while the map is open; tap it, press **N** or **Esc** to close it. On touch devices the radar sits in the top-left corner, out of the stick's way.
 
@@ -217,6 +217,7 @@ Tier costs rise with the tier; the current costs live in `UPGRADE_CONFIGS` (`src
 
 - In normal mode the game saves a checkpoint when a chapter starts, after each wave, right before the boss and the moment a boss falls (chapters 1–9; a *hangar* checkpoint for the next chapter, saved again when you press **Launch** so your hangar purchases are kept); an **Autosaved** toast in the HUD confirms each save, and it follows a language switch while it is on screen
 - **Save & Exit** in the pause pod (**ESC** / **P**) leaves the mission without losing the run. The confirmation names the place it saves at — the wave you are in, the boss fight or the hangar — and the save is read back before you leave; if the browser's storage is unavailable or full, the game says so and offers **Back** or **Exit Anyway**. The save keeps your score, lives, missiles and upgrades as they are at that moment, and **Continue Campaign** starts that wave or boss fight from the beginning. Where nothing can be saved — Boss mode, before the first checkpoint, after the campaign is complete — the button reads **Main Menu** instead and says why before you leave
+- The run is also saved whenever the page is hidden or closed — you switch tabs or apps, lock the screen, or close the tab — because a browser may drop a background tab without warning (common in Safari on an iPad). It is saved the way **Save & Exit** saves it, at the wave you are in, the boss fight or the hangar, but nothing changes in the mission: come back and it is as you left it. If the page was dropped, **Continue Campaign** starts that wave, boss fight or hangar stop from the beginning with the score, missiles and upgrades you had when the page was hidden. Lives are the one exception: a save made this way never stores fewer lives than the checkpoint already saved at that point, so leaving the page cannot make **Continue Campaign** or **Retry from checkpoint** worse. It happens once each time the page is hidden, and not where nothing can be saved — Boss mode, before the first checkpoint (which includes the first hangar stop of a run started at a later chapter), after the campaign is complete or after a failed mission
 - **Continue Campaign** is the first button on the main menu when a checkpoint exists, labelled like `Ch. 6 · Heart of the Forge · Wave 3` or `Ch. 2 · Sandstorm · Hangar` (`第6关 · 熔炉之心 · 第3波` / `第2关 · 沙漠风暴 · 机库整备` in Chinese), with the saved score, difficulty and lives and a ten-chapter route strip
 - After `MISSION FAILED` in normal mode with a checkpoint, the settlement screen's main button is **Retry from checkpoint** (从检查点重试), with the checkpoint's position on a **Checkpoint** card above it, followed by **Main Menu**. There is no **Play Again** in that state and nothing on that screen deletes the save — to start over, go to **Main Menu** → **New Campaign**. Without a checkpoint, and in Boss mode, the buttons are **Play Again** and **Main Menu** as before. On every settlement screen, failed or complete, the first button is focused when it appears, **Tab** moves between the two buttons, and a button counts once however often it is pressed. If a wave clear or a boss kill lands in the same instant as the death, the checkpoint is left as it was
 - A checkpoint restores score, lives, missiles, upgrades, unlocked weapons and their ammo, flare charges, the camera view and the run statistics, and puts you back at the saved wave or the boss — or, for a hangar checkpoint, in the hangar before the next chapter, then its chapter card (weapons and flares are refilled for the new chapter)
@@ -281,9 +282,9 @@ After chapter 10: debrief → epilogue and credits → `MISSION COMPLETE`.
 - Special-weapon stores panel (ammo, reload, heat, charge, cooldown, slots), flare counter with recharge, autosave toast, camera-mode chip
 - Boss status strip with phase pips and hazard warnings; missile warning (`locking` / `incoming`) that combines SAM locks and boss missiles
 - Radio panel with a portrait glyph for every speaker and a priority queue (urgent warnings interrupt chatter, but not a voiced line); voiced lines stay up until the voice finishes
-- The gun cross marks where your bullets go — the point 600 m ahead on the nose line — in both views, with the seeker ring around it. A lead marker shows where to aim at the nearest airborne target ahead within 500 m. On touch devices, gun aim assist pulls your fire onto a target within 480 m once you are within a few degrees of it (full pull inside 2.5°, fading out by 5°) and tightens the spread; the cross moves with it. Desktop play is not assisted
+- The gun cross marks where your bullets go — the point 600 m ahead on the nose line — in both views, with the seeker ring around it. A lead marker shows where to aim at the nearest airborne target ahead within 500 m. Gun aim assist pulls your fire onto a target within 480 m once your nose is close to it, and tightens the spread; the cross moves with it. On touch devices the pull is full inside 2.5° and fades out by 5°; on desktop, with the keyboard, it is lighter — full inside 1.25°, gone by 2.5° — so it only helps when a target is almost dead ahead
 - Health bars label jets by type, bosses by name and hostile units by their own names (Main Battle Tank, Fast Gunboat and so on), in the current language; your wingmen show their callsigns. Boss parts get compact bars, and only the part nearest your reticle shows its name
-- The layout respects the screen's safe areas and keeps the top of the screen free of overlaps on phones in portrait and landscape: a status column on the right (wave, lives, missiles, reload, power-up timer), a centre message stack (boss strip, briefing, event objective) with the radio panel below it; pickup and event callouts keep clear of the reticle and the missile ring in both camera views
+- The layout respects the screen's safe areas and keeps the top of the screen free of overlaps on phones in portrait and landscape: a status column on the right (wave, lives, missiles, reload, power-up timer), a centre message stack (boss strip, briefing, event objective), and a radio panel that moves with the layout — along the bottom on desktop, between the stick and the buttons in landscape, and in portrait under the message stack in the cockpit view or, in the chase view, left of the buttons and above the stick (on phones a compact box that shows more lines of a message on taller screens); pickup and event callouts keep clear of the reticle and the missile ring in both camera views
 - The enemy counter reads `ENEMIES n · LEFT m` during the waves; in a boss fight (Boss mode or a campaign boss) it shows only the hostiles actually present, `ENEMIES n` (boss-launched jets and drones plus any hostile units), with no wave count
 - Level and boss briefings, the autosave toast, flashing warnings (unit warnings included), the boss status strip, power-up timers and the centre callouts (pickups, tutorial hints, wave announcements, special-weapon notices and the rest) switch language on the spot if you change it while they are showing
 - On touch devices the weapon, flare, camera and missile state shows on the touch buttons themselves
@@ -370,6 +371,8 @@ Settings are saved in `localStorage` (`air-supreme:start-menu-settings`; fields 
 | U | open the upgrade shop (pauses the game) |
 
 A quick tap of **Space** or the missile key is never lost, even when it is shorter than one simulation step; the same goes for the touch **FIRE** and **MSL** buttons.
+
+The cannon has a light aim assist on the keyboard too: when a target is almost dead ahead, the gun cross shifts slightly onto it and your shots follow (see _HUD_).
 
 ### Mobile
 
@@ -497,7 +500,7 @@ src/
 │   │   ├── BossProjectilePool.ts
 │   │   ├── MissileSystem.ts
 │   │   ├── MissileSeeker.ts      # always-on missile seeker (acquire / keep rings, lock progress)
-│   │   ├── GunLeadSolver.ts      # gun lead marker + touch aim assist
+│   │   ├── GunLeadSolver.ts      # gun lead marker + gun aim assist (touch and keyboard cones)
 │   │   └── HealthSystem.ts
 │   ├── camera/                   # CameraRig, cockpit, camera shake
 │   ├── terrain/                  # terrain
@@ -530,7 +533,7 @@ src/
 │   ├── RadarLevelMap.ts          # north-up level map opened from the radar
 │   ├── radarGlyphs.ts            # symbols shared by the dial and the map
 │   ├── EnemyHealthBars.ts        # health bars, target brackets, off-screen arrows
-│   ├── ChevronAvoidance.ts       # keeps off-screen arrows clear of the radar, HUD panels and touch controls
+│   ├── ChevronAvoidance.ts       # keeps off-screen arrows clear of the radar, HUD panels, touch controls and the portrait-phone radio box
 │   ├── LockOnIndicator.ts        # gun cross, seeker ring, lock brackets, lead marker
 │   ├── ModelPreview.ts           # the main menu's Hangar (model viewer)
 │   ├── UpgradeMenu.ts            # pause shop + hangar
@@ -558,7 +561,7 @@ Voice packs live outside `src/`, in `public/voice/` (`en/` and `zh/` MP3s named 
 
 | Feature | Desktop | Mobile |
 | ------- | ------- | ------ |
-| Controls | keyboard | floating analog stick + touch buttons, flight assist and gun aim assist (a keyboard also works) |
+| Controls | keyboard, with a light gun aim assist | floating analog stick + touch buttons, flight assist and gun aim assist (a keyboard also works) |
 | Default quality (`auto`) | balanced | performance |
 | Post-processing | balanced / quality presets | off by default (performance preset) |
 | Camera | first / third person | first / third person |

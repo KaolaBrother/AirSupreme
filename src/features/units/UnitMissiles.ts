@@ -23,6 +23,8 @@ export interface UnitMissileLaunchOptions {
   launchSpeed?: number;
   /** 发射后先竖直爬升的时间（潜射 / 垂发） */
   boostUpTime?: number;
+  /** 发射者标签：敌机发射的导弹填 'jet:<机型>'；单位导弹不填 */
+  source?: string;
 }
 
 export interface UnitMissileEnv {
@@ -31,7 +33,8 @@ export interface UnitMissileEnv {
   readonly decoys: readonly DecoyPoint[];
   readonly particleSystem: ParticleSystem | null;
   sampleSurfaceY(x: number, z: number): number;
-  onPlayerHit(damage: number, position: THREE.Vector3): void;
+  /** source：敌机导弹的发射者标签（'jet:<机型>'），单位导弹为 null */
+  onPlayerHit(damage: number, position: THREE.Vector3, source?: string | null): void;
   onUnitHit(target: UnitEntity, damage: number, position: THREE.Vector3): void;
   onDetonate(position: THREE.Vector3, scale: number, harmless: boolean): void;
   onDecoyed?(position: THREE.Vector3): void;
@@ -50,6 +53,8 @@ interface UnitMissile {
   age: number;
   boostUpTime: number;
   damage: number;
+  /** 发射者标签（敌机导弹）；单位导弹为 null */
+  source: string | null;
   targetKind: UnitMissileTargetKind;
   targetUnit: UnitEntity | null;
   decoyRef: DecoyPoint | null;
@@ -176,6 +181,7 @@ export class UnitMissilePool {
         trailTimer: 0,
         surfaceTimer: 0,
         surfaceY: -Infinity,
+        source: null,
         incoming: { position: new THREE.Vector3(), targetIsPlayer: false },
       });
     }
@@ -216,6 +222,7 @@ export class UnitMissilePool {
     missile.age = 0;
     missile.boostUpTime = options.boostUpTime ?? 0;
     missile.damage = damage;
+    missile.source = options.source ?? null;
     missile.targetKind = target === 'player' ? 'player' : 'unit';
     missile.targetUnit = target === 'player' ? null : target;
     missile.decoyRef = null;
@@ -410,7 +417,7 @@ export class UnitMissilePool {
       case 'player': {
         const distance = missile.position.distanceTo(env.playerPosition);
         if (distance <= UNIT_MISSILE_PROXIMITY) {
-          env.onPlayerHit(missile.damage, missile.position);
+          env.onPlayerHit(missile.damage, missile.position, missile.source);
           this.detonate(missile, env, false, 1.2);
           return true;
         }
@@ -418,7 +425,7 @@ export class UnitMissilePool {
         const passing = distance > missile.lastDistance + 0.05;
         missile.lastDistance = distance;
         if (passing && missile.minDistance <= UNIT_MISSILE_FRAGMENT_RADIUS) {
-          env.onPlayerHit(missile.damage * 0.5, missile.position);
+          env.onPlayerHit(missile.damage * 0.5, missile.position, missile.source);
           this.detonate(missile, env, false, 1.0);
           return true;
         }
@@ -484,6 +491,15 @@ export class UnitMissilePool {
       if (missile.active && missile.targetKind === 'player') return true;
     }
     return false;
+  }
+
+  /** 正在追踪玩家的敌机导弹数（带发射者标签的；被诱饵引开的不算） */
+  countSourcedTargetingPlayer(): number {
+    let count = 0;
+    for (const missile of this.missiles) {
+      if (missile.active && missile.targetKind === 'player' && missile.source !== null) count++;
+    }
+    return count;
   }
 
   /** EMP / 拦截：半径内导弹无害销毁，返回数量 */

@@ -17,6 +17,7 @@ import { CAMPAIGN_SAVE_KEY } from '@/core/save/SaveSystem';
 import { Faction } from '@/core/Faction';
 import { EventBus, GameEventType } from '@/core/EventBus';
 import { POWER_UP_CONFIGS, PowerUpType } from '@/features/powerups/PowerUpSystem';
+import { EnemyType } from '@/features/enemy/EnemyTypes';
 import { installBalanceHarness } from './BalanceHarness';
 
 /**
@@ -70,6 +71,34 @@ function round(value: number): number {
 
 function toPlain(vector: THREE.Vector3): Vec3Like {
   return { x: round(vector.x), y: round(vector.y), z: round(vector.z) };
+}
+
+/** spawnEnemy 的缺省值与范围 */
+const SPAWN_DEFAULT_DISTANCE = 450;
+const SPAWN_MAX_COUNT = 12;
+/** 一次生成多架时相邻两架错开的方位角（度） */
+const SPAWN_FAN_STEP_DEG = 12;
+/** 生成点至少高出地表这么多（米），与波次生成一致 */
+const SPAWN_TERRAIN_CLEARANCE = 45;
+
+export interface DevSpawnEnemyOptions {
+  /** 离玩家的水平距离（米），缺省 450 */
+  distance?: number;
+  /** 相对玩家机头的方位（度）：0 = 正前方，90 = 右侧，180 = 正后方；缺省 0 */
+  bearingDeg?: number;
+  /** 架数（1..12），缺省 1；多架时以该方位为中心每架错开 12° */
+  count?: number;
+}
+
+export interface DevJetEntry {
+  type: string;
+  health: number;
+  position: Vec3Like;
+  distance: number;
+  /** 条令当前阶段的简短名字（瘫痪时为 'stunned'） */
+  phase: string;
+  hasAttackToken: boolean;
+  cloaked: boolean;
 }
 
 export function installDevHooks(access: DevHookAccess): void {
@@ -274,6 +303,87 @@ export function installDevHooks(access: DevHookAccess): void {
     }));
 
   /**
+   * 在玩家周围生成敌机：走 Boss 召唤小兵的同一条生成路径（按当前关卡 / 难度缩放、带机型条令、
+   * 接好开火与击杀事件），但不计入关卡的“已生成”数。type 为 EnemyType 的名字（不分大小写）。
+   * 返回实际生成的架数（类型无效或敌机系统未就绪时为 0）。
+   */
+  const spawnEnemy = (type: string, opts: DevSpawnEnemyOptions = {}): number => {
+    const enemySystem = access.getEnemySystem();
+    const key = String(type).toUpperCase();
+    if (!enemySystem || !(Object.values(EnemyType) as string[]).includes(key)) return 0;
+    const distance =
+      typeof opts.distance === 'number' && Number.isFinite(opts.distance)
+        ? Math.max(30, Math.min(2000, opts.distance))
+        : SPAWN_DEFAULT_DISTANCE;
+    const bearing =
+      typeof opts.bearingDeg === 'number' && Number.isFinite(opts.bearingDeg) ? opts.bearingDeg : 0;
+    const count =
+      typeof opts.count === 'number' && Number.isFinite(opts.count)
+        ? Math.max(1, Math.min(SPAWN_MAX_COUNT, Math.floor(opts.count)))
+        : 1;
+
+    // 玩家的水平航向（机头接近竖直时朝 -Z）
+    const player = access.getPlayerAircraft();
+    tmp.set(0, 0, -1).applyQuaternion(player.quaternion);
+    let headingX = tmp.x;
+    let headingZ = tmp.z;
+    const length = Math.hypot(headingX, headingZ);
+    if (length > 1e-3 && Number.isFinite(length)) {
+      headingX /= length;
+      headingZ /= length;
+    } else {
+      headingX = 0;
+      headingZ = -1;
+    }
+
+    const levelManager = enemySystem.getLevelManager();
+    for (let i = 0; i < count; i++) {
+      const angle = ((bearing + (i - (count - 1) / 2) * SPAWN_FAN_STEP_DEG) * Math.PI) / 180;
+      const cos = Math.cos(angle);
+      const sin = Math.sin(angle);
+      // 前向 × cos + 右向 × sin；右向 = (-z, x)
+      const x = player.position.x + (headingX * cos - headingZ * sin) * distance;
+      const z = player.position.z + (headingZ * cos + headingX * sin) * distance;
+      let y = player.position.y;
+      const ground = levelManager.getCrashSurfaceY(x, z);
+      if (Number.isFinite(ground)) y = Math.max(y, ground + SPAWN_TERRAIN_CLEARANCE);
+      enemySystem.spawnEnemyAt(key as EnemyType, new THREE.Vector3(x, y, z), false);
+    }
+    return count;
+  };
+
+  /** 存活敌机明细：机型 / 血量 / 位置 / 离玩家的距离 / 条令阶段 / 是否持有攻击令牌 / 是否隐形 */
+  const listJets = (): DevJetEntry[] => {
+    const player = access.getPlayerAircraft();
+    const jets: DevJetEntry[] = [];
+    for (const enemy of access.getEnemySystem()?.getEnemies() ?? []) {
+      if (!enemy.isAlive()) continue;
+      const mesh = enemy.getMesh();
+      jets.push({
+        type: enemy.getConfig().type,
+        health: round(enemy.getHealth().current),
+        position: toPlain(mesh.position),
+        distance: round(mesh.position.distanceTo(player.position)),
+        phase: enemy.getDoctrinePhase(),
+        hasAttackToken: enemy.hasAttackToken(),
+        cloaked: enemy.isCloaked(),
+      });
+    }
+    return jets;
+  };
+
+  /** 移除所有在场敌机（不计分、不触发击杀事件），返回移除的架数 */
+  const clearJets = (): number => access.getEnemySystem()?.removeAllEnemies() ?? 0;
+
+  /** 暂停 / 恢复常规波次（不生成、不结算、不进入下一波），便于单独研究某个机型；返回当前状态 */
+  const holdWaves = (on: boolean): boolean => {
+    const levelManager = access.getEnemySystem()?.getLevelManager();
+    if (!levelManager) return false;
+    levelManager.setWaveSpawningHeld(on === true);
+    return levelManager.isWaveSpawningHeld();
+  };
+
+  /**
    * 无敌模式（只在开发构建里通过补丁实现，生产代码不含任何作弊开关）：
    * 屏蔽玩家受到的伤害，并在每个渲染帧把玩家抬到地表上方 60 米以上，便于长时间自动化流程测试。
    */
@@ -349,6 +459,10 @@ export function installDevHooks(access: DevHookAccess): void {
     getState,
     voice: voiceHooks,
     listUnits,
+    spawnEnemy,
+    listJets,
+    clearJets,
+    holdWaves,
     bossSubTargets,
     setGodMode: (on: boolean) => {
       godMode = on === true;

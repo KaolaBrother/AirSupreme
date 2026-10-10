@@ -1,5 +1,6 @@
 import type { Object3D, Vector3 } from 'three';
 import { EnemyType, EnemyConfig } from '@/features/enemy/EnemyTypes';
+import type { EnemyWeaponKind } from '@/features/enemy/EnemyWeapons';
 import { LevelWaveEventType } from '@/features/terrain/LevelConfig';
 import { PowerUpType, PowerUpConfig } from '@/features/powerups/PowerUpSystem';
 import { Faction } from '@/core/Faction';
@@ -12,6 +13,7 @@ export enum GameEventType {
 
   ENEMY_SPAWNED = 'ENEMY_SPAWNED',
   ENEMY_FIRED = 'ENEMY_FIRED',
+  ENEMY_TELL = 'ENEMY_TELL',
   ENEMY_HIT = 'ENEMY_HIT',
   ENEMY_DEATH = 'ENEMY_DEATH',
 
@@ -61,6 +63,23 @@ export interface GameEventPayloads {
     direction: Vector3;
     damage: number;
     faction: Faction;
+    owner?: Object3D;
+    /** 弹种（缺省 'bullet'：普通机炮弹，与旧载荷一致） */
+    weapon?: EnemyWeaponKind;
+    /** 弹速（米/秒；缺省为普通子弹弹速）：供伤害归因等按弹速推算弹道 */
+    speed?: number;
+    /** 同一次齐射里的后续弹：不单独播放开火音与枪口焰 */
+    quiet?: boolean;
+  };
+  /**
+   * 敌机招牌攻击的预警开始（狙击机蓄力 / 隐形机现形）：用于播放提示音；画面上的预警由敌机
+   * 自己画
+   */
+  [GameEventType.ENEMY_TELL]: {
+    kind: 'lance-charge' | 'decloak';
+    position: Vector3;
+    /** 预警时长（秒）：到点才可能开火 */
+    duration: number;
     owner?: Object3D;
   };
   [GameEventType.ENEMY_HIT]: {

@@ -102,7 +102,8 @@ export class CombatHudFeed {
 
     if (enemySystem) {
       for (const enemy of enemySystem.getEnemies()) {
-        if (!enemy.isAlive()) continue;
+        // 隐形中的敌机没有雷达光点
+        if (!enemy.isAlive() || enemy.isCloaked()) continue;
         const position = enemy.getMesh().position;
         let spawning = false;
         if (portals) {
@@ -195,7 +196,8 @@ export class CombatHudFeed {
     const enemySystem = this.deps.getEnemySystem();
     if (enemySystem) {
       for (const enemy of enemySystem.getEnemies()) {
-        if (!enemy.isAlive()) continue;
+        // 隐形中的敌机不进快照：血条、名称、目标框和屏幕外箭头都随之消失
+        if (!enemy.isAlive() || enemy.isCloaked()) continue;
         enemyBars.push(
           this.takeBar(enemy.getMesh(), enemy.getHealth().current, enemy.getConfig().health)
         );

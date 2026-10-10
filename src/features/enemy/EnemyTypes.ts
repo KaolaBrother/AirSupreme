@@ -9,7 +9,17 @@ export enum EnemyType {
   HEAVY = 'HEAVY', // 重型机 - 慢但血厚
   SNIPER = 'SNIPER', // 狙击手 - 远距离攻击
   ACE = 'ACE', // 王牌 - 高难度，聪明AI
+  JAMMER = 'JAMMER', // 电子干扰机 - 无武装，拖慢玩家导弹锁定
+  STRIKER = 'STRIKER', // 导弹攻击机 - 远距离导弹齐射
+  WRAITH = 'WRAITH', // 幽灵机 - 隐形接近后偷袭
 }
+
+/**
+ * 阵营尾迹颜色（粒子尾迹 / 凝结尾共用这一处定义）：敌方无人机红橙，友军僚机淡蓝；
+ * 玩家座机保持白色。
+ */
+export const ENEMY_TRAIL_COLOR = 0xff5a3c;
+export const FRIENDLY_TRAIL_COLOR = 0x7fd4ff;
 
 /**
  * 敌人AI状态枚举
@@ -44,6 +54,11 @@ export interface EnemyConfig {
    * 在 LevelManager 生成敌机时写入；友军僚机不设置。
    */
   aimLead?: number;
+  /**
+   * 开火节奏倍率（可选，缺省 1）：条令里“两次点射 / 齐射 / 蓄力之间”的间隔乘以它
+   * （难度档 × 关卡曲线的冷却倍率，由 LevelManager 生成敌机时写入）。预警时长不随它变化。
+   */
+  cadenceScale?: number;
   fireSpreadAngle: number; // 开火角度（度数）- 机头朝向目标在此角度范围内即可开火
 
   // 移动参数
@@ -82,16 +97,16 @@ export const ENEMY_CONFIGS: Record<EnemyType, EnemyConfig> = {
   [EnemyType.SCOUT]: {
     type: EnemyType.SCOUT,
     name: { en: 'Scout', zh: '侦察机' },
-    health: 60,
-    speed: 40, // 基于导弹（80）的一半
-    damage: 5, // 伤害减半
+    health: 60, // 固定值：基础难度下一枚玩家导弹（80）击落
+    speed: 48, // 袭扰机：小而灵活，冲刺（1.3×）时略快于玩家基础速度
+    damage: 5, // 三连发点射的单发伤害
     detectionRange: 120,
     attackRange: 25,
     attackCooldown: 0.4,
     evasionChance: 0.3,
     accuracy: 0.4,
     fireSpreadAngle: 50,
-    turnSpeed: 1.5, // 比导弹（2.5）慢很多
+    turnSpeed: 2.8, // 转向最快的机型
     maxRollAngle: Math.PI / 4,
     wanderRadius: 80,
     // 新AI状态概率
@@ -142,14 +157,14 @@ export const ENEMY_CONFIGS: Record<EnemyType, EnemyConfig> = {
     name: { en: 'Heavy Bomber', zh: '重型轰炸机' },
     health: 300,
     speed: 35, // 慢速但转向慢
-    damage: 15, // 伤害减半
+    damage: 15, // 高炮弹单发伤害（尾炮按条令取其一半）
     detectionRange: 80,
     attackRange: 40,
     attackCooldown: 0.8,
     evasionChance: 0.02,
     accuracy: 0.6,
     fireSpreadAngle: 35,
-    turnSpeed: 0.8, // 转向慢
+    turnSpeed: 0.9, // 转向慢：不躲避
     maxRollAngle: Math.PI / 10,
     wanderRadius: 40,
     // 新AI状态概率
@@ -171,14 +186,14 @@ export const ENEMY_CONFIGS: Record<EnemyType, EnemyConfig> = {
     name: { en: 'Sniper', zh: '狙击机' },
     health: 80,
     speed: 45, // 中等速度
-    damage: 20, // 伤害减半
+    damage: 20, // 蓄力长枪弹的伤害
     detectionRange: 200,
     attackRange: 80,
     attackCooldown: 1.0,
     evasionChance: 0.2,
     accuracy: 0.7,
     fireSpreadAngle: 60,
-    turnSpeed: 1.2, // 中等转向
+    turnSpeed: 1.5, // 中等转向
     maxRollAngle: Math.PI / 8,
     wanderRadius: 100,
     // 新AI状态概率
@@ -222,6 +237,90 @@ export const ENEMY_CONFIGS: Record<EnemyType, EnemyConfig> = {
     scoreValue: 500,
     color: 0xffdd00, // 金色
     scale: 1.2,
+  },
+
+  [EnemyType.JAMMER]: {
+    type: EnemyType.JAMMER,
+    name: { en: 'Jammer', zh: '电子干扰机' },
+    health: 120,
+    speed: 38, // 慢速支援机
+    damage: 0, // 无武装
+    detectionRange: 200,
+    attackRange: 0,
+    attackCooldown: 1.0,
+    evasionChance: 0.1,
+    accuracy: 0.5,
+    fireSpreadAngle: 30,
+    turnSpeed: 1.1,
+    maxRollAngle: Math.PI / 8,
+    wanderRadius: 80,
+    stateProbabilities: {
+      [EnemyAIState.CHASE]: 0.2,
+      [EnemyAIState.FIXED_DIRECTION]: 0.5,
+      [EnemyAIState.CIRCLE]: 0.3,
+    },
+    stateDurationRange: [5, 9],
+    circleRadius: 200,
+    circleHeight: 40,
+    scoreValue: 250,
+    color: 0x9a4dff, // 紫色：干扰专用的识别色
+    scale: 1.1,
+  },
+
+  [EnemyType.STRIKER]: {
+    type: EnemyType.STRIKER,
+    name: { en: 'Striker', zh: '导弹攻击机' },
+    health: 140,
+    speed: 46,
+    damage: 24, // 没有机炮，这个值用不到；导弹伤害见 EnemyWeapons 的 JET_MISSILE_SPEC
+    detectionRange: 300,
+    attackRange: 120,
+    attackCooldown: 1.0,
+    evasionChance: 0.1,
+    accuracy: 0.6,
+    fireSpreadAngle: 30,
+    turnSpeed: 1.3,
+    maxRollAngle: Math.PI / 6,
+    wanderRadius: 100,
+    stateProbabilities: {
+      [EnemyAIState.CHASE]: 0.3,
+      [EnemyAIState.FIXED_DIRECTION]: 0.5,
+      [EnemyAIState.CIRCLE]: 0.2,
+    },
+    stateDurationRange: [5, 9],
+    circleRadius: 220,
+    circleHeight: 40,
+    scoreValue: 300,
+    color: 0xff5a3c,
+    scale: 1.3,
+  },
+
+  [EnemyType.WRAITH]: {
+    type: EnemyType.WRAITH,
+    name: { en: 'Wraith', zh: '幽灵机' },
+    health: 110,
+    speed: 58,
+    damage: 9, // 五连发点射的单发伤害
+    detectionRange: 150,
+    attackRange: 35,
+    attackCooldown: 0.5,
+    evasionChance: 0.3,
+    accuracy: 0.6,
+    fireSpreadAngle: 30,
+    turnSpeed: 2.3,
+    maxRollAngle: Math.PI / 4,
+    wanderRadius: 60,
+    stateProbabilities: {
+      [EnemyAIState.CHASE]: 0.4,
+      [EnemyAIState.FIXED_DIRECTION]: 0.4,
+      [EnemyAIState.CIRCLE]: 0.2,
+    },
+    stateDurationRange: [3, 7],
+    circleRadius: 110,
+    circleHeight: 40,
+    scoreValue: 350,
+    color: 0x2a2a30,
+    scale: 1.0,
   },
 };
 

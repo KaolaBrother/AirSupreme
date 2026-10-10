@@ -12,6 +12,11 @@ import { BOSS_DECOY_ANCHOR_NAME } from '@/core/boss/AdvancedBossSupport';
 import { isAdvancedBoss } from '@/features/boss/BossContracts';
 import { BOSS_MISSILE_CONFIG, BossType } from '@/features/boss/BossTypes';
 import {
+  ENEMY_WEAPON_SPECS,
+  isEnemyWeaponKind,
+  type EnemyWeaponKind,
+} from '@/features/enemy/EnemyWeapons';
+import {
   UPGRADE_CONFIGS,
   UpgradeType,
   getStartingUpgradePoints,
@@ -222,6 +227,9 @@ interface ShotRecord {
   origin: THREE.Vector3;
   direction: THREE.Vector3;
   damage: number;
+  /** 弹速（米/秒）与最长存活时间（秒）：高炮弹 / 长枪弹与普通子弹不同 */
+  speed: number;
+  maxAge: number;
   label: string;
   used: boolean;
 }
@@ -349,7 +357,9 @@ export function installBalanceHarness(access: DevHookAccess): BalanceHarnessApi 
     origin: THREE.Vector3,
     direction: THREE.Vector3,
     damage: number,
-    owner: THREE.Object3D | undefined
+    owner: THREE.Object3D | undefined,
+    weapon: EnemyWeaponKind | undefined,
+    speed: number | undefined
   ): void => {
     let shot = shots[shotCursor];
     if (!shot) {
@@ -358,6 +368,8 @@ export function installBalanceHarness(access: DevHookAccess): BalanceHarnessApi 
         origin: new THREE.Vector3(),
         direction: new THREE.Vector3(),
         damage: 0,
+        speed: GAME_CONSTANTS.PROJECTILE.SPEED,
+        maxAge: SHOT_MAX_AGE,
         label: '',
         used: false,
       };
@@ -368,6 +380,13 @@ export function installBalanceHarness(access: DevHookAccess): BalanceHarnessApi 
     shot.origin.copy(origin);
     shot.direction.copy(direction).normalize();
     shot.damage = damage;
+    // 弹种自带弹速 / 射程；旧载荷（没有弹种）按普通子弹算
+    const spec = isEnemyWeaponKind(weapon) ? ENEMY_WEAPON_SPECS[weapon] : null;
+    shot.speed =
+      typeof speed === 'number' && speed > 0
+        ? speed
+        : (spec?.speed ?? GAME_CONSTANTS.PROJECTILE.SPEED);
+    shot.maxAge = spec ? spec.maxDistance / shot.speed + 0.5 : SHOT_MAX_AGE;
     shot.label = labelShooter(owner);
     shot.used = false;
   };
@@ -380,10 +399,11 @@ export function installBalanceHarness(access: DevHookAccess): BalanceHarnessApi 
     if (!system || system === wrappedUnitSystem) return;
     wrappedUnitSystem = system;
     const original = system.onPlayerDamaged;
-    system.onPlayerDamaged = (damage, cause, position) => {
-      pendingUnitCause = cause;
+    system.onPlayerDamaged = (damage, cause, position, source) => {
+      // 敌机导弹带发射者标签（'jet:<机型>'），与机炮伤害记在同一个机型名下
+      pendingUnitCause = source ?? `unit-${cause}`;
       try {
-        original?.(damage, cause, position);
+        original?.(damage, cause, position, source);
       } finally {
         pendingUnitCause = null;
       }
@@ -420,7 +440,7 @@ export function installBalanceHarness(access: DevHookAccess): BalanceHarnessApi 
 
   /** 找出最可能命中玩家的那颗子弹（伤害吻合、预测位置最近） */
   const attributeHit = (damage: number): string => {
-    if (pendingUnitCause) return `unit-${pendingUnitCause}`;
+    if (pendingUnitCause) return pendingUnitCause;
     const armor = access.getStats().getArmorReduction();
     const player = access.getPlayerAircraft().position;
     let best: ShotRecord | null = null;
@@ -428,11 +448,9 @@ export function installBalanceHarness(access: DevHookAccess): BalanceHarnessApi 
     for (const shot of shots) {
       if (!shot || shot.used) continue;
       const age = gameTime - shot.t;
-      if (age < 0 || age > SHOT_MAX_AGE) continue;
+      if (age < 0 || age > shot.maxAge) continue;
       if (Math.abs(shot.damage * (1 - armor) - damage) > 0.6) continue;
-      shotPosition
-        .copy(shot.origin)
-        .addScaledVector(shot.direction, GAME_CONSTANTS.PROJECTILE.SPEED * age);
+      shotPosition.copy(shot.origin).addScaledVector(shot.direction, shot.speed * age);
       const distance = shotPosition.distanceTo(player);
       if (distance < bestDistance) {
         bestDistance = distance;
@@ -557,7 +575,14 @@ export function installBalanceHarness(access: DevHookAccess): BalanceHarnessApi 
 
   EventBus.on(GameEventType.ENEMY_FIRED, ({ payload }) => {
     if (!run || run.done || payload.faction !== Faction.ENEMY) return;
-    recordShot(payload.position, payload.direction, payload.damage, payload.owner);
+    recordShot(
+      payload.position,
+      payload.direction,
+      payload.damage,
+      payload.owner,
+      payload.weapon,
+      payload.speed
+    );
   });
 
   EventBus.on(GameEventType.PLAYER_HIT, ({ payload }) => {
@@ -1039,7 +1064,7 @@ export function installBalanceHarness(access: DevHookAccess): BalanceHarnessApi 
       target.position.copy(mesh.position);
       target.velocity.copy(enemy.velocity);
       target.kind = 'jet';
-      target.radius = 5;
+      target.radius = getDeclaredHitRadius(mesh, 5);
       target.weight = inBoss ? 1.3 : 1;
     }
 
