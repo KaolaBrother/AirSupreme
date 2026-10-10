@@ -742,37 +742,35 @@ describe('NaN / Infinity inputs never give a non-finite position (spec §2.7)', 
     }
   });
 
-  // FINDING: spec §3a — "Non-finite time step: a jet's position is finite whenever `update`
-  // returns, also for `NaN` / `Infinity` time steps; the jet is not moved to the origin to repair
-  // it." EnemyAI.update(NaN | Infinity, ...) integrates the step first and only checks the position
-  // at the start of the NEXT update, so the jet's mesh sits at NaN / ±Infinity for a whole frame
-  // (anything that reads the position in between — collision, radar, the renderer — sees it), and
-  // the next update then teleports the jet to the world origin (357-514 m away in these runs).
-  // Reproduce: fly any doctrine jet for 2 s, call
-  // jet.update(Number.NaN, playerPosition, undefined, playerPosition) and read
-  // jet.getMesh().position. The same hole exists on the old three-state path (wingmen) and was
-  // there before this batch (601def1), so it is inherited rather than introduced.
-  it.fails.each([
+  // 规格 §3a：时间步长是 NaN / Infinity 时，update 返回时敌机位置仍是有限值，而且不靠把它挪到
+  // 原点来“修复”。（此前的缺陷：坏的一步先积分，位置在一整帧里是 NaN / ±Infinity，下一步再被
+  // 瞬移到世界原点，离原处 357–514 米。）
+  it.each([
     [Number.NaN, EnemyType.FIGHTER],
     [Infinity, EnemyType.FIGHTER],
     [Number.NaN, EnemyType.STRIKER],
     [Infinity, EnemyType.WRAITH],
-  ])('a time step of %s leaves a %s where it was, at a finite position', (step, type) => {
-    const current = makeRig({ capacity: 2, seed: 55 });
-    const jet = current.addJet(type, pointAround(current.player, 300, 40 * DEG));
-    current.run(2);
-    const before = jet.getMesh().position.clone();
-    jet.update(step, current.player.position, undefined, current.player.position);
-    expect(isFiniteVector(jet.getMesh().position), 'finite when update returns').toBe(true);
-    // 没有被挪到原点去“修复”：坏的那一步不该让它跑出几米远，接下来的一小段也照常飞
-    expect(jet.getMesh().position.distanceTo(before), 'moved by the bad step (m)').toBeLessThan(5);
-    current.run(0.5);
-    expect(isFiniteVector(jet.getMesh().position)).toBe(true);
-    expect(
-      jet.getMesh().position.distanceTo(before),
-      'distance from where it was, half a second later (m)'
-    ).toBeLessThan(60);
-  });
+  ])(
+    'a time step of %s leaves a %s where it was, at a finite position (spec §3a)',
+    (step, type) => {
+      const current = makeRig({ capacity: 2, seed: 55 });
+      const jet = current.addJet(type, pointAround(current.player, 300, 40 * DEG));
+      current.run(2);
+      const before = jet.getMesh().position.clone();
+      jet.update(step, current.player.position, undefined, current.player.position);
+      expect(isFiniteVector(jet.getMesh().position), 'finite when update returns').toBe(true);
+      // 没有被挪到原点去“修复”：坏的那一步不该让它跑出几米远，接下来的一小段也照常飞
+      expect(jet.getMesh().position.distanceTo(before), 'moved by the bad step (m)').toBeLessThan(
+        5
+      );
+      current.run(0.5);
+      expect(isFiniteVector(jet.getMesh().position)).toBe(true);
+      expect(
+        jet.getMesh().position.distanceTo(before),
+        'distance from where it was, half a second later (m)'
+      ).toBeLessThan(60);
+    }
+  );
 });
 
 // ---------------------------------------------------------------------------------------------

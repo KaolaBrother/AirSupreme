@@ -1,4 +1,5 @@
 import { Vector3 } from 'three';
+import { GAME_CONSTANTS } from '@/config';
 import { ENEMY_WEAPON_SPECS, type EnemyWeaponKind } from '../EnemyWeapons';
 import {
   DOCTRINE_RULES,
@@ -13,9 +14,12 @@ import {
 import {
   angleBetween,
   horizontalRight,
+  interceptTime,
   leadPoint,
+  relativeSpeedAlong,
   rotateAroundUp,
   scatterDirection,
+  wrapAngle,
 } from './DoctrineMath';
 
 /** 一步里最多的射击请求数（重型机 5 发扇面 + 1 发尾炮） */
@@ -284,6 +288,46 @@ export abstract class JetDoctrine implements IEnemyDoctrine {
     return angleBetween(context.forward, tmpToSelf);
   }
 
+  /**
+   * 玩家机头与本机“机炮提前量点”的夹角（弧度）。提前量点与 HUD 的提前量标记（GunLeadSolver）
+   * 同一解法：玩家子弹弹速、本机当前速度。照着标记追本机的玩家机头压在提前量点上，离本机身
+   * 二三十度（100 米/秒的子弹打四百米外横穿的目标），这也是在追它。没有拦截解、或拦截距离
+   * （子弹要飞的路程）超过 maxRange 时返回 π。
+   */
+  protected playerGunLeadAngle(context: DoctrineContext, maxRange: number): number {
+    const { position, forward, speed, playerPosition } = context;
+    const vx = forward.x * speed;
+    const vy = forward.y * speed;
+    const vz = forward.z * speed;
+    const dx = position.x - playerPosition.x;
+    const dy = position.y - playerPosition.y;
+    const dz = position.z - playerPosition.z;
+    const bulletSpeed = GAME_CONSTANTS.PROJECTILE.SPEED;
+    const time = interceptTime(dx, dy, dz, vx, vy, vz, bulletSpeed);
+    if (!(time > 0) || time * bulletSpeed > maxRange) return Math.PI;
+    tmpToSelf.set(dx + vx * time, dy + vy * time, dz + vz * time);
+    return angleBetween(context.playerForward, tmpToSelf);
+  }
+
+  /**
+   * 玩家在追本机的程度 0..1：玩家机头对着本机、或对着本机的机炮提前量点（取两者中较小的夹角）
+   * 在 chasedAngle 以内为 1，偏开到 passingAngle 以外为 0，中间线性过渡。
+   * 用作 steerOrbitMoving 的 approachYield：被追时不为了保持距离而跑得比玩家还快。
+   */
+  protected chaseYield(
+    context: DoctrineContext,
+    chasedAngle: number,
+    passingAngle: number,
+    leadMaxRange: number
+  ): number {
+    const noseOff = Math.min(
+      this.playerNoseAngle(context),
+      this.playerGunLeadAngle(context, leadMaxRange)
+    );
+    const passing = (noseOff - chasedAngle) / (passingAngle - chasedAngle);
+    return 1 - (passing > 1 ? 1 : passing < 0 ? 0 : passing);
+  }
+
   /** 与玩家同速所需的油门（钳制在规则范围内） */
   protected throttleToMatch(context: DoctrineContext): number {
     const speed = context.playerVelocity.length();
@@ -329,6 +373,221 @@ export abstract class JetDoctrine implements IEnemyDoctrine {
       ux * sign * tangential + uz * error
     );
     this.applyAltitude(context, command, context.playerPosition.y + heightOffset);
+  }
+
+  /**
+   * 和 steerOrbit 一样绕玩家盘旋，但在“随玩家一起移动”的参照系里：把玩家的速度加回去
+   * （截击三角形），所以玩家直线飞行时也真的能绕到侧面 / 保持距离，而不是被甩在身后尾追。
+   * 玩家几乎不动时与 steerOrbit 完全一样。
+   * @param maxThrottle 油门上限；不给 relativeSpeed 时就用它
+   * @param band 半径误差的归一化宽度（米）
+   * @param relativeSpeed 想要的相对速率（米/秒，相对玩家绕行的速率）：给了就在
+   *   0.6×–maxThrottle 之间取刚好够用的油门，不给则一直用 maxThrottle。
+   *   用到的油门写入 command.throttle。
+   * @param approachYield 0..1：玩家朝本机飞来的那部分速度有多少不跟（1 = 完全不跟，只跟横向与
+   *   远离的部分）。不跟的时候照旧原地盘旋、能被追近，不会因为“保持距离”而跑得比玩家还快
+   * @returns 实际跟随的玩家速度的大小（米/秒）
+   */
+  protected steerOrbitMoving(
+    context: DoctrineContext,
+    command: DoctrineCommand,
+    radius: number,
+    sign: number,
+    heightOffset: number,
+    maxThrottle: number,
+    band: number = ORBIT_BAND,
+    relativeSpeed: number = Infinity,
+    approachYield: number = 0
+  ): number {
+    command.throttle = maxThrottle;
+    const rx = context.position.x - context.playerPosition.x;
+    const rz = context.position.z - context.playerPosition.z;
+    const distance = Math.hypot(rx, rz);
+    if (!(distance > 1e-3)) {
+      command.direction.copy(context.forward);
+      return 0;
+    }
+    const ux = rx / distance;
+    const uz = rz / distance;
+    let error = (radius - distance) / (band > 0 ? band : ORBIT_BAND);
+    error = error > 1 ? 1 : error < -1 ? -1 : error;
+    const tangential = 1 - 0.6 * Math.abs(error);
+    const dx = -uz * sign * tangential + ux * error;
+    const dz = ux * sign * tangential + uz * error;
+    const length = Math.hypot(dx, dz);
+    if (!(length > 1e-6)) {
+      command.direction.copy(context.forward);
+      return 0;
+    }
+    return this.flyRelativeToPlayer(
+      context,
+      command,
+      dx / length,
+      dz / length,
+      ux,
+      uz,
+      heightOffset,
+      maxThrottle,
+      relativeSpeed,
+      approachYield
+    );
+  }
+
+  /**
+   * 守住一个随玩家移动的站位点：从玩家看的方位 bearing（世界方位角）、水平距离 radius 处。
+   * 和 steerOrbitMoving 一样在“随玩家一起移动”的参照系里飞，但不绕玩家打转：径向误差按 band、
+   * 方位误差按 bearingBand（弧度）归一化，径向与绕行各有自己的相对速率上限，误差变小时随之减小，
+   * 到位后与玩家同速（油门不低于 0.6×）。站位点在玩家另一侧时沿圆周绕过去，不从玩家身边直穿。
+   * @param radialSpeed 径向误差拉满时沿径向的相对速率（米/秒）
+   * @param aroundSpeed 方位误差拉满时沿圆周的相对速率（米/秒）：比 radialSpeed 小时，玩家转弯、
+   *   站位点转得比本机快的时候先守住距离
+   * @returns 实际跟随的玩家速度的大小（米/秒）
+   */
+  protected steerStationMoving(
+    context: DoctrineContext,
+    command: DoctrineCommand,
+    radius: number,
+    bearing: number,
+    heightOffset: number,
+    maxThrottle: number,
+    band: number,
+    bearingBand: number,
+    radialSpeed: number,
+    aroundSpeed: number,
+    approachYield: number = 0
+  ): number {
+    command.throttle = maxThrottle;
+    const rx = context.position.x - context.playerPosition.x;
+    const rz = context.position.z - context.playerPosition.z;
+    const distance = Math.hypot(rx, rz);
+    if (!(distance > 1e-3)) {
+      command.direction.copy(context.forward);
+      return 0;
+    }
+    const ux = rx / distance;
+    const uz = rz / distance;
+    let radial = (radius - distance) / (band > 0 ? band : ORBIT_BAND);
+    radial = (radial > 1 ? 1 : radial < -1 ? -1 : radial) * radialSpeed;
+    let around = wrapAngle(bearing - Math.atan2(rx, rz)) / (bearingBand > 0 ? bearingBand : 1);
+    around = (around > 1 ? 1 : around < -1 ? -1 : around) * aroundSpeed;
+    // 方位角增大的切向是 (uz, -ux)
+    const dx = ux * radial + uz * around;
+    const dz = uz * radial - ux * around;
+    const length = Math.hypot(dx, dz);
+    if (!(length > 1e-6)) {
+      // 正好在站位点上：与玩家同速
+      return this.flyRelativeToPlayer(
+        context,
+        command,
+        ux,
+        uz,
+        ux,
+        uz,
+        heightOffset,
+        maxThrottle,
+        0,
+        approachYield
+      );
+    }
+    return this.flyRelativeToPlayer(
+      context,
+      command,
+      dx / length,
+      dz / length,
+      ux,
+      uz,
+      heightOffset,
+      maxThrottle,
+      length,
+      approachYield
+    );
+  }
+
+  /**
+   * 在随玩家移动的参照系里沿单位方向 (dx, dz) 以 relativeSpeed 飞：方向 = 跟随的玩家速度 +
+   * 相对速度，油门取刚好够用的值（0.6×–maxThrottle，写入 command.throttle）；追不上时尽量沿这个
+   * 方向、退而与玩家并行。(ux, uz) 是“玩家 → 本机”的水平单位向量，用于 approachYield。
+   * @returns 实际跟随的玩家速度的大小（米/秒）
+   */
+  private flyRelativeToPlayer(
+    context: DoctrineContext,
+    command: DoctrineCommand,
+    dx: number,
+    dz: number,
+    ux: number,
+    uz: number,
+    heightOffset: number,
+    maxThrottle: number,
+    relativeSpeed: number,
+    approachYield: number
+  ): number {
+    // 要跟随的玩家速度（水平）；按 approachYield 去掉“朝本机飞来”的分量
+    let vx = context.playerVelocity.x;
+    let vz = context.playerVelocity.z;
+    if (approachYield > 0) {
+      const approach = (vx * ux + vz * uz) * (approachYield < 1 ? approachYield : 1);
+      if (approach > 0) {
+        vx -= approach * ux;
+        vz -= approach * uz;
+      }
+    }
+    let throttle = maxThrottle;
+    if (Number.isFinite(relativeSpeed) && context.baseSpeed > 0) {
+      const needed =
+        Math.hypot(vx + relativeSpeed * dx, vz + relativeSpeed * dz) / context.baseSpeed;
+      throttle = Math.min(maxThrottle, Math.max(DOCTRINE_RULES.MIN_THROTTLE, needed));
+      command.throttle = throttle;
+    }
+    const k = relativeSpeedAlong(vx, 0, vz, dx, 0, dz, context.baseSpeed * throttle);
+    // k = 0：这个方向追不上，退而与玩家并行（玩家也不动时就按原方向飞）
+    command.direction.set(vx + k * dx, 0, vz + k * dz);
+    if (!(command.direction.lengthSq() > 1e-6)) command.direction.set(dx, 0, dz);
+    this.applyAltitude(context, command, context.playerPosition.y + heightOffset);
+    return Math.hypot(vx, vz);
+  }
+
+  /**
+   * 从这里以 speed 的速率沿截击航线（恒定方位）冲向玩家时，沿视线的接近速率（米/秒）；
+   * 追不上时为 0。对直线飞行的玩家，正后方的接近速率最低——那是尾追，不是切入。
+   */
+  protected interceptClosingSpeed(context: DoctrineContext, speed: number): number {
+    tmpToSelf.subVectors(context.playerPosition, context.position);
+    const length = tmpToSelf.length();
+    if (!(length > 1e-3)) return speed;
+    const velocity = context.playerVelocity;
+    return relativeSpeedAlong(
+      velocity.x,
+      velocity.y,
+      velocity.z,
+      tmpToSelf.x / length,
+      tmpToSelf.y / length,
+      tmpToSelf.z / length,
+      speed
+    );
+  }
+
+  /**
+   * 沿截击航线飞向玩家（恒定方位、距离递减）：方向 = 玩家速度 + 接近速率 × 视线方向。
+   * 追不上时直接指向玩家。返回接近速率（米/秒）。
+   */
+  protected steerIntercept(
+    context: DoctrineContext,
+    command: DoctrineCommand,
+    speed: number
+  ): number {
+    const closing = this.interceptClosingSpeed(context, speed);
+    // interceptClosingSpeed 把“本机 → 玩家”留在 tmpToSelf 里
+    const length = tmpToSelf.length();
+    if (!(length > 1e-3)) {
+      command.direction.copy(context.forward);
+      return closing;
+    }
+    if (closing > 1) {
+      command.direction.copy(context.playerVelocity).addScaledVector(tmpToSelf, closing / length);
+    } else {
+      command.direction.copy(tmpToSelf);
+    }
+    return closing;
   }
 
   /** 给已写好的水平方向加上高度修正：向 targetY 靠拢，坡度受限 */

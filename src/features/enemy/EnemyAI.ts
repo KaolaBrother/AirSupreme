@@ -33,6 +33,12 @@ const TERRAIN_CLEARANCE = 32;
 const TERRAIN_MIN_CLEARANCE = 12;
 /** 绝对兜底：穿入地形时直接抬到地表以上（米） */
 const TERRAIN_HARD_FLOOR = 5;
+/**
+ * 竖直构件判定（米）：地表比本机高出这么多 = 天梯主干 / 支柱 / 锚塔这类竖直构件（主干顶在
+ * 7000 米）。爬不过去，也不能一步抬到构件顶上（那是瞬移到几千米高空、再花几分钟飞回战场）：
+ * 前瞻遇到时改为侧滑绕开，贴地兜底遇到时退回本步之前的水平位置。
+ */
+const TERRAIN_WALL_HEIGHT = 200;
 
 /**
  * 开火距离上限（米）：超出则不开火。子弹射程 500 米，但远距离点射只在玩家直线飞行时
@@ -147,6 +153,8 @@ export class EnemyAI {
   private missileInbound = false;
   private level = 1;
   private bossFight = false;
+  /** 玩家现在可以被攻击（复活中 / 剧情停顿 / 阵亡时为 false：任何武器都不开火） */
+  private playerTargetable = true;
   /** 狙击机的瞄准光束（首次蓄力时创建） */
   private lanceBeam: LanceBeam | null = null;
   /** 全队导弹令牌：本机现在可以发射的导弹数（EnemySystem 的导弹导演读写） */
@@ -155,6 +163,7 @@ export class EnemyAI {
   private missileLocking = false;
   /** 同伴（非干扰机）的平均位置：干扰机躲在它们身后（EnemySystem 每步写入） */
   private readonly groupCenter = new THREE.Vector3();
+  private groupId = 0;
   private hasGroup = false;
   /** 隐形机的淡出 / 眼灯特效（首次隐形时创建）与当前机体不透明度 */
   private cloakFade: CloakFade | null = null;
@@ -259,6 +268,8 @@ export class EnemyAI {
     friendlyMeshes?: THREE.Object3D[],
     fireTarget: THREE.Vector3 | null = null
   ): void {
+    // 步长不是有限数（NaN / Infinity）：整步跳过，位置与朝向保持原样
+    if (!Number.isFinite(deltaTime)) return;
     this.capturePreviousVisualState();
     if (!this.ensureFinitePosition()) {
       return;
@@ -270,8 +281,9 @@ export class EnemyAI {
       this.friendlyMeshes = friendlyMeshes;
     }
 
+    const weaponsFree = fireTarget !== null && this.playerTargetable;
     if (this.doctrine) {
-      this.updateWithDoctrine(deltaTime, playerPosition, fireTarget !== null);
+      this.updateWithDoctrine(deltaTime, playerPosition, weaponsFree);
       return;
     }
 
@@ -303,7 +315,7 @@ export class EnemyAI {
 
     this.attackCooldown = Math.max(0, this.attackCooldown - deltaTime);
 
-    if (!stunned && this.attackCooldown <= 0 && fireTarget) {
+    if (!stunned && this.attackCooldown <= 0 && fireTarget && weaponsFree) {
       const toTarget = tmpDirection.subVectors(fireTarget, this.mesh.position).normalize();
       const forward = tmpForward.copy(this.velocity).normalize();
       const dot = toTarget.dot(forward);
@@ -575,14 +587,17 @@ export class EnemyAI {
 
   /**
    * 战场态势（EnemySystem 每步在 update 之前写入）：玩家机头方向、玩家对本机的威胁、
-   * 当前关卡与是否在 Boss 战。没有条令的敌机不使用这些。
+   * 当前关卡、是否在 Boss 战，以及玩家现在能不能被攻击。
+   * playerTargetable 为 false（复活中 / 剧情停顿 / 阵亡）时本机任何武器都不开火——不需要令牌的
+   * 防御性射击（重型机尾炮）也一样——也不开始锁定或蓄力；飞行照常。
    */
   public setCombatSituation(
     playerForward: THREE.Vector3 | null,
     lockedOn: boolean,
     missileInbound: boolean,
     level: number,
-    bossFight: boolean
+    bossFight: boolean,
+    playerTargetable = true
   ): void {
     if (playerForward && isFiniteVector(playerForward) && playerForward.lengthSq() > 1e-8) {
       this.playerForward.copy(playerForward).normalize();
@@ -591,6 +606,7 @@ export class EnemyAI {
     this.missileInbound = missileInbound;
     this.level = Number.isFinite(level) ? level : 1;
     this.bossFight = bossFight;
+    this.playerTargetable = playerTargetable;
   }
 
   /** 本机的条令；旧三状态行为（僚机）为 null */
@@ -641,6 +657,18 @@ export class EnemyAI {
     return cloak !== null && cloak.hidden && this.isAlive();
   }
 
+  /**
+   * 波次编组号：同一波同一路到场的敌机相同；0 = 不属于任何编组（Boss 召唤 / 开发钩子）。
+   * 干扰机据此找“自己那一路”。
+   */
+  public setGroupId(id: number): void {
+    this.groupId = Number.isFinite(id) && id > 0 ? Math.floor(id) : 0;
+  }
+
+  public getGroupId(): number {
+    return this.groupId;
+  }
+
   /** 同伴（非干扰机）的平均位置；null = 场上没有可以躲在身后的同伴 */
   public setGroupCenter(center: THREE.Vector3 | null): void {
     if (center && isFiniteVector(center)) {
@@ -663,6 +691,7 @@ export class EnemyAI {
    * 攻击冷却与 EMP 瘫痪照常计时。velocity 非有限时改为沿机头方向按配置速度飞行。
    */
   public updateKinematic(deltaTime: number): void {
+    if (!Number.isFinite(deltaTime)) return;
     this.capturePreviousVisualState();
     if (!this.ensureFinitePosition()) {
       return;
@@ -701,8 +730,10 @@ export class EnemyAI {
   private integrateMotion(deltaTime: number, speedLimit: number = Infinity): void {
     this.applyTerrainAvoidance();
     if (speedLimit < Infinity) this.limitSpeed(speedLimit);
+    const fromX = this.mesh.position.x;
+    const fromZ = this.mesh.position.z;
     this.mesh.position.addScaledVector(this.velocity, deltaTime);
-    this.enforceTerrainFloor();
+    this.enforceTerrainFloor(fromX, fromZ);
 
     if (this.velocity.lengthSq() > 0) {
       tmpTarget.copy(this.mesh.position).add(this.velocity);
@@ -1112,15 +1143,21 @@ export class EnemyAI {
   /**
    * 前瞻地形避让：沿当前水平速度在若干时间点采样地表，若预计高度低于“地表 + 安全高度”，
    * 把竖直速度抬升为爬升速度（与亏欠高度成正比，上限为本机速度）。
+   * 前方是竖直构件（高出本机 TERRAIN_WALL_HEIGHT 以上）时不去爬它，水平速度转向较空的一侧。
    */
   private applyTerrainAvoidance(): void {
     if (!this.terrainSampler) return;
     const position = this.mesh.position;
     const velocity = this.velocity;
     let required = this.sampleTerrain(position.x, position.z) + TERRAIN_MIN_CLEARANCE;
+    let wallAhead = false;
     for (const t of TERRAIN_LOOKAHEAD_SECONDS) {
       const ground = this.sampleTerrain(position.x + velocity.x * t, position.z + velocity.z * t);
       if (ground === -Infinity) continue;
+      if (ground - position.y > TERRAIN_WALL_HEIGHT) {
+        wallAhead = true;
+        continue;
+      }
       // 预计 t 秒后的高度若低于地表 + 安全高度，则需要提前爬升
       const predictedY = position.y + Math.max(0, velocity.y) * t;
       const deficit = ground + TERRAIN_CLEARANCE - predictedY;
@@ -1128,6 +1165,7 @@ export class EnemyAI {
         required = Math.max(required, position.y + deficit);
       }
     }
+    if (wallAhead) this.sidestepWall();
     if (!Number.isFinite(required) || position.y >= required) return;
     const deficit = required - position.y;
     const climbRate = Math.min(Math.max(this.config.speed, 20), deficit * 2.2 + 8);
@@ -1136,17 +1174,48 @@ export class EnemyAI {
     }
   }
 
-  /** 硬兜底：位置一旦落到地表以下，直接抬到地表上方（避免穿模 / 卡在岩壁里） */
-  private enforceTerrainFloor(): void {
+  /**
+   * 前方是竖直构件：水平速度原地转 90° 侧滑（竖直速度不变），转向构件较空的一侧
+   * （沿左右两侧各取一个采样点，取地表较低的一侧，相同则向右）。
+   */
+  private sidestepWall(): void {
+    const position = this.mesh.position;
+    const velocity = this.velocity;
+    const speed = Math.hypot(velocity.x, velocity.z);
+    if (!(speed > 1e-3) || !Number.isFinite(speed)) return;
+    const ux = velocity.x / speed;
+    const uz = velocity.z / speed;
+    const reach = speed * TERRAIN_LOOKAHEAD_SECONDS[1];
+    // 水平右侧为 (-z, x)，左侧为 (z, -x)
+    const right = this.sampleTerrain(position.x - uz * reach, position.z + ux * reach);
+    const left = this.sampleTerrain(position.x + uz * reach, position.z - ux * reach);
+    const sign = right <= left ? 1 : -1;
+    velocity.x = -uz * speed * sign;
+    velocity.z = ux * speed * sign;
+  }
+
+  /**
+   * 硬兜底：位置一旦落到地表以下，直接抬到地表上方（避免穿模 / 卡在岩壁里）。
+   * 需要一步抬高 TERRAIN_WALL_HEIGHT 以上（撞进竖直构件）时不抬，退回本步之前的水平位置
+   * (fromX, fromZ)；那里本身也在地表以下时（例如出生点就在构件里）照旧抬到地表上方。
+   */
+  private enforceTerrainFloor(fromX: number, fromZ: number): void {
     if (!this.terrainSampler) return;
     const position = this.mesh.position;
     const ground = this.sampleTerrain(position.x, position.z);
     if (ground === -Infinity) return;
     const floor = ground + TERRAIN_HARD_FLOOR;
-    if (position.y < floor) {
-      position.y = floor;
-      if (this.velocity.y < 0) this.velocity.y = 0;
+    if (position.y >= floor) return;
+    if (floor - position.y > TERRAIN_WALL_HEIGHT && Number.isFinite(fromX + fromZ)) {
+      const fromGround = this.sampleTerrain(fromX, fromZ);
+      if (position.y >= fromGround + TERRAIN_HARD_FLOOR) {
+        position.x = fromX;
+        position.z = fromZ;
+        return;
+      }
     }
+    position.y = floor;
+    if (this.velocity.y < 0) this.velocity.y = 0;
   }
 
   /**
@@ -1220,11 +1289,16 @@ export class EnemyAI {
         continue;
       }
       if (child instanceof THREE.Mesh) {
-        child.geometry.dispose();
-        if (Array.isArray(child.material)) {
-          child.material.forEach((m) => m.dispose());
-        } else if (child.material instanceof THREE.Material) {
-          child.material.dispose();
+        // 本机自己的几何体随机体释放；按机型缓存的材质 / 共享几何体（userData.sharedResource）
+        // 同型号的其它飞机还在用，不释放
+        if (child.geometry.userData.sharedResource !== true) child.geometry.dispose();
+        const materials: THREE.Material[] = Array.isArray(child.material)
+          ? child.material
+          : child.material instanceof THREE.Material
+            ? [child.material]
+            : [];
+        for (const material of materials) {
+          if (material.userData.sharedResource !== true) material.dispose();
         }
       }
     }

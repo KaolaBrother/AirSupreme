@@ -20,6 +20,14 @@ export interface SnowWorldYRange {
 const DEFAULT_SNOW_RANGE: SnowWorldYRange = { start: 1, end: 9 };
 
 /**
+ * 着色法线的世界空间“朝上”分量（snowUp）。
+ * normal_fragment_maps 之后的 normal 在视图空间（平面着色由 vViewPosition 求导得到），
+ * 直接用 normal.y 会让雪随相机俯仰 / 滚转变化：俯冲时平地法线正对相机、视图空间 y 趋近 0，
+ * 雪消失并露出底下的绿色顶点色。three.js 的环境贴图也用同一个函数把法线转回世界空间。
+ */
+const SNOW_WORLD_UP_GLSL = 'float snowUp = inverseTransformDirection( normal, viewMatrix ).y;';
+
+/**
  * 随 uSnowCover 上升把朝上的表面染白（雪天落定、再融化）。
  * 普通网格与实例化网格皆可用。
  */
@@ -56,7 +64,8 @@ export function injectSnowCover(
         '#include <normal_fragment_maps>',
         `#include <normal_fragment_maps>
         {
-          float snowFacing = smoothstep( 0.45, 0.85, normal.y );
+          ${SNOW_WORLD_UP_GLSL}
+          float snowFacing = smoothstep( 0.45, 0.85, snowUp );
           float snowHeight = smoothstep( ${range.start.toFixed(2)}, ${range.end.toFixed(2)}, vSnowWorldY );
           diffuseColor.rgb = mix( diffuseColor.rgb, vec3( 0.93, 0.95, 0.975 ),
             uSnowCover * snowFacing * snowHeight );
@@ -167,7 +176,8 @@ export function injectSnowAndWind(
         '#include <normal_fragment_maps>',
         `#include <normal_fragment_maps>
         {
-          float snowFacing = smoothstep( 0.35, 0.8, normal.y );
+          ${SNOW_WORLD_UP_GLSL}
+          float snowFacing = smoothstep( 0.35, 0.8, snowUp );
           float snowHeight = smoothstep( ${range.start.toFixed(2)}, ${range.end.toFixed(2)}, vSnowWorldY );
           diffuseColor.rgb = mix( diffuseColor.rgb, vec3( 0.91, 0.94, 0.965 ),
             uSnowCover * snowFacing * snowHeight * 0.85 );

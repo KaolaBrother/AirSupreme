@@ -96,6 +96,27 @@ export function interceptTime(
 }
 
 /**
+ * 在“随目标一起移动”的参照系里沿单位方向 (ux, uy, uz) 前进的速率（米/秒）：自己以 speed 的
+ * 速率飞、目标以 (vx, vy, vz) 匀速运动时，|V + k·u| = speed 的正根 k。
+ * 世界坐标里该飞的方向就是 V + k·u（截击三角形）。speed 不够、朝这个方向追不上时返回 0。
+ */
+export function relativeSpeedAlong(
+  vx: number,
+  vy: number,
+  vz: number,
+  ux: number,
+  uy: number,
+  uz: number,
+  speed: number
+): number {
+  const along = vx * ux + vy * uy + vz * uz;
+  const discriminant = along * along + speed * speed - (vx * vx + vy * vy + vz * vz);
+  if (!(discriminant > 0)) return 0;
+  const k = Math.sqrt(discriminant) - along;
+  return k > 0 && Number.isFinite(k) ? k : 0;
+}
+
+/**
  * 瞄准点：目标位置 + 速度 ×（延迟 + 拦截时间）× 提前量系数，写入 out。
  * - delay：开火前还要等的时间（蓄力剩余时间），期间目标继续按当前速度运动
  * - lead：0 = 瞄准当前位置，1 = 完整提前
