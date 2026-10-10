@@ -196,6 +196,12 @@ export class InputHandler {
    */
   private fireTapQueued: boolean = false;
   private missileTapQueued: boolean = false;
+  /**
+   * 触控键当前这一下按下之后还没被 getState 读到过。只有这种按下在手指正常抬起时才补记成一次轻触；
+   * 被取消的那一下什么都不留，也不动上面已经记下的锁存（更早完成的轻触、键盘的按下沿）。
+   */
+  private fireTouchUnread: boolean = false;
+  private missileTouchUnread: boolean = false;
 
   /** getState() 复用的结果对象（每个模拟步调用一次，避免逐帧分配） */
   private readonly state: Required<InputState> = {
@@ -345,32 +351,34 @@ export class InputHandler {
     this.addTrackedListener(document, 'touchend', this.handleStickEnd);
     this.addTrackedListener(document, 'touchcancel', this.handleStickEnd);
 
-    // 开火 / 导弹：按住；按下沿另外锁存，短于一个模拟步的轻触也不丢。
-    // 被系统取消（touchcancel / 失焦）的那一下不算按过
+    // 开火 / 导弹：按住；短于一个模拟步的轻触在手指抬起时补记成一次按下，不会丢。
+    // 被系统取消（touchcancel / 失焦）的那一下不算按过，也不抹掉在它之前已经完成的按下
     this.bindTouchButton(
       fireButton,
       () => {
         this.firePressed = true;
-        this.fireTapQueued = true;
+        this.fireTouchUnread = true;
       },
       (cancelled) => {
         this.firePressed = false;
-        if (cancelled) {
-          this.fireTapQueued = false;
+        if (this.fireTouchUnread && !cancelled) {
+          this.fireTapQueued = true;
         }
+        this.fireTouchUnread = false;
       }
     );
     this.bindTouchButton(
       missileButton,
       () => {
         this.missilePressed = true;
-        this.missileTapQueued = true;
+        this.missileTouchUnread = true;
       },
       (cancelled) => {
         this.missilePressed = false;
-        if (cancelled) {
-          this.missileTapQueued = false;
+        if (this.missileTouchUnread && !cancelled) {
+          this.missileTapQueued = true;
         }
+        this.missileTouchUnread = false;
       }
     );
 
@@ -651,6 +659,8 @@ export class InputHandler {
     this.specialPressed = false;
     this.fireTapQueued = false;
     this.missileTapQueued = false;
+    this.fireTouchUnread = false;
+    this.missileTouchUnread = false;
     this.setBoostLatched(false);
   }
 
@@ -709,6 +719,9 @@ export class InputHandler {
     const missileTap = this.missileTapQueued;
     this.fireTapQueued = false;
     this.missileTapQueued = false;
+    // 这一步已经读到正按着的触控键（见下方 isMobile 分支）：它松开时不再补记
+    this.fireTouchUnread = false;
+    this.missileTouchUnread = false;
     state.fire = keys.has('Space') || fireTap;
     state.missile = keys.has('KeyM') || keys.has('ShiftRight') || missileTap; // M键或右Shift发射导弹
     state.throttle = keys.has('ShiftLeft') || keys.has('ControlLeft');
@@ -792,6 +805,8 @@ export class InputHandler {
     this.specialTapQueued = false;
     this.fireTapQueued = false;
     this.missileTapQueued = false;
+    this.fireTouchUnread = false;
+    this.missileTouchUnread = false;
     if (this.boostLatched) {
       this.setBoostLatched(false);
     }

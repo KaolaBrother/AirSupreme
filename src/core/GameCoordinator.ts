@@ -19,11 +19,10 @@ import { EnemyType, ENEMY_CONFIGS } from '@/features/enemy/EnemyTypes';
 import { PowerUpType, POWER_UP_CONFIGS } from '@/features/powerups/PowerUpSystem';
 import type { UpgradeMenu } from '@/ui/UpgradeMenu';
 import type { PauseMenu } from '@/ui/PauseMenu';
-import type { HUD, HudText, HudTextWithParams } from '@/ui/HUD';
+import type { HUD, HudText, HudTextWithParams, SettlementCheckpointRetry } from '@/ui/HUD';
 import type { GameSettings } from '@/ui/StartMenu';
 import type { LockOnIndicator } from '@/ui/LockOnIndicator';
 import type { BossMissileIndicator } from '@/ui/BossMissileIndicator';
-import { CheckpointResumeButton } from '@/ui/CheckpointResumeButton';
 import { GameConfig, GAME_CONSTANTS, type QualityPreset } from '@/config';
 import { BOSS_CONFIGS, BossType, BossConfig } from '@/features/boss/BossTypes';
 import type { BossMinionKind } from '@/features/boss/BossContracts';
@@ -59,6 +58,7 @@ import {
   type ICampaignPresentation,
 } from '@/core/campaign/CampaignPresentation';
 import {
+  describeCheckpointText,
   hasCampaignCheckpoint,
   loadCampaignCheckpoint,
   type CampaignCheckpointInput,
@@ -389,7 +389,6 @@ export class GameCoordinator {
   private readonly hudFeed: CombatHudFeed;
   /** 具名僚机「渡鸦」「雨燕」：友机入场领取身份，坠毁 / 撤场时归还 */
   private readonly wingmen = new WingmanRoster();
-  private readonly checkpointResumeButton = new CheckpointResumeButton();
   private readonly options: GameCoordinatorOptions;
   private readonly showStartMenu: boolean;
   private presentationRuntimePromise: Promise<void> | null = null;
@@ -740,8 +739,7 @@ export class GameCoordinator {
           this.pauseMenu?.hide();
           this.upgradeMenu?.hide();
           this.hud.hideRespawnOverlay();
-          this.hud.showGameOver(this.gameState.getScore());
-          this.offerCheckpointResume();
+          this.hud.showGameOver(this.gameState.getScore(), this.resolveCheckpointRetry());
         } else {
           this.hud.showRespawnOverlay({
             lives: payload.lives,
@@ -2397,17 +2395,21 @@ export class GameCoordinator {
     this.sessionState.setLevel(save.level);
   }
 
-  /** 结算界面：正常模式且存在检查点时提供“从检查点继续” */
-  private offerCheckpointResume(): void {
+  /**
+   * 任务失败的结算面板：正常模式且存在检查点时，主动作是“从检查点重试”（写明回到哪一关哪一波），
+   * 面板上不再有“再来一局”——它会从头开一局、清掉这份存档。Boss 模式 / 没有检查点返回 null，
+   * 面板照旧是“再来一局 / 返回菜单”。
+   */
+  private resolveCheckpointRetry(): SettlementCheckpointRetry | null {
     const onContinue = this.options.onContinueFromCheckpoint;
     if (!onContinue || this.sessionState.isBossMode() || !hasCampaignCheckpoint()) {
-      return;
+      return null;
     }
     const save = loadCampaignCheckpoint();
     if (!save) {
-      return;
+      return null;
     }
-    this.checkpointResumeButton.show(save, (resumeSave) => onContinue(resumeSave));
+    return { detail: describeCheckpointText(save), onRetry: () => onContinue(save) };
   }
 
   // ===========================================================================================
@@ -3766,7 +3768,6 @@ export class GameCoordinator {
     this.vfx.dispose();
     this.view.dispose();
     this.presentation.dispose();
-    this.checkpointResumeButton.dispose();
     this.enemySystem?.dispose();
     this.particleSystem?.clear();
     this.powerUpSystem?.dispose();

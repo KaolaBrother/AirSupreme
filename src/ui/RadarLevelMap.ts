@@ -411,11 +411,18 @@ export class RadarLevelMap {
   }
 
   private drawRangeRings(ctx: CanvasRenderingContext2D, x: number, y: number): void {
-    const scale = (this.size / 2 - MAP_PADDING_PX) / MAP_HALF_EXTENT;
+    const center = this.size / 2;
+    const scale = (center - MAP_PADDING_PX) / MAP_HALF_EXTENT;
+    const compact = this.size < COMPACT_PANEL_PX;
+    const fontPx = compact ? 9 : 10;
+    // 地图顶上那一条留给静态层的指北标记 “N”（边界圈正上方）和标题 / 关闭提示（见 renderStaticLayer）：
+    // 取两者下沿较低的一个，再留 2px
+    const headerBottom =
+      Math.max(center - BOUNDARY_RADIUS * scale - (compact ? 1 : 3), compact ? 17 : 21) + 2;
     ctx.strokeStyle = HUD_COLORS.sys;
     ctx.fillStyle = HUD_COLORS.sys;
     ctx.lineWidth = 1;
-    ctx.font = `bold ${this.size < COMPACT_PANEL_PX ? 9 : 10}px ${FONT_STACK}`;
+    ctx.font = `bold ${fontPx}px ${FONT_STACK}`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'bottom';
     ctx.setLineDash(RING_DASH);
@@ -426,8 +433,9 @@ export class RadarLevelMap {
       ctx.arc(x, y, r, 0, FULL_CIRCLE);
       ctx.stroke();
       ctx.globalAlpha = 0.85;
-      // 标注放在环的正北；贴到地图上沿时改放正南
-      const labelY = y - r - 2 > 12 ? y - r - 2 : y + r + 12;
+      // 标注放在环的正北；上沿会伸进顶上那一条（压到 “N” / 标题，或出了地图上沿）时改放正南
+      const north = y - r - 2;
+      const labelY = north - fontPx >= headerBottom ? north : y + r + 12;
       ctx.fillText(label, x, labelY);
     }
     ctx.setLineDash(NO_DASH);

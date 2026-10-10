@@ -73,6 +73,13 @@ function missileProximity(distance: number): number {
   return 1 - (distance - MISSILE_NEAR_DISTANCE) / (MISSILE_FAR_DISTANCE - MISSILE_NEAR_DISTANCE);
 }
 
+/** 箭头图形的放大倍数：敌方目标恒为 1，导弹随距离从 1.0 放大到 1.35 */
+function chevronScale(kind: OffscreenChevronKind | undefined, distance: number): number {
+  return kind === 'missile'
+    ? MISSILE_FAR_SCALE + missileProximity(distance) * (MISSILE_NEAR_SCALE - MISSILE_FAR_SCALE)
+    : 1;
+}
+
 /** 距离标签的半宽估算（px）：位数 × 数字宽 + 单位宽 */
 function labelHalfWidth(roundedDistance: number): number {
   let digits = 1;
@@ -96,21 +103,23 @@ function labelReach(tailX: number, tailY: number, halfWidth: number, scale: numb
 }
 
 /**
- * 敌方目标箭头（不放大）加距离标签相对箭头中心的占位，写入 out（不分配）。
+ * 箭头加距离标签相对箭头中心的占位，写入 out（不分配）。kind 缺省按敌方目标箭头（不放大）；
+ * 导弹箭头随距离放大，标签跟着外移，图形本身放到最大也仍在 40px 的盒子里。
  * 调用方据此让整枚箭头避开遮挡并留在屏幕内；与 OffscreenChevron.update 的摆放一致
  * （标签偏移同样取整），四个值都是整像素并向外取整。
  */
 export function measureChevronFootprint(
   rotationDeg: number,
   distance: number,
-  out: ChevronFootprint
+  out: ChevronFootprint,
+  kind?: OffscreenChevronKind
 ): ChevronFootprint {
   const radians = (Number.isFinite(rotationDeg) ? Math.round(rotationDeg) : 0) * DEG_TO_RAD;
   // 指向 (sin, -cos)，尾侧取反
   const tailX = -Math.sin(radians);
   const tailY = Math.cos(radians);
   const halfWidth = Number.isFinite(distance) ? labelHalfWidth(Math.round(distance)) : 0;
-  const reach = labelReach(tailX, tailY, halfWidth, 1);
+  const reach = labelReach(tailX, tailY, halfWidth, chevronScale(kind, distance));
   const labelX = Math.round(tailX * reach);
   const labelY = Math.round(tailY * reach);
   out.minX = Math.min(-ARROW_HALF_PX, Math.floor(labelX - halfWidth));
@@ -219,9 +228,7 @@ export class OffscreenChevron {
     const rotation = Number.isFinite(state.rotationDeg) ? Math.round(state.rotationDeg) : 0;
     const isMissile = state.kind === 'missile';
     const proximity = isMissile ? missileProximity(state.distance) : 0;
-    const scale = isMissile
-      ? MISSILE_FAR_SCALE + proximity * (MISSILE_NEAR_SCALE - MISSILE_FAR_SCALE)
-      : 1;
+    const scale = chevronScale(state.kind, state.distance);
 
     if (rotation !== this.lastRotation || scale !== this.lastScale) {
       this.svg.style.transform = `rotate(${rotation}deg) scale(${scale})`;
