@@ -254,6 +254,8 @@ export class WeaponFx {
 
   /**
    * 第一人称时枪口就在镜头前：缩小枪口特效，并把光束起点前移，避免糊屏。
+   * particles.firstPerson 同时让火箭近段尾烟、刚离架的喷口光点减弱，蜂群导弹改从翼下外侧
+   * 弹出（ProjectileController 读同一个标志）。第三人称的观感不受影响。
    */
   public setFirstPerson(enabled: boolean): void {
     this.particles.muzzleScale = enabled ? 0.35 : 1;

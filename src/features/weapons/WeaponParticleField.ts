@@ -9,6 +9,7 @@ import * as THREE from 'three';
  *
  * 一个粒子场只有一次绘制调用；武器尾迹、火花、爆炸火球、热焰弹都复用它，
  * 不占用全局 ParticleSystem 的小额度。无贴图依赖，形状完全由着色器生成。
+ * 贴近相机的粒子按视深淡出（与 ParticleBatch 一致）：第一人称时自机的口焰 / 尾烟不会糊屏。
  */
 
 export type WeaponParticleBlend = 'smoke' | 'glow';
@@ -96,6 +97,9 @@ void main() {
   float grow = 1.0 - (1.0 - t) * (1.0 - t);
   float size = mix(aSize.x, aSize.y, grow);
   vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
+  // 贴近相机的大粒子淡出（与 ParticleBatch 相同的曲线），避免尾烟 / 口焰掠过镜头时整屏糊住
+  float viewDepth = -mvPosition.z;
+  float nearFade = clamp((viewDepth - 0.8) / max(size * 0.9, 0.6), 0.0, 1.0);
 
   vec2 axis;
   float len = size;
@@ -115,7 +119,7 @@ void main() {
   gl_Position = projectionMatrix * mvPosition;
 
   float fadeOut = pow(max(1.0 - t, 0.0), aPhys.z);
-  vColor = vec4(aColor.rgb, aColor.a * fadeOut);
+  vColor = vec4(aColor.rgb, aColor.a * fadeOut * nearFade);
   vHeat = aPhys.w > 0.0 ? 1.0 - smoothstep(0.0, aPhys.w, t) : 0.0;
   #include <fog_vertex>
 }
