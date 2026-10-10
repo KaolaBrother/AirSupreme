@@ -367,9 +367,10 @@ describe('STRIKER reload: turns away for about 10 s, slow and vulnerable (spec Â
   // after reloads 2-4 it never turns more than 60-66 degrees off the player; from about +3 s its
   // heading swings back toward the player (45 down to 22 degrees off, at 835-890 m) while still
   // reloading, before the 900 m leash takes over. (It is slow, and does not lock again early.)
-  // Minor, and it depends on reading "turns away" as "flies away from the player". Reproduce: FleetRig({ level: 8, capacity: 3, seed: 5 }), one STRIKER
-  // 600 m out at 40 degrees, player straight at 45 m/s for 150 s, missiles in flight for 3 s;
-  // salvos end at 37.87, 62.90, 97.88 and 132.40 s.
+  // Minor, and it depends on reading "turns away" as "flies away from the player". Reproduce:
+  // FleetRig({ level: 8, capacity: 3, seed: 5 }), one STRIKER 600 m out at 40 degrees, player
+  // straight at 45 m/s for 150 s, missiles in flight for 3 s; salvos end at 37.87, 62.90, 97.88
+  // and 132.40 s.
   it.fails(
     'against a straight player: it turns away (flying more than 90 degrees off the player) within 3 s of its last missile',
     () => {

@@ -535,6 +535,47 @@ describe('WRAITH hit while cloaked: decloaks at once and staggers for 1 s (spec 
     expect(log.shots().length).toBe(shots);
     expect(log.steps.slice(-27).every(fullyVisible)).toBe(true);
   });
+
+  // “僵直 1 秒”读作：这 1 秒里它失去控制、不机动（不转向、不加速），1 秒之后才重新机动
+  it.each(PILOTS)(
+    'against a %s player: staggered, it holds its heading without speeding up for 1 s, and manoeuvres again after that',
+    (_name, fly) => {
+      for (const seed of [3, 4, 5]) {
+        for (const into of [0.1, 0.5, 1.2]) {
+          const made = wraithRig(seed, fly);
+          const { current, wraith } = made;
+          expect(
+            current.runUntil(() => wraith.isCloaked(), 20),
+            'it cloaked'
+          ).toBe(true);
+          current.run(into);
+          const heading = wraith.velocity.clone();
+          const speed = heading.length();
+          wraith.takeDamage(4);
+          const tag = `seed ${seed}, hit ${into} s into the cloak`;
+          let steps = 0;
+          let turnWhileStaggered = 0;
+          let fastestWhileStaggered = 0;
+          let turnAfter = 0;
+          current.run(STAGGER_SECONDS + 2, () => {
+            steps++;
+            const turn = angleBetween(heading, wraith.velocity);
+            if (steps * DT < STAGGER_SECONDS - 1e-9) {
+              turnWhileStaggered = Math.max(turnWhileStaggered, turn);
+              fastestWhileStaggered = Math.max(fastestWhileStaggered, wraith.velocity.length());
+            } else {
+              turnAfter = Math.max(turnAfter, turn);
+            }
+          });
+          expect(turnWhileStaggered / DEG, `${tag}: turned while staggered`).toBeLessThan(2);
+          expect(fastestWhileStaggered, `${tag}: speed while staggered`).toBeLessThanOrEqual(
+            speed + 1e-6
+          );
+          expect(turnAfter / DEG, `${tag}: turned in the 2 s after`).toBeGreaterThan(15);
+        }
+      }
+    }
+  );
 });
 
 describe('WRAITH and the common rules', () => {
