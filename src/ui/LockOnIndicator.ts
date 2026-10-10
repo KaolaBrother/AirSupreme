@@ -11,8 +11,8 @@ import {
   type LockOnState,
 } from '@/ui/theme/hudTokens';
 
-/** 准星 = 机头轴线前方这么远的一点投到屏幕上的位置（米） */
-const AIM_DISTANCE = 600;
+/** 准星 = 机头轴线前方这么远的一点投到屏幕上的位置（米）；机炮辅助的十字从同一个距离拉近 */
+const AIM_DISTANCE = GAME_CONSTANTS.GUN_ASSIST.REFERENCE_RANGE;
 /** 丢锁后的红色提示时长 */
 const BREAK_TREATMENT_MS = 260;
 /** “未锁定 / 无导弹”提示的显示时长 */
@@ -246,6 +246,8 @@ export class LockOnIndicator {
     window.addEventListener('resize', this.resizeHandler);
     window.addEventListener('orientationchange', this.resizeHandler);
     this.unsubscribeLocale = onLocaleChange(() => this.renderStaticText());
+    // 指示器在开始菜单阶段就已创建：之后（init 之前）切换过语言时，固定文案按当前语言补写
+    this.renderStaticText();
     this.initialized = true;
   }
 
@@ -430,6 +432,8 @@ export class LockOnIndicator {
    * @param leadOnTarget 机头是否已压在提前量点上
    * @param gunAimDirection 触屏辅助下子弹的发射方向（世界坐标单位向量）；机炮十字画在这个方向上。
    *   没有辅助偏移（含桌面端）时传 null，十字就在机头轴线上
+   * @param gunAimDistance 十字画在该方向上多远处（米）：辅助压住目标时是瞄准点的距离，十字因此
+   *   在两种视角下都落在瞄准点上；非正 / 非有限数按准星参考距离处理
    */
   public renderUpdate(
     visible: boolean,
@@ -438,7 +442,8 @@ export class LockOnIndicator {
     camera: Camera,
     leadPoint: Vector3 | null,
     leadOnTarget: boolean,
-    gunAimDirection: Vector3 | null = null
+    gunAimDirection: Vector3 | null = null,
+    gunAimDistance: number = AIM_DISTANCE
   ): void {
     if (!visible || this.paused) {
       this.setStyleValue(this.container, 'display', 'none');
@@ -460,7 +465,7 @@ export class LockOnIndicator {
       this.place(this.reticle, aim.x, aim.y);
     }
     this.setStyleValue(this.reticle, 'visibility', aimOnScreen ? 'visible' : 'hidden');
-    this.renderGunCross(aimOnScreen, playerPosition, camera, gunAimDirection);
+    this.renderGunCross(aimOnScreen, playerPosition, camera, gunAimDirection, gunAimDistance);
 
     if (this.cueKind !== null) {
       if (now < this.cueUntilMs) {
@@ -493,21 +498,23 @@ export class LockOnIndicator {
 
   /**
    * 机炮十字：没有辅助方向时就在机头轴线上（与捕获环同心，样子不变）；有辅助方向时画在该方向
-   * 前方 AIM_DISTANCE 米处，并在偏移看得出来时换成“辅助中”的样子（机头位置留暗标记）。
+   * 前方 distance 米处，并在偏移看得出来时换成“辅助中”的样子（机头位置留暗标记）。
    * 只移动十字：准星锚点、捕获环、提示和导引头用的准星位置都留在机头轴线上。
    */
   private renderGunCross(
     aimOnScreen: boolean,
     playerPosition: Vector3,
     camera: Camera,
-    direction: Vector3 | null
+    direction: Vector3 | null,
+    distance: number
   ): void {
     const aim = this.renderAim;
     let shiftX = 0;
     let shiftY = 0;
     let shown = aimOnScreen;
     if (aimOnScreen && direction) {
-      const point = this.aimWorld.copy(direction).multiplyScalar(AIM_DISTANCE).add(playerPosition);
+      const reach = Number.isFinite(distance) && distance > 0 ? distance : AIM_DISTANCE;
+      const point = this.aimWorld.copy(direction).multiplyScalar(reach).add(playerPosition);
       // 方向含 NaN / Infinity：按没有辅助处理（PlayerSystem 同样回落到机头方向）
       if (Number.isFinite(point.x) && Number.isFinite(point.y) && Number.isFinite(point.z)) {
         const screen = this.scratchScreen;
@@ -524,9 +531,9 @@ export class LockOnIndicator {
       }
     }
 
-    const distance = Math.sqrt(shiftX * shiftX + shiftY * shiftY);
+    const shift = Math.sqrt(shiftX * shiftX + shiftY * shiftY);
     const assisted =
-      shown && distance >= (this.crossAssisted ? CROSS_ASSIST_OFF_PX : CROSS_ASSIST_ON_PX);
+      shown && shift >= (this.crossAssisted ? CROSS_ASSIST_OFF_PX : CROSS_ASSIST_ON_PX);
     this.crossAssisted = assisted;
     this.setAttr(this.reticle, 'data-gun-assist', assisted ? 'true' : 'false');
     // '' = 跟随准星锚点的可见性（锚点隐藏时不能单独显示出来）
@@ -543,8 +550,7 @@ export class LockOnIndicator {
 
   /** 十字相对准星锚点的偏移；变化不足 0.25 像素时不改写样式，回到原位时去掉 transform */
   private shiftCross(x: number, y: number): void {
-    const settled =
-      Math.abs(this.crossShiftX - x) < 0.25 && Math.abs(this.crossShiftY - y) < 0.25;
+    const settled = Math.abs(this.crossShiftX - x) < 0.25 && Math.abs(this.crossShiftY - y) < 0.25;
     // 回到原位的最后一小段必须写到 0，否则十字会停在离机头轴线不到 0.25 像素的地方
     const returning = x === 0 && y === 0 && (this.crossShiftX !== 0 || this.crossShiftY !== 0);
     if (settled && !returning) {

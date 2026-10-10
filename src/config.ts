@@ -261,6 +261,8 @@ export const GAME_CONSTANTS = {
     OUTER_ANGLE: (5 * Math.PI) / 180,        // 从 FULL_ANGLE 到它：偏移平滑减到零；再往外不辅助
     EASE_TIME: 0.1,                          // 目标出现 / 消失 / 更换时，十字滑到新位置约 95% 所需时间（秒）
     SWITCH_MARGIN: (0.75 * Math.PI) / 180,   // 换辅助目标：新目标离机头轴线必须近出这么多（防来回跳）
+    REFERENCE_RANGE: 600,                    // 准星参考距离（米）：捕获环中心与无辅助时的十字都在机头前方这么远处
+    CROSS_MIN_RANGE: 100,                    // 辅助生效时十字按瞄准点的距离画（追尾视角才落在目标上），最近按它算
   },
 
   // 相机参数

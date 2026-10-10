@@ -942,7 +942,8 @@ export class HUD {
     window.addEventListener('resize', this.resizeHandler);
     window.addEventListener('orientationchange', this.resizeHandler);
     this.unsubscribeLocale ??= onLocaleChange(() => this.refreshLocaleText());
-    // HUD 在开始菜单阶段就已创建：之后（init 之前）切换过语言时，结算文案按当前语言补写
+    // HUD 在开始菜单阶段就已创建：之后（init 之前）切换过语言时，状态列标签与结算文案按当前语言补写
+    this.renderStatLabels();
     this.renderSettlementTitle();
     this.renderSettlementLabels();
     this.applyLayoutDensity();

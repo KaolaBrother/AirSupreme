@@ -430,8 +430,6 @@ export class GameCoordinator {
   private readonly gunMuzzle = new THREE.Vector3();
   private readonly gunForward = new THREE.Vector3();
   private readonly gunLeadPoint = new THREE.Vector3();
-  /** 渲染帧的机炮辅助方向（机炮十字画在这个方向上） */
-  private readonly gunAimDirection = new THREE.Vector3();
 
   private upgradeMenuPromise: Promise<UpgradeMenu> | null = null;
   private pauseMenuPromise: Promise<PauseMenu> | null = null;
@@ -768,7 +766,6 @@ export class GameCoordinator {
         // 复活补给：特殊武器满弹、热焰弹充满
         this.weapons.refill();
         this.view.snapToTarget();
-        this.resetGunAim();
 
         this.playerSystem.activateShield(this.gameScene.scene);
         this.powerUpSystem?.addActivePowerUp(
@@ -1472,7 +1469,10 @@ export class GameCoordinator {
     this.resetGunAim();
   }
 
-  /** 提前量解算与触屏辅助归零（阵亡 / 复活 / 剧情冻结 / 换关）：机炮十字回到机头轴线上 */
+  /**
+   * 提前量解算与触屏辅助归零（阵亡 / 剧情冻结 / 换关）：机炮十字回到机头轴线上。
+   * 等待复活期间不解算（见 update），所以复活时仍是阵亡那一刻清零后的状态。
+   */
   private resetGunAim(): void {
     this.gunLeadSolver.reset();
     this.playerSystem.setGunAimAssist(null);
@@ -1493,12 +1493,11 @@ export class GameCoordinator {
       this.playerAircraft.visible &&
       !this.playerSystem.isPlayerRespawning();
     const hasLead = visible && this.gunLeadSolver.getPipPoint(this.gunLeadPoint);
-    // 机炮十字的方向 = 插值后的机头方向 + 插值后的辅助偏移（与子弹用的是同一个偏移）
-    const aimDirection = this.gunAimDirection
-      .set(0, 0, -1)
-      .applyQuaternion(this.interpolatedCameraTargetQuaternion);
-    const hasAssist =
-      visible && this.gunLeadSolver.getRenderAssistDirection(aimDirection, alpha, aimDirection);
+    // 机炮十字的方向 = 插值后的机头方向 + 插值后的辅助偏移（与子弹用的是同一个偏移）；没有偏移时为 null。
+    // 十字画在这个方向上瞄准点的距离处，追尾视角下才会落在目标上
+    const gunAimDirection = visible
+      ? this.gunLeadSolver.getRenderAssistDirection(this.interpolatedCameraTargetQuaternion, alpha)
+      : null;
     this.lockOnIndicator.renderUpdate(
       visible,
       this.interpolatedCameraTargetPosition,
@@ -1506,7 +1505,8 @@ export class GameCoordinator {
       this.gameScene.camera,
       hasLead ? this.gunLeadPoint : null,
       this.gunLeadSolver.isPipOnTarget(),
-      hasAssist ? aimDirection : null
+      gunAimDirection,
+      this.gunLeadSolver.getRenderAssistDistance(alpha)
     );
   }
 

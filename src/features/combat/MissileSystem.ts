@@ -722,7 +722,11 @@ export class Missile {
     // 使用 getWorldPosition 获取实时世界坐标（解决 Boss 部件位置不更新的问题）
     const position = this.targetWorldPos;
     target.getWorldPosition(position);
-    if (!Number.isFinite(position.x) || !Number.isFinite(position.y) || !Number.isFinite(position.z)) {
+    if (
+      !Number.isFinite(position.x) ||
+      !Number.isFinite(position.y) ||
+      !Number.isFinite(position.z)
+    ) {
       this.sampledTarget = null;
       return false;
     }

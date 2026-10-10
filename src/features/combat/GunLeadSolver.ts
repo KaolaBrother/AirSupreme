@@ -1,5 +1,5 @@
 import { Vector3 } from 'three';
-import type { Object3D } from 'three';
+import type { Object3D, Quaternion } from 'three';
 import { GAME_CONSTANTS } from '@/config';
 import { getDeclaredHitRadius } from '@/core/CombatContracts';
 
@@ -11,6 +11,8 @@ const PIP_SWITCH_RATIO = 0.85;
 /** 触屏机炮辅助：偏移量小于这个值（约 0.0006°）且没有辅助目标时直接归零 */
 const ASSIST_OFFSET_EPSILON = 1e-5;
 const ASSIST_WEIGHT_EPSILON = 1e-3;
+/** 十字拉近量小于这个值（米）且没有辅助目标时直接归零 */
+const ASSIST_NEAR_EPSILON = 0.05;
 /** 机头“压在”提前量点上的最小判定角（桌面高亮用），目标很远时不至于小到按不住 */
 const ON_TARGET_MIN_ANGLE = (0.9 * Math.PI) / 180;
 /** 子弹的默认命中半径（与 ProjectilePool 一致） */
@@ -45,7 +47,7 @@ interface TrackState {
  *   FULL_ANGLE 时，辅助方向正对瞄准点；FULL_ANGLE 到 OUTER_ANGLE 之间偏移平滑减到零；再往外、
  *   超过 MAX_RANGE 或没有可靠解时不偏移。偏移不会超过 FULL_ANGLE。目标出现 / 消失 / 更换时，
  *   偏移在 EASE_TIME 内滑到新值，不会跳变。子弹（PlayerSystem）与机炮十字（LockOnIndicator）
- *   用的是同一个辅助方向。
+ *   用的是同一个辅助方向；十字画在这个方向上瞄准点的距离处（见 assistNear）。
  * 逐步调用零分配（每个目标的跟踪状态只在第一次见到时创建）。
  */
 export class GunLeadSolver {
@@ -67,7 +69,16 @@ export class GunLeadSolver {
   private readonly assistResidual = new Vector3();
   /** 辅助强度 0..1（收窄散布用；随 θ 的变化规律与偏移相同，同样平滑过渡） */
   private assistWeight = 0;
+  /**
+   * 十字拉近量（米）：十字画在辅助方向上 REFERENCE_RANGE − 拉近量 处。目标值 =
+   * (REFERENCE_RANGE − 瞄准点距离) × 强度，所以辅助压住目标时十字正好在瞄准点的距离上
+   * （追尾视角下相机不在炮口，同一个方向上远近不同的点在屏幕上不重合）。
+   */
+  private assistNear = 0;
+  /** 上一步的拉近量（渲染帧在两步之间插值） */
+  private assistPreviousNear = 0;
   private readonly assistDirection = new Vector3(0, 0, -1);
+  private readonly renderDirection = new Vector3(0, 0, -1);
 
   private readonly scratchPos = new Vector3();
   private readonly nearestVelocity = new Vector3();
@@ -88,6 +99,12 @@ export class GunLeadSolver {
     assistEnabled: boolean
   ): void {
     this.step++;
+    // 炮口位置 / 机头方向不是有限数：这一步不给标记也不辅助（NaN 的比较恒为 false，
+    // 后面的距离 / 夹角判定挡不住）；跟踪样本因为断了一步，之后重新累积
+    if (!isFiniteVector(muzzle) || !isFiniteVector(forward)) {
+      this.clearSolution();
+      return;
+    }
     const step = this.step;
     const bulletSpeed = GAME_CONSTANTS.PROJECTILE.SPEED;
     const bulletRange = GAME_CONSTANTS.PROJECTILE.MAX_DISTANCE;
@@ -111,10 +128,12 @@ export class GunLeadSolver {
     let bestX = 0;
     let bestY = 0;
     let bestZ = 0;
+    let bestReach = 0;
     let heldAngle = Infinity;
     let heldX = 0;
     let heldY = 0;
     let heldZ = 0;
+    let heldReach = 0;
 
     for (let i = 0; i < targets.length; i++) {
       const target = targets[i];
@@ -149,6 +168,7 @@ export class GunLeadSolver {
           heldX = lx / leadRange;
           heldY = ly / leadRange;
           heldZ = lz / leadRange;
+          heldReach = leadRange;
         }
         if (angle < bestAngle) {
           bestAssist = target;
@@ -156,6 +176,7 @@ export class GunLeadSolver {
           bestX = lx / leadRange;
           bestY = ly / leadRange;
           bestZ = lz / leadRange;
+          bestReach = leadRange;
         }
       }
 
@@ -214,8 +235,18 @@ export class GunLeadSolver {
       bestX = heldX;
       bestY = heldY;
       bestZ = heldZ;
+      bestReach = heldReach;
     }
-    this.updateAssist(deltaTime, forward, assistTarget, assistAngle, bestX, bestY, bestZ);
+    this.updateAssist(
+      deltaTime,
+      forward,
+      assistTarget,
+      assistAngle,
+      bestX,
+      bestY,
+      bestZ,
+      bestReach
+    );
 
     // 辅助方向正对提前量点时子弹会朝它飞：标记目标正被这样瞄准也算“压住”
     if (
@@ -230,8 +261,9 @@ export class GunLeadSolver {
   /**
    * 触屏辅助的偏移量：目标值 g 只由夹角 θ 决定（见 assistPull），同一个目标上 g 连续变化、
    * 偏移直接跟随（不滞后）；辅助目标变化（出现 / 消失 / 更换）时 g 会跳变，差值记进 residual，
-   * 按 EASE_TIME 指数衰减，偏移因此是滑过去的。
+   * 按 EASE_TIME 指数衰减，偏移因此是滑过去的。强度与十字拉近量按同一个时间常数趋近各自的目标值。
    * @param aimX 瞄准点方向（单位向量）的分量；没有辅助目标时不使用
+   * @param aimReach 炮口到瞄准点的距离（米）；没有辅助目标时不使用
    */
   private updateAssist(
     deltaTime: number,
@@ -240,20 +272,26 @@ export class GunLeadSolver {
     angle: number,
     aimX: number,
     aimY: number,
-    aimZ: number
+    aimZ: number,
+    aimReach: number
   ): void {
     const assist = GAME_CONSTANTS.GUN_ASSIST;
     const offset = this.assistOffset;
     const residual = this.assistResidual;
     this.assistPreviousOffset.copy(offset);
+    this.assistPreviousNear = this.assistNear;
 
     // 目标偏移 g：沿“机头 → 瞄准点”的方向转过 pull × θ 的角度
     let goalX = 0;
     let goalY = 0;
     let goalZ = 0;
     let goalWeight = 0;
+    let goalNear = 0;
     if (target !== null) {
       goalWeight = assistPull(angle, assist.FULL_ANGLE, assist.OUTER_ANGLE);
+      const reach = Math.max(assist.CROSS_MIN_RANGE, Math.min(assist.REFERENCE_RANGE, aimReach));
+      // aimReach 非有限数时 reach 为 NaN：不拉近
+      goalNear = Number.isFinite(reach) ? (assist.REFERENCE_RANGE - reach) * goalWeight : 0;
       const shift = angle <= assist.FULL_ANGLE ? angle : assist.FULL_ANGLE * goalWeight;
       const sin = Math.sin(angle);
       if (sin > 1e-6) {
@@ -291,12 +329,23 @@ export class GunLeadSolver {
     if (target === null && this.assistWeight < ASSIST_WEIGHT_EPSILON) {
       this.assistWeight = 0;
     }
+    this.assistNear += (goalNear - this.assistNear) * (1 - decay);
+    if (target === null && this.assistNear < ASSIST_NEAR_EPSILON) {
+      this.assistNear = 0;
+    }
 
     this.assistDirection.copy(forward).add(offset).normalize();
   }
 
   /** 清空（关卡切换 / 复活）：下一步重新累积速度样本 */
   public reset(): void {
+    this.clearSolution();
+    // 步号跳变让所有旧跟踪状态失效（下一次 observe 时样本数归零）
+    this.step += 2;
+  }
+
+  /** 撤掉提前量标记与触屏辅助（偏移直接归零，不做滑动） */
+  private clearSolution(): void {
     this.pipTarget = null;
     this.pipTime = 0;
     this.pipOnTarget = false;
@@ -305,8 +354,8 @@ export class GunLeadSolver {
     this.assistPreviousOffset.set(0, 0, 0);
     this.assistResidual.set(0, 0, 0);
     this.assistWeight = 0;
-    // 步号跳变让所有旧跟踪状态失效（下一次 observe 时样本数归零）
-    this.step += 2;
+    this.assistNear = 0;
+    this.assistPreviousNear = 0;
   }
 
   /** 提前量标记对应的目标；没有可靠解时为 null */
@@ -354,23 +403,37 @@ export class GunLeadSolver {
   }
 
   /**
-   * 渲染帧的辅助方向：上一步与这一步的偏移按 alpha 插值，加到（插值后的）机头方向上。
-   * 与 getAssistDirection 是同一个量——alpha = 1 时就是这一步子弹用的方向。
-   * @param forward 渲染帧的机头方向（单位向量）；可以与 out 是同一个对象
-   * @returns 没有偏移（机炮十字就在机头轴线上）时返回 false，out 不变
+   * 渲染帧的辅助方向（世界坐标单位向量，内部复用向量）：上一步与这一步的偏移按 alpha 插值，
+   * 加到渲染帧的机头方向上。与 getAssistDirection 是同一个量——alpha = 1 时就是这一步子弹用的方向。
+   * @param quaternion 渲染帧（插值后）的机体姿态
+   * @param alpha 两个模拟步之间的插值比例 0..1；非有限数按 1 处理
+   * @returns 没有偏移也没有拉近（机炮十字就在机头轴线上）或结果非有限数时返回 null
    */
-  public getRenderAssistDirection(forward: Vector3, alpha: number, out: Vector3): boolean {
+  public getRenderAssistDirection(quaternion: Quaternion, alpha: number): Vector3 | null {
     const previous = this.assistPreviousOffset;
     const current = this.assistOffset;
-    if (previous.lengthSq() === 0 && current.lengthSq() === 0) return false;
-    const t = alpha <= 0 ? 0 : alpha >= 1 ? 1 : alpha;
-    const x = forward.x + previous.x + (current.x - previous.x) * t;
-    const y = forward.y + previous.y + (current.y - previous.y) * t;
-    const z = forward.z + previous.z + (current.z - previous.z) * t;
-    const length = Math.sqrt(x * x + y * y + z * z);
-    if (!Number.isFinite(length) || length < 1e-6) return false;
-    out.set(x / length, y / length, z / length);
-    return true;
+    // 目标正好在机头轴线上时偏移为零，但十字仍要按目标距离画：有拉近量就给方向
+    const shifted = previous.lengthSq() !== 0 || current.lengthSq() !== 0;
+    if (!shifted && this.assistPreviousNear === 0 && this.assistNear === 0) return null;
+    const t = Number.isFinite(alpha) ? Math.max(0, Math.min(1, alpha)) : 1;
+    const direction = this.renderDirection.set(0, 0, -1).applyQuaternion(quaternion);
+    direction.x += previous.x + (current.x - previous.x) * t;
+    direction.y += previous.y + (current.y - previous.y) * t;
+    direction.z += previous.z + (current.z - previous.z) * t;
+    const length = direction.length();
+    if (!Number.isFinite(length) || length < 1e-6) return null;
+    return direction.divideScalar(length);
+  }
+
+  /**
+   * 渲染帧的机炮十字距离（米）：十字画在辅助方向上这么远处。没有辅助时是 REFERENCE_RANGE；
+   * 辅助压住目标时是炮口到瞄准点的距离（不近于 CROSS_MIN_RANGE），中间随强度平滑过渡。
+   * @param alpha 两个模拟步之间的插值比例 0..1；非有限数按 1 处理
+   */
+  public getRenderAssistDistance(alpha: number): number {
+    const t = Number.isFinite(alpha) ? Math.max(0, Math.min(1, alpha)) : 1;
+    const near = this.assistPreviousNear + (this.assistNear - this.assistPreviousNear) * t;
+    return GAME_CONSTANTS.GUN_ASSIST.REFERENCE_RANGE - near;
   }
 
   private observe(target: Object3D, pos: Vector3, deltaTime: number, step: number): TrackState {
@@ -416,6 +479,10 @@ export class GunLeadSolver {
     track.step = step;
     return track;
   }
+}
+
+function isFiniteVector(v: Vector3): boolean {
+  return Number.isFinite(v.x) && Number.isFinite(v.y) && Number.isFinite(v.z);
 }
 
 /**
