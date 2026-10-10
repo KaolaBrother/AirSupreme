@@ -11,18 +11,26 @@ import {
   Vector3,
   WebGLRenderer,
 } from 'three';
-import type { BufferGeometry, Object3D } from 'three';
+import type { BufferGeometry, Matrix4, Object3D } from 'three';
 import { GameConfig } from '@/config';
 import { EnemyType, ENEMY_CONFIGS } from '@/features/enemy/EnemyTypes';
 import { BossType, BOSS_CONFIGS, type BossConfig } from '@/features/boss/BossTypes';
 import { onLocaleChange, tr, type LocalizedText } from '@/i18n';
 import { MENU_ICONS } from './menu/menuIcons';
-import { disposeModelTree, releaseRenderer } from './menu/modelDisposal';
+import { disposeModelTree, hideSignalLights, releaseRenderer } from './menu/modelDisposal';
 
-// 包围球取景：模型统一缩放到这个包围球半径，相机按视场角后退到横纵都容得下整个球
+// 包围球取景：模型统一缩放到这个包围球半径，相机按视场角后退到球的轮廓占展台短边的固定比例
 const PREVIEW_FIT_RADIUS = 3.1;
-/** 包围球外留的边距（倍数） */
+/**
+ * 包围球轮廓的直径占展台（画布容器）短边的比例。球是贴着顶点算的，所以机体最长的一面
+ * 约占短边的这个比例，转到其它角度时略小（战机约 55%-68%）；四周留出的空当给取景框线和展台光环。
+ */
+const PREVIEW_FILL = 0.7;
+/** 标签上方的取景区放不下上面的比例时（标签折成多行 / 很矮的视口），包围球外至少留的边距（倍数） */
 const PREVIEW_FRAME_MARGIN = 1.08;
+/** 展台光环：宽度是包围球直径的倍数，圆心在模型中心下方（直径的比例） */
+const PREVIEW_RING_SCALE = 1.24;
+const PREVIEW_RING_DROP = 0.21;
 /** 相机俯视方向（原先固定在 (0, 2, 8)） */
 const PREVIEW_VIEW_DIRECTION = new Vector3(0, 2, 8).normalize();
 /** 取景区与画布上沿、与名称标签之间留的间距（px） */
@@ -98,6 +106,50 @@ function computeVisibleBounds(root: Object3D, target: Box3): Box3 {
     }
   });
   return target;
+}
+
+const scratchVertex = new Vector3();
+
+/**
+ * 可见几何体上离 center 最远的顶点有多远：模型绕 center 怎么转都不出这个球。
+ * 比包围盒对角线的一半紧得多（战机又长又扁，差三成左右），同样的展台里模型因此更大、
+ * 各个模型的大小也更一致。实例化网格按整体包围盒的八个角估算（偏保守）。
+ */
+function computeVisibleRadius(root: Object3D, center: Vector3): number {
+  let maxDistanceSq = 0;
+  const reach = (point: Vector3, matrixWorld: Matrix4): void => {
+    const distanceSq = point.applyMatrix4(matrixWorld).distanceToSquared(center);
+    if (distanceSq > maxDistanceSq) {
+      maxDistanceSq = distanceSq;
+    }
+  };
+  root.traverseVisible((object) => {
+    if (object instanceof Sprite) {
+      return;
+    }
+    if (object instanceof InstancedMesh) {
+      const box = object.boundingBox;
+      if (box && !box.isEmpty()) {
+        for (let corner = 0; corner < 8; corner++) {
+          scratchVertex.set(
+            corner & 1 ? box.max.x : box.min.x,
+            corner & 2 ? box.max.y : box.min.y,
+            corner & 4 ? box.max.z : box.min.z
+          );
+          reach(scratchVertex, object.matrixWorld);
+        }
+      }
+      return;
+    }
+    const position = (object as Renderable).geometry?.getAttribute('position');
+    if (!position) {
+      return;
+    }
+    for (let index = 0; index < position.count; index++) {
+      reach(scratchVertex.fromBufferAttribute(position, index), object.matrixWorld);
+    }
+  });
+  return Math.sqrt(maxDistanceSq);
 }
 
 type AircraftCategory = 'player' | 'enemy' | 'boss' | 'missile';
@@ -247,6 +299,7 @@ const PREVIEW_CSS = `
 #model-preview .preview-header {
   margin: 4px 0 0;
   font-family: 'Arial Black', system-ui, 'Arial', sans-serif;
+  font-stretch: 115%;
   font-size: 26px;
   font-weight: 900;
   line-height: 1.05;
@@ -316,13 +369,13 @@ const PREVIEW_CSS = `
   pointer-events: none;
 }
 
-/* 模型下方的全息展台光环 */
+/* 模型下方的全息展台光环：位置与宽度由取景（frameCamera）按模型的包围球写入，未取景时用后面的默认值 */
 #model-preview .preview-canvas-container::after {
   content: '';
   position: absolute;
   left: 50%;
-  top: 60%;
-  width: min(74%, 66vh);
+  top: var(--mp-ring-top, 60%);
+  width: var(--mp-ring-width, min(74%, 66vh));
   aspect-ratio: 4.6 / 1;
   border: 1px solid rgba(143, 228, 255, 0.3);
   border-radius: 50%;
@@ -913,14 +966,17 @@ export class ModelPreview {
 
   /**
    * 包围球取景：模型已缩放到半径 PREVIEW_FIT_RADIUS 的包围球（绕中心自转也不出球），相机沿固定
-   * 俯视方向后退到整个球放得进名称标签上方的取景区（横向为整个画布宽）。投影中心用 setViewOffset
-   * 平移到取景区中心（镜头平移，透视方向不变），模型因此完整显示在标签上方。
+   * 俯视方向后退到球的轮廓直径等于展台短边的 PREVIEW_FILL——各个模型、各种屏幕上大小一致。
+   * 球心在名称标签上方取景区（横向为整个画布宽）的中心：投影中心用 setViewOffset 平移过去
+   * （镜头平移，透视方向不变）；取景区放不下这个直径时（标签折行 / 很矮的视口）缩到放得下并留边，
+   * 模型因此总是完整显示在标签上方。展台光环跟着球的大小与位置走。
    * 画布尚未布局（隐藏 / 无布局的测试环境）时按整个画布取景。
    */
   private frameCamera(): void {
     const width = this.canvasContainer.clientWidth;
     const height = this.canvasContainer.clientHeight;
     const tanHalfVertical = Math.tan(MathUtils.degToRad(this.camera.fov / 2));
+    const ring = this.canvasContainer.style;
     // 包围球轮廓半径对应的视角正切
     let fitTan: number;
     if (width > 0 && height > 0) {
@@ -933,15 +989,27 @@ export class ModelPreview {
       const centerY = (pad + regionBottom) / 2;
       const fullHeight = 2 * (height - centerY);
       this.camera.setViewOffset(width, fullHeight, 0, fullHeight - height, width, height);
-      // 视场角覆盖全画幅高度：取景区的半高 / 半宽（像素）按全画幅换算成视角正切
-      fitTan = (Math.min(regionHeight, width) / fullHeight) * tanHalfVertical;
+      // 球的轮廓直径（像素）：展台短边的固定比例，但不超出取景区（留边）
+      const diameter = Math.min(
+        PREVIEW_FILL * Math.min(width, height),
+        Math.min(regionHeight, width) / PREVIEW_FRAME_MARGIN
+      );
+      // 视场角覆盖全画幅高度：球的半径（像素）按全画幅换算成视角正切
+      fitTan = (diameter / fullHeight) * tanHalfVertical;
+      ring.setProperty(
+        '--mp-ring-width',
+        `${Math.round(Math.min(diameter * PREVIEW_RING_SCALE, width - 2 * pad))}px`
+      );
+      ring.setProperty('--mp-ring-top', `${Math.round(centerY + diameter * PREVIEW_RING_DROP)}px`);
     } else {
       this.camera.clearViewOffset();
       const aspect =
         Number.isFinite(this.camera.aspect) && this.camera.aspect > 0 ? this.camera.aspect : 1;
-      fitTan = Math.min(1, aspect) * tanHalfVertical;
+      fitTan = PREVIEW_FILL * Math.min(1, aspect) * tanHalfVertical;
+      ring.removeProperty('--mp-ring-width');
+      ring.removeProperty('--mp-ring-top');
     }
-    const distance = (PREVIEW_FIT_RADIUS * PREVIEW_FRAME_MARGIN) / Math.sin(Math.atan(fitTan));
+    const distance = PREVIEW_FIT_RADIUS / Math.sin(Math.atan(fitTan));
     this.camera.position.copy(PREVIEW_VIEW_DIRECTION).multiplyScalar(distance);
     this.camera.lookAt(0, 0, 0);
     this.camera.updateProjectionMatrix();
@@ -969,14 +1037,17 @@ export class ModelPreview {
       return;
     }
 
-    // 包围球取景：按可见几何体的包围盒求包围球，把模型统一缩放到固定半径并移到原点。
-    // 缩放 / 平移放在中间的取景组上，不改动工厂组自带的变换（如八爪鱼战舰 scale=5）；
-    // 外层包装组负责旋转（渲染循环旋转 currentMesh），模型绕几何中心转动
+    // 按包围盒摆放的信号灯小球在这个距离上是悬在机体外的大圆点：机库里不显示（也不参与取景）
+    hideSignalLights(mesh);
+
+    // 包围球取景：球心取可见几何体包围盒的中心，半径取离它最远的顶点，把模型统一缩放到
+    // 固定半径并移到原点。缩放 / 平移放在中间的取景组上，不改动工厂组自带的变换
+    // （如八爪鱼战舰 scale=5）；外层包装组负责旋转（渲染循环旋转 currentMesh），模型绕几何中心转动
     const bounds = computeVisibleBounds(mesh, new Box3());
     const fit = new Group();
     if (!bounds.isEmpty()) {
       const center = bounds.getCenter(new Vector3());
-      const radius = bounds.getSize(new Vector3()).length() / 2;
+      const radius = computeVisibleRadius(mesh, center);
       const fitScale = radius > 0 && Number.isFinite(radius) ? PREVIEW_FIT_RADIUS / radius : 1;
       fit.scale.setScalar(fitScale);
       fit.position.copy(center).multiplyScalar(-fitScale);

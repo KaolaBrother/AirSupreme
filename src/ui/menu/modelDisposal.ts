@@ -2,9 +2,31 @@ import { InstancedMesh, Sprite } from 'three';
 import type { BufferGeometry, Material, Object3D, WebGLRenderer } from 'three';
 
 /**
- * 菜单里两处实时 3D（机库模型预览、标题画面的主机）共用的释放逻辑。
+ * 菜单里两处实时 3D（机库模型预览、标题画面的主机）共用的逻辑：释放模型 / 渲染器，
+ * 以及特写镜头下隐藏机体外的信号灯。
  * 本模块导入 three，只能被按需加载的模块引用，不能进入入口包。
  */
+
+/** 按包围盒摆放的航行灯 / 频闪灯 / 防撞灯（AircraftMeshFactory.addNavigationLights 里的命名） */
+const SIGNAL_LIGHT_NAMES: ReadonlySet<string> = new Set([
+  'navLightPort',
+  'navLightStarboard',
+  'strobeLight',
+  'beaconLight',
+]);
+
+/**
+ * 隐藏按包围盒摆放的信号灯小球：对局里它们是远处的光点，特写镜头下却是悬在机体外的大圆点
+ * （位置取包围盒的边，不在翼尖 / 机尾上）。只改这一份模型实例的 visible，不动工厂与共享材质；
+ * 装在机体上的灯（翼尖灯、垂尾灯、Boss 的航行灯）不受影响。
+ */
+export function hideSignalLights(root: Object3D): void {
+  root.traverse((object) => {
+    if (SIGNAL_LIGHT_NAMES.has(object.name)) {
+      object.visible = false;
+    }
+  });
+}
 
 type Renderable = Object3D & {
   geometry?: BufferGeometry;

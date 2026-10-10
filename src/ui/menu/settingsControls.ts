@@ -14,6 +14,8 @@ export interface StepperOptions {
   increaseLabel: string;
   /** 数值下方的刻度格数（难度 5 格、生命 9 格…）；0 = 不显示 */
   pips?: number;
+  /** 左右方向键是否调整数值（默认是）；暂停菜单不接管方向键，传 false */
+  arrowKeys?: boolean;
   onStep: (direction: 1 | -1) => void;
 }
 
@@ -86,7 +88,9 @@ export function createStepper(options: StepperOptions): StepperHandle {
   }
 
   root.append(decrease, readout, increase);
-  bindArrowSteps(root, decrease, increase);
+  if (options.arrowKeys !== false) {
+    bindArrowSteps(root, decrease, increase);
+  }
 
   return {
     root,

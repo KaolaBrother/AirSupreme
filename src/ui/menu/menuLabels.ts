@@ -27,6 +27,10 @@ export const QUALITY_LABELS: Readonly<Record<QualityPreset, LocalizedText>> = {
   quality: { en: 'High', zh: '高质量' },
 };
 
+/** 步进器两侧按钮的读屏名称（{name} 是这一行设置的标签） */
+export const DECREASE_LABEL: LocalizedText = { en: 'Decrease {name}', zh: '降低{name}' };
+export const INCREASE_LABEL: LocalizedText = { en: 'Increase {name}', zh: '提高{name}' };
+
 export const SWITCH_ON: LocalizedText = { en: 'On', zh: '开启' };
 export const SWITCH_OFF: LocalizedText = { en: 'Off', zh: '关闭' };
 
