@@ -35,7 +35,7 @@ Systems implement `IGameSystem` (`init` / `update` / `dispose`):
 |--------|------|
 | `PlayerSystem` | Player control, health, shield (hex ripple via `notifyShieldHit`), armour reduction (`takeCombatDamage`), respawn; crash kill when world `Y <=` live surface from `setCrashSurfaceSampler` |
 | `CombatSystem` | Projectiles, missiles, collisions |
-| `EnemySystem` | Enemy spawn, friendlies, waves; per-step fleet direction (`AttackDirector` attack tokens, jet-missile tokens, Jammer group centre, jamming and locking state); `LevelManager.getCrashSurfaceY` / `getSurfaceSample` / `getSurfaceKind` |
+| `EnemySystem` | Enemy spawn, friendlies, waves (authored line-ups and arrival patterns through `LevelManager`); per-step fleet direction (`AttackDirector` attack tokens, jet-missile tokens, Jammer group centre, jamming and locking state); `LevelManager.getCrashSurfaceY` / `getSurfaceSample` / `getSurfaceKind` |
 | `PowerUpSystem` | Drops and effects |
 | `UnitSystem` | Ground / sea / air units (`src/features/units/`); `update(dt)` is a no-op wrapper — `UnitController` drives it with `updateWithContext` |
 
@@ -64,7 +64,7 @@ The coordinator also owns a `VoiceSystem` (`src/core/Audio/VoiceSystem.ts`, hand
 - Reinforcements, boss-fight support, the Call Wingman pickup and escort jets (`spawnFriendlyAI()`) never play a join line; they take a callsign only if one is free (in practice in Boss mode, where no flight launches).
 - `EnemySystem.spawnFriendly` gives each friendly the lowest free formation slot (0 left, 1 right, then further out and back), and `getFriendlySpawnPose` puts a new friendly 12 m behind its slot, nose along the player's heading; both the formation flight and the spawn pose read the slot layout from `getFormationSlotOffset` (`FriendlyAI.ts`). With no target, `FriendlyAI` flies to its slot in the player's heading frame, steering clear of the chase camera's sight corridor, and moves through `EnemyAI.updateKinematic` (no manoeuvre state machine, no firing); with an enemy jet (a cloaked one does not count) or boss target it fights with the legacy three-state AI. Every friendly jet flies the fixed `WINGMAN_CONFIG` stats and its own airframe (`createFriendlyMesh`), not an enemy type. Numbers: [api.md → Wingmen](api.md#wingmen).
 
-Helpers outside the coordinator: `MenuMusic` (`src/core/campaign/MenuMusic.ts`, owned by `main.ts`), `resolveLevelStartPose` (`src/core/campaign/LevelStartPose.ts`, terrain-checked start heading per level), the `SaveSystem` functions (`src/core/save/SaveSystem.ts`) and `installDevHooks` (`src/core/dev/DevHooks.ts`, dev builds only, exposes `window.__AIR_SUPREME_DEV__`, including the `voice` probes, the `balance` harness and the enemy-fleet hooks `spawnEnemy` / `listJets` / `clearJets` / `holdWaves`).
+Helpers outside the coordinator: `MenuMusic` (`src/core/campaign/MenuMusic.ts`, owned by `main.ts`), `resolveLevelStartPose` (`src/core/campaign/LevelStartPose.ts`, terrain-checked start heading per level), the `SaveSystem` functions (`src/core/save/SaveSystem.ts`) and `installDevHooks` (`src/core/dev/DevHooks.ts`, dev builds only, exposes `window.__AIR_SUPREME_DEV__`, including the `voice` probes, the `balance` harness and the enemy-fleet hooks `spawnEnemy` / `listJets` / `clearJets` / `holdWaves` / `startLevel`).
 
 ```
 main.ts ── setLocale(saved language) ── StartMenu ── MenuMusic
@@ -125,19 +125,22 @@ EnemySystem.updateWithPlayer(dt, playerPosition)
   1. directEnemies:  setCombatSituation on every jet
                      → AttackDirector.update (attack tokens + entry bearings)
                      → grantJetMissiles (fleet missile cap)
-                     → assignJammerGroup (centroid of the non-Jammer jets)
+                     → assignJammerGroup (centroid of the Jammer's own wave group,
+                       else of all non-Jammer jets)
   2. LevelManager.update → each EnemyAI.update:
                      fill DoctrineContext → doctrine.update → steer / throttle → integrate
                      → onFire (ENEMY_FIRED) · onMissileLaunch (launcher.launch) · onTell (ENEMY_TELL)
                      → LanceBeam / CloakFade visuals
-  3. reviewEnemies:  any jet locking → launcher.setLockWarning · Jammer within 800 m → lock-time scale 2
+  3. reviewEnemies:  any jet locking → launcher.setLockWarning · unstunned Jammer within 800 m
+                     → lock-time scale 2
   4. friendlies:     FriendlyAI.update against live, uncloaked jets + boss targets
 ```
 
-- **Tokens.** Only token holders attack the player; the count comes from the level, the difficulty and whether a boss fight is on (`getAttackTokenCount`), and is 0 while the player is not targetable. Holders get entry bearings at least 60° apart. The Heavy tail gun is the one shot that needs no token.
+- **Tokens.** Only token holders attack the player; the count comes from the level, the difficulty and whether a boss fight is on (`getAttackTokenCount`), and is 0 while the player is not targetable. Holders get entry bearings at least 60° apart. The Heavy tail gun is the one shot that needs no token; while the player is not targetable no weapon fires at all, tail gun included.
 - **Missiles.** Ace and Striker missiles join the unit missile pool, so the HUD `locking` → `incoming` warning, flares, EMP and CIWS work on them as on SAMs; `MissileDirector` keeps missiles in flight plus held tokens within the cap (1 in levels 1–5, 2 in levels 6–10, 0 in boss fights).
 - **Shots.** `ENEMY_FIRED` carries the weapon kind; `CombatSystem` hands it to `ProjectilePool`, which flies bullets, heavy shells and lance rounds at their own speed and range (lance rounds hit-tested along the step's segment), and `GameCoordinator` picks the shot sound from it.
-- **Cloak.** A cloaked Wraith (`EnemyAI.isCloaked()`) is filtered out wherever the coordinator, `CombatHudFeed` and `EnemySystem` build target lists — lock candidates, gun candidates, contrails, radar blips, health-bar snapshots, wingman targets — but stays in the collision path.
+- **Cloak.** A cloaked Wraith (`EnemyAI.isCloaked()`) is filtered out wherever the coordinator, `CombatHudFeed` and `EnemySystem` build target lists — lock candidates, gun candidates, contrails, the friendly units' targets, radar blips, health-bar snapshots, wingman targets — and its `CombatTarget.isSeekable()` keeps swarm missiles from picking it, but it stays in the collision path.
+- **Waves.** `LevelManager` spawns each wave's authored line-up (`LevelConfig.waves`) in order, around one group centre or, for a pincer, two (`WaveArrival.planWaveGroupCenters`); jets of one group share a group id, which the Jammer uses to find its own group. The wave event no longer changes the line-up. On `WAVE_START` the coordinator schedules the first-contact hints for any type that the campaign introduces in that wave (`getFirstContactHints`, text only, after the event prompt).
 - **Hit radius.** `createEnemyMesh` declares `userData.hitRadius` = 2.5 × the type's airframe scale; the enemy `CombatTarget`, the health-bar height and the dev balance harness all read it with `getDeclaredHitRadius`.
 
 Contracts, tuning and dev hooks: [api.md → Enemy AI](api.md#enemy-ai); per-type behaviour: `TECHNICAL_DOCUMENTATION.md` → 敌人AI系统.
@@ -158,6 +161,7 @@ beginChapter(L):  prepareLevel(L, 0) → showChapterIntro (prologue before chapt
                     Raven in L1-2, Raven + Swift from L3; Swift's join line once per run)
                   → stinger 'chapter-start'
 WAVE_START(k):    UnitController.spawnForWave(L, k) (resets the warning voice budgets) → radio 'wave-start'
+                  → first-contact hints for types introduced in (L, k), text only
                   (LevelManager holds the wave while UnitController.getWaveHoldCount() > 0)
 WAVE_COMPLETE(k): radio 'wave-complete' → checkpoint 'wave' (wave k + 1) when k + 1 < totalWaves
 LEVEL_COMPLETE:   checkpoint 'boss' (wave = totalWaves) → stinger 'level-complete' → boss briefing → boss
@@ -244,6 +248,6 @@ All bosses satisfy `IBossCore`; bosses 6–10 also implement `IAdvancedBoss` (`s
 - Config: `src/config.ts`
 - Player: `src/core/systems/PlayerSystem.ts` (`setCrashSurfaceSampler`, respawn track and crash grace), `src/features/player/PlayerController.ts`
 - Enemy and friendly AI: `src/features/enemy/EnemyAI.ts` (`setTargetVelocity`, `updateKinematic`, doctrine execution, cloak), `src/features/enemy/doctrine/` (`createJetDoctrine`, `DoctrineTypes.ts`, `JetDoctrine.ts`, one doctrine per type, `MissileRack.ts`), `src/features/enemy/AttackDirector.ts`, `MissileDirector.ts`, `JetThreat.ts`, `EnemyWeapons.ts`, `effects/` (`LanceBeam.ts`, `CloakFade.ts`), `src/features/enemy/FriendlyAI.ts` (formation slots, `WINGMAN_CONFIG`), `src/core/systems/EnemySystem.ts` (`getFriendlySpawnPose`, fleet direction); airframes in `src/features/aircraft/AircraftMeshFactory.ts` (`createEnemyMesh`, `createFriendlyMesh`)
-- Levels / crash surface: `src/features/levels/LevelManager.ts`, `src/features/terrain/TerrainGenerator.ts` (`WORLDSCAPE_WATER_Y`, `getCrashSurfaceY`, `sampleSurface`)
+- Levels / crash surface: `src/features/levels/LevelManager.ts`, `src/features/levels/WaveArrival.ts` (wave group centres), `src/features/terrain/LevelConfig.ts` (`waves`, `getIntroducedEnemyTypes`), `src/features/terrain/TerrainGenerator.ts` (`WORLDSCAPE_WATER_Y`, `getCrashSurfaceY`, `sampleSurface`)
 
 Long-form system notes remain in `TECHNICAL_DOCUMENTATION.md`. Live work ordering is `IMPLEMENTATION_PLAN.md`. Contracts and signatures: [`api.md`](api.md).
