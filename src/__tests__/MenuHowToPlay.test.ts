@@ -329,11 +329,14 @@ describe('How to Play sheet (batch X5, spec 6)', () => {
         expect(keys, key).toContain(key);
       }
       expect(keys).toContain(locale === 'en' ? 'Space' : '空格');
-      // Shift 的键帽怎么写不钉死（"Shift"、"L Shift" 都行）；哪一个 Shift 做什么在下面一组里查
+      // 分左右的修饰键：键帽上写明是哪一边，两种语言同一写法
+      for (const key of ['L Shift', 'L Ctrl', 'R Shift']) {
+        expect(keys, key).toContain(key);
+      }
       expect(
-        keys.some((key) => /shift/i.test(key)),
-        'a Shift key cap'
-      ).toBe(true);
+        keys.filter((key) => /shift|ctrl/i.test(key)),
+        'no Shift or Ctrl cap is left without its side'
+      ).toEqual(['L Shift', 'L Ctrl', 'R Shift']);
     });
 
     it.each(LOCALES)(
@@ -364,7 +367,8 @@ describe('How to Play sheet (batch X5, spec 6)', () => {
   /**
    * 文字与实际按键一致（src/core/Input/InputHandler.ts、src/ui/RadarMinimap.ts）：
    * 加速 = 左 Shift / 左 Ctrl；导弹 = M / 右 Shift；暂停 = Esc / P；升级 = U；关卡地图 = N。
-   * 只查说了什么，不查键帽上的写法、措辞与排版。
+   * 加速与导弹两行的键帽已定稿（"L Shift" / "L Ctrl"、"M" / "R Shift"，两种语言相同），按原样钉住；
+   * 其余只查说了什么，不查措辞与排版。
    */
   describe('the keys it names are the keys the game listens to', () => {
     const LEFT_SHIFT: Readonly<Record<Locale, RegExp>> = {
@@ -389,35 +393,52 @@ describe('How to Play sheet (batch X5, spec 6)', () => {
       expectShowing('keyboard');
     }
 
-    it.each(LOCALES)('boost: says it is the left Shift, and never the right one (%s)', (locale) => {
+    it.each(LOCALES)('boost: the key caps read "L Shift" and "L Ctrl" (%s)', (locale) => {
       openKeyboardPage(locale);
 
       const boost = rowsAbout(BOOST, locale);
 
-      expect(
-        boost.some((row) => row.caps.some((cap) => /shift/i.test(cap))),
-        'a Shift key cap on the boost row'
-      ).toBe(true);
+      expect(boost).toHaveLength(1);
       // 只写 "Shift" 不够：右 Shift 发射导弹，玩家得知道是哪一个
-      expect(textOf(boost)).toMatch(LEFT_SHIFT[locale]);
+      expect(boost[0].caps).toEqual(['L Shift', 'L Ctrl']);
       expect(textOf(boost)).not.toMatch(RIGHT_SHIFT[locale]);
     });
 
-    it.each(LOCALES)('boost: Ctrl is offered as well (%s)', (locale) => {
-      openKeyboardPage(locale);
+    it.each(LOCALES)(
+      'boost: the description spells the side out in words as well (%s)',
+      (locale) => {
+        openKeyboardPage(locale);
 
-      expect(textOf(rowsAbout(BOOST, locale))).toMatch(/\b(?:ctrl|control)\b/i);
-    });
+        const [boost] = rowsAbout(BOOST, locale);
 
-    it.each(LOCALES)('missile: M, with Right Shift as the other key (%s)', (locale) => {
+        // 键帽上只有一个 “L”：说明里把“左”写出来，并且 Shift 与 Ctrl 都提到
+        expect(boost.action).toMatch(locale === 'en' ? /\bleft\s+shift\b/i : /左\s*shift/i);
+        expect(boost.action).toMatch(/\b(?:ctrl|control)\b/i);
+        expect(boost.action).not.toMatch(locale === 'en' ? /\bright\b/i : /右/);
+      }
+    );
+
+    it.each(LOCALES)('missile: the key caps read "M" and "R Shift" (%s)', (locale) => {
       openKeyboardPage(locale);
 
       const missile = rowsAbout(MISSILE, locale);
 
-      expect(missile.some((row) => row.caps.includes('M'))).toBe(true);
-      expect(textOf(missile)).toMatch(RIGHT_SHIFT[locale]);
+      expect(missile).toHaveLength(1);
+      expect(missile[0].caps).toEqual(['M', 'R Shift']);
       expect(textOf(missile)).not.toMatch(LEFT_SHIFT[locale]);
     });
+
+    it.each(LOCALES)(
+      'missile: the description spells the side out in words as well (%s)',
+      (locale) => {
+        openKeyboardPage(locale);
+
+        const [missile] = rowsAbout(MISSILE, locale);
+
+        expect(missile.action).toMatch(locale === 'en' ? /\bright\s+shift\b/i : /右\s*shift/i);
+        expect(missile.action).not.toMatch(locale === 'en' ? /\bleft\b/i : /左/);
+      }
+    );
 
     it.each(LOCALES)('no other row hands a Shift key a second job (%s)', (locale) => {
       openKeyboardPage(locale);
