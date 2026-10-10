@@ -363,6 +363,11 @@ export class GameCoordinator {
     railgun: 0.35,
     emp: 0,
   };
+  /**
+   * 第一人称下特殊武器的枪口焰与电磁炮闪屏的缩减：眼点就在炮口后面，原尺寸会糊住座舱视野。
+   * 与机炮枪口焰（第一人称 0.3 / 第三人称 0.55）同一个比例。
+   */
+  private static readonly FIRST_PERSON_FLASH_SCALE = 0.55;
 
   private gameLoop: GameLoop;
   private gameScene: GameScene;
@@ -425,6 +430,8 @@ export class GameCoordinator {
   private readonly gunMuzzle = new THREE.Vector3();
   private readonly gunForward = new THREE.Vector3();
   private readonly gunLeadPoint = new THREE.Vector3();
+  /** 渲染帧的机炮辅助方向（机炮十字画在这个方向上） */
+  private readonly gunAimDirection = new THREE.Vector3();
 
   private upgradeMenuPromise: Promise<UpgradeMenu> | null = null;
   private pauseMenuPromise: Promise<PauseMenu> | null = null;
@@ -761,6 +768,7 @@ export class GameCoordinator {
         // 复活补给：特殊武器满弹、热焰弹充满
         this.weapons.refill();
         this.view.snapToTarget();
+        this.resetGunAim();
 
         this.playerSystem.activateShield(this.gameScene.scene);
         this.powerUpSystem?.addActivePowerUp(
@@ -1416,7 +1424,8 @@ export class GameCoordinator {
 
   /**
    * 机炮提前量：候选 = 存活敌机 + 敌方空中单位（可显示提前量标记），其后是敌方地面 / 海上单位
-   * （只参与触屏辅助）。触屏设备上把辅助瞄准点交给 PlayerSystem，桌面不改变弹道。
+   * （只参与触屏辅助）。触屏设备上把辅助方向交给 PlayerSystem（机炮十字画的是同一个方向，
+   * 见 renderAimHud），桌面不改变弹道。
    */
   private updateGunAim(deltaTime: number): void {
     const targets = this.gunTargets;
@@ -1449,19 +1458,31 @@ export class GameCoordinator {
     const muzzle = this.gunMuzzle.copy(this.playerSystem.getPosition()).addScaledVector(forward, 2);
     const assist = GameConfig.isMobile;
     this.gunLeadSolver.update(deltaTime, muzzle, forward, targets, airCount, assist);
-    this.playerSystem.setGunAimAssist(assist ? this.gunLeadSolver.getAssistPoint() : null);
+    // 没有辅助（含桌面端）时方向为 null：子弹沿机头方向发射
+    this.playerSystem.setGunAimAssist(
+      this.gunLeadSolver.getAssistDirection(),
+      this.gunLeadSolver.getAssistWeight()
+    );
   }
 
-  /** 阵亡 / 剧情冻结：清掉按键状态、提前量解算与触屏辅助瞄准点 */
+  /** 阵亡 / 剧情冻结：清掉按键状态、提前量解算与触屏辅助 */
   private resetWeaponAim(): void {
     this.missilePressArmed = false;
     this.missileRearmTimer = 0;
+    this.resetGunAim();
+  }
+
+  /** 提前量解算与触屏辅助归零（阵亡 / 复活 / 剧情冻结 / 换关）：机炮十字回到机头轴线上 */
+  private resetGunAim(): void {
     this.gunLeadSolver.reset();
     this.playerSystem.setGunAimAssist(null);
   }
 
-  /** 渲染帧：准星 / 目标角标 / 提前量标记跟随当前相机与插值后的可视位置 */
-  private renderAimHud(): void {
+  /**
+   * 渲染帧：准星 / 机炮十字 / 目标角标 / 提前量标记跟随当前相机与插值后的可视位置。
+   * @param alpha 两个模拟步之间的插值比例（机炮辅助偏移与机体位姿用同一个比例）
+   */
+  private renderAimHud(alpha: number): void {
     if (!this.presentationRuntimeReady) {
       return;
     }
@@ -1472,13 +1493,20 @@ export class GameCoordinator {
       this.playerAircraft.visible &&
       !this.playerSystem.isPlayerRespawning();
     const hasLead = visible && this.gunLeadSolver.getPipPoint(this.gunLeadPoint);
+    // 机炮十字的方向 = 插值后的机头方向 + 插值后的辅助偏移（与子弹用的是同一个偏移）
+    const aimDirection = this.gunAimDirection
+      .set(0, 0, -1)
+      .applyQuaternion(this.interpolatedCameraTargetQuaternion);
+    const hasAssist =
+      visible && this.gunLeadSolver.getRenderAssistDirection(aimDirection, alpha, aimDirection);
     this.lockOnIndicator.renderUpdate(
       visible,
       this.interpolatedCameraTargetPosition,
       this.interpolatedCameraTargetQuaternion,
       this.gameScene.camera,
       hasLead ? this.gunLeadPoint : null,
-      this.gunLeadSolver.isPipOnTarget()
+      this.gunLeadSolver.isPipOnTarget(),
+      hasAssist ? aimDirection : null
     );
   }
 
@@ -1888,7 +1916,7 @@ export class GameCoordinator {
         renderDeltaTime
       );
       this.vfx.renderUpdate(renderDeltaTime);
-      this.renderAimHud();
+      this.renderAimHud(clampedAlpha);
       this.playerSystem.setShieldViewFade(1 - 0.7 * this.view.getBlend());
       this.gameScene.render();
     } finally {
@@ -1951,6 +1979,8 @@ export class GameCoordinator {
         enemySystem.setDifficultyProfile(this.getCurrentDifficultyProfile());
         runtimeSystems.combatSystem.setDamageMultiplier(1);
 
+        // 加载期间排队的单次动作（含开火 / 导弹的按下沿）不带进第一步
+        this.inputHandler.resetActionQueue();
         this.gameLoop.start(
           (dt) => this.update(dt),
           (alpha) => this.render(alpha)
@@ -2138,6 +2168,7 @@ export class GameCoordinator {
     }
     this.sessionState.setLevel(level);
     this.sessionState.setWave(startWave);
+    this.resetGunAim();
     this.presentLevelBriefing(level);
     const shouldRunTutorialIntro = firstLevelOfSession && this.shouldRunTutorialIntro();
     const tutorialWaveDelayMs = shouldRunTutorialIntro ? this.getTutorialWaveDelayMs() : 0;
@@ -2390,10 +2421,15 @@ export class GameCoordinator {
       collectTargets: (out) => this.collectWeaponTargets(out),
       onEmpPulse: (center, radius, seconds) => this.handleEmpPulse(center, radius, seconds),
       onFired: (id, position, direction) => {
-        this.particleSystem?.createMuzzleFlash(position, direction, id === 'railgun' ? 1.6 : 1);
+        const viewScale = this.view.isFirstPerson() ? GameCoordinator.FIRST_PERSON_FLASH_SCALE : 1;
+        this.particleSystem?.createMuzzleFlash(
+          position,
+          direction,
+          (id === 'railgun' ? 1.6 : 1) * viewScale
+        );
         this.view.addShake(GameCoordinator.WEAPON_FIRE_SHAKE[id]);
         if (id === 'railgun') {
-          this.gameScene.setScreenEffects({ flash: 0.25 });
+          this.gameScene.setScreenEffects({ flash: 0.25 * viewScale });
         }
       },
       onImpact: (_id, position, scale) => {
@@ -2563,8 +2599,11 @@ export class GameCoordinator {
           getAimState: () => {
             const indicator = this.lockOnIndicator;
             const aim = indicator.getAimScreen();
+            const cross = indicator.getGunCrossScreen();
             return {
               reticle: aim.visible ? { x: Math.round(aim.x), y: Math.round(aim.y) } : null,
+              gunCross: cross.visible ? { x: Math.round(cross.x), y: Math.round(cross.y) } : null,
+              gunCrossAssisted: indicator.isGunCrossAssisted(),
               acquireRadius: Math.round(indicator.getAcquireRadius()),
               keepRadius: Math.round(indicator.getKeepRadius()),
               lockState: indicator.getLockState(),
@@ -2572,7 +2611,7 @@ export class GameCoordinator {
               hasTarget: indicator.getTrackedTarget() !== null,
               missiles: this.missileCount,
               leadPip: this.gunLeadSolver.getPipTarget() !== null,
-              gunAssist: this.gunLeadSolver.getAssistPoint() !== null,
+              gunAssist: this.gunLeadSolver.getAssistDirection() !== null,
             };
           },
           clickHangarContinue: () => {
@@ -3274,6 +3313,14 @@ export class GameCoordinator {
             });
           },
           onExitToMenu: () => this.options.onExitToMenu?.(),
+          // 保存并退出。对局已结束（阵亡 / 通关）时不存档：此时菜单本来就打不开，这里只是兜底，
+          // 免得结束后的快照被写成检查点
+          getSaveStatus: () =>
+            this.sessionState.isPlaying()
+              ? this.campaign.describeExitSave()
+              : { kind: 'no-save-mode' },
+          onSaveAndExit: () =>
+            this.sessionState.isPlaying() ? this.campaign.saveForExit() : { kind: 'no-save-mode' },
           applyAudio: (sfx, music) => {
             this.audioManager.setSFXVolume(sfx);
             this.audioManager.setMusicVolume(music);

@@ -201,6 +201,10 @@ function clearInput(input: InputState): void {
   input.missile = false;
   input.throttle = false;
   input.special = false;
+  // 模拟量与辅助飞行也清掉：脚本只写布尔方向，残留的摇杆值 / 辅助标记会盖过它
+  input.pitchAxis = 0;
+  input.yawAxis = 0;
+  input.flightAssist = false;
 }
 
 /** 把单位方向的竖直分量抬到至少 sinClimb（水平分量按比例缩放，保持航向） */

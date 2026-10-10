@@ -247,6 +247,38 @@ ${toneBlock('muted', '195, 204, 214')}
   bottom: calc(max(20px, env(safe-area-inset-bottom)) + var(--touch-deck-h, 240px) + 8px);
 }
 
+/*
+ * 手机竖屏追尾视角：机体下方的告警通道（第一行在屏幕中线下方约 45–75px）到按键簇之间，
+ * 最多放得下两行正文；第三行会盖住导弹告警
+ */
+@media (orientation: portrait) and (max-width: 699.98px) {
+  :root:not([data-hud-camera='first-person']) #radio-comms[data-density='touch-portrait'] .rc-text {
+    -webkit-line-clamp: 2;
+  }
+}
+
+/*
+ * 平板（index.html 的平板档）：摇杆 / 按键簇从两侧收进 28px + 安全区，并整体抬高 10% 屏高。
+ * - 横屏：面板左右缘按这组边距避让（手机档的 20px 会让面板离摇杆、按键簇只剩 6px）。
+ * - 竖屏追尾视角：按键簇上方那一带被抬高的按键簇和告警通道占着，面板改放到按键簇左侧、
+ *   静止摇杆的上方。
+ */
+@media (min-width: 700px) and (min-height: 700px) {
+  #radio-comms[data-density='touch-landscape'] {
+    left: calc(28px + env(safe-area-inset-left, 0px) + var(--touch-stick-size, 150px) + 14px);
+    right: calc(28px + env(safe-area-inset-right, 0px) + var(--touch-deck-w, 334.8px) + 14px);
+  }
+
+  :root:not([data-hud-camera='first-person']) #radio-comms[data-density='touch-portrait'] {
+    left: calc(28px + env(safe-area-inset-left, 0px));
+    right: calc(28px + env(safe-area-inset-right, 0px) + var(--touch-deck-w, 334.8px) + 14px);
+    bottom: calc(
+      max(10vh, calc(env(safe-area-inset-bottom, 0px) + 20px)) + var(--touch-stick-size, 150px) +
+        14px
+    );
+  }
+}
+
 #radio-comms:not([data-density='desktop']) .rc-panel {
   gap: 10px;
   padding: 7px 10px 8px 8px;
