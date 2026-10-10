@@ -12,7 +12,9 @@ import {
  * - 雷达盘（#radar-minimap）；
  * - 触控布局下的摇杆（#joystick）和每个可见的按键（.touch-btn）；
  * - HUD 面板：得分 / 速度 / 强化 / 右上状态 / 生命条，以及顶部消息栈（#hud-top-stack）里
- *   正在显示的每一块（Boss 阶段条、简报、事件目标……）。
+ *   正在显示的每一块（Boss 阶段条、简报、事件目标……）；
+ * - 手机竖屏下正在显示的无线电面板（#radio-comms）：它在按键簇左侧、摇杆上方，正是箭头从
+ *   摇杆和按键簇移出来的落点。平板和横握的无线电面板照旧不算避让区。
  *
  * 约每秒量一次这些元素的位置（不逐帧读布局）；触摸按下 / 抬起时浮动摇杆会移位，另外补量一次。
  * 箭头连同距离标签碰到任何一块避让区（外扩 8px）时，朝屏幕中心移出去：沿屏幕边滑到空位，
@@ -27,12 +29,16 @@ const TOUCH_STICK_ID = 'joystick';
 const TOUCH_BUTTON_SELECTOR = '.touch-btn';
 const HUD_PANEL_IDS = ['hud-score', 'hud-speed', 'hud-upgrades', 'hud-status', 'hud-health'];
 const HUD_TOP_STACK_ID = 'hud-top-stack';
+const RADIO_ELEMENT_ID = 'radio-comms';
+const RADIO_PORTRAIT_DENSITY = 'touch-portrait';
+/** 手机档的屏宽上限：与 radioStyles 的手机竖屏规则（max-width: 699.98px）一致，再宽就是平板 */
+const PHONE_MAX_WIDTH_PX = 700;
 const AVOID_MARGIN_PX = 8;
 const AVOID_RECT_REFRESH_UPDATES = 30;
 /** 摇杆松手后缓动回原位（index.html：0.18 秒）：等这么多次刷新再量 */
 const AVOID_SETTLE_UPDATES = 15;
 /**
- * 雷达盘 + 摇杆 + 8 个按键 + 5 块 HUD 面板 + 顶部消息栈里的几块，留一点余量；
+ * 雷达盘 + 摇杆 + 8 个按键 + 5 块 HUD 面板 + 顶部消息栈里的几块 + 无线电面板，留一点余量；
  * 每块 4 个数（left, top, right, bottom）
  */
 const AVOID_MAX_RECTS = 24;
@@ -163,6 +169,16 @@ export class ChevronAvoidance {
       for (let index = 0; index < stackItems.length; index++) {
         this.addRect(stackItems[index], KIND_PANEL);
       }
+    }
+    // 手机竖屏的无线电面板：只在显示时有尺寸（不显示时 addRect 量到空矩形，跳过），
+    // 随台词逐行长高，跟着每次重量更新
+    const radio = document.getElementById(RADIO_ELEMENT_ID);
+    if (
+      radio &&
+      window.innerWidth < PHONE_MAX_WIDTH_PX &&
+      radio.getAttribute('data-density') === RADIO_PORTRAIT_DENSITY
+    ) {
+      this.addRect(radio, KIND_PANEL);
     }
     this.mergeRects();
   }
