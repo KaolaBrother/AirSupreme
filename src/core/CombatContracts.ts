@@ -54,6 +54,11 @@ export interface CombatTarget {
   applyDamage(amount: number, source: DamageSource, hitPoint?: Vector3): void;
   /** EMP 等控制效果；不支持控制效果的目标可省略 */
   applyStun?(seconds: number): void;
+  /**
+   * 自动索敌（蜂群导弹开火时分配目标、丢失目标后重新索敌）能不能选它；省略 = 可以。
+   * 隐形中的敌机返回 false：范围伤害、光束和已经在飞的弹药照样打得到它。
+   */
+  isSeekable?(): boolean;
 }
 
 /** 热焰弹等诱饵点：导弹会以 strength 为权重偏转到诱饵 */
