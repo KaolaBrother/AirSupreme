@@ -976,16 +976,14 @@ describe('off-screen chevrons and the touch controls', () => {
   }
 
   /*
-   * FINDING（手机竖屏 390×844）：摇杆和按键簇之间只有约 46px，实现把两者并成一个外接矩形
-   * （x 12–371，y 578–832）。摇杆的上沿在 y = 728，它上方、按键簇左边那块约 142×142px 的空地
-   * 也被算成了遮挡：贴左边、y 在 581–776 之间的箭头全部被推到 y = 558——压在摇杆上的挪了
-   * 218px（挪 78px 就有空位），本来就离每个遮挡 8px 以上的也被挪走 23–120px。
-   * 规格说并成外接矩形会吞掉一块空角时不再合并；实现里这条只对含 HUD 面板的合并生效，
-   * 摇杆 + 按键簇不在其内。
+   * 手机竖屏 390×844：摇杆和按键簇之间只有约 46px，但两者不并成一块——并成外接矩形
+   * （x 12–371，y 578–832）会吞掉摇杆上方、按键簇左边那块约 142×142px 的空地。
+   * 曾经的缺陷（已修）：两者并成了一块，贴左边、y 在 581–776 之间的箭头全部被推到 y = 558——
+   * 压在摇杆上的挪了 218px（挪 78px 就有空位），本来就离每个遮挡 8px 以上的也被挪走 23–120px。
    */
   const FREE_CORNER_ABOVE_THE_STICK =
     'chevrons moved further than they needed to (phone portrait: the stick and the button ' +
-    'cluster are treated as one box, which swallows the free corner above the stick)';
+    'cluster must stay two blocks, or the free corner above the stick is swallowed)';
 
   /** 哪些箭头本来落在“摇杆和按键簇合起来的外接矩形”附近（8px 之内） */
   function byStickAndButtons(
@@ -1067,11 +1065,10 @@ describe('off-screen chevrons and the touch controls', () => {
      * 雷达盘是单独的一块，箭头只横着滑到它朝屏幕中心的一侧（另有用例），本来会落在雷达上的
      * 不在这里比。
      *
-     * 手机竖屏上这条不成立（FINDING，见 FREE_CORNER_ABOVE_THE_STICK）：这个场景里被挪动的
-     * 箭头都在摇杆和按键簇附近。
+     * 手机竖屏上被挪动的箭头都在摇杆和按键簇附近：这两块不并成一块才成立
+     * （见 FREE_CORNER_ABOVE_THE_STICK）。
      */
-    const noFurtherThanNeeded = target === PHONE_PORTRAIT ? it.fails : it;
-    noFurtherThanNeeded('moves a chevron no further than it needs to', () => {
+    it('moves a chevron no further than it needs to', () => {
       const free = unobstructed(target);
       const { controls, radar } = touchScene(target);
       const placed = drawnChevrons();
@@ -1654,14 +1651,12 @@ describe('off-screen chevrons and the touch controls', () => {
 
       /*
        * “不多挪”（见 leastMove）。按键簇按一整块算；本来会落在雷达上的不比（雷达盘是单独的一块，
-       * 箭头只横着滑开）。手机竖屏上，摇杆和按键簇合起来的外接矩形附近的箭头另见下一条。
+       * 箭头只横着滑开）。
        */
       it('moves a chevron no further than it needs to', () => {
         const { free, placed, blocks, radar, labels } = flightSurvey(wanted, target);
-        const aroundTheControls = byStickAndButtons(free, blocks);
         const compared = (index: number): boolean =>
-          clearanceOf(free[index], [radar]) >= CLEARANCE_PX - ROUNDING_PX &&
-          !(target === PHONE_PORTRAIT && aroundTheControls(index));
+          clearanceOf(free[index], [radar]) >= CLEARANCE_PX - ROUNDING_PX;
         expect(
           free.filter(
             (before, index) => compared(index) && moveOf(before, placed[index]) > MOVE_SLACK_PX
@@ -1681,11 +1676,45 @@ describe('off-screen chevrons and the touch controls', () => {
         ).toEqual([]);
       });
 
+      /*
+       * 按键与按键总是算成一簇：簇的外接矩形里离每个按键都够远的那一角，箭头也不停在里面
+       * （不会从一个按键下面被推到另一个按键下面）。两种横屏上，贴边的那一圈位置正好穿过这样的一角。
+       */
+      it('keeps every chevron out of the button cluster, even where no single button is near', () => {
+        const { free, placed, later, obstacles, blocks, labels } = flightSurvey(wanted, target);
+        const cluster = blocks.filter(([name]) => name === 'the button cluster');
+        expect(cluster, 'the button cluster').toHaveLength(1);
+        const notButtons = new Set(blocks.map(([name]) => name));
+        const buttons = obstacles.filter(([name]) => !notButtons.has(name)).map(([, rect]) => rect);
+        expect(buttons.length, 'touch buttons').toBeGreaterThan(5);
+
+        const inTheEmptyPart = free.filter(
+          (chevron) =>
+            clearanceOf(chevron, [cluster[0][1]]) < CLEARANCE_PX - ROUNDING_PX &&
+            clearanceOf(chevron, buttons) >= ROOMY_CLEARANCE_PX
+        );
+        if (target === TABLET_LANDSCAPE || target === PHONE_LANDSCAPE) {
+          expect(
+            inTheEmptyPart.length,
+            'chevrons inside the cluster that are clear of each button'
+          ).toBeGreaterThan(2);
+        }
+        expectClearOf(placed, cluster, labels);
+        expectClearOf(later, cluster, labels);
+      });
+
       if (target === PHONE_PORTRAIT) {
-        // FINDING：见 FREE_CORNER_ABOVE_THE_STICK
-        it.fails('leaves the free corner above the stick to the chevrons', () => {
+        // 见 FREE_CORNER_ABOVE_THE_STICK
+        it('leaves the free corner above the stick to the chevrons', () => {
           const { free, placed, blocks, labels } = flightSurvey(wanted, target);
           const aroundTheControls = byStickAndButtons(free, blocks);
+          expect(
+            free.filter(
+              (before, index) =>
+                aroundTheControls(index) && moveOf(before, placed[index]) > MOVE_SLACK_PX
+            ).length,
+            'moved chevrons around the stick and the buttons'
+          ).toBeGreaterThan(5);
           expect(
             overMoved(
               free,
@@ -1697,6 +1726,58 @@ describe('off-screen chevrons and the touch controls', () => {
             ),
             FREE_CORNER_ABOVE_THE_STICK
           ).toEqual([]);
+        });
+
+        /*
+         * 下面两条不靠逐像素找空位，直接看摇杆上方那一角：摇杆和按键簇合起来的外接矩形之内、
+         * 离每块遮挡都有余地的箭头不动；压在摇杆上的箭头只挪到摇杆正上方——还在按键簇上沿以下，
+         * 没有被当成“摇杆 + 按键簇”一整块推到簇的上面去。
+         */
+        it('leaves a chevron that stands in the corner above the stick where it was', () => {
+          const { free, placed, later, blocks, labels } = flightSurvey(wanted, target);
+          const inTheUnion = byStickAndButtons(free, blocks);
+          const all = blocks.map(([, rect]) => rect);
+          let standing = 0;
+          free.forEach((before, index) => {
+            if (!inTheUnion(index) || clearanceOf(before, all) < ROOMY_CLEARANCE_PX) return;
+            standing++;
+            expect(placed[index].centre, labels[index]).toEqual(before.centre);
+            expect(later[index].centre, `${labels[index]}, after flying on`).toEqual(before.centre);
+          });
+          expect(standing, 'chevrons standing in the corner above the stick').toBeGreaterThan(2);
+        });
+
+        it('moves a chevron off the stick to just above it, not above the whole button cluster', () => {
+          const { free, placed, blocks, labels } = flightSurvey(wanted, target);
+          const rectOf = (wantedName: string): Rect =>
+            (blocks.find(([name]) => name === wantedName) as [string, Rect])[1];
+          const stick = rectOf('#joystick');
+          const cluster = rectOf('the button cluster');
+          // 这个布局的前提：摇杆的上沿比按键簇的上沿低得多，簇在摇杆右边不远
+          expect(
+            stick.top - cluster.top,
+            'the cluster starts well above the stick'
+          ).toBeGreaterThan(LARGEST_CHEVRON_PX.height + 2 * CLEARANCE_PX);
+          expect(cluster.left - (stick.left + stick.width), 'gap between the two').toBeLessThan(
+            LARGEST_CHEVRON_PX.width
+          );
+
+          let onTheStick = 0;
+          free.forEach((before, index) => {
+            if (clearanceOf(before, [stick]) >= CLEARANCE_PX - ROUNDING_PX) return;
+            onTheStick++;
+            const after = placed[index];
+            expect(
+              clearanceOf(after, [stick]),
+              `${labels[index]}: clear of the stick`
+            ).toBeGreaterThan(CLEARANCE_PX - ROUNDING_PX);
+            expect(after.centre.y, `${labels[index]}: above the stick`).toBeLessThan(stick.top);
+            expect(
+              wholeOf(after).top,
+              `${labels[index]}: still below the top of the button cluster`
+            ).toBeGreaterThan(cluster.top);
+          });
+          expect(onTheStick, 'chevrons heading for the stick').toBeGreaterThan(5);
         });
       }
     });
@@ -2089,6 +2170,205 @@ describe('off-screen chevrons and the touch controls', () => {
           ).toBeLessThan(radar.left + radar.width + CLEARANCE_PX + MOVE_SLACK_PX);
         });
         expect(onTheRadar, 'chevrons that would land on the radar only').toBeGreaterThan(4);
+      });
+    });
+
+    // ───────────────────────────── 按键算一簇；别的块之间留着空角 ─────────────────────────────
+
+    /*
+     * 手机横屏右下角两块矩形，一高一低斜着摆：横向、纵向都只隔 40px（之间放不下箭头），
+     * 合起来的外接矩形右上、左下各空出一个放得下箭头的角，贴右边、贴下边的箭头正好经过这两个角。
+     * 两块都是触控按键时算一簇，两个角里的箭头都挪到外接矩形之外；换成别的东西
+     * （摇杆、雷达、HUD 面板，或其中之一配一个按键），空角留给箭头，角里的箭头不动。
+     */
+    describe('two blocks set diagonally, with a free corner between them', () => {
+      const FINE = { rings: [75, 110], rollStep: 5 };
+      const UPPER: Rect = { left: 600, top: 180, width: 80, height: 70 };
+      const LOWER: Rect = { left: 720, top: 290, width: 110, height: 90 };
+      const BOTH: Rect = { left: 600, top: 180, width: 230, height: 200 };
+      const PAIR: Array<[string, Rect]> = [
+        ['the upper block', UPPER],
+        ['the lower block', LOWER],
+      ];
+
+      /** 触控控件里只留下头 count 个按键，摇杆留在左下角原处 */
+      function mountButtons(count: number): Controls {
+        const controls = mountControls();
+        controls.buttons.forEach((button, index) => {
+          if (index >= count) button.style.display = 'none';
+        });
+        return controls;
+      }
+
+      /**
+       * 没有遮挡时站在两个空角里的箭头：压在外接矩形上，离两块都有余地，那个位置放得下最大的箭头。
+       * 贴右边的在右上角，贴下边的在左下角。
+       */
+      function inTheCorners(free: readonly DrawnChevron[]): {
+        upperRight: number[];
+        lowerLeft: number[];
+      } {
+        const upperRight: number[] = [];
+        const lowerLeft: number[] = [];
+        free.forEach((chevron, index) => {
+          if (
+            clearanceOf(chevron, [BOTH]) >= 0 ||
+            clearanceOf(chevron, [UPPER, LOWER]) < ROOMY_CLEARANCE_PX ||
+            isNarrowSlot(wholeOf(chevron), [boxOf(UPPER), boxOf(LOWER)])
+          ) {
+            return;
+          }
+          (chevron.centre.y < LOWER.top ? upperRight : lowerLeft).push(index);
+        });
+        expect(upperRight.length, 'chevrons in the free upper right corner').toBeGreaterThan(2);
+        expect(lowerLeft.length, 'chevrons in the free lower left corner').toBeGreaterThan(2);
+        return { upperRight, lowerLeft };
+      }
+
+      it('treats two touch buttons as one cluster: chevrons leave the corners too', () => {
+        kind = wanted;
+        const free = unobstructed(PHONE_LANDSCAPE, FINE);
+        let stick: Rect | undefined;
+        const placed = chevronsWith(
+          PHONE_LANDSCAPE,
+          () => {
+            const controls = mountButtons(2);
+            stick = controls.layout.stick;
+            rects.set(controls.buttons[0], UPPER);
+            rects.set(controls.buttons[1], LOWER);
+          },
+          FINE
+        );
+        const labels = labelsOfTargets();
+        const { upperRight, lowerLeft } = inTheCorners(free);
+        for (const index of [...upperRight, ...lowerLeft]) {
+          expect(placed[index].centre, `${labels[index]}: moved out of the corner`).not.toEqual(
+            free[index].centre
+          );
+        }
+        expect(tooClose(placed, [['the two buttons together', BOTH]], labels)).toEqual([]);
+        expectInsideViewport(placed, labels, PHONE_LANDSCAPE);
+        // 出去的路是最近的那条：右上角的往上、左下角的往左，刚好离开外接矩形
+        expect(
+          overMoved(free, placed, [BOTH, stick as Rect], PHONE_LANDSCAPE, labels),
+          'chevrons moved further than they needed to'
+        ).toEqual([]);
+      });
+
+      const OTHERS: Array<[name: string, mount: () => void]> = [
+        [
+          'the stick and a touch button',
+          () => {
+            const controls = mountButtons(1);
+            rects.set(controls.stick, UPPER);
+            rects.set(controls.buttons[0], LOWER);
+          },
+        ],
+        [
+          'a touch button and the stick',
+          () => {
+            const controls = mountButtons(1);
+            rects.set(controls.buttons[0], UPPER);
+            rects.set(controls.stick, LOWER);
+          },
+        ],
+        [
+          'the radar and a touch button',
+          () => {
+            const controls = mountButtons(1);
+            // 摇杆不占地方（量出来是空矩形）：这里只看雷达和按键
+            rects.delete(controls.stick);
+            mountRadar(UPPER);
+            rects.set(controls.buttons[0], LOWER);
+          },
+        ],
+        [
+          'two HUD panels',
+          () => {
+            mountPanel('hud-score', UPPER);
+            mountPanel('hud-status', LOWER);
+          },
+        ],
+        [
+          // 下面那一块由两个紧挨着的按键拼成：先并成一簇，再和面板比
+          'a HUD panel and a pair of touch buttons',
+          () => {
+            const controls = mountButtons(2);
+            rects.delete(controls.stick);
+            mountPanel('hud-status', UPPER);
+            rects.set(controls.buttons[0], { ...LOWER, width: 50 });
+            rects.set(controls.buttons[1], { ...LOWER, left: LOWER.left + 60, width: 50 });
+          },
+        ],
+      ];
+
+      it.each(OTHERS)('leaves both corners to the chevrons between %s', (_name, mount) => {
+        kind = wanted;
+        const free = unobstructed(PHONE_LANDSCAPE, FINE);
+        const placed = chevronsWith(PHONE_LANDSCAPE, mount, FINE);
+        const labels = labelsOfTargets();
+        const { upperRight, lowerLeft } = inTheCorners(free);
+        for (const index of [...upperRight, ...lowerLeft]) {
+          expect(placed[index].centre, `${labels[index]}: stays in the corner`).toEqual(
+            free[index].centre
+          );
+        }
+        // 两块本身照样避开
+        expect(tooClose(placed, PAIR, labels)).toEqual([]);
+        expect(
+          free.filter(
+            (chevron) => clearanceOf(chevron, [UPPER, LOWER]) < CLEARANCE_PX - ROUNDING_PX
+          ).length,
+          'chevrons heading for one of the two blocks'
+        ).toBeGreaterThan(3);
+        expectInsideViewport(placed, labels, PHONE_LANDSCAPE);
+      });
+
+      // “按键总是并成一簇”说的是挨着的按键：两个按键之间放得下一枚箭头时，那道空隙照样能用
+      it('still uses a gap between two touch buttons that is wide enough for a chevron', () => {
+        kind = wanted;
+        const free = unobstructed(PHONE_LANDSCAPE, FINE);
+        // 贴下边的两个按键，之间留 240px
+        const left: Rect = { left: 330, top: 300, width: 100, height: 80 };
+        const right: Rect = { left: 670, top: 300, width: 100, height: 80 };
+        const placed = chevronsWith(
+          PHONE_LANDSCAPE,
+          () => {
+            const controls = mountButtons(2);
+            rects.delete(controls.stick);
+            rects.set(controls.buttons[0], left);
+            rects.set(controls.buttons[1], right);
+          },
+          FINE
+        );
+        const labels = labelsOfTargets();
+        expect(
+          tooClose(
+            placed,
+            [
+              ['the left button', left],
+              ['the right button', right],
+            ],
+            labels
+          )
+        ).toEqual([]);
+
+        let inTheGap = 0;
+        free.forEach((before, index) => {
+          const whole = wholeOf(before);
+          if (
+            whole.left > left.left + left.width &&
+            whole.right < right.left &&
+            whole.bottom > left.top &&
+            clearanceOf(before, [left, right]) >= ROOMY_CLEARANCE_PX
+          ) {
+            inTheGap++;
+            expect(placed[index].centre, `${labels[index]}: stays in the gap`).toEqual(
+              before.centre
+            );
+          }
+        });
+        expect(inTheGap, 'chevrons standing in the gap').toBeGreaterThan(2);
       });
     });
 
