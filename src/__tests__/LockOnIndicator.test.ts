@@ -9,8 +9,8 @@ import { resetLocale } from './i18nTestUtils';
  * 瞄准与锁定显示（W1 准星、W2 捕获环尺寸与常开导引头、W5 反馈）。
  *
  * - 准星（机炮十字）：机头轴线前方 600 米那一点经当前相机投到屏幕上的位置。
- *   这里只在“机头附近没有敌方目标”的情形下断言十字的位置：触屏机炮辅助会让十字向目标偏移，
- *   那条规则正在重做，不在这里固定。
+ *   触屏机炮辅助会把十字拉到辅助方向上（C4），见文件末尾的 “gun cross with aim assist”；
+ *   辅助方向本身怎么算在 GunAimAssist.test.ts。
  * - 捕获环 / 保持环 / 导引头的参考点始终在真实的机头轴线上：环的位置对照机头轴线的投影断言，
  *   不对照十字元素。
  * - 期望的屏幕坐标用三角函数或 THREE 的 Vector3.project 独立算出，不经过被测代码的投影函数。
@@ -965,11 +965,10 @@ describe('LockOnIndicator', () => {
       expect(part('.lk-label-tag').textContent).toBe('LOCK');
     });
 
-    // FINDING（缺陷）：和 HUD 状态列标签同一个问题。LockOnIndicator 在开始菜单阶段就已创建
-    // （PresentationRuntimeLoader），进入战斗时才 init()；“锁定”标签只在构造函数里和 init 之后的
-    // 语言切换时写入。玩家在开始菜单里切到中文再开局，目标上的标签仍是创建时的 LOCK，
-    // 直到下一次切换语言。修复（init 时补写一次）后去掉 .fails。
-    it.fails('words the LOCK label in the language picked before the indicator comes up', () => {
+    // 曾经的缺陷（b35f8e1 已修）：和 HUD 状态列标签同一个问题。LockOnIndicator 在开始菜单阶段
+    // 就已创建，进入战斗时才 init()；玩家在开始菜单里切到中文再开局，目标上的标签仍是创建时的
+    // LOCK，直到下一次切换语言。
+    it('words the LOCK label in the language picked before the indicator comes up', () => {
       indicator.dispose();
       setLocale('en');
       indicator = new LockOnIndicator();
@@ -1204,6 +1203,498 @@ describe('LockOnIndicator', () => {
         const broken = new THREE.Vector3(Number.NaN, 0, -200);
         indicator.renderUpdate(true, pose.position, pose.quaternion, camera, broken, false);
         expect(isShown(anchor('lead'))).toBe(false);
+      });
+    });
+  });
+
+  /**
+   * C4：触屏辅助把机炮十字拉到“子弹真正飞去的方向”上。
+   * 十字画在辅助方向上、瞄准点那么远的一点的投影处（不给距离时 600 米）；捕获环、提示、
+   * 导弹余量和导引头用的准星位置都留在机头轴线上。
+   */
+  describe('gun cross with aim assist', () => {
+    const VIEWS = [
+      ['first person, level', levelPose, eyeCamera],
+      ['first person, banked', bankedPose, eyeCamera],
+      ['chase view, level', levelPose, chaseCamera],
+      ['chase view, banked', bankedPose, chaseCamera],
+    ] as const;
+
+    /** 机头方向向机体右侧偏 rightDeg 度、向机体上方偏 upDeg 度 */
+    function offNose(pose: Pose, rightDeg: number, upDeg = 0): THREE.Vector3 {
+      return new THREE.Vector3(
+        Math.tan(THREE.MathUtils.degToRad(rightDeg)),
+        Math.tan(THREE.MathUtils.degToRad(upDeg)),
+        -1
+      )
+        .normalize()
+        .applyQuaternion(pose.quaternion);
+    }
+
+    function renderAssisted(
+      pose: Pose,
+      camera: THREE.Camera,
+      direction: THREE.Vector3 | null,
+      distance?: number
+    ): void {
+      if (distance === undefined) {
+        indicator.renderUpdate(
+          true,
+          pose.position,
+          pose.quaternion,
+          camera,
+          null,
+          false,
+          direction
+        );
+      } else {
+        indicator.renderUpdate(
+          true,
+          pose.position,
+          pose.quaternion,
+          camera,
+          null,
+          false,
+          direction,
+          distance
+        );
+      }
+    }
+
+    /** 辅助方向上 distance 米处那一点的屏幕位置 */
+    function aimedPixel(
+      pose: Pose,
+      camera: THREE.Camera,
+      direction: THREE.Vector3,
+      distance: number
+    ): Pixel {
+      return toPixel(pose.position.clone().addScaledVector(direction, distance), camera);
+    }
+
+    function gunAssistFlag(): string | null {
+      return anchor('reticle').getAttribute('data-gun-assist');
+    }
+
+    function expectAt(actual: Pixel, expected: Pixel, tolerance = 1): void {
+      expect(Math.abs(actual.x - expected.x), `x: ${actual.x} vs ${expected.x}`).toBeLessThan(
+        tolerance
+      );
+      expect(Math.abs(actual.y - expected.y), `y: ${actual.y} vs ${expected.y}`).toBeLessThan(
+        tolerance
+      );
+    }
+
+    /** 第一人称平飞：让十字正好落在机头轴线右侧 pixelsRight 像素处的辅助方向与距离 */
+    function pixelRig() {
+      const pose = levelPose();
+      const camera = eyeCamera(pose);
+      const aim = noseAxisPixel(pose, camera);
+      const crossAt = (pixelsRight: number, pixelsDown = 0): void => {
+        const point = worldAtPixel(camera, aim.x + pixelsRight, aim.y + pixelsDown, 300);
+        const offset = point.sub(pose.position);
+        renderAssisted(pose, camera, offset.clone().normalize(), offset.length());
+      };
+      return { pose, camera, aim, crossAt };
+    }
+
+    describe('where the cross is drawn', () => {
+      it.each(VIEWS)(
+        'is where the assisted direction meets the aim range (%s)',
+        (_name, makePose, makeCamera) => {
+          const pose = makePose();
+          const camera = makeCamera(pose);
+          const direction = offNose(pose, 2, 1);
+
+          renderAssisted(pose, camera, direction, 300);
+
+          const expected = aimedPixel(pose, camera, direction, 300);
+          const nose = noseAxisPixel(pose, camera);
+          expect(Math.hypot(expected.x - nose.x, expected.y - nose.y)).toBeGreaterThan(10);
+          expect(isShown(chrome('gun-cross'))).toBe(true);
+          expectAt(screenPositionOf(chrome('gun-cross')), expected);
+          const reported = indicator.getGunCrossScreen();
+          expect(reported.visible).toBe(true);
+          expectAt(reported, expected, 0.01);
+        }
+      );
+
+      it.each([100, 200, 450])(
+        'is drawn at the aim point’s range: %s m in the chase view',
+        (distance) => {
+          const pose = bankedPose();
+          const camera = chaseCamera(pose);
+          const direction = offNose(pose, -1.5, 1);
+
+          renderAssisted(pose, camera, direction, distance);
+
+          const expected = aimedPixel(pose, camera, direction, distance);
+          const atReference = aimedPixel(pose, camera, direction, AIM_DISTANCE);
+          // 追尾相机不在炮口：同一个方向上远近不同的点在屏幕上不重合
+          expect(
+            Math.hypot(expected.x - atReference.x, expected.y - atReference.y)
+          ).toBeGreaterThan(1.5);
+          expectAt(screenPositionOf(chrome('gun-cross')), expected, 0.5);
+          expectAt(indicator.getGunCrossScreen(), expected, 0.01);
+        }
+      );
+
+      it('lands on the aim point itself in both views', () => {
+        for (const makeCamera of [eyeCamera, chaseCamera]) {
+          const pose = bankedPose();
+          const camera = makeCamera(pose);
+          const direction = offNose(pose, 2, -1.2);
+          const aimPoint = pose.position.clone().addScaledVector(direction, 260);
+
+          renderAssisted(pose, camera, direction, 260);
+
+          expectAt(screenPositionOf(chrome('gun-cross')), toPixel(aimPoint, camera), 0.5);
+        }
+      });
+
+      it('is drawn at 600 m when no range is given', () => {
+        const pose = levelPose();
+        const camera = chaseCamera(pose);
+        const direction = offNose(pose, 2, 1);
+
+        renderAssisted(pose, camera, direction);
+
+        expectAt(indicator.getGunCrossScreen(), aimedPixel(pose, camera, direction, 600), 0.01);
+      });
+
+      it.each([0, -120, Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY])(
+        'falls back to 600 m for a range of %s',
+        (distance) => {
+          const pose = levelPose();
+          const camera = chaseCamera(pose);
+          const direction = offNose(pose, 2, 1);
+
+          renderAssisted(pose, camera, direction, distance);
+
+          const reported = indicator.getGunCrossScreen();
+          expect(reported.visible).toBe(true);
+          expectAt(reported, aimedPixel(pose, camera, direction, 600), 0.01);
+        }
+      );
+
+      it('follows the direction from frame to frame', () => {
+        const pose = levelPose();
+        const camera = eyeCamera(pose);
+
+        for (const [right, up] of [
+          [0.5, 0],
+          [1.5, -1],
+          [-2.2, 0.8],
+          [0.2, 2.4],
+        ]) {
+          const direction = offNose(pose, right, up);
+          renderAssisted(pose, camera, direction, 350);
+          expectAt(
+            screenPositionOf(chrome('gun-cross')),
+            aimedPixel(pose, camera, direction, 350),
+            0.5
+          );
+        }
+      });
+
+      it('moves the cross even for a shift too small to be flagged', () => {
+        const { aim, crossAt } = pixelRig();
+
+        crossAt(1.5, -1);
+
+        expectAt(screenPositionOf(chrome('gun-cross')), { x: aim.x + 1.5, y: aim.y - 1 }, 0.3);
+      });
+
+      it('returns to the nose axis when the assist ends', () => {
+        const pose = levelPose();
+        const camera = eyeCamera(pose);
+        renderAssisted(pose, camera, offNose(pose, 2, 1), 300);
+        expect(gunAssistFlag()).toBe('true');
+
+        renderAssisted(pose, camera, null);
+
+        const nose = noseAxisPixel(pose, camera);
+        expectAt(screenPositionOf(chrome('gun-cross')), nose, 0.01);
+        expectAt(indicator.getGunCrossScreen(), nose, 0.01);
+        expect(isShown(chrome('gun-cross'))).toBe(true);
+        expect(gunAssistFlag()).toBe('false');
+        expect(indicator.isGunCrossAssisted()).toBe(false);
+      });
+
+      it('is on the nose axis with no assist, exactly as before', () => {
+        const pose = bankedPose();
+        const camera = chaseCamera(pose);
+
+        render(pose, camera);
+
+        const nose = noseAxisPixel(pose, camera);
+        expectAt(screenPositionOf(chrome('gun-cross')), nose, 0.5);
+        expectAt(indicator.getGunCrossScreen(), indicator.getAimScreen(), 1e-9);
+        expect(gunAssistFlag()).toBe('false');
+      });
+    });
+
+    describe('marked as assisted', () => {
+      it('carries data-gun-assist="true" on the reticle anchor while the cross is pulled away', () => {
+        const pose = levelPose();
+        const camera = eyeCamera(pose);
+
+        renderAssisted(pose, camera, offNose(pose, 2, 1), 300);
+
+        expect(gunAssistFlag()).toBe('true');
+        expect(indicator.isGunCrossAssisted()).toBe(true);
+      });
+
+      it('carries data-gun-assist="false" with no assist', () => {
+        const pose = levelPose();
+
+        render(pose, eyeCamera(pose));
+
+        expect(gunAssistFlag()).toBe('false');
+        expect(indicator.isGunCrossAssisted()).toBe(false);
+      });
+
+      it('is not flagged for an assisted direction that is the nose axis itself', () => {
+        const pose = levelPose();
+        const camera = eyeCamera(pose);
+
+        renderAssisted(pose, camera, offNose(pose, 0, 0), 300);
+
+        expect(gunAssistFlag()).toBe('false');
+        expect(isShown(chrome('gun-cross'))).toBe(true);
+      });
+
+      /** 十字从机头轴线慢慢拉开再慢慢收回：记下标记打开 / 关掉时的偏移（像素） */
+      function sweepThresholds(): { on: number; off: number } {
+        const { crossAt } = pixelRig();
+        let on: number | null = null;
+        let off: number | null = null;
+        for (let px = 0; px <= 10; px += 0.25) {
+          crossAt(px);
+          if (on === null && gunAssistFlag() === 'true') on = px;
+        }
+        for (let px = 10; px >= 0; px -= 0.25) {
+          crossAt(px);
+          if (off === null && gunAssistFlag() === 'false') off = px;
+        }
+        expect(on, 'the cross should be flagged somewhere within 10 px').not.toBeNull();
+        expect(off, 'the flag should clear on the way back').not.toBeNull();
+        return { on: on as number, off: off as number };
+      }
+
+      it('is flagged only once the shift can be seen, within a few pixels', () => {
+        const { on } = sweepThresholds();
+
+        expect(on).toBeGreaterThan(0.5);
+        expect(on).toBeLessThanOrEqual(6);
+      });
+
+      it('lets go at a smaller shift than the one that set it (hysteresis)', () => {
+        const { on, off } = sweepThresholds();
+
+        expect(off).toBeLessThan(on - 0.5);
+        expect(off).toBeGreaterThanOrEqual(0);
+      });
+
+      it('does not flicker when the shift hovers between the two thresholds', () => {
+        const { on, off } = sweepThresholds();
+        const middle = (on + off) / 2;
+        const wobble = (on - off) / 4;
+        const { crossAt } = pixelRig();
+
+        // 从没有偏移进来：在中间地带晃，一直不亮
+        crossAt(0);
+        for (let i = 0; i < 40; i += 1) {
+          crossAt(middle + wobble * Math.sin(i));
+          expect(gunAssistFlag(), `rising, frame ${i}`).toBe('false');
+        }
+        // 从大偏移回来：在同一个地带晃，一直亮着
+        crossAt(on + 4);
+        expect(gunAssistFlag()).toBe('true');
+        for (let i = 0; i < 40; i += 1) {
+          crossAt(middle + wobble * Math.sin(i));
+          expect(gunAssistFlag(), `falling, frame ${i}`).toBe('true');
+        }
+        crossAt(0);
+        expect(gunAssistFlag()).toBe('false');
+      });
+
+      it('measures the shift in any direction on screen', () => {
+        const { on } = sweepThresholds();
+        const { crossAt } = pixelRig();
+
+        crossAt(0, -(on + 2));
+
+        expect(gunAssistFlag()).toBe('true');
+      });
+    });
+
+    describe('nose marker', () => {
+      it('sits on the true nose position while the cross is pulled away', () => {
+        for (const [, makePose, makeCamera] of VIEWS) {
+          const pose = makePose();
+          const camera = makeCamera(pose);
+
+          renderAssisted(pose, camera, offNose(pose, 2.2, -1), 250);
+
+          const marker = chrome('nose-mark');
+          expectAt(screenPositionOf(marker), noseAxisPixel(pose, camera), 0.5);
+          expect(isShown(marker)).toBe(true);
+        }
+      });
+
+      it('is displayed only while the cross is flagged as assisted', () => {
+        const pose = levelPose();
+        const camera = eyeCamera(pose);
+        const marker = chrome('nose-mark');
+
+        render(pose, camera);
+        expect(getComputedStyle(marker).display).toBe('none');
+
+        renderAssisted(pose, camera, offNose(pose, 2, 1), 300);
+        expect(getComputedStyle(marker).display).not.toBe('none');
+
+        renderAssisted(pose, camera, null);
+        expect(getComputedStyle(marker).display).toBe('none');
+      });
+
+      it('is a dim mark, not a second gun cross', () => {
+        const pose = levelPose();
+        renderAssisted(pose, eyeCamera(pose), offNose(pose, 2, 1), 300);
+        const marker = chrome('nose-mark');
+
+        expect(marker).not.toBe(chrome('gun-cross'));
+        expect(marker.contains(chrome('gun-cross'))).toBe(false);
+        const opacity = Number(getComputedStyle(marker).opacity);
+        expect(opacity).toBeGreaterThan(0);
+        expect(opacity).toBeLessThan(1);
+      });
+    });
+
+    describe('what stays on the nose axis', () => {
+      it.each(VIEWS)(
+        'keeps the acquire ring, the cue and the missile count where they were (%s)',
+        (_name, makePose, makeCamera) => {
+          const pose = makePose();
+          const camera = makeCamera(pose);
+          indicator.setMissileCount(2);
+          indicator.showCue('no-lock');
+          render(pose, camera);
+          const before = {
+            ring: screenPositionOf(chrome('acquire-ring')),
+            cue: screenPositionOf(chrome('cue')),
+            count: screenPositionOf(chrome('missile-count')),
+            reticle: screenPositionOf(anchor('reticle')),
+            aim: { ...indicator.getAimScreen() },
+          };
+
+          renderAssisted(pose, camera, offNose(pose, 2.4, 1.5), 200);
+
+          const nose = noseAxisPixel(pose, camera);
+          const cross = screenPositionOf(chrome('gun-cross'));
+          expect(Math.hypot(cross.x - nose.x, cross.y - nose.y)).toBeGreaterThan(10);
+          expect(screenPositionOf(chrome('acquire-ring'))).toEqual(before.ring);
+          expect(screenPositionOf(chrome('cue'))).toEqual(before.cue);
+          expect(screenPositionOf(chrome('missile-count'))).toEqual(before.count);
+          expect(screenPositionOf(anchor('reticle'))).toEqual(before.reticle);
+          expectAt(screenPositionOf(anchor('reticle')), nose, 0.5);
+          expect(isShown(chrome('acquire-ring'))).toBe(true);
+          expect(isShown(chrome('cue'))).toBe(true);
+          expect(isShown(chrome('missile-count'))).toBe(true);
+          const aim = indicator.getAimScreen();
+          expect(aim.visible).toBe(true);
+          expect(aim.x).toBe(before.aim.x);
+          expect(aim.y).toBe(before.aim.y);
+        }
+      );
+
+      it('keeps the seeker choosing by the nose axis, not by the cross', () => {
+        const pose = levelPose();
+        const camera = eyeCamera(pose);
+        const aim = noseAxisPixel(pose, camera);
+        // 一架离机头轴线 12 像素，另一架在 22 像素外；十字被拉到后者身上
+        const nearNose = enemyAtPixel(camera, aim.x + 12, aim.y);
+        const nearCross = enemyAtPixel(camera, aim.x - 22, aim.y);
+        const offset = nearCross.position.clone().sub(pose.position);
+
+        for (let i = 0; i < 30; i += 1) {
+          indicator.update(pose.position, [nearCross, nearNose], camera, DT, pose.quaternion);
+          renderAssisted(pose, camera, offset.clone().normalize(), offset.length());
+          nowMs += DT * 1000;
+        }
+
+        expectAt(screenPositionOf(chrome('gun-cross')), { x: aim.x - 22, y: aim.y }, 0.5);
+        expect(indicator.getSeeker().getTarget()).toBe(nearNose);
+      });
+    });
+
+    describe('when the direction cannot be shown', () => {
+      it('hides the cross when the assisted direction is behind the camera', () => {
+        const pose = levelPose();
+        const camera = eyeCamera(pose);
+        const backwards = new THREE.Vector3(0, 0, 1).applyQuaternion(pose.quaternion);
+
+        renderAssisted(pose, camera, backwards, 300);
+
+        expect(isShown(chrome('gun-cross'))).toBe(false);
+        expect(indicator.getGunCrossScreen().visible).toBe(false);
+        expect(gunAssistFlag()).toBe('false');
+        expect(indicator.isGunCrossAssisted()).toBe(false);
+        // 机头轴线上的环照常显示
+        expect(isShown(chrome('acquire-ring'))).toBe(true);
+      });
+
+      it('shows it again on the next frame with a direction in view', () => {
+        const pose = levelPose();
+        const camera = eyeCamera(pose);
+        renderAssisted(pose, camera, new THREE.Vector3(0, 0, 1), 300);
+        expect(isShown(chrome('gun-cross'))).toBe(false);
+
+        const direction = offNose(pose, 2, 1);
+        renderAssisted(pose, camera, direction, 300);
+
+        expect(isShown(chrome('gun-cross'))).toBe(true);
+        expectAt(screenPositionOf(chrome('gun-cross')), aimedPixel(pose, camera, direction, 300));
+      });
+
+      it.each([
+        ['NaN', new THREE.Vector3(Number.NaN, 0, -1)],
+        ['Infinity', new THREE.Vector3(0, Number.POSITIVE_INFINITY, -1)],
+        ['-Infinity', new THREE.Vector3(0, 0, Number.NEGATIVE_INFINITY)],
+      ])('falls back to the nose axis for a direction containing %s', (_name, direction) => {
+        const pose = bankedPose();
+        const camera = chaseCamera(pose);
+
+        renderAssisted(pose, camera, direction, 300);
+
+        const nose = noseAxisPixel(pose, camera);
+        expect(isShown(chrome('gun-cross'))).toBe(true);
+        expectAt(screenPositionOf(chrome('gun-cross')), nose, 0.5);
+        const reported = indicator.getGunCrossScreen();
+        expect(reported.visible).toBe(true);
+        expectAt(reported, nose, 0.01);
+        expect(gunAssistFlag()).toBe('false');
+      });
+
+      it('reports no cross while the indicator is not visible', () => {
+        const pose = levelPose();
+        const camera = eyeCamera(pose);
+        renderAssisted(pose, camera, offNose(pose, 2, 1), 300);
+        expect(indicator.getGunCrossScreen().visible).toBe(true);
+
+        indicator.renderUpdate(
+          false,
+          pose.position,
+          pose.quaternion,
+          camera,
+          null,
+          false,
+          offNose(pose, 2, 1),
+          300
+        );
+
+        expect(indicator.getGunCrossScreen().visible).toBe(false);
+        expect(indicator.isGunCrossAssisted()).toBe(false);
+        expect(isShown(chrome('gun-cross'))).toBe(false);
       });
     });
   });

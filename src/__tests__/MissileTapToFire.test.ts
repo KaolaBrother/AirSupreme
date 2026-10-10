@@ -31,6 +31,8 @@ interface Launch {
   position: THREE.Vector3;
   direction: THREE.Vector3;
   target: THREE.Object3D | undefined;
+  /** 交给导弹的载机速度（米/秒）：导弹继承它再加速 */
+  launcherSpeed: unknown;
   /** 发射时刻（秒，自测试开始） */
   time: number;
 }
@@ -234,6 +236,8 @@ describe('player missile control (GameCoordinator)', () => {
     multiShot?: boolean;
     pose?: Pose;
     view?: 'first-person' | 'third-person';
+    /** 载机当前速度（米/秒）；默认巡航 22.5 */
+    speed?: number;
   }
 
   function createRig(options: RigOptions = {}) {
@@ -242,7 +246,13 @@ describe('player missile control (GameCoordinator)', () => {
     const launches: Launch[] = [];
     const scheduled: Array<{ callback: () => void; delay: number }> = [];
     const enemies: FakeEnemy[] = [];
-    const state = { playing: true, paused: false, respawning: false, time: 0 };
+    const state = {
+      playing: true,
+      paused: false,
+      respawning: false,
+      time: 0,
+      speed: options.speed ?? 22.5,
+    };
     const aircraft = { visible: true };
     const presentationController = autoStub();
     const coordinator = coordinatorWith({
@@ -268,16 +278,23 @@ describe('player missile control (GameCoordinator)', () => {
       playerSystem: {
         getPosition: () => pose.position,
         getQuaternion: () => pose.quaternion,
+        getSpeed: () => state.speed,
         isPlayerRespawning: () => state.respawning,
       },
       gameScene: { camera },
       combatSystem: {
         getMissileSystem: () => ({
-          fire: (position: THREE.Vector3, direction: THREE.Vector3, target?: THREE.Object3D) => {
+          fire: (
+            position: THREE.Vector3,
+            direction: THREE.Vector3,
+            target?: THREE.Object3D,
+            launcherSpeed?: unknown
+          ) => {
             launches.push({
               position: position.clone(),
               direction: direction.clone(),
               target,
+              launcherSpeed,
               time: state.time,
             });
           },
@@ -307,7 +324,7 @@ describe('player missile control (GameCoordinator)', () => {
       const frames = Math.max(1, Math.round(seconds / DT));
       for (let i = 0; i < frames; i += 1) {
         callPrivate(coordinator, 'handleMissileInput', { missile: held }, DT);
-        callPrivate(coordinator, 'renderAimHud');
+        callPrivate(coordinator, 'renderAimHud', 1);
         state.time += DT;
         nowMs += DT * 1000;
       }
@@ -820,6 +837,52 @@ describe('player missile control (GameCoordinator)', () => {
     });
   });
 
+  // 导弹继承载机速度（P2）：发射时把载机当前速度交给 MissileSystem.fire 的第四个参数
+  describe('launcher speed handed to the missile', () => {
+    it.each([22.5, 45, 85, 127.5])(
+      'passes the aircraft’s current speed (%s) with the launch',
+      (speed) => {
+        const rig = createRig({ speed });
+        rig.addEnemyOnNose();
+        rig.waitForLock();
+
+        rig.press(0.05);
+
+        expect(rig.launches).toHaveLength(1);
+        expect(rig.launches[0].launcherSpeed).toBe(speed);
+      }
+    );
+
+    it('reads the speed at the moment of each launch, not once', () => {
+      const rig = createRig({ missiles: 5, speed: 22.5 });
+      rig.addEnemyOnNose();
+      rig.waitForLock();
+
+      rig.press(0.05);
+      rig.state.speed = 45;
+      rig.step(false, 0.5);
+      rig.press(0.05);
+
+      expect(rig.launches.map((launch) => launch.launcherSpeed)).toEqual([22.5, 45]);
+    });
+
+    it('gives every missile of a multi-shot salvo the speed at its own launch', () => {
+      const rig = createRig({ missiles: 3, multiShot: true, speed: 30 });
+      rig.addEnemyOnNose();
+      rig.waitForLock();
+
+      rig.step(true);
+      rig.state.speed = 60;
+      rig.flushScheduled();
+
+      expect(rig.launches.length).toBeGreaterThan(1);
+      expect(rig.launches[0].launcherSpeed).toBe(30);
+      for (const launch of rig.launches.slice(1)) {
+        expect(launch.launcherSpeed).toBe(60);
+      }
+    });
+  });
+
   describe('missile stock', () => {
     function reloadRig(missiles: number, reloadTime: number) {
       const presentationController = autoStub();
@@ -940,7 +1003,7 @@ describe('player missile control (GameCoordinator)', () => {
     function renderRig() {
       const rig = createRig();
       const render = (): void => {
-        callPrivate(rig.coordinator, 'renderAimHud');
+        callPrivate(rig.coordinator, 'renderAimHud', 1);
       };
       render();
       expect(gunCrossShown(), 'the gun cross shows while flying').toBe(true);
