@@ -8,7 +8,7 @@ AirSupreme 是一个基于 Three.js 和 TypeScript 的 3D 飞机战斗游戏。
 
 - 十关故事战役已集成：十章剧情（章节卡片、无线电、任务结算、结局）、第 6-10 关环境与 Boss、17 种地面 / 海上 / 空中单位、5 种特殊武器与热焰弹、第一 / 第三人称相机组、分级升级与机库、自动存档与继续战役、程序化音乐与新音效、实例化粒子与 HDR 后处理（详见下文「十关战役系统」与 `CHANGELOG.md`）
 - 界面默认英文，简体中文可在主菜单的设置面板 / 暂停菜单实时切换（`src/i18n/`，文案就地双语 `LocalizedText`）；国际化角色阵容与具名僚机渡鸦 / 雨燕；无线电与剧情旁白有英文与普通话配音（`VoiceSystem`，语音包在 `public/voice/`）；难度曲线与 Boss 血量按脚本飞行员实测重新调校（见下文「界面语言」「角色配音」「具名僚机」与「平衡与难度曲线」）
-- 主流程：`main.ts -> StartMenu -> 动态导入 GameCoordinator -> 按需初始化战斗 / 表现层 runtime`；开始菜单「继续战役」与失败结算「从检查点继续」都由 `main.ts` 以检查点重新开局
+- 主流程：`main.ts -> StartMenu -> 动态导入 GameCoordinator -> 按需初始化战斗 / 表现层 runtime`；主菜单「继续战役」与失败结算「从检查点继续」都由 `main.ts` 以检查点重新开局
 - `GameCoordinator` 负责装配；战役接线拆到 `src/core/` 下的控制器（`CampaignFlowController`、`UnitController`、`SpecialWeaponsController`、`PlayerViewController`、`CombatVfxController`、`CombatHudFeed`、`AdvancedBossController`），剧情 / HUD / 音乐 / 音效统一经 `ICampaignPresentation`（见 `docs/decisions/0001-campaign-presentation-adapter.md`）
 - 战斗 runtime、Boss 控制器、升级菜单、presentation runtime，以及相机组、单位、特殊武器、尾迹、剧情界面与第 6-10 关 Boss 都在按需加载路径上
 - `PresentationRuntimeLoader` 负责按需创建 `HUD / EnemyHealthBars / LockOnIndicator / BossMissileIndicator / PresentationController`
@@ -475,7 +475,7 @@ if (tmpAxis.lengthSq() > 1e-8) {
 - `SaveSystem`（`src/core/save/SaveSystem.ts`）：单个检查点 `air-supreme:campaign-save`（`CAMPAIGN_SAVE_VERSION = 1`）+ 战役进度 `air-supreme:campaign-progress`；只在调用时访问 `localStorage`，读写失败不抛出；读取时校验并规范化（损坏或外来数据删除键并返回 null；越界钳制、缺失取默认）。
 - 检查点类型：`level-start`（章节卡片之后，wave 0）、`wave`（第 k 波结束后，wave = k + 1，最后一波除外）、`boss`（全部波次清空后，wave = 总波数）、`hangar`（第 1-9 关击破 Boss 时，level 为下一关、wave 为 0；机库「出击」时静默重写一次）；只在正常模式写入。`describeCheckpoint(data, locale?)` 默认按当前语言（传入 locale 时按该语言）生成「第6关 · 熔炉之心 · 第3波」「… · Boss 战」或「第2关 · 沙漠风暴 · 机库整备」（英文为 `Ch. 6 · Heart of the Forge · Wave 3` / `… · Boss` / `Ch. 2 · Sandstorm · Hangar`）；`describeCheckpointText(data)` 返回双语版本。
 - 内容：关卡、波次、难度、分数、生命、导弹、`PlayerUpgrades.export()`、`WeaponSystem.exportState()`、热焰弹、视角、本局统计（击落、平民损失、阵亡、游戏时间），以及可选的 `swiftJoined`（本局雨燕的入列台词是否已播；没有这个字段的旧存档由 `isSwiftJoinAnnounced` 按关卡推断：level > 3 视为已播）。`hangar` 检查点的快照把升级上限（`campaignLevel`）与武器解锁改写为下一关的值。加入 `hangar` 与 `swiftJoined` 之前的存档照常读取（`CAMPAIGN_SAVE_VERSION` 仍为 1）。
-- 继续：开始菜单「继续战役」/ 失败结算「从检查点继续」→ `main.ts` 用存档的难度 / 关卡 / 生命 / 视角重新开局（`resume`）→ `restoreCheckpoint`（reset → import → 关卡上限 → 武器解锁 → 武器等级 → importState → 分数 / 生命 / 导弹 / 视角）→ `resumeFromCheckpoint` 回到存档波次或 Boss 战前；`hangar` 检查点回到机库，「出击」后与刚打完上一关一样进入章节卡片与战斗（不播序章与教学，弹药与热焰弹在章节开始时补满；其余检查点读档后的第一次 `prepareLevel` 保留存档里的弹药）。
+- 继续：主菜单「继续战役」/ 失败结算「从检查点继续」→ `main.ts` 用存档的难度 / 关卡 / 生命 / 视角重新开局（`resume`）→ `restoreCheckpoint`（reset → import → 关卡上限 → 武器解锁 → 武器等级 → importState → 分数 / 生命 / 导弹 / 视角）→ `resumeFromCheckpoint` 回到存档波次或 Boss 战前；`hangar` 检查点回到机库，「出击」后与刚打完上一关一样进入章节卡片与战斗（不播序章与教学，弹药与热焰弹在章节开始时补满；其余检查点读档后的第一次 `prepareLevel` 保留存档里的弹药）。
 - 保存并退出：每次写检查点时 `CampaignFlowController` 同时记下本局的退出点（`{ kind, level, wave }`；最后一波清空后退出点先移到 Boss，第一个检查点之前与战役通关之后为空）。暂停菜单用 `describeExitSave()`（只读）决定显示「保存并退出」还是「返回菜单」并写出确认文案——结果 `CampaignExitSave` 为 `saved`（附存档位置）/ `no-save-mode`（Boss 模式）/ `not-started` / `complete`；确认后 `saveForExit()` 用此刻的快照在退出点重写检查点（不弹存档提示），再读回核对，存储里不是刚写的那份时返回 `failed`，菜单给出「返回 / 仍然退出」。从这份存档继续时回到该波或 Boss 战的开头（`hangar` 退出点回到机库），分数、生命、导弹与升级是退出时的值；存档格式没有新增字段。
 - 清除：普通模式新开一局、通关第 10 章；`recordLevelReached` / `markCampaignCompleted` 维护进度记录。
 
