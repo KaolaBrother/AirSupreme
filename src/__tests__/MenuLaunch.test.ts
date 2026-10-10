@@ -529,15 +529,11 @@ describe('start / continue callbacks and whenLaunched() (batch X5, spec 3)', () 
       expect(onStart).toHaveBeenCalledTimes(1);
     });
 
-    // FINDING: once the menu has left the screen it still accepts activation of its buttons.
-    // Expected: a hidden menu ignores its title actions, so a click event that reaches a
-    // hidden button (Enter auto-repeat on a button that kept focus after display:none, a
-    // script, an automation tool) cannot boot a second run on top of the first.
-    // Observed: StartMenu.handleAction only checks `launching` and `isDisposed`
-    // (src/ui/StartMenu.ts:292-295), not `visible`. Under prefers-reduced-motion `launching`
-    // is never set, so the very next click starts a second run; with the transition it is
-    // the first click after the 340 ms.
-    it.fails('a hidden menu does not start another run (reduced motion)', () => {
+    // 菜单离开屏幕之后，按钮上还可能来激活事件（display:none 之后仍留着焦点的按钮上的 Enter 连发、
+    // 脚本、自动化工具）：隐藏的菜单一律不理，不会在第一局上面再开一局。
+    // （最初是 FINDING：handleAction 只看 launching / isDisposed；减少动态效果时 launching 从不置位，
+    // 紧接着的第二下就开了第二局。已在 src/ui/StartMenu.ts:294 修复。）
+    it('a hidden menu does not start another run (reduced motion)', () => {
       stubMatchMedia({ reducedMotion: true });
       const startMenu = createMenu();
       const onStart = vi.fn();
@@ -550,8 +546,7 @@ describe('start / continue callbacks and whenLaunched() (batch X5, spec 3)', () 
       expect(onStart).toHaveBeenCalledTimes(1);
     });
 
-    // FINDING: same defect as above, on the normal path once the transition is over.
-    it.fails('a hidden menu does not start another run (after the transition)', () => {
+    it('a hidden menu does not start another run (after the transition)', () => {
       const startMenu = createMenu();
       const onStart = vi.fn();
       startMenu.setOnStart(onStart);
@@ -563,6 +558,83 @@ describe('start / continue callbacks and whenLaunched() (batch X5, spec 3)', () 
       button.click();
 
       expect(onStart).toHaveBeenCalledTimes(1);
+    });
+
+    it.each([
+      ['reduced motion', true],
+      ['after the transition', false],
+    ])('a hidden menu does not continue the campaign a second time (%s)', (_name, reduced) => {
+      stubMatchMedia({ reducedMotion: reduced });
+      seedCheckpoint();
+      const startMenu = createMenu();
+      const onStart = vi.fn();
+      const onContinue = vi.fn();
+      startMenu.setOnStart(onStart);
+      startMenu.setOnContinue(onContinue);
+      const button = byId('continue-btn');
+
+      button.click();
+      vi.advanceTimersByTime(WELL_AFTER_LAUNCH_ENDS_MS);
+      expect(isShown(byId('start-menu'))).toBe(false);
+      button.click();
+      vi.advanceTimersByTime(WELL_AFTER_LAUNCH_ENDS_MS);
+
+      expect(onContinue).toHaveBeenCalledTimes(1);
+      expect(onStart).not.toHaveBeenCalled();
+    });
+
+    // 确认框里的“开始新战役”按钮同理（src/ui/StartMenu.ts:495）：确认开局之后它还在文档里
+    it.each([
+      ['reduced motion', true],
+      ['after the transition', false],
+    ])('after a confirmed start, the confirm button starts nothing more (%s)', (_name, reduced) => {
+      stubMatchMedia({ reducedMotion: reduced });
+      seedCheckpoint();
+      const startMenu = createMenu();
+      const onStart = vi.fn();
+      const onContinue = vi.fn();
+      startMenu.setOnStart(onStart);
+      startMenu.setOnContinue(onContinue);
+
+      click('start-btn');
+      const confirm = byId('new-campaign-confirm-btn');
+      confirm.click();
+      expect(onStart).toHaveBeenCalledTimes(1);
+      // 紧接着的第二下、过场中途的、过场播完菜单隐藏之后的
+      confirm.click();
+      vi.advanceTimersByTime(WELL_BEFORE_LAUNCH_ENDS_MS);
+      confirm.click();
+      vi.advanceTimersByTime(WELL_AFTER_LAUNCH_ENDS_MS);
+      expect(isShown(byId('start-menu'))).toBe(false);
+      confirm.click();
+      document.getElementById('new-campaign-confirm-btn')?.click();
+      vi.advanceTimersByTime(WELL_AFTER_LAUNCH_ENDS_MS);
+
+      expect(onStart).toHaveBeenCalledTimes(1);
+      expect(onContinue).not.toHaveBeenCalled();
+    });
+
+    it('activations that reach a hidden menu leave nothing open when it comes back', () => {
+      const startMenu = createMenu();
+      const onStart = vi.fn();
+      startMenu.setOnStart(onStart);
+
+      click('start-btn');
+      vi.advanceTimersByTime(WELL_AFTER_LAUNCH_ENDS_MS);
+      expect(isShown(byId('start-menu'))).toBe(false);
+      byId('settings-btn').click();
+      byId('howto-btn').click();
+      byId('preview-btn').click();
+      vi.advanceTimersByTime(WELL_AFTER_LAUNCH_ENDS_MS);
+
+      startMenu.show();
+
+      expect(isShown(document.getElementById('settings-sheet'))).toBe(false);
+      expect(isShown(document.getElementById('howto-sheet'))).toBe(false);
+      expect(document.getElementById('model-preview')).toBeNull();
+      // 标题上的动作照常可用：再开一局
+      click('start-btn');
+      expect(onStart).toHaveBeenCalledTimes(2);
     });
   });
 

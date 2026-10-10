@@ -2,8 +2,12 @@ import { readFileSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { saveStartFlowSettings, type StartFlowSettings } from '@/core/SessionSettings';
-import type { CampaignSaveData } from '@/core/save/SaveSystem';
+import {
+  loadStartFlowSettings,
+  saveStartFlowSettings,
+  type StartFlowSettings,
+} from '@/core/SessionSettings';
+import { loadCampaignCheckpoint, type CampaignSaveData } from '@/core/save/SaveSystem';
 import type { Locale, LocalizedText } from '@/i18n';
 import type { GameSettings, StartMenu } from '@/ui/StartMenu';
 import { LOCALES, textIn } from './i18nTestUtils';
@@ -146,8 +150,15 @@ interface Shell {
   releaseConfig: () => void;
 }
 
+/** 入口模块交给菜单的两个回调：菜单“要求开局 / 续玩”时调用的就是它们 */
+interface MenuRequests {
+  start: ((settings: GameSettings) => void) | null;
+  resume: ((save: CampaignSaveData) => void) | null;
+}
+
 describe('boot shell: src/main.ts and #loading-screen (batch X5, spec 10)', () => {
   let menus: StartMenu[] = [];
+  let menuRequests: MenuRequests = { start: null, resume: null };
   let originalTitle: string;
   let originalLang: string | null;
   let consoleError: ReturnType<typeof vi.spyOn>;
@@ -204,6 +215,7 @@ describe('boot shell: src/main.ts and #loading-screen (batch X5, spec 10)', () =
       hide: MenuClass.prototype.hide,
       whenLaunched: MenuClass.prototype.whenLaunched,
       setOnStart: MenuClass.prototype.setOnStart,
+      setOnContinue: MenuClass.prototype.setOnContinue,
     };
     vi.spyOn(MenuClass.prototype, 'setOnStart').mockImplementation(function (
       this: StartMenu,
@@ -212,7 +224,15 @@ describe('boot shell: src/main.ts and #loading-screen (batch X5, spec 10)', () =
       if (!menus.includes(this)) {
         menus.push(this);
       }
+      menuRequests.start = callback;
       original.setOnStart.call(this, callback);
+    });
+    vi.spyOn(MenuClass.prototype, 'setOnContinue').mockImplementation(function (
+      this: StartMenu,
+      callback
+    ) {
+      menuRequests.resume = callback;
+      original.setOnContinue.call(this, callback);
     });
     vi.spyOn(MenuClass.prototype, 'reloadFromStorage').mockImplementation(function (
       this: StartMenu
@@ -275,6 +295,7 @@ describe('boot shell: src/main.ts and #loading-screen (batch X5, spec 10)', () =
     document.documentElement.setAttribute('lang', shipped.documentElement.lang);
     document.body.innerHTML = shipped.body.innerHTML;
     menus = [];
+    menuRequests = { start: null, resume: null };
     game.instances.length = 0;
     game.log.length = 0;
     game.failConstruct = false;
@@ -772,6 +793,286 @@ describe('boot shell: src/main.ts and #loading-screen (batch X5, spec 10)', () =
       expect(second.options.resume).toEqual(stored);
       expect(second.booted[0]).toMatchObject({ startLevel: 3, playerLives: 1, gameMode: 'normal' });
       expect(isMenuShowing()).toBe(false);
+    });
+  });
+
+  /**
+   * 启动不可重入（src/main.ts 的 booting）：上一次启动还在等游戏代码时再来的启动请求不做任何事；
+   * 启动失败后放开，之后还能再试。
+   *
+   * 菜单自己已经不会连着要求两次（隐藏 / 过场中的菜单不理按钮），所以这里直接调用入口模块交给
+   * 菜单的那两个回调（setOnStart / setOnContinue 收到的函数）来模拟“菜单又要求了一次”。
+   * 结算界面的重试 / 检查点续玩由别的测试文件负责。
+   *
+   * 关于“只有一个游戏”这条断言的局限：Vitest 里同一个被 vi.mock 替身的模块若被并发 import() 两次，
+   * 第二次会绕过替身去载入真模块（vitest 的 requestWithMock 里写明了这个限制），所以即使没有
+   * booting 这道闸，这里也数不出第二个替身游戏。能如实观察到的是第二次请求有没有走进 bootGame：
+   * 走进去就会再通知一次菜单音乐、再调一次 disposeGame。因此每个场景都用 expectExactlyOneBoot()
+   * 连这些痕迹一起数（变异检查：去掉闸之后这些用例全部失败）。
+   */
+  describe('one boot at a time: a second request from the menu while a boot is in progress', () => {
+    /**
+     * 游戏模块先载入好：之后入口模块里的 import() 只差几个微任务。
+     * （Vitest 里同一个被替身的模块头一次载入时并发 import() 两次，第二个拿不到替身；
+     * 先载入一次就没有这个问题，两次请求才能真的撞在一起。）
+     */
+    async function bootWithGameCodeLoaded(): Promise<void> {
+      await boot();
+      await import('@/core/GameCoordinator');
+      game.log.length = 0;
+    }
+
+    /** 一次启动该留下的痕迹恰好一份：造了一个游戏、启动一次、没销毁过谁、菜单音乐只被通知一次 */
+    function expectExactlyOneBoot(): void {
+      expect(coordinators()).toHaveLength(1);
+      expect(count('game:construct')).toBe(1);
+      expect(count('game:boot')).toBe(1);
+      expect(count('game:dispose')).toBe(0);
+      expect(count('music:menu-hidden'), 'the shell ran its boot steps once').toBe(1);
+    }
+
+    function requestStart(overrides: Partial<GameSettings> = {}): GameSettings {
+      const settings: GameSettings = { ...loadStartFlowSettings(), ...overrides };
+      expect(menuRequests.start, 'the shell registered a start handler').not.toBeNull();
+      menuRequests.start?.(settings);
+      return settings;
+    }
+
+    function requestContinue(): CampaignSaveData {
+      const save = loadCampaignCheckpoint();
+      expect(save, 'a checkpoint is stored').not.toBeNull();
+      expect(menuRequests.resume, 'the shell registered a continue handler').not.toBeNull();
+      menuRequests.resume?.(save as CampaignSaveData);
+      return save as CampaignSaveData;
+    }
+
+    /** 所有启动都尘埃落定：模块到了、游戏造好、“进入战场”画面淡出完 */
+    async function bootsSettled(): Promise<void> {
+      await settle(20);
+      await vi.advanceTimersByTimeAsync(1500);
+      await settle();
+    }
+
+    function count(entry: string): number {
+      return game.log.filter((logged) => logged === entry).length;
+    }
+
+    it('start, then start again: one game, and it is the first request that runs', async () => {
+      await bootWithGameCodeLoaded();
+
+      const first = requestStart({ difficulty: 2 });
+      requestStart({ difficulty: 5 });
+      await bootsSettled();
+
+      expectExactlyOneBoot();
+      expect(coordinators()[0].booted).toEqual([first]);
+      expect(coordinators()[0].options.resume ?? null).toBeNull();
+      expect(coordinators()[0].disposed).toBe(false);
+    });
+
+    it('start, then continue: one game, a new run, not the resume', async () => {
+      seedCheckpoint();
+      await bootWithGameCodeLoaded();
+
+      const first = requestStart({ difficulty: 2 });
+      requestContinue();
+      await bootsSettled();
+
+      expectExactlyOneBoot();
+      expect(coordinators()[0].booted).toEqual([first]);
+      expect(coordinators()[0].options.resume ?? null).toBeNull();
+    });
+
+    it('continue, then start: one game, the resume', async () => {
+      seedCheckpoint();
+      await bootWithGameCodeLoaded();
+
+      const save = requestContinue();
+      requestStart({ difficulty: 5, gameMode: 'boss' });
+      await bootsSettled();
+
+      expectExactlyOneBoot();
+      expect(coordinators()[0].options.resume).toEqual(save);
+      expect(coordinators()[0].booted).toHaveLength(1);
+      expect(coordinators()[0].booted[0]).toMatchObject({
+        gameMode: 'normal',
+        startLevel: CHECKPOINT.level,
+        difficulty: CHECKPOINT.difficulty,
+      });
+    });
+
+    it('continue twice: one game', async () => {
+      seedCheckpoint();
+      await bootWithGameCodeLoaded();
+
+      const save = requestContinue();
+      requestContinue();
+      await bootsSettled();
+
+      expectExactlyOneBoot();
+      expect(coordinators()[0].booted).toHaveLength(1);
+      expect(coordinators()[0].options.resume).toEqual(save);
+    });
+
+    it('five requests on top of each other: still one game, never two alive', async () => {
+      seedCheckpoint();
+      await bootWithGameCodeLoaded();
+
+      requestStart();
+      requestContinue();
+      requestStart();
+      requestStart();
+      requestContinue();
+      await bootsSettled();
+
+      expectExactlyOneBoot();
+      expect(coordinators().map((instance) => instance.aliveAtConstruction)).toEqual([1]);
+    });
+
+    it('a request that arrives a moment later, still during the boot, is ignored as well', async () => {
+      await bootWithGameCodeLoaded();
+
+      const first = requestStart({ difficulty: 2 });
+      // 第一次请求已经走进 bootGame、正在等游戏模块
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(count('music:menu-hidden'), 'the first boot is under way').toBe(1);
+      expect(coordinators(), 'and not finished yet').toHaveLength(0);
+      requestStart({ difficulty: 5 });
+      await bootsSettled();
+
+      expectExactlyOneBoot();
+      expect(coordinators()[0].booted).toEqual([first]);
+      expect(consoleError).not.toHaveBeenCalled();
+    });
+
+    it('leaves the screen as one boot would: menu gone, entering screen gone, game up', async () => {
+      await bootWithGameCodeLoaded();
+
+      requestStart();
+      expect(isLoadingScreenUp(), 'the entering screen is up while it boots').toBe(true);
+      requestStart();
+      await bootsSettled();
+
+      expectExactlyOneBoot();
+      expect(isMenuShowing()).toBe(false);
+      expect(isLoadingScreenUp()).toBe(false);
+      expect(loadingScreen().querySelector('[role="alert"]')).toBeNull();
+    });
+
+    it('a request after the boot has finished is a new boot: the old game goes first', async () => {
+      await bootWithGameCodeLoaded();
+      const first = requestStart({ difficulty: 2 });
+      await bootsSettled();
+      expect(coordinators()).toHaveLength(1);
+
+      const second = requestStart({ difficulty: 5 });
+      await bootsSettled();
+
+      expect(coordinators()).toHaveLength(2);
+      expect(coordinators()[0].booted).toEqual([first]);
+      expect(coordinators()[0].disposed).toBe(true);
+      expect(coordinators()[1].booted).toEqual([second]);
+      expect(coordinators()[1].aliveAtConstruction).toBe(1);
+    });
+
+    it('exit to menu and start again right after an ignored request: the next run boots', async () => {
+      await bootWithGameCodeLoaded();
+      requestStart();
+      requestStart();
+      await bootsSettled();
+
+      coordinators()[0].options.onExitToMenu?.();
+      const second = await startRun(2);
+
+      expect(coordinators()).toHaveLength(2);
+      expect(second.aliveAtConstruction).toBe(1);
+      expect(isMenuShowing()).toBe(false);
+    });
+
+    describe('when the boot fails', () => {
+      /** 要求开局、游戏造不出来，等到出错画面 */
+      async function failedBoot(): Promise<void> {
+        game.failConstruct = true;
+        requestStart();
+        await settleUntil(() => loadingScreen().querySelector('[role="alert"]') !== null);
+        await settle();
+        expect(
+          loadingScreen().querySelector('[role="alert"]'),
+          'the error is shown'
+        ).not.toBeNull();
+        expect(coordinators()).toHaveLength(0);
+        game.failConstruct = false;
+      }
+
+      it('a later start request boots the game and takes the error screen away', async () => {
+        await bootWithGameCodeLoaded();
+        await failedBoot();
+
+        const settings = requestStart({ difficulty: 4 });
+        await bootsSettled();
+
+        expect(coordinators()).toHaveLength(1);
+        expect(coordinators()[0].booted).toEqual([settings]);
+        expect(isLoadingScreenUp()).toBe(false);
+        expect(loadingScreen().querySelector('[role="alert"]')).toBeNull();
+      });
+
+      it('a later continue request boots the resume', async () => {
+        seedCheckpoint();
+        await bootWithGameCodeLoaded();
+        await failedBoot();
+
+        const save = requestContinue();
+        await bootsSettled();
+
+        expect(coordinators()).toHaveLength(1);
+        expect(coordinators()[0].options.resume).toEqual(save);
+        expect(isLoadingScreenUp()).toBe(false);
+      });
+
+      it('two failures in a row, then a success', async () => {
+        await bootWithGameCodeLoaded();
+        await failedBoot();
+        await failedBoot();
+
+        requestStart();
+        await bootsSettled();
+
+        expect(coordinators()).toHaveLength(1);
+        expect(coordinators()[0].booted).toHaveLength(1);
+      });
+
+      it('a second request on top of the failing one is ignored too, and does not hide the error', async () => {
+        await bootWithGameCodeLoaded();
+        game.failConstruct = true;
+
+        requestStart();
+        requestStart();
+        await settleUntil(() => loadingScreen().querySelector('[role="alert"]') !== null);
+        await bootsSettled();
+
+        expect(coordinators()).toHaveLength(0);
+        expect(count('music:menu-hidden'), 'the shell ran its boot steps once').toBe(1);
+        expect(isLoadingScreenUp(), 'the error stays up').toBe(true);
+        expect(readableText(loadingScreen().querySelector('[role="alert"]'))).toContain(
+          COPY.failed.en
+        );
+        expect(consoleError, 'the failure was reported once').toHaveBeenCalledTimes(1);
+      });
+    });
+
+    it('through the real menu: two quick taps under reduced motion are one boot', async () => {
+      stubMatchMedia({ reducedMotion: true });
+      await bootWithGameCodeLoaded();
+      const button = byId('start-btn');
+
+      button.click();
+      button.click();
+      await bootsSettled();
+
+      expectExactlyOneBoot();
+      expect(coordinators()[0].booted).toHaveLength(1);
     });
   });
 
