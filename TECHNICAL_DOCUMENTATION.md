@@ -8,7 +8,7 @@ AirSupreme 是一个基于 Three.js 和 TypeScript 的 3D 飞机战斗游戏。
 
 - 十关故事战役已集成：十章剧情（章节卡片、无线电、任务结算、结局）、第 6-10 关环境与 Boss、17 种地面 / 海上 / 空中单位、5 种特殊武器与热焰弹、第一 / 第三人称相机组、分级升级与机库、自动存档与继续战役、程序化音乐与新音效、实例化粒子与 HDR 后处理（详见下文「十关战役系统」与 `CHANGELOG.md`）
 - 界面默认英文，简体中文可在主菜单的设置面板 / 暂停菜单实时切换（`src/i18n/`，文案就地双语 `LocalizedText`）；国际化角色阵容与具名僚机渡鸦 / 雨燕；无线电与剧情旁白有英文与普通话配音（`VoiceSystem`，语音包在 `public/voice/`）；难度曲线与 Boss 血量按脚本飞行员实测重新调校（见下文「界面语言」「角色配音」「具名僚机」与「平衡与难度曲线」）
-- 主流程：`main.ts -> StartMenu -> 动态导入 GameCoordinator -> 按需初始化战斗 / 表现层 runtime`；主菜单「继续战役」与失败结算「从检查点继续」都由 `main.ts` 以检查点重新开局
+- 主流程：`main.ts -> StartMenu -> 动态导入 GameCoordinator -> 按需初始化战斗 / 表现层 runtime`；主菜单「继续战役」与失败结算「从检查点重试」都由 `main.ts` 以检查点重新开局
 - `GameCoordinator` 负责装配；战役接线拆到 `src/core/` 下的控制器（`CampaignFlowController`、`UnitController`、`SpecialWeaponsController`、`PlayerViewController`、`CombatVfxController`、`CombatHudFeed`、`AdvancedBossController`），剧情 / HUD / 音乐 / 音效统一经 `ICampaignPresentation`（见 `docs/decisions/0001-campaign-presentation-adapter.md`）
 - 战斗 runtime、Boss 控制器、升级菜单、presentation runtime，以及相机组、单位、特殊武器、尾迹、剧情界面与第 6-10 关 Boss 都在按需加载路径上
 - `PresentationRuntimeLoader` 负责按需创建 `HUD / EnemyHealthBars / LockOnIndicator / BossMissileIndicator / PresentationController`
@@ -433,7 +433,7 @@ if (tmpAxis.lengthSq() > 1e-8) {
 
 签名与常量表见 `docs/api.md` 的「Input」与「Missiles and gun aim」；数值以 `src/config.ts` 的 `GAME_CONSTANTS.PLAYER` / `MISSILE` / `GUN_ASSIST` 为准。
 
-- 输入（`src/core/Input/InputHandler.ts`）：`getState()` 除布尔方向外带模拟量 `pitchAxis` / `yawAxis`（-1..1）与 `flightAssist`。触屏摇杆是浮动的——拇指落在 `#touch-stick-zone`（视口左侧 42%、从 38% 高度往下）里的任意位置，摇杆底座就移到落点；位移经径向死区（`TOUCH_STICK_TUNING.DEAD_ZONE` 0.12）与指数曲线（`EXPO` 1.7，`shapeStickMagnitude`）整形。触屏设备上键盘与触屏输入合并：每个轴取绝对值较大的一路，按键相或。开火 / 导弹的按下锁存到下一次 `getState()`，短于一个模拟步长的轻触也不会丢；BOOST 是开关式锁存；窗口失焦或页面隐藏时释放全部按住的输入。
+- 输入（`src/core/Input/InputHandler.ts`）：`getState()` 除布尔方向外带模拟量 `pitchAxis` / `yawAxis`（-1..1）与 `flightAssist`。触屏摇杆是浮动的——拇指落在 `#touch-stick-zone`（视口左侧 42%、从 38% 高度往下）里的任意位置，摇杆底座就移到落点；位移经径向死区（`TOUCH_STICK_TUNING.DEAD_ZONE` 0.12）与指数曲线（`EXPO` 1.7，`shapeStickMagnitude`）整形。触屏设备上键盘与触屏输入合并：每个轴取绝对值较大的一路，按键相或。开火 / 导弹的按下锁存到下一次 `getState()`，短于一个模拟步长的轻触也不会丢（被 `touchcancel` 取消的那一下不算按过，也不抹掉此前已经记下的轻触）；BOOST 是开关式锁存；窗口失焦或页面隐藏时释放全部按住的输入。
 - 飞行辅助（`src/features/player/PlayerController.ts`）：手指在摇杆上、且没有按下俯仰 / 偏航 / 滚转键时 `flightAssist` 为真，走 `applyAssistedAttitude`——偏航绕世界竖直轴，俯仰相对地平线不超过 `ASSIST_PITCH_LIMIT`（75°），坡度趋向 `-yawAxis × ASSIST_MAX_BANK`（45°），摇杆回中即改平。键盘仍走原来的机体轴操纵（`applyManualAttitude`）。
 - 设备档位（`GameConfig`）：`isMobile`（触屏设备）与 `isTablet`（触屏且视口短边不小于 700 CSS 像素），启动时判定一次。平板在各画质档下的目标帧率（`getTargetFPS()` / `getTargetFPSForPreset()`，`GameLoop` 的模拟步长由它决定）都是 60，`auto` 画质的像素比上限为 1.5。
 - 导引头（`src/features/combat/MissileSeeker.ts`，纯逻辑，由 `LockOnIndicator` 持有）：只要有导弹就一直工作，没有「按住锁定」这一步。准星是机头轴线前方 600 米（`GUN_ASSIST.REFERENCE_RANGE`）那一点的屏幕位置；捕获环以它为圆心，半径 = 视口短边 × `LOCK_RING_RATIO`（0.13）× 锁定范围升级倍率（下限 44 像素，上限为短边的 30%）。环内离准星最近的候选成为跟踪目标；目标在捕获环内时进度按 `1 / 锁定时间` 增长（锁定时间来自升级线：基础 1.0 秒，每级减 0.05 秒），在捕获环与保持环（捕获环的 1.6 倍）之间按 `LOCK_DECAY_RATE` 回落，完成的锁定在保持环内一直保持；出了保持环、转到相机后方或超过 `MAX_LOCK_DISTANCE`（1200 米）时，经 0.5 秒宽限后丢锁；不在候选表里的目标（被击毁 / 回收 / 隐形）立即丢弃。候选表每步由 `GameCoordinator.collectLockCandidates()` 重建：Boss 战中的 Boss 锁定目标、存活敌机、敌方单位瞄准点（`UnitController.collectLockTargets`）。
@@ -475,7 +475,8 @@ if (tmpAxis.lengthSq() > 1e-8) {
 - `SaveSystem`（`src/core/save/SaveSystem.ts`）：单个检查点 `air-supreme:campaign-save`（`CAMPAIGN_SAVE_VERSION = 1`）+ 战役进度 `air-supreme:campaign-progress`；只在调用时访问 `localStorage`，读写失败不抛出；读取时校验并规范化（损坏或外来数据删除键并返回 null；越界钳制、缺失取默认）。
 - 检查点类型：`level-start`（章节卡片之后，wave 0）、`wave`（第 k 波结束后，wave = k + 1，最后一波除外）、`boss`（全部波次清空后，wave = 总波数）、`hangar`（第 1-9 关击破 Boss 时，level 为下一关、wave 为 0；机库「出击」时静默重写一次）；只在正常模式写入。`describeCheckpoint(data, locale?)` 默认按当前语言（传入 locale 时按该语言）生成「第6关 · 熔炉之心 · 第3波」「… · Boss 战」或「第2关 · 沙漠风暴 · 机库整备」（英文为 `Ch. 6 · Heart of the Forge · Wave 3` / `… · Boss` / `Ch. 2 · Sandstorm · Hangar`）；`describeCheckpointText(data)` 返回双语版本。
 - 内容：关卡、波次、难度、分数、生命、导弹、`PlayerUpgrades.export()`、`WeaponSystem.exportState()`、热焰弹、视角、本局统计（击落、平民损失、阵亡、游戏时间），以及可选的 `swiftJoined`（本局雨燕的入列台词是否已播；没有这个字段的旧存档由 `isSwiftJoinAnnounced` 按关卡推断：level > 3 视为已播）。`hangar` 检查点的快照把升级上限（`campaignLevel`）与武器解锁改写为下一关的值。加入 `hangar` 与 `swiftJoined` 之前的存档照常读取（`CAMPAIGN_SAVE_VERSION` 仍为 1）。
-- 继续：主菜单「继续战役」/ 失败结算「从检查点继续」→ `main.ts` 用存档的难度 / 关卡 / 生命 / 视角重新开局（`resume`）→ `restoreCheckpoint`（reset → import → 关卡上限 → 武器解锁 → 武器等级 → importState → 分数 / 生命 / 导弹 / 视角）→ `resumeFromCheckpoint` 回到存档波次或 Boss 战前；`hangar` 检查点回到机库，「出击」后与刚打完上一关一样进入章节卡片与战斗（不播序章与教学，弹药与热焰弹在章节开始时补满；其余检查点读档后的第一次 `prepareLevel` 保留存档里的弹药）。
+- 失败结算：正常模式任务失败且存储里有检查点时，`GameCoordinator.resolveCheckpointRetry()` 把 `SettlementCheckpointRetry`（检查点位置的双语描述 `describeCheckpointText` + 重试回调）交给 `HUD.showGameOver(finalScore, checkpointRetry)`，结算面板的主按钮变成「从检查点重试」，下方写明检查点位置，后面是「返回菜单」；这种情况下没有「再来一局」，面板上也没有任何操作会删除存档（想从头开始：返回菜单 →「新战役」，有存档时会先确认）。Boss 模式或没有检查点时仍是「再来一局 / 返回菜单」。原先浮在结算面板下方的 `CheckpointResumeButton` 已删除。「再来一局」与检查点重试都经 `main.ts` 的 `bootGame`，上一次启动还没完成时再来的请求会被忽略。
+- 继续：主菜单「继续战役」/ 失败结算「从检查点重试」→ `main.ts` 用存档的难度 / 关卡 / 生命 / 视角重新开局（`resume`）→ `restoreCheckpoint`（reset → import → 关卡上限 → 武器解锁 → 武器等级 → importState → 分数 / 生命 / 导弹 / 视角）→ `resumeFromCheckpoint` 回到存档波次或 Boss 战前；`hangar` 检查点回到机库，「出击」后与刚打完上一关一样进入章节卡片与战斗（不播序章与教学，弹药与热焰弹在章节开始时补满；其余检查点读档后的第一次 `prepareLevel` 保留存档里的弹药）。
 - 保存并退出：每次写检查点时 `CampaignFlowController` 同时记下本局的退出点（`{ kind, level, wave }`；最后一波清空后退出点先移到 Boss，第一个检查点之前与战役通关之后为空）。暂停菜单用 `describeExitSave()`（只读）决定显示「保存并退出」还是「返回菜单」并写出确认文案——结果 `CampaignExitSave` 为 `saved`（附存档位置）/ `no-save-mode`（Boss 模式）/ `not-started` / `complete`；确认后 `saveForExit()` 用此刻的快照在退出点重写检查点（不弹存档提示），再读回核对，存储里不是刚写的那份时返回 `failed`，菜单给出「返回 / 仍然退出」。从这份存档继续时回到该波或 Boss 战的开头（`hangar` 退出点回到机库），分数、生命、导弹与升级是退出时的值；存档格式没有新增字段。
 - 清除：普通模式新开一局、通关第 10 章；`recordLevelReached` / `markCampaignCompleted` 维护进度记录。
 
@@ -505,14 +506,15 @@ if (tmpAxis.lengthSq() > 1e-8) {
 - 雷达：`RadarBlipKind` 新增 `enemy-ground`（红色方块）、`enemy-sea`（红色菱形）、`ally-unit`（金色三角）、`neutral`（灰色空心圆）；`setRangeMultiplier` 由友军预警机驱动；`CombatHudFeed` 用池化对象生成雷达点（20 Hz）与血条快照（含第 6-10 关 Boss 子目标与可命中的敌方单位）。雷达盘（`#radar-minimap`）机头朝上：前方在上，右侧的目标画在右侧（原先左右画反）；`BASE_RANGE` 800 米是整个盘面的跨度（圆心到盘缘约 400 米）；量程外的目标贴在盘缘，画成同类的空心小符号并带一道朝外的短线（`drawRadarRimMarker`）。桌面端 120 像素、位于左下角；触屏布局在左上角状态舱下方，手机 84 像素、视口短边 ≥ 700 像素时 132 像素，并有单独的点按面 `#radar-tap-target`（点雷达不会带出摇杆）。
 - 关卡地图（`RadarLevelMap`，`#radar-map`，由 `RadarMinimap` 持有）：点击 / 轻触雷达或按 N 键开合，Esc 关闭（被雷达截获，不会同时暂停）；换关或雷达停止更新 1.5 秒后自动收起；打开时游戏不暂停。地图北向朝上、比例固定：战场边界圆、以玩家为圆心的 500 / 1000 米距离环、按航向旋转的玩家箭头、全部雷达目标（与雷达盘共用 `radarGlyphs.ts` 的符号，画得更大）、图例，以及每关采样一次的 64 × 64 陆地 / 水面底图（`CombatHudFeed` 把 `UnitController.getSurfaceSampler()` 交给 `PresentationController.setRadarTerrainSource`；没有采样器时只画网格）。面板为视口短边的 72%（200-560 像素），20 Hz 重绘。
 - 移动端：`index.html` 拇指弧按键簇新增 `#special-button`、`#flare-button`、`#cycle-button`、`#camera-button`；按键文字默认英文（FIRE / MSL / SPEC / FLARE / BOOST / SWAP / VIEW / PAUSE），`main.ts` 按语言改写（中文为 开火 / 导弹 / 特武 / 热焰 / 加速 / 切换 / 视角 / 暂停）；HUD 写入按钮的武器代号、外圈进度（`--tc-meter`）、空弹 / 告警状态（`data-alert`）与视角状态，以及导弹键的余量（`data-count`）与装填外圈；`LockOnIndicator` 把锁定状态写成导弹键的样式类。摇杆是浮动式的（触摸区 `#touch-stick-zone`，见「操控、瞄准与导弹」）；BOOST（`#throttle-button`）是开关式锁存，带 `aria-pressed`。视口宽高都不小于 700 像素时（与 `GameConfig.isTablet` 同一阈值）摇杆与按键簇放大并抬离底边，尺寸都是 `:root` 上的 CSS 变量（`--touch-stick-size`、`--touch-deck-scale` 等）。暂停键（`#upgrade-button`）与其他单击键一样在 `touchstart` 时锁存，直到 `InputHandler.isPauseToggled()` 读取（`resetPauseState()` 清除），低帧率下短于一个模拟步长的轻触也不会丢；桌面 Esc / P 仍取按下沿。
-- 血条：友军 AI 战机的 `mesh.userData.displayName`（僚机呼号）优先于按名称缓存的标签；敌机显示机型，Boss 显示名称，单位显示自己的型号名（`UnitMeshFactory` 写入的 `userData.displayName`，没有时退回阵营通用名），都按当前语言，切换语言时所有血条立即改名。三种尺寸：Boss 本体 120 × 10 像素（带名称）、Boss 部件 44 × 5 像素（深色底槽）、其他目标 60 × 6 像素（带名称）；视野内的 Boss 部件只有离准星最近的一个显示名称（带滞回：新部件离准星的距离须小于当前焦点的 80% 才切换），部件不再各自产生屏外箭头；名称标签用样式居中，不再逐次测量文字宽度。可命中的敌方地面 / 海上 / 空中单位也进入血条（`CombatHudFeed` 经 `UnitController.forEachHostileMarker`）：在屏幕上小于约 22 像素时加一个威胁色的目标角标并标出距离（取整到 10 米，大于 28 像素时收起）；快照带 `objective` 时换成目标样式——角标常显、加粗并脉动，屏外箭头闪烁（减少动态效果时不做动画）。屏外箭头（`OffscreenChevron`）的距离文字保持水平，箭头避开雷达盘，触屏布局下还避开摇杆与每个可见的触控按键。
-- 机库（模型预览）：主菜单的「机库」就是 `ModelPreview`（`#model-preview`）。它经 `Record<BossType, loader>` 按需导入每个 Boss 自己的网格工厂（第 6-10 关来自 `MagmaColossusMesh` / `AbyssalLeviathanMesh` / `TempestZeppelinMesh` / `PhantomWingMesh` / `OraclePrimeMesh`），把可见几何（排除隐藏部件与精灵）缩放到固定半径的包围球，切换模型时逐一释放几何体、材质与实例缓冲（跳过共享资源）。取景只用名称标签上方的区域：写入名称后（以及改变窗口大小、切换语言时）`frameCamera()` 从 DOM 读取标签上沿，与标签、画布上沿各留 8 像素（区域至少延伸到画布一半高度），相机后退到包围球放得进区域高度（画布更窄时按画布宽度），再用 `setViewOffset` 把投影中心移到区域中心；画布尚未布局时按整个画布取景。名称标签放得下时单行显示（宽度 600 像素以下字号 18 像素）；横屏且高度不超过 520 像素的视口压缩页眉并隐藏提示行，把高度留给展台。左右箭头按钮、左 / 右方向键或横向滑动切换模型，鼠标拖动旋转，`#rotate-toggle` 开关自动旋转，Esc 或返回按钮回到主菜单。渲染器只在显示期间存在（`show()` 创建，`hide()` 连同 WebGL 上下文一起释放）。
+- 血条：友军 AI 战机的 `mesh.userData.displayName`（僚机呼号）优先于按名称缓存的标签；敌机显示机型，Boss 显示名称，单位显示自己的型号名（`UnitMeshFactory` 写入的 `userData.displayName`，没有时退回阵营通用名），都按当前语言，切换语言时所有血条立即改名。三种尺寸：Boss 本体 120 × 10 像素（带名称）、Boss 部件 44 × 5 像素（深色底槽）、其他目标 60 × 6 像素（带名称）；视野内的 Boss 部件只有离准星最近的一个显示名称（带滞回：新部件离准星的距离须小于当前焦点的 80% 才切换），部件不再各自产生屏外箭头；名称标签用样式居中，不再逐次测量文字宽度。可命中的敌方地面 / 海上 / 空中单位也进入血条（`CombatHudFeed` 经 `UnitController.forEachHostileMarker`）：在屏幕上小于约 22 像素时加一个威胁色的目标角标并标出距离（取整到 10 米，大于 28 像素时收起）；快照带 `objective` 时换成目标样式——角标常显、加粗并脉动，屏外箭头闪烁（减少动态效果时不做动画）。屏外箭头（`OffscreenChevron`）的距离文字保持水平；敌方目标箭头与 Boss 导弹箭头（`BossMissileIndicator`）各持有一个 `ChevronAvoidance`（`src/ui/ChevronAvoidance.ts`），用同一套避让规则：避开雷达盘与 HUD 面板（得分 / 速度 / 强化 / 右上状态 / 生命条，以及顶部消息栈里正在显示的每一块），触屏布局下还避开摇杆与每个可见的触控按键。
+- 机库（模型预览）：主菜单的「机库」就是 `ModelPreview`（`#model-preview`）。它经 `Record<BossType, loader>` 按需导入每个 Boss 自己的网格工厂（第 6-10 关来自 `MagmaColossusMesh` / `AbyssalLeviathanMesh` / `TempestZeppelinMesh` / `PhantomWingMesh` / `OraclePrimeMesh`），把可见几何（排除隐藏部件与精灵）缩放到固定半径的包围球（球心取可见包围盒的中心，半径取离它最远的可见顶点，模型怎么转都不出球），切换模型时逐一释放几何体、材质与实例缓冲（跳过共享资源）。战机工厂按包围盒摆放的信号灯小球（`navLightPort` / `navLightStarboard` / `strobeLight` / `beaconLight`）先由 `hideSignalLights()`（`src/ui/menu/modelDisposal.ts`）隐藏，不显示也不参与取景；标题画面的战机同样处理。取景只用名称标签上方的区域：写入名称后（以及改变窗口大小、切换语言时）`frameCamera()` 从 DOM 读取标签上沿，与标签、画布上沿各留 8 像素（区域至少延伸到画布一半高度），相机后退到包围球的轮廓直径等于画布短边的 70%（各个模型大小一致），区域放不下这个直径时缩到放得进区域的高与宽并留边，再用 `setViewOffset` 把投影中心移到区域中心；画布尚未布局时按整个画布取景。模型的工厂或代码块加载失败时，名称标签写明「无法加载：{name}」（英文 `Could not load: {name}`），其余模型与返回照常可用；`show()` 创建不了渲染器（浏览器不给 WebGL 上下文）时调用 `hide()`（经 `setOnBack` 的回调让主菜单回来）并照常抛出错误。名称标签放得下时单行显示（宽度 600 像素以下字号 18 像素）；横屏且高度不超过 520 像素的视口压缩页眉并隐藏提示行，把高度留给展台。左右箭头按钮、左 / 右方向键或横向滑动切换模型，鼠标拖动旋转，`#rotate-toggle` 开关自动旋转，Esc 或返回按钮回到主菜单。渲染器只在显示期间存在（`show()` 创建，`hide()` 连同 WebGL 上下文一起释放）。
 
 ### 主菜单
 
 - 结构：`StartMenu`（`src/ui/StartMenu.ts`，`#start-menu`）是一层外壳，界面由 `src/ui/menu/` 下的模块组成——`TitleScreen`（标题画面：继续战役 / 新战役 / 机库 / 设置 / 操作说明）、`SettingsSheet`（设置面板）、`HowToPlaySheet`（操作说明，键盘 / 触屏两个标签页）、`MenuSheet`（三者共用的面板容器；「新战役」会覆盖存档时的确认对话框也用它，默认按钮是「保留存档」）、`MenuBackdrop`（CSS 与 2D 画布绘制的背景）与 `MenuHero`（按需加载 `MenuHeroScene`，在标题后面实时渲染玩家战机）。有检查点时才显示「继续战役」，并作为默认高亮的按钮。
 - 设置面板：分「游戏」（难度、生命、视角、教程）、「音频」（音效 / 音乐 / 语音音量）、「显示」（画质、语言）、「高级」（起始关卡、游戏模式、测试分数）四组，每次改动立即保存（`StartFlowSettings`）；「高级」每次打开面板时折叠，其中任一项不是默认值时显示「已修改」标记。
 - WebGL 上下文：菜单隐藏或机库打开时，标题画面的战机场景停止；机库（`ModelPreview`，同样按需加载）的渲染器只在显示期间存在——菜单任何时候至多持有一个 WebGL 上下文，游戏运行时不持有。
+- 暂停菜单的外观：`PauseMenu` 与主菜单用同一套视觉语言——它把主菜单自己的样式片段换到 `#pause-menu` 下复用（`src/ui/menu/menuStyles.ts` 的 `rescopeMenuCss` / `menuKitCss`，`sheetStyles.ts` 的 `sheetKitCss`），行为不变。「离开」确认页把存档位置显示成一张卡片；会存档时主按钮「保存并退出」是冰蓝色，琥珀色只用在会丢进度的退出（不存档的模式、没有接存档）与「保存失败」页上。
 - 进入战场：`StartMenu.launch()` 在点击的调用栈上同步解锁音频并触发 `onStart` / `onContinue`；`main.ts` 的 `launchFromMenu` 立即显示进入战场的画面，等 `startMenu.whenLaunched()`（约 0.3 秒的过场；减少动态效果时立即完成）之后再启动游戏。
 
 ---
@@ -561,7 +563,7 @@ src/
 │   ├── powerups/                 # PowerUpSystem、BalloonPowerUp
 │   └── upgrade/                  # UpgradeSystem
 ├── scenes/                       # GameScene（渲染器、光照、后处理）
-├── ui/                           # HUD、StartMenu（外壳）与 menu/（标题画面、设置 / 操作说明面板、实时战机场景）、PauseMenu、UpgradeMenu、StoryOverlay、RadioComms、RadarMinimap、RadarLevelMap、radarGlyphs、CheckpointResumeButton、EnemyHealthBars、OffscreenChevron、LockOnIndicator、ModelPreview（机库）、theme/ …
+├── ui/                           # HUD、StartMenu（外壳）与 menu/（标题画面、设置 / 操作说明面板、实时战机场景）、PauseMenu、UpgradeMenu、StoryOverlay、RadioComms、RadarMinimap、RadarLevelMap、radarGlyphs、EnemyHealthBars、OffscreenChevron、ChevronAvoidance、LockOnIndicator、ModelPreview（机库）、theme/ …
 └── __tests__/                    # Vitest 测试
 
 public/voice/                     # 配音包：en/、zh/（<台词 id>.mp3）、manifest.json、provenance.json
@@ -580,8 +582,8 @@ public/voice/                     # 配音包：en/、zh/（<台词 id>.mp3）�
 3. **机炮** - `GunLeadSolver`：提前量标记与触屏瞄准辅助（`GAME_CONSTANTS.GUN_ASSIST`、`PlayerSystem.setGunAimAssist`），机炮十字每个渲染帧对准弹道
 4. **目标与雷达** - 敌方单位的血条、目标角标与「当前目标」提示，波次放行时限 150 → 60 秒且击伤敌方单位即重新计时；雷达改为机头朝上（修正左右画反）、盘缘标记量程外目标；关卡地图 `RadarLevelMap`（N 键 / 点雷达）
 5. **座舱与视角** - 座舱压低、遮光罩与立柱变细，第一人称下自己的武器特效减弱，竖屏保持约 70° 水平视场，大字提示与告警栏按视角避开准星
-6. **菜单与存档** - 主菜单重做为 `StartMenu` 外壳 + `src/ui/menu/`（标题画面、设置 / 操作说明面板、实时战机场景），模型预览改为「机库」（`ModelPreview`），`StartMenu.whenLaunched()`；暂停菜单「保存并退出」（`CampaignFlowController.describeExitSave` / `saveForExit`、`IPauseMenuOptions.getSaveStatus` / `onSaveAndExit`）
-7. **修复** - 第 1 关的坦克没有标记、波次迟迟不结束；雷达左右颠倒
+6. **菜单与存档** - 主菜单重做为 `StartMenu` 外壳 + `src/ui/menu/`（标题画面、设置 / 操作说明面板、实时战机场景），模型预览改为「机库」（`ModelPreview`），`StartMenu.whenLaunched()`；暂停菜单「保存并退出」（`CampaignFlowController.describeExitSave` / `saveForExit`、`IPauseMenuOptions.getSaveStatus` / `onSaveAndExit`），暂停菜单改用主菜单的样式片段；失败结算保留检查点——主按钮「从检查点重试」（`HUD.showGameOver(finalScore, checkpointRetry)`、`SettlementCheckpointRetry`、`GameCoordinator.resolveCheckpointRetry()`），`CheckpointResumeButton` 删除
+7. **修复** - 第 1 关的坦克没有标记、波次迟迟不结束；雷达左右颠倒；任务失败后「再来一局」会清掉检查点；屏外箭头被 HUD 面板挡住（`ChevronAvoidance`）；机库里模型大小不一
 
 ### 2026-10: 收尾打磨
 
@@ -906,7 +908,9 @@ npm run test:run   # Vitest 单次运行（npm run test 为监听模式）
 
 位置: `public/config/game-config.json`
 
-包含所有游戏参数：玩家、敌人、Boss、导弹、升级等配置。
+包含玩家、敌人、Boss、导弹、升级等配置段。启动时 `src/main.ts` 调用 `configLoader.load()` 读取它，并合并到 `ConfigLoader` 内置的默认值之上。
+
+**现状**：除了这次 `load()`，运行时代码没有调用 `configLoader` 的任何读取方法，所以这份 JSON 目前没有运行时读取方——只改 JSON 不会改变实际玩法。以 `missile` 段为例：玩家导弹的数值来自 `GAME_CONSTANTS.MISSILE`（`src/config.ts`），基础锁定时间与补给时间来自升级线（`UPGRADE_CONFIGS`）；`getMissile()` 返回的只是 JSON 里的值，没有系统使用它。
 
 ### 使用方式
 
@@ -916,11 +920,10 @@ import { configLoader } from '@/core/utils/ConfigLoader';
 // 异步加载配置
 await configLoader.load();
 
-// 获取各类配置
+// 读取方法（目前没有运行时调用方，见上）
 const playerConfig = configLoader.getPlayer();
 const enemyConfig = configLoader.getEnemy('FIGHTER');
 const bossConfig = configLoader.getBoss('HEAVY_BOMBER');
-const missileConfig = configLoader.getMissile();
 ```
 
 ---

@@ -17,14 +17,14 @@ A 3D air-combat game built with Three.js + TypeScript, playable on desktop and m
 - **Touch controls for phones and tablets** — a floating analog stick with flight assist, tap-to-fire missiles, a latching **BOOST**, and a larger layout on tablets (see _Controls_)
 - **Five special weapons + flares**, unlocked as the story advances
 - **Ground, sea and air units** in three factions — hostile, friendly and civilian; hostile units carry on-screen markers, and the radar opens into a level map (**N** or tap the radar)
-- **Autosave checkpoints, Save & Exit and Continue** — leave a mission from the pause pod and keep the run; continue from the main menu or from the game-over screen
+- **Autosave checkpoints, Save & Exit and Continue** — leave a mission from the pause pod and keep the run; continue from the main menu, or retry from the checkpoint after a failed mission
 - **Hangar between chapters** — tiered upgrades whose caps open up chapter by chapter
 - **Procedural soundtrack** — 23 tracks and 7 stingers synthesized live with Web Audio, plus a new SFX set
 - **Tutorial toggle**
 - **Pause pod with in-match settlement**
-  - ESC / P opens the pause pod; on desktop U pauses then opens the upgrade shop
+  - ESC / P opens the pause pod, drawn in the same style as the main menu; on desktop U pauses then opens the upgrade shop
   - **Save & Exit** leaves the mission and keeps the run (see _Autosave, Save & Exit and Continue_)
-  - Failure shows `MISSION FAILED`, victory `MISSION COMPLETE` (任务失败 / 任务完成 in Chinese); play again or return to the main menu
+  - Failure shows `MISSION FAILED`, victory `MISSION COMPLETE` (任务失败 / 任务完成 in Chinese); play again or return to the main menu — after a failure with a checkpoint, **Retry from checkpoint** takes the place of **Play Again**
 - **Site chrome**
   - `index.html`: `<link rel="icon" href="/favicon.svg">` (`public/favicon.svg`); viewport includes `viewport-fit=cover`
   - The page ships as `<html lang="en">` with English loading-screen and touch-button text; `src/main.ts` applies the saved language before any UI renders and keeps `<html lang>` in step
@@ -132,7 +132,7 @@ Friendly units: Allied Convoy (escort), Allied Frigate (its close-in guns shoot 
 
 **Wingmen**: your named flight launches with you shortly after every level starts — Raven in chapters 1–2, Raven and Swift from chapter 3 (`WINGMEN`, `src/core/campaign/Wingmen.ts`); continuing from a checkpoint before a boss launches it with the boss briefing. Any further friendly jets (reinforcements, boss-fight support, the Call Wingman pickup, escorts) are ordinary allied fighters; only in Boss mode, where no flight launches, do the first of them fly under Raven's and Swift's callsigns. A wingman's callsign shows on its health bar. With nothing to fight, the wingmen hold formation slots ahead of you, one on each side, clear of the chase camera's line of sight to your jet, and new friendlies join on their own side. Swift reports in over the radio once per campaign, the first time she flies with you; if a wingman is shot down, the other one calls it (or Skydome, if the other is not airborne), and the downed wingman sits out the rest of the level (the flight is back together at the next level, or when you continue from a checkpoint).
 
-**Target markers**: every hostile unit you can shoot carries a health bar with its own name (a submerged submarine has none until it surfaces). A unit too far away to make out gets a corner bracket with its range in metres, and one that is off screen gets an edge arrow with its distance; the arrows keep clear of the radar, the stick and the touch buttons. When units are the objective (see _Hostile_ above) their brackets and arrows turn bold and pulse.
+**Target markers**: every hostile unit you can shoot carries a health bar with its own name (a submerged submarine has none until it surfaces). A unit too far away to make out gets a corner bracket with its range in metres, and one that is off screen gets an edge arrow with its distance; these arrows, and the ones that point at a boss's missiles, keep clear of the radar, the HUD panels, the stick and the touch buttons. When units are the objective (see _Hostile_ above) their brackets and arrows turn bold and pulse.
 
 **Radar**: the dial is heading-up — whatever is ahead of you is at the top, whatever is on your right is on the right. Contacts inside its range are drawn as filled symbols; contacts beyond it sit on the rim as smaller, dimmer, hollow symbols with a short tick pointing outward. Click or tap the radar, or press **N**, to open the **level map**: north-up, the whole battlefield with its boundary circle, 500 m and 1000 m rings around you, your heading arrow, every radar contact, a legend and, where the level has terrain, a land / water backdrop. The game keeps running while the map is open; tap it, press **N** or **Esc** to close it. On touch devices the radar sits in the top-left corner, out of the stick's way.
 
@@ -217,7 +217,8 @@ Tier costs rise with the tier; the current costs live in `UPGRADE_CONFIGS` (`src
 
 - In normal mode the game saves a checkpoint when a chapter starts, after each wave, right before the boss and the moment a boss falls (chapters 1–9; a *hangar* checkpoint for the next chapter, saved again when you press **Launch** so your hangar purchases are kept); an **Autosaved** toast in the HUD confirms each save, and it follows a language switch while it is on screen
 - **Save & Exit** in the pause pod (**ESC** / **P**) leaves the mission without losing the run. The confirmation names the place it saves at — the wave you are in, the boss fight or the hangar — and the save is read back before you leave; if the browser's storage is unavailable or full, the game says so and offers **Back** or **Exit Anyway**. The save keeps your score, lives, missiles and upgrades as they are at that moment, and **Continue Campaign** starts that wave or boss fight from the beginning. Where nothing can be saved — Boss mode, before the first checkpoint, after the campaign is complete — the button reads **Main Menu** instead and says why before you leave
-- **Continue Campaign** is the first button on the main menu when a checkpoint exists, labelled like `Ch. 6 · Heart of the Forge · Wave 3` or `Ch. 2 · Sandstorm · Hangar` (`第6关 · 熔炉之心 · 第3波` / `第2关 · 沙漠风暴 · 机库整备` in Chinese), with the saved score, difficulty and lives and a ten-chapter route strip; after `MISSION FAILED` the settlement screen offers **Continue from checkpoint**
+- **Continue Campaign** is the first button on the main menu when a checkpoint exists, labelled like `Ch. 6 · Heart of the Forge · Wave 3` or `Ch. 2 · Sandstorm · Hangar` (`第6关 · 熔炉之心 · 第3波` / `第2关 · 沙漠风暴 · 机库整备` in Chinese), with the saved score, difficulty and lives and a ten-chapter route strip
+- After `MISSION FAILED` in normal mode with a checkpoint, the settlement screen's main button is **Retry from checkpoint** (从检查点重试), with the checkpoint's position written under it, followed by **Main Menu**. There is no **Play Again** in that state and nothing on that screen deletes the save — to start over, go to **Main Menu** → **New Campaign**. Without a checkpoint, and in Boss mode, the buttons are **Play Again** and **Main Menu** as before
 - A checkpoint restores score, lives, missiles, upgrades, unlocked weapons and their ammo, flare charges, the camera view and the run statistics, and puts you back at the saved wave or the boss — or, for a hangar checkpoint, in the hangar before the next chapter, then its chapter card (weapons and flares are refilled for the new chapter)
 - Starting a new normal-mode game clears the old checkpoint — **New Campaign** asks first when one exists, and **Keep my save** is the default answer; finishing chapter 10 marks the campaign complete and clears it; Boss mode never writes checkpoints
 - Saves live in `localStorage` (`air-supreme:campaign-save`; completion, best score and highest level reached in `air-supreme:campaign-progress`)
@@ -310,7 +311,9 @@ Wingmen fly the same airframes in an allied livery, and the player's afterburner
 
 - **Hangar** on the main menu opens a full-screen stand: the player jet, the five enemy jets, all ten bosses (each with its own model), the player missile and the boss missile. It is not the _Refit & Rearm_ hangar between chapters
 - Step through the models with the arrow buttons, the **Left** / **Right** keys or a swipe; drag with the mouse to turn a model, or switch auto-rotate off; **Esc** or **Main Menu** goes back
-- Each model is framed in the area above its name label, sized to that area's width and height, so big bosses, long names and narrow portrait screens do not hide part of the model; the name stays on one line when it fits
+- Every model is shown at the same size, centred in the area above its name label: its bounding sphere spans about 70% of the stand's shorter side, and shrinks only where that area is too small for it (a name that wraps, a very short screen), so big bosses, long names and narrow portrait screens do not hide part of the model. The name stays on one line when it fits
+- The signal-light balls a jet carries in flight are hidden on the stand and on the title screen's jet, where they would hang beside the airframe as large dots
+- A model that fails to load says so in its name label (`Could not load: …`) and the other models stay available; if the browser cannot create a WebGL context, the Hangar closes and the title screen comes back
 - On a phone held in landscape the header shrinks and the hint line is hidden, so the height goes to the model
 - The viewer's code is fetched during idle menu time before first open
 
@@ -364,7 +367,7 @@ Settings are saved in `localStorage` (`air-supreme:start-menu-settings`; fields 
 | V | toggle first-person / third-person view |
 | N | open / close the level map (or click the radar); **Esc** also closes it |
 | ESC / P | pause pod (Resume / Upgrades / Settings / Save & Exit — **Main Menu** where nothing can be saved) |
-| U | open the upgrade shop after pausing |
+| U | open the upgrade shop (pauses the game) |
 
 A quick tap of **Space** or the missile key is never lost, even when it is shorter than one simulation step; the same goes for the touch **FIRE** and **MSL** buttons.
 
@@ -524,11 +527,11 @@ src/
 │   ├── PauseMenu.ts              # pause pod, Save & Exit
 │   ├── StoryOverlay.ts           # chapter cards, debrief, ending
 │   ├── RadioComms.ts             # radio panel
-│   ├── CheckpointResumeButton.ts # "continue from checkpoint" on the settlement screen
 │   ├── RadarMinimap.ts           # heading-up radar dial
 │   ├── RadarLevelMap.ts          # north-up level map opened from the radar
 │   ├── radarGlyphs.ts            # symbols shared by the dial and the map
 │   ├── EnemyHealthBars.ts        # health bars, target brackets, off-screen arrows
+│   ├── ChevronAvoidance.ts       # keeps off-screen arrows clear of the radar, HUD panels and touch controls
 │   ├── LockOnIndicator.ts        # gun cross, seeker ring, lock brackets, lead marker
 │   ├── ModelPreview.ts           # the main menu's Hangar (model viewer)
 │   ├── UpgradeMenu.ts            # pause shop + hangar
@@ -616,31 +619,34 @@ PLAYER: {
   PITCH_SPEED: 2.0,    // pitch speed
   YAW_SPEED: 1.5,      // yaw speed
   ROLL_SPEED: 3.0,     // roll speed
-  BASE_SPEED: 50,      // base speed
-  MAX_SPEED: 100,      // max speed
+  BASE_SPEED: 45,      // base speed
+  MAX_SPEED: 45,       // max speed
 }
 ```
 
 ### JSON config system
 
-The game supports external JSON configuration without code changes:
+The game fetches an external JSON configuration at start-up (`configLoader.load()` in `src/main.ts`) and merges it over the defaults built into `ConfigLoader`:
 
-**Location**: `public/config/game-config.json`
+**Location**: `public/config/game-config.json` (the first two blocks are shown; the file goes on with camera, world, power-up, level, missile, boss-weapon, enemy, boss, upgrade and performance blocks)
 
 ```json
 {
+  "version": "1.0.0",
   "player": {
-    "maxHealth": 200,
-    "speed": 45,
-    "fireRate": 0.3,
-    "damage": 12.5
+    "pitchSpeed": 2.0,
+    "yawSpeed": 1.5,
+    "rollSpeed": 3.0,
+    "baseSpeed": 45,
+    "maxSpeed": 45,
+    "baseHealth": 200,
+    "baseDamage": 12.5,
+    "baseFireRate": 0.3
   },
-  "enemy": {
-    "spawnInterval": 2000,
-    "maxCount": 10
-  },
-  "game": {
-    "difficulty": "normal"
+  "projectile": {
+    "speed": 100,
+    "maxDistance": 500,
+    "poolSize": 200
   }
 }
 ```
@@ -656,6 +662,8 @@ async function initGame() {
   const enemyConfig = configLoader.getEnemy('FIGHTER');
 }
 ```
+
+At present nothing in the game calls these getters — only `load()` runs — so editing the JSON does not change gameplay; the numbers in play are the constants in the source, such as `GAME_CONSTANTS` in `src/config.ts`.
 
 ## 📊 Logging
 
