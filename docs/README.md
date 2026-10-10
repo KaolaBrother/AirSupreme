@@ -7,6 +7,7 @@
 - [Decisions](decisions/)
   - [0001 — Campaign presentation adapter and controller extraction](decisions/0001-campaign-presentation-adapter.md)
   - [0002 — Bilingual text in place, and pre-recorded voice packs keyed by line id](decisions/0002-bilingual-text-and-voice-packs.md)
+  - [0003 — Always-on missile seeker on the nose axis, and assisted flight with a bounded gun aim assist on touch](decisions/0003-nose-axis-seeker-and-touch-assists.md)
 - [Changelog](../CHANGELOG.md)
 - [Implementation plan](../IMPLEMENTATION_PLAN.md)
 - [Technical documentation](../TECHNICAL_DOCUMENTATION.md)
