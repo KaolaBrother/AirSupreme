@@ -257,7 +257,9 @@ ${toneBlock('muted', '195, 204, 214')}
  *   面板高 = 行数 × 16.9px + 8px（带呼号行再加 18.6px）
  *   可用高 = 50vh − 8vmin − 203px − max(20px, 底部安全区)
  * 五行及以上的档按底部有 34px 安全区算，四行及以下的档（没有主屏幕指示条的手机、带着工具栏的
- * 手机浏览器）按没有安全区算
+ * 手机浏览器）按没有安全区算。
+ * 正文比行数上限长时不在这里截掉：RadioComms 把正文换成同样高的裁切框，里面的文字像字幕一样
+ * 逐行上移（radioFollowOffset），这里的行数上限就是面板里同时可见的行数
  */
 @media (orientation: portrait) and (max-width: 699.98px) {
   :root:not([data-hud-camera='first-person']) #radio-comms[data-density='touch-portrait'] {

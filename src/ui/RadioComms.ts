@@ -66,6 +66,13 @@ const VOICE_SAFETY_SECONDS = 2.5;
 const VOICE_START_ALLOWANCE_SECONDS = 0.6;
 /** 读屏文本里“呼号：台词”的分隔符 */
 const SPEAKER_SEPARATOR: LocalizedText = { en: ': ', zh: '：' };
+/** 跟读：开头先停这么久再上移（抬眼看到面板的反应时间 + 第一行逐字显示） */
+const FOLLOW_START_HOLD_SECONDS = 0.8;
+/** 跟读：上移一行的滑动时间（秒）；减少动态效果时不滑动，一次跳一整行 */
+const FOLLOW_SLIDE_SECONDS = 0.25;
+/** 跟读只用于手机竖屏追尾视角的窄面板：与 radioStyles 的手机竖屏规则（max-width: 699.98px）一致 */
+const FOLLOW_MAX_WIDTH_PX = 700;
+const HUD_CAMERA_ATTRIBUTE = 'data-hud-camera';
 
 function resolveSpeaker(id: CampaignSpeakerId | string): CampaignSpeaker {
   const known = (CAMPAIGN_SPEAKERS as Readonly<Record<string, CampaignSpeaker>>)[id];
@@ -95,6 +102,56 @@ function readingHoldSeconds(chars: number): number {
 }
 
 /**
+ * 正文跟读的位置：正文比面板放得下的行数多时，面板像字幕一样逐行上移，不把后半句截掉。
+ * 返回此刻正文该向上滚过多少像素（0 … 多出来的行数 × 行高）；放得下时恒为 0。纯函数，不碰 DOM。
+ *
+ * 排法按“读得最慢、仍来得及读完”的读者：开头停 FOLLOW_START_HOLD_SECONDS，剩下的显示时间
+ * 平分给每一行（每行 τ 秒）；第 k 行在这位读者读完它的时刻（开头停留 + k × τ）滑出上沿，
+ * 最后一屏正好留下读完它所需的时间。逐字显示期间（revealSeconds 之前）不上移：整段文字排好
+ * 之后才滚，滚进来的行都已经显示完。静止时总是整行；stepOnly（减少动态效果）时不滑动。
+ *
+ * @param contentHeight 整段正文不截断时的高度（像素）
+ * @param boxHeight 面板里正文可见的高度（像素，整行数 × 行高）
+ * @param lineHeight 行高（像素）
+ * @param elapsedSeconds 这句已显示了多久（逐字 + 停留，秒）
+ * @param totalSeconds 这句计划显示多久（逐字 + 停留，秒）
+ * @param revealSeconds 逐字显示阶段的时长（秒；没有逐字显示时为 0）
+ * @param stepOnly 不做滑动，一次跳一整行
+ */
+export function radioFollowOffset(
+  contentHeight: number,
+  boxHeight: number,
+  lineHeight: number,
+  elapsedSeconds: number,
+  totalSeconds: number,
+  revealSeconds: number = 0,
+  stepOnly: boolean = false
+): number {
+  if (!(lineHeight > 0) || !(contentHeight > 0) || !(boxHeight > 0) || !(totalSeconds > 0)) {
+    return 0;
+  }
+  const totalLines = Math.round(contentHeight / lineHeight);
+  const steps = totalLines - Math.max(1, Math.round(boxHeight / lineHeight));
+  if (steps <= 0 || !(elapsedSeconds > 0)) {
+    return 0;
+  }
+  const startHold = Math.min(FOLLOW_START_HOLD_SECONDS, totalSeconds / 4);
+  const perLine = (totalSeconds - startHold) / totalLines;
+  const slide = stepOnly ? 0 : Math.min(FOLLOW_SLIDE_SECONDS, perLine / 2);
+  const earliest = revealSeconds > 0 ? revealSeconds : 0;
+  let lines = 0;
+  for (let step = 1; step <= steps; step += 1) {
+    const at = Math.max(startHold + step * perLine, earliest);
+    if (elapsedSeconds < at) {
+      break;
+    }
+    const progress = slide > 0 ? (elapsedSeconds - at) / slide : 1;
+    lines += progress >= 1 ? 1 : progress * progress * (3 - 2 * progress);
+  }
+  return lines * lineHeight;
+}
+
+/**
  * 无线电通讯：说话人（呼号 / 头像 / 色调来自 CAMPAIGN_SPEAKERS）+ 逐字台词的紧凑面板。
  *
  * - enqueue 时若空闲（isBusy() 为 false）立即显示（同步回调 onLineShown），否则排队；
@@ -107,6 +164,8 @@ function readingHoldSeconds(chars: number): number {
  *   配音结束后 VOICE_TAIL_SECONDS；说话期间下一句等待，直到 releaseVoice(line)（或兜底上限）。
  *   被打断时若配音还没说完，这句一定重播（重播时表现层重新播放配音）。没有配音时时序不变。
  * - 切换语言：当前台词（呼号、正文、读屏文本）立即按新语言重写。
+ * - 手机竖屏追尾视角的面板很窄：正文超出样式给的行数上限时不截断，像字幕一样逐行上移
+ *   （位置由 radioFollowOffset 算，面板的大小和位置不变）；放得下的台词、其余布局照旧。
  * - 面板 pointer-events: none，不遮挡准星与雷达；DOM 首次显示时才创建，没有 document 时只跑逻辑。
  */
 export class RadioComms {
@@ -124,14 +183,34 @@ export class RadioComms {
   private callsign: HTMLSpanElement | null = null;
   private name: HTMLSpanElement | null = null;
   private text: HTMLDivElement | null = null;
+  /** 正文的文字放在 .rc-text 里的这一层：跟读时整层上移，.rc-text 只管裁切 */
+  private textLine: HTMLSpanElement | null = null;
   private srText: HTMLDivElement | null = null;
   private density: HudLayoutDensity = 'desktop';
   private lastGlyphSpeaker: string = '';
   private readonly unsubscribeLocale: () => void;
 
+  /**
+   * 正文跟读（见 radioFollowOffset）：这句量到的整段正文高度、可见高度、行高。
+   * followLineHeight 为 0 = 这句不跟读（放得下，或不是手机竖屏追尾视角的面板）
+   */
+  private followContentHeight: number = 0;
+  private followBoxHeight: number = 0;
+  private followLineHeight: number = 0;
+  /** 已经滚到的位置（像素）。只增不减：配音把停留时间拉长时不往回滚 */
+  private followOffset: number = 0;
+  /** 量的时候的视角标记：视角一换，面板换了位置和大小，要重量 */
+  private followCamera: string | null = null;
+
   private readonly handleResize = (): void => {
     // 等 HUD 自己的 resize 处理先更新布局密度
-    window.setTimeout(() => this.applyDensity(), 0);
+    window.setTimeout(() => {
+      this.applyDensity();
+      // 面板的宽度和行数上限跟着视口变：正在显示的台词重新量一次
+      if (this.current) {
+        this.measureFollow(this.current);
+      }
+    }, 0);
   };
 
   constructor() {
@@ -201,6 +280,7 @@ export class RadioComms {
         if (current.phase === 'reveal') {
           this.renderReveal(current);
         }
+        this.updateFollow(current);
         return;
       }
       dt -= Math.max(0, remaining);
@@ -330,6 +410,7 @@ export class RadioComms {
     this.callsign = null;
     this.name = null;
     this.text = null;
+    this.textLine = null;
     this.srText = null;
     this.disposed = true;
   }
@@ -465,6 +546,7 @@ export class RadioComms {
     current.holdSeconds = Math.max(current.holdSeconds, readingHoldSeconds(chars));
     this.renderSpeaker(current);
     this.renderReveal(current, true);
+    this.measureFollow(current);
   }
 
   private advancePhase(line: ActiveLine): void {
@@ -536,6 +618,9 @@ export class RadioComms {
     const text = document.createElement('div');
     text.className = 'rc-text';
     text.setAttribute('aria-hidden', 'true');
+    // 文字单放一层：平时就是普通的行内文字，跟读时（measureFollow）整层上移
+    const textLine = document.createElement('span');
+    text.appendChild(textLine);
     body.append(head, text);
 
     const srText = document.createElement('div');
@@ -551,6 +636,7 @@ export class RadioComms {
     this.callsign = callsign;
     this.name = name;
     this.text = text;
+    this.textLine = textLine;
     this.srText = srText;
 
     window.addEventListener('resize', this.handleResize);
@@ -595,6 +681,96 @@ export class RadioComms {
     if (root.style.display !== 'block') {
       root.style.display = 'block';
     }
+    this.measureFollow(line);
+  }
+
+  /**
+   * 这句要不要跟读：只在手机竖屏追尾视角的窄面板上，量一次整段正文不截断时的高度
+   * （每句一次；临时放上全文、关掉行数截断，量完放回）。超出样式给的行数上限就跟读：
+   * .rc-text 改成整行数高的裁切框（高度与截断时相同，不再显示省略号），里面那层文字
+   * 由 applyFollow 逐行上移。上移用 transform，不用 scrollTop：行高不是整数像素（16.9px），
+   * 浏览器把滚动位置取整，停下来时会差出不到一像素。
+   */
+  private measureFollow(line: ActiveLine): void {
+    const text = this.text;
+    const textLine = this.textLine;
+    if (!text || !textLine || typeof window === 'undefined') {
+      return;
+    }
+    this.clearFollow();
+    const camera = document.documentElement.getAttribute(HUD_CAMERA_ATTRIBUTE);
+    this.followCamera = camera;
+    if (
+      this.density !== 'touch-portrait' ||
+      camera === 'first-person' ||
+      window.innerWidth >= FOLLOW_MAX_WIDTH_PX
+    ) {
+      return;
+    }
+    const shown = textLine.textContent ?? '';
+    text.style.display = 'block';
+    textLine.textContent = tr(line.line.text);
+    const contentHeight = text.scrollHeight;
+    const style = window.getComputedStyle(text);
+    const lineHeight = parseFloat(style.lineHeight);
+    const boxLines = parseInt(style.getPropertyValue('-webkit-line-clamp'), 10);
+    textLine.textContent = shown;
+    if (!(lineHeight > 0) || !(boxLines > 0) || contentHeight <= boxLines * lineHeight + 1) {
+      text.style.display = '';
+      return;
+    }
+    const boxHeight = boxLines * lineHeight;
+    text.style.maxHeight = `${boxHeight}px`;
+    textLine.style.display = 'block';
+    this.followContentHeight = contentHeight;
+    this.followBoxHeight = boxHeight;
+    this.followLineHeight = lineHeight;
+    this.applyFollow(line);
+  }
+
+  /** 每次 update：视角换了就重量；跟读中的台词按已显示的时间上移 */
+  private updateFollow(line: ActiveLine): void {
+    if (!this.text) {
+      return;
+    }
+    if (document.documentElement.getAttribute(HUD_CAMERA_ATTRIBUTE) !== this.followCamera) {
+      this.measureFollow(line);
+      return;
+    }
+    this.applyFollow(line);
+  }
+
+  /** 只在位置变了的时候写样式：停着的时候不碰 DOM，滑动的 0.25 秒里每帧写一次 transform */
+  private applyFollow(line: ActiveLine): void {
+    if (!this.textLine || this.followLineHeight <= 0) {
+      return;
+    }
+    const offset = radioFollowOffset(
+      this.followContentHeight,
+      this.followBoxHeight,
+      this.followLineHeight,
+      this.elapsedOf(line),
+      line.revealSeconds + line.holdSeconds,
+      line.revealSeconds,
+      this.reducedMotion
+    );
+    if (offset > this.followOffset) {
+      this.followOffset = offset;
+      this.textLine.style.transform = `translateY(${-Math.round(offset * 100) / 100}px)`;
+    }
+  }
+
+  private clearFollow(): void {
+    if (this.text && this.textLine && this.followLineHeight > 0) {
+      this.text.style.display = '';
+      this.text.style.maxHeight = '';
+      this.textLine.style.display = '';
+      this.textLine.style.transform = '';
+    }
+    this.followContentHeight = 0;
+    this.followBoxHeight = 0;
+    this.followLineHeight = 0;
+    this.followOffset = 0;
   }
 
   /** 呼号、角色名与读屏文本（按当前语言） */
@@ -617,19 +793,19 @@ export class RadioComms {
   private renderReveal(line: ActiveLine, force: boolean = false): void {
     if (line.phase === 'reveal' && !force) {
       const shown = Math.min(line.chars, Math.floor(line.phaseTime * REVEAL_CHARS_PER_SECOND) + 1);
-      if (shown === line.shown && this.text?.textContent) {
+      if (shown === line.shown && this.textLine?.textContent) {
         return;
       }
       line.shown = shown;
     }
-    if (!this.text) {
+    if (!this.textLine) {
       return;
     }
     const text = tr(line.line.text);
     const visible =
       line.shown >= line.chars ? text : Array.from(text).slice(0, line.shown).join('');
-    if (this.text.textContent !== visible) {
-      this.text.textContent = visible;
+    if (this.textLine.textContent !== visible) {
+      this.textLine.textContent = visible;
     }
   }
 
@@ -637,6 +813,7 @@ export class RadioComms {
     if (!this.root) {
       return;
     }
+    this.clearFollow();
     this.root.style.display = 'none';
     this.root.classList.remove('is-out');
     this.root.setAttribute('data-phase', 'idle');
