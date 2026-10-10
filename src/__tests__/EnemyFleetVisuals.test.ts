@@ -15,7 +15,10 @@ import { ParticleSystem } from '@/features/effects/ParticleSystem';
 import { ParticleTrailRenderer } from '@/features/effects/ParticleTrailRenderer';
 import { ENEMY_CONFIGS, EnemyType } from '@/features/enemy/EnemyTypes';
 import { FriendlyAI, WINGMAN_CONFIG } from '@/features/enemy/FriendlyAI';
-import { DT, SPEC } from './enemyFleetRig';
+import { DT, SIM_TEST_TIMEOUT, SPEC } from './enemyFleetRig';
+
+// 整场交战要算几万步：给足时间，别让机器忙的时候超时（超时的用例还会拖累后面的用例）
+vi.setConfig({ testTimeout: SIM_TEST_TIMEOUT });
 
 /**
  * 舰队外观（规格 §1），在 jsdom 里能验证的部分：三方阵营的涂装规则（敌机身上没有金色 / 黄色、

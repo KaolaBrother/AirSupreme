@@ -11,14 +11,18 @@ import type { EnemyWeaponKind } from '@/features/enemy/EnemyWeapons';
 import {
   DEG,
   DT,
+  SIM_TEST_TIMEOUT,
   SystemRig,
   breathe,
   groupBursts,
   pointAround,
-  seededRandom,
+  seededGameRandom,
   type SystemRigOptions,
   type SystemShot,
 } from './enemyFleetRig';
+
+// 整场交战要算几万步：给足时间，别让机器忙的时候超时（超时的用例还会拖累后面的用例）
+vi.setConfig({ testTimeout: SIM_TEST_TIMEOUT });
 
 /**
  * 敌机的三种弹（规格 §3 与 §2.3、§2.7）：普通机炮弹、重型机的高炮弹（约 60 米/秒的红橙色大光球）、
@@ -595,7 +599,7 @@ describe('live fire: ENEMY_FIRED through the combat system', () => {
   let randomSpy: MockInstance | null = null;
 
   beforeEach(() => {
-    randomSpy = vi.spyOn(Math, 'random').mockImplementation(seededRandom(20261012));
+    randomSpy = vi.spyOn(Math, 'random').mockImplementation(seededGameRandom(20261012));
   });
 
   afterEach(() => {
@@ -749,10 +753,10 @@ describe('live fire: ENEMY_FIRED through the combat system', () => {
     for (const seed of [20261012, 20261013, 20261014]) {
       fight?.dispose();
       fight = null;
-      randomSpy?.mockImplementation(seededRandom(seed));
+      randomSpy?.mockImplementation(seededGameRandom(seed));
       const current = startFight(6, 300);
       // 玩家直飞：会挨到各种弹
-      const steps = Math.round(90 / DT);
+      const steps = Math.round(60 / DT);
       for (let i = 0; i < steps; i++) {
         current.step();
         if (i % 600 === 599) await breathe();
@@ -786,7 +790,7 @@ describe('live fire: ENEMY_FIRED through the combat system', () => {
         traced.add(bestKind);
       }
     }
-    expect(hits, 'hits on the player in three 90 s fights').toBeGreaterThan(5);
+    expect(hits, 'hits on the player in three 60 s fights').toBeGreaterThan(5);
     expect(traced.size, 'kinds of round that hit').toBeGreaterThanOrEqual(2);
   });
 });

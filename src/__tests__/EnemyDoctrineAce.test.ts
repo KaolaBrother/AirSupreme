@@ -1,11 +1,12 @@
 import * as THREE from 'three';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { EnemyAI } from '@/features/enemy/EnemyAI';
 import { ENEMY_CONFIGS, EnemyType } from '@/features/enemy/EnemyTypes';
 import {
   DEG,
   DT,
   FleetRig,
+  SIM_TEST_TIMEOUT,
   SPEC,
   TurnTracker,
   angleBetween,
@@ -17,6 +18,9 @@ import {
   pointAround,
   type RigShot,
 } from './enemyFleetRig';
+
+// 整场交战要算几万步：给足时间，别让机器忙的时候超时（超时的用例还会拖累后面的用例）
+vi.setConfig({ testTimeout: SIM_TEST_TIMEOUT });
 
 /**
  * 王牌（ACE，决斗者）的机炮与机动打法，规格 §3：
@@ -103,10 +107,11 @@ describe('ACE: Fighter pursuit with better numbers (spec §3)', () => {
       await breathe();
     }
     expect(opening.length, 'bursts seen').toBeGreaterThan(60);
-    // 规格没有给王牌单独的锥角：只要求它和战斗机一样是窄锥，远小于旧的 45°
-    expect(Math.max(...opening), 'widest angle at which a burst opened (degrees)').toBeLessThan(
-      22.5
-    );
+    // 规格 §3a：锥角在点射的第一发上检查，王牌不超过 15°
+    expect(
+      Math.max(...opening),
+      'widest angle at which a burst opened (degrees)'
+    ).toBeLessThanOrEqual(15);
     // 点射：每次不止一发，长度固定（偶尔被打断）
     const full = Math.max(...sizes);
     expect(full).toBeGreaterThanOrEqual(4);

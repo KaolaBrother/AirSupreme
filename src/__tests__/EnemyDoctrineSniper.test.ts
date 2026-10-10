@@ -8,6 +8,7 @@ import {
   DT,
   FleetRig,
   LiveFire,
+  SIM_TEST_TIMEOUT,
   SPEC,
   SystemRig,
   angleBetween,
@@ -15,8 +16,11 @@ import {
   chasePilot,
   horizontal,
   pointAround,
-  seededRandom,
+  seededGameRandom,
 } from './enemyFleetRig';
+
+// 整场交战要算几万步：给足时间，别让机器忙的时候超时（超时的用例还会拖累后面的用例）
+vi.setConfig({ testTimeout: SIM_TEST_TIMEOUT });
 
 /**
  * 狙击机（SNIPER，长枪手）的打法，规格 §3：
@@ -278,7 +282,7 @@ describe('SNIPER charged shot (spec §3)', () => {
 
   it('through the real system each charge raises one lance-charge tell event (the charge sound hook)', () => {
     EventBus.clear();
-    const randomSpy = vi.spyOn(Math, 'random').mockImplementation(seededRandom(1414));
+    const randomSpy = vi.spyOn(Math, 'random').mockImplementation(seededGameRandom(1414));
     const system = new SystemRig({ level: 2, difficulty: 3 });
     try {
       const sniper = system.spawn(EnemyType.SNIPER, pointAround(system.player, 440, 70 * DEG));
@@ -410,26 +414,48 @@ describe('SNIPER standoff (spec §3: orbits 380-520 m out)', () => {
     }
   });
 
-  // FINDING: spec §3 SNIPER — "Standoff: orbits 380-520 m out." The band is not held. The Sniper
-  // orbits at 1.0x of its base speed (45 m/s, the same as the player's base speed) and does not use
-  // its throttle to keep station, so against a player who simply flies straight it either happens
-  // to orbit the right way round (seed 7: 385-481 m, fine) or falls behind and trails at 507-673 m
-  // (seed 4: inside 380-520 m only 3 % of the time, bearing barely changing — a tail chase, not an
-  // orbit), firing only 3 lances in 70 s (instead of about 15) from up to 610 m, mostly out of
-  // lance range, and eventually drifting toward the 900 m leash. Against
-  // a gently turning player (0.1 rad/s) it wanders between 271 m and 612 m. Reproduce:
-  // FleetRig({ capacity: 2, seed: 4 }), one SNIPER 450 m out at 70 degrees off the nose, player
-  // flying straight at 45 m/s for 80 s; sample the distance from t = 10 s. This test allows 20 m
-  // either side of the band and asks for 90 % of the time.
-  it.fails('holds the 380-520 m band against a player who flies straight or turns gently', () => {
-    for (const seed of [4, 5, 6, 7]) {
-      for (const yaw of [0, 0.1]) {
-        const { distances } = standoff(seed, yaw);
-        const inBand = distances.filter((distance) => distance >= 360 && distance <= 540).length;
-        expect(inBand / distances.length, `seed ${seed}, turn ${yaw} rad/s`).toBeGreaterThan(0.9);
+  // FINDING: spec §3a — "Sniper standoff: while it is neither fleeing nor charging nor outside the
+  // leash, a Sniper is inside 380–520 m for at least 60 % of the time against a player flying
+  // straight at cruise speed or turning gently. It may use the full throttle range to keep
+  // station." The band is not held. The Sniper orbits at 1.0x of its base speed (45 m/s, the same
+  // as the player's cruise speed) and does not use its throttle to keep station, so against a
+  // player who simply flies straight it either happens to orbit the right way round (seeds 5-7:
+  // in the band all the time) or falls behind and trails at 507-673 m (seed 4: in the band 3 % of
+  // the counted time, 5 lances in 70 s instead of about 15). Against a gentle turn of 0.1 rad/s it
+  // is in the band 53 %, 11 %, 56 % and 57 % of the time (seeds 4-7). Reproduce:
+  // FleetRig({ capacity: 2, seed }), one SNIPER 450 m out at 70 degrees off the nose, player at
+  // 45 m/s for 80 s; from t = 10 s count the steps on which it is not charging (no beam shown),
+  // not fleeing (from the player coming inside 220 m until the range is back to 380 m) and not
+  // beyond 900 m, and take the share of those with the range inside 380-520 m.
+  it.fails(
+    'is inside 380-520 m at least 60 % of the time against a straight or gently turning player',
+    () => {
+      for (const seed of [4, 5, 6, 7]) {
+        for (const yaw of [0, 0.1]) {
+          const current = makeRig({ capacity: 2, seed });
+          const sniper = current.addJet(
+            EnemyType.SNIPER,
+            pointAround(current.player, 450, 70 * DEG)
+          );
+          current.pilot = (active) => active.turnPlayer(yaw * DT);
+          let counted = 0;
+          let inBand = 0;
+          let fleeing = false;
+          current.run(80, () => {
+            if (current.time < 10) return;
+            const distance = current.distanceTo(sniper);
+            if (distance < FLEE_DISTANCE) fleeing = true;
+            else if (distance >= 380) fleeing = false;
+            if (fleeing || sniper.isTelegraphing() || distance > SPEC.LEASH) return;
+            counted++;
+            if (distance >= 380 && distance <= 520) inBand++;
+          });
+          expect(counted, `steps that count, seed ${seed}, turn ${yaw} rad/s`).toBeGreaterThan(600);
+          expect(inBand / counted, `seed ${seed}, turn ${yaw} rad/s`).toBeGreaterThanOrEqual(0.6);
+        }
       }
     }
-  });
+  );
 });
 
 describe('SNIPER flees a player who closes inside 220 m (spec §3)', () => {
@@ -582,5 +608,72 @@ describe('SNIPER without a token (spec §2.1)', () => {
     expect(current.shots.length).toBe(0);
     expect(current.tells.length).toBe(0);
     expect(beamSteps).toBe(0);
+  });
+});
+
+// 规格 §3a："Player not targetable (respawning, story hold, dead): no enemy weapon of any kind
+// fires ... and no lock or charge starts." 走真实的 EnemySystem（玩家是否可被攻击由威胁提供者给出）。
+describe('SNIPER and a player who cannot be attacked (spec §3a)', () => {
+  let system: SystemRig | null = null;
+  let randomSpy: { mockRestore(): void } | null = null;
+
+  beforeEach(() => {
+    EventBus.clear();
+    randomSpy = vi.spyOn(Math, 'random').mockImplementation(seededGameRandom(1515));
+  });
+
+  afterEach(() => {
+    system?.dispose();
+    system = null;
+    EventBus.clear();
+    randomSpy?.mockRestore();
+    randomSpy = null;
+  });
+
+  function duel(): { current: SystemRig; sniper: EnemyAI } {
+    const current = new SystemRig({ level: 2, difficulty: 3 });
+    system = current;
+    const sniper = current.spawn(EnemyType.SNIPER, pointAround(current.player, 440, 70 * DEG));
+    current.pilot = (active) => active.turnPlayer(0.3 * DT);
+    return { current, sniper };
+  }
+
+  it('starts no charge and fires nothing while the player cannot be attacked, and charges again afterwards', () => {
+    const { current, sniper } = duel();
+    // 对照：玩家可以被攻击时它会蓄力
+    current.run(20, () => current.tells.length > 0);
+    expect(current.tells.length, 'control: it charges at a player it may attack').toBeGreaterThan(
+      0
+    );
+    // 等这一发打完、光束收起
+    current.run(10, () => !sniper.isTelegraphing());
+    expect(sniper.isTelegraphing()).toBe(false);
+
+    current.playerTargetable = false;
+    const tells = current.tells.length;
+    const shots = current.shots.length;
+    let beamSteps = 0;
+    current.run(15, () => {
+      if (sniper.isTelegraphing()) beamSteps++;
+    });
+    expect(current.tells.length - tells, 'charges started').toBe(0);
+    expect(beamSteps, 'steps with the aiming beam showing').toBe(0);
+    expect(current.shots.length - shots, 'rounds fired').toBe(0);
+
+    current.playerTargetable = true;
+    current.run(15, () => current.tells.length > tells);
+    expect(current.tells.length, 'it charges again once the player is back').toBeGreaterThan(tells);
+  });
+
+  it('a charge already under way does not end in a lance once the player cannot be attacked', () => {
+    const { current } = duel();
+    current.run(20, () => current.tells.length > 0);
+    expect(current.tells.length).toBeGreaterThan(0);
+    // 蓄力到一半（光束还在跟踪）玩家变成不可被攻击
+    current.run(0.5);
+    const shots = current.shots.length;
+    current.playerTargetable = false;
+    current.run(6);
+    expect(current.shots.length - shots, 'rounds fired at a player who cannot be attacked').toBe(0);
   });
 });

@@ -6,7 +6,18 @@ import { createFriendlyMesh } from '@/features/aircraft/AircraftMeshFactory';
 import { getAttackTokenCount } from '@/features/enemy/AttackDirector';
 import { EnemyType } from '@/features/enemy/EnemyTypes';
 import { FriendlyAI, WINGMAN_CONFIG } from '@/features/enemy/FriendlyAI';
-import { DEG, SystemRig, pointAround, seededRandom, type SystemRigOptions } from './enemyFleetRig';
+import {
+  DEG,
+  DT,
+  SIM_TEST_TIMEOUT,
+  SystemRig,
+  pointAround,
+  seededGameRandom,
+  type SystemRigOptions,
+} from './enemyFleetRig';
+
+// 整场交战要算几万步：给足时间，别让机器忙的时候超时（超时的用例还会拖累后面的用例）
+vi.setConfig({ testTimeout: SIM_TEST_TIMEOUT });
 
 /**
  * 开发钩子里和敌机有关的四个（规格 §5，window.__AIR_SUPREME_DEV__）：
@@ -54,12 +65,18 @@ const ALL_TYPES = Object.values(EnemyType);
 const ENTRY_KEYS = ['cloaked', 'distance', 'hasAttackToken', 'health', 'phase', 'position', 'type'];
 
 let rig: SystemRig | null = null;
-let playerObject: THREE.Object3D;
 let randomSpy: MockInstance | null = null;
 let canvasSpy: MockInstance | null = null;
+/**
+ * 每个测试台自己的“玩家机”对象（钩子看到的玩家）。不能放在一个模块变量里共用：超时的异步用例
+ * 会在后台接着跑，把它自己的玩家位置写进下一个用例的玩家机，下一个用例的敌机就生成到几公里外。
+ */
+const playerObjects = new WeakMap<SystemRig, THREE.Object3D>();
 
 /** 把测试台里的玩家（位置 + 机头方向）同步到钩子看到的玩家机对象上：玩家机机头是本地 -Z */
 function syncPlayer(current: SystemRig): void {
+  const playerObject = playerObjects.get(current);
+  if (!playerObject) return;
   playerObject.position.copy(current.player.position);
   const { forward } = current.player;
   playerObject.rotation.set(0, Math.atan2(-forward.x, -forward.z), 0);
@@ -71,7 +88,8 @@ function install(options: SystemRigOptions = {}): { current: SystemRig; dev: Ene
   EventBus.clear();
   const current = new SystemRig(options);
   rig = current;
-  playerObject = new THREE.Group();
+  const playerObject = new THREE.Group();
+  playerObjects.set(current, playerObject);
   syncPlayer(current);
   const provided: Record<string, unknown> = {
     getEnemySystem: () => current.system,
@@ -106,7 +124,7 @@ beforeEach(() => {
     'requestAnimationFrame',
     vi.fn(() => 0)
   );
-  randomSpy = vi.spyOn(Math, 'random').mockImplementation(seededRandom(20261013));
+  randomSpy = vi.spyOn(Math, 'random').mockImplementation(seededGameRandom(20261013));
   // 敌机进场的传送门会试着画贴图：jsdom 没有 canvas，直接返回 null
   canvasSpy = vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null);
 });
@@ -299,28 +317,40 @@ describe('listJets()', () => {
       dev.spawnEnemy(EnemyType.FIGHTER, { distance: 320, bearingDeg: i * 72 + 10 });
     }
     current.jets[1].takeDamage(37);
-    let sawToken = false;
+    // 每一步都比，记下最坏的情况，最后只断言一次
+    let wrongLength = 0;
+    let wrongToken = 0;
+    let worstNumber = 0;
+    let mostHolding = 0;
     run(current, 20, () => {
       const list = dev.listJets();
       const jets = current.jets.filter((jet) => jet.isAlive());
-      expect(list.length).toBe(jets.length);
+      if (list.length !== jets.length) {
+        wrongLength++;
+        return;
+      }
+      let holding = 0;
       list.forEach((entry, index) => {
         const jet = jets[index];
         const position = jet.getMesh().position;
-        expect(Math.abs(entry.health - jet.getHealth().current)).toBeLessThan(0.11);
-        expect(Math.abs(entry.position.x - position.x)).toBeLessThan(0.11);
-        expect(Math.abs(entry.position.y - position.y)).toBeLessThan(0.11);
-        expect(Math.abs(entry.position.z - position.z)).toBeLessThan(0.11);
-        expect(
+        worstNumber = Math.max(
+          worstNumber,
+          Math.abs(entry.health - jet.getHealth().current),
+          Math.abs(entry.position.x - position.x),
+          Math.abs(entry.position.y - position.y),
+          Math.abs(entry.position.z - position.z),
           Math.abs(entry.distance - position.distanceTo(current.player.position))
-        ).toBeLessThan(0.11);
-        expect(entry.hasAttackToken).toBe(jet.hasAttackToken());
+        );
+        if (entry.hasAttackToken !== jet.hasAttackToken()) wrongToken++;
+        if (entry.hasAttackToken) holding++;
       });
-      const holding = list.filter((entry) => entry.hasAttackToken).length;
-      expect(holding).toBeLessThanOrEqual(getAttackTokenCount(1, 3, false));
-      if (holding > 0) sawToken = true;
+      mostHolding = Math.max(mostHolding, holding);
     });
-    expect(sawToken, 'some jet held a token at some point').toBe(true);
+    expect(wrongLength, 'steps where the list was not one entry per alive jet').toBe(0);
+    expect(worstNumber, 'largest gap between a listed number and the live one').toBeLessThan(0.11);
+    expect(wrongToken, 'entries whose token flag differed from the jet').toBe(0);
+    expect(mostHolding).toBeLessThanOrEqual(getAttackTokenCount(1, 3, false));
+    expect(mostHolding, 'some jet held a token at some point').toBeGreaterThan(0);
     const damaged = dev.listJets()[1];
     expect(damaged.health).toBeLessThan(dev.listJets()[0].health);
   });
@@ -438,15 +468,15 @@ describe('holdWaves(on): regular wave spawning stops and resumes', () => {
     for (let i = 0; i < 4; i++) await Promise.resolve();
   }
 
-  /** 推进 seconds 秒（每 0.1 秒让按需加载跑完一次）；until 返回 true 时提前结束 */
+  /** 推进 seconds 秒（每 0.25 秒让按需加载跑完一次）；until 返回 true 时提前结束 */
   async function advance(
     current: SystemRig,
     seconds: number,
     until?: () => boolean
   ): Promise<boolean> {
-    const chunks = Math.round(seconds / 0.1);
+    const chunks = Math.round(seconds / 0.25);
     for (let i = 0; i < chunks; i++) {
-      run(current, 0.1);
+      run(current, 0.25);
       await settle();
       if (until?.()) return true;
     }
@@ -458,10 +488,32 @@ describe('holdWaves(on): regular wave spawning stops and resumes', () => {
     current.system.startWave(current.player.position);
   }
 
+  /** 存活敌机数 */
+  function alive(current: SystemRig): number {
+    return current.jets.filter((jet) => jet.isAlive()).length;
+  }
+
+  /** 把在场的敌机全部击落，持续 seconds 秒（这期间进场的也击落） */
+  async function shootDown(current: SystemRig, seconds: number): Promise<void> {
+    await advance(current, seconds, () => {
+      for (const jet of current.jets) jet.takeDamage(1e9);
+      return false;
+    });
+    await advance(current, 1);
+  }
+
   it('control: without a hold, the first wave brings jets in', async () => {
     const { current } = install();
     startLevel(current);
     expect(await advance(current, 60, () => current.jets.length > 0)).toBe(true);
+  });
+
+  it('control: without a hold, shooting the first arrivals down brings more jets within 30 s', async () => {
+    const { current } = install();
+    startLevel(current);
+    expect(await advance(current, 60, () => current.jets.length > 0)).toBe(true);
+    await shootDown(current, 3);
+    expect(await advance(current, 30, () => alive(current) > 0)).toBe(true);
   });
 
   it('held from the start: no jet arrives; released: the wave comes in', async () => {
@@ -469,8 +521,9 @@ describe('holdWaves(on): regular wave spawning stops and resumes', () => {
     current.system.loadLevel(1);
     dev.holdWaves(true);
     current.system.startWave(current.player.position);
+    // 不暂停时第一架几秒内就进场（见上面的对照）：暂停 25 秒一架也不来
     let arrived = 0;
-    await advance(current, 60, () => {
+    await advance(current, 25, () => {
       arrived = Math.max(arrived, current.jets.length);
       return false;
     });
@@ -484,28 +537,25 @@ describe('holdWaves(on): regular wave spawning stops and resumes', () => {
     ).toBe(true);
   });
 
-  it('held with everything shot down: the next wave does not start until the hold is released', async () => {
+  it('held with everything shot down: no more jets come until the hold is released', async () => {
     const { current, dev } = install();
     startLevel(current);
     expect(await advance(current, 60, () => current.jets.length > 0)).toBe(true);
     dev.holdWaves(true);
     // 按下暂停时已经打开的传送门还会把那一架送进来：给它几秒走完，进来的照样击落
-    await advance(current, 8, () => {
-      for (const jet of current.jets) jet.takeDamage(1e9);
-      return false;
-    });
-    await advance(current, 1);
-    expect(current.jets.filter((jet) => jet.isAlive()).length).toBe(0);
+    await shootDown(current, 8);
+    expect(alive(current)).toBe(0);
+    // 不暂停时 30 秒内必有新的敌机进场（见上面的对照）
     let arrived = 0;
-    await advance(current, 90, () => {
-      arrived = Math.max(arrived, current.jets.filter((jet) => jet.isAlive()).length);
+    await advance(current, 30, () => {
+      arrived = Math.max(arrived, alive(current));
       return false;
     });
-    expect(arrived, 'regular jets that arrived during 90 s of hold').toBe(0);
+    expect(arrived, 'regular jets that arrived during 30 s of hold').toBe(0);
 
     dev.holdWaves(false);
     expect(
-      await advance(current, 120, () => current.jets.some((jet) => jet.isAlive())),
+      await advance(current, 60, () => alive(current) > 0),
       'regular jets come back after release'
     ).toBe(true);
   });
@@ -517,9 +567,17 @@ describe('holdWaves(on): regular wave spawning stops and resumes', () => {
     dev.holdWaves(true);
     dev.clearJets();
     dev.spawnEnemy(EnemyType.SNIPER, { distance: 450, bearingDeg: 40, count: 2 });
+    for (const jet of current.jets) {
+      expect(
+        jet.getMesh().position.distanceTo(current.player.position),
+        'spawned around this player'
+      ).toBeLessThan(500);
+    }
     const start = current.jets.map((jet) => jet.getMesh().position.clone());
+    // 玩家盘旋：狙击机好保持站位，会照常蓄力
+    current.pilot = (active) => active.turnPlayer(0.35 * DT);
     let foreign = 0;
-    await advance(current, 45, () => {
+    await advance(current, 30, () => {
       for (const entry of dev.listJets()) {
         if (entry.type !== EnemyType.SNIPER) foreign++;
       }

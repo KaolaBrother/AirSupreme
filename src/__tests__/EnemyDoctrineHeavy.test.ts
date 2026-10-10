@@ -7,15 +7,19 @@ import {
   DT,
   FleetRig,
   LiveFire,
+  SIM_TEST_TIMEOUT,
   SystemRig,
   angleBetween,
   breathe,
   groupBursts,
   pointAround,
-  seededRandom,
+  seededGameRandom,
   shadowPilot,
   type RigShot,
 } from './enemyFleetRig';
+
+// 整场交战要算几万步：给足时间，别让机器忙的时候超时（超时的用例还会拖累后面的用例）
+vi.setConfig({ testTimeout: SIM_TEST_TIMEOUT });
 
 /**
  * 重型机（HEAVY，炮艇机）的打法，规格 §3：
@@ -326,17 +330,16 @@ describe('HEAVY tail gun (spec §3)', () => {
     expect(without.current.shots.filter((shot) => shot.weapon === 'heavy-shell').length).toBe(0);
   });
 
-  // FINDING: nobody fires at a player who cannot be attacked (respawning). Milestone 1 guaranteed
-  // this through the tokens: EnemySystem hands out zero tokens while the threat provider reports
-  // the player as not targetable, and "jets without a token ... do not fire at the player"
-  // (spec §2.1). The token-free tail gun added in milestone 2 (d90d661) is documented to keep the
-  // rule ("防御性射击也只在这时打出", DoctrineContext.weaponsFree; "同样要有可攻击的玩家", EnemyAI), but
-  // weaponsFree is derived only from "a player position was passed in", and LevelManager always
-  // passes one. So a Heavy keeps shooting its tail gun at a respawning player parked astern.
-  // Reproduce: SystemRig (real EnemySystem) at level 1, one HEAVY, player held 200 m directly
-  // astern, playerTargetable = false for 15 s: 12 tail-gun rounds are fired (0 token holders).
+  // FINDING: spec §3a — "Player not targetable (respawning, story hold, dead): no enemy weapon of
+  // any kind fires — token-free weapons such as the Heavy's tail gun included — and no lock or
+  // charge starts." The token-free tail gun (d90d661) is documented to keep the rule
+  // ("防御性射击也只在这时打出", DoctrineContext.weaponsFree), but weaponsFree is derived only from
+  // "a player position was passed in", and LevelManager always passes one. So a Heavy keeps
+  // shooting its tail gun at a respawning player parked astern. Reproduce: SystemRig (real
+  // EnemySystem) at level 1, one HEAVY, player held 200 m directly astern, playerTargetable = false
+  // for 15 s: 12 tail-gun rounds are fired (0 token holders).
   it.fails('the tail gun stays silent while the player cannot be attacked (respawning)', () => {
-    const randomSpy = vi.spyOn(Math, 'random').mockImplementation(seededRandom(5));
+    const randomSpy = vi.spyOn(Math, 'random').mockImplementation(seededGameRandom(5));
     const system = new SystemRig({ level: 1, difficulty: 3 });
     try {
       const heavy = system.spawn(EnemyType.HEAVY, pointAround(system.player, 300, 0));
@@ -352,7 +355,7 @@ describe('HEAVY tail gun (spec §3)', () => {
   });
 
   it('once the player can be attacked again the tail gun is live at once', () => {
-    const randomSpy = vi.spyOn(Math, 'random').mockImplementation(seededRandom(5));
+    const randomSpy = vi.spyOn(Math, 'random').mockImplementation(seededGameRandom(5));
     const system = new SystemRig({ level: 1, difficulty: 3 });
     try {
       const heavy = system.spawn(EnemyType.HEAVY, pointAround(system.player, 300, 0));
