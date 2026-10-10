@@ -1,12 +1,28 @@
 import { Quaternion, Vector3 } from 'three';
 import type { Camera } from 'three';
-import { OffscreenChevron } from '@/ui/OffscreenChevron';
+import {
+  CHEVRON_EDGE_PADDING,
+  CHEVRON_EXIT_NONE,
+  ChevronAvoidance,
+  type ChevronAvoidExit,
+} from '@/ui/ChevronAvoidance';
+import { OffscreenChevron, measureChevronFootprint } from '@/ui/OffscreenChevron';
 import { HUD_COLORS } from '@/ui/theme/hudTokens';
+
+interface MissileIndicatorEntry {
+  chevron: OffscreenChevron;
+  /** 这枚箭头上一次避让走的出口（滞回用） */
+  exit: ChevronAvoidExit;
+}
 
 export class BossMissileIndicator {
   private container: HTMLDivElement;
   private initialized: boolean = false;
-  private indicators: Map<string, OffscreenChevron> = new Map();
+  private indicators: Map<string, MissileIndicatorEntry> = new Map();
+  /** 雷达盘 / 触控控件 / HUD 面板都叠在这一层之上：箭头按 ChevronAvoidance 的规则避开它们 */
+  private readonly avoidance = new ChevronAvoidance();
+  /** 上一次 update 是否有屏幕外的导弹（没有的时候不量避让区） */
+  private hadOffscreenMissile: boolean = false;
   private readonly styleValueCache = new WeakMap<HTMLElement, Map<string, string>>();
   private readonly fromCamera = new Vector3();
   private readonly cameraLocal = new Vector3();
@@ -32,6 +48,7 @@ export class BossMissileIndicator {
     }
 
     document.body.appendChild(this.container);
+    this.avoidance.attach();
     this.initialized = true;
   }
 
@@ -50,10 +67,26 @@ export class BossMissileIndicator {
 
     for (const [id, indicator] of this.indicators) {
       if (!activeIds.has(id)) {
-        indicator.dispose();
+        indicator.chevron.dispose();
         this.indicators.delete(id);
       }
     }
+
+    // 避让区只在有箭头要摆的时候才量；隔了一段没量之后，第一枚箭头出现时立即重量
+    let hasOffscreenMissile = false;
+    for (const missile of missiles) {
+      if (!missile.inView) {
+        hasOffscreenMissile = true;
+        break;
+      }
+    }
+    if (hasOffscreenMissile) {
+      if (!this.hadOffscreenMissile) {
+        this.avoidance.invalidate();
+      }
+      this.avoidance.refresh();
+    }
+    this.hadOffscreenMissile = hasOffscreenMissile;
 
     for (const missile of missiles) {
       if (missile.inView) {
@@ -75,19 +108,31 @@ export class BossMissileIndicator {
     let indicator = this.indicators.get(missile.id);
 
     if (!indicator) {
-      indicator = this.createIndicator();
-      this.container.appendChild(indicator.element);
+      indicator = { chevron: this.createIndicator(), exit: CHEVRON_EXIT_NONE };
+      this.container.appendChild(indicator.chevron.element);
       this.indicators.set(missile.id, indicator);
     }
 
     const { arrowX, arrowY, rotation } = this.calculateIndicatorPosition(missile.worldPos, camera);
 
-    this.setStyleValue(indicator.element, 'left', `${arrowX * 100}%`);
-    this.setStyleValue(indicator.element, 'top', `${arrowY * 100}%`);
-    this.setStyleValue(indicator.element, 'display', 'flex');
-    this.setStyleValue(indicator.element, 'opacity', '1');
-    this.setStyleValue(indicator.element, 'visibility', 'visible');
-    indicator.update({
+    // 整枚箭头（含距离标签）移出遮挡它的控件 / 面板，并留在屏幕内
+    const avoidance = this.avoidance;
+    measureChevronFootprint(rotation, missile.distance, avoidance.footprint, 'missile');
+    avoidance.resolve(arrowX * window.innerWidth, arrowY * window.innerHeight, indicator.exit);
+    if (!Number.isFinite(avoidance.x) || !Number.isFinite(avoidance.y)) {
+      // 位置算不出来（坐标非有限）：这一帧不显示
+      this.hideIndicator(missile.id);
+      return;
+    }
+    indicator.exit = avoidance.exit;
+
+    const element = indicator.chevron.element;
+    this.setStyleValue(element, 'left', `${Math.round(avoidance.x)}px`);
+    this.setStyleValue(element, 'top', `${Math.round(avoidance.y)}px`);
+    this.setStyleValue(element, 'display', 'flex');
+    this.setStyleValue(element, 'opacity', '1');
+    this.setStyleValue(element, 'visibility', 'visible');
+    indicator.chevron.update({
       rotationDeg: rotation,
       distance: missile.distance,
       kind: 'missile',
@@ -125,7 +170,7 @@ export class BossMissileIndicator {
   ): { arrowX: number; arrowY: number; rotation: number } {
     const centerX = 0.5;
     const centerY = 0.5;
-    const edgePadding = 0.08;
+    const edgePadding = CHEVRON_EDGE_PADDING;
 
     // 使用相机位置计算方向向量
     this.fromCamera.copy(worldPos).sub(camera.position);
@@ -188,22 +233,26 @@ export class BossMissileIndicator {
   private hideIndicator(id: string): void {
     const indicator = this.indicators.get(id);
     if (indicator) {
-      this.setStyleValue(indicator.element, 'display', 'none');
-      this.setStyleValue(indicator.element, 'opacity', '0');
-      this.setStyleValue(indicator.element, 'visibility', 'hidden');
-      this.setStyleValue(indicator.element, 'left', '50%');
-      this.setStyleValue(indicator.element, 'top', '50%');
+      const element = indicator.chevron.element;
+      this.setStyleValue(element, 'display', 'none');
+      this.setStyleValue(element, 'opacity', '0');
+      this.setStyleValue(element, 'visibility', 'hidden');
+      this.setStyleValue(element, 'left', '50%');
+      this.setStyleValue(element, 'top', '50%');
+      indicator.exit = CHEVRON_EXIT_NONE;
     }
   }
 
   public clear(): void {
     for (const indicator of this.indicators.values()) {
-      indicator.dispose();
+      indicator.chevron.dispose();
     }
     this.indicators.clear();
+    this.hadOffscreenMissile = false;
   }
 
   public dispose(): void {
+    this.avoidance.detach();
     this.clear();
     if (this.container.parentElement) {
       this.container.remove();

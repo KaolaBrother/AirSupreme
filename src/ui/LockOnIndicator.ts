@@ -405,26 +405,6 @@ export class LockOnIndicator {
   }
 
   /**
-   * @deprecated 导引头常开，不再有“开始锁定”这一步。空方法只为让尚未更新的旧调用通过编译，
-   * 旧调用清理后删除。
-   */
-  public startLockOn(): void {
-    this.init();
-  }
-
-  /**
-   * @deprecated 改用 setMissileCount(0) 与 showCue('no-missile')。只为让尚未更新的旧调用
-   * 通过编译，旧调用清理后删除。
-   */
-  public setNoMissiles(show: boolean): void {
-    this.init();
-    if (show) {
-      this.setMissileCount(0);
-      this.showCue('no-missile');
-    }
-  }
-
-  /**
    * 渲染帧：把准星、目标角标、提前量标记放到当前相机下的屏幕位置。
    * 在相机更新之后、插值后的可视状态仍然生效时调用。
    * @param visible 玩家存活且在飞行（菜单 / 剧情冻结 / 暂停 / 等待复活时为 false）

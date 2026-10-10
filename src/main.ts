@@ -231,6 +231,8 @@ async function main(): Promise<void> {
     menuMusic.install();
     let game: GameCoordinator | null = null;
     let lastSettings: GameSettings | null = null;
+    // bootGame 正在等游戏代码加载 / 启动：这期间再来的启动请求一律不理
+    let booting = false;
 
     function disposeGame(): void {
       game?.dispose();
@@ -275,11 +277,18 @@ async function main(): Promise<void> {
       settings: GameSettings,
       resume: CampaignSaveData | null = null
     ): Promise<void> {
+      // 不可重入：结算界面的重试键连点两下、或上一次启动还在加载游戏代码时又来一次，
+      // 两次调用各建一个 GameCoordinator，先建的那个再也没人释放。“再来一局”和检查点续玩
+      // 都走这里，所以只在这一处拦。
+      if (booting) {
+        return;
+      }
       showEnteringBattlefield();
       disposeGame();
       unlockAudioFromUserGesture();
       menuMusic.onMenuHidden();
 
+      booting = true;
       try {
         const [{ GameCoordinator }] = await Promise.all([import('./core/GameCoordinator')]);
         void GameCoordinator.warmRuntimeChunks();
@@ -302,6 +311,9 @@ async function main(): Promise<void> {
             zh: '游戏启动失败，请查看控制台了解详情',
           })
         );
+      } finally {
+        // 启动失败也要放开，出错画面之后还能再试
+        booting = false;
       }
     }
 
