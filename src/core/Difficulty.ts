@@ -19,16 +19,16 @@ export interface DifficultyProfile {
  * （src/core/dev/BalanceHarness.ts，贪心购买升级）实测调校——波次中每分钟受到的伤害约为最大
  * 生命值的 4%（第 1 关）、8-11%（第 2-5 关）、14-17%（第 6-9 关），第 10 关约 20% 最高；
  * 不会躲避的脚本飞行员第 1-3 关不阵亡，第 8-10 关通常每关阵亡 1-2 次。“非常简单”约为普通的
- * 0.6 倍，“专家”约 2 倍。单关单次测量波动很大，看多次跑的平均。
+ * 0.35 倍（整轮战役通常一次都不被击落），“专家”约 2 倍。单关单次测量波动很大，看多次跑的平均。
  * 伤害 × 冷却共同决定敌方火力：DPS 倍率 ≈ enemyDamageMultiplier / enemyAttackCooldownMultiplier。
  */
 const DIFFICULTY_PROFILES: Record<DifficultyProfile['level'], DifficultyProfile> = {
   1: {
     level: 1,
     label: { en: 'Very Easy', zh: '非常简单' },
-    enemyHealthMultiplier: 0.8,
-    enemyDamageMultiplier: 0.35,
-    enemyAttackCooldownMultiplier: 1.7,
+    enemyHealthMultiplier: 0.72,
+    enemyDamageMultiplier: 0.22,
+    enemyAttackCooldownMultiplier: 1.9,
     powerUpDropMultiplier: 1.25,
     bossCooldownMultiplier: 1.2,
   },
