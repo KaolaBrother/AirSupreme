@@ -2,9 +2,14 @@ import { readFileSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { RadioLine } from '@/features/campaign/CampaignTypes';
+import { CAMPAIGN_SPEAKERS } from '@/features/campaign/CampaignCast';
+import type { CampaignSpeakerId, RadioLine } from '@/features/campaign/CampaignTypes';
 import { HUD } from '@/ui/HUD';
+import { RadarMinimap } from '@/ui/RadarMinimap';
 import { RadioComms } from '@/ui/RadioComms';
+import { HUD_TONE_COLORS } from '@/ui/theme/hudPalette';
+import { installCanvasRecording, type CanvasRecording } from './canvasRecorder';
+import { parseShippedDocument } from './touchTestUtils';
 
 /**
  * 触屏横握时两处位置规则（C5）：
@@ -12,10 +17,16 @@ import { RadioComms } from '@/ui/RadioComms';
  *   不再钉在左下角摇杆的位置上；
  * - 无线电面板：左右缘跟着平板档的摇杆 / 按键簇（两侧收进 28px + 安全区、尺寸放大）一起让开。
  *
- * 以及告警通道两行时的无线电面板（b602778，横握与竖屏）：
+ * 以及告警通道两行时的无线电面板（b602778）：
  * - 导弹告警与闪烁告警同时显示时 HUD 在 <html> 上记 data-hud-warning-rows="2"，少于两行或 HUD
  *   拆下时去掉；
- * - 有这个标记时手机上的无线电面板收小，不盖住下面那一行告警；平板档不变。
+ * - 有这个标记时手机横握的无线电面板收小，不盖住下面那一行告警；平板档不变。
+ *
+ * 手机竖屏追尾视角的无线电面板（P5，取代上一条在竖屏手机上的做法）：
+ * - 一个紧凑的面板，在按键簇左侧、静止摇杆上方 14px；告警通道显示零行、一行还是两行，面板都在
+ *   同一处、用同一套尺寸；
+ * - 正文行数上限按视口高度分档（1–8 行），六行起多一行呼号（说话方的强调色）；
+ * - 面板到了上限，离两行告警的下沿仍至少 12px（五行及以上的档带 34px 底部安全区也成立）。
  *
  * jsdom 不做布局，也不解析 calc() / env() / var()：这里读样式表原文（HUD 与无线电面板自己注入的
  * 样式，加上 index.html 里触控控件的样式），按媒体查询、选择器优先级和书写顺序自己层叠，
@@ -246,6 +257,12 @@ function cascaded(
 ): string | undefined {
   let winner: { value: string; rank: number[] } | undefined;
   for (const rule of rules) {
+    // 只是先筛一遍：没有声明这个属性的规则不必去比选择器（结果不变，一条用例里要查很多个视口）
+    const declares = rule.declarations.some(
+      (declaration) =>
+        declaration.property === property || declaration.property === shorthand?.property
+    );
+    if (!declares) continue;
     const matching = rule.selectors.filter((selector) => matches(element, selector));
     if (matching.length === 0) continue;
     if (!rule.conditions.every((condition) => mediaHolds(condition, viewport))) continue;
@@ -444,9 +461,9 @@ function evaluateLength(expression: string, context: LengthContext): number {
 // 被测页面
 // ---------------------------------------------------------------------------
 
-function radioLine(): RadioLine {
+function radioLine(speaker: CampaignSpeakerId = 'hq'): RadioLine {
   const text = { en: 'Viper, bandits inbound.', zh: '蝰蛇，敌机来袭。' };
-  return { id: 'layout-test-line', trigger: 'wave-start', speaker: 'hq', text };
+  return { id: 'layout-test-line', trigger: 'wave-start', speaker, text };
 }
 
 /** HUD 记在 <html> 上的页面级标记：每条用例前后清掉，互不影响 */
@@ -1107,11 +1124,11 @@ describe('radio box under a two-row warning lane', () => {
 
   /** 规格点名的两个尺寸 */
   const REFERENCE_PHONES: Scene[] = [phone(390, 844), phone(844, 390)];
-  const PHONE_SCENES: Scene[] = [
-    ...REFERENCE_PHONES,
-    phone(393, 852),
-    phone(412, 915),
-    phone(430, 932),
+  /** 横握的那一个：两行告警时面板收小的规则只剩横握手机在用 */
+  const LANDSCAPE_REFERENCE: Scene = REFERENCE_PHONES[1];
+  /** 手机横握：面板夹在摇杆和按键簇之间、贴着底边，两行告警时收小 */
+  const LANDSCAPE_PHONE_SCENES: Scene[] = [
+    LANDSCAPE_REFERENCE,
     phone(852, 393),
     phone(915, 412),
     phone(932, 430),
@@ -1119,13 +1136,22 @@ describe('radio box under a two-row warning lane', () => {
     phone(932, 430, 'first-person'),
     // 矮一些的手机（曾经盖住第二行约 6px，7723114 已修）
     phone(800, 360),
-    phone(360, 800),
     phone(800, 360, 'first-person'),
+  ];
+  /** 手机竖屏追尾视角：面板在按键簇左侧、摇杆上方，不随告警行数变（P5） */
+  const PORTRAIT_PHONE_SCENES: Scene[] = [
+    REFERENCE_PHONES[0],
+    phone(393, 852),
+    phone(412, 915),
+    phone(430, 932),
+    phone(360, 800),
   ];
   /** 有主屏幕指示条的 iPhone：面板的底边跟着安全区抬高，告警通道不动 */
   const INSET_PHONES: Scene[] = [
     phone(844, 390, 'third-person', 21),
     phone(390, 844, 'third-person', 34),
+    // iPhone X / 11 Pro / 12 mini 一类：上一轮在这里盖住第二行约 1–6px，P5 修掉
+    phone(375, 812, 'third-person', 34),
   ];
   const TABLET_SCENES: Scene[] = [
     phone(1024, 768),
@@ -1138,11 +1164,11 @@ describe('radio box under a two-row warning lane', () => {
     phone(820, 1180, 'first-person'),
   ];
 
-  function stage(scene: Scene): HTMLElement {
+  function stage(scene: Scene, speaker: CampaignSpeakerId = 'hq'): HTMLElement {
     mountHud(scene.density);
     hud.setCameraMode(scene.camera);
     radio = new RadioComms();
-    radio.enqueue(radioLine());
+    radio.enqueue(radioLine(speaker));
     radio.update(0.1);
     const element = document.getElementById('radio-comms');
     expect(element, 'expected the radio panel in the document').not.toBeNull();
@@ -1160,10 +1186,14 @@ describe('radio box under a two-row warning lane', () => {
    * 按样式表估算面板与告警通道在视口里的上下位置（像素，原点在视口左上角）。
    * 盒模型：高度 = 上下内边距 + 上下边框 + 内容；一行文字的内容高度 = 字号 × 行高；
    * 图标取样式给的高度；告警行都是单行（white-space: nowrap）。
+   * 一条用例里要量很多个视口时，把解析好的样式表（pageRules()）传进来，不必每次重读。
    */
-  function measure(scene: Scene, overrides: Readonly<Record<string, string>> = {}) {
+  function measure(
+    scene: Scene,
+    overrides: Readonly<Record<string, string>> = {},
+    rules: readonly ParsedRule[] = pageRules()
+  ) {
     const viewport: Viewport = { width: scene.width, height: scene.height };
-    const rules = pageRules();
     const context = (percentBase?: number): LengthContext => ({
       viewport,
       insets: { ...NO_INSETS, bottom: scene.bottomInset },
@@ -1222,6 +1252,27 @@ describe('radio box under a two-row warning lane', () => {
       const svg = row.querySelector('svg');
       return svg && shown(svg) ? length(svg, 'height') : 0;
     };
+    /** 无线电面板的高度与显示的正文行数（不管它锚在哪一边） */
+    const radioSize = (messageLines: number, normal: number) => {
+      const root = need<HTMLElement>(document, '#radio-comms');
+      const panel = need(root, '.rc-panel');
+      const portrait = need(root, '.rc-portrait');
+      const head = need(root, '.rc-head');
+      const text = need(root, '.rc-text');
+      const clamp = Number(own(text, '-webkit-line-clamp'));
+      expect(Number.isInteger(clamp) && clamp >= 1, `line clamp: ${clamp}`).toBe(true);
+      const lines = Math.min(messageLines, clamp);
+      const textHeight = shown(text) ? lines * lineBox(text, normal) : 0;
+      const headHeight = shown(head)
+        ? lineBox(need(head, '.rc-callsign'), normal) + length(head, 'margin-bottom')
+        : 0;
+      const portraitHeight = shown(portrait) ? length(portrait, 'height') : 0;
+      return {
+        height: frame(panel) + Math.max(portraitHeight, headHeight + textHeight),
+        lines,
+        visible: shown(root) && shown(panel) && shown(text),
+      };
+    };
 
     return {
       /** 告警通道：两行都显示时各条边的位置 */
@@ -1246,19 +1297,7 @@ describe('radio box under a two-row warning lane', () => {
       /** 无线电面板：消息正文有 messageLines 行时的位置（面板贴着 bottom 向上长） */
       radioBox(messageLines: number, normal: number) {
         const root = need<HTMLElement>(document, '#radio-comms');
-        const panel = need(root, '.rc-panel');
-        const portrait = need(root, '.rc-portrait');
-        const head = need(root, '.rc-head');
-        const text = need(root, '.rc-text');
-        const clamp = Number(own(text, '-webkit-line-clamp'));
-        expect(Number.isInteger(clamp) && clamp >= 1, `line clamp: ${clamp}`).toBe(true);
-        const lines = Math.min(messageLines, clamp);
-        const textHeight = shown(text) ? lines * lineBox(text, normal) : 0;
-        const headHeight = shown(head)
-          ? lineBox(need(head, '.rc-callsign'), normal) + length(head, 'margin-bottom')
-          : 0;
-        const portraitHeight = shown(portrait) ? length(portrait, 'height') : 0;
-        const height = frame(panel) + Math.max(portraitHeight, headHeight + textHeight);
+        const { height, lines, visible } = radioSize(messageLines, normal);
 
         const bottomOffset = own(root, 'bottom');
         expect(
@@ -1281,9 +1320,11 @@ describe('radio box under a two-row warning lane', () => {
           left,
           right: left + width,
           lines,
-          visible: shown(root) && shown(panel) && shown(text),
+          visible,
         };
       },
+
+      radioSize,
 
       /** 样式表给面板各个元素的全部声明 */
       radioStyles(): Array<Record<string, string>> {
@@ -1313,7 +1354,7 @@ describe('radio box under a two-row warning lane', () => {
     expect(box.height).toBeLessThan(120);
   });
 
-  it.each(PHONE_SCENES)(
+  it.each(LANDSCAPE_PHONE_SCENES)(
     'leaves the lower warning row clear on a $width×$height phone ($camera)',
     (scene) => {
       stage(scene);
@@ -1334,6 +1375,30 @@ describe('radio box under a two-row warning lane', () => {
     }
   );
 
+  // 竖屏手机（P5）：面板不再横在屏幕中间，而是在按键簇左侧那一栏；告警通道居中、宽度由文字决定
+  // （这里量不出来），所以仍然按上下错开来要求。位置、行数与 12px 的余量见下面
+  // “on a portrait phone in the chase camera” 一组。
+  it.each(PORTRAIT_PHONE_SCENES)(
+    'leaves the lower warning row clear on a $width×$height phone ($camera)',
+    (scene) => {
+      stage(scene);
+      showBothRows();
+      expect(rowsMarker()).toBe('2');
+      const page = measure(scene);
+
+      const box = page.radioBox(LONG_MESSAGE, NORMAL_LINE_HEIGHT.high);
+      const lane = page.lane(NORMAL_LINE_HEIGHT.high);
+
+      // 不是整行的面板：不到半个屏宽
+      expect(box.right - box.left).toBeGreaterThan(0);
+      expect(box.right - box.left).toBeLessThan(scene.width / 2);
+      expect(box.top - lane.bottom).toBeGreaterThanOrEqual(0);
+      // 面板还在，仍然显示正文
+      expect(box.visible).toBe(true);
+      expect(box.lines).toBeGreaterThanOrEqual(1);
+    }
+  );
+
   it.each(WARNING_TONES.flatMap((tone) => REFERENCE_PHONES.map((scene) => ({ ...scene, tone }))))(
     'does so whatever the tone of the flash warning ($tone, $width×$height)',
     (scene) => {
@@ -1347,7 +1412,8 @@ describe('radio box under a two-row warning lane', () => {
     }
   );
 
-  it.each(REFERENCE_PHONES)(
+  // 以下两条只对横握成立：竖屏手机上面板不随告警行数变（见下面竖屏那一组）
+  it.each([LANDSCAPE_REFERENCE])(
     'is what makes room on $width×$height: at full size even a one-line message reaches into the lower row',
     (scene) => {
       stage(scene);
@@ -1370,7 +1436,7 @@ describe('radio box under a two-row warning lane', () => {
     }
   );
 
-  it.each(REFERENCE_PHONES)(
+  it.each([LANDSCAPE_REFERENCE])(
     'goes back to full size on $width×$height as soon as one of the rows goes',
     (scene) => {
       stage(scene);
@@ -1444,43 +1510,837 @@ describe('radio box under a two-row warning lane', () => {
     expect(box.top - page.lane(NORMAL_LINE_HEIGHT.low).bottom).toBeGreaterThanOrEqual(0);
   });
 
-  // FINDING：375×812 竖屏 + 34px 安全区（iPhone X / 11 Pro / 12 mini 一类），收小后的面板仍然
-  // 盖住第二行告警。按样式表算、取对实现最有利的估计（告警行按最矮算）：通道下沿在 514px，
-  // 面板底边在 534px（安全区 34 + 按键簇 240 + 4）、高 20.9px，上沿在 513.1px——盖住约 0.9px；
-  // 中文字体的行框更高时更多（按 1.5 倍行高算约 5.9px）。
-  // 期望：不盖住。同一档没有安全区时（375×812）余量约 13px。
-  it.fails(
-    'leaves the lower warning row clear on a 375×812 phone with a 34 px bottom inset',
-    () => {
-      const scene = phone(375, 812, 'third-person', 34);
-      stage(scene);
-      showBothRows();
-      const page = measure(scene);
-
-      const box = page.radioBox(LONG_MESSAGE, NORMAL_LINE_HEIGHT.low);
-
-      expect(box.top - page.lane(NORMAL_LINE_HEIGHT.low).bottom).toBeGreaterThanOrEqual(0);
-    }
-  );
-
-  // FINDING：更矮的竖屏手机上，收小后的面板仍然压在告警上。告警通道在屏幕中线下方、按键簇占着
-  // 底部 260px，视口高度不到约 785px 时两者之间放不下 20.9px 的面板（取对实现最有利的估计）：
-  // - 360×740（Galaxy S8 / S9 一类）：面板 455.1–476px，第二行告警 448.8–476.8px，几乎整行被盖住；
-  // - 375×667（iPhone SE）：面板 382.1–403px，落在第一行告警（377.5–407.5px）上，第二行已经伸进
-  //   按键簇的范围。
-  // 手机浏览器带着地址栏时视口比屏幕矮，360×800 的手机也会落到这个范围里。
-  // 期望：手机档都不盖住告警。这不是收小规则本身能解决的（没有地方可放）；如果这些尺寸
-  // 另行处理，删掉这条即可。
-  it.fails.each([phone(360, 740), phone(375, 667)])(
+  // 上一轮记下的发现（更矮的竖屏手机上，收小后的面板仍压在告警上）由 P5 修掉：面板挪到按键簇
+  // 左侧、行数按视口高度分档，这两个尺寸现在都让得开（告警行按最高估计）。
+  it.each([phone(360, 740), phone(375, 667)])(
     'leaves the warning lane clear on a shorter $width×$height portrait phone',
     (scene) => {
       stage(scene);
       showBothRows();
       const page = measure(scene);
 
-      const box = page.radioBox(LONG_MESSAGE, NORMAL_LINE_HEIGHT.low);
+      const box = page.radioBox(LONG_MESSAGE, NORMAL_LINE_HEIGHT.high);
 
-      expect(box.top - page.lane(NORMAL_LINE_HEIGHT.low).bottom).toBeGreaterThanOrEqual(0);
+      expect(box.visible).toBe(true);
+      expect(box.top - page.lane(NORMAL_LINE_HEIGHT.high).bottom).toBeGreaterThanOrEqual(0);
     }
   );
+
+  // -------------------------------------------------------------------------
+  // 手机竖屏追尾视角的面板（P5），以及它不该波及的地方
+  // -------------------------------------------------------------------------
+
+  interface Box {
+    left: number;
+    right: number;
+    top: number;
+    bottom: number;
+  }
+
+  /** 规格的分档：视口高度（两端都含）→ 正文行数上限 */
+  const BANDS = [
+    { range: 'under 599 px', from: 0, to: 598, lines: 1 },
+    { range: '599–632 px', from: 599, to: 632, lines: 2 },
+    { range: '633–665 px', from: 633, to: 665, lines: 3 },
+    { range: '666–727 px', from: 666, to: 727, lines: 4 },
+    { range: '728–798 px', from: 728, to: 798, lines: 5 },
+    { range: '799–832 px', from: 799, to: 832, lines: 6 },
+    { range: '833–866 px', from: 833, to: 866, lines: 7 },
+    { range: '867 px and up', from: 867, to: Infinity, lines: 8 },
+  ];
+  /** 这里取的最矮与最高的竖屏视口（小屏手机带着浏览器工具栏；长屏手机） */
+  const SHORTEST = 460;
+  const TALLEST = 1100;
+  /** 每个分档边界的两侧，加上最矮和最高 */
+  const BAND_EDGES = [
+    SHORTEST,
+    ...BANDS.slice(1).flatMap((band) => [band.from - 1, band.from]),
+    TALLEST,
+  ];
+  /** 从六行的档起显示呼号行 */
+  const CALLSIGN_FROM = 799;
+  /** 规格覆盖的屏宽：到 430px 为止 */
+  const WIDTHS = [320, 360, 375, 390, 414, 430];
+  /** 每档一个真实的尺寸 */
+  const ONE_PER_BAND: Scene[] = [
+    phone(320, 568), // 1 行：iPhone SE 一代
+    phone(360, 616), // 2 行：360×640 的手机带着浏览器工具栏
+    phone(360, 640), // 3 行
+    phone(375, 667), // 4 行：iPhone SE 二 / 三代
+    phone(360, 740), // 5 行：Galaxy S8 / S9
+    phone(375, 812), // 6 行：iPhone X / 11 Pro
+    phone(390, 844), // 7 行：iPhone 12–15
+    phone(430, 932), // 8 行：iPhone Pro Max
+  ];
+  /** 有主屏幕指示条的 iPhone 竖屏的底部安全区 */
+  const HOME_INDICATOR = 34;
+
+  const bandOf = (height: number) =>
+    BANDS.find((band) => height >= band.from && height <= band.to) as (typeof BANDS)[number];
+
+  /** it.each 的表：行数、高度范围（标题用）、这一档 */
+  const BAND_ROWS = BANDS.map((band) => [band.lines, band.range, band] as const);
+  /** it.each 的表：尺寸（标题用，底部安全区不为零时带上）、场景 */
+  const sceneRows = (scenes: readonly Scene[]) =>
+    scenes.map((scene) => {
+      const inset = scene.bottomInset > 0 ? ` with a ${scene.bottomInset} px bottom inset` : '';
+      return [`${scene.width}×${scene.height}${inset}`, scene] as const;
+    });
+
+  /** 样式给正文的行数上限（-webkit-line-clamp 层叠后的值） */
+  function lineLimit(scene: Scene, rules: readonly ParsedRule[]): number {
+    const text = need<HTMLElement>(document, '#radio-comms .rc-text');
+    const viewport: Viewport = { width: scene.width, height: scene.height };
+    return Number(cascaded(rules, text, '-webkit-line-clamp', viewport));
+  }
+
+  /** 面板里的一个部件在给定视口下是否显示（自己和祖先都没有 display: none） */
+  function partShown(selector: string, scene: Scene, rules: readonly ParsedRule[]): boolean {
+    const viewport: Viewport = { width: scene.width, height: scene.height };
+    const root = need<HTMLElement>(document, '#radio-comms');
+    for (let node: Element | null = need(root, selector); node; node = node.parentElement) {
+      if (cascaded(rules, node, 'display', viewport) === 'none') return false;
+      if (node === root) break;
+    }
+    return true;
+  }
+
+  /** 可继承属性层叠后的取值：自己没有声明就往上找；值是 var(--x) 时再解一层 */
+  function inheritedValue(
+    element: Element,
+    property: string,
+    scene: Scene,
+    rules: readonly ParsedRule[]
+  ): string | undefined {
+    const viewport: Viewport = { width: scene.width, height: scene.height };
+    const lookup = (name: string): string | undefined => {
+      for (let node: Element | null = element; node; node = node.parentElement) {
+        const value = cascaded(rules, node, name, viewport);
+        if (value !== undefined && value !== 'inherit') return value;
+      }
+      return undefined;
+    };
+    const value = lookup(property);
+    const reference = value?.match(/^var\(\s*(--[\w-]+)\s*(?:,\s*(.+))?\)$/);
+    return reference ? (lookup(reference[1]) ?? reference[2]) : value;
+  }
+
+  /** 把发布版 index.html 的触控控件换进文档：摇杆、按键簇和各个按键的样式规则靠真实的 id 命中 */
+  function shipControls(): void {
+    const shipped = parseShippedDocument().getElementById('mobile-controls');
+    expect(shipped, 'index.html should have #mobile-controls').not.toBeNull();
+    const node = document.importNode(shipped as HTMLElement, true);
+    node.classList.add('is-visible');
+    controls.replaceWith(node);
+    controls = node;
+  }
+
+  /**
+   * 触控控件在视口里的位置（像素）。#mobile-controls 贴着视口底边，是两端对齐、交叉轴靠下的弹性
+   * 容器：摇杆贴左下内边距，按键簇贴右下内边距并以右下角为基点整体缩放（平板 ×1.35），各按键在
+   * 簇里按 right / bottom 绝对定位。按住时摇杆底座会跟着手指走，这里量的是静止位置。
+   */
+  function controlBoxes(scene: Scene, rules: readonly ParsedRule[] = pageRules()) {
+    const viewport: Viewport = { width: scene.width, height: scene.height };
+    const declared = (element: Element, property: string): string | undefined =>
+      cascaded(rules, element, property, viewport);
+    const evaluate = (element: Element, expression: string): number =>
+      evaluateLength(expression, {
+        viewport,
+        insets: { ...NO_INSETS, bottom: scene.bottomInset },
+        // 按键的 --x / --y / --s 写在按键自己身上，簇和摇杆的尺寸写在 <html> 上：自己没有就往上找
+        customProperty: (name) => {
+          for (let node: Element | null = element; node; node = node.parentElement) {
+            const own = cascaded(rules, node, name, viewport);
+            if (own !== undefined) return own;
+          }
+          return undefined;
+        },
+      });
+    const length = (element: Element, property: string): number => {
+      const value = declared(element, property);
+      expect(value, `${property} should be set`).toBeDefined();
+      return evaluate(element, value as string);
+    };
+    const padding = (side: 'left' | 'right' | 'bottom'): number => {
+      const value = cascaded(rules, controls, `padding-${side}`, viewport, {
+        property: 'padding',
+        side,
+      });
+      expect(value, `padding-${side} should be set`).toBeDefined();
+      return evaluate(controls, value as string);
+    };
+
+    const stick = need<HTMLElement>(controls, '#joystick');
+    const deck = need<HTMLElement>(controls, '.button-container');
+
+    // 这个估算依赖的布局方式
+    expect(declared(controls, 'position')).toBe('fixed');
+    expect(declared(controls, 'bottom')).toBe('0');
+    expect(declared(controls, 'display')).toBe('flex');
+    expect(declared(controls, 'justify-content')).toBe('space-between');
+    expect(declared(controls, 'align-items')).toBe('flex-end');
+    expect(declared(deck, 'transform-origin')).toBe('100% 100%');
+    const scaled = declared(deck, 'transform')?.match(/^scale\((.+)\)$/);
+    expect(scaled, 'the deck should be scaled as a whole').toBeTruthy();
+    const scale = evaluate(deck, (scaled as RegExpMatchArray)[1]);
+
+    const floor = viewport.height - padding('bottom');
+    const stickLeft = padding('left');
+    const deckRight = viewport.width - padding('right');
+    const stickBox: Box = {
+      left: stickLeft,
+      right: stickLeft + length(stick, 'width'),
+      top: floor - length(stick, 'height'),
+      bottom: floor,
+    };
+    const deckBox: Box = {
+      left: deckRight - length(deck, 'width') * scale,
+      right: deckRight,
+      top: floor - length(deck, 'height') * scale,
+      bottom: floor,
+    };
+    const buttons = Array.from(deck.querySelectorAll<HTMLElement>('.touch-btn')).map((button) => {
+      const right = deckRight - length(button, 'right') * scale;
+      const bottom = floor - length(button, 'bottom') * scale;
+      return {
+        id: button.id,
+        left: right - length(button, 'width') * scale,
+        right,
+        top: bottom - length(button, 'height') * scale,
+        bottom,
+      };
+    });
+    return { stick: stickBox, deck: deckBox, buttons };
+  }
+
+  it('reads where the shipped stick, deck and buttons rest from index.html', () => {
+    stage(phone(390, 844));
+    shipControls();
+    const rules = pageRules();
+
+    // 手机竖屏：摇杆 96px、按键簇 210×240，离屏幕边 20px
+    const onPhone = controlBoxes(phone(390, 844), rules);
+    expect(onPhone.stick).toEqual({ left: 20, right: 116, top: 728, bottom: 824 });
+    expect(onPhone.deck).toEqual({ left: 160, right: 370, top: 584, bottom: 824 });
+    expect(onPhone.buttons.map((button) => button.id).sort()).toEqual([
+      'camera-button',
+      'cycle-button',
+      'fire-button',
+      'flare-button',
+      'missile-button',
+      'special-button',
+      'throttle-button',
+      'upgrade-button',
+    ]);
+    for (const button of onPhone.buttons) {
+      expect(button.right - button.left, button.id).toBeGreaterThanOrEqual(44);
+      expect(button.left, button.id).toBeGreaterThanOrEqual(onPhone.deck.left);
+      expect(button.right, button.id).toBeLessThanOrEqual(onPhone.deck.right);
+      expect(button.top, button.id).toBeGreaterThanOrEqual(onPhone.deck.top);
+      expect(button.bottom, button.id).toBeLessThanOrEqual(onPhone.deck.bottom);
+    }
+    // 开火键最大（66px），圆心离簇的右下角 (40, 44)
+    const fire = onPhone.buttons.find((button) => button.id === 'fire-button') as Box;
+    expect(fire).toMatchObject({ left: 297, right: 363, top: 747, bottom: 813 });
+
+    // 底部安全区把摇杆和按键簇一起抬高
+    const withInset = controlBoxes(phone(390, 844, 'third-person', HOME_INDICATOR), rules);
+    expect(withInset.stick.bottom).toBe(844 - HOME_INDICATOR);
+    expect(withInset.deck.bottom).toBe(844 - HOME_INDICATOR);
+
+    // 平板竖屏：摇杆 150px、按键簇放大 1.35 倍（334.8×307.8），两侧收进 28px，整体抬高 10% 屏高
+    const onTablet = controlBoxes(phone(768, 1024), rules);
+    expect(onTablet.stick.left).toBe(28);
+    expect(onTablet.stick.right - onTablet.stick.left).toBe(150);
+    expect(onTablet.stick.bottom).toBeCloseTo(1024 * 0.9, 6);
+    expect(onTablet.deck.right).toBe(768 - 28);
+    expect(onTablet.deck.right - onTablet.deck.left).toBeCloseTo(334.8, 6);
+    expect(onTablet.deck.bottom - onTablet.deck.top).toBeCloseTo(307.8, 6);
+  });
+
+  describe('on a portrait phone in the chase camera', () => {
+    /** 规格给的两行告警的高度（中文字体）。这里没有字体、量不出来，照规格取 */
+    const TWO_ROW_LANE = 67;
+    const CLEARANCE = 12;
+    /** 档的下端恰好等于 12px 时留给浮点误差的余地 */
+    const EPSILON = 1e-6;
+    /** 不到约 556px 高时一行也进了 12px（规格接受）：一行这一档从最矮的真实手机视口起量 */
+    const ONE_LINE_FROM = 568;
+
+    let radar: RadarMinimap | null = null;
+    let canvases: CanvasRecording | null = null;
+    let originalInnerWidth: number;
+    let originalInnerHeight: number;
+
+    beforeEach(() => {
+      radar = null;
+      canvases = null;
+      originalInnerWidth = window.innerWidth;
+      originalInnerHeight = window.innerHeight;
+    });
+
+    afterEach(() => {
+      radar?.dispose();
+      canvases?.restore();
+      setWindowSize(originalInnerWidth, originalInnerHeight);
+    });
+
+    function setWindowSize(width: number, height: number): void {
+      Object.defineProperty(window, 'innerWidth', { configurable: true, value: width });
+      Object.defineProperty(window, 'innerHeight', { configurable: true, value: height });
+    }
+
+    /**
+     * 面板到了行数上限时，上沿离两行告警下沿多远。告警通道的上沿从样式表量，两行的高度按规格的
+     * 67px；面板的高度全由样式表决定（见 “has a height the stylesheet alone decides”）。
+     */
+    function clearance(scene: Scene, rules: readonly ParsedRule[]): number {
+      const page = measure(scene, {}, rules);
+      const box = page.radioBox(LONG_MESSAGE, NORMAL_LINE_HEIGHT.low);
+      expect(box.lines, `lines on ${scene.width}×${scene.height}`).toBe(bandOf(scene.height).lines);
+      return box.top - (page.lane(NORMAL_LINE_HEIGHT.low).top + TWO_ROW_LANE);
+    }
+
+    describe('number of text lines', () => {
+      it.each(BAND_ROWS)('is at most %i on a viewport %s high', (lines, _range, band) => {
+        stage(phone(390, 844));
+        const rules = pageRules();
+        const low = Math.max(band.from, SHORTEST);
+        const high = Math.min(band.to, TALLEST);
+
+        for (const height of [low, Math.round((low + high) / 2), high]) {
+          for (const width of WIDTHS) {
+            const scene = phone(width, height);
+            const box = measure(scene, {}, rules).radioBox(LONG_MESSAGE, NORMAL_LINE_HEIGHT.low);
+            expect(box.lines, `${width}×${height}`).toBe(lines);
+            expect(box.visible, `${width}×${height}`).toBe(true);
+          }
+        }
+      });
+
+      it('steps up one line at each band edge and nowhere else', () => {
+        stage(phone(390, 844));
+        const rules = pageRules();
+
+        const steps: Array<[number, number]> = [];
+        let previous = lineLimit(phone(390, SHORTEST), rules);
+        expect(previous).toBe(1);
+        for (let height = SHORTEST + 1; height <= TALLEST; height += 1) {
+          const limit = lineLimit(phone(390, height), rules);
+          if (limit !== previous) steps.push([height, limit]);
+          previous = limit;
+        }
+
+        expect(steps).toEqual(BANDS.slice(1).map((band) => [band.from, band.lines]));
+      });
+
+      it('goes by the height alone, up to the widest portrait phone (699 px)', () => {
+        stage(phone(390, 844));
+        const rules = pageRules();
+
+        for (const height of BAND_EDGES.filter((edge) => edge >= 700)) {
+          for (const width of [480, 600, 699]) {
+            expect(lineLimit(phone(width, height), rules), `${width}×${height}`).toBe(
+              bandOf(height).lines
+            );
+          }
+        }
+      });
+
+      it('does not depend on the bottom inset', () => {
+        stage(phone(390, 844));
+        const rules = pageRules();
+
+        for (const height of BAND_EDGES) {
+          const scene = phone(390, height, 'third-person', HOME_INDICATOR);
+          const box = measure(scene, {}, rules).radioBox(LONG_MESSAGE, NORMAL_LINE_HEIGHT.low);
+          expect(box.lines, `390×${height}`).toBe(bandOf(height).lines);
+        }
+      });
+    });
+
+    describe('callsign line', () => {
+      it('is the first line from six lines of text up (799 px)', () => {
+        stage(phone(390, 844));
+        const rules = pageRules();
+        const callsign = need<HTMLElement>(document, '#radio-comms .rc-callsign');
+        const head = need<HTMLElement>(document, '#radio-comms .rc-head');
+        const body = need<HTMLElement>(document, '#radio-comms .rc-body');
+
+        // 呼号行在正文之前
+        expect(callsign.closest('.rc-head')).toBe(head);
+        expect(Array.from(body.children).map((child) => child.className)).toEqual([
+          'rc-head',
+          'rc-text',
+        ]);
+        for (const height of BAND_EDGES.filter((edge) => edge >= CALLSIGN_FROM)) {
+          for (const width of WIDTHS) {
+            const scene = phone(width, height);
+            expect(lineLimit(scene, rules), `${width}×${height}`).toBeGreaterThanOrEqual(6);
+            expect(partShown('.rc-callsign', scene, rules), `${width}×${height}`).toBe(true);
+          }
+        }
+      });
+
+      it('is left out below six lines (under 799 px)', () => {
+        stage(phone(390, 844));
+        const rules = pageRules();
+
+        for (const height of BAND_EDGES.filter((edge) => edge < CALLSIGN_FROM)) {
+          for (const width of WIDTHS) {
+            const scene = phone(width, height);
+            expect(lineLimit(scene, rules), `${width}×${height}`).toBeLessThanOrEqual(5);
+            expect(partShown('.rc-callsign', scene, rules), `${width}×${height}`).toBe(false);
+            expect(partShown('.rc-text', scene, rules), `${width}×${height}`).toBe(true);
+          }
+        }
+      });
+
+      it('adds exactly one short line to the box', () => {
+        stage(phone(390, 844));
+        const rules = pageRules();
+        const height = (lines: number, viewportHeight: number): number =>
+          measure(phone(390, viewportHeight), {}, rules).radioBox(lines, NORMAL_LINE_HEIGHT.low)
+            .height;
+
+        // 同样五行正文：798px 高没有呼号行，799px 高有
+        const added = height(5, CALLSIGN_FROM) - height(5, CALLSIGN_FROM - 1);
+        const textLine = height(5, CALLSIGN_FROM) - height(4, CALLSIGN_FROM);
+
+        expect(textLine).toBeGreaterThan(10);
+        expect(added).toBeGreaterThan(10);
+        // 一行呼号加它与正文之间的间隔，不到两行正文
+        expect(added).toBeLessThan(textLine * 2);
+        // 呼号不换行：否则面板比这里估的高一行
+        const callsign = need<HTMLElement>(document, '#radio-comms .rc-callsign');
+        expect(inheritedValue(callsign, 'white-space', phone(390, 844), rules)).toBe('nowrap');
+      });
+
+      it.each(BAND_ROWS)(
+        'comes without the portrait, the role line and the signal bars (limit %i, %s)',
+        (_lines, _range, band) => {
+          stage(phone(390, 844));
+          const rules = pageRules();
+
+          for (const height of [Math.max(band.from, SHORTEST), Math.min(band.to, TALLEST)]) {
+            for (const width of [320, 390, 430]) {
+              const scene = phone(width, height);
+              const where = `${width}×${height}`;
+              expect(partShown('.rc-portrait', scene, rules), where).toBe(false);
+              expect(partShown('.rc-name', scene, rules), where).toBe(false);
+              expect(partShown('.rc-signal', scene, rules), where).toBe(false);
+              expect(partShown('.rc-text', scene, rules), where).toBe(true);
+            }
+          }
+        }
+      );
+
+      // 每种强调色一位说话方
+      const SPEAKERS: CampaignSpeakerId[] = ['hq', 'wingman', 'scientist', 'oracle', 'airliner'];
+
+      it('uses a different accent colour for each kind of speaker tried here', () => {
+        const colours = SPEAKERS.map((speaker) => HUD_TONE_COLORS[CAMPAIGN_SPEAKERS[speaker].tone]);
+
+        expect(new Set(colours.map((colour) => colour.toLowerCase())).size).toBe(SPEAKERS.length);
+      });
+
+      it.each(SPEAKERS)('names the speaker in their own accent colour (%s)', (speaker) => {
+        const scene = phone(390, 844);
+        const root = stage(scene, speaker);
+        const rules = pageRules();
+        const callsign = need<HTMLElement>(root, '.rc-callsign');
+        const accent = HUD_TONE_COLORS[CAMPAIGN_SPEAKERS[speaker].tone];
+
+        expect(partShown('.rc-callsign', scene, rules)).toBe(true);
+        expect(Object.values(CAMPAIGN_SPEAKERS[speaker].callsign)).toContain(callsign.textContent);
+        for (const height of [CALLSIGN_FROM, 844, 932]) {
+          const colour = inheritedValue(callsign, 'color', phone(390, height), rules);
+          expect(colour?.toLowerCase(), `390×${height}`).toBe(accent.toLowerCase());
+        }
+        // 正文不是这个颜色：强调色只给呼号
+        const text = need<HTMLElement>(root, '.rc-text');
+        expect(inheritedValue(text, 'color', scene, rules)?.toLowerCase()).not.toBe(
+          accent.toLowerCase()
+        );
+      });
+    });
+
+    describe('warning rows', () => {
+      it.each(sceneRows([...ONE_PER_BAND, phone(390, 844, 'third-person', HOME_INDICATOR)]))(
+        'leave the box as it is, with none, one or two showing (%s)',
+        (_size, scene) => {
+          stage(scene);
+          const snapshot = () => {
+            const page = measure(scene);
+            return {
+              styles: page.radioStyles(),
+              box: page.radioBox(LONG_MESSAGE, NORMAL_LINE_HEIGHT.low),
+            };
+          };
+          const quiet = snapshot();
+          expect(rowsShowing()).toBe(0);
+          expect(quiet.box.visible).toBe(true);
+
+          // 一行：导弹告警
+          for (const level of MISSILE_LEVELS) {
+            hud.setMissileWarning(level);
+            expect(rowsShowing()).toBe(1);
+            expect(snapshot(), `missile warning (${level})`).toEqual(quiet);
+          }
+          // 两行：每种色调的闪烁告警
+          for (const tone of WARNING_TONES) {
+            hud.flashWarning('Boss attack incoming', tone);
+            expect(rowsShowing()).toBe(2);
+            expect(rowsMarker()).toBe('2');
+            expect(snapshot(), `both rows (${tone})`).toEqual(quiet);
+          }
+          // 一行：只剩闪烁告警
+          hud.setMissileWarning('none');
+          expect(rowsShowing()).toBe(1);
+          expect(rowsMarker()).toBeNull();
+          expect(snapshot(), 'flash warning only').toEqual(quiet);
+        }
+      );
+    });
+
+    describe('place', () => {
+      it.each(
+        sceneRows([
+          ...ONE_PER_BAND,
+          phone(375, 812, 'third-person', HOME_INDICATOR),
+          phone(430, 932, 'third-person', HOME_INDICATOR),
+        ])
+      )('is left of the button deck, 14 px above the resting stick (%s)', (_size, scene) => {
+        stage(scene);
+        shipControls();
+        const rules = pageRules();
+
+        const box = measure(scene, {}, rules).radioBox(LONG_MESSAGE, NORMAL_LINE_HEIGHT.low);
+        const { stick, deck, buttons } = controlBoxes(scene, rules);
+
+        expect(stick.top - box.bottom).toBeCloseTo(14, 6);
+        // 与横握时面板到按键簇的空隙同一个范围
+        expect(deck.left - box.right).toBeGreaterThanOrEqual(12);
+        expect(deck.left - box.right).toBeLessThanOrEqual(24);
+        expect(box.left).toBeGreaterThanOrEqual(0);
+        expect(box.right).toBeGreaterThan(box.left);
+        // 每个按键都在面板右边，隔着同样的空隙
+        expect(buttons).toHaveLength(8);
+        for (const button of buttons) {
+          expect(button.left - box.right, button.id).toBeGreaterThanOrEqual(12);
+        }
+        // 底部安全区：摇杆跟着抬高，面板跟着摇杆，整个在安全区之上
+        expect(stick.bottom).toBeLessThanOrEqual(scene.height - scene.bottomInset);
+        expect(box.bottom).toBeLessThan(stick.top);
+      });
+
+      // 雷达的位置由 RadarMinimap 自己写在行内样式上。jsdom 里量不到状态栏和顶部消息栈的大小，
+      // 雷达按它的默认尺寸回退——这里量的是消息栈没有把雷达往下推时的位置。
+      it.each(sceneRows(ONE_PER_BAND))(
+        'stays below the radar in its default place on %s',
+        (_size, scene) => {
+          stage(scene);
+          setWindowSize(scene.width, scene.height);
+          // jsdom 没有 2D 画布：给雷达一个记录型的上下文，它照常创建
+          canvases = installCanvasRecording();
+          radar = new RadarMinimap();
+          radar.setLayoutDensity(scene.density);
+          const node = need<HTMLElement>(document, '#radar-minimap');
+          const radarBox = {
+            left: parseFloat(node.style.left),
+            top: parseFloat(node.style.top),
+            size: parseFloat(node.style.height),
+          };
+          expect(Object.values(radarBox).every(Number.isFinite), JSON.stringify(radarBox)).toBe(
+            true
+          );
+          expect(radarBox.size).toBe(PHONE_RADAR);
+
+          const box = measure(scene).radioBox(LONG_MESSAGE, NORMAL_LINE_HEIGHT.low);
+
+          // 两者都靠左（左右是重叠的）：雷达整个在面板上方
+          expect(radarBox.left).toBeLessThan(box.right);
+          expect(box.top - (radarBox.top + radarBox.size)).toBeGreaterThanOrEqual(CLEARANCE);
+        }
+      );
+    });
+
+    describe('room above the box when the lane shows two rows', () => {
+      it('has a height the stylesheet alone decides, whatever the font', () => {
+        stage(phone(390, 844));
+        const rules = pageRules();
+
+        for (const scene of ONE_PER_BAND) {
+          const page = measure(scene, {}, rules);
+          const shortest = page.radioBox(LONG_MESSAGE, NORMAL_LINE_HEIGHT.low);
+          const tallest = page.radioBox(LONG_MESSAGE, NORMAL_LINE_HEIGHT.high);
+          expect(tallest.height, `${scene.width}×${scene.height}`).toBe(shortest.height);
+        }
+      });
+
+      it('takes the 67 px of the specification for the two rows, within what the stylesheet allows', () => {
+        const scene = phone(390, 844);
+        stage(scene);
+        showBothRows();
+        const page = measure(scene);
+        const shortest = page.lane(NORMAL_LINE_HEIGHT.low);
+        const tallest = page.lane(NORMAL_LINE_HEIGHT.high);
+
+        expect(shortest.bottom - shortest.top).toBeLessThanOrEqual(TWO_ROW_LANE);
+        expect(tallest.bottom - tallest.top).toBeGreaterThanOrEqual(TWO_ROW_LANE);
+        expect(tallest.bottom - tallest.top - TWO_ROW_LANE).toBeLessThan(4);
+      });
+
+      // 实现方在浏览器里量到的数：面板上沿、下沿，两行告警时的余量（英文 / 中文字体）。
+      // 用来核对这里的估算与真实排版一致；设计有意改动时按新的实测值更新。
+      it.each([
+        [375, 667, 461, 537, 19.9, 16.9],
+        [360, 740, 518, 610, 40.8, 37.8],
+        [360, 800, 542, 670, 35.3, 32.3],
+        [375, 812, 554, 682, 40.1, 37.1],
+        [390, 844, 569, 714, 38.0, 35.0],
+        [430, 932, 640, 802, 61.9, 58.9],
+      ])(
+        'agrees with the browser on %i×%i: box at %i–%i, clear by %f px (en) and %f px (zh)',
+        (width, height, top, bottom, clearLatin, clearChinese) => {
+          const scene = phone(width, height);
+          stage(scene);
+          showBothRows();
+          const rules = pageRules();
+          const page = measure(scene, {}, rules);
+
+          const box = page.radioBox(LONG_MESSAGE, NORMAL_LINE_HEIGHT.low);
+
+          // 上下沿报的是整数像素
+          expect(Math.abs(box.top - top)).toBeLessThanOrEqual(0.5);
+          expect(Math.abs(box.bottom - bottom)).toBeLessThanOrEqual(0.5);
+          // 英文：两行告警的高度由图标决定，样式表里量得出
+          const latinLane = page.lane(NORMAL_LINE_HEIGHT.low);
+          expect(Math.abs(box.top - latinLane.bottom - clearLatin)).toBeLessThanOrEqual(0.25);
+          expect(Math.abs(clearance(scene, rules) - clearChinese)).toBeLessThanOrEqual(0.25);
+        }
+      );
+
+      // 档内余量随高度增加、随屏宽减小：量每档的两端和规格覆盖的各个屏宽
+      it.each(BAND_ROWS)(
+        'is at least 12 px at the %i-line limit (%s, no bottom inset)',
+        (_lines, _range, band) => {
+          stage(phone(390, 844));
+          showBothRows();
+          const rules = pageRules();
+
+          for (const height of [Math.max(band.from, ONE_LINE_FROM), Math.min(band.to, TALLEST)]) {
+            for (const width of WIDTHS) {
+              expect(
+                clearance(phone(width, height), rules),
+                `${width}×${height}`
+              ).toBeGreaterThanOrEqual(CLEARANCE - EPSILON);
+            }
+          }
+        }
+      );
+
+      it.each(BAND_ROWS.filter(([lines]) => lines >= 5))(
+        'is at least 12 px at the %i-line limit even with a 34 px bottom inset (%s)',
+        (_lines, _range, band) => {
+          stage(phone(390, 844));
+          showBothRows();
+          const rules = pageRules();
+
+          for (const height of [band.from, Math.min(band.to, TALLEST)]) {
+            for (const width of WIDTHS) {
+              const scene = phone(width, height, 'third-person', HOME_INDICATOR);
+              expect(clearance(scene, rules), `${width}×${height}`).toBeGreaterThanOrEqual(
+                CLEARANCE - EPSILON
+              );
+            }
+          }
+        }
+      );
+
+      it.each(
+        sceneRows([
+          phone(320, 568),
+          phone(360, 640),
+          phone(375, 667),
+          phone(414, 736),
+          phone(360, 740),
+          phone(360, 780),
+          phone(360, 800),
+          phone(412, 915),
+          // 有主屏幕指示条的 iPhone
+          phone(375, 812, 'third-person', HOME_INDICATOR),
+          phone(390, 844, 'third-person', HOME_INDICATOR),
+          phone(393, 852, 'third-person', HOME_INDICATOR),
+          phone(414, 896, 'third-person', HOME_INDICATOR),
+          phone(428, 926, 'third-person', HOME_INDICATOR),
+          phone(430, 932, 'third-person', HOME_INDICATOR),
+          // 五行的档带着安全区也成立
+          phone(360, 740, 'third-person', HOME_INDICATOR),
+        ])
+      )('is at least 12 px on a phone of %s', (_size, scene) => {
+        stage(scene);
+        showBothRows();
+
+        expect(clearance(scene, pageRules())).toBeGreaterThanOrEqual(CLEARANCE);
+      });
+
+      // 规格接受的例外：四行及以下的档只保证没有安全区时的 12px。375×667 强加 34px 安全区后余量
+      // 约 3–6px——不到 12px，但没有盖住。
+      it('is smaller but still there on 375×667 with a forced 34 px bottom inset', () => {
+        const scene = phone(375, 667, 'third-person', HOME_INDICATOR);
+        stage(scene);
+        showBothRows();
+        const page = measure(scene);
+
+        const box = page.radioBox(LONG_MESSAGE, NORMAL_LINE_HEIGHT.low);
+
+        expect(box.lines).toBe(4);
+        expect(clearance(scene, pageRules())).toBeGreaterThanOrEqual(0);
+        // 按最高的告警行估计也没有盖住
+        expect(box.top - page.lane(NORMAL_LINE_HEIGHT.high).bottom).toBeGreaterThanOrEqual(0);
+      });
+    });
+  });
+
+  describe('away from the portrait-phone chase camera, where the new rule does not apply', () => {
+    const FULL_PANEL_PARTS = [
+      '.rc-portrait',
+      '.rc-head',
+      '.rc-callsign',
+      '.rc-name',
+      '.rc-signal',
+      '.rc-text',
+    ];
+
+    /**
+     * 完整面板放满三行正文时的高度，各处一样：内边距 7 + 8、边框 1 + 1、呼号行 12 + 3（行高按字号
+     * 算）、正文 3 × 13 × 1.45。竖屏手机面板收紧的行高和内边距不该出现在别处。
+     */
+    const FULL_PANEL_HEIGHT = 7 + 8 + 1 + 1 + 12 + 3 + 3 * 13 * 1.45;
+
+    /** 完整的面板：三行正文，头像、呼号、军衔姓名、信号格都在，尺寸没有收紧 */
+    function expectFullPanel(scene: Scene, rules: readonly ParsedRule[]): void {
+      const where = `${scene.width}×${scene.height}`;
+      expect(lineLimit(scene, rules), where).toBe(3);
+      for (const part of FULL_PANEL_PARTS) {
+        expect(partShown(part, scene, rules), `${part} on ${where}`).toBe(true);
+      }
+      const size = measure(scene, {}, rules).radioSize(LONG_MESSAGE, NORMAL_LINE_HEIGHT.low);
+      expect(size.height, `panel height on ${where}`).toBeCloseTo(FULL_PANEL_HEIGHT, 6);
+    }
+
+    it('keeps the full-width panel under the top stack on a portrait phone in the first-person camera', () => {
+      const reference = phone(390, 844, 'first-person');
+      const root = stage(reference);
+      const rules = pageRules();
+      const expected = measure(reference, {}, rules).radioStyles();
+
+      // 不按高度分档
+      for (const height of BAND_EDGES) {
+        for (const width of [320, 430]) {
+          const scene = phone(width, height, 'first-person');
+          expect(measure(scene, {}, rules).radioStyles(), `${width}×${height}`).toEqual(expected);
+          expectFullPanel(scene, rules);
+        }
+      }
+      // 整行，挂在顶部，不贴底
+      const viewport: Viewport = { width: 390, height: 844 };
+      const context = lengthContext(viewport, NO_INSETS);
+      const offset = (property: string): number =>
+        evaluateLength(cascaded(rules, root, property, viewport) as string, context);
+      expect(cascaded(rules, root, 'bottom', viewport)).toBe('auto');
+      expect(offset('left')).toBeLessThanOrEqual(20);
+      expect(offset('right')).toBe(offset('left'));
+      expect(offset('top')).toBeGreaterThan(100);
+      expect(offset('top')).toBeLessThan(844 / 3);
+
+      // 两行告警也不改它
+      showBothRows();
+      expect(rowsMarker()).toBe('2');
+      expect(measure(reference).radioStyles()).toEqual(expected);
+    });
+
+    it('does not band the lines by height on a phone held in landscape', () => {
+      stage(LANDSCAPE_REFERENCE);
+      const rules = pageRules();
+      const expected = measure(LANDSCAPE_REFERENCE, {}, rules).radioStyles();
+      // 真实的横握手机都不到 599px 高（竖屏规则里是一行的档）；再加上各档边界两侧的高度
+      const viewports = [
+        [667, 375],
+        [800, 360],
+        [932, 430],
+        ...BAND_EDGES.filter((edge) => edge < 700).map((edge) => [1000, edge]),
+        [1000, 699],
+      ];
+
+      for (const [width, height] of viewports) {
+        const scene = phone(width, height);
+        expect(scene.density).toBe('touch-landscape');
+        expect(measure(scene, {}, rules).radioStyles(), `${width}×${height}`).toEqual(expected);
+        expectFullPanel(scene, rules);
+      }
+      // 贴着底边、压着屏幕中线，和以前一样
+      const box = measure(LANDSCAPE_REFERENCE, {}, rules).radioBox(
+        LONG_MESSAGE,
+        NORMAL_LINE_HEIGHT.low
+      );
+      expect(box.lines).toBe(3);
+      expect(box.bottom).toBeCloseTo(390 - 12, 6);
+      expect(box.left).toBeLessThan(844 / 2);
+      expect(box.right).toBeGreaterThan(844 / 2);
+    });
+
+    it.each(TABLET_SCENES)(
+      'keeps three lines, the portrait and the whole callsign row on a $width×$height tablet ($camera)',
+      (scene) => {
+        stage(scene);
+
+        expectFullPanel(scene, pageRules());
+      }
+    );
+
+    it.each([
+      ['portrait tablet in the chase camera', 700, 'third-person'],
+      ['portrait tablet in the first-person camera', 700, 'first-person'],
+      ['landscape tablet in the chase camera', 1200, 'third-person'],
+      ['landscape tablet in the first-person camera', 1200, 'first-person'],
+    ] as Array<[string, number, CameraMode]>)(
+      'does not band the lines by height on a %s',
+      (_name, width, camera) => {
+        const reference = phone(width, 700, camera);
+        stage(reference);
+        const rules = pageRules();
+        const expected = measure(reference, {}, rules).radioStyles();
+
+        // 平板档从 700px 高起：竖屏手机五行到八行的各档边界都在这个范围里
+        for (const height of BAND_EDGES.filter((edge) => edge >= 700)) {
+          const scene = phone(width, height, camera);
+          expect(scene.density).toBe(reference.density);
+          expect(measure(scene, {}, rules).radioStyles(), `${width}×${height}`).toEqual(expected);
+          expectFullPanel(scene, rules);
+        }
+      }
+    );
+
+    it.each([phone(768, 1024), phone(820, 1180), phone(1024, 1366)])(
+      'still puts the box left of the larger deck, 14 px above the larger stick, on a $width×$height tablet',
+      (scene) => {
+        stage(scene);
+        shipControls();
+        const rules = pageRules();
+
+        const box = measure(scene, {}, rules).radioBox(LONG_MESSAGE, NORMAL_LINE_HEIGHT.low);
+        const { stick, deck } = controlBoxes(scene, rules);
+
+        expect(stick.top - box.bottom).toBeCloseTo(14, 6);
+        expect(deck.left - box.right).toBeGreaterThanOrEqual(12);
+        expect(deck.left - box.right).toBeLessThanOrEqual(24);
+        // 左缘与摇杆对齐
+        expect(box.left).toBeCloseTo(stick.left, 6);
+        expect(box.lines).toBe(3);
+      }
+    );
+  });
 });
