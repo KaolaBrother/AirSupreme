@@ -20,7 +20,16 @@ type DeviceQualityParams = {
 };
 
 export class GameConfig {
+  /** 平板判定阈值：视口短边（CSS px）。与 index.html 平板触控布局的媒体查询同一数值 */
+  private static readonly TABLET_MIN_SHORT_SIDE = 700;
+  /** 平板的固定模拟步长（Hz）：所有画质档一致，不随 targetFPS 降到 30 */
+  private static readonly TABLET_TARGET_FPS = 60;
+  /** 平板在 auto 画质下的像素比上限（手机 auto 为 performance 档的 1.2） */
+  private static readonly TABLET_AUTO_MAX_PIXEL_RATIO = 1.5;
+
   public static isMobile: boolean = this.detectMobile();
+  /** 平板：触控设备（isMobile）且视口短边 ≥ 700 CSS px；与 isMobile 一样只在启动时判定一次 */
+  public static isTablet: boolean = this.detectTablet();
   private static qualityPreset: QualityPreset = 'auto';
   private static runtimeQualityOverride?: ResolvedQualityPreset;
 
@@ -119,6 +128,9 @@ export class GameConfig {
   }
 
   public static getTargetFPSForPreset(preset: QualityPreset): number {
+    if (this.isTabletDevice()) {
+      return this.TABLET_TARGET_FPS;
+    }
     return this.getQualityProfileForPreset(preset).targetFPS;
   }
 
@@ -162,9 +174,23 @@ export class GameConfig {
       || ('ontouchstart' in window);
   }
 
+  private static detectTablet(): boolean {
+    const shortSide = Math.min(window.innerWidth, window.innerHeight);
+    return this.isMobile && Number.isFinite(shortSide) && shortSide >= this.TABLET_MIN_SHORT_SIDE;
+  }
+
+  /** isTablet 只在触控设备上生效：isMobile 被改成 false 时一律按桌面取值 */
+  private static isTabletDevice(): boolean {
+    return this.isMobile && this.isTablet;
+  }
+
   // 渲染设置
   public static getPixelRatio(): number {
-    return Math.min(window.devicePixelRatio, this.getQualityProfile().maxPixelRatio);
+    let maxPixelRatio = this.getQualityProfile().maxPixelRatio;
+    if (this.isTabletDevice() && this.qualityPreset === 'auto') {
+      maxPixelRatio = Math.max(maxPixelRatio, this.TABLET_AUTO_MAX_PIXEL_RATIO);
+    }
+    return Math.min(window.devicePixelRatio, maxPixelRatio);
   }
 
   public static getShadowEnabled(): boolean {
@@ -188,8 +214,11 @@ export class GameConfig {
     return this.getQualityProfile().projectilePoolSize;
   }
 
-  // 性能目标
+  // 性能目标（同时是固定模拟步长，见 GameLoop.applyQualityProfile）
   public static getTargetFPS(): number {
+    if (this.isTabletDevice()) {
+      return this.TABLET_TARGET_FPS;
+    }
     return this.getQualityProfile().targetFPS;
   }
 
@@ -211,6 +240,11 @@ export const GAME_CONSTANTS = {
     BASE_HEALTH: 200,      // 基础生命值（翻倍）
     BASE_DAMAGE: 12.5,     // 基础伤害（减半）
     BASE_FIRE_RATE: 0.3,   // 基础射击间隔（加倍，降低射速）
+    // 触控辅助飞行（InputState.flightAssist，见 PlayerController.applyAssistedAttitude）
+    ASSIST_MAX_BANK: Math.PI / 4,              // 满偏航时的目标坡度（弧度，45°）
+    ASSIST_PITCH_LIMIT: (75 * Math.PI) / 180,  // 机头相对地平线的俯仰上限（弧度，75°）
+    ASSIST_ROLL_RESPONSE: 5,                   // 坡度逼近目标的响应（1/秒，越大越快）
+    ASSIST_ROLL_MAX_RATE: 2.6,                 // 坡度变化的最大角速度（弧度/秒）
   },
 
   // 子弹参数
