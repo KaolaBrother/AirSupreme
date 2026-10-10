@@ -129,6 +129,14 @@ const GAME_AIRCRAFT: ReadonlyArray<{ name: string; build: () => THREE.Group }> =
 
 const MODEL_COUNT = 1 + Object.values(EnemyType).length + Object.values(BossType).length + 2;
 
+/**
+ * 这里的模型模块都是真的：第一次翻到某一页，要经 vite-node 把那个模型的模块取回、转换，花的是
+ * 真实时间（Boss 那几个不小），机器一忙就更久。等待按时间兜底，用例与钩子的超时也相应放宽——
+ * 默认的 5 秒是给不做真实 I/O 的用例定的。
+ */
+const LOAD_BUDGET_MS = 20_000;
+vi.setConfig({ testTimeout: 90_000, hookTimeout: 90_000 });
+
 describe('Hangar and title hero with the real models (batch X5 follow-up)', () => {
   let menu: StartMenu | null = null;
   let frames: AnimationFrames;
@@ -157,13 +165,13 @@ describe('Hangar and title hero with the real models (batch X5 follow-up)', () =
   }
 
   async function modelLoaded(): Promise<void> {
-    await settleUntil(() => !/loading|加载中/i.test(modelName()), 4000);
+    await settleUntil(() => !/loading|加载中/i.test(modelName()), 500, LOAD_BUDGET_MS);
     await settle(2);
   }
 
   async function openHangar(): Promise<void> {
     click('preview-btn');
-    await settleUntil(() => isHangarOpen(), 4000);
+    await settleUntil(() => isHangarOpen(), 500, LOAD_BUDGET_MS);
     expect(isHangarOpen(), 'the Hangar opened').toBe(true);
     await modelLoaded();
     frames.run();
@@ -205,7 +213,8 @@ describe('Hangar and title hero with the real models (batch X5 follow-up)', () =
   }
 
   beforeAll(async () => {
-    // 按需加载的模块先各载入一次（Boss 模型的模块不小），之后每个用例里的 import() 只差几个微任务
+    // 机库与标题主机的模块先各载入一次。各个模型自己的模块（Boss、导弹）仍是哪个用例第一次翻到
+    // 那一页就由哪个用例载入：modelLoaded() 按时间等，不靠预热
     await import('@/ui/ModelPreview');
     await import('@/ui/menu/MenuHeroScene');
   });

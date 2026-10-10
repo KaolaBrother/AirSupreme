@@ -1200,23 +1200,34 @@ describe('Hangar (batch X5, spec 9)', () => {
         expect(onStart).toHaveBeenCalledTimes(1);
       });
 
-      // FINDING: after a refused Hangar the title comes back with keyboard focus on <body>, not on
-      // the Hangar button. Sequence: focus / activate #preview-btn, the browser refuses the WebGL
-      // context, the title returns. Expected: focus on #preview-btn, as after every other way out
-      // of the Hangar ("Main Menu", Escape). Observed: ModelPreview.show() closes itself and calls
-      // back (src/ui/ModelPreview.ts:1123-1130) while StartMenu.openHangar is still inside its
-      // try block, so resumeFromHangar's focus() (src/ui/StartMenu.ts:661-662) lands on a button
-      // that is still disabled for "Loading…" (set at src/ui/StartMenu.ts:630, disabled at
-      // src/ui/menu/TitleScreen.ts:168-170) and does nothing; the button is only re-enabled
-      // afterwards in the finally block (src/ui/StartMenu.ts:644-648), which does not focus it.
-      // A keyboard player has to Tab from the top of the page again.
-      it.fails('puts keyboard focus back on the Hangar button', async () => {
+      // 标题画面回来时焦点在“机库”按钮上，与“主菜单”/ Esc 离开机库时一样。
+      // （最初是 FINDING：机库自己收起并回调时按钮还因“加载中”停用着，focus() 落空，焦点掉到
+      // <body> 上，键盘玩家得从页首重新 Tab。已在 src/ui/StartMenu.ts:639-641 修复：显示机库之前
+      // 先恢复按钮。）
+      it('puts keyboard focus back on the Hangar button', async () => {
         createMenu();
         byId('preview-btn').focus();
 
         await openWithoutContext();
 
         expect(isTitleShowing()).toBe(true);
+        expect(document.activeElement).toBe(byId('preview-btn'));
+        expect(isOperable(byId('preview-btn')), 'and the button takes the next activation').toBe(
+          true
+        );
+      });
+
+      it('focus comes back to the Hangar button wherever it was when the refusal arrived', async () => {
+        createMenu();
+        // 载入期间玩家把焦点挪到了别的按钮上：机库被拒之后回到的仍是“机库”按钮
+        click('preview-btn');
+        byId('settings-btn').focus();
+        gl.failNextRenderer = true;
+        await settleUntil(() => !gl.failNextRenderer);
+        await settle(12);
+
+        expect(isTitleShowing()).toBe(true);
+        expect(isHangarOpen()).toBe(false);
         expect(document.activeElement).toBe(byId('preview-btn'));
       });
 
@@ -1280,6 +1291,9 @@ describe('Hangar (batch X5, spec 9)', () => {
           expect(isHangarOpen(), `attempt ${attempt}`).toBe(false);
           expect(isTitleShowing(), `attempt ${attempt}`).toBe(true);
           expect(isOperable(byId('preview-btn')), `attempt ${attempt}`).toBe(true);
+          expect(document.activeElement, `focus after attempt ${attempt}`).toBe(
+            byId('preview-btn')
+          );
           expect(ledger.snapshot(), `listeners after attempt ${attempt}`).toEqual(afterFirst);
         }
 
