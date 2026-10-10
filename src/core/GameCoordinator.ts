@@ -1508,7 +1508,10 @@ export class GameCoordinator {
       .add(this.playerSystem.getPosition());
     const forward = this.missileSpawnForward.set(0, 0, -1).applyQuaternion(quaternion);
 
-    this.combatSystem.getMissileSystem().fire(position, forward, target);
+    // 导弹继承载机当前速度后继续加速：加力 / 速度升级之后载机也追不上自己的导弹
+    this.combatSystem
+      .getMissileSystem()
+      .fire(position, forward, target, this.playerSystem.getSpeed());
     this.audioManager.playMissileLaunch();
     this.view.addShake(0.05);
 

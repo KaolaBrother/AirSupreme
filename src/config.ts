@@ -289,12 +289,15 @@ export const GAME_CONSTANTS = {
     SPAWN_INTERVAL: 3,     // 敌人生成间隔
   },
 
-  // 导弹参数
+  // 导弹参数（只用于玩家的锁定导弹；Boss / 单位导弹各有自己的参数，不读这里）
   MISSILE: {
-    SPEED: 80,             // 导弹速度
+    SPEED: 200,            // 巡航速度（米/秒）：离架后加速到它
+    LAUNCH_SPEED_BOOST: 20, // 离架初速 = 发射瞬间的载机速度 + 它
+    ACCELERATION: 200,     // 离架后的加速度（米/秒²）
+    MIN_OVERTAKE_SPEED: 80, // 巡航速度至少比发射瞬间的载机快这么多
     DAMAGE: 80,            // 导弹伤害（CombatSystem 命中结算读取，再乘伤害倍率）
-    TURN_SPEED: 2.0,       // 转向速度（弧度/秒）
-    MAX_LIFETIME: 10,      // 最大寿命（秒）
+    TURN_SPEED: 5.0,       // 转向速度（弧度/秒）：巡航时转弯半径 40 米，与旧版（80 米/秒、2.0）相同
+    MAX_LIFETIME: 12,      // 最大寿命（秒）：巡航 12 秒约 2400 米，与最大飞行距离一致
     MAX_LOCK_DISTANCE: 1200, // 导引头最大锁定距离
     MAX_FLIGHT_DISTANCE: 2400, // 最大飞行距离（是锁定距离的2倍）
     LOCK_RING_RATIO: 0.13, // 捕获环半径 / 视口短边（再乘锁定范围升级倍率）
