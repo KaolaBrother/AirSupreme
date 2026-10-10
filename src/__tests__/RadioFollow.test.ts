@@ -72,6 +72,20 @@ function isWholeLines(offset: number): boolean {
   return Math.abs(lines - Math.round(lines)) < 1e-9;
 }
 
+/** 比 x 小的最大的双精度数（x 为有限的正数） */
+function justBelow(x: number): number {
+  const view = new DataView(new ArrayBuffer(8));
+  view.setFloat64(0, x);
+  const low = view.getUint32(4);
+  if (low === 0) {
+    view.setUint32(0, view.getUint32(0) - 1);
+    view.setUint32(4, 0xffffffff);
+  } else {
+    view.setUint32(4, low - 1);
+  }
+  return view.getFloat64(0);
+}
+
 /** 从 from 到 to 均匀取 count + 1 个时刻 */
 function times(from: number, to: number, count: number): number[] {
   return Array.from({ length: count + 1 }, (_, index) => from + ((to - from) * index) / count);
@@ -427,6 +441,41 @@ describe('radioFollowOffset', () => {
       }
     });
 
+    it('jumps exactly when its time comes: at that moment, and not one representable moment before', () => {
+      // 时刻按约定的算式（开头停顿 + k 份时间）算；“到点即移”，早一个双精度数都不行。
+      // 除了 GRID，再取一面板行、显示时间 0.01–9 秒（每 0.01 秒）的各种行数：浮点除法在整点上
+      // 有时多算一行、有时少算一行，两种情况这里都有
+      const cases = [
+        ...GRID,
+        ...Array.from({ length: 900 * 12 }, (_, index) => ({
+          textLines: 2 + (index % 12),
+          boxLines: 1,
+          total: (1 + Math.floor(index / 12)) / 100,
+          reveal: 0,
+        })),
+      ];
+      const problems: string[] = [];
+      let checked = 0;
+      for (const { textLines, boxLines, total, reveal } of cases) {
+        const schedule = plan(textLines, boxLines, total, reveal);
+        for (let k = 1; k <= schedule.steps; k += 1) {
+          const at = schedule.stepAt(k);
+          if (at <= reveal) continue;
+          checked += 1;
+          const onTime = offsetOf(textLines, boxLines, at, total, reveal, true);
+          const before = offsetOf(textLines, boxLines, justBelow(at), total, reveal, true);
+          if (Math.abs(onTime - k * LH) > 1e-9 || Math.abs(before - (k - 1) * LH) > 1e-9) {
+            problems.push(
+              `${describeCase({ textLines, boxLines, total, reveal })}, jump ${k} at ${at} s: ` +
+                `${before / LH} lines just before, ${onTime / LH} at that moment`
+            );
+          }
+        }
+      }
+      expect(checked).toBeGreaterThan(50000);
+      expect(problems.slice(0, 5)).toEqual([]);
+    });
+
     it('is where the slide ends up, at every moment the slide is at rest', () => {
       // 取样避开整百分之一秒：2.79 秒那样的时刻正好是一次上移的起点
       for (const seconds of times(0.0037, 9.0037, 900)) {
@@ -503,16 +552,49 @@ describe('radioFollowOffset', () => {
       }
     );
 
-    // 偏差（RadioComms 现在走不到这里：它传进来的面板高总是“行数上限 × 行高”）。约定是“正文
-    // 逐行上移，在这句的显示时间里全部给出”；面板高不是整行数时按四舍五入算行数，2.5–2.99 行的
-    // 面板当成 3 行，最后停下的位置少了一行，最后一行文字有一部分一直在面板下沿之外。
-    it.fails.each([2.5, 2.75, 2.9])(
+    // RadioComms 走不到这里（它传进来的面板高总是“行数上限 × 行高”），约定照样适用：“正文逐行
+    // 上移，在这句的显示时间里全部给出”。面板高不是整行数时只算放得下的整行（向下取整）。
+    // 已修（原为 it.fails：按四舍五入算，2.5–2.99 行的面板当成 3 行，少移一行，最后一行文字
+    // 有一部分一直在面板下沿之外）。
+    it.each([2.5, 2.75, 2.9, 2.999])(
       'shows the last text line in full at the end in a box %s lines high',
       (boxLines) => {
         const contentHeight = 8 * LH;
         const boxHeight = boxLines * LH;
         const final = radioFollowOffset(contentHeight, boxHeight, LH, 100, 8.76);
         expect(contentHeight - final).toBeLessThanOrEqual(boxHeight + 0.5);
+        // 2 行放得下：最后停在 8 − 2 行
+        expect(final).toBeCloseTo(6 * LH, 9);
+      }
+    );
+
+    it('counts a box of exactly k lines as k lines, whatever the line height', () => {
+      // 向下取整不能把浮点误差算成少一行：3 × 11.7 ÷ 11.7 = 2.9999999999999996，仍是 3 行
+      const problems: string[] = [];
+      for (let hundredths = 1000; hundredths <= 3000; hundredths += 1) {
+        const lineHeight = hundredths / 100;
+        for (let k = 1; k <= 7; k += 1) {
+          const final = radioFollowOffset(10 * lineHeight, k * lineHeight, lineHeight, 100, 8.76);
+          if (Math.abs(final - (10 - k) * lineHeight) > 1e-9) {
+            problems.push(`${k} lines of ${lineHeight} px: ${final}`);
+          }
+        }
+      }
+      expect(problems.slice(0, 5)).toEqual([]);
+    });
+
+    it.each([1.5, 2.5, 2.9, 3.5, 5.75])(
+      'moves at every moment exactly as a box of the whole lines it holds (%s lines)',
+      (boxLines) => {
+        const whole = Math.floor(boxLines);
+        for (const stepOnly of [false, true]) {
+          for (const seconds of times(0, 9, 900)) {
+            expect(
+              radioFollowOffset(8 * LH, boxLines * LH, LH, seconds, 8.76, 2.26, stepOnly),
+              `at ${seconds} s${stepOnly ? ', reduced motion' : ''}`
+            ).toBe(offsetOf(8, whole, seconds, 8.76, 2.26, stepOnly));
+          }
+        }
       }
     );
 
@@ -598,20 +680,74 @@ describe('radioFollowOffset', () => {
       expect(guarded([Infinity, 3 * LH, LH, 0.5, 8.76, 0])).toBe(0);
     });
 
-    // 偏差（RadioComms 传不进这样的值：scrollHeight 总是有限的）。封面要求是“非正、非有限的
-    // 大小和时间 ⇒ 0（NaN 和 Infinity 也算）”，项目约定是“位置要防 NaN / Infinity”。
-    // 内容高是 Infinity、开头的停顿一过：循环永远走不完，函数不返回（这里靠看门狗才停得下来）。
-    it.fails('returns 0 for an infinite content height once the start hold is over', () => {
-      expect(guarded([Infinity, 3 * LH, LH, 5, 8.76, 2.26])).toBe(0);
+    // RadioComms 传不进这样的值（scrollHeight 总是有限的），约定照样适用：“非正、非有限的大小和
+    // 时间 ⇒ 0（NaN 和 Infinity 也算）”，项目约定是“位置要防 NaN / Infinity”。
+    // 已修（原为 it.fails：内容高是 Infinity、开头的停顿一过，逐行数的循环永远走不完，靠看门狗才停下）。
+    it('returns 0 for an infinite content height once the start hold is over', () => {
+      for (const seconds of [0.9, 5, 8.76, 100, Infinity]) {
+        expect(guarded([Infinity, 3 * LH, LH, seconds, 8.76, 2.26])).toBe(0);
+        expect(guarded([Infinity, 3 * LH, LH, seconds, 8.76, 2.26, true])).toBe(0);
+      }
     });
 
-    // 偏差（同上，RadioComms 传不进这样的值）：下面三种组合返回 NaN，而不是 0 或某个有限的位置。
-    it.fails.each([
+    // 已修（原为 it.fails：这三种组合返回 NaN）。大小或显示时间不是有限的正数 ⇒ 0；逐字显示没有
+    // 尽头 ⇒ 一直不动，也是 0。
+    it.each([
       ['content height and line height', [Infinity, 3 * LH, Infinity, 5, 8.76, 2.26]],
       ['elapsed time and display time', [8 * LH, 3 * LH, LH, Infinity, Infinity, 2.26]],
       ['elapsed time and typing time', [8 * LH, 3 * LH, LH, Infinity, 8.76, Infinity]],
-    ] as const)('returns a finite position when %s are both infinite', (_name, args) => {
-      expect(Number.isFinite(guarded(args))).toBe(true);
+    ] as const)('returns 0, not NaN, when %s are both infinite', (_name, args) => {
+      expect(guarded(args)).toBe(0);
+      expect(guarded([...args, true])).toBe(0);
+    });
+
+    it('never returns NaN, Infinity or a negative position, whatever the arguments', () => {
+      // 每个数值参数都取遍这些值（负数、NaN、±Infinity、极小和极大的有限数；0 上面已经逐个试过），
+      // 两种动态效果。1e300 的正文配 5e-324 的行高：行数在浮点里是 Infinity
+      const sizes = [8 * LH, 3 * LH, LH, 5e-324, 1e300, -1, NaN, Infinity, -Infinity];
+      const seconds = [5.4, 8.76, 2.26, 5e-324, 1e300, -1, NaN, Infinity, -Infinity];
+      const context = { follow: radioFollowOffset, sizes, seconds, problems: [] as string[] };
+      runInNewContext(
+        `for (const c of sizes) for (const b of sizes) for (const l of sizes)
+         for (const e of seconds) for (const t of seconds) for (const r of seconds)
+         for (const s of [false, true]) {
+           const v = follow(c, b, l, e, t, r, s);
+           if (!(v >= 0 && v < Infinity) && problems.length < 5) {
+             problems.push([c, b, l, e, t, r, s].join(', ') + ' -> ' + v);
+           }
+         }`,
+        context,
+        // 平时不到一秒；只有逐行数、算不完时才会碰到这个上限（低于本用例自己的超时）
+        { timeout: 15000 }
+      );
+      expect(context.problems).toEqual([]);
+    }, 20000);
+
+    it('does not count line by line: an absurdly long text gets its position at once', () => {
+      // 一万亿行：逐行数的话看门狗等不到结果
+      const textLines = 1e12;
+      const final = (textLines - 3) * LH;
+      expect(guarded([textLines * LH, 3 * LH, LH, 100, 8.76, 2.26]) / final).toBeCloseTo(1, 9);
+      expect(guarded([textLines * LH, 3 * LH, LH, 100, 8.76, 2.26, true]) / final).toBeCloseTo(
+        1,
+        9
+      );
+      // 显示时间过半（0.8 + 7.96 / 2 秒）：一半的行已经移出
+      const half = guarded([textLines * LH, 3 * LH, LH, 0.8 + 7.96 / 2, 8.76, 2.26]);
+      expect(half / ((textLines / 2) * LH)).toBeCloseTo(1, 9);
+    });
+
+    // FINDING（偏差，很小；RadioComms 传不进这样的值：scrollHeight 总是有限的、远小于此）。
+    // 函数的说明写着“结果总是有限的数”，项目约定是“位置要防 NaN / Infinity”。期望：内容高是有限的
+    // 最大双精度数（Number.MAX_VALUE）、行高 3px 时，最后的位置是有限的、不超过内容高。
+    // 实际：返回 +Infinity——（行数 − 面板行数）× 行高在浮点里溢出（MAX_VALUE ÷ 3 四舍五入后再乘 3
+    // 超出了 MAX_VALUE）。行高 7px 同样；行高 16.9px 时恰好不溢出。
+    it.fails('returns a finite position for the largest finite content height', () => {
+      for (const lineHeight of [3, 7]) {
+        const offset = guarded([Number.MAX_VALUE, 3 * lineHeight, lineHeight, 100, 8.76, 2.26]);
+        expect(Number.isFinite(offset), `line height ${lineHeight}: ${offset}`).toBe(true);
+        expect(offset).toBeLessThanOrEqual(Number.MAX_VALUE);
+      }
     });
   });
 });
@@ -1532,25 +1668,82 @@ describe('RadioComms follows long lines in the compact portrait-phone box', () =
       expect(movedUp()).toBeCloseTo(4 * LH, 2);
     });
 
-    // 偏差。约定：“只走整行：停下来时位置是行高的整数倍”。配音开口（holdForVoice）把显示时间
-    // 拉长，时间表整体后移；面板的位置只增不减，所以停在开口那一刻的位置上——开口正好落在一次
-    // 0.25 秒的滑动中间时，文字就停在两行之间（最上面一行被裁掉一截），直到新的时间表追上来
-    // （这个例子里约 0.9 秒）。配音在第一次上移之前开口时没有这个问题。
-    // 眼下游戏里很难碰到：表现层只在台词出现后 1.5 秒内让配音开口（RADIO_VOICE_MAX_DELAY_MS），
-    // 而第一次上移早于 1.5 秒的只有 360px 宽手机上的十几句中文（最早 1.43 秒），那时最多滑出
-    // 3.4px。这里按 RadioComms 自己的接口写，不依赖那个上限。
-    it.fails('rests on a whole line when the voice starts in the middle of a slide', () => {
+    // 3 × 10.8 ÷ 10.8 = 3.0000000000000004、3 × 11.7 ÷ 11.7 = 2.9999999999999996：停在整行上的位置
+    // 换算回行数时有浮点误差，也要认作停在整行上，马上换新的时间表
+    it.each([10.8, 11.7])(
+      'stays on whole lines when the voice starts at rest, with a %s px line height',
+      (px) => {
+        lineHeightPx = px;
+        const line = show(LONG);
+        advance(4.4);
+        expect(movedUp()).toBeCloseTo(3 * px, 2);
+        const { stepAt } = plan(8, 3, elapsed + 9 + 0.4, radioDisplayTimes(LONG.en).reveal);
+        radio.holdForVoice(line, 9);
+        for (const seconds of times(4.45, stepAt(4) - 0.05, 40)) {
+          advance(seconds - elapsed, 0.005);
+          expect(movedUp(), `at ${elapsed.toFixed(2)} s`).toBeCloseTo(3 * px, 2);
+        }
+        advance(stepAt(4) + SLIDE + 0.05 - elapsed, 0.005);
+        expect(movedUp()).toBeCloseTo(4 * px, 2);
+      }
+    );
+
+    // 约定：“只走整行：停下来时位置是行高的整数倍”。配音开口（holdForVoice）把显示时间拉长，
+    // 时间表整体后移；开口正好落在一次 0.25 秒的滑动中间时，先按原来的时间表把这一行滑完，停在
+    // 整行上，再换新的时间表。已修（原为 it.fails：文字停在两行之间约 0.9 秒，直到新的时间表追上来）。
+    // 游戏里很难碰到（表现层只在台词出现后 1.5 秒内让配音开口），这里按 RadioComms 自己的接口写。
+    it.each([
+      [200, 0.005],
+      [60, 1 / 60],
+      [30, 1 / 30],
+    ])(
+      'rests on a whole line when the voice starts in the middle of a slide (%i frames a second)',
+      (_fps, frame) => {
+        const line = show(LONG);
+        // 第二行在 2.79 秒开始移出，滑 0.25 秒；配音在滑到一半时开口
+        advance(2.9);
+        const midway = movedUp();
+        expect(midway).toBeGreaterThan(LH + 0.5);
+        expect(midway).toBeLessThan(2 * LH - 0.5);
+        radio.holdForVoice(line, 9);
+        // 这一行照原来的时间表滑完（到 2.79 + 0.25 秒）：一路往上，不停在半路，最后停在整行上
+        let previous = midway;
+        while (elapsed < 2.79 + SLIDE + 0.02) {
+          advance(frame, frame);
+          expect(movedUp(), `at ${elapsed.toFixed(3)} s`).toBeGreaterThanOrEqual(previous);
+          previous = movedUp();
+        }
+        expect(movedUp(), `at ${elapsed.toFixed(3)} s`).toBeCloseTo(2 * LH, 2);
+        // 再过半秒：仍停在整行上，而不是停在两行之间
+        advance(0.5, frame);
+        expect(isWholeLines(movedUp()), `resting at ${movedUp()} px`).toBe(true);
+        expect(movedUp()).toBeCloseTo(2 * LH, 2);
+      }
+    );
+
+    it('then takes up the lengthened timing from that whole line', () => {
       const line = show(LONG);
-      // 第二行在 2.79 秒开始移出，滑 0.25 秒；配音在滑到一半时开口
       advance(2.9);
-      const midway = movedUp();
-      expect(midway).toBeGreaterThan(LH + 0.5);
-      expect(midway).toBeLessThan(2 * LH - 0.5);
+      const { stepAt } = plan(8, 3, elapsed + 9 + 0.4, radioDisplayTimes(LONG.en).reveal);
       radio.holdForVoice(line, 9);
-      // 再过半秒，原来那次滑动早该结束了：文字应当停在整行上，而不是停在两行之间
-      advance(0.5);
-      expect(movedUp()).toBeGreaterThanOrEqual(midway);
-      expect(isWholeLines(movedUp()), `resting at ${movedUp()} px`).toBe(true);
+      // 新的时间表：第三行在约 5.1 秒移出（原来的在 3.785 秒）；在那之前一直停在两行上
+      expect(stepAt(3)).toBeCloseTo(5.11, 1);
+      for (const seconds of times(3.1, stepAt(3) - 0.05, 40)) {
+        advance(seconds - elapsed, 0.005);
+        expect(movedUp(), `at ${elapsed.toFixed(2)} s`).toBeCloseTo(2 * LH, 2);
+      }
+      // 照新的时间表滑，不是一下跳过去：滑到一半时在两行之间
+      advance(stepAt(3) + SLIDE / 2 - elapsed, 0.005);
+      expect(movedUp()).toBeGreaterThan(2 * LH + 0.5);
+      expect(movedUp()).toBeLessThan(3 * LH - 0.5);
+      advance(stepAt(3) + SLIDE + 0.05 - elapsed, 0.005);
+      expect(movedUp()).toBeCloseTo(3 * LH, 2);
+      advance(stepAt(4) + SLIDE + 0.05 - elapsed, 0.005);
+      expect(movedUp()).toBeCloseTo(4 * LH, 2);
+      // 全文在这句消失之前给出
+      advance(stepAt(5) + SLIDE + 0.05 - elapsed, 0.005);
+      expect(phase()).toBe('hold');
+      expect(movedUp()).toBeCloseTo(84.5, 2);
     });
   });
 });
@@ -1589,8 +1782,11 @@ describe('how long each text line of the shipped radio lines can be read', () =>
   ];
 
   const sizeRows = FOLLOW_PHONES.map((phone) => [`${phone.width}×${phone.height}`, phone] as const);
-  /** 减少动态效果时，中文在这两个尺寸上有几行来不及读完（见下面 it.fails 的说明） */
-  const KNOWN_LATE_WITH_REDUCED_MOTION = ['360×640', '360×740'];
+  /**
+   * 已接受的偏差：减少动态效果时，按成人字幕速度读中文的读者最多比移出慢这么多秒（见下面的说明）。
+   * 英文和不减少动态效果时不放宽。
+   */
+  const ACCEPTED_ZH_REDUCED_MOTION_LAG = 0.06;
 
   function timelines(
     language: Language,
@@ -1777,11 +1973,13 @@ describe('how long each text line of the shipped radio lines can be read', () =>
 
       /**
        * 读者在这句出现 0.5 秒后开始，从上往下按成人字幕的速度读；一行要整行进了面板、打完了字才
-       * 读得完。返回没来得及的：某一行在读完之前就开始移出（最后几行：这句消失之前没读完）。
+       * 读得完。返回没来得及的：某一行在读完之前就开始移出（最后几行：这句消失之前没读完），
+       * 读完的时刻比那一刻晚了 lag 秒以上。
        */
       const lateLines = (
         phone: (typeof FOLLOW_PHONES)[number],
-        reducedMotion: boolean
+        reducedMotion: boolean,
+        lag = 0
       ): string[] => {
         const rate = SUBTITLE_RATE.adult[language];
         const late: string[] = [];
@@ -1797,7 +1995,7 @@ describe('how long each text line of the shipped radio lines can be read', () =>
           for (const row of timeline.lines) {
             const chars = Array.from(row.text.trimEnd()).length;
             reading = Math.max(Math.max(reading, row.from) + chars / rate, row.typedAt);
-            if (reading > row.until + 1e-9) {
+            if (reading > row.until + lag + 1e-9) {
               late.push(
                 `${id} line ${row.line}/${timeline.textLines} "${row.text}": read by ` +
                   `${reading.toFixed(2)} s, moves out at ${row.until.toFixed(2)} s`
@@ -1816,19 +2014,19 @@ describe('how long each text line of the shipped radio lines can be read', () =>
         }
       );
 
-      for (const [size, phone] of sizeRows) {
-        // 偏差（幅度很小，0.01–0.06 秒）：减少动态效果时没有逐字阶段，显示时间只有停留的那一段，
-        // 每行分到的时间更短。360px 宽的手机上，中文有四句（c05-level-start-hq、
-        // c09-wave-start-2-airliner、c10-wave-start-6-wingman2、generic-raven-down-hq）的第二或
-        // 第三行在按 9 字/秒读的读者读完之前就开始移出。
-        const known = language === 'zh' && KNOWN_LATE_WITH_REDUCED_MOTION.includes(size);
-        (known ? it.fails : it)(
-          `with reduced motion, on a ${size} phone a reader at subtitle pace finishes every text line before it moves out`,
-          () => {
-            expect(lateLines(phone, true)).toEqual([]);
-          }
-        );
-      }
+      // 已接受的偏差（幅度很小）：减少动态效果时没有逐字阶段，显示时间只有停留的那一段，每行分到
+      // 的时间更短。360px 宽的手机上，中文有四句（c05-level-start-hq、c09-wave-start-2-airliner、
+      // c10-wave-start-6-wingman2、generic-raven-down-hq）的第二或第三行在按 9 字/秒读的读者读完
+      // 之前就开始移出，最多早 0.058 秒（360×640，c09 第二行）。负责人接受“最多慢 0.06 秒”，
+      // 中文按这个上限放宽（原为 4 例 it.fails：中文 × 360×640 / 360×740 × 两种折行估算）。
+      const lag = language === 'zh' ? ACCEPTED_ZH_REDUCED_MOTION_LAG : 0;
+      it.each(sizeRows)(
+        `with reduced motion, on a %s phone a reader at subtitle pace finishes every text line before it moves out` +
+          (lag > 0 ? ` (or at most ${lag} s after)` : ''),
+        (_size, phone) => {
+          expect(lateLines(phone, true, lag)).toEqual([]);
+        }
+      );
     });
   });
 
