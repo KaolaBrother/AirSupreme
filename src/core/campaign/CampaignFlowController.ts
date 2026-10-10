@@ -498,6 +498,8 @@ export class CampaignFlowController {
    * 视角 / 统计）重写在当前进度的检查点位置上——“继续战役”从那一波 / Boss 战 / 机库重新开始。
    * 不显示存档提示（紧接着就退出）。写入后读回确认；写不进去、读不回来，或者读回来的不是刚写的
    * 那一份（写入被悄悄丢弃，存储里还是更早的检查点）都返回 'failed'。
+   * 页面转入后台 / 关闭时的后台存档（GameCoordinator.saveCampaignInBackground）走的也是这里，
+   * 只是不退出：除了存储和 exitPoint（位置不变），不动任何运行状态，也不触发任何演出。
    */
   public saveForExit(): CampaignExitSave {
     const point = this.exitPoint;

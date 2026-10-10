@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Initialized Kaola-Workflow documentation structure.
+- 移除没有任何代码读取的 JSON 配置：`public/config/game-config.json`、`src/core/utils/ConfigLoader.ts` 与启动时的那次读取一并删除；数值一直以源码里的常量为准（`src/config.ts` 等），玩法不变，启动时少一次网络请求
 
 ### 操控与武器体验（`workflow/ipad-controls-weapons`）
 
