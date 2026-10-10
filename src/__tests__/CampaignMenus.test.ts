@@ -66,6 +66,37 @@ function rowText(rowId: string): string {
   return document.getElementById(rowId)?.textContent ?? '';
 }
 
+/** 分段单选的设置行（视角 / 语言）里的全部选项 */
+function rowOptions(rowId: string): HTMLElement[] {
+  const row = document.getElementById(rowId);
+  expect(row, `expected #${rowId}`).not.toBeNull();
+  return Array.from(row?.querySelectorAll<HTMLElement>('[role="radio"]') ?? []);
+}
+
+/** 当前选中的那个选项的文字 */
+function selectedOption(rowId: string): string {
+  const selected = rowOptions(rowId).filter(
+    (option) => option.getAttribute('aria-checked') === 'true'
+  );
+  expect(selected, `exactly one option is selected in #${rowId}`).toHaveLength(1);
+  return selected[0]?.textContent?.trim() ?? '';
+}
+
+function rowOption(rowId: string, label: string): HTMLElement {
+  const option = rowOptions(rowId).find((candidate) => candidate.textContent?.trim() === label);
+  expect(option, `expected a "${label}" option in #${rowId}`).toBeDefined();
+  return option as HTMLElement;
+}
+
+/** 两个选项的行里没选中的那个 */
+function otherOption(rowId: string): HTMLElement {
+  const others = rowOptions(rowId).filter(
+    (option) => option.getAttribute('aria-checked') !== 'true'
+  );
+  expect(others, `#${rowId} offers exactly one alternative`).toHaveLength(1);
+  return others[0];
+}
+
 describe('SessionSettings campaign fields', () => {
   beforeEach(() => {
     window.localStorage.clear();
@@ -413,38 +444,43 @@ describe('StartMenu campaign additions', () => {
     });
   });
 
+  // 批次 X5：视角与语言从“+ / -”步进行改成了分段单选（Settings 面板里），开新局的按钮叫“新战役”。
   describe('#camera-row', () => {
     it('toggles the camera mode, persists it and hands it to onStart', () => {
       const startMenu = createMenu();
       expect(document.getElementById('camera-row')).not.toBeNull();
-      const thirdPersonText = rowText('camera-row');
+      expect(rowOptions('camera-row')).toHaveLength(2);
+      const thirdPersonText = selectedOption('camera-row');
+      expect(loadStartFlowSettings().cameraMode).toBe('third-person');
 
-      rowButton('camera-row', '+').click();
-      const firstPersonText = rowText('camera-row');
+      otherOption('camera-row').click();
+      const firstPersonText = selectedOption('camera-row');
       expect(firstPersonText).not.toBe(thirdPersonText);
       expect(loadStartFlowSettings().cameraMode).toBe('first-person');
 
+      otherOption('camera-row').click();
+      expect(selectedOption('camera-row')).toBe(thirdPersonText);
+      expect(loadStartFlowSettings().cameraMode).toBe('third-person');
+
+      rowOption('camera-row', firstPersonText).click();
       let started: GameSettings | null = null;
       startMenu.setOnStart((settings) => {
         started = settings;
       });
       (document.getElementById('start-btn') as HTMLButtonElement).click();
       expect((started as GameSettings | null)?.cameraMode).toBe('first-person');
-
-      rowButton('camera-row', '-').click();
-      expect(rowText('camera-row')).toBe(thirdPersonText);
-      expect(loadStartFlowSettings().cameraMode).toBe('third-person');
     });
 
     it('opens with the persisted camera mode', () => {
       createMenu();
-      const thirdPersonText = rowText('camera-row');
+      const thirdPersonText = selectedOption('camera-row');
       menu?.dispose();
       document.body.innerHTML = '';
 
       saveStartFlowSettings({ cameraMode: 'first-person' });
       createMenu();
-      expect(rowText('camera-row')).not.toBe(thirdPersonText);
+      expect(selectedOption('camera-row')).not.toBe(thirdPersonText);
+      expect(rowOption('camera-row', thirdPersonText).getAttribute('aria-checked')).toBe('false');
     });
   });
 
@@ -456,30 +492,31 @@ describe('StartMenu campaign additions', () => {
     it('starts in English and switches the whole menu to Chinese, persisting the choice', () => {
       createMenu();
       expect(rowText('language-row')).toContain('Language');
-      expect(rowText('language-row')).toContain('English');
-      expect(startButtonText()).toBe('Start Game');
+      expect(selectedOption('language-row')).toBe('English');
+      expect(startButtonText()).toContain('New Campaign');
       expect(rowText('level-row')).toContain('Start level');
 
-      rowButton('language-row', '+').click();
+      rowOption('language-row', '中文').click();
 
       expect(getLocale()).toBe('zh-CN');
       expect(document.documentElement.lang).toBe('zh-CN');
       expect(loadStartFlowSettings().language).toBe('zh-CN');
       expect(rowText('language-row')).toContain('语言');
-      expect(rowText('language-row')).toContain('中文');
-      expect(startButtonText()).toBe('开始游戏');
+      expect(selectedOption('language-row')).toBe('中文');
+      expect(startButtonText()).toContain('新战役');
+      expect(startButtonText()).not.toContain('New Campaign');
       expect(rowText('level-row')).toContain('起始关卡');
 
-      rowButton('language-row', '-').click();
+      rowOption('language-row', 'English').click();
       expect(getLocale()).toBe('en');
       expect(loadStartFlowSettings().language).toBe('en');
-      expect(rowText('language-row')).toContain('English');
-      expect(startButtonText()).toBe('Start Game');
+      expect(selectedOption('language-row')).toBe('English');
+      expect(startButtonText()).toContain('New Campaign');
     });
 
     it('hands the chosen language to onStart', () => {
       const startMenu = createMenu();
-      rowButton('language-row', '+').click();
+      rowOption('language-row', '中文').click();
       let started: GameSettings | null = null;
       startMenu.setOnStart((settings) => {
         started = settings;
@@ -491,11 +528,11 @@ describe('StartMenu campaign additions', () => {
     it('follows a language change made elsewhere (e.g. the pause menu)', () => {
       createMenu();
       setLocale('zh-CN');
-      expect(rowText('language-row')).toContain('中文');
-      expect(startButtonText()).toBe('开始游戏');
+      expect(selectedOption('language-row')).toBe('中文');
+      expect(startButtonText()).toContain('新战役');
       setLocale('en');
-      expect(rowText('language-row')).toContain('English');
-      expect(startButtonText()).toBe('Start Game');
+      expect(selectedOption('language-row')).toBe('English');
+      expect(startButtonText()).toContain('New Campaign');
     });
   });
 
