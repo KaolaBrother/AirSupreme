@@ -98,6 +98,9 @@ export class GunLeadSolver {
     airCount: number,
     assistEnabled: boolean
   ): void {
+    // 时间步长不是正的有限数（一帧坏帧）：整步跳过，什么都不改——保持的目标、偏移、强度、
+    // 十字距离、速度估计和步号都原样留着，下一个好步接着上一个好步算
+    if (!Number.isFinite(deltaTime) || deltaTime <= 0) return;
     this.step++;
     // 炮口位置 / 机头方向不是有限数：这一步不给标记也不辅助（NaN 的比较恒为 false，
     // 后面的距离 / 夹角判定挡不住）；跟踪样本因为断了一步，之后重新累积
@@ -303,8 +306,8 @@ export class GunLeadSolver {
       }
     }
 
-    // deltaTime 非正 / 非有限时不衰减也不前进
-    const decay = deltaTime > 0 ? Math.exp((-3 * deltaTime) / assist.EASE_TIME) : 1;
+    // deltaTime 在 update 入口已保证是正的有限数
+    const decay = Math.exp((-3 * deltaTime) / assist.EASE_TIME);
     if (target !== this.assistTarget) {
       residual.set(offset.x - goalX, offset.y - goalY, offset.z - goalZ);
       this.assistTarget = target;

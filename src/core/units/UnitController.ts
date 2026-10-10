@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { GameConfig } from '@/config';
 import type { CombatTarget, IDecoyProvider } from '@/core/CombatContracts';
 import { getLevelScaling, type DifficultyProfile, type LevelScaling } from '@/core/Difficulty';
 import { Faction } from '@/core/Faction';
@@ -67,6 +68,11 @@ const CIVILIAN_HIT_RADIO: RadioBudgetConfig = { maxPerWave: 2, cooldownSeconds: 
 const MISSILE_INBOUND_WARNING: LocalizedText = {
   en: 'Missile inbound · Press G for flares',
   zh: '导弹来袭 · 按 G 投放热焰弹',
+};
+/** 触控设备没有 G 键：指向屏幕上的热焰键（键面文字见 main.ts 的 localizeShell） */
+const MISSILE_INBOUND_WARNING_TOUCH: LocalizedText = {
+  en: 'Missile inbound · Tap FLARE',
+  zh: '导弹来袭 · 点「热焰」键',
 };
 const CEASE_FIRE_WARNING: LocalizedText = {
   en: 'Cease fire! Those are civilians!',
@@ -278,7 +284,10 @@ export class UnitController {
       );
       if (phase !== 'launched') return;
       // 每次发射：HUD 闪烁告警（告警音见上）；配音按配额，进了无线电才计数
-      this.deps.presentation.flashWarning(MISSILE_INBOUND_WARNING, 'threat');
+      this.deps.presentation.flashWarning(
+        GameConfig.isMobile ? MISSILE_INBOUND_WARNING_TOUCH : MISSILE_INBOUND_WARNING,
+        'threat'
+      );
       if (
         this.missileWarningRadio.isReady() &&
         this.deps.presentation.genericRadio('missile-warning')
