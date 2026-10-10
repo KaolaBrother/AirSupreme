@@ -168,6 +168,9 @@ const CATEGORY_LABELS: Readonly<Record<AircraftCategory, LocalizedText>> = {
   missile: { en: 'Ordnance', zh: '弹药' },
 };
 
+/** 某个模型没能载入时名称标签上的文字 */
+const LOAD_FAILED_LABEL: LocalizedText = { en: 'Could not load: {name}', zh: '无法加载：{name}' };
+
 const PREVIEW_CSS = `
 #model-preview {
   --mp-ice: var(--hud-sys, #8fe4ff);
@@ -1031,7 +1034,17 @@ export class ModelPreview {
     }
     this.renderCategory();
 
-    const mesh = await aircraft.createMesh();
+    let mesh: Group;
+    try {
+      mesh = await aircraft.createMesh();
+    } catch (error) {
+      // 模型的代码块没下载下来 / 工厂抛错：这一页写明加载失败，其余模型与返回照常可用
+      if (loadSequence === this.meshLoadSequence && this.shown) {
+        console.error(`Failed to load hangar model "${aircraft.name}"`, error);
+        this.nameDisplay.textContent = tr(LOAD_FAILED_LABEL, { name: aircraft.name });
+      }
+      return;
+    }
     if (loadSequence !== this.meshLoadSequence || !this.shown) {
       disposeModelTree(mesh);
       return;
@@ -1107,7 +1120,14 @@ export class ModelPreview {
   public show(): void {
     this.shown = true;
     this.container.style.display = 'flex';
-    this.ensureRenderer();
+    try {
+      this.ensureRenderer();
+    } catch (error) {
+      // 浏览器不给 WebGL 上下文：不留下一个没有模型、按键也没接上的空机库——
+      // 收起并通知调用方返回（onBack），错误照常抛出
+      this.hide();
+      throw error;
+    }
     document.addEventListener('keydown', this.handleKeydown);
     void this.showAircraft(0);
     cancelAnimationFrame(this.animationId);

@@ -636,12 +636,7 @@ export class MenuHeroScene {
     );
     this.camera.lookAt(CAMERA_TARGET);
     if (launching) {
-      // 出场时视场拉开 7°。全工程只有 CameraRig 写视场角，这里改 zoom：
-      // zoom = tan(FOV / 2) / tan(加宽后的视场 / 2) 得到的投影矩阵与直接加宽视场完全相同
-      const launchFov = FOV + 7 * Math.min(1, launchElapsed * 4);
-      this.camera.zoom =
-        Math.tan(THREE.MathUtils.degToRad(FOV / 2)) /
-        Math.tan(THREE.MathUtils.degToRad(launchFov / 2));
+      this.camera.fov = FOV + 7 * Math.min(1, launchElapsed * 4);
       this.camera.updateProjectionMatrix();
     }
 
