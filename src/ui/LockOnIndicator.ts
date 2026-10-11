@@ -2,7 +2,12 @@ import { Vector3 } from 'three';
 import type { Camera, Object3D, Quaternion } from 'three';
 import { GAME_CONSTANTS } from '@/config';
 import { onLocaleChange, tr, type LocalizedText } from '@/i18n';
-import { MissileSeeker, projectToScreen, type ScreenPoint } from '@/features/combat/MissileSeeker';
+import {
+  MissileSeeker,
+  projectToScreen,
+  type ILockJamProvider,
+  type ScreenPoint,
+} from '@/features/combat/MissileSeeker';
 import {
   HUD_COLORS,
   detectHudLayoutDensity,
@@ -22,7 +27,7 @@ const MIN_ACQUIRE_RADIUS = 44;
 const MAX_ACQUIRE_RADIUS_RATIO = 0.3;
 /** 准星跑出视口这么多像素后不再绘制（追尾视角急拉杆时机头轴线会甩出屏幕） */
 const OFFSCREEN_MARGIN = 24;
-/** 机炮十字被触屏辅助拉离机头轴线超过这么多像素才换成“辅助中”的样子；回到这么近才换回来 */
+/** 机炮十字被机炮辅助拉离机头轴线超过这么多像素才换成“辅助中”的样子；回到这么近才换回来 */
 const CROSS_ASSIST_ON_PX = 3;
 const CROSS_ASSIST_OFF_PX = 1.5;
 /** 距离读数的取整步长（米），避免每帧改写文字 */
@@ -34,6 +39,7 @@ const TXT_LOCK: LocalizedText = { en: 'LOCK', zh: '锁定' };
 const TXT_NO_LOCK: LocalizedText = { en: 'NO LOCK', zh: '未锁定' };
 const TXT_NO_MISSILE: LocalizedText = { en: 'NO MSL', zh: '无导弹' };
 const TXT_MISSILE: LocalizedText = { en: 'MSL', zh: '导弹' };
+const TXT_JAMMED: LocalizedText = { en: 'JAMMED', zh: '受干扰' };
 
 export type LockOnCue = 'no-lock' | 'no-missile';
 
@@ -45,13 +51,14 @@ interface PlacedPosition {
 /**
  * 瞄准与导弹锁定显示：
  * - 机炮准星：画在机头轴线前方 600 米那一点的屏幕位置（第一 / 第三人称都对准弹道），
- *   每个渲染帧更新（renderUpdate）。触屏机炮辅助把弹道拉向目标时，十字跟着移到辅助方向上
+ *   每个渲染帧更新（renderUpdate）。机炮辅助（触屏 / 键盘）把弹道拉向目标时，十字跟着移到辅助方向上
  *   （同样取 600 米处），换成锁定色并套一个小菱形，机头轴线的位置留一个暗标记。
  * - 导引头捕获环：始终以机头轴线为圆心，不随机炮十字移动。只要有导弹，导引头一直工作
  *   （MissileSeeker，每个模拟步 update）。
  * - 跟踪：目标上的角标随进度收紧 + 进度弧；锁定：角标变锁定色 + “锁定”标签与距离；
  *   丢锁：短暂的红色提示；“未锁定 / 无导弹”提示显示在准星下方。
  * - 准星旁显示导弹余量；机炮提前量标记（由 GunLeadSolver 给出世界坐标）。
+ * - 敌方干扰机拖慢锁定期间，捕获环内侧上沿显示“受干扰”标签。
  * 所有元素 pointer-events: none。
  */
 export class LockOnIndicator {
@@ -71,6 +78,8 @@ export class LockOnIndicator {
   private ring: HTMLDivElement;
   private cross: HTMLDivElement;
   private cue: HTMLDivElement;
+  private jam: HTMLDivElement;
+  private jammed: boolean = false;
   private count: HTMLDivElement;
   private countLabel: HTMLSpanElement;
   private readonly countPips: HTMLElement[] = [];
@@ -142,7 +151,7 @@ export class LockOnIndicator {
     this.setStyleValue(this.container, 'contain', 'layout style paint');
 
     // 准星锚点：机炮十字 + 捕获环 + 提示 + 导弹余量，整体跟随机头轴线的屏幕位置
-    // （十字在触屏辅助生效时相对锚点再偏移，见 renderGunCross）
+    // （十字在机炮辅助生效时相对锚点再偏移，见 renderGunCross）
     this.reticle = this.createAnchor('reticle');
     this.ring = document.createElement('div');
     this.ring.className = 'lk-ring';
@@ -173,6 +182,11 @@ export class LockOnIndicator {
     this.cue.className = 'lk-cue';
     this.cue.dataset.lockChrome = 'cue';
     this.setStyleValue(this.cue, 'display', 'none');
+    // “受干扰”标签：敌方干扰机拖慢锁定期间显示在捕获环内侧上沿
+    this.jam = document.createElement('div');
+    this.jam.className = 'lk-jam';
+    this.jam.dataset.lockChrome = 'jam-tag';
+    this.setStyleValue(this.jam, 'display', 'none');
     this.count = document.createElement('div');
     this.count.className = 'lk-count';
     this.count.dataset.lockChrome = 'missile-count';
@@ -183,7 +197,7 @@ export class LockOnIndicator {
       this.count.appendChild(pip);
       this.countPips.push(pip);
     }
-    this.reticle.append(this.ring, noseMark, cross, this.cue, this.count);
+    this.reticle.append(this.ring, noseMark, cross, this.cue, this.jam, this.count);
 
     // 目标锚点：角标 + 进度弧 + “锁定 / 距离”标签
     this.targetAnchor = this.createAnchor('target');
@@ -306,7 +320,7 @@ export class LockOnIndicator {
     return this.renderCross;
   }
 
-  /** 机炮十字是否正显示成“辅助中”（被触屏辅助拉离了机头轴线） */
+  /** 机炮十字是否正显示成“辅助中”（被机炮辅助拉离了机头轴线） */
   public isGunCrossAssisted(): boolean {
     return this.crossAssisted && this.renderCross.visible;
   }
@@ -327,6 +341,24 @@ export class LockOnIndicator {
    */
   public setLockTime(time: number): void {
     this.seeker.setLockTime(time);
+  }
+
+  /** 接入导引头的干扰来源（敌方干扰机）；传 null 断开 */
+  public setLockJamProvider(provider: ILockJamProvider | null): void {
+    this.seeker.setJamProvider(provider);
+    this.applyJammed(this.seeker.isJammed());
+  }
+
+  /** 是否正显示“受干扰”标签 */
+  public isJammed(): boolean {
+    return this.jammed;
+  }
+
+  private applyJammed(jammed: boolean): void {
+    if (this.jammed === jammed) return;
+    this.jammed = jammed;
+    this.setStyleValue(this.jam, 'display', jammed ? 'block' : 'none');
+    this.setAttr(this.container, 'data-jammed', jammed ? 'true' : 'false');
   }
 
   /**
@@ -382,6 +414,8 @@ export class LockOnIndicator {
     playerQuaternion: Quaternion | null
   ): boolean {
     this.init();
+    // 干扰标签跟着效果走：没有导弹（导引头关闭）时也照常显示 / 收起
+    this.applyJammed(this.seeker.isJammed());
     if (this.missileCount <= 0) {
       return false;
     }
@@ -410,8 +444,8 @@ export class LockOnIndicator {
    * @param visible 玩家存活且在飞行（菜单 / 剧情冻结 / 暂停 / 等待复活时为 false）
    * @param leadPoint 机炮提前量点的世界坐标；没有可靠解时传 null
    * @param leadOnTarget 机头是否已压在提前量点上
-   * @param gunAimDirection 触屏辅助下子弹的发射方向（世界坐标单位向量）；机炮十字画在这个方向上。
-   *   没有辅助偏移（含桌面端）时传 null，十字就在机头轴线上
+   * @param gunAimDirection 机炮辅助下子弹的发射方向（世界坐标单位向量）；机炮十字画在这个方向上。
+   *   没有辅助偏移时传 null，十字就在机头轴线上
    * @param gunAimDistance 十字画在该方向上多远处（米）：辅助压住目标时是瞄准点的距离，十字因此
    *   在两种视角下都落在瞄准点上；非正 / 非有限数按准星参考距离处理
    */
@@ -642,6 +676,9 @@ export class LockOnIndicator {
     this.setStyleValue(this.ring, 'width', diameter);
     this.setStyleValue(this.ring, 'height', diameter);
 
+    // “受干扰”标签贴在捕获环内侧上沿
+    this.setStyleValue(this.jam, 'top', `${Math.round(6 - radius)}px`);
+
     // 导弹余量贴在捕获环右下方
     const offset = Math.round(radius * 0.72);
     this.setStyleValue(this.count, 'left', `${offset + 6}px`);
@@ -722,6 +759,7 @@ export class LockOnIndicator {
   private renderStaticText(): void {
     this.setTextContent(this.countLabel, tr(TXT_MISSILE));
     this.setTextContent(this.targetLabelTag, tr(TXT_LOCK));
+    this.setTextContent(this.jam, tr(TXT_JAMMED));
     if (this.cueKind !== null) {
       this.setTextContent(
         this.cue,
@@ -832,7 +870,7 @@ export class LockOnIndicator {
       #lock-on-indicator .lk-e { right: 0; top: 14px; width: 9px; height: 2px; }
       #lock-on-indicator .lk-dot { left: 13px; top: 13px; width: 4px; height: 4px; border-radius: 50%; }
 
-      /* 触屏辅助把十字拉离机头轴线时：十字换成锁定色并套一个小菱形，机头位置留一个暗标记 */
+      /* 机炮辅助把十字拉离机头轴线时：十字换成锁定色并套一个小菱形，机头位置留一个暗标记 */
       #lock-on-indicator .lk-cross {
         will-change: transform;
       }
@@ -910,6 +948,22 @@ export class LockOnIndicator {
         font-weight: 700;
         letter-spacing: 0.16em;
         white-space: nowrap;
+      }
+
+      /* “受干扰”标签（捕获环内侧上沿）：紫色只用于电子干扰 */
+      #lock-on-indicator .lk-jam {
+        position: absolute;
+        left: 0;
+        transform: translateX(-50%);
+        padding: 1px 7px;
+        border-radius: 4px;
+        background: rgba(8, 14, 24, 0.6);
+        color: #cfa6ff;
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.16em;
+        white-space: nowrap;
+        text-shadow: 0 1px 2px rgba(0, 0, 0, 0.95);
       }
 
       /* 准星旁的导弹余量 */

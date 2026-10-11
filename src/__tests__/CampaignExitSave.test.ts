@@ -1516,3 +1516,521 @@ describe('campaign exit save', () => {
     });
   });
 });
+
+// ══════════════════════════════════ 后台存档 ══════════════════════════════════
+
+/**
+ * 后台存档的战役侧（CampaignFlowController.saveInBackground）：页面转入后台 / 关闭时，协调器让战役
+ * 流程把此刻的进度写进检查点（iPad 的 Safari 会把后台标签页整个丢弃）。按规格 B1-B4：
+ * - B1 写在哪、写什么：与“保存并退出”同一个键、同一种记录、同一个存档点，内容是此刻的状态；
+ *   之后“继续战役”与保存并退出之后一样，从那一波 / Boss 战 / 机库重新开始；
+ * - B2 什么时候不写：Boss 模式、还没到第一个检查点、战役已通关、本局已结束——存储一个字节都不动；
+ *   章节卡片、结算、机库期间照样写（机库里买的升级靠它保住）；
+ * - B3 生命数（与保存并退出唯一的不同）：转入后台不是玩家自己选的，不能让重试比被它覆盖的检查点
+ *   更糟。存储里那份如果是同一个存档点（类型、关卡、波次都相同），写入的生命数取已存的与此刻的
+ *   较大者；是别的存档点、没有、或读不出来，写此刻的生命数。“保存并退出”照旧写此刻的生命数；
+ * - B4 对局原样继续：不触发任何演出，流程不动。
+ * 页面事件、一次转入后台只写一次、协调器一侧的“对局不受影响”在 BackgroundCampaignSave.test.ts。
+ */
+
+/** 最后一波已清空、Boss 检查点还没写：存储里还是上一波的检查点，算另一个存档点 */
+const BEFORE_BOSS_CHECKPOINT = 'the last wave cleared, before the boss checkpoint is written';
+
+/** 存档里除了生命数和存档时间之外的全部内容 */
+function withoutLivesAndTime(save: CampaignSaveData): Record<string, unknown> {
+  const rest: Record<string, unknown> = { ...save };
+  delete rest.lives;
+  delete rest.savedAt;
+  return rest;
+}
+
+/** “继续战役”读这份存档后，流程往协调器发了哪些指令 */
+async function resumeLog(save: CampaignSaveData): Promise<string[]> {
+  const next = createHarness();
+  next.flow.resumeFromCheckpoint(save);
+  await flushPromises();
+  return next.log;
+}
+
+function pointOf(save: CampaignSaveData): SavePoint {
+  return { stage: save.checkpoint, level: save.level, wave: save.wave };
+}
+
+/** 第 3 关第 3 波打到一半；这一波开始时的检查点里是 livesAtCheckpoint 条命 */
+async function midThirdWave(h: Harness, livesAtCheckpoint = 3): Promise<SavePoint> {
+  await enterCombat(h, 3);
+  clearWaves(h, 1);
+  h.run.lives = livesAtCheckpoint;
+  h.flow.handleWaveStart(1);
+  h.flow.handleWaveComplete(1);
+  h.flow.handleWaveStart(2);
+  const stored = storedCheckpoint();
+  expect([stored.checkpoint, stored.level, stored.wave, stored.lives]).toEqual([
+    'wave',
+    3,
+    2,
+    livesAtCheckpoint,
+  ]);
+  return { stage: 'wave', level: 3, wave: 2 };
+}
+
+describe('campaign background save', () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+    restoreStorage();
+    resetLocale();
+    window.localStorage.clear();
+  });
+
+  // ───────────────────────────── B1 / B2 ─────────────────────────────
+
+  describe('B1, B2: where and what it writes, and when it does not', () => {
+    it.each(SCENARIOS)('hidden during $name', async (scenario) => {
+      // 对照：同一时刻按下“保存并退出”
+      const twin = createHarness(scenario.mode);
+      const expected = await scenario.arrange(twin);
+      playOn(twin);
+      twin.flow.saveForExit();
+      const exitRecord = loadCampaignCheckpoint();
+      const exitKeys = Object.keys(storageSnapshot()).sort();
+      window.localStorage.clear();
+
+      const h = createHarness(scenario.mode);
+      await scenario.arrange(h);
+      playOn(h);
+      const before = storageSnapshot();
+      const replaced = loadCampaignCheckpoint();
+      const writes = watchStorageWrites();
+
+      h.flow.saveInBackground();
+
+      if (typeof expected === 'string') {
+        writes.expectNone(`saveInBackground (${expected})`);
+        expect(storageSnapshot()).toEqual(before);
+        return;
+      }
+      const save = storedCheckpoint();
+      expect(pointOf(save), 'the same save point as Save & Exit').toEqual(expected);
+      expect(exitRecord, 'Save & Exit stored a record at this moment').not.toBeNull();
+      const exit = exitRecord as CampaignSaveData;
+      expect(Object.keys(save).sort(), 'the same fields').toEqual(Object.keys(exit).sort());
+      expect(withoutLivesAndTime(save), 'the same content, lives aside').toEqual(
+        withoutLivesAndTime(exit)
+      );
+      expect(save.version).toBe(CAMPAIGN_SAVE_VERSION);
+      expect(
+        writes.setItem.mock.calls.map(([key]) => key),
+        'one write, to the checkpoint key'
+      ).toEqual([CAMPAIGN_SAVE_KEY]);
+      expect(Object.keys(storageSnapshot()).sort()).toEqual(exitKeys);
+
+      // 生命数：playOn 之后是 2 条。被覆盖的检查点就是这个存档点上的那份（3 条命）时保住 3 条；
+      // 最后一波清空后的空档里，被覆盖的是上一波的检查点，写此刻的 2 条
+      expect(exit.lives, 'Save & Exit writes the current lives').toBe(2);
+      if (scenario.name === BEFORE_BOSS_CHECKPOINT) {
+        expect(replaced ? pointOf(replaced) : null, 'premise: another save point').not.toEqual(
+          expected
+        );
+        expect(save.lives).toBe(2);
+      } else {
+        expect(replaced ? pointOf(replaced) : null, 'premise: the same save point').toEqual(
+          expected
+        );
+        expect(replaced?.lives, 'premise: saved there with three lives').toBe(3);
+        expect(save.lives).toBe(3);
+      }
+
+      // “继续战役”：与保存并退出之后走的是同一条路
+      const route = await resumeLog(save);
+      expect(route.length).toBeGreaterThan(0);
+      expect(route).toEqual(await resumeLog(exit));
+    });
+
+    it('stores score, missiles, upgrades, weapons and ammo, flares, camera, stats and Swift as they are now', async () => {
+      const h = createHarness();
+      await enterCombat(h, 3);
+      clearWaves(h, 1);
+      const autosave = storedCheckpoint();
+      expect(autosave.score, 'the autosave was taken before any of this').toBe(0);
+      expect(autosave.swiftJoined ?? false).toBe(false);
+
+      h.run.score = 18_640;
+      h.run.missiles = 2;
+      h.run.flares = 1;
+      h.run.cameraMode = 'first-person';
+      h.run.weapons = {
+        unlocked: ['rockets', 'laser', 'swarm'],
+        selected: 'swarm',
+        ammo: { rockets: 5, swarm: 1 },
+      };
+      const upgrades = h.stats.getUpgrades();
+      upgrades.awardBonusPoints(6);
+      expect(upgrades.upgrade(UpgradeType.MAX_HEALTH)).toBe(true);
+      const pointsLeft = upgrades.getAvailablePoints();
+      for (let kill = 0; kill < 7; kill++) h.flow.recordKill();
+      h.flow.recordAssetLost(true);
+      h.flow.recordDeath();
+      h.flow.handleWingmanLaunched('swift');
+      h.flow.tick(42.5);
+
+      h.flow.saveInBackground();
+
+      const save = storedCheckpoint();
+      expect(save.score).toBe(18_640);
+      expect(save.missiles).toBe(2);
+      expect(save.flares).toBe(1);
+      expect(save.cameraMode).toBe('first-person');
+      expect(save.weapons).toEqual({
+        unlocked: ['rockets', 'laser', 'swarm'],
+        selected: 'swarm',
+        ammo: { rockets: 5, swarm: 1 },
+      });
+      expect(upgradeLevel(save, UpgradeType.MAX_HEALTH)).toBe(1);
+      expect(save.upgrades.availablePoints).toBe(pointsLeft);
+      expect(save.stats).toEqual({ kills: 7, civiliansLost: 1, deaths: 1, playTimeSeconds: 42.5 });
+      expect(save.swiftJoined).toBe(true);
+      expect(pointOf(save)).toEqual({ stage: 'wave', level: 3, wave: 1 });
+    });
+
+    it('keeps what was bought in the hangar', async () => {
+      const h = createHarness();
+      await defeatBoss(h, 4);
+      h.advance(10);
+      h.continueDebrief();
+      expect(h.log).toContain('hangar:5');
+      const upgrades = h.stats.getUpgrades();
+      upgrades.awardBonusPoints(6);
+      expect(upgradeLevel(storedCheckpoint(), UpgradeType.DAMAGE)).toBe(0);
+      expect(upgrades.upgrade(UpgradeType.DAMAGE)).toBe(true);
+      expect(upgrades.upgrade(UpgradeType.DAMAGE)).toBe(true);
+
+      h.flow.saveInBackground();
+
+      const save = storedCheckpoint();
+      expect(pointOf(save)).toEqual({ stage: 'hangar', level: 5, wave: 0 });
+      expect(upgradeLevel(save, UpgradeType.DAMAGE)).toBe(2);
+      expect(save.upgrades.availablePoints).toBe(upgrades.getAvailablePoints());
+    });
+
+    it.each(SCENARIOS)('once the run is over, nothing is written: $name', async (scenario) => {
+      const h = createHarness(scenario.mode);
+      await scenario.arrange(h);
+      playOn(h);
+      h.session.setGameOver();
+      const before = storageSnapshot();
+      const writes = watchStorageWrites();
+
+      h.flow.saveInBackground();
+
+      writes.expectNone('saveInBackground after the run is over');
+      expect(storageSnapshot()).toEqual(before);
+    });
+
+    it.each(SCENARIOS)(
+      'when nothing is to be written, a stored record nobody can read stays as it is: $name',
+      async (scenario) => {
+        const unreadable = '{"version":1,"checkpoint":"wave","level":3,"wave":2,"lives":';
+        const h = createHarness(scenario.mode);
+        const expected = await scenario.arrange(h);
+        playOn(h);
+        // 本来会写的时刻：换成本局已经结束
+        if (typeof expected !== 'string') h.session.setGameOver();
+        window.localStorage.setItem(CAMPAIGN_SAVE_KEY, unreadable);
+        const before = storageSnapshot();
+        const writes = watchStorageWrites();
+
+        h.flow.saveInBackground();
+
+        writes.expectNone('saveInBackground');
+        expect(rawCheckpoint()).toBe(unreadable);
+        expect(storageSnapshot()).toEqual(before);
+      }
+    );
+
+    // Boss 模式下流程本来就走不到任何存档点（协调器也不会在 Boss 模式下读档）。这里硬塞一个
+    // 存档点给它：“Boss 模式不写”是流程自己的保证，不靠“碰巧没有存档点”。
+    it.each([
+      [
+        'a campaign save',
+        (): void => {
+          saveCampaignCheckpoint(makeSave({ checkpoint: 'wave', level: 3, wave: 2, lives: 3 }));
+        },
+      ],
+      [
+        'a record nobody can read',
+        (): void => {
+          window.localStorage.setItem(CAMPAIGN_SAVE_KEY, '{"version":1,"checkpoint":"wave",');
+        },
+      ],
+    ])(
+      'boss mode never writes, even with a save point forced on the flow: %s stays as it is',
+      async (_name, store) => {
+        const h = createHarness('boss');
+        h.flow.resumeFromCheckpoint({
+          ...makeSave({ checkpoint: 'wave', level: 3, wave: 2, lives: 3 }),
+          version: CAMPAIGN_SAVE_VERSION,
+          savedAt: FROZEN_NOW,
+        });
+        await flushPromises();
+        playOn(h);
+        store();
+        const before = storageSnapshot();
+        const writes = watchStorageWrites();
+
+        h.flow.saveInBackground();
+
+        writes.expectNone('saveInBackground in boss mode');
+        expect(storageSnapshot()).toEqual(before);
+      }
+    );
+  });
+
+  // ───────────────────────────── B3 ─────────────────────────────
+
+  describe('B3: the lives it writes', () => {
+    it.each([
+      { stored: 3, now: 1, written: 3 },
+      { stored: 3, now: 2, written: 3 },
+      { stored: 5, now: 1, written: 5 },
+      { stored: 2, now: 2, written: 2 },
+      { stored: 1, now: 3, written: 3 },
+      { stored: 1, now: 2, written: 2 },
+    ])(
+      'same save point, $stored stored and $now now: $written written',
+      async ({ stored, now, written }) => {
+        const h = createHarness();
+        const point = await midThirdWave(h, stored);
+        h.run.lives = now;
+        h.run.score = 6_600;
+
+        h.flow.saveInBackground();
+
+        const save = storedCheckpoint();
+        expect(pointOf(save)).toEqual(point);
+        expect(save.lives).toBe(written);
+        expect(save.score, 'the rest is as of now').toBe(6_600);
+        expect(h.run.lives, 'the lives in the running game are not touched').toBe(now);
+      }
+    );
+
+    it('with the lives kept, everything else is still the state as of now', async () => {
+      const h = createHarness();
+      await midThirdWave(h);
+      playOn(h);
+
+      h.flow.saveInBackground();
+
+      const save = storedCheckpoint();
+      expect(save.lives).toBe(3);
+      expectCurrentState({ ...save, lives: h.run.lives }, h);
+    });
+
+    it.each([
+      ['an earlier wave of this level', { checkpoint: 'wave', level: 3, wave: 1 }],
+      ['a later wave of this level', { checkpoint: 'wave', level: 3, wave: 3 }],
+      ['the same wave of another level', { checkpoint: 'wave', level: 4, wave: 2 }],
+      ['the start of this level', { checkpoint: 'level-start', level: 3, wave: 0 }],
+      ['another kind with the same level and wave', { checkpoint: 'boss', level: 3, wave: 2 }],
+      ['the hangar before this level', { checkpoint: 'hangar', level: 3, wave: 0 }],
+    ] as const)(
+      'a stored checkpoint for another save point (%s) does not lend its lives',
+      async (_name, other) => {
+        const h = createHarness();
+        const point = await midThirdWave(h);
+        saveCampaignCheckpoint(makeSave({ ...other, lives: 5 }));
+        h.run.lives = 1;
+
+        h.flow.saveInBackground();
+
+        const save = storedCheckpoint();
+        expect(pointOf(save)).toEqual(point);
+        expect(save.lives).toBe(1);
+      }
+    );
+
+    it('no stored checkpoint: the current lives are written', async () => {
+      const h = createHarness();
+      const point = await midThirdWave(h);
+      window.localStorage.removeItem(CAMPAIGN_SAVE_KEY);
+      h.run.lives = 1;
+
+      h.flow.saveInBackground();
+
+      expect(pointOf(storedCheckpoint())).toEqual(point);
+      expect(storedCheckpoint().lives).toBe(1);
+    });
+
+    it.each([
+      ['text that is not JSON', '{"version":1,"checkpoint":"wave","level":3,"wave":2,"lives":'],
+      ['an empty string', ''],
+      ['a JSON array', '[3,2,9]'],
+      [
+        'a record from another save format, same save point, nine lives',
+        JSON.stringify({
+          ...makeSave({ checkpoint: 'wave', level: 3, wave: 2, lives: 9 }),
+          version: 99,
+          savedAt: FROZEN_NOW,
+        }),
+      ],
+    ])('an unreadable stored record (%s) is replaced by the current state', async (_name, raw) => {
+      const h = createHarness();
+      const point = await midThirdWave(h);
+      window.localStorage.setItem(CAMPAIGN_SAVE_KEY, raw);
+      playOn(h);
+
+      expect(() => h.flow.saveInBackground()).not.toThrow();
+
+      const save = storedCheckpoint();
+      expect(pointOf(save)).toEqual(point);
+      expect(save.lives).toBe(2);
+      expectCurrentState(save, h);
+    });
+
+    it.each([
+      ['the boss fight', async (h: Harness) => enterBossFight(h, 6), 'boss'],
+      ['the hangar after a boss', async (h: Harness) => defeatBoss(h, 4), 'hangar'],
+      ['the first wave of a level', async (h: Harness) => enterCombat(h, 2), 'level-start'],
+    ] as const)('%s keeps the higher lives too', async (_name, reach, kind) => {
+      const h = createHarness();
+      await reach(h);
+      expect([storedCheckpoint().checkpoint, storedCheckpoint().lives]).toEqual([kind, 3]);
+      h.run.lives = 1;
+
+      h.flow.saveInBackground();
+
+      expect([storedCheckpoint().checkpoint, storedCheckpoint().lives]).toEqual([kind, 3]);
+    });
+
+    it('last wave cleared, boss checkpoint not yet written: the save moves to the boss with the current lives', async () => {
+      const level = 2;
+      const totalWaves = totalWavesOf(level);
+      const h = createHarness();
+      await enterCombat(h, level);
+      clearWaves(h, totalWaves);
+      // 存储里还是最后一波开始时的检查点（3 条命）
+      expect(pointOf(storedCheckpoint())).toEqual({
+        stage: 'wave',
+        level,
+        wave: totalWaves - 1,
+      });
+      expect(storedCheckpoint().lives).toBe(3);
+      h.run.lives = 1;
+
+      h.flow.saveInBackground();
+
+      const save = storedCheckpoint();
+      expect(pointOf(save)).toEqual({ stage: 'boss', level, wave: totalWaves });
+      expect(save.lives).toBe(1);
+    });
+
+    it('hiding again and again keeps the lives; Save & Exit afterwards writes the current ones', async () => {
+      const h = createHarness();
+      await midThirdWave(h);
+      h.run.lives = 2;
+      h.flow.saveInBackground();
+      expect(storedCheckpoint().lives).toBe(3);
+
+      h.run.lives = 1;
+      h.run.score = 9_100;
+      h.flow.saveInBackground();
+      expect([storedCheckpoint().lives, storedCheckpoint().score]).toEqual([3, 9_100]);
+
+      expectSaved(h.flow.saveForExit(), 'wave');
+      expect(storedCheckpoint().lives, 'the player chose this one').toBe(1);
+    });
+
+    it('after a Save & Exit at one life, later background saves keep that one life', async () => {
+      const h = createHarness();
+      const point = await midThirdWave(h);
+      h.run.lives = 1;
+      expectSaved(h.flow.saveForExit(), 'wave');
+      const chosen = storedCheckpoint();
+      expect(chosen.lives).toBe(1);
+
+      // “继续战役”：新的一局从这份存档开始
+      const next = createHarness();
+      next.run.lives = chosen.lives;
+      next.run.score = chosen.score;
+      next.flow.resumeFromCheckpoint(chosen);
+      await flushPromises();
+      next.flow.saveInBackground();
+      expect(pointOf(storedCheckpoint())).toEqual(point);
+      expect(storedCheckpoint().lives).toBe(1);
+
+      // 续玩时多了一条命：两者取大，写 2
+      next.run.lives = 2;
+      next.flow.saveInBackground();
+      expect(storedCheckpoint().lives).toBe(2);
+    });
+
+    it('once the run reaches the next checkpoint, the lives are those of that checkpoint', async () => {
+      const h = createHarness();
+      await midThirdWave(h);
+      h.run.lives = 1;
+      h.flow.handleWaveComplete(2);
+      const autosave = storedCheckpoint();
+      expect([autosave.wave, autosave.lives]).toEqual([3, 1]);
+      h.flow.handleWaveStart(3);
+
+      h.flow.saveInBackground();
+
+      expect(pointOf(storedCheckpoint())).toEqual({ stage: 'wave', level: 3, wave: 3 });
+      expect(storedCheckpoint().lives).toBe(1);
+    });
+  });
+
+  // ───────────────────────────── B4 ─────────────────────────────
+
+  describe('B4: the run itself does not notice', () => {
+    function sessionFacts(h: Harness): unknown[] {
+      return [
+        h.session.getStatus(),
+        h.session.getLevel(),
+        h.session.getWave(),
+        h.session.isInBossBattle(),
+        h.session.isPaused(),
+      ];
+    }
+
+    it.each(SCENARIOS)(
+      '$name: no toast, stinger or radio, and the flow does not move',
+      async (scenario) => {
+        const h = createHarness(scenario.mode);
+        await scenario.arrange(h);
+        playOn(h);
+        const effectsBefore = h.fake.effects.length;
+        const logBefore = [...h.log];
+        const runBefore = JSON.parse(JSON.stringify(h.run)) as unknown;
+        const statsBefore = h.flow.getRunStats();
+        const preview = h.flow.describeExitSave();
+        const session = sessionFacts(h);
+
+        h.flow.saveInBackground();
+        h.flow.saveInBackground();
+
+        expect(effectNames(h.fake, effectsBefore), 'silent').toEqual([]);
+        expect(h.log, 'the run does not move').toEqual(logBefore);
+        expect(JSON.parse(JSON.stringify(h.run))).toEqual(runBefore);
+        expect(h.flow.getRunStats()).toEqual(statsBefore);
+        expect(h.flow.describeExitSave(), 'the save point stays where it was').toEqual(preview);
+        expect(sessionFacts(h)).toEqual(session);
+      }
+    );
+
+    it('…whereas the autosave at the same moment is announced (the fake does record it)', async () => {
+      const h = createHarness();
+      await enterCombat(h, 3);
+      const before = h.fake.effects.length;
+
+      h.flow.handleWaveStart(0);
+      h.flow.handleWaveComplete(0);
+
+      expect(effectNames(h.fake, before)).toContain('showAutosave');
+    });
+  });
+});

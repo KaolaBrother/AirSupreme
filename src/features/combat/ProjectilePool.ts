@@ -9,6 +9,7 @@ import {
   OctahedronGeometry,
   PlaneGeometry,
   Scene,
+  SphereGeometry,
   Sprite,
   SpriteMaterial,
   Vector3,
@@ -17,6 +18,11 @@ import {
 import { GameConfig, GAME_CONSTANTS } from '@/config';
 import { getVfxTextures } from '@/features/effects/ParticleSystem';
 import { getDeclaredHitRadius } from '@/core/CombatContracts';
+import {
+  ENEMY_WEAPON_SPECS,
+  isEnemyWeaponKind,
+  type EnemyWeaponKind,
+} from '@/features/enemy/EnemyWeapons';
 
 /**
  * 环境命中面：固定高度（旧行为），或按 (x, z) 采样的地表高度（第 6-10 关的高耸地形）。
@@ -52,6 +58,15 @@ interface Projectile {
   tail: Group; // 弹道拖尾（交叉双面片）
   direction: Vector3;
   speed: number;
+  /** 弹种：普通子弹，或敌机的高炮弹 / 长枪弹（各自的弹速、射程、大小与外观） */
+  kind: EnemyWeaponKind;
+  /** 最大飞行距离（米） */
+  maxDistance: number;
+  /** 弹体自身的命中半径（米），叠加到目标的命中半径上 */
+  radius: number;
+  /** 高速弹：命中判定用“上一步位置 → 当前位置”的线段，避免一步越过目标 */
+  swept: boolean;
+  previousPosition: Vector3;
   active: boolean;
   startPosition: Vector3;
   damage: number; // 伤害值
@@ -70,6 +85,28 @@ interface Projectile {
 
 const FORWARD = new Vector3(0, 0, 1);
 const targetWorldPosition = new Vector3();
+const sweepSegment = new Vector3();
+const sweepToTarget = new Vector3();
+
+/** 点到线段 (from → to) 的最近距离 */
+function distanceToSegment(point: Vector3, from: Vector3, to: Vector3): number {
+  sweepSegment.subVectors(to, from);
+  const lengthSq = sweepSegment.lengthSq();
+  if (!(lengthSq > 1e-10)) return point.distanceTo(to);
+  sweepToTarget.subVectors(point, from);
+  const t = Math.min(1, Math.max(0, sweepToTarget.dot(sweepSegment) / lengthSq));
+  sweepToTarget.copy(from).addScaledVector(sweepSegment, t);
+  return point.distanceTo(sweepToTarget);
+}
+
+/** 光晕精灵相对弹体中心的前移量（弹体本地 Z，单位随弹体缩放） */
+const DEFAULT_GLOW_OFFSET_Z = 0.1;
+/** 敌机高炮弹的外观：球体缩放（半径 0.5 的球 → 直径 SHELL_SCALE 米）、球体颜色、弹芯光晕 */
+const SHELL_SCALE = 4.6;
+const SHELL_BODY_COLOR = 0xff3210;
+/** 弹芯光晕的大小（相对球体直径）与前移量（相对球体直径，留在球体之内） */
+const SHELL_CORE_SCALE = 1.15;
+const SHELL_CORE_OFFSET_Z = 0.3;
 
 /**
  * 子弹对象池
@@ -82,14 +119,19 @@ export class ProjectilePool {
   private playerGeometry: BoxGeometry;
   private enemyGeometry: OctahedronGeometry;
   private friendlyGeometry: BoxGeometry;
+  private shellGeometry: SphereGeometry;
+  private lanceGeometry: BoxGeometry;
   private tailGeometry: PlaneGeometry;
   // 各阵营共享的光晕/拖尾材质（避免 600+ 材质实例）
   private playerGlowMaterial: SpriteMaterial;
   private enemyGlowMaterial: SpriteMaterial;
   private friendlyGlowMaterial: SpriteMaterial;
+  private shellGlowMaterial: SpriteMaterial;
+  private lanceGlowMaterial: SpriteMaterial;
   private playerTailMaterial: MeshBasicMaterial;
   private enemyTailMaterial: MeshBasicMaterial;
   private friendlyTailMaterial: MeshBasicMaterial;
+  private lanceTailMaterial: MeshBasicMaterial;
 
   constructor(scene: Scene) {
     this.scene = scene;
@@ -101,6 +143,9 @@ export class ProjectilePool {
     this.playerGeometry = new BoxGeometry(0.12, 0.12, 1.4);
     this.enemyGeometry = new OctahedronGeometry(0.22, 0);
     this.friendlyGeometry = new BoxGeometry(0.14, 0.14, 1.05);
+    // 敌机高炮弹：发光圆球；长枪弹：细长的针
+    this.shellGeometry = new SphereGeometry(0.5, 16, 12);
+    this.lanceGeometry = new BoxGeometry(0.16, 0.16, 3.2);
 
     // 拖尾面片：预旋转为沿 Z 轴展开，v=0（亮端）朝 +Z（弹头方向）
     this.tailGeometry = new PlaneGeometry(1, 1);
@@ -129,9 +174,13 @@ export class ProjectilePool {
     this.playerGlowMaterial = makeGlowMaterial(0xffe08a);
     this.enemyGlowMaterial = makeGlowMaterial(0xff7a30);
     this.friendlyGlowMaterial = makeGlowMaterial(0x8af4ff);
+    // 高炮弹的炽热弹芯：淡黄白色，叠在红橙色的球体上
+    this.shellGlowMaterial = makeGlowMaterial(0xffe2b0);
+    this.lanceGlowMaterial = makeGlowMaterial(0xff3020);
     this.playerTailMaterial = makeTailMaterial(0xffc96a);
     this.enemyTailMaterial = makeTailMaterial(0xff5a1e);
     this.friendlyTailMaterial = makeTailMaterial(0x6ce8ff);
+    this.lanceTailMaterial = makeTailMaterial(0xff2a1a);
 
     const material = new MeshBasicMaterial({
       color: 0xffff00,
@@ -145,7 +194,7 @@ export class ProjectilePool {
       mesh.visible = false;
 
       const glow = new Sprite(this.playerGlowMaterial);
-      glow.position.z = 0.1;
+      glow.position.z = DEFAULT_GLOW_OFFSET_Z;
       mesh.add(glow);
 
       const tail = new Group();
@@ -163,6 +212,11 @@ export class ProjectilePool {
         tail,
         direction: new Vector3(),
         speed: GAME_CONSTANTS.PROJECTILE.SPEED,
+        kind: 'bullet',
+        maxDistance: this.maxDistance,
+        radius: 0,
+        swept: false,
+        previousPosition: new Vector3(),
         active: false,
         startPosition: new Vector3(),
         damage: 10,
@@ -190,10 +244,12 @@ export class ProjectilePool {
     glowScale: number,
     tailWidth: number,
     tailLength: number,
-    tailCenterZ: number
+    tailCenterZ: number,
+    glowOffsetZ: number = DEFAULT_GLOW_OFFSET_Z
   ): void {
     projectile.glow.material = glowMaterial;
     projectile.glow.scale.set(glowScale, glowScale, 1);
+    projectile.glow.position.z = glowOffsetZ;
     for (const tailPlane of projectile.tail.children) {
       (tailPlane as Mesh).material = tailMaterial;
     }
@@ -208,19 +264,30 @@ export class ProjectilePool {
    * @param damage 伤害值
    * @param owner 发射者（用于防止立即碰撞）
    * @param faction 子弹阵营（用于伤害检测）
+   * @param kind 弹种（缺省普通子弹）：敌机的高炮弹 / 长枪弹有自己的弹速、射程、大小与外观
    */
   public fire(
     origin: Vector3,
     direction: Vector3,
     damage: number,
     owner?: Object3D,
-    faction?: string
+    faction?: string,
+    kind?: EnemyWeaponKind
   ): void {
-    // 找到未激活的子弹
-    const projectile = this.pool.find((p) => !p.active);
+    // 找到未激活的子弹；池满时回收飞得最远（最接近射程尽头）的那一发，新的一发不丢
+    const projectile = this.acquire();
     if (!projectile) return;
 
+    const weapon: EnemyWeaponKind = isEnemyWeaponKind(kind) ? kind : 'bullet';
+    const spec = ENEMY_WEAPON_SPECS[weapon];
+    projectile.kind = weapon;
+    projectile.speed = spec.speed;
+    projectile.maxDistance = weapon === 'bullet' ? this.maxDistance : spec.maxDistance;
+    projectile.radius = spec.radius;
+    projectile.swept = spec.swept;
+
     projectile.mesh.position.copy(origin);
+    projectile.previousPosition.copy(origin);
     projectile.direction.copy(direction).normalize();
     projectile.startPosition.copy(origin);
     projectile.damage = damage; // 设置伤害
@@ -229,6 +296,23 @@ export class ProjectilePool {
     this.applyProjectileVisual(projectile, faction);
     projectile.mesh.visible = true;
     projectile.active = true;
+  }
+
+  /** 取一发空闲子弹；没有空闲时回收已飞过射程比例最大的活跃子弹 */
+  private acquire(): Projectile | null {
+    let oldest: Projectile | null = null;
+    let oldestFraction = -1;
+    for (const projectile of this.pool) {
+      if (!projectile.active) return projectile;
+      const travelled = projectile.mesh.position.distanceTo(projectile.startPosition);
+      const fraction = projectile.maxDistance > 0 ? travelled / projectile.maxDistance : 1;
+      if (fraction > oldestFraction) {
+        oldestFraction = fraction;
+        oldest = projectile;
+      }
+    }
+    if (oldest) this.deactivate(oldest);
+    return oldest;
   }
 
   /**
@@ -243,6 +327,7 @@ export class ProjectilePool {
       if (!projectile.active) continue;
 
       // 移动子弹
+      projectile.previousPosition.copy(projectile.mesh.position);
       projectile.mesh.position.addScaledVector(projectile.direction, projectile.speed * deltaTime);
       this.updateProjectileVisual(projectile);
 
@@ -254,7 +339,7 @@ export class ProjectilePool {
 
       // 检查是否超出最大距离
       const distance = projectile.mesh.position.distanceTo(projectile.startPosition);
-      if (distance > this.maxDistance) {
+      if (distance > projectile.maxDistance) {
         this.deactivate(projectile);
       }
     }
@@ -278,11 +363,19 @@ export class ProjectilePool {
 
         target.getWorldPosition(targetWorldPosition);
 
-        const distance = projectile.mesh.position.distanceTo(targetWorldPosition);
-        const collisionThreshold = Math.max(
-          MIN_COLLISION_THRESHOLD,
-          getDeclaredHitRadius(target, DEFAULT_COLLISION_THRESHOLD)
-        );
+        // 高速弹（长枪弹）按本步扫过的线段判定；其余按当前位置
+        const distance = projectile.swept
+          ? distanceToSegment(
+              targetWorldPosition,
+              projectile.previousPosition,
+              projectile.mesh.position
+            )
+          : projectile.mesh.position.distanceTo(targetWorldPosition);
+        const collisionThreshold =
+          Math.max(
+            MIN_COLLISION_THRESHOLD,
+            getDeclaredHitRadius(target, DEFAULT_COLLISION_THRESHOLD)
+          ) + projectile.radius;
 
         if (distance < collisionThreshold) {
           onHit(target, projectile.mesh, projectile.damage);
@@ -328,7 +421,56 @@ export class ProjectilePool {
 
   private applyProjectileVisual(projectile: Projectile, faction?: string): void {
     const material = projectile.mesh.material as MeshBasicMaterial;
-    if (faction === 'ENEMY') {
+    if (projectile.kind === 'heavy-shell') {
+      // 高炮弹：又大又慢的红橙色光球（直径约 4.6 米），中心一团炽热的黄白色弹芯，缓慢脉动，
+      // 没有拖尾——250 米外也是一个看得清的红球，和机炮的小曳光弹一眼分得开。
+      // 球体用普通混合、不透明：在明亮的天空 / 地表前仍然是红橙色（加色混合会被洗成黄白）。
+      projectile.mesh.geometry = this.shellGeometry;
+      material.color.set(SHELL_BODY_COLOR);
+      projectile.baseOpacity = 1;
+      projectile.baseScale.set(SHELL_SCALE, SHELL_SCALE, SHELL_SCALE);
+      projectile.widthPulseScale = 0.12;
+      projectile.lengthPulseScale = -0.12;
+      projectile.opacityPulseScale = 0.05;
+      projectile.pulseFrequency = 0.2;
+      projectile.stretchFrequency = 0.2;
+      projectile.travelLengthBoost = 0;
+      projectile.travelWidthBoost = 0;
+      // 弹芯光晕放在球心前方（朝飞行方向）：迎面飞来的炮弹，光晕比球心离镜头更近，
+      // 透明物体按远近排序后它画在球体之上
+      this.applyTracerDress(
+        projectile,
+        this.shellGlowMaterial,
+        this.enemyTailMaterial,
+        SHELL_CORE_SCALE,
+        0.001,
+        0.001,
+        0,
+        SHELL_CORE_OFFSET_Z
+      );
+    } else if (projectile.kind === 'lance') {
+      // 长枪弹：细长的红白色针 + 很长的拖尾
+      projectile.mesh.geometry = this.lanceGeometry;
+      material.color.set(0xffe2d6);
+      projectile.baseOpacity = 1;
+      projectile.baseScale.set(1.2, 1.2, 2.6);
+      projectile.widthPulseScale = 0.04;
+      projectile.lengthPulseScale = 0.06;
+      projectile.opacityPulseScale = 0.02;
+      projectile.pulseFrequency = 0.1;
+      projectile.stretchFrequency = 0.08;
+      projectile.travelLengthBoost = 0.3;
+      projectile.travelWidthBoost = 0;
+      this.applyTracerDress(
+        projectile,
+        this.lanceGlowMaterial,
+        this.lanceTailMaterial,
+        1.6,
+        0.6,
+        3.2,
+        -3.1
+      );
+    } else if (faction === 'ENEMY') {
       projectile.mesh.geometry = this.enemyGeometry;
       material.color.set(0xff7f36);
       projectile.baseOpacity = 0.82;
@@ -442,13 +584,18 @@ export class ProjectilePool {
     this.playerGeometry.dispose();
     this.enemyGeometry.dispose();
     this.friendlyGeometry.dispose();
+    this.shellGeometry.dispose();
+    this.lanceGeometry.dispose();
     this.tailGeometry.dispose();
     this.playerGlowMaterial.dispose();
     this.enemyGlowMaterial.dispose();
     this.friendlyGlowMaterial.dispose();
+    this.shellGlowMaterial.dispose();
+    this.lanceGlowMaterial.dispose();
     this.playerTailMaterial.dispose();
     this.enemyTailMaterial.dispose();
     this.friendlyTailMaterial.dispose();
+    this.lanceTailMaterial.dispose();
     this.pool = [];
   }
 }

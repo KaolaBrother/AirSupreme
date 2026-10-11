@@ -1,5 +1,6 @@
 import { Quaternion, Vector3 } from 'three';
 import type { Camera, Object3D } from 'three';
+import { getDeclaredHitRadius } from '@/core/CombatContracts';
 import { Faction } from '@/core/Faction';
 import { BOSS_CONFIGS, BossType, getBossForLevel } from '@/features/boss/BossTypes';
 import { getCampaignChapter } from '@/features/campaign/CampaignData';
@@ -155,8 +156,8 @@ function ensureTargetMarkerStyle(): void {
 /** 兜底标签（按界面语言取值） */
 const FALLBACK_ENEMY_LABEL: LocalizedText = { en: 'Hostile', zh: '敌方目标' };
 const FALLBACK_FRIENDLY_LABEL: LocalizedText = { en: 'Friendly', zh: '友军' };
-/** 友军敌机型号：“友军” + 型号名 */
-const FRIENDLY_TYPE_LABEL: LocalizedText = { en: 'Allied {type}', zh: '友军{type}' };
+/** 没有呼号的友军僚机（固定数值 WINGMAN_CONFIG，不随敌机机型变；名字与机库展示的一致，不显示型号名） */
+const FRIENDLY_WINGMAN_LABEL: LocalizedText = { en: 'Allied Wingman', zh: '友军僚机' };
 
 /**
  * Boss 部件网格名前缀 → 标签（第三关的眼睛、第 6-10 关带独立血量的子目标）。
@@ -230,8 +231,8 @@ function readDisplayName(mesh: Object3D): string | null {
 
 /**
  * 解析血条标签：Boss 本体 → 战役名；Boss 部件 → 部件名；敌机（含 Boss 召唤的敌机）→
- * ENEMY_CONFIGS 型号名（友军加“友军”前缀）；地面 / 海上 / 空中单位（UNIT_*）→ 网格自带的
- * 型号名（如“主战坦克”），没有时退回按阵营的通用名。
+ * ENEMY_CONFIGS 型号名（友军僚机没有呼号时统一叫“友军僚机”）；地面 / 海上 / 空中单位
+ * （UNIT_*）→ 网格自带的型号名（如“主战坦克”），没有时退回按阵营的通用名。
  */
 function resolveTargetLabel(mesh: Object3D, isFriendly: boolean): string {
   const name = mesh.name || '';
@@ -247,8 +248,7 @@ function resolveTargetLabel(mesh: Object3D, isFriendly: boolean): string {
     if (name.startsWith(prefix)) return tr(label);
   }
   if (isEnemyType(name)) {
-    const typeName = tr(ENEMY_CONFIGS[name].name);
-    return isFriendly ? tr(FRIENDLY_TYPE_LABEL, { type: typeName }) : typeName;
+    return isFriendly ? tr(FRIENDLY_WINGMAN_LABEL) : tr(ENEMY_CONFIGS[name].name);
   }
   if (name.startsWith('UNIT_') || mesh.userData.unitType !== undefined) {
     const unitName = readDisplayName(mesh);
@@ -288,6 +288,13 @@ const BAR_METRICS: Readonly<Record<BarKind, BarMetrics>> = {
 
 /** 部件名称换焦点的滞回：新部件离准星的距离需小于当前焦点的 80% 才切换，避免来回跳 */
 const PART_FOCUS_SWITCH_RATIO_SQ = 0.8 * 0.8;
+
+/**
+ * 喷气机（敌机 / 僚机）血条的基准：命中半径 5 米（缩放 2.0 的机体）时，血条的参考点在机体
+ * 中心上方 2 米；更大 / 更小的机体按命中半径等比变化。
+ */
+const JET_BAR_BASE_OFFSET = 2;
+const JET_BAR_BASE_HIT_RADIUS = 5;
 
 function getBarKind(name: string): BarKind {
   if (name.includes('BOSS')) return 'boss';
@@ -1131,9 +1138,16 @@ export class EnemyHealthBars {
 
   private getBarHeightOffset(enemyMesh: Object3D): number {
     const name = enemyMesh.name || '';
-    const isBoss = name.includes('BOSS');
-    const isEye = name.includes('boss_eye');
-    return isBoss ? 15 : isEye ? 5 : 2;
+    if (name.includes('BOSS')) return 15;
+    if (name.includes('boss_eye')) return 5;
+    // 喷气机（网格名是机型）：偏移跟着机体大小走，大块头（重型机）的血条和名称不再落在机身里
+    if (Object.prototype.hasOwnProperty.call(ENEMY_CONFIGS, name)) {
+      return (
+        (JET_BAR_BASE_OFFSET * getDeclaredHitRadius(enemyMesh, JET_BAR_BASE_HIT_RADIUS)) /
+        JET_BAR_BASE_HIT_RADIUS
+      );
+    }
+    return 2;
   }
 
   private getBarPositionFromScreen(

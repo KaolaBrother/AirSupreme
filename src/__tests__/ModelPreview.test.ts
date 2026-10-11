@@ -6,6 +6,7 @@ import {
   getBossForLevel,
   type BossConfig,
 } from '@/features/boss/BossTypes';
+import { EnemyType } from '@/features/enemy/EnemyTypes';
 import { setLocale } from '@/i18n';
 import { ModelPreview } from '@/ui/ModelPreview';
 import { resetLocale } from './i18nTestUtils';
@@ -13,6 +14,7 @@ import { resetLocale } from './i18nTestUtils';
 /**
  * 模型预览（ModelPreview，终验修复 F3）：第 6-10 关的 Boss 用各自的模型工厂（与战斗中同源），
  * 不再退回第 1 关的重型轰炸机；切换模型时释放上一个模型（几何体 / 材质，并从场景移除）。
+ * 友军僚机排在玩家机后面，用自己的机体工厂（createFriendlyMesh），不借敌机的。
  * 渲染器换成假的（jsdom 没有 WebGL）；各模型工厂换成带标记的替身，记录被谁调用。
  */
 
@@ -45,6 +47,7 @@ vi.mock('three', async (importOriginal) => {
 
 vi.mock('@/features/aircraft/AircraftMeshFactory', () => ({
   createPlayerMesh: () => taggedModel('createPlayerMesh', null),
+  createFriendlyMesh: () => taggedModel('createFriendlyMesh', null),
   createEnemyMesh: (config: { type: string }) => taggedModel('createEnemyMesh', config.type),
 }));
 vi.mock('@/features/boss/BossAI', () => ({
@@ -133,6 +136,7 @@ describe('ModelPreview', () => {
   afterEach(() => {
     preview.dispose();
     vi.unstubAllGlobals();
+    resetLocale();
     document.body.innerHTML = '';
   });
 
@@ -172,6 +176,47 @@ describe('ModelPreview', () => {
     await browseAll();
     const bossCalls = factoryCalls.filter((call) => call.type && call.type in BOSS_CONFIGS);
     expect(new Set(bossCalls.map((call) => call.type))).toEqual(new Set(Object.values(BossType)));
+  });
+
+  it('offers a preview of every enemy jet, each built once by the enemy factory', async () => {
+    await browseAll();
+
+    const enemyCalls = factoryCalls.filter((call) => call.factory === 'createEnemyMesh');
+    expect(enemyCalls.map((call) => call.type).sort()).toEqual(
+      Object.values(EnemyType).map(String).sort()
+    );
+  });
+
+  it('shows the allied wingman right after the player jet, built by the friendly factory', async () => {
+    await browseAll();
+
+    // 僚机有自己的机体工厂：不借敌机的工厂造，也只造一次
+    expect(factoryCalls.slice(0, 2).map((call) => call.factory)).toEqual([
+      'createPlayerMesh',
+      'createFriendlyMesh',
+    ]);
+    expect(factoryCalls.filter((call) => call.factory === 'createFriendlyMesh')).toHaveLength(1);
+    expect(factoryCalls.filter((call) => call.factory === 'createPlayerMesh')).toHaveLength(1);
+  });
+
+  it('the wingman page puts the friendly model on the stage, named and tagged as an ally', async () => {
+    preview.show();
+    await settle();
+    (document.getElementById('next-btn') as HTMLButtonElement).click();
+    await settle();
+
+    expect(pageIndicator().index).toBe(2);
+    expect(createdModels).toHaveLength(2);
+    const wingman = createdModels[1] as THREE.Group;
+    expect(wingman.userData.factory).toBe('createFriendlyMesh');
+    expect(rootOf(wingman), 'shown in the preview scene').toBeInstanceOf(THREE.Scene);
+    expect(document.getElementById('aircraft-name')?.textContent).toBe('Allied Wingman');
+    expect(document.getElementById('aircraft-type')?.textContent).toBe('Ally');
+
+    setLocale('zh-CN');
+    expect(document.getElementById('aircraft-name')?.textContent).toBe('友军僚机');
+    expect(document.getElementById('aircraft-type')?.textContent).toBe('友军');
+    expect(pageIndicator().index).toBe(2);
   });
 
   it('disposes the previous model when switching to the next one', async () => {

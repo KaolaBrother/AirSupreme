@@ -41,6 +41,15 @@ export function projectToScreen(
   return true;
 }
 
+/**
+ * 导引头受到的干扰（窄接口）：导引头只通过它知道“锁定要慢多少”，不接触敌机系统。
+ * 由 GameCoordinator 实现（数值来自 EnemySystem 的干扰机判定）；没有提供者时不受干扰。
+ */
+export interface ILockJamProvider {
+  /** 锁定时间的倍数：1 = 正常；敌方干扰机在范围内时为 2 */
+  getLockTimeScale(): number;
+}
+
 /** 切换目标所需的最小屏幕距离优势（像素下限 / 相对捕获环半径的比例） */
 const SWITCH_MARGIN_MIN_PX = 12;
 const SWITCH_MARGIN_RATIO = 0.25;
@@ -52,7 +61,8 @@ const SWITCH_DWELL_LOCKED = 0.6;
  * 导弹导引头（纯逻辑，无 DOM）：只要有导弹就一直工作，不需要“开始锁定”的步骤。
  *
  * - 捕获环：以准星为圆心、半径 acquireRadius（像素）。环内离准星最近的候选成为跟踪目标。
- * - 目标在捕获环内：进度按 1/lockTime 增长，满 1 即锁定。
+ * - 目标在捕获环内：进度按 1/lockTime 增长，满 1 即锁定。受到干扰（ILockJamProvider）时
+ *   lockTime 乘以干扰倍数——只有这一处变慢，捕获环、保持环、衰减、宽限和已完成的锁定都不变。
  * - 保持环：半径 = 捕获环 × LOCK_KEEP_RATIO。目标在两环之间时进度按 LOCK_DECAY_RATE 衰减
  *   （不是清零）；已完成的锁定在保持环内一直保持。
  * - 目标离开保持环（或转到相机后方 / 超出距离）：LOCK_GRACE_TIME 秒宽限后才丢失。
@@ -80,6 +90,7 @@ export class MissileSeeker {
   private challenger: Object3D | null = null;
   private challengerTimer = 0;
   private lockTime = 1;
+  private jamProvider: ILockJamProvider | null = null;
   private acquireRadius = 100;
   private viewportWidth = 1;
   private viewportHeight = 1;
@@ -95,6 +106,22 @@ export class MissileSeeker {
 
   public getLockTime(): number {
     return this.lockTime;
+  }
+
+  /** 接入干扰来源；传 null 断开（不受干扰） */
+  public setJamProvider(provider: ILockJamProvider | null): void {
+    this.jamProvider = provider;
+  }
+
+  /** 当前的锁定时间倍数（≥ 1；1 = 没有干扰）：干扰只会让锁定变慢 */
+  public getLockTimeScale(): number {
+    const scale = this.jamProvider ? this.jamProvider.getLockTimeScale() : 1;
+    return Number.isFinite(scale) && scale > 1 ? scale : 1;
+  }
+
+  /** 正受到干扰（锁定时间倍数大于 1） */
+  public isJammed(): boolean {
+    return this.getLockTimeScale() > 1;
   }
 
   /** 捕获环半径（像素） */
@@ -177,6 +204,7 @@ export class MissileSeeker {
       return;
     }
     const dt = Number.isFinite(deltaTime) && deltaTime > 0 ? deltaTime : 0;
+    const lockTimeScale = this.getLockTimeScale();
     const acquireRadius = this.acquireRadius;
     const keepRadius = this.getKeepRadius();
     const maxRange = GAME_CONSTANTS.MISSILE.MAX_LOCK_DISTANCE;
@@ -238,7 +266,7 @@ export class MissileSeeker {
         this.outsideTimer = 0;
         if (!this.lockedOn) {
           if (targetDistance <= acquireRadius) {
-            this.progress = Math.min(1, this.progress + dt / this.lockTime);
+            this.progress = Math.min(1, this.progress + dt / (this.lockTime * lockTimeScale));
           } else {
             this.decayProgress(dt);
           }

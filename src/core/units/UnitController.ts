@@ -19,6 +19,7 @@ import type {
   UnitSystem,
   UnitUpdateContext,
 } from '@/features/units/UnitSystem';
+import type { UnitMissileLaunchOptions } from '@/features/units/UnitMissiles';
 import type { UnitDomain, UnitRadarKind, UnitType } from '@/features/units/UnitTypes';
 import { tr, type LocalizedText } from '@/i18n';
 import { RadioBudget, type RadioBudgetConfig } from '@/core/campaign/RadioBudget';
@@ -170,6 +171,7 @@ export class UnitController {
 
   // 告警（配音配额每波 / 每场 Boss 战重新计数：spawnForWave / clear）
   private lastLockState: PlayerLockState = 'none';
+  private jetMissileLock = false;
   private readonly missileWarningRadio = new RadioBudget(MISSILE_WARNING_RADIO);
   private readonly civilianHitRadio = new RadioBudget(CIVILIAN_HIT_RADIO);
 
@@ -226,6 +228,52 @@ export class UnitController {
     return this.loadPromise;
   }
 
+  /** 锁定 / 发射的告警音、HUD 闪烁与配音：单位导弹和敌机导弹共用 */
+  private handleLockWarning(phase: 'locking' | 'launched'): void {
+    this.deps.presentation.onUnitEvent(phase === 'locking' ? 'sam-locking' : 'sam-launched', null);
+    if (phase !== 'launched') return;
+    // 每次发射：HUD 闪烁告警（告警音见上）；配音按配额，进了无线电才计数
+    this.deps.presentation.flashWarning(
+      GameConfig.isMobile ? MISSILE_INBOUND_WARNING_TOUCH : MISSILE_INBOUND_WARNING,
+      'threat'
+    );
+    if (
+      this.missileWarningRadio.isReady() &&
+      this.deps.presentation.genericRadio('missile-warning')
+    ) {
+      this.missileWarningRadio.consume();
+    }
+  }
+
+  /**
+   * 敌机的导弹锁定状态（EnemySystem 每步写入）：从无到有时响一次锁定告警音；
+   * HUD 的“锁定中”由 update 里的轮询照常驱动。
+   */
+  public setJetMissileLock(active: boolean): void {
+    const system = this.system;
+    if (!system) return;
+    if (active && !this.jetMissileLock) this.handleLockWarning('locking');
+    this.jetMissileLock = active;
+    system.setJetMissileLock(active);
+  }
+
+  /** 敌机发射追踪玩家的导弹（见 UnitSystem.launchJetMissile）；单位系统未就绪时返回 false */
+  public launchJetMissile(
+    from: THREE.Vector3,
+    direction: THREE.Vector3,
+    baseDamage: number,
+    options: UnitMissileLaunchOptions & { source: string }
+  ): boolean {
+    const launched = this.system?.launchJetMissile(from, direction, baseDamage, options) ?? false;
+    if (launched) this.handleLockWarning('launched');
+    return launched;
+  }
+
+  /** 正在追踪玩家的敌机导弹数；单位系统未就绪时为 0 */
+  public countJetMissilesInFlight(): number {
+    return this.system?.countJetMissilesInFlight() ?? 0;
+  }
+
   public isReady(): boolean {
     return this.system !== null;
   }
@@ -277,24 +325,7 @@ export class UnitController {
       this.deps.presentation.genericRadio(success ? 'escort-success' : 'escort-failed');
       this.deps.onEscortResult(success);
     };
-    system.onLockWarning = (_unit, phase) => {
-      this.deps.presentation.onUnitEvent(
-        phase === 'locking' ? 'sam-locking' : 'sam-launched',
-        null
-      );
-      if (phase !== 'launched') return;
-      // 每次发射：HUD 闪烁告警（告警音见上）；配音按配额，进了无线电才计数
-      this.deps.presentation.flashWarning(
-        GameConfig.isMobile ? MISSILE_INBOUND_WARNING_TOUCH : MISSILE_INBOUND_WARNING,
-        'threat'
-      );
-      if (
-        this.missileWarningRadio.isReady() &&
-        this.deps.presentation.genericRadio('missile-warning')
-      ) {
-        this.missileWarningRadio.consume();
-      }
-    };
+    system.onLockWarning = (_unit, phase) => this.handleLockWarning(phase);
     system.onPlayerDamaged = (damage, _cause, position) => this.deps.damagePlayer(damage, position);
     system.onFirstContact = (type) => this.deps.presentation.unitFirstContact(type);
     system.onExplosion = (position, scale, kind) => {
@@ -694,6 +725,7 @@ export class UnitController {
     this.objectiveActive = false;
     this.objectiveHintShown = false;
     this.resetRadioBudgets();
+    this.jetMissileLock = false;
     if (this.lastLockState !== 'none') {
       this.lastLockState = 'none';
       this.deps.presentation.setMissileWarning('none');

@@ -16,7 +16,7 @@
 ## Testing and review
 
 - Meaningful changes finish with `npx tsc --noEmit`, `npm run lint`, `npm run test:run`, `npm run build`.
-- Whoever implements a behavior does not author its tests.
+- Whoever implements a behavior does not author its tests. Test authors test against the spec and never edit production code; a defect they find is recorded as an `it.fails` case with a `FINDING:` comment that quotes the rule it breaks, and becomes a plain test once the fix lands. Implementers list the tests their change makes stale instead of editing them.
 - Do not merge to `main` unless explicitly asked. Confirm the current branch with `git branch --show-current`.
 
 ## Agent execution
@@ -27,7 +27,7 @@
 
 ## Adding content
 
-- New enemy type: `EnemyTypes.ts` enum + `ENEMY_CONFIGS`, then wave rules in spawn selection.
+- New enemy type: `EnemyTypes.ts` enum + `ENEMY_CONFIGS`; a doctrine in `src/features/enemy/doctrine/` (extend `JetDoctrine`, tuning as an exported `*_TUNING` constant) registered in `createJetDoctrine`; an airframe and scale in `createEnemyMesh` (`AircraftMeshFactory.ts`; the hit radius follows the scale; materials shared between jets come from the per-type cache or carry `userData.sharedResource`, so one jet's `dispose` does not free them); then place it in the authored line-ups (`waves` in `src/features/terrain/LevelConfig.ts`; a line-up's length equals that wave's `enemiesPerWave`), add its first-contact hint to `FIRST_CONTACT_HINTS` (`src/ui/OnboardingManager.ts`, shown in the first wave that contains it) and, if an elite hunt should count it, add it to `ELITE_ENEMY_TYPES` (`EnemyTypes.ts`). The Hangar picks the type up from the enum.
 - Cannon / missile tuning: `GAME_CONSTANTS` in `src/config.ts` and the upgrade tracks in `src/features/upgrade/UpgradeSystem.ts`.
 - New special weapon: `SpecialWeaponId` / `SPECIAL_WEAPON_IDS` (`src/core/CombatContracts.ts`), `SPECIAL_WEAPON_CONFIGS` + stat table (`src/features/weapons/WeaponTypes.ts`), fire logic in `WeaponSystem`, the unlock chapter (`unlockedWeapons` in `CampaignData.ts`) and an upgrade track (`WEAPON_UPGRADE_TYPES`).
 - New unit: `UnitType` + `UNIT_CONFIGS` (`src/features/units/UnitTypes.ts`), a mesh in `UnitMeshFactory`, a behaviour in `updateUnitBehavior` (`UnitBehaviors.ts` / `UnitBehaviorsAir.ts`), wave placement in `UnitDeployments.ts`, a first-contact line in `UNIT_FIRST_CONTACT_RADIO`.
@@ -37,7 +37,7 @@
 - Player-facing text: a `LocalizedText` (`{ en, zh }`, both filled) written next to the data it belongs to and resolved with `tr()` where it is displayed (`src/i18n/index.ts`); per-frame code keeps the object as a module-level constant. Snapshots handed to the HUD stay `string`, except the briefing banner, the autosave toast, flashed warnings, the boss status label, the power-up timer and the centre callouts (`HUD.showBriefing` / `showAutosave` / `flashWarning` / `setBossStatus` / `showPowerUp` / `showPowerUpBig`, the matching `ICampaignPresentation` methods and `SpecialWeaponsDeps.notify`), which take `HudText`: pass the `LocalizedText` (or `{ text, params }`), not a `tr()` result, so whatever is still on screen is redrawn on a language switch.
 - New voiced line (radio line, briefing / prologue / epilogue paragraph): a stable id that follows the id patterns, recordings in both packs, and `manifest.json` / `provenance.json` entries ([voice-lines.md](voice-lines.md)); `VoicePack.test.ts` fails until both packs have it.
 - New terrain: `TerrainType`, `LevelConfig.ts`, `TerrainGenerator` / worldscape, or an environment module extending `EnvironmentBase` registered in `TERRAIN_ENVIRONMENT_FACTORIES` (`src/features/terrain/environments/index.ts`).
-- Balance: prefer `public/config/game-config.json` and existing config objects over new hardcoded constants.
+- Balance: prefer `src/config.ts` and existing config objects over new hardcoded constants.
 
 New campaign modules follow the shared rules in the campaign API spec: no `document` / `window` access at import time; per-frame code reuses preallocated vectors and guards `NaN` / `Infinity`; transparent VFX / environment materials use `transparent: true`, `depthTest: true`, `depthWrite: false`, `renderOrder 0`; everything added to a scene is removed and disposed in `dispose()` / `clear()` (skip `userData.sharedResource === true`); large meshes declare `userData.hitRadius`. Story, HUD, music, SFX and voice calls from gameplay code go through `ICampaignPresentation` ([ADR 0001](decisions/0001-campaign-presentation-adapter.md)); player-facing text and voice assets follow [ADR 0002](decisions/0002-bilingual-text-and-voice-packs.md).
 

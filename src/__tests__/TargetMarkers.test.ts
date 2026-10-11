@@ -46,7 +46,10 @@ interface FedBar {
   objective: boolean;
 }
 
-/** 敌机的最小替身（血条馈送只读这几样） */
+/**
+ * 敌机的最小替身（血条馈送只读这几样）：一架普通的、没有隐形的敌机。
+ * 隐形中的敌机没有标记，见 CloakedJetHud.test.ts（那里用真实的敌机）。
+ */
 interface JetStub {
   mesh: THREE.Object3D;
   alive: boolean;
@@ -150,6 +153,7 @@ describe('hostile unit target markers', () => {
       getEnemies: () =>
         jets.map((jet) => ({
           isAlive: () => jet.alive,
+          isCloaked: () => false,
           getMesh: () => jet.mesh,
           getHealth: () => ({ current: 40, max: 50 }),
           getConfig: () => ({ health: 50 }),

@@ -1,101 +1,216 @@
 import { describe, it, expect } from 'vitest';
-import { EnemyType, EnemyAIState, ENEMY_CONFIGS, EnemyConfig, getEnemyTypesForWave, getRandomEnemyType } from '@/features/enemy/EnemyTypes';
+import { GAME_CONSTANTS } from '@/config';
+import {
+  EnemyType,
+  EnemyAIState,
+  ENEMY_CONFIGS,
+  getRandomEnemyType,
+} from '@/features/enemy/EnemyTypes';
+import { WINGMAN_CONFIG } from '@/features/enemy/FriendlyAI';
+import { getLevelConfig, getWaveConfig } from '@/features/terrain/LevelConfig';
+
+/**
+ * 敌机编制表（敌机舰队重做，规格 §3）。只钉规格里写死的规则：八个机型的键、侦察机 60 血
+ * （一枚玩家导弹击落）、干扰机无武装、各机型之间“谁更快 / 更灵活 / 更耐打”的关系。
+ * 标了“起始值”的血量 / 速度 / 分数不在这里钉具体数字；旧 AI 才用的字段（状态概率、盘旋半径、
+ * 开火锥角等）不再要求每个机型都有——还在用它们的只有僚机的固定属性块。
+ */
+
+const ALL_TYPES = Object.values(EnemyType);
+/** 带机炮 / 高炮 / 长枪的五个机型 */
+const GUN_TYPES = [
+  EnemyType.SCOUT,
+  EnemyType.FIGHTER,
+  EnemyType.HEAVY,
+  EnemyType.SNIPER,
+  EnemyType.ACE,
+];
 
 describe('EnemyTypes', () => {
-  describe('ENEMY_CONFIGS', () => {
-    it('should have config for all enemy types', () => {
-      const types = Object.values(EnemyType);
-      for (const type of types) {
-        expect(ENEMY_CONFIGS[type]).toBeDefined();
+  describe('the roster', () => {
+    it('has exactly the eight types: the five existing keys plus Jammer, Striker and Wraith', () => {
+      expect([...ALL_TYPES].sort()).toEqual(
+        ['ACE', 'FIGHTER', 'HEAVY', 'JAMMER', 'SCOUT', 'SNIPER', 'STRIKER', 'WRAITH'].sort()
+      );
+      for (const type of ALL_TYPES) {
+        // 波次表、Boss 小兵与旧测试都按这些键引用：枚举名与值一致
+        expect(EnemyType[type as keyof typeof EnemyType]).toBe(type);
+      }
+    });
+
+    it('has a config for every type, filed under its own key', () => {
+      for (const type of ALL_TYPES) {
+        expect(ENEMY_CONFIGS[type], type).toBeDefined();
         expect(ENEMY_CONFIGS[type].type).toBe(type);
       }
+      expect(Object.keys(ENEMY_CONFIGS).sort()).toEqual([...ALL_TYPES].sort());
     });
 
-    it('should have all required properties for each config', () => {
-      const requiredProps: (keyof EnemyConfig)[] = [
-        'type', 'name', 'health', 'speed', 'damage',
-        'detectionRange', 'attackRange', 'attackCooldown',
-        'evasionChance', 'accuracy', 'fireSpreadAngle',
-        'turnSpeed', 'maxRollAngle', 'wanderRadius',
-        'stateProbabilities', 'stateDurationRange',
-        'circleRadius', 'circleHeight', 'scoreValue', 'color', 'scale'
-      ];
-
-      for (const type of Object.values(EnemyType)) {
-        const config = ENEMY_CONFIGS[type];
-        for (const prop of requiredProps) {
-          expect(config[prop], `Missing ${prop} in ${type}`).toBeDefined();
-        }
+    it.each(ALL_TYPES)('%s: the stats every jet needs are present and sane', (type) => {
+      const config = ENEMY_CONFIGS[type];
+      expect(config.name.en.trim().length, 'English name').toBeGreaterThan(0);
+      expect(config.name.zh.trim().length, 'Chinese name').toBeGreaterThan(0);
+      for (const key of ['health', 'speed', 'turnSpeed', 'scoreValue'] as const) {
+        expect(Number.isFinite(config[key]), `${key} is finite`).toBe(true);
+        expect(config[key], key).toBeGreaterThan(0);
       }
+      expect(Number.isFinite(config.damage)).toBe(true);
+      expect(config.damage, 'damage is never negative').toBeGreaterThanOrEqual(0);
+      expect(config.accuracy).toBeGreaterThanOrEqual(0);
+      expect(config.accuracy).toBeLessThanOrEqual(1);
     });
 
-    it('should have valid fireSpreadAngle (1-90 degrees)', () => {
-      for (const type of Object.values(EnemyType)) {
-        const config = ENEMY_CONFIGS[type];
-        expect(config.fireSpreadAngle).toBeGreaterThan(0);
-        expect(config.fireSpreadAngle).toBeLessThanOrEqual(90);
-      }
-    });
-
-    it('should have valid state probabilities (sum to 1)', () => {
-      for (const type of Object.values(EnemyType)) {
-        const config = ENEMY_CONFIGS[type];
-        const probs = config.stateProbabilities;
-        const sum = probs[EnemyAIState.CHASE] + probs[EnemyAIState.FIXED_DIRECTION] + probs[EnemyAIState.CIRCLE];
-        expect(sum).toBeCloseTo(1, 1);
-      }
-    });
-
-    it('should have positive health, speed, damage', () => {
-      for (const type of Object.values(EnemyType)) {
-        const config = ENEMY_CONFIGS[type];
-        expect(config.health).toBeGreaterThan(0);
-        expect(config.speed).toBeGreaterThan(0);
-        expect(config.damage).toBeGreaterThan(0);
-      }
-    });
-
-    it('should have accuracy between 0 and 1', () => {
-      for (const type of Object.values(EnemyType)) {
-        const config = ENEMY_CONFIGS[type];
-        expect(config.accuracy).toBeGreaterThanOrEqual(0);
-        expect(config.accuracy).toBeLessThanOrEqual(1);
-      }
-    });
-
-    it('should have evasionChance between 0 and 1', () => {
-      for (const type of Object.values(EnemyType)) {
-        const config = ENEMY_CONFIGS[type];
-        expect(config.evasionChance).toBeGreaterThanOrEqual(0);
-        expect(config.evasionChance).toBeLessThanOrEqual(1);
-      }
+    it('display names are distinct', () => {
+      const english = ALL_TYPES.map((type) => ENEMY_CONFIGS[type].name.en);
+      const chinese = ALL_TYPES.map((type) => ENEMY_CONFIGS[type].name.zh);
+      expect(new Set(english).size).toBe(ALL_TYPES.length);
+      expect(new Set(chinese).size).toBe(ALL_TYPES.length);
     });
   });
 
-  describe('getEnemyTypesForWave', () => {
-    it('should return SCOUT for level 1 wave 1', () => {
-      const types = getEnemyTypesForWave(1, 1);
-      expect(types).toContain(EnemyType.SCOUT);
+  describe('what the spec fixes about each type', () => {
+    it('SCOUT has exactly 60 health: one player missile (80) kills it at base', () => {
+      expect(ENEMY_CONFIGS[EnemyType.SCOUT].health).toBe(60);
+      expect(GAME_CONSTANTS.MISSILE.DAMAGE, 'player missile damage stays 80').toBe(80);
+      expect(ENEMY_CONFIGS[EnemyType.SCOUT].health).toBeLessThanOrEqual(
+        GAME_CONSTANTS.MISSILE.DAMAGE
+      );
     });
 
-    it('should return FIGHTER for level 1 wave 2+', () => {
-      const types = getEnemyTypesForWave(1, 2);
-      expect(types).toContain(EnemyType.FIGHTER);
+    it('SCOUT is the most agile: no type turns faster', () => {
+      const scout = ENEMY_CONFIGS[EnemyType.SCOUT];
+      for (const type of ALL_TYPES) {
+        if (type === EnemyType.SCOUT) continue;
+        expect(scout.turnSpeed, `turns faster than ${type}`).toBeGreaterThan(
+          ENEMY_CONFIGS[type].turnSpeed
+        );
+      }
     });
 
-    it('should return SNIPER for level 2+', () => {
-      const types = getEnemyTypesForWave(2, 2);
-      expect(types).toContain(EnemyType.SNIPER);
+    it('HEAVY is the big slow one: most health of all, slowest and least agile of the gun jets', () => {
+      const heavy = ENEMY_CONFIGS[EnemyType.HEAVY];
+      for (const type of ALL_TYPES) {
+        if (type === EnemyType.HEAVY) continue;
+        expect(heavy.health, `more health than ${type}`).toBeGreaterThan(
+          ENEMY_CONFIGS[type].health
+        );
+      }
+      for (const type of GUN_TYPES) {
+        if (type === EnemyType.HEAVY) continue;
+        expect(heavy.speed, `slower than ${type}`).toBeLessThan(ENEMY_CONFIGS[type].speed);
+        expect(heavy.turnSpeed, `turns slower than ${type}`).toBeLessThan(
+          ENEMY_CONFIGS[type].turnSpeed
+        );
+      }
     });
 
-    it('should return HEAVY for level 3+', () => {
-      const types = getEnemyTypesForWave(3, 2);
-      expect(types).toContain(EnemyType.HEAVY);
+    it('ACE is the fastest jet and a Fighter with better numbers', () => {
+      const ace = ENEMY_CONFIGS[EnemyType.ACE];
+      const fighter = ENEMY_CONFIGS[EnemyType.FIGHTER];
+      for (const type of ALL_TYPES) {
+        if (type === EnemyType.ACE) continue;
+        expect(ace.speed, `faster than ${type}`).toBeGreaterThan(ENEMY_CONFIGS[type].speed);
+      }
+      expect(ace.health).toBeGreaterThan(fighter.health);
+      expect(ace.turnSpeed).toBeGreaterThan(fighter.turnSpeed);
+      expect(ace.damage).toBeGreaterThan(fighter.damage);
     });
 
-    it('should return ACE for level 4+ wave 2+', () => {
-      const types = getEnemyTypesForWave(4, 2);
-      expect(types).toContain(EnemyType.ACE);
+    it('SNIPER hits hardest per round among the gun jets (lance, base 20)', () => {
+      const sniper = ENEMY_CONFIGS[EnemyType.SNIPER];
+      expect(sniper.damage).toBe(20);
+      for (const type of GUN_TYPES) {
+        if (type === EnemyType.SNIPER) continue;
+        expect(sniper.damage, `more per round than ${type}`).toBeGreaterThan(
+          ENEMY_CONFIGS[type].damage
+        );
+      }
+    });
+
+    it('the five gun jets are armed: positive damage per round', () => {
+      for (const type of GUN_TYPES) {
+        expect(ENEMY_CONFIGS[type].damage, type).toBeGreaterThan(0);
+      }
+    });
+
+    it('JAMMER is unarmed and slow', () => {
+      const jammer = ENEMY_CONFIGS[EnemyType.JAMMER];
+      expect(jammer.damage).toBe(0);
+      expect(jammer.speed).toBeLessThan(ENEMY_CONFIGS[EnemyType.FIGHTER].speed);
+    });
+  });
+
+  describe('the wingman stat block (the only user of the old three-state fields)', () => {
+    it('has state probabilities that sum to 1 and a sane state duration range', () => {
+      const probabilities = WINGMAN_CONFIG.stateProbabilities;
+      const sum =
+        probabilities[EnemyAIState.CHASE] +
+        probabilities[EnemyAIState.FIXED_DIRECTION] +
+        probabilities[EnemyAIState.CIRCLE];
+      expect(sum).toBeCloseTo(1, 6);
+      const [shortest, longest] = WINGMAN_CONFIG.stateDurationRange;
+      expect(shortest).toBeGreaterThan(0);
+      expect(longest).toBeGreaterThanOrEqual(shortest);
+    });
+
+    it('has a valid firing cone, accuracy and cooldown', () => {
+      expect(WINGMAN_CONFIG.fireSpreadAngle).toBeGreaterThan(0);
+      expect(WINGMAN_CONFIG.fireSpreadAngle).toBeLessThanOrEqual(90);
+      expect(WINGMAN_CONFIG.accuracy).toBeGreaterThanOrEqual(0);
+      expect(WINGMAN_CONFIG.accuracy).toBeLessThanOrEqual(1);
+      expect(WINGMAN_CONFIG.attackCooldown).toBeGreaterThan(0);
+      expect(WINGMAN_CONFIG.damage).toBeGreaterThan(0);
+    });
+  });
+
+  // 波次里出哪些机型（规格 §4a 规则 2、3）：每一波是写定的编成，不再按关卡 / 波次随机选型；
+  // 每个机型都不早于它的引入关卡出现。经真实生成路径的检查见 EnemyWaveLineups.test.ts。
+  describe('which jets a wave brings (spec §4a)', () => {
+    /** 某关全部波次里出现过的机型 */
+    function typesOfLevel(level: number): Set<EnemyType> {
+      const config = getLevelConfig(level);
+      expect(config, `level ${level}`).toBeDefined();
+      return new Set((config?.waves ?? []).flatMap((wave) => [...wave.lineup]));
+    }
+
+    /** 机型第一次出现的关卡（没有出现为 Infinity） */
+    function firstLevelWith(type: EnemyType): number {
+      for (let level = 1; level <= 10; level++) {
+        if (typesOfLevel(level).has(type)) return level;
+      }
+      return Infinity;
+    }
+
+    it('level 1 wave 1 is exactly two Scouts (rule 3)', () => {
+      expect([...(getWaveConfig(1, 0)?.lineup ?? [])]).toEqual([EnemyType.SCOUT, EnemyType.SCOUT]);
+    });
+
+    it('level 1 brings Fighters as well as Scouts, and nothing else (rule 3)', () => {
+      expect([...typesOfLevel(1)].sort()).toEqual([EnemyType.FIGHTER, EnemyType.SCOUT].sort());
+    });
+
+    it('Snipers first appear on level 2 (rule 3: introduced at level 2)', () => {
+      expect(firstLevelWith(EnemyType.SNIPER)).toBe(2);
+    });
+
+    it('Heavies first appear on level 2 (rule 3: introduced at level 2)', () => {
+      expect(firstLevelWith(EnemyType.HEAVY)).toBe(2);
+    });
+
+    it('Aces first appear on level 3 (rule 3: introduced at level 3)', () => {
+      expect(firstLevelWith(EnemyType.ACE)).toBe(3);
+    });
+
+    it('a wave is an authored list: the same jets every time it is read (rule 2)', () => {
+      for (let level = 1; level <= 10; level++) {
+        const config = getLevelConfig(level);
+        for (let wave = 0; wave < (config?.totalWaves ?? 0); wave++) {
+          const first = [...(getWaveConfig(level, wave)?.lineup ?? [])];
+          const again = [...(getWaveConfig(level, wave)?.lineup ?? [])];
+          expect(first.length, `level ${level} wave ${wave + 1}`).toBeGreaterThan(0);
+          expect(again, `level ${level} wave ${wave + 1}`).toEqual(first);
+        }
+      }
     });
   });
 

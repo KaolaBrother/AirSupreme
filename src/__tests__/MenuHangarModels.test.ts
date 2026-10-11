@@ -1,9 +1,15 @@
 import * as THREE from 'three';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { GameConfig } from '@/config';
-import { createEnemyMesh, createPlayerMesh } from '@/features/aircraft/AircraftMeshFactory';
+import { Faction } from '@/core/Faction';
+import {
+  createEnemyMesh,
+  createFriendlyMesh,
+  createPlayerMesh,
+} from '@/features/aircraft/AircraftMeshFactory';
 import { BossType } from '@/features/boss/BossTypes';
 import { ENEMY_CONFIGS, EnemyType } from '@/features/enemy/EnemyTypes';
+import { WINGMAN_CONFIG } from '@/features/enemy/FriendlyAI';
 import { StartMenu } from '@/ui/StartMenu';
 import { resetLocale } from './i18nTestUtils';
 import {
@@ -27,8 +33,9 @@ import {
  * 批次 X5 追加 · 机库与标题主机里的真实模型。
  *
  * 模型工厂在这里一个都不替身（与对局同源），只有 three 的 WebGLRenderer / PMREMGenerator 是假的：
- * - 18 个模型（玩家机、5 种敌机、10 个 Boss、2 种导弹）每一个都能载入并显示，转一整圈也不出展台、
- *   不压到名称标签；
+ * - 22 个模型（玩家机、友军僚机、8 种敌机、10 个 Boss、2 种导弹）每一个都能载入并显示，转一整圈
+ *   也不出展台、不压到名称标签；
+ * - 僚机那一页是友军自己的机体，八种敌机各是各的机体（新加的干扰机 / 导弹攻击机 / 幽灵机也是）；
  * - 机库和标题主机里看不到那四个按包围盒摆放的信号灯小球；隐藏的只是这一份模型实例，
  *   对局用同一个工厂造出来的飞机照样带着亮着的信号灯，共享的几何体 / 材质没有被动过。
  */
@@ -118,16 +125,60 @@ function isDrawn(object: THREE.Object3D): boolean {
   return true;
 }
 
-/** 对局里造飞机的方式：直接调工厂。按机库里显示的英文名称索引 */
+const WINGMAN_NAME = 'Allied Wingman';
+
+/**
+ * 机库里八种敌机该有的先后与英文名称（原有五种在前，这一轮新加的三种跟在后面）：
+ * 写在这里，不从机库自己的数组里抄。
+ */
+const ENEMY_PAGES: ReadonlyArray<{ name: string; type: EnemyType }> = [
+  { name: 'Scout', type: EnemyType.SCOUT },
+  { name: 'Fighter', type: EnemyType.FIGHTER },
+  { name: 'Heavy Bomber', type: EnemyType.HEAVY },
+  { name: 'Sniper', type: EnemyType.SNIPER },
+  { name: 'Ace', type: EnemyType.ACE },
+  { name: 'Jammer', type: EnemyType.JAMMER },
+  { name: 'Striker', type: EnemyType.STRIKER },
+  { name: 'Wraith', type: EnemyType.WRAITH },
+];
+
+/** 对局里造飞机的方式：直接调工厂（僚机用对局里那一份僚机配置）。按机库里显示的英文名称索引 */
 const GAME_AIRCRAFT: ReadonlyArray<{ name: string; build: () => THREE.Group }> = [
   { name: 'Player jet', build: () => createPlayerMesh() },
-  ...Object.values(EnemyType).map((type) => ({
-    name: ENEMY_CONFIGS[type].name.en,
+  { name: WINGMAN_NAME, build: () => createFriendlyMesh(WINGMAN_CONFIG) },
+  ...ENEMY_PAGES.map(({ name, type }) => ({
+    name,
     build: () => createEnemyMesh(ENEMY_CONFIGS[type]),
   })),
 ];
 
-const MODEL_COUNT = 1 + Object.values(EnemyType).length + Object.values(BossType).length + 2;
+/** 玩家机、友军僚机、敌机、Boss、两种导弹 */
+const MODEL_COUNT = 1 + 1 + ENEMY_PAGES.length + Object.values(BossType).length + 2;
+
+/** 一个模型的“身形”：多少个网格、一共多少个顶点（隐藏的部件也算——机库只是不画信号灯） */
+function shapeOf(root: THREE.Object3D): string {
+  let meshes = 0;
+  let vertices = 0;
+  root.traverse((object) => {
+    const mesh = object as THREE.Mesh;
+    if (mesh.isMesh) {
+      meshes++;
+      vertices += mesh.geometry.getAttribute('position')?.count ?? 0;
+    }
+  });
+  return `${meshes} meshes / ${vertices} vertices`;
+}
+
+/** 模型树里声明了阵营的那个节点（机体工厂写在自己造的根节点上） */
+function airframeOf(root: THREE.Object3D): THREE.Object3D | undefined {
+  let found: THREE.Object3D | undefined;
+  root.traverse((object) => {
+    if (!found && object.userData.faction !== undefined) {
+      found = object;
+    }
+  });
+  return found;
+}
 
 /**
  * 这里的模型模块都是真的：第一次翻到某一页，要经 vite-node 把那个模型的模块取回、转换，花的是
@@ -242,11 +293,14 @@ describe('Hangar and title hero with the real models (batch X5 follow-up)', () =
   });
 
   describe('every model loads and is displayed', () => {
-    it('offers the player jet, every enemy, every boss and both missiles', async () => {
+    it('offers the player jet, the wingman, every enemy, every boss and both missiles', async () => {
       createMenu();
       await openHangar();
 
-      expect(MODEL_COUNT).toBe(18);
+      expect(ENEMY_PAGES.map((enemy) => enemy.type).sort()).toEqual(
+        Object.values(EnemyType).sort()
+      );
+      expect(MODEL_COUNT).toBe(22);
       expect(page()).toEqual({ index: 1, total: MODEL_COUNT });
     });
 
@@ -307,6 +361,106 @@ describe('Hangar and title hero with the real models (batch X5 follow-up)', () =
       expect(page().index).toBe(1);
       expect(modelName()).toBe(first);
       expect(drawnMeshes(stageModels()[0]).length).toBeGreaterThan(0);
+    });
+
+    describe('the aircraft pages show the airframes the game flies', () => {
+      /** 这一轮新加的三种敌机 */
+      const NEW_JETS: readonly EnemyType[] = [
+        EnemyType.JAMMER,
+        EnemyType.STRIKER,
+        EnemyType.WRAITH,
+      ];
+
+      function kindShown(): string {
+        return (byId('aircraft-type').textContent ?? '').trim();
+      }
+
+      it('precondition: the game builds ten different airframes', () => {
+        const shapes = GAME_AIRCRAFT.map((aircraft) => shapeOf(aircraft.build()));
+
+        expect(GAME_AIRCRAFT).toHaveLength(10);
+        expect(new Set(shapes).size, shapes.join(' | ')).toBe(GAME_AIRCRAFT.length);
+      });
+
+      it('the wingman has the second page and its own allied airframe, not an enemy jet', async () => {
+        createMenu();
+        await openHangar();
+        await nextModel();
+
+        expect(page().index).toBe(2);
+        expect(modelName()).toBe(WINGMAN_NAME);
+        expect(kindShown()).toBe('Ally');
+        const [model] = stageModels();
+        const airframe = airframeOf(model);
+        expect(airframe, 'the model declares whose side it is on').toBeDefined();
+        expect(airframe?.userData.faction).toBe(Faction.FRIENDLY);
+        expect(shapeOf(model), 'the airframe the game gives a wingman').toBe(
+          shapeOf(createFriendlyMesh(WINGMAN_CONFIG))
+        );
+        for (const enemy of ENEMY_PAGES) {
+          expect(shapeOf(model), `not the ${enemy.name} airframe`).not.toBe(
+            shapeOf(createEnemyMesh(ENEMY_CONFIGS[enemy.type]))
+          );
+        }
+        expect(shapeOf(model), 'not the player jet either').not.toBe(shapeOf(createPlayerMesh()));
+        expect(consoleError).not.toHaveBeenCalled();
+      });
+
+      it('the eight enemy jets follow, each on its own page with the airframe of its type', async () => {
+        createMenu();
+        await openHangar();
+        await nextModel();
+
+        for (const [offset, enemy] of ENEMY_PAGES.entries()) {
+          await nextModel();
+          const where = `page ${offset + 3}`;
+          expect(page().index).toBe(offset + 3);
+          expect(modelName(), where).toBe(enemy.name);
+          const [model] = stageModels();
+          const airframe = airframeOf(model);
+          expect(airframe?.userData.faction, `${where} (${enemy.name}): hostile`).toBe(
+            Faction.ENEMY
+          );
+          expect(airframe?.name, `${where} (${enemy.name}): the airframe of that type`).toBe(
+            enemy.type
+          );
+          expect(shapeOf(model), `${where} (${enemy.name}): as the game builds it`).toBe(
+            shapeOf(createEnemyMesh(ENEMY_CONFIGS[enemy.type]))
+          );
+        }
+
+        // 敌机到此为止：下一页是第一个 Boss
+        expect(kindShown()).toBe('Enemy');
+        await nextModel();
+        expect(kindShown(), `page ${page().index} (${modelName()})`).toBe('Boss');
+        expect(consoleError).not.toHaveBeenCalled();
+      });
+
+      it.each(
+        ENEMY_PAGES.filter((enemy) => NEW_JETS.includes(enemy.type)).map(
+          (enemy) => [enemy.name, enemy] as const
+        )
+      )(
+        'the %s is not a stand-in: its airframe is unlike the five older enemy jets',
+        async (_name, enemy) => {
+          const older = ENEMY_PAGES.filter((other) => !NEW_JETS.includes(other.type));
+          expect(older).toHaveLength(5);
+          createMenu();
+          await openHangar();
+          for (let turned = 0; turned < MODEL_COUNT && modelName() !== enemy.name; turned++) {
+            await nextModel();
+          }
+
+          expect(modelName()).toBe(enemy.name);
+          const [model] = stageModels();
+          expect(drawnMeshes(model).length).toBeGreaterThan(0);
+          for (const other of older) {
+            expect(shapeOf(model), `not the ${other.name} airframe`).not.toBe(
+              shapeOf(createEnemyMesh(ENEMY_CONFIGS[other.type]))
+            );
+          }
+        }
+      );
     });
 
     describe('stays in view while it turns', () => {
@@ -441,7 +595,7 @@ describe('Hangar and title hero with the real models (batch X5 follow-up)', () =
       }
     });
 
-    it('the Hangar shows the player jet and every enemy plane without them', async () => {
+    it('the Hangar shows the player jet, the wingman and every enemy plane without them', async () => {
       createMenu();
       await openHangar();
       const seen: string[] = [];

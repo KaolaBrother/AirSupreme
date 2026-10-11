@@ -16,7 +16,7 @@ EventBus.on(GameEventType.ENEMY_DEATH, ({ payload }) => {
 EventBus.emit(GameEventType.SCORE_CHANGED, { score: 100, delta: 10 });
 ```
 
-Event names include player fire/hit/death/respawn; enemy and friendly spawn/fire/hit/death; missile fire/hit; wave and level complete; powerup collect/expire; balloon destroyed; shield activate/deactivate; score changed. Payload shapes are `GameEventPayloads` in the same file — read that file, do not copy the enum into agent instructions.
+Event names include player fire/hit/death/respawn; enemy and friendly spawn/fire/hit/death; enemy tell; missile fire/hit; wave and level complete; powerup collect/expire; balloon destroyed; shield activate/deactivate; score changed. Payload shapes are `GameEventPayloads` in the same file — read that file, do not copy the enum into agent instructions.
 
 The ten-level campaign added **no** event types. Units reuse the existing fire events through `src/features/units/UnitEventBridge.ts`:
 
@@ -31,20 +31,35 @@ export function bridgeUnitFireToEventBus(system: UnitSystem): () => void;
 
 The controls and weapons round (touch flight, unit markers, always-on seeker, Save & Exit, new menu) also added and changed **no** event types or payloads. One wiring note: nothing emits `MISSILE_FIRED` and nothing listens for it — the player's missile is launched by a direct call (`GameCoordinator.launchMissile` → `MissileSystem.fire`), as it already was before this round, and the listeners the coordinator and `CombatSystem` had for it are gone (`launchMissile` reports the tutorial's missile step itself). Only the type and its payload are still declared in `EventBus.ts`. `MISSILE_HIT` is unchanged.
 
+The enemy fleet round adds one event type and extends one payload (both optional for existing emitters and listeners):
+
+```typescript
+[GameEventType.ENEMY_FIRED]: {
+  position: Vector3; direction: Vector3; damage: number; faction: Faction; owner?: Object3D;
+  /** 弹种（缺省 'bullet'：普通机炮弹，与旧载荷一致） */
+  weapon?: EnemyWeaponKind;
+  /** 弹速（米/秒；缺省为普通子弹弹速）：供伤害归因等按弹速推算弹道 */
+  speed?: number;
+  /** 同一次齐射里的后续弹：不单独播放开火音与枪口焰 */
+  quiet?: boolean;
+};
+/** 敌机招牌攻击的预警开始（狙击机蓄力 / 隐形机现形）：用于播放提示音；画面上的预警由敌机自己画 */
+[GameEventType.ENEMY_TELL]: {
+  kind: 'lance-charge' | 'decloak';
+  position: Vector3;
+  duration: number; // 预警时长（秒）：到点才可能开火
+  owner?: Object3D;
+};
+```
+
+`EnemySystem` emits both from the jet callbacks (`onFire`, `onTell`). `CombatSystem` passes `weapon` to the enemy projectile pool; `GameCoordinator` skips sound and muzzle flash for `quiet` shots, plays `playTankCannon` for `'heavy-shell'`, `playShoot('boss')` for `'lance'` and `playShoot('enemy')` otherwise, and maps `ENEMY_TELL` to `playLanceCharge(duration)` / `playDecloak(duration)`; the dev balance harness reads `speed` to trace shots. Jet missiles are not events: they go through `IJetMissileLauncher` (see [Enemy AI](#enemy-ai)).
+
 ## Config
 
 - Runtime constants: `src/config.ts` (`GAME_CONSTANTS` — `PLAYER`, `PROJECTILE`, `GUN_ASSIST`, `CAMERA`, `WORLD`, `POWERUP`, `LEVEL`, `MISSILE`; `GameConfig` device / quality profiles)
-- External JSON: `public/config/game-config.json` via `src/core/utils/ConfigLoader.ts`. `src/main.ts` loads it at start-up (`configLoader.load()`, merged over the loader's built-in defaults), but no runtime code calls the getters below, so none of its blocks reaches the game. Its `missile` block is one example: the player's missile takes its numbers from `GAME_CONSTANTS.MISSILE`, and the base lock and reload times come from the upgrade tracks (`UPGRADE_CONFIGS`)
+- There is no external config file and no config is fetched at start-up: every tuning value lives in the TypeScript source
 
-```typescript
-import { configLoader } from '@/core/utils/ConfigLoader';
-
-await configLoader.load();
-const playerConfig = configLoader.getPlayer();
-const enemyConfig = configLoader.getEnemy('FIGHTER');
-```
-
-Enemy type tables live in `src/features/enemy/EnemyTypes.ts`. Level terrain params live in `src/features/terrain/LevelConfig.ts`. Quality presets (`QualityPreset = 'auto' | 'performance' | 'balanced' | 'quality'`) and their per-device parameters live in `GameConfig` (`src/config.ts`).
+Enemy type tables live in `src/features/enemy/EnemyTypes.ts`; per-type doctrine tuning sits next to each doctrine in `src/features/enemy/doctrine/`, and enemy weapon and jet-missile specs in `src/features/enemy/EnemyWeapons.ts`. Level terrain params live in `src/features/terrain/LevelConfig.ts`. Quality presets (`QualityPreset = 'auto' | 'performance' | 'balanced' | 'quality'`) and their per-device parameters live in `GameConfig` (`src/config.ts`).
 
 ## Logger
 
@@ -181,11 +196,15 @@ public setAccuracyBonusProvider(provider: (() => number) | null): void; // enemy
 public areWaveJetsCleared(): boolean;
 /** 同时在场敌机上限：GameConfig.getMaxEnemies()（桌面 6 / 移动端 5）+ 关卡曲线的 concurrentEnemyBonus */
 public getMaxConcurrentEnemies(): number;
+public getCurrentWaveConfig(): LevelWaveConfig | null; // this wave's line-up and arrival
+public getWaveGroupCenters(): IWaveGroupCenter[]; // copies; empty before the wave is planned
+/** 本波还没现身的精英：编成里尚未出场的 + 还在传送门里的 */
+public countEliteJetsToCome(): number;
 ```
 
 `y` is the world-space surface (the water surface where `water` is true). Water exists on `LAKE`, `OCEAN`, `VOLCANO` (sea around the island), `ARCTIC` (open sea between ice) and the `CANYON` river. Environment modules implement `TerrainEnvironment` (`terrain`, `root`, `hasWater`, `build(ctx)`, `sampleHeight(worldX, worldZ)`, `isWater(worldX, worldZ)`, optional `surfaceKindAt(worldX, worldZ)` and `update(deltaTime, elapsed, focus)`, `dispose()`) on top of `EnvironmentBase`; `sampleEnvironmentSurface(environment, worldX, worldZ, waterY)` turns height + water into the `sampleSurface` result.
 
-`LevelManager` also estimates the player's velocity each step (a jump faster than 250 m/s — respawn, checkpoint, dev teleport — resets it to zero) and hands it to every jet through `EnemyAI.setTargetVelocity`, so jets aim at a lead point (see [Enemy AI](#enemy-ai)). A wave group's spawn centre (600–800 m from the player) is picked among directions that keep the whole group, including its 60 m spread, inside the battlefield; if none of 12 tries fits, it goes toward the battlefield centre instead of being clamped onto the boundary next to the player.
+`LevelManager` also estimates the player's velocity each step (a jump faster than 250 m/s — respawn, checkpoint, dev teleport — resets it to zero) and hands it to every jet through `EnemyAI.setTargetVelocity`, so jets aim at a lead point (see [Enemy AI](#enemy-ai)). Each wave spawns its authored line-up (`LevelConfig.waves`, below) in order — there is no random type picking, and the wave event only sets the objective and the spawn interval (a trail wave spaces its jets at least `TRAIL_SPAWN_INTERVAL`, 2.5 s, apart; its first jet still comes on the event's interval). `planWaveGroupCenters(arrival, playerX, playerZ, limit, rng, out, drawOffset = 0)` (`src/features/levels/WaveArrival.ts`, pure; returns 1, or 2 for a pincer) places the group centres 600–800 m from the player, among directions that keep the whole group, including its 60 m spread, inside the battlefield; if none of 12 tries fits, a single centre goes toward the battlefield centre instead of being clamped onto the boundary next to the player. A pincer's two centres are 90–150° apart (`PINCER_MIN_ANGLE_DEG` / `PINCER_MAX_ANGLE_DEG`) as seen from the player when its jets appear: `LevelManager` passes, instead of the player's current position, the position predicted for the wave's mean arrival time — `SPAWN_PORTAL_SECONDS` (5 s, also the `SpawnPortal` lifetime) plus 0.5 s × (line-up length + 1) / 2 — extrapolated along an arc from the player's velocity estimate and turn rate (smoothed over 0.5 s) and clamped to the battlefield. The random tries draw the separation from 105–135° only (`PINCER_PLAN_MARGIN_DEG` 15 inside each end), leaving room for the player's turns and the spread of arrival times, and add `waveDrawOffset(levelId, waveIndex)` — a fixed 0..1 offset per level and wave — to the draw, so two waves started from the same random state get different angles. When 16 random tries fail it scans bearings in 5° steps at 600 m and takes the in-bounds pair closest to 120°. Each jet spawns near its own group's centre, and jets of one group share a group id (`EnemyAI.setGroupId(currentWave × 2 + side + 1)`; boss minions and dev spawns get 0).
 
 `LevelConfig` (`TerrainType` gains five values, the weather presets gain `ash` / `aurora`, `LEVELS` covers ids 1..10 with names equal to `CampaignChapter.title`):
 
@@ -205,8 +224,23 @@ export interface LevelPostFxConfig {
   bloomStrength: number;
   vignetteStrength: number;
 }
+// LevelConfig: waves replaces the old enemyTypes table (random picking by minWave / maxCount)
+waves: LevelWaveConfig[]; // one per wave; lineup length = enemiesPerWave[wave]
+export type WaveArrival = 'group' | 'pincer' | 'trail';
+export interface LevelWaveConfig {
+  lineup: readonly EnemyType[]; // spawn order
+  arrival: WaveArrival;
+  sides?: readonly number[]; // pincer only: group 0 / 1 per jet (the two groups alternate)
+}
 export function getLevelConfig(levelId: number): LevelConfig | undefined;
+export function getWaveConfig(levelId: number, waveIndex: number): LevelWaveConfig | undefined;
+/** 战役里第一次出现在这一波（从 0 起）的机型（结果缓存）；首次遭遇提示以它为准 */
+export function getIntroducedEnemyTypes(levelId: number, waveIndex: number): readonly EnemyType[];
 ```
+
+The same wave of the same level always brings the same jets. `enemiesPerWave` keeps its old values in levels 1–9; level 10 is `[4, 5, 5, 5, 6, 6, 6, 6]`, no wave lower than level 9's. Types first appear in level 1 (Scout, Fighter), 2 (Sniper, Heavy), 3 (Ace), 4 (Striker), 5 (Jammer) and 7 (Wraith); a wave has at most one Jammer (with at least two armed jets) and at most two each of Striker, Wraith, Heavy, Sniper and Ace. `getEnemyTypesForWave` / `getRandomEnemyType` remain in `EnemyTypes.ts` but nothing in the game flow calls them.
+
+First-contact hints (`src/ui/OnboardingManager.ts`): `FIRST_CONTACT_HINTS` (a `LocalizedText` per type, none for SCOUT), `FIRST_CONTACT_HINT_HOLD_MS` (5,000) and `getFirstContactHints(level, waveIndex): LocalizedText[]`, which reads `getIntroducedEnemyTypes`. On `WAVE_START`, `GameCoordinator.scheduleFirstContactHints` shows each hint with `HUD.showPowerUpBig('', hint, 5, true)`, one after another, starting 250 ms after the wave's event prompt (`eventPromptDelayMs + eventPromptHoldMs`); nothing in Boss mode or a boss battle, and a hint is dropped if, when it is due, the game is not playing, a boss battle has started, or the level, wave or wave state has changed. Because it depends only on level and wave, a checkpoint replay of that wave shows it again. Elite hunt: `ELITE_ENEMY_TYPES` / `isEliteEnemyType(type)` (`EnemyTypes.ts`: HEAVY, ACE, SNIPER, STRIKER, JAMMER, WRAITH); the objective counts the live elites plus `LevelManager.countEliteJetsToCome()`.
 
 Environment extensions: `CanyonEnvironment.getConvoyRoute(): readonly THREE.Vector3[]` and `CitadelEnvironment.getAssaultRoute(): readonly THREE.Vector3[]` feed `UnitSystem.setRouteProvider`; `CitadelEnvironment.getCoreArena(target?)` anchors Oracle Prime and `setCoreState(state: CitadelCoreState)` (`'online' | 'exposed' | 'overload' | 'offline'`) mirrors its phases.
 
@@ -277,6 +311,8 @@ export interface CombatTarget {
   isAlive(): boolean;
   applyDamage(amount: number, source: DamageSource, hitPoint?: Vector3): void;
   applyStun?(seconds: number): void;
+  /** 自动索敌（蜂群导弹开火分配 / 丢失后重新索敌）能不能选它；省略 = 可以。隐形中的敌机返回 false */
+  isSeekable?(): boolean;
 }
 
 export interface DecoyPoint {
@@ -340,7 +376,7 @@ export interface DifficultyProfile {
 export function getDifficultyProfile(level: number): DifficultyProfile; // player difficulty 1..5
 ```
 
-The per-level values live in one module-private table, `LEVEL_CURVE` (one column per level, level 1 = 1.0 / 0), which `getLevelScaling` reads; `LevelManager` (enemy jets) and `UnitController.setLevel` (units) multiply them by the player's `DifficultyProfile`, and `GameCoordinator` applies `scoreMultiplier` to every score award. Jets take `aimLead` from `enemyAimLead` (0 at level 1, 0.28 at level 2, rising to 0.94 at level 10) and the concurrent-jet cap from `concurrentEnemyBonus` (+1 in levels 4–6, +2 in levels 7–10); units deal `enemyDamageMultiplier × unitDamageShare`. Jet firepower (damage ÷ cooldown) relative to level 1 is about 2× in levels 2–3, 2.5–2.9× in levels 4–5 and steps up from level 6 (about 5.1×) to about 9.8× in level 10; `scoreMultiplier` runs 1.0 → 2.08. Difficulty 3 (Normal) is the default; `Difficulty.ts` records that it was tuned with the dev-only scripted-pilot harness (`src/core/dev/BalanceHarness.ts`, greedy hangar buys): damage taken per minute of about 20–25 % of max health in levels 1–2, about 30 % in levels 3–6 and 35–40 % in levels 8–10, with 0–2 non-crash deaths per level.
+The per-level values live in one module-private table, `LEVEL_CURVE` (one column per level, level 1 = 1.0 / 0), which `getLevelScaling` reads; `LevelManager` (enemy jets) and `UnitController.setLevel` (units) multiply them by the player's `DifficultyProfile`, and `GameCoordinator` applies `scoreMultiplier` to every score award. Jets take `aimLead` from `enemyAimLead` (0 at level 1, 0.28 at level 2, rising to 0.94 at level 10) and the concurrent-jet cap from `concurrentEnemyBonus` (+1 in levels 4–6, +2 in levels 7–10); units deal `enemyDamageMultiplier × unitDamageShare`. Jet firepower (damage ÷ cooldown) relative to level 1 is about 1.2× in levels 2–3, 2.7–3.1× in levels 4–5, 4.1× in level 6, 8.4–8.7× in levels 7–8, 10.5× in level 9 and 17× in level 10. It steps up at levels 4, 7 and 10 because the health and armour the player has bought by then absorb more of each unit of fire: `Difficulty.ts` models measured pressure as about k × damage ÷ cooldown, with k falling from about 6 in levels 1–3 to about 1.2 in level 10. Units' per-shot damage (`enemyDamageMultiplier × unitDamageShare`) never falls from one level to the next. `scoreMultiplier` runs 1.0 → 2.08. Difficulty 3 (Normal) is the default; `Difficulty.ts` records that it was tuned with the dev-only scripted-pilot harness (`src/core/dev/BalanceHarness.ts`, greedy hangar buys): damage taken per minute during waves of about 4 % of max health in level 1, 8–11 % in levels 2–5, 14–17 % in levels 6–9 and about 20 % in level 10, the highest; the non-evading pilot does not die in levels 1–3 and usually dies once or twice per level in levels 8–10. Single runs vary a lot, so the figures are averages over several runs. Very Easy (difficulty 1) is health 0.72, damage 0.22 and attack cooldown 1.9 (power-up drops 1.25, boss cooldown 1.2), so jet firepower is about 0.35× Normal's; over 8 full Very Easy campaigns the harness pilot lost no life to enemy fire, and wave pressure is still highest in level 10.
 
 ## Campaign data
 
@@ -704,6 +740,11 @@ export class CampaignFlowController {
   describeExitSave(): CampaignExitSave;
   /** 暂停菜单“保存并退出”：把此刻的快照重写在当前进度的检查点位置上；写入后读回确认 */
   saveForExit(): CampaignExitSave;
+  /**
+   * 后台存档（页面转入后台 / 关闭）：和“保存并退出”一样静默重写当前进度的检查点，只是不退出；
+   * 同一位置已有检查点时，生命数取已存的与此刻的两者中较大的
+   */
+  saveInBackground(): void;
   handleWaveStart(wave: number): void;
   handleWaveComplete(wave: number): void;
   handleLevelComplete(level: number): void;
@@ -728,6 +769,7 @@ The sequence it drives is in [architecture.md → Campaign flow](architecture.md
 - **Boss outro.** `handleBossDefeated` plays the `boss-defeated` stinger, then waits on game time advanced by `tick` (pauses and story holds freeze it): at least `BOSS_OUTRO_MIN_SECONDS` (1.6 s), then until `presentation.isRadioBusy()` is false, with a watchdog ceiling of `min(BOSS_OUTRO_MAX_SECONDS (75 s), max(1.6 s, getRadioBacklogSeconds()) + BOSS_OUTRO_SLACK_SECONDS (6 s))` taken when the outro starts. At the ceiling the debrief opens and the line being spoken finishes. If the player dies or leaves meanwhile, the outro is dropped.
 - **Autosave labels** are `HudText`: `{ text: 'Level {level} · Wave {wave}' | 'Level {level} · Before the boss' | 'Level {level} cleared', params }` (with their Chinese forms), so a toast on screen follows a language switch. Only `'wave'` checkpoints add the `checkpoint` stinger.
 - **Save & Exit.** The controller keeps an _exit point_ `{ kind, level, wave }`: the position of the most recent checkpoint (taken from the save on resume, set by every checkpoint write). When the last wave is cleared it becomes `{ kind: 'boss', level, wave: totalWaves }` before the `'boss'` checkpoint is written; it is `null` before the first checkpoint and after the campaign is complete. `describeExitSave()` is a read-only preview: `'no-save-mode'` in Boss mode; with no exit point `'complete'` after a victory, otherwise `'not-started'`; else `'saved'` with the checkpoint kind and the position text (the same wording as `describeCheckpointText`). `saveForExit()` writes a checkpoint at the exit point with the snapshot of that moment (score, lives, missiles, upgrades, special weapons and ammo, flares, camera view, stats), shows no autosave toast, then loads the stored checkpoint and returns `'failed'` unless it is the one just written (the write succeeded, the record reads back, `savedAt` is not older than the call, and kind, level, wave and score match). Continuing from it restarts that wave, the boss fight or the hangar stop. `'failed'` only ever comes from `saveForExit()`.
+- **Background save.** `GameCoordinator.saveCampaignInBackground()` saves the run when the page is hidden or about to close, because a background tab can be discarded without any further event. `setupBackgroundSave()` listens for `visibilitychange` (to `hidden`) and `pagehide`, and `src/main.ts` calls the method from `beforeunload` before it disposes the coordinator, which removes those listeners. It writes at most once per hide — the flag is cleared when the page is visible again or on `pageshow` — does nothing after disposal or while the session is not playing (a pause, a story card, the debrief and the hangar all count as playing), and never throws: a failure is logged. It calls `saveInBackground()`, which rewrites the checkpoint at the exit point with the snapshot of that moment and no autosave toast, where Save & Exit would, but leaves the running game untouched and does not read the save back. Like Save & Exit it writes nothing in Boss mode, with no exit point (before the first checkpoint, after the campaign is complete) or once the run is over. The one difference is the lives count: hiding the page is not the player's choice, so when the stored checkpoint is at the same save point (same kind, level and wave) the record keeps the higher of the stored and the current lives; score, missiles, upgrades, special weapons and ammo, flares, camera view and stats are always those of the moment. A stored checkpoint at another position, a missing one or an unreadable one leaves the current lives as they are. Two limits follow from this. A run started above level 1 opens the hangar before its first checkpoint, so a hide during that first hangar saves nothing. And the stored lives at a save point only go up under background saves — a life gained and later lost stays in the record — until an ordinary checkpoint write or Save & Exit, which always store the current count, replaces it.
 - **Swift's join line.** `handleWingmanLaunched('swift')` plays `onWingmanEvent('swift', 'joined')` the first time Swift launches in a campaign run, then patches `swiftJoined: true` into the stored checkpoint (the `'level-start'` checkpoint is written just before the flight launches); every later checkpoint carries the flag, and `resumeFromCheckpoint` reads it with `isSwiftJoinAnnounced(save)`.
 - **After game over.** A death can land in the same simulation step as a wave clear, a level clear or a boss kill, and the coordinator finishes that step. Once the session status is `GAME_OVER` the controller leaves storage alone: `writeCheckpoint` returns `null` without writing, the level-10 branch of `handleBossDefeated` neither marks the campaign complete nor clears the checkpoint, and the Swift flag is not patched in — so the position the settlement panel names is still the one that is stored. `GameCoordinator`'s `LEVEL_COMPLETE` handler also returns while the session is not playing, so a late level clear does not start the boss encounter under the panel.
 
@@ -821,19 +863,37 @@ getFriendlySpawnPose(
 
 ## Enemy AI
 
-Source: `src/features/enemy/EnemyAI.ts`, `EnemyTypes.ts`. Enemy jets and the friendly jets (`FriendlyAI` wraps an `EnemyAI`) share it; `LevelManager` builds each enemy jet's `EnemyConfig` from the base config × level curve × difficulty.
+Source: `src/features/enemy/` — `EnemyAI.ts`, `EnemyTypes.ts`, `FriendlyAI.ts`, `AttackDirector.ts`, `MissileDirector.ts`, `JetThreat.ts`, `EnemyWeapons.ts`, `doctrine/`, `effects/`; wired by `src/core/systems/EnemySystem.ts`. Enemy jets and the friendly jets (`FriendlyAI` wraps an `EnemyAI`) share the flight model. Every enemy jet that `LevelManager` builds carries a **doctrine** for its type; a jet without one (only wingmen) runs the legacy three-state AI. `LevelManager` builds each enemy jet's `EnemyConfig` from the base config × level curve × difficulty, plus `cadenceScale` (the cooldown multiplier, clamped to 0.5–2.5); unarmed types keep `damage` 0.
 
 ```typescript
-// EnemyConfig (EnemyTypes.ts) addition
+// EnemyConfig (EnemyTypes.ts) additions
 /** 射击提前量 0..1（可选，缺省 0 = 瞄准目标当前位置）：LevelManager 生成敌机时按 enemyAimLead 写入；友军僚机不设置 */
 aimLead?: number;
+/** 条令的开火节奏倍率（可选，缺省 1）：LevelManager 按难度档 × 关卡曲线的冷却倍率写入，钳制 0.5..2.5 */
+cadenceScale?: number;
+// EnemyType: SCOUT | FIGHTER | HEAVY | SNIPER | ACE | JAMMER | STRIKER | WRAITH
+export const ENEMY_TRAIL_COLOR = 0xff5a3c; // enemy particle trail
+export const FRIENDLY_TRAIL_COLOR = 0x7fd4ff; // wingman particle trail
 
-// EnemyAI
+// EnemyAI.ts
+export interface EnemyAIOptions {
+  /** 机型条令；不给则沿用旧的三状态（追逐 / 固定方向 / 盘旋）——僚机走的就是这条路 */
+  doctrine?: IEnemyDoctrine | null;
+  trailColor?: number; // 缺省 ENEMY_TRAIL_COLOR
+  rng?: () => number; // 条令用的随机数（缺省 Math.random）
+}
+/** 一发子弹的弹种信息（条令开火时随 onFire 传出；旧的三状态开火不带） */
+export interface EnemyShotInfo {
+  weapon: EnemyWeaponKind;
+  speed: number;
+  quiet: boolean;
+}
+constructor(mesh: THREE.Group, config: EnemyConfig, scene: THREE.Scene, options: EnemyAIOptions = {});
 public update(
   deltaTime: number,
   playerPosition: THREE.Vector3 | null,
   friendlyMeshes?: THREE.Object3D[],
-  fireTarget: THREE.Vector3 | null = null
+  fireTarget: THREE.Vector3 | null = null // doctrine path: null = weapons not free
 ): void;
 /** 开火目标的速度（世界坐标，米/秒）：设置后按 config.aimLead 计算提前量；null 或非有限 / 过大（瞬移）的速度只瞄准目标当前位置 */
 public setTargetVelocity(velocity: THREE.Vector3 | null): void;
@@ -843,9 +903,182 @@ public setTargetVelocity(velocity: THREE.Vector3 | null): void;
  * （状态与计时冻结，攻击冷却与 EMP 瘫痪照常计时；velocity 非有限时沿机头按配置速度飞行）
  */
 public updateKinematic(deltaTime: number): void;
+/** 战场态势（EnemySystem 每步在 update 之前写入）；没有条令的敌机不使用 */
+public setCombatSituation(
+  playerForward: THREE.Vector3 | null,
+  lockedOn: boolean,
+  missileInbound: boolean,
+  level: number,
+  bossFight: boolean,
+  playerTargetable = true // false: no weapon fires (Heavy tail gun included), no lock or charge starts
+): void;
+public readonly orders: AttackOrders; // read and written by AttackDirector
+public getDoctrine(): IEnemyDoctrine | null;
+public getDoctrinePhase(): string; // 'stunned' while stunned, 'legacy' without a doctrine
+public getAttackRequest(): Readonly<AttackRequest> | null; // null without a doctrine
+public hasAttackToken(): boolean;
+public getMissileRequest(): number;
+public getMissileGrant(): number;
+public setMissileGrant(count: number): void;
+public isMissileLocking(): boolean;
+public isCloaked(): boolean; // fully cloaked only (not while fading or telegraphing)
+public setGroupId(id: number): void; // wave group (same wave, same pincer side); 0 = none
+public getGroupId(): number;
+public setGroupCenter(center: THREE.Vector3 | null): void; // the Jammer's group reference
+public isTelegraphing(): boolean; // a Sniper beam is showing
+/** shot 只在条令开火时提供，且只在回调期间有效 */
+public onFire?: (position: THREE.Vector3, direction: THREE.Vector3, damage: number, shot?: Readonly<EnemyShotInfo>) => void;
+public onTell?: (cue: DoctrineCue, position: THREE.Vector3, duration: number) => void;
+public onMissileLaunch?: (position: THREE.Vector3, direction: THREE.Vector3) => void;
 ```
 
-Aiming: a jet fires only when its nose is within `fireSpreadAngle` of the target and the target is inside `FIRE_RANGE` (420 m). With a target velocity below 250 m/s and `aimLead > 0`, the shot is aimed at `target + velocity × t × min(1, aimLead)`, where `t` is a two-step first-order intercept time at the bullet speed (`GAME_CONSTANTS.PROJECTILE.SPEED`), capped at 4 s; the accuracy-based yaw / pitch scatter is applied on top. `update` and `updateKinematic` share the same motion integration and NaN guard (a non-finite position is reset to the origin and the step skipped).
+### Doctrines
+
+```typescript
+// doctrine/DoctrineTypes.ts
+export const DOCTRINE_RULES: {
+  MIN_THROTTLE: 0.6; MAX_THROTTLE: 1.3; // × base speed
+  LEASH_DISTANCE: 900; LEASH_RESUME_DISTANCE: 850; // m
+  MIN_TELL_SECONDS: 0.7; TOKEN_RELEASE_COOLDOWN: 1.5; // s
+};
+export type DoctrineCue = 'lance-charge' | 'decloak';
+export interface IEnemyDoctrine {
+  readonly id: string;
+  getPhase(): string;
+  update(context: DoctrineContext, command: DoctrineCommand): void;
+  interrupt(): void; // EMP stun / respawn: cancel the charge or burst, back to the first phase
+  getAttackRequest(): Readonly<AttackRequest>;
+  getTell(): Readonly<DoctrineTell> | null; // the Sniper's beam
+  getMissileRequest(): number;
+  getCloak(): Readonly<CloakState> | null; // Wraith only
+  notifyHit(): void;
+}
+// doctrine/createJetDoctrine.ts — one stateful instance per jet
+export function createJetDoctrine(type: EnemyType): IEnemyDoctrine;
+```
+
+- **Contract.** Each step `EnemyAI` fills a reused `DoctrineContext` snapshot (own position, forward, speed, base speed, turn rate, accuracy, `aimLead`, `cadenceScale`; player position, velocity estimate and forward; `lockedOn`, `missileInbound`; `weaponsFree`, `hasToken`, `attackBearing`; `missileGrant`; `hasGroup` / `groupCenter`; `level`, `bossFight`, `rng`). The doctrine writes a reset `DoctrineCommand` (direction, throttle, turn scale, up to `MAX_SHOTS_PER_STEP` `ShotRequest`s, `missileLock`, `missileLaunch`, `releaseToken`, `cue` and `cueDuration`). Doctrines do not touch the renderer or read the clock, and draw random numbers only from `context.rng`.
+- **Execution.** `EnemyAI` turns toward the commanded direction at `turnSpeed × turnScale` (turn scale clamped to 0.2–2), limits pitch to a vertical component of 0.7, moves airspeed toward `base speed × throttle` (throttle clamped to 0.6–1.3) at 0.9 × base speed per second, then integrates with the same terrain avoidance and floor as the legacy path. Shots without a token are dropped unless `defensive` (the Heavy tail gun), and no shot leaves unless `weaponsFree`, which is false while the player is not targetable (the context's `hasToken` is false then too, so no lock or charge starts); a missile launches and `isMissileLocking()` holds only with a token. `releaseToken` hands the token back with `TOKEN_RELEASE_COOLDOWN`.
+- **Leash.** `JetDoctrine` (the base of every type) gives up its token, interrupts the attack and flies straight back at full throttle once the jet is more than 900 m from the player, until it is back within 850 m.
+- **Terrain walls.** Ground more than `TERRAIN_WALL_HEIGHT` (200 m) above the jet — the Sky Ladder's trunk, pylons and anchor towers — is not climbed: look-ahead turns the horizontal velocity 90° toward the lower side, and the floor clamp moves the jet back to its previous XZ instead of lifting it more than 200 m in one step (it still lifts a jet whose previous position was below ground too).
+- **Gun.** `JetDoctrine` aims at the intercept point for the bullet speed scaled by `aimLead` (4 s cap) and adds `(1 − accuracy) × GUN_SPREAD` (0.16 rad) of yaw / pitch scatter; damage per shot is the config `damage` × the request's `damageScale`. Intervals between bursts, fans, salvos and charges are multiplied by `cadenceScale`; tell lengths are not.
+- **Stun.** `applyStun(seconds)` (capped at 6 s) stands the jet down: no decisions, turns or fire, its token is released, `interrupt()` runs, and a Wraith decloaks.
+- **Per-type tuning** is exported next to each doctrine (`SCOUT_TUNING`, `FIGHTER_TUNING`, `HEAVY_TUNING`, `SNIPER_TUNING`, `ACE_TUNING` / `ACE_SCISSORS` / `ACE_MISSILE`, `STRIKER_TUNING`, `JAMMER_TUNING`, `WRAITH_TUNING`; `JetDoctrine.ts` exports `GUN_SPREAD` and `MAX_SHOTS_PER_STEP` 6); the values and what each type does are tabulated in `TECHNICAL_DOCUMENTATION.md` → 敌人AI系统 → 机型一览. `MissileRack` (`doctrine/MissileRack.ts`) times a missile rack — ready → lock (`LOCK_SECONDS`) → salvo → reload — for the Ace and the Striker; `isFiring()` is true between the first and the last missile of a salvo, and the Striker uses it to finish its pair whatever the range or facing (each missile still needs a missile token).
+- **Shared steering.** `JetDoctrine` gives the types protected helpers that fly in the player's moving frame (the player's velocity added back; given a relative speed, the throttle is just high enough, within 0.6× and the cap): `steerOrbitMoving` circles the player at a radius (the Sniper's orbit, the Scout's flank swing, the Striker's reload circle); `steerStationMoving(context, command, radius, bearing, heightOffset, maxThrottle, band, bearingBand, radialSpeed, aroundSpeed, approachYield = 0)` holds a station at a world bearing and radius from the player, with separate radial and around speed limits and no orbiting (the Striker's beam station); `chaseYield(context, chasedAngle, passingAngle, leadMaxRange)` takes the smaller of the player's nose angle to the jet and to the jet's gun-lead point (`playerGunLeadAngle(context, maxRange)`, which counts only within `leadMaxRange`) and is 1 within `chasedAngle`, 0 beyond `passingAngle`, linear in between; as `approachYield` it drops the part of the player's velocity that closes on the jet, so a chased Sniper or Striker can be caught.
+
+### Attack tokens
+
+```typescript
+// AttackDirector.ts
+export const ATTACK_DIRECTOR_RULES; // MIN_BEARING_SEPARATION 60°, PLACEMENT_SEPARATION 61°, RELEASE_COOLDOWN 1.5 s, BOSS_FIGHT_TOKENS 2, MAX_TOKENS 6, PAIR_MEMORY_SECONDS 3.5
+/** 关卡 1–2: 2, 3–5: 3, 6–8: 4, 9–10: 5；难度档 ≤ 2: −1（至少 1），≥ 4: +1；Boss 战固定 2 */
+export function getAttackTokenCount(level: number, difficultyLevel: number, bossFight: boolean): number;
+export interface IDirectedJet {
+  readonly orders: AttackOrders;
+  isAlive(): boolean;
+  isStunned(): boolean;
+  getMesh(): { readonly position: Vector3 };
+  getAttackRequest(): Readonly<AttackRequest> | null;
+}
+export class AttackDirector {
+  reset(): void;
+  /** playerPosition null 或 capacity ≤ 0：全部收回 */
+  update(dt: number, jets: readonly IDirectedJet[], playerPosition: Vector3 | null, capacity: number): void;
+  getHolderCount(): number;
+}
+// DoctrineTypes.ts
+export interface AttackRequest {
+  wants: boolean;
+  desiredBearing: number; // NaN = the bearing it is on
+  bearingPriority: number; // 0 = fires in place (Sniper / Heavy)
+  pairsOpposite: boolean; // Scout pairs
+}
+export interface AttackOrders { hasToken: boolean; bearing: number; cooldown: number; waiting: number; sequence: number; }
+```
+
+`EnemySystem` runs the director every step before the jets update, with `getAttackTokenCount(level, difficulty, bossFight)` — `bossFight` is Boss mode or a campaign boss battle — or 0 while the player is not targetable. Tokens go to the jet that has waited longest (nearest on a tie); cooling-down, stunned, dead and leashed jets are skipped. A token is taken back when the jet dies, is stunned or stops asking; when capacity drops, the latest holders lose theirs first. Holders get entry bearings (world azimuth from the player, `atan2(x, z)`) at least 60° apart, spread evenly when they do not fit; a `bearingPriority` 0 jet keeps its own bearing and only gets a token while that bearing is clear of the other holders; a second Scout holder is placed opposite the first where possible — also when the first handed its token back less than `PAIR_MEMORY_SECONDS` (3.5 s) ago, so a Scout pair attacking one after the other still comes from opposite sides. A Wraith asks for a bearing 44° off the player's tail on its own side; while it holds a token it flies to the assigned bearing (clamped inside the rear quarter) and switches sides once per token when the assignment is more than 10° off its own, so two Wraiths attacking together come in at least 60° apart.
+
+### Threat awareness and jet missiles
+
+```typescript
+// JetThreat.ts — implemented by GameCoordinator, handed to EnemySystem.setThreatProvider
+export interface IJetThreatProvider {
+  getLockedTarget(): Object3D | null; // the seeker's completed lock
+  isMissileInbound(target: Object3D): boolean; // MissileSystem.hasActiveMissileToward
+  getPlayerForward(out: Vector3): boolean;
+  isPlayerTargetable(): boolean; // false: every jet holds fire and gives its token back
+}
+
+// MissileDirector.ts — implemented by GameCoordinator over UnitController, handed to EnemySystem.setMissileLauncher
+export interface IJetMissileLauncher {
+  isAvailable(): boolean; // the unit system is loaded
+  launch(position: Vector3, direction: Vector3, source: string): boolean; // source 'jet:<TYPE>'
+  countInFlight(): number;
+  setLockWarning(active: boolean): void; // drives the HUD 'locking' warning and tone
+}
+/** 1–5 关 1 枚，6–10 关 2 枚；Boss 战 0 */
+export function getJetMissileCap(level: number, bossFight: boolean): number;
+/** 保证“在飞的敌机导弹 + 各机手里的令牌 ≤ cap”；按列表顺序补发 */
+export function grantJetMissiles(jets: readonly IMissileJet[], cap: number, inFlight: number): void;
+
+// EnemyWeapons.ts
+export type EnemyWeaponKind = 'bullet' | 'heavy-shell' | 'lance';
+export const ENEMY_WEAPON_SPECS: Readonly<Record<EnemyWeaponKind, EnemyWeaponSpec>>; // speed, maxDistance, radius, swept
+export function isEnemyWeaponKind(value: unknown): value is EnemyWeaponKind;
+export const JET_MISSILE_SPEC; // DAMAGE 30, MAX_SPEED 88, TURN_RATE 1.4, LIFE 9, LAUNCH_SPEED 55, MUZZLE_OFFSET 6
+export const JET_MISSILE_RULES; // EARLY_CAP 1, LATE_CAP 2, LATE_LEVEL 6
+```
+
+| Weapon        | Speed (m/s)               | Range (m)                        | Radius (m) | Hit test        |
+| ------------- | ------------------------- | -------------------------------- | ---------- | --------------- |
+| `bullet`      | `PROJECTILE.SPEED`        | `PROJECTILE.MAX_DISTANCE`        | 0          | point           |
+| `heavy-shell` | 60                        | 380                              | 1.2        | point           |
+| `lance`       | 320                       | 700                              | 0.5        | swept segment   |
+
+- **Shots.** `EnemySystem` turns `onFire` into `ENEMY_FIRED` with `weapon`, `speed` and `quiet`; `CombatSystem` passes `weapon` to `ProjectilePool`, which flies each kind at its own speed and range, adds its radius to the target's hit radius, tests `swept` rounds along the step's segment, and, when full, recycles the active round furthest through its range.
+- **Missiles.** `EnemySystem.directEnemies` grants missile tokens every step with `getJetMissileCap(level, bossFight)` (0 while the player is not targetable or the launcher is unavailable) and `countInFlight()`; a jet hands one token back per launch. `onMissileLaunch` calls `launch(position, direction, 'jet:<TYPE>')`, which the coordinator routes to `UnitController.launchJetMissile` with `JET_MISSILE_SPEC`. After the jets update, `reviewEnemies` calls `setLockWarning(true)` while any live jet `isMissileLocking()`.
+- **Jamming.** `reviewEnemies` also sets `getLockTimeScale()` to `JAMMER_TUNING.LOCK_TIME_MULTIPLIER` (2) while a live Jammer that is not EMP-stunned is within `JAMMER_TUNING.JAM_RANGE` (800 m) of the player, else 1; it is reset to 1 on level load and `removeAllEnemies`. See [Missiles and gun aim](#missiles-and-gun-aim) for the seeker side. `assignJammerGroup` writes each Jammer the centroid of the live non-Jammer jets that share its group id; when none of them is left, or its id is 0, it falls back to the centroid of all live non-Jammer jets, and to `setGroupCenter(null)` when there are none at all.
+
+### Cloak
+
+```typescript
+// DoctrineTypes.ts
+export interface CloakState {
+  opacity: number; // 1 visible, about 0.15 cloaked
+  hidden: boolean; // fully cloaked: EnemyAI.isCloaked()
+  flare: number; // decloak warning eye 0..1
+}
+// effects/CloakFade.ts — one per Wraith, created on first fade
+export class CloakFade { /* clones the airframe's materials for this jet only; shared materials are never touched */ }
+```
+
+`WraithDoctrine` reports a `CloakState`; `EnemyAI` fades the airframe through `CloakFade` (eye mesh `wraithEye`) and keeps only every fourth particle-trail point while the opacity is below 0.5. While `isCloaked()` is true the jet is left out of `GameCoordinator.collectLockCandidates` (an existing lock drops), `updateGunAim`'s candidates, `collectUncloakedEnemyMeshes` (contrails and the friendly units' target list), `CombatHudFeed`'s radar blips and health-bar snapshots, and `EnemySystem`'s wingman targets, and its `CombatTarget.isSeekable()` returns false, so swarm missiles do not pick it; it stays in the collision and damage path (area damage, EMP and rounds already in flight still hit it). `takeDamage` calls `notifyHit()`, which decloaks and staggers a cloaked Wraith. The Sniper's beam and charge glow are `effects/LanceBeam.ts`, driven from `getTell()`.
+
+### EnemySystem additions
+
+```typescript
+setThreatProvider(provider: IJetThreatProvider | null): void; // null: no threats, player always targetable
+setMissileLauncher(launcher: IJetMissileLauncher | null): void; // null: no locks, no missiles
+getLockTimeScale(): number; // 1, or 2 while jammed
+getAttackDirector(): AttackDirector;
+/** Boss 召唤小兵；开发钩子传 counted = false，不计入关卡的已生成数 */
+spawnEnemyAt(type: EnemyType, position: THREE.Vector3, counted: boolean = true): void;
+removeAllEnemies(): number; // dev hook: no score, no death events
+// LevelManager
+spawnEnemyAtPosition(type: EnemyType, position: Vector3, counted: boolean = true): EnemyAI | null;
+removeAllEnemies(): number;
+setWaveSpawningHeld(held: boolean): void; // no spawning, settling or next wave while held; open portals freeze
+isWaveSpawningHeld(): boolean;
+```
+
+### Wingmen and the legacy AI
+
+```typescript
+// FriendlyAI.ts — 僚机的固定数值（战斗机级），与敌机机型表脱钩；type 仍是 FIGHTER（没有呼号时血条“友军僚机” / Allied Wingman）
+export const WINGMAN_CONFIG: Readonly<EnemyConfig>;
+```
+
+`GameCoordinator.spawnFriendlyJet` always uses `WINGMAN_CONFIG` and `createFriendlyMesh`; `FriendlyAI` builds its `EnemyAI` without a doctrine and with `trailColor: FRIENDLY_TRAIL_COLOR`. Legacy aiming (wingmen only): in any state, a jet fires when its attack cooldown is up, its nose is within `fireSpreadAngle` of the target and the target is inside `FIRE_RANGE` (420 m). With a target velocity below 250 m/s and `aimLead > 0`, the shot is aimed at `target + velocity × t × min(1, aimLead)`, where `t` is a two-step first-order intercept time at the bullet speed (`GAME_CONSTANTS.PROJECTILE.SPEED`), capped at 4 s; `(1 − accuracy) × AIM_SPREAD` (0.4 rad) of yaw / pitch scatter is applied on top. `update` and `updateKinematic` share the same motion integration and NaN guards: a step whose `deltaTime` is not finite is skipped with position and heading unchanged, and a position that is already non-finite is reset to the origin and the step skipped.
 
 ## Save system
 
@@ -1185,7 +1418,16 @@ export class UnitSystem implements IGameSystem {
   getRadarRangeMultiplier(): number; // > 1 while an ALLY_AWACS lives
   getRadarBlips(): Array<{ position: THREE.Vector3; kind: UnitRadarKind }>;
   getIncomingMissiles(): ReadonlyArray<{ position: THREE.Vector3; targetIsPlayer: boolean }>;
-  getPlayerLockState(): PlayerLockState;
+  getPlayerLockState(): PlayerLockState; // 'locking' also while setJetMissileLock(true)
+  /** 敌机发射追踪玩家的导弹：进同一个导弹池；baseDamage 再乘与地空导弹相同的伤害倍率。池满或参数非法返回 false */
+  launchJetMissile(
+    from: THREE.Vector3,
+    direction: THREE.Vector3,
+    baseDamage: number,
+    options: UnitMissileLaunchOptions & { source: string }
+  ): boolean;
+  countJetMissilesInFlight(): number;
+  setJetMissileLock(active: boolean): void;
   destroyMissilesInRadius(center: THREE.Vector3, radius: number): number; // EMP
   applyAreaDamage(center: THREE.Vector3, radius: number, damage: number, source: DamageSource): number;
   applyAreaStun(center: THREE.Vector3, radius: number, seconds: number): number; // ENEMY units only
@@ -1204,7 +1446,12 @@ export class UnitSystem implements IGameSystem {
   onCivilianHit?: (unit: UnitInstance) => void;
   onEscortResult?: (success: boolean, unit: UnitInstance) => void;
   onLockWarning?: (unit: UnitInstance, phase: 'locking' | 'launched') => void;
-  onPlayerDamaged?: (damage: number, cause: 'sam' | 'kamikaze' | 'bomb', position: THREE.Vector3) => void;
+  onPlayerDamaged?: (
+    damage: number,
+    cause: 'sam' | 'kamikaze' | 'bomb' | 'jet-missile',
+    position: THREE.Vector3,
+    source?: string // 'jet:<TYPE>' for jet missiles
+  ) => void;
   onFirstContact?: (type: UnitType) => void;
   onExplosion?: (position: THREE.Vector3, scale: number, kind: 'ground' | 'sea' | 'air' | 'missile') => void;
   onMissileDecoyed?: (position: THREE.Vector3) => void;
@@ -1215,6 +1462,8 @@ export class UnitSystem implements IGameSystem {
 ```
 
 Faction rules: damage from a player source (`cannon | missile | rocket | laser | swarm | railgun | emp`) counts as `byPlayer`; `applyAreaDamage` with a player source spares friendly units, and `'enemy-fire'` / `'boss'` spare enemy units. The system draws its own explosions — use `onExplosion` for camera shake and sound only. `UnitController` (`src/core/units/UnitController.ts`) is the runtime wrapper the coordinator talks to. `UnitMeshFactory.createUnitMesh` puts the unit's bilingual name on `mesh.userData.displayName` (`UNIT_CONFIGS[type].name`), which the HUD reads for the unit's health-bar label.
+
+Enemy jet missiles (the Ace and the Striker) share the unit missile pool, so the HUD `locking` → `incoming` warning, flares, EMP and CIWS treat them like SAMs. `UnitMissileLaunchOptions` (`UnitMissiles.ts`) gains `source?: string` (`'jet:<TYPE>'`), which comes back as the fourth argument of `onPlayerDamaged` with cause `'jet-missile'`. `UnitController` wraps the three calls — `launchJetMissile(...)` (false while the unit system is not loaded), `countJetMissilesInFlight()` and `setJetMissileLock(active)` — and plays the same lock warning as a SAM: the locking tone when a jet lock starts, the HUD flash, tone and radio call (within its budget) on launch.
 
 Wave hold, objective and markers (`UnitController`):
 
@@ -1346,7 +1595,7 @@ export class WeaponSystem {
 }
 ```
 
-Targeting: hits only damage `Faction.ENEMY` and `Faction.CIVILIAN` targets (civilian penalties are applied by the target wrappers); `FRIENDLY` and the player are never damaged. Swarm missiles auto-target `ENEMY` targets only. The EMP calls `applyStun?.(stunSeconds)` on every enemy target in radius and damages `kind === 'projectile'` targets and drones; `onEmpPulse` lets the coordinator stun units, destroy unit / boss missiles and decloak the Phantom Wing. Railgun releases below `RAILGUN_MIN_CHARGE` (`EnergyWeaponControllers.ts`) cancel through `onDryFire('railgun')`.
+Targeting: hits only damage `Faction.ENEMY` and `Faction.CIVILIAN` targets (civilian penalties are applied by the target wrappers); `FRIENDLY` and the player are never damaged. Swarm missiles auto-target `ENEMY` targets only, and only seekable ones: `TargetSnapshot.seekable` (from `isTargetSeekable`, true unless `isSeekable()` returns false) is checked by `acquireConeTargets` when a salvo is assigned and by the seeker when a swarm missile re-acquires — a cloaked enemy jet is skipped; the EMP, proximity fuzes and area damage ignore the flag. The EMP calls `applyStun?.(stunSeconds)` on every enemy target in radius and damages `kind === 'projectile'` targets and drones; `onEmpPulse` lets the coordinator stun units, destroy unit / boss missiles and decloak the Phantom Wing. Railgun releases below `RAILGUN_MIN_CHARGE` (`EnergyWeaponControllers.ts`) cancel through `onDryFire('railgun')`.
 
 ## Flares
 
@@ -1394,6 +1643,12 @@ export function projectToScreen(
   out: ScreenPoint
 ): boolean;
 
+/** 导引头受到的干扰（窄接口）：由 GameCoordinator 实现（数值来自 EnemySystem.getLockTimeScale）；没有提供者时不受干扰 */
+export interface ILockJamProvider {
+  /** 锁定时间的倍数：1 = 正常；敌方干扰机在范围内时为 2 */
+  getLockTimeScale(): number;
+}
+
 export class MissileSeeker {
   /** 本次 update 内发生的事件（下一次 update 开始时清零） */
   public readonly events = {
@@ -1408,6 +1663,11 @@ export class MissileSeeker {
   };
   /** 锁定所需时间（秒），下限 0.2 防止除零 */
   public setLockTime(seconds: number): void;
+  /** 接入干扰来源；传 null 断开（不受干扰） */
+  public setJamProvider(provider: ILockJamProvider | null): void;
+  /** 当前的锁定时间倍数（≥ 1；非有限或 ≤ 1 的值按 1） */
+  public getLockTimeScale(): number;
+  public isJammed(): boolean; // getLockTimeScale() > 1
   /** 捕获环半径（像素） */
   public setAcquireRadius(pixels: number): void;
   public getKeepRadius(): number; // acquire radius × LOCK_KEEP_RATIO
@@ -1449,6 +1709,8 @@ public fire(
   launcherSpeed: number = 0
 ): void;
 public prewarm(): void; // level load: renders a hidden missile so the first launch does not compile shaders
+/** 是否有在飞的导弹正追踪这个目标（敌机条令据此规避；只读，不分配） */
+public hasActiveMissileToward(target: THREE.Object3D): boolean;
 
 // LockOnIndicator.ts — owns the MissileSeeker and draws the reticle, rings, gun cross and lead marker
 export type LockOnCue = 'no-lock' | 'no-missile';
@@ -1456,6 +1718,9 @@ public getSeeker(): MissileSeeker;
 public setLockTime(time: number): void;
 public setLockCircleScale(scale: number): void; // 1..2, the lock-radius upgrade
 public setMissileCount(count: number): void; // 0 switches the seeker off
+/** 接入导引头的干扰来源（敌方干扰机）；传 null 断开 */
+public setLockJamProvider(provider: ILockJamProvider | null): void;
+public isJammed(): boolean; // the JAMMED tag is showing
 /** 放弃当前跟踪 / 锁定（阵亡、复活、剧情冻结）：不触发丢锁提示 */
 public cancelLockOn(): void;
 /** 在准星下方短暂显示“未锁定 / 无导弹” */
@@ -1486,10 +1751,17 @@ public renderUpdate(
 
 // GunLeadSolver.ts — pure logic
 /**
+ * 机炮辅助的锥角档位：'touch' 用 GAME_CONSTANTS.GUN_ASSIST 的 FULL_ANGLE / OUTER_ANGLE，
+ * 'keyboard' 用更小的 KEYBOARD_FULL_ANGLE / KEYBOARD_OUTER_ANGLE；其余参数两档共用。
+ */
+export type GunAssistCone = 'touch' | 'keyboard';
+/**
  * @param muzzle 炮口世界坐标
  * @param forward 机头方向（单位向量）
- * @param targets 候选：前 airCount 个是空中目标（可显示提前量标记），其余只参与触屏辅助
- * @param assistEnabled 是否计算触屏辅助瞄准点
+ * @param targets 候选：前 airCount 个是空中目标（可显示提前量标记），其余只参与机炮辅助
+ * @param assistEnabled 是否计算辅助瞄准点
+ * @param assistCone 辅助的锥角档位（默认触屏）；不是 'keyboard' 的值一律按触屏处理。
+ *   一局之内应保持不变：中途换档时已有的偏移会直接夹到新档位的上限
  */
 public update(
   deltaTime: number,
@@ -1497,7 +1769,8 @@ public update(
   forward: Vector3,
   targets: readonly Object3D[],
   airCount: number,
-  assistEnabled: boolean
+  assistEnabled: boolean,
+  assistCone: GunAssistCone = 'touch'
 ): void;
 
 // PlayerSystem.ts
@@ -1527,13 +1800,14 @@ setGunAimAssist(direction: THREE.Vector3 | null, weight: number = 1): void;
 
 `LOCK_TIME`, `LOCK_BOX_SIZE` and `MISSILE_RESPAWN_TIME` are gone: lock time, ring size and reload time come from the upgrade tracks (see [Upgrades](#upgrades)).
 
-`GAME_CONSTANTS.GUN_ASSIST`: `MAX_RANGE` 480 m, `FULL_ANGLE` 2.5°, `OUTER_ANGLE` 5°, `EASE_TIME` 0.1 s, `SWITCH_MARGIN` 0.75°, `REFERENCE_RANGE` 600 m, `CROSS_MIN_RANGE` 100 m.
+`GAME_CONSTANTS.GUN_ASSIST`: `MAX_RANGE` 480 m, `FULL_ANGLE` 2.5° and `OUTER_ANGLE` 5° (the touch cone), `KEYBOARD_FULL_ANGLE` 1.25° and `KEYBOARD_OUTER_ANGLE` 2.5° (the keyboard cone, half the touch one), `EASE_TIME` 0.1 s, `SWITCH_MARGIN` 0.75°, `REFERENCE_RANGE` 600 m, `CROSS_MIN_RANGE` 100 m. Everything except the two angles is shared by both cones.
 
-- **Seeker.** It runs whenever the player has a missile; there is no "start lock" step. The reticle is the screen position of the point `GUN_ASSIST.REFERENCE_RANGE` ahead on the nose axis. The acquire ring is centred on it with radius `clamp(short side × LOCK_RING_RATIO × lock-radius scale, 44 px, 0.3 × short side)`, which `LockOnIndicator` also publishes as `--hud-aim-r` on `<html>`. The candidate inside the ring that is closest to the reticle on screen is tracked. Progress rises by `1 / lockTime` per second inside the acquire ring, decays at `LOCK_DECAY_RATE` between the acquire ring and the keep ring, and a completed lock holds anywhere inside the keep ring. Outside the keep ring, behind the camera or beyond `MAX_LOCK_DISTANCE`, the target is lost after `LOCK_GRACE_TIME` (`events.lost`). A target that is missing from the candidate list is dropped at once with no `lost` event. A candidate that is closer to the reticle replaces the current target only after it has stayed so for 0.25 s (0.6 s once locked); while the current target is still inside the acquire ring the newcomer must also be closer by at least `max(12 px, 25% of the acquire radius)`. Progress then starts from zero.
-- **Candidates.** `GameCoordinator.collectLockCandidates()` rebuilds the full list every step: the boss controller's `appendLockTargets` during a boss fight, the meshes of live enemy jets, then `UnitController.collectLockTargets`.
+- **Seeker.** It runs whenever the player has a missile; there is no "start lock" step. The reticle is the screen position of the point `GUN_ASSIST.REFERENCE_RANGE` ahead on the nose axis. The acquire ring is centred on it with radius `clamp(short side × LOCK_RING_RATIO × lock-radius scale, 44 px, 0.3 × short side)`, which `LockOnIndicator` also publishes as `--hud-aim-r` on `<html>`. The candidate inside the ring that is closest to the reticle on screen is tracked. Progress rises by `1 / (lockTime × getLockTimeScale())` per second inside the acquire ring, decays at `LOCK_DECAY_RATE` between the acquire ring and the keep ring, and a completed lock holds anywhere inside the keep ring. Outside the keep ring, behind the camera or beyond `MAX_LOCK_DISTANCE`, the target is lost after `LOCK_GRACE_TIME` (`events.lost`). A target that is missing from the candidate list is dropped at once with no `lost` event. A candidate that is closer to the reticle replaces the current target only after it has stayed so for 0.25 s (0.6 s once locked); while the current target is still inside the acquire ring the newcomer must also be closer by at least `max(12 px, 25% of the acquire radius)`. Progress then starts from zero.
+- **Candidates.** `GameCoordinator.collectLockCandidates()` rebuilds the full list every step: the boss controller's `appendLockTargets` during a boss fight, the meshes of live enemy jets that are not cloaked (`EnemyAI.isCloaked()`; a Wraith that fades out is dropped at once), then `UnitController.collectLockTargets`.
+- **Jamming.** The coordinator hands `LockOnIndicator.setLockJamProvider` an `ILockJamProvider` that reads `EnemySystem.getLockTimeScale()` (2 while a live enemy Jammer is within 800 m, else 1). Only the lock timer slows: the rings, decay, grace and a completed lock are unchanged. While jammed the indicator shows a `JAMMED` / `受干扰` tag (`.lk-jam`, `data-lock-chrome="jam-tag"`, violet `#cfa6ff`) at the top inside edge of the acquire ring and sets `data-jammed="true"` on its container; the tag follows the effect even with no missiles on board. The jam state is computed after the jets update, so the seeker sees the previous step's value.
 - **Launch.** One press fires one missile. With a completed lock the press fires at once and the lock stays; the next launch needs a new press and `LOCK_REARM_TIME`. A press while the seeker is still locking fires the moment the lock completes if the input is still held. A press with nothing tracked, or a release before the lock completes, shows `showCue('no-lock')`; a press with no missiles shows `showCue('no-missile')`. With the Rapid Fire power-up (`PowerUpType.MULTISHOT`) one press fires up to three missiles 0.1 s apart. Each missile leaves from alternate wing pylons along the nose, and `PlayerSystem.getSpeed()` is passed as `launcherSpeed`.
 - **Flight.** A missile starts at `min(cruise, launcherSpeed + LAUNCH_SPEED_BOOST)` and accelerates at `ACCELERATION` to `cruise = max(SPEED, launcherSpeed + MIN_OVERTAKE_SPEED)`. It flies straight for 0.2 s, then steers with lead on the target's estimated velocity at `TURN_SPEED`. The hit test covers the segment travelled in the step; targets without a declared hit radius use a 6 m proximity radius. A missile whose target is gone re-acquires the nearest enemy.
-- **Gun lead and assist.** `GunLeadSolver` estimates each target's velocity from successive positions and solves the intercept for `PROJECTILE.SPEED`. The nearest airborne target within 500 m and 40° of the nose gets the lead marker; `isPipOnTarget()` tells the indicator when the nose is on it. With `assistEnabled` — `GameCoordinator` passes `GameConfig.isMobile` — the solver also returns an assist direction: it points at the lead point while that is within `FULL_ANGLE` of the nose, the offset fades to zero by `OUTER_ANGLE`, there is none beyond `MAX_RANGE`, and it eases over `EASE_TIME` when the target changes. `PlayerSystem.setGunAimAssist(direction, weight)` makes the next shots leave along that direction and narrows the base spread from 3° towards 1.2° with `weight`; with `null` shots leave along the nose. `renderUpdate` draws the gun cross on the same direction, so the cross and the bullets agree. An `update` whose `deltaTime` is not a positive finite number is skipped and changes nothing.
+- **Gun lead and assist.** `GunLeadSolver` estimates each target's velocity from successive positions and solves the intercept for `PROJECTILE.SPEED`. `updateGunAim` leaves cloaked enemy jets out of its candidates, so they get no lead marker and no assist. The nearest airborne target within 500 m and 40° of the nose gets the lead marker; `isPipOnTarget()` tells the indicator when the nose is on it. With `assistEnabled` the solver also returns an assist direction: it points at the lead point while that is within the cone's full angle of the nose, the offset fades to zero by its outer angle and never exceeds the full angle, there is none beyond `MAX_RANGE`, and it eases over `EASE_TIME` when the target changes. The cone is the `assistCone` argument: `'touch'` uses `FULL_ANGLE` / `OUTER_ANGLE`, `'keyboard'` uses `KEYBOARD_FULL_ANGLE` / `KEYBOARD_OUTER_ANGLE`, and any other value counts as `'touch'`; it should stay the same for a whole run, because a change clamps the current offset to the new limit at once. `GameCoordinator.updateGunAim` always passes `assistEnabled = true` and picks the cone from the device — `'touch'` when `GameConfig.isMobile`, otherwise `'keyboard'` — not from the input in use. `PlayerSystem.setGunAimAssist(direction, weight)` makes the next shots leave along that direction and narrows the base spread from 3° towards 1.2° with `weight`; with `null` — which `getAssistDirection()` returns when there is no offset in effect — shots leave along the nose. `renderUpdate` draws the gun cross on the same direction, so the cross and the bullets agree. An `update` whose `deltaTime` is not a positive finite number is skipped and changes nothing.
 
 ## Camera
 
@@ -1596,7 +1870,7 @@ export class CameraRig {
 }
 ```
 
-`PlayerViewController` (`src/core/camera/PlayerViewController.ts`) wraps the rig for the coordinator (`toggleMode`, `setMode`, `snapToTarget`, `setFlightState`, `addShake`, `addExplosionShake(position, scale)`, `getBlend`) and drives `updatePlayerAfterburner` (`AircraftMeshFactory`). Friendly wingmen use `createFriendlyMesh(config)` (same airframe and hit radii as `createEnemyMesh`).
+`PlayerViewController` (`src/core/camera/PlayerViewController.ts`) wraps the rig for the coordinator (`toggleMode`, `setMode`, `snapToTarget`, `setFlightState`, `addShake`, `addExplosionShake(position, scale)`, `getBlend`) and drives `updatePlayerAfterburner` (`AircraftMeshFactory`). Friendly wingmen use `createFriendlyMesh(_config)`, which ignores its argument and builds the wingman's own airframe (the player's family in steel blue and gold, with a canopy): root name `'FIGHTER'`, `userData.faction = Faction.FRIENDLY`, `userData.hitRadius` 5. `createEnemyMesh(config)` builds the eight enemy drone airframes, names the root after the `EnemyType` and sets `userData.hitRadius` to 2.5 × the type's airframe scale (Scout 3.75 m, Fighter and Wraith 5 m, Sniper 5.25 m, Ace and Jammer 5.5 m, Striker 6 m, Heavy 7.5 m); the coordinator's enemy `CombatTarget` reads it with `getDeclaredHitRadius(mesh, 5)`. `ContrailController` colours each attached contrail by `userData.faction`: red-orange (0xff5a3c) for enemies, light blue (0x7fd4ff) for wingmen; the player's stays white.
 
 Field of view: the rig is the only writer of `camera.fov`. It adds a speed / boost kick to the base FOV, and when `camera.aspect < 1` (portrait) it raises the vertical FOV so that the horizontal field stays at about 70°, capped at 95° vertical; landscape is unaffected.
 
@@ -1734,7 +2008,7 @@ export class TargetLeadTracker {
 export const BOSS_DECOY_ANCHOR_NAME = 'boss-missile-decoy-anchor';
 ```
 
-- **Damage by difficulty.** `GameCoordinator.getAdjustedBossConfig` scales `missileDamage` by the difficulty's `enemyDamageMultiplier` (rounded, at least 1) along with `health` and `damage`, and every missile-carrying boss passes it to its `BossMissileSystem`; `BossHitFeedback.checkBossMissileHits` applies the reported value to the player (through armour, not while shielded) and to wingmen. With the base 90 that is 31 / 38 / 45 / 56 / 70 per hit from Very Easy to Expert; the Phantom Wing's base is doubled (63 … 140, 90 on Normal). Flak and the Octopus Warship's eye bolts follow the same rule: `FlakCannonSystem(scene, explosionRadius, onExplode, damage = FLAK_CANNON_CONFIG.DAMAGE)` takes the boss's scaled `damage` (Desert Fortress and Missile Destroyer; base 30) and passes it to every shell's explosion, and `EyeSystem(scene, damage = EYE_CONFIG.DAMAGE)` takes the scaled `BossConfig.eyeDamage` (optional, base 40; `OctopusWarshipAI.getEyeDamage()` returns the system's value). Per hit from Very Easy to Expert: flak 11 / 13 / 15 / 19 / 23, eye bolts 14 / 17 / 20 / 25 / 31 (Normal keeps the tuned 15 / 20).
+- **Damage by difficulty.** `GameCoordinator.getAdjustedBossConfig` scales `missileDamage` by the difficulty's `enemyDamageMultiplier` (rounded, at least 1) along with `health` and `damage`, and every missile-carrying boss passes it to its `BossMissileSystem`; `BossHitFeedback.checkBossMissileHits` applies the reported value to the player (through armour, not while shielded) and to wingmen. With the base 90 that is 20 / 38 / 45 / 56 / 70 per hit from Very Easy to Expert; the Phantom Wing's base is doubled (40 … 140, 90 on Normal). Flak and the Octopus Warship's eye bolts follow the same rule: `FlakCannonSystem(scene, explosionRadius, onExplode, damage = FLAK_CANNON_CONFIG.DAMAGE)` takes the boss's scaled `damage` (Desert Fortress and Missile Destroyer; base 30) and passes it to every shell's explosion, and `EyeSystem(scene, damage = EYE_CONFIG.DAMAGE)` takes the scaled `BossConfig.eyeDamage` (optional, base 40; `OctopusWarshipAI.getEyeDamage()` returns the system's value). Per hit from Very Easy to Expert: flak 7 / 13 / 15 / 19 / 23, eye bolts 9 / 17 / 20 / 25 / 31 (Normal keeps the tuned 15 / 20).
 - **Flares.** `BossBattleController` now runs the same `BossFlareDecoyRedirector` as `AdvancedBossController`, so flares pull the player-tracking missiles of bosses 1–5 too: a missile within 420 m can be redirected to an anchor that follows a burning flare (chance from the strongest flare) and detonates there.
 - **Profiles in use.** Trident (level 4) launches salvos of 2 missiles — 3 at 35 % health or less — at 72 m/s (turn rate 0.85 rad/s, lead 0.3, 7 s fuel, 0.4 s apart) every `missileFireInterval` (20 s base) and fires 95 m/s flak with 50 % lead and ±32 m scatter; the Sky Carrier's missiles fly at 72 m/s (0.95 rad/s, lead 0.3, 10 s); the Phantom Wing's bay missiles at 88 m/s (1.3 rad/s, lead 0.5, 8 s), ejected forward and down. Sandwall's flak (80 m/s) and the Sky Carrier's cannons (100 m/s) lead the player through `TargetLeadTracker` (50 % and 60 %).
 
@@ -1963,6 +2237,10 @@ public playShieldHit(): void;
 public playBossPhaseAlarm(): void;
 public playDebriefTally(): void;
 public playUnitDestroyed(domain: 'ground' | 'sea' | 'air'): void;
+/** 敌方狙击机蓄力：在 chargeSeconds（钳制 0.4..3）内升高的啸叫，一次性 */
+public playLanceCharge(chargeSeconds: number = 1.3): void;
+/** 敌方隐形机现形：高音下滑 + 低音嗡鸣，在 tellSeconds（钳制 0.3..2）内收尾，一次性 */
+public playDecloak(tellSeconds: number = 0.7): void;
 public stopSustainedSounds(): void; // laser beam + railgun charge loops (pause / death / leaving combat)
 
 public playGroundImpact(
@@ -1971,7 +2249,7 @@ public playGroundImpact(
 ): void;
 ```
 
-Each method has a matching `SoundType` entry (`ROCKET_SALVO`, `LASER_BEAM`, `LASER_STOP`, `LASER_OVERHEAT`, `RAILGUN_CHARGE`, `RAILGUN_CANCEL`, `RAILGUN_FIRE`, `SWARM_LAUNCH`, `EMP_PULSE`, `FLARE_DEPLOY`, `SAM_LOCK`, `SAM_LAUNCH`, `BOMB_DROP`, `TANK_CANNON`, `HELICOPTER`, `SHIP_HORN`, `SONAR`, `CAMERA_SWITCH`, `AUTOSAVE`, `RADIO`, `TYPEWRITER`, `WEAPON_SWITCH`, `WEAPON_UNLOCK`, `CIVILIAN_WARNING`, `CHAPTER_IMPACT`, `LIGHTNING`, `LAVA_ERUPTION`, `SHIELD_HIT`, `PHASE_ALARM`, `DEBRIEF_TALLY`, `UNIT_DESTROYED`). Gameplay reaches them through `ICampaignPresentation.onWeaponEvent` / `onUnitEvent` / `onBossCue` (`CampaignSfxRouter`, `src/core/campaign/CampaignSfx.ts`).
+Each method has a matching `SoundType` entry (`ROCKET_SALVO`, `LASER_BEAM`, `LASER_STOP`, `LASER_OVERHEAT`, `RAILGUN_CHARGE`, `RAILGUN_CANCEL`, `RAILGUN_FIRE`, `SWARM_LAUNCH`, `EMP_PULSE`, `FLARE_DEPLOY`, `SAM_LOCK`, `SAM_LAUNCH`, `BOMB_DROP`, `TANK_CANNON`, `HELICOPTER`, `SHIP_HORN`, `SONAR`, `CAMERA_SWITCH`, `AUTOSAVE`, `RADIO`, `TYPEWRITER`, `WEAPON_SWITCH`, `WEAPON_UNLOCK`, `CIVILIAN_WARNING`, `CHAPTER_IMPACT`, `LIGHTNING`, `LAVA_ERUPTION`, `SHIELD_HIT`, `PHASE_ALARM`, `DEBRIEF_TALLY`, `UNIT_DESTROYED`, `LANCE_CHARGE`, `WRAITH_DECLOAK`). Gameplay reaches them through `ICampaignPresentation.onWeaponEvent` / `onUnitEvent` / `onBossCue` (`CampaignSfxRouter`, `src/core/campaign/CampaignSfx.ts`), except the enemy-jet sounds, which `GameCoordinator` plays straight from `ENEMY_FIRED` and `ENEMY_TELL` (see [EventBus](#eventbus)).
 
 ## VFX
 
@@ -2177,11 +2455,24 @@ export class RadioComms {
   dispose(): void;
   onLineShown?: (line: RadioLine) => void;
 }
+/**
+ * 正文跟读的位置（纯函数）：正文比面板放得下的行数多时，返回此刻正文该向上滚过多少像素
+ * （0 … 多出来的行数 × 行高）；放得下时恒为 0。stepOnly（减少动态效果）时不滑动，一次跳一整行
+ */
+export function radioFollowOffset(
+  contentHeight: number,
+  boxHeight: number,
+  lineHeight: number,
+  elapsedSeconds: number,
+  totalSeconds: number,
+  revealSeconds: number = 0,
+  stepOnly: boolean = false
+): number;
 ```
 
 `StoryOverlay` sets `data-story-overlay` on `<html>` while a card is up (the HUD, radar, radio, mobile controls and indicator layers hide); callbacks run once per `show*`, after the overlay closes. With `narration` set, each prologue / briefing / epilogue paragraph asks for its voice by `VoicedText.id` before it types: it waits a short time for the voice to start (otherwise it types as plain text and stops the late voice), paces the typewriter so the text lands just before the voice ends, and waits for the voice to end (with a grace cap) before the next paragraph. A fully narrated card turns the page after a short hold for the objectives instead of the reading-time hold. Space / click (reveal all), the next card, Esc / Skip and `hide()` stop the narration; reduced motion shows the text at once and still narrates; a card written before a language switch is not narrated further.
 
-`RadioComms` shows a line immediately when idle (the short gap between lines counts as busy), lets `'high'` interrupt, ignores duplicate text and caps its queue. Voiced timing: `holdForVoice` keeps the line up until its voice has finished plus a short tail, and the next line waits for `releaseVoice` (or a safety cap); without a voice the reading-time timing is unchanged. An interrupted normal line that was not delivered (its voice had not finished, or a text-only line had not been held long enough) goes back to the front of the normal queue — once: a replay that is interrupted again is dropped; a line whose voice finished counts as delivered. Whether an urgent line may interrupt a voiced one is the caller's decision (`isVoicing()`; the presentation never does). On a language switch the line on screen (callsign, text, screen-reader text) is rewritten in the new language. Each speaker's portrait glyph comes from `getSpeakerGlyph(speakerId)` (`src/ui/theme/hudGlyphs.ts`), which has an entry for every `CampaignSpeakerId`.
+`RadioComms` shows a line immediately when idle (the short gap between lines counts as busy), lets `'high'` interrupt, ignores duplicate text and caps its queue. Voiced timing: `holdForVoice` keeps the line up until its voice has finished plus a short tail, and the next line waits for `releaseVoice` (or a safety cap); without a voice the reading-time timing is unchanged. An interrupted normal line that was not delivered (its voice had not finished, or a text-only line had not been held long enough) goes back to the front of the normal queue — once: a replay that is interrupted again is dropped; a line whose voice finished counts as delivered. Whether an urgent line may interrupt a voiced one is the caller's decision (`isVoicing()`; the presentation never does). On a language switch the line on screen (callsign, text, screen-reader text) is rewritten in the new language. **Follow:** in the compact portrait-phone box (density `touch-portrait`, not first person, viewport narrower than 700 px) a line that is taller than the box's clamped lines is not cut off with an ellipsis: the box becomes a clip of whole lines and the text inside moves up with `transform: translateY` (not `scrollTop`, which rounds the fractional line height). `radioFollowOffset` paces it for the slowest reader: nothing moves before the typewriter reveal ends; there is a start hold of `min(0.8 s, total / 4)`; the rest of the line's time is split evenly per line, and line k slides out at `start hold + k × per-line time` over `min(0.25 s, per-line time / 2)` with smoothstep easing, coming to rest on whole lines; the offset never moves back. The box counts only the whole lines that fit (a fractional box height rounds down), and sizes or times that are not finite and positive give 0; the offset is capped at the content height, so it stays finite even for content heights near `Number.MAX_VALUE`. When a voice lengthens the line's time (`holdForVoice` / `releaseVoice`) mid-slide, the slide in progress finishes on the old schedule and rests on a whole line before the new schedule takes over. With reduced motion it steps a whole line at a time. The box is re-measured when the camera mode changes. Each speaker's portrait glyph comes from `getSpeakerGlyph(speakerId)` (`src/ui/theme/hudGlyphs.ts`), which has an entry for every `CampaignSpeakerId`.
 
 ```typescript
 // RadarMinimap (#radar-minimap) — RadarBlipKind / RadarBlip live in src/ui/radarGlyphs.ts and are re-exported
@@ -2299,15 +2590,17 @@ The settlement panel (`#hud-settlement-overlay` / `#hud-settlement-panel`, share
 
 Mobile controls in `index.html`: the stick (`#touch-stick-zone`, `#joystick`, `#joystick-knob`; see [Input](#input)) and the buttons `#camera-button`, `#special-button`, `#cycle-button`, `#flare-button` (plus the existing `#fire-button`, `#missile-button`, `#throttle-button`, `#upgrade-button`). `#throttle-button` (BOOST) is a latch and carries `aria-pressed`; `#missile-button` shows the missile count (`data-count`) and a reload ring (`--tc-meter`) written by the HUD, and the lock state as classes written by `LockOnIndicator` (`is-search`, plus `is-track` while tracking; `is-lock` + `is-ready` when locked; `is-dry` with no missiles). The HTML ships English labels (FIRE, MSL, SPEC, FLARE, BOOST, SWAP, VIEW, PAUSE); `src/main.ts` rewrites labels and `aria-label`s for the current language, except the special button's main label while the HUD shows a weapon code there.
 
-HUD layout (`HUD.ts`, `theme/hudExtrasStyles.ts`, `theme/radioStyles.ts`): `#hud` is inset by `env(safe-area-inset-*)`, and positions and sizes are CSS keyed by `HudLayoutDensity`, so a rotation re-lays out. The right status column `#hud-status` stacks the wave line, the lives readout (label + pips, `data-hud="lives-readout"`), the missile readout (label, `#hud-missile-count` as `n/max`, pips and the reload meter, `data-hud="missile-readout"`) and the power-up timer (the two readouts side by side in portrait). The centre message stack `#hud-top-stack` holds the boss strip, briefing, event objective and, in portrait, the autosave toast; on phones in portrait it is a full-width row under the status band, and the radio panel follows its bottom through the `--hud-stack-bottom` variable on `<html>`. In portrait the autosave toast waits (hidden, timer paused) while a briefing is up or while the boss strip and an objective share the stack. Centre callouts (`showPowerUpBig`, `#hud-callout`) are a banner, not a full-screen block, placed per camera mode so that it clears the reticle and the seeker ring (whose radius `LockOnIndicator` publishes as `--hud-aim-r` on `<html>`; the HUD marks the mode with `data-hud-camera`): in the chase view, where the reticle sits about 29% down the screen, the banner goes below the jet on desktop and touch-landscape and between the ring and the jet in portrait; in first person, where the reticle is at the centre, it grows upward from above the ring on desktop and portrait and sits under the message stack in touch-landscape. The warning lane (`#hud-warning-lane`) sits below the jet in the chase view (under the callout on desktop and touch-landscape) and below the ring in first person. The ENEMIES / LEFT counter has the same dark backing as the cockpit panel.
+HUD layout (`HUD.ts`, `theme/hudExtrasStyles.ts`, `theme/radioStyles.ts`): `#hud` is inset by `env(safe-area-inset-*)`, and positions and sizes are CSS keyed by `HudLayoutDensity`, so a rotation re-lays out. The right status column `#hud-status` stacks the wave line, the lives readout (label + pips, `data-hud="lives-readout"`), the missile readout (label, `#hud-missile-count` as `n/max`, pips and the reload meter, `data-hud="missile-readout"`) and the power-up timer (the two readouts side by side in portrait). The centre message stack `#hud-top-stack` holds the boss strip, briefing, event objective and, in portrait, the autosave toast; on phones in portrait it is a full-width row under the status band, and the HUD publishes its bottom edge as the `--hud-stack-bottom` variable on `<html>`. In portrait the autosave toast waits (hidden, timer paused) while a briefing is up or while the boss strip and an objective share the stack. Centre callouts (`showPowerUpBig`, `#hud-callout`) are a banner, not a full-screen block, placed per camera mode so that it clears the reticle and the seeker ring (whose radius `LockOnIndicator` publishes as `--hud-aim-r` on `<html>`; the HUD marks the mode with `data-hud-camera`): in the chase view, where the reticle sits about 29% down the screen, the banner goes below the jet on desktop and touch-landscape and between the ring and the jet in portrait; in first person, where the reticle is at the centre, it grows upward from above the ring on desktop and portrait and sits under the message stack in touch-landscape. The warning lane (`#hud-warning-lane`) sits below the jet in the chase view (under the callout on desktop and touch-landscape) and below the ring in first person. The ENEMIES / LEFT counter has the same dark backing as the cockpit panel.
 
-Health bars (`src/ui/EnemyHealthBars.ts`) show a friendly AI jet's pilot callsign when its mesh carries `userData.displayName` (`LocalizedText` or string — set from `WingmanProfile.callsign`), ahead of the per-name label cache, and rename every bar at once on a language switch. Bars come in three sizes: boss body (120 × 10 px, with its name), boss part (44 × 5 px on a dark track) and everything else (60 × 6 px, with its name). Of the boss parts in view, only the one nearest the reticle shows its name, with hysteresis (another part must be under 80 % of its distance to take over); parts no longer draw their own off-screen chevrons.
+The radio panel (`#radio-comms`, `theme/radioStyles.ts`) is placed per density and camera mode, clear of the reticle and the radar. Desktop: along the bottom edge, right of the radar. Touch-landscape: on the bottom edge between the stick and the button deck; on phones it shrinks to one body line, without the portrait glyph and the callsign row, while the warning lane shows two rows (the HUD marks that with `data-hud-warning-rows='2'` on `<html>`). Touch-portrait in first person: a full-width row under the message stack, following `--hud-stack-bottom`. Touch-portrait in the chase view, where the reticle sits in that band: left of the button deck and above the resting stick, on tablets and phones alike. On portrait phones (viewport narrower than 700 px) that box is compact — no portrait glyph, rank / name or signal bars, 6 px side padding — and it is the same box whatever the warning lane shows. Its body is clamped to a number of lines set by the viewport height: 1 line under 599 px, 2 under 633 px, 3 under 666 px, 4 from there, 5 from 728 px, 6 from 799 px, 7 from 833 px and 8 from 867 px; the callsign row (the callsign only, in the speaker's accent colour) appears from the 6-line tier. A longer line scrolls up inside the box (see `radioFollowOffset` above). The tiers are sized so that the box at its limit stays at least 12 px below a two-row warning lane, worked out for widths up to 430 px, with a 34 px bottom safe area assumed from five lines up and none below.
+
+Health bars (`src/ui/EnemyHealthBars.ts`) show a friendly AI jet's pilot callsign when its mesh carries `userData.displayName` (`LocalizedText` or string — set from `WingmanProfile.callsign`), ahead of the per-name label cache (a friendly jet without one reads `Allied Wingman` / `友军僚机`), and rename every bar at once on a language switch. Bars come in three sizes: boss body (120 × 10 px, with its name), boss part (44 × 5 px on a dark track) and everything else (60 × 6 px, with its name). Of the boss parts in view, only the one nearest the reticle shows its name, with hysteresis (another part must be under 80 % of its distance to take over); parts no longer draw their own off-screen chevrons. A jet's bar (any mesh named after an `EnemyType`, wingmen included) sits `2 × hitRadius / 5` m above the jet's centre (2 m for a 5 m hit radius), so big airframes do not cover their own bar; `CombatHudFeed` leaves cloaked enemy jets out of the snapshots, so they have no bar, name, bracket or off-screen arrow.
 
 Hostile ground / sea / air units are fed to the same bars by `CombatHudFeed` (through `UnitController.forEachHostileMarker`) and are labelled with the unit's own name from `mesh.userData.displayName`. On top of the bar, a unit gets:
 
 - a **target bracket** — four corners in the threat colour with the range in metres (rounded to 10 m) — while it projects smaller than about 22 px on screen, hidden again above 28 px;
 - the **objective style** when its snapshot carries `objective: true`: the bracket is always shown, thicker and pulsing, and its off-screen arrow blinks in the threat colour (class `is-objective`; no animation under reduced motion);
-- an **off-screen arrow** (`OffscreenChevron`) whose distance label stays horizontal on the arrow's tail side. Arrows are kept out from under the chrome drawn above them by `ChevronAvoidance` (`src/ui/ChevronAvoidance.ts`); `EnemyHealthBars` and `BossMissileIndicator` (the arrows that point at a boss's missiles) each hold one instance and follow the same rules. The areas avoided are the radar dial (`#radar-minimap`), the HUD panels (`#hud-score`, `#hud-speed`, `#hud-upgrades`, `#hud-status`, `#hud-health` and every block showing in `#hud-top-stack`) and, in touch layouts, the stick (`#joystick`) and every visible `.touch-btn`. The rectangles are re-measured about once a second (and on touch start / end, because the floating stick moves), and an arrow whose footprint — distance label included — touches one of them (with an 8 px margin) slides along the screen edge or inward past it, whichever is the shorter move, keeping its bearing and staying whole on screen.
+- an **off-screen arrow** (`OffscreenChevron`) whose distance label stays horizontal on the arrow's tail side. Arrows are kept out from under the chrome drawn above them by `ChevronAvoidance` (`src/ui/ChevronAvoidance.ts`); `EnemyHealthBars` and `BossMissileIndicator` (the arrows that point at a boss's missiles) each hold one instance and follow the same rules. The areas avoided are the radar dial (`#radar-minimap`), the HUD panels (`#hud-score`, `#hud-speed`, `#hud-upgrades`, `#hud-status`, `#hud-health` and every block showing in `#hud-top-stack`), in touch layouts the stick (`#joystick`) and every visible `.touch-btn`, and — on portrait phones only (viewport narrower than 700 px, `data-density="touch-portrait"`) — the radio panel `#radio-comms` while it is showing, since it sits where arrows moved off the stick and the deck would otherwise land; on tablets and in landscape the radio panel is not avoided. The rectangles are re-measured about once a second (and on touch start / end, because the floating stick moves), so the radio box is followed as it grows line by line. Areas too close together for an arrow to pass between them are merged into one: the buttons are merged with each other first, so the deck is always one cluster, and any other pair is merged only when their bounding box would not swallow a free corner large enough for an arrow — which keeps the spot above the stick usable on portrait phones — and a HUD panel is never merged into a radar dial standing alone. An arrow whose footprint — distance label included — touches an area (with an 8 px margin) slides along the screen edge or inward past it, whichever is the shorter move, keeping its bearing and staying whole on screen; if it lands on another area it keeps going, up to three moves, and takes the shortest route that works.
 
 Radar (`RadarMinimap`, `RadarLevelMap`, `radarGlyphs.ts`):
 
@@ -2316,7 +2609,7 @@ Radar (`RadarMinimap`, `RadarLevelMap`, `radarGlyphs.ts`):
 - A click or tap on the dial, or the N key (not with Ctrl / Meta / Alt, not while typing), toggles the level map (`#radar-map`); Esc closes it and is captured so it does not also pause. The map collapses on a level change and when radar updates stop for 1.5 s. It does not pause the game.
 - The level map is north-up (world −Z at the top) and fixed-scale: the battlefield boundary circle, 500 m and 1000 m rings around the player, the player's arrow rotated by heading, every radar contact with the same glyphs drawn larger, a legend, and a 64 × 64 land / water underlay sampled once per level from the `RadarTerrainSampler` (a plain grid without one). The panel is 72% of the viewport's shorter side (200–560 px), nearly opaque, redrawn at 20 Hz.
 
-`ModelPreview` builds every boss from its own mesh factory through a lazy `Record<BossType, loader>` (bosses 6–10 from `MagmaColossusMesh`, `AbyssalLeviathanMesh`, `TempestZeppelinMesh`, `PhantomWingMesh`, `OraclePrimeMesh`), scales the visible geometry (hidden parts and sprites excluded) to a fixed bounding sphere — centred on the visible bounding box, its radius the farthest visible vertex from that centre, so the model stays inside it at every rotation — and disposes each previewed model's geometries, materials and instance buffers once, skipping shared resources. `hideSignalLights()` (`src/ui/menu/modelDisposal.ts`) first hides the jet factory's signal-light balls (`navLightPort`, `navLightStarboard`, `strobeLight`, `beaconLight`) on that instance, so they are neither drawn nor framed; `MenuHeroScene` does the same for the title screen's jet. The sphere is framed in the part of the canvas above the name label: after the name is written (and again on resize and on a language switch) `frameCamera()` reads the label's top from the DOM, keeps 8 px clear of it and of the canvas top (the region reaches at least halfway down the canvas), backs the camera off until the sphere's outline is 70% of the canvas's shorter side — the same size for every model — or, where the region is too small for that, until it fits the region's height or width with a margin, and moves the projection centre into the region with `setViewOffset`; before the canvas has a layout it frames the whole canvas. A model whose factory or chunk fails to load writes `Could not load: {name}` / `无法加载：{name}` into the name label and leaves the other models and the way back working; a failed import of the aircraft factory is not kept, so the next visit to that page imports it again (a browser whose module map remembers the failed download still needs a reload). If `show()` cannot create its renderer (no WebGL context) it calls `hide()`, which runs the `setOnBack` callback and so brings the menu back with focus on the Hangar button, and rethrows. The name label stays on one line when it fits (18 px type up to 600 px width); in a landscape viewport up to 520 px tall the header is compressed and the hint line hidden so the stand gets the height. The menu calls this screen the **Hangar** (`#model-preview`, opened from `#preview-btn`): arrow buttons, the Left / Right keys or a horizontal swipe change model, a mouse drag rotates it, `#rotate-toggle` switches auto-rotate, and Esc or the back button returns to the menu. Its `WebGLRenderer` exists only while it is shown — created in `show()`, released with its context in `hide()` — so it never coexists with the title screen's hero renderer or a game's.
+`ModelPreview` builds every boss from its own mesh factory through a lazy `Record<BossType, loader>` (bosses 6–10 from `MagmaColossusMesh`, `AbyssalLeviathanMesh`, `TempestZeppelinMesh`, `PhantomWingMesh`, `OraclePrimeMesh`), scales the visible geometry (hidden parts and sprites excluded) to a fixed bounding sphere — centred on the visible bounding box, its radius the farthest visible vertex from that centre, so the model stays inside it at every rotation — and disposes each previewed model's geometries, materials and instance buffers once, skipping shared resources. `hideSignalLights()` (`src/ui/menu/modelDisposal.ts`) first hides the jet factory's signal-light balls (`navLightPort`, `navLightStarboard`, `strobeLight`, `beaconLight`) on that instance, so they are neither drawn nor framed; `MenuHeroScene` does the same for the title screen's jet. The sphere is framed in the part of the canvas above the name label: after the name is written (and again on resize and on a language switch) `frameCamera()` reads the label's top from the DOM, keeps 8 px clear of it and of the canvas top (the region reaches at least halfway down the canvas), backs the camera off until the sphere's outline is 70% of the canvas's shorter side — the same size for every model — or, where the region is too small for that, until it fits the region's height or width with a margin, and moves the projection centre into the region with `setViewOffset`; before the canvas has a layout it frames the whole canvas. A model whose factory or chunk fails to load writes `Could not load: {name}` / `无法加载：{name}` into the name label and leaves the other models and the way back working; a failed import of the aircraft factory is not kept, so the next visit to that page imports it again (a browser whose module map remembers the failed download still needs a reload). If `show()` cannot create its renderer (no WebGL context) it calls `hide()`, which runs the `setOnBack` callback and so brings the menu back with focus on the Hangar button, and rethrows. The name label stays on one line when it fits (18 px type up to 600 px width); in a landscape viewport up to 520 px tall the header is compressed and the hint line hidden so the stand gets the height. The stand has 22 pages: the player jet, the allied wingman (category `'ally'`, built with `createFriendlyMesh`), the eight enemy jets in `EnemyType` order (pages 3–10), the ten bosses, the player missile and the boss missile. The menu calls this screen the **Hangar** (`#model-preview`, opened from `#preview-btn`): arrow buttons, the Left / Right keys or a horizontal swipe change model, a mouse drag rotates it, `#rotate-toggle` switches auto-rotate, and Esc or the back button returns to the menu. Its `WebGLRenderer` exists only while it is shown — created in `show()`, released with its context in `hide()` — so it never coexists with the title screen's hero renderer or a game's.
 
 ## Input
 
@@ -2485,5 +2778,14 @@ Dev builds only (`import.meta.env.DEV`): `GameCoordinator` dynamically imports `
 - `voice` — `state()` (`VoiceSystem.getDebugState()`), `sample()` (voice and music bus RMS in dBFS, the music's voice-duck level, current line and phase, pack language), `say(lineId, kind = 'radio')`, `radio(key: GenericRadioKey)` and `wingman(id: WingmanId, event: WingmanEvent)`.
 - `balance` — the scripted-pilot balance harness (`installBalanceHarness`, `src/core/dev/BalanceHarness.ts`, with the pilot in `ScriptedPilot.ts`), used to measure the difficulty curve and progression. The pilot's terrain look-ahead also checks lines 14 m either side of its path for walls, so it steers around obstacles such as the Sky Ladder pylons.
 - `grantPowerUp(type = 'DAMAGE')` — emits `POWERUP_COLLECTED` with that power-up's config (unknown types fall back to `DAMAGE`), so the real pickup handler runs (HUD timer, effect, sound); returns the type granted.
+
+Added with the enemy fleet round, for studying one type at a time:
+
+- `spawnEnemy(type, { distance = 450, bearingDeg = 0, count = 1 } = {})` — spawns `count` (1–12) jets of an `EnemyType` name (case-insensitive) at `distance` m (clamped to 30–2,000) on a bearing relative to the player's nose (0 ahead, 90 right, 180 behind), fanned 12° apart, at the player's height or 45 m above the terrain, whichever is higher. It uses the boss-minion spawn path (level and difficulty scaling, the type's doctrine, fire and kill events) but does not count toward the level's spawned total. Returns the number spawned (0 for an unknown type or before the enemy system exists).
+- `listJets()` — the live enemy jets: `{ type, health, position, distance, phase, hasAttackToken, cloaked }`, where `phase` is `EnemyAI.getDoctrinePhase()` (`'stunned'` while stunned, `'legacy'` without a doctrine).
+- `clearJets()` — removes every enemy jet and portal (no score, no death events, wave counters untouched); returns the number removed.
+- `holdWaves(on)` — holds or resumes the normal waves (no spawning, settling or next wave, and portals already open do not release their jets; jets already in the air keep flying); returns the current state.
+- `startLevel(level, wave = 1)` — moves the campaign to that level and wave (`wave` 1-based, as on the HUD; clamped to the level's waves) through the same entry path as continuing from a checkpoint (`prepareLevel` → `startLevelCombat`), with weapons unlocked through that level; bought upgrades, upgrade points, score and lives are unchanged. Returns `{ level, wave, waveIndex }`, or `false` during a story hold, with the hangar open, outside a running game, in Boss mode or for an unknown level.
+- `getState()` also reports `waveArrival`, `waveLineup` and `waveGroupCenters` (one centre, two for a pincer) for the current wave.
 
 `getState()` also carries an `aim` block from `DevHookAccess.getAimState?()` (`null` when the access object does not provide it): `reticle` and `gunCross` as screen pixels (`null` while off screen), `gunCrossAssisted`, `acquireRadius` and `keepRadius` in pixels, `lockState`, `lockProgress`, `hasTarget`, `missiles`, `leadPip` and `gunAssist`. The scripted pilot presses the missile key in a hold-and-release cadence (1.4 s held, 0.25 s released), because one press fires one missile.

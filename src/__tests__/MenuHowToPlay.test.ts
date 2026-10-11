@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { GameConfig } from '@/config';
+import { GAME_CONSTANTS, GameConfig } from '@/config';
 import { setLocale, type Locale } from '@/i18n';
 import { StartMenu } from '@/ui/StartMenu';
 import { LOCALES, resetLocale } from './i18nTestUtils';
@@ -9,6 +9,7 @@ import {
   click,
   isDialogShowing,
   isShown,
+  last,
   prepareMenuEnvironment,
   press,
   readableText,
@@ -497,20 +498,111 @@ describe('How to Play sheet (batch X5, spec 6)', () => {
       }
     });
 
-    it.each(LOCALES)('aim assist is explained on the touch page only (%s)', (locale) => {
-      // 机炮辅助瞄准只在触控设备上启用（GameCoordinator 用 GameConfig.isMobile 开关）
-      setLocale(locale);
-      createMenu('touch');
-      openHowTo();
-      expectShowing('touch');
+    /**
+     * 机炮辅助瞄准两种操作方式都有（GameCoordinator 按设备选锥角）；键盘的锥角是触屏的一半
+     * （GAME_CONSTANTS.GUN_ASSIST 的 KEYBOARD_*），所以键盘页的说法要比触屏页轻：
+     * 目标几乎正对机头才起作用，十字只是小幅移动。触屏页的那一句没有变。
+     */
+    describe('gun aim assist', () => {
+      const TOUCH_NOTE: Readonly<Record<Locale, string>> = {
+        en: 'Aim assist: when a target is close to your nose, the gun cross slides onto it and your shots follow.',
+        'zh-CN': '辅助瞄准：目标靠近机头时，机炮十字会滑到目标上，子弹跟着十字走。',
+      };
 
-      expect(readableText(panelOf('touch'))).toMatch(AIM_ASSIST[locale]);
+      /** 这一页里讲辅助瞄准的句子（一句 = 一个不再含子元素的文字节点） */
+      function assistNotes(view: View, locale: Locale): HTMLElement[] {
+        return Array.from(panelOf(view).querySelectorAll<HTMLElement>('*')).filter(
+          (node) => node.children.length === 0 && AIM_ASSIST[locale].test(node.textContent ?? '')
+        );
+      }
 
-      // 键盘页不许诺它：桌面端没有这个辅助
-      click(tab('keyboard'));
-      expectShowing('keyboard');
-      expect(readableText(panelOf('keyboard'))).toMatch(BOOST[locale]);
-      expect(readableText(panelOf('keyboard'))).not.toMatch(AIM_ASSIST[locale]);
+      function noteText(view: View, locale: Locale): string {
+        const notes = assistNotes(view, locale);
+        expect(notes, `one aim-assist note on the ${view} page`).toHaveLength(1);
+        return (notes[0].textContent ?? '').trim();
+      }
+
+      function openOn(view: View, locale: Locale): void {
+        setLocale(locale);
+        createMenu(view === 'touch' ? 'touch' : 'desktop');
+        openHowTo();
+        expectShowing(view);
+      }
+
+      it.each(LOCALES)('both pages explain it (%s)', (locale) => {
+        openOn('keyboard', locale);
+
+        expect(assistNotes('keyboard', locale)).toHaveLength(1);
+        expect(isShown(assistNotes('keyboard', locale)[0])).toBe(true);
+
+        click(tab('touch'));
+        expect(assistNotes('touch', locale)).toHaveLength(1);
+        expect(isShown(assistNotes('touch', locale)[0])).toBe(true);
+      });
+
+      it.each(LOCALES)('the touch note reads as it did (%s)', (locale) => {
+        openOn('touch', locale);
+
+        expect(noteText('touch', locale)).toBe(TOUCH_NOTE[locale]);
+      });
+
+      it.each(LOCALES)(
+        'the keyboard note promises no more than a slight shift, for a target almost dead ahead (%s)',
+        (locale) => {
+          openOn('keyboard', locale);
+
+          const note = noteText('keyboard', locale);
+
+          // 幅度：写明只是小幅移动
+          expect(note).toMatch(locale === 'en' ? /\bslight(?:ly)?\b/i : /小幅|略微|稍微|轻微/);
+          // 条件：目标几乎正对机头，比触屏页的“靠近机头”窄
+          expect(note).toMatch(locale === 'en' ? /\b(?:almost|nearly)\b/i : /几乎/);
+          // 不照搬触屏页的说法（十字“滑到目标上”），也不说成锁定 / 自动瞄准
+          expect(note).not.toBe(TOUCH_NOTE[locale]);
+          expect(note).not.toMatch(
+            locale === 'en'
+              ? /\bslides?\b|close to your nose|\bsnaps?\b|\block|\bauto/i
+              : /滑到|靠近机头|锁定|自动|吸附/
+          );
+        }
+      );
+
+      it.each(LOCALES)('the keyboard note belongs to the gun row (%s)', (locale) => {
+        openOn('keyboard', locale);
+
+        const [note] = assistNotes('keyboard', locale);
+        // 它前面最近的那一行按键说明
+        const rowsBefore = Array.from(panelOf('keyboard').querySelectorAll('dd')).filter(
+          (action) =>
+            (action.compareDocumentPosition(note) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0
+        );
+        const owner = last(rowsBefore);
+
+        expect(owner, 'a key row before the note').toBeDefined();
+        expect(readableText(owner ?? null)).toMatch(locale === 'en' ? /fire guns/i : /开火/);
+        expect(readableText(owner ?? null)).not.toMatch(MISSILE[locale]);
+      });
+
+      it('follows a language switch on both pages', () => {
+        openOn('keyboard', 'en');
+        const english = noteText('keyboard', 'en');
+
+        setLocale('zh-CN');
+
+        expect(assistNotes('keyboard', 'en')).toEqual([]);
+        expect(noteText('keyboard', 'zh-CN')).not.toBe(english);
+        click(tab('touch'));
+        expect(noteText('touch', 'zh-CN')).toBe(TOUCH_NOTE['zh-CN']);
+      });
+
+      it('the tuning backs the wording: a keyboard cone that exists and is narrower than the touch cone', () => {
+        const assist = GAME_CONSTANTS.GUN_ASSIST;
+
+        expect(assist.KEYBOARD_FULL_ANGLE).toBeGreaterThan(0);
+        expect(assist.KEYBOARD_FULL_ANGLE).toBeLessThan(assist.FULL_ANGLE);
+        expect(assist.KEYBOARD_OUTER_ANGLE).toBeGreaterThan(assist.KEYBOARD_FULL_ANGLE);
+        expect(assist.KEYBOARD_OUTER_ANGLE).toBeLessThan(assist.OUTER_ANGLE);
+      });
     });
 
     it.each(LOCALES)('the touch page says the radar opens the level map (%s)', (locale) => {

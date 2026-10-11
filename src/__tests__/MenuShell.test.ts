@@ -30,6 +30,8 @@ import {
 /**
  * 批次 X5 · 规格 10：启动外壳（src/main.ts + index.html 的 #loading-screen）。
  *
+ * 入口模块启动时不等任何东西：文档解析完（readyState 不再是 loading）就当场建好菜单，随 index.html
+ * 一起发下来的加载画面随即淡出；启动不了（没有 WebGL、菜单建不出来）时加载画面换成一条报错。
  * 加载画面与“进入战场”画面按界面语言显示、不带表情符号；从菜单开局要等菜单的过场
  * （whenLaunched()）结束、菜单已经隐藏之后才启动游戏；退回主菜单时先销毁游戏、
  * 再 reloadFromStorage()、再显示菜单。
@@ -51,6 +53,7 @@ const COPY = {
   entering: { en: 'Entering the battlefield', zh: '正在进入战场' },
   failed: { en: 'Failed to load', zh: '加载失败' },
   noWebGL: { en: 'Your browser does not support WebGL.', zh: '您的浏览器不支持 WebGL' },
+  initFailed: { en: 'failed to initialize', zh: '初始化失败' },
   retryAdvice: {
     en: 'Try reloading the page or using a different browser.',
     zh: '请尝试刷新页面或使用其他浏览器',
@@ -136,10 +139,13 @@ vi.mock('@/core/campaign/MenuMusic', () => ({
 
 interface BootOptions {
   language?: Locale;
-  /** 配置迟迟不来：停在加载画面 */
-  holdConfig?: boolean;
-  /** 配置加载失败 */
-  failConfig?: boolean;
+  /**
+   * 入口模块载入那一刻文档所处的状态（缺省 'complete'）。
+   * 'loading' = 文档还没解析完：入口模块要等 DOMContentLoaded，见 Shell.documentReady()
+   */
+  readyState?: DocumentReadyState;
+  /** 菜单建不出来（构造函数抛错） */
+  failMenu?: boolean;
   /** 浏览器不支持 WebGL */
   noWebGL?: boolean;
 }
@@ -147,7 +153,8 @@ interface BootOptions {
 interface Shell {
   /** 入口模块所用的那份 i18n（与本文件静态导入的不是同一个实例） */
   i18n: typeof import('@/i18n');
-  releaseConfig: () => void;
+  /** 文档解析完了：readyState 变成 'interactive'，并派发 DOMContentLoaded */
+  documentReady: () => void;
 }
 
 /** 入口模块交给菜单的两个回调：菜单“要求开局 / 续玩”时调用的就是它们 */
@@ -159,6 +166,7 @@ interface MenuRequests {
 describe('boot shell: src/main.ts and #loading-screen (batch X5, spec 10)', () => {
   let menus: StartMenu[] = [];
   let menuRequests: MenuRequests = { start: null, resume: null };
+  let menuModuleReplaced = false;
   let originalTitle: string;
   let originalLang: string | null;
   let consoleError: ReturnType<typeof vi.spyOn>;
@@ -182,7 +190,7 @@ describe('boot shell: src/main.ts and #loading-screen (batch X5, spec 10)', () =
     return menu !== null && isShown(menu);
   }
 
-  /** 载入入口模块，等它走到“菜单出现 / 报错 / 等配置” */
+  /** 载入入口模块，等它走到“菜单出现 / 报错 / 等文档解析完” */
   async function boot(options: BootOptions = {}): Promise<Shell> {
     if (options.language) {
       saveStartFlowSettings({ language: options.language });
@@ -193,19 +201,28 @@ describe('boot shell: src/main.ts and #loading-screen (batch X5, spec 10)', () =
         ? ({} as RenderingContext)
         : null) as HTMLCanvasElement['getContext']);
 
-    const { configLoader } = await import('@/core/utils/ConfigLoader');
-    let releaseConfig = (): void => undefined;
-    vi.spyOn(configLoader, 'load').mockImplementation(() => {
-      if (options.failConfig) {
-        return Promise.reject(new Error('config unavailable'));
-      }
-      if (!options.holdConfig) {
-        return Promise.resolve({} as Awaited<ReturnType<typeof configLoader.load>>);
-      }
-      return new Promise((resolve) => {
-        releaseConfig = () => resolve({} as Awaited<ReturnType<typeof configLoader.load>>);
-      });
-    });
+    let readyState: DocumentReadyState = options.readyState ?? 'complete';
+    vi.spyOn(document, 'readyState', 'get').mockImplementation(() => readyState);
+    const documentReady = (): void => {
+      readyState = 'interactive';
+      document.dispatchEvent(new Event('DOMContentLoaded'));
+    };
+
+    if (options.failMenu) {
+      // 菜单建不出来：入口模块拿到的 StartMenu 一构造就抛错（真的菜单这个用例里不出场）
+      vi.doMock('@/ui/StartMenu', () => ({
+        StartMenu: class {
+          constructor() {
+            throw new Error('the menu could not be built');
+          }
+        },
+      }));
+      menuModuleReplaced = true;
+      await import('@/main');
+      const failedShellI18n = await import('@/i18n');
+      await settle();
+      return { i18n: failedShellI18n, documentReady };
+    }
 
     // 入口模块自己造菜单、不对外暴露：从原型上接住实例，并给生命周期调用记个先后
     const { StartMenu: MenuClass } = await import('@/ui/StartMenu');
@@ -257,11 +274,11 @@ describe('boot shell: src/main.ts and #loading-screen (batch X5, spec 10)', () =
 
     await import('@/main');
     const i18n = await import('@/i18n');
-    if (!options.holdConfig && !options.failConfig && !options.noWebGL) {
+    if (readyState !== 'loading' && !options.noWebGL) {
       await settleUntil(() => document.getElementById('start-menu') !== null);
     }
     await settle();
-    return { i18n, releaseConfig: () => releaseConfig() };
+    return { i18n, documentReady };
   }
 
   /** 等替身游戏被造出来（import('./core/GameCoordinator') 要让出几轮事件循环） */
@@ -311,6 +328,10 @@ describe('boot shell: src/main.ts and #loading-screen (batch X5, spec 10)', () =
     }
     menus = [];
     await settle(2);
+    if (menuModuleReplaced) {
+      vi.doUnmock('@/ui/StartMenu');
+      menuModuleReplaced = false;
+    }
     resetMenuEnvironment();
     document.title = originalTitle;
     if (originalLang === null) {
@@ -337,39 +358,125 @@ describe('boot shell: src/main.ts and #loading-screen (batch X5, spec 10)', () =
       expect(shipped.getElementById('loading-screen')?.textContent ?? '').not.toMatch(EMOJI);
       expect(shipped.title).not.toMatch(EMOJI);
     });
+
+    it('is on screen while the game script downloads: no script blocks the page before it', () => {
+      // 启动时不再等任何东西，加载画面只管“脚本还没下载、执行完”的这一段：
+      // 页面里的脚本都不阻塞解析（模块脚本 / defer / async），而且排在加载画面之后
+      const shipped = new DOMParser().parseFromString(SHIPPED_HTML, 'text/html');
+      const screen = shipped.getElementById('loading-screen') as HTMLElement;
+      const scripts = Array.from(shipped.querySelectorAll('script'));
+
+      expect(scripts.some((script) => (script.getAttribute('src') ?? '').includes('main'))).toBe(
+        true
+      );
+      for (const script of scripts) {
+        const where = script.getAttribute('src') ?? 'inline script';
+        expect(
+          script.getAttribute('type') === 'module' ||
+            script.hasAttribute('defer') ||
+            script.hasAttribute('async'),
+          `${where}: does not block parsing`
+        ).toBe(true);
+        expect(
+          (screen.compareDocumentPosition(script) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0,
+          `${where}: comes after the loading screen`
+        ).toBe(true);
+      }
+    });
   });
 
-  describe('while the game is loading', () => {
-    it.each(LOCALES)('shows the loading screen in the saved language (%s)', async (locale) => {
-      await boot({ language: locale, holdConfig: true });
+  describe('before the document is ready', () => {
+    // 入口模块在文档还没解析完时载入（readyState === 'loading'）：等 DOMContentLoaded，
+    // 这之前页面上只有随 index.html 发下来的那张加载画面
+    it('leaves the shipped loading screen up and builds nothing', async () => {
+      await boot({ language: 'zh-CN', readyState: 'loading' });
+      await vi.advanceTimersByTimeAsync(2000);
 
       expect(isLoadingScreenUp()).toBe(true);
-      expect(loadingText()).toContain(textIn(COPY.loading, locale));
-      expect(loadingText()).toContain(textIn(COPY.tagline, locale));
       expect(loadingText()).toMatch(/AIR\s*SUPREME/);
-      expect(loadingScreen().textContent ?? '').not.toMatch(EMOJI);
-      expect(document.title).toBe(textIn(COPY.pageTitle, locale));
-      expect(document.documentElement.lang).toBe(locale);
+      expect(loadingScreen().querySelector('[role="alert"]'), 'no error').toBeNull();
       expect(document.getElementById('start-menu'), 'no menu yet').toBeNull();
+      expect(coordinators(), 'no game').toHaveLength(0);
+      expect(consoleError).not.toHaveBeenCalled();
     });
+
+    it('the title screen is there the moment the document is ready: nothing else is waited for', async () => {
+      const shell = await boot({ readyState: 'loading' });
+      expect(document.getElementById('start-menu')).toBeNull();
+
+      shell.documentReady();
+
+      // 同一步里：没有让出事件循环，也没有走任何定时器
+      expect(isMenuShowing()).toBe(true);
+      expect(isOperable(byId('start-btn'))).toBe(true);
+    });
+
+    it.each(LOCALES)(
+      'once ready, the title screen takes over in the saved language (%s)',
+      async (locale) => {
+        const shell = await boot({ language: locale, readyState: 'loading' });
+
+        shell.documentReady();
+        await vi.advanceTimersByTimeAsync(1000);
+
+        expect(isMenuShowing()).toBe(true);
+        expect(readableText(byId('start-btn'))).toContain(textIn(COPY.newCampaign, locale));
+        expect(document.title).toBe(textIn(COPY.pageTitle, locale));
+        expect(document.documentElement.lang).toBe(locale);
+        expect(isLoadingScreenUp()).toBe(false);
+        expect(coordinators(), 'no game was started').toHaveLength(0);
+      }
+    );
+  });
+
+  describe('at start-up', () => {
+    it.each(['interactive', 'complete'] as const)(
+      'starts straight away when the document is already %s',
+      async (readyState) => {
+        await boot({ readyState });
+
+        expect(isMenuShowing()).toBe(true);
+        expect(document.querySelectorAll('#start-menu')).toHaveLength(1);
+      }
+    );
+
+    it.each(LOCALES)(
+      'the loading screen reads in the saved language for as long as it is up (%s)',
+      async (locale) => {
+        await boot({ language: locale });
+
+        // 没有要等的东西了：菜单已经在它后面，加载画面正在淡出（还没收起）
+        expect(isLoadingScreenUp(), 'it leaves with a fade, not in the same frame').toBe(true);
+        expect(loadingText()).toContain(textIn(COPY.loading, locale));
+        expect(loadingText()).toContain(textIn(COPY.tagline, locale));
+        expect(loadingText()).toMatch(/AIR\s*SUPREME/);
+        expect(loadingScreen().textContent ?? '').not.toMatch(EMOJI);
+        expect(loadingScreen().querySelector('[role="alert"]'), 'no error').toBeNull();
+        expect(document.title).toBe(textIn(COPY.pageTitle, locale));
+        expect(document.documentElement.lang).toBe(locale);
+        expect(isMenuShowing(), 'the title screen is already behind it').toBe(true);
+      }
+    );
 
     it('is in English when no language was ever saved', async () => {
-      await boot({ holdConfig: true });
+      await boot();
+
       expect(loadingText()).toContain(COPY.loading.en);
       expect(loadingText()).not.toContain(COPY.loading.zh);
+      expect(document.title).toBe(COPY.pageTitle.en);
+      expect(readableText(byId('start-btn'))).toContain(COPY.newCampaign.en);
     });
 
-    it('gives way to the title screen once loading is done', async () => {
-      const shell = await boot({ holdConfig: true });
+    it('gives way to the title screen', async () => {
+      await boot();
       expect(isLoadingScreenUp()).toBe(true);
 
-      shell.releaseConfig();
-      await settleUntil(() => document.getElementById('start-menu') !== null);
       await vi.advanceTimersByTimeAsync(1000);
 
       expect(isMenuShowing()).toBe(true);
       expect(isLoadingScreenUp()).toBe(false);
       expect(coordinators(), 'no game was started').toHaveLength(0);
+      expect(consoleError).not.toHaveBeenCalled();
     });
 
     it('goes at once, without a fade, under prefers-reduced-motion', async () => {
@@ -380,6 +487,20 @@ describe('boot shell: src/main.ts and #loading-screen (batch X5, spec 10)', () =
       expect(isLoadingScreenUp()).toBe(false);
     });
 
+    it('stays away: nothing brings the loading screen back while the player is on the menu', async () => {
+      await boot();
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(isLoadingScreenUp()).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(5000);
+      await settle();
+
+      expect(isLoadingScreenUp()).toBe(false);
+      expect(isMenuShowing()).toBe(true);
+    });
+  });
+
+  describe('when start-up cannot go ahead', () => {
     it.each(LOCALES)(
       'a browser without WebGL gets a localized error instead of a menu (%s)',
       async (locale) => {
@@ -399,17 +520,71 @@ describe('boot shell: src/main.ts and #loading-screen (batch X5, spec 10)', () =
     it.each(LOCALES)(
       'a failed start-up says so, localized and without emoji (%s)',
       async (locale) => {
-        await boot({ language: locale, failConfig: true });
-        await settle();
+        await boot({ language: locale, failMenu: true });
 
         expect(isLoadingScreenUp()).toBe(true);
         const alert = loadingScreen().querySelector('[role="alert"]');
+        expect(alert, 'announced as an alert').not.toBeNull();
         expect(readableText(alert)).toContain(textIn(COPY.failed, locale));
+        expect(readableText(alert)).toContain(textIn(COPY.initFailed, locale));
         expect(readableText(alert)).toContain(textIn(COPY.retryAdvice, locale));
         expect(loadingScreen().textContent ?? '').not.toMatch(EMOJI);
         expect(isMenuShowing()).toBe(false);
+        expect(coordinators(), 'no game').toHaveLength(0);
       }
     );
+
+    it('a failed start-up is reported to the console once, with the cause', async () => {
+      await boot({ failMenu: true });
+
+      expect(consoleError).toHaveBeenCalledTimes(1);
+      const reported = consoleError.mock.calls[0].filter(
+        (argument: unknown) => argument instanceof Error
+      );
+      expect(reported.map((error: Error) => error.message)).toEqual([
+        'the menu could not be built',
+      ]);
+    });
+
+    it.each([
+      ['a browser without WebGL', { noWebGL: true }],
+      ['a failed start-up', { failMenu: true }],
+    ] as const)('%s: the error stays on screen, it does not fade away', async (_name, options) => {
+      await boot(options);
+
+      await vi.advanceTimersByTimeAsync(5000);
+      await settle();
+
+      expect(isLoadingScreenUp()).toBe(true);
+      expect(loadingScreen().querySelector('[role="alert"]')).not.toBeNull();
+      expect(loadingText()).not.toContain(COPY.loading.en + '…');
+    });
+
+    it.each([
+      ['a browser without WebGL', { noWebGL: true }],
+      ['a failed start-up', { failMenu: true }],
+    ] as const)('%s: the error shows under prefers-reduced-motion too', async (_name, options) => {
+      stubMatchMedia({ reducedMotion: true });
+      await boot(options);
+
+      expect(isLoadingScreenUp()).toBe(true);
+      expect(readableText(loadingScreen().querySelector('[role="alert"]'))).toContain(
+        COPY.failed.en
+      );
+    });
+
+    it('an error found once the document is ready is shown the same way', async () => {
+      const shell = await boot({ readyState: 'loading', noWebGL: true });
+      expect(loadingScreen().querySelector('[role="alert"]'), 'not before').toBeNull();
+
+      shell.documentReady();
+
+      expect(isLoadingScreenUp()).toBe(true);
+      expect(readableText(loadingScreen().querySelector('[role="alert"]'))).toContain(
+        COPY.noWebGL.en
+      );
+      expect(document.getElementById('start-menu')).toBeNull();
+    });
   });
 
   describe('starting a run from the menu', () => {

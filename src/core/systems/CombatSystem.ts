@@ -112,7 +112,8 @@ export class CombatSystem implements IGameSystem {
           payload.direction,
           payload.damage,
           payload.owner,
-          payload.faction
+          payload.faction,
+          payload.weapon
         );
       })
     );

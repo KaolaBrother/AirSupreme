@@ -1,12 +1,26 @@
 import type * as THREE from 'three';
+import { Faction } from '@/core/Faction';
 import type { ContrailHandle, ContrailSystem } from '@/features/effects/ContrailSystem';
 
 /** 拖尾挂载同步间隔（秒）：敌机 / 僚机的出生与坠毁不需要逐帧对账 */
 const SYNC_INTERVAL = 0.3;
 
+/** 敌机尾迹：红橙色（玩家机保持 ContrailSystem 的默认白色） */
+const HOSTILE_CONTRAIL_COLOR = 0xff5a3c;
+/** 友军僚机尾迹：淡蓝色 */
+const ALLIED_CONTRAIL_COLOR = 0x7fd4ff;
+
+/** 僚机网格由 createFriendlyMesh 标记 userData.faction = Faction.FRIENDLY，其余一律按敌机处理 */
+function getContrailColor(mesh: THREE.Object3D): number {
+  return mesh.userData.faction === Faction.FRIENDLY
+    ? ALLIED_CONTRAIL_COLOR
+    : HOSTILE_CONTRAIL_COLOR;
+}
+
 /**
  * 翼尖凝结尾迹的挂载管理：玩家机常驻，敌机与友军僚机按存活列表定期对账（新出现的挂载，
  * 消失 / 坠毁的解除，拖尾自然淡出后回收）。ContrailSystem 按需加载。
+ * 尾迹按阵营着色：玩家白色、敌机红橙、僚机淡蓝。
  */
 export class ContrailController {
   private system: ContrailSystem | null = null;
@@ -62,7 +76,11 @@ export class ContrailController {
       if (!mesh.visible) continue;
       this.alive.add(mesh);
       if (!this.handles.has(mesh)) {
-        const handle = system.attach(mesh, { width: 0.42, lifetime: 1.6 });
+        const handle = system.attach(mesh, {
+          width: 0.42,
+          lifetime: 1.6,
+          color: getContrailColor(mesh),
+        });
         if (handle >= 0) {
           this.handles.set(mesh, handle);
         }

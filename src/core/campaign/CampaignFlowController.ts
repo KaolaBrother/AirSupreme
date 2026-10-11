@@ -513,6 +513,33 @@ export class CampaignFlowController {
   }
 
   /**
+   * 后台存档（页面转入后台 / 关闭；GameCoordinator.saveCampaignInBackground）：和“保存并退出”一样，
+   * 把此刻的快照静默重写在当前进度的检查点位置上，只是不退出——除了存储，不动任何运行状态
+   * （对局里的生命数不变），也不触发任何演出。什么时候不写也和“保存并退出”相同：Boss 模式、
+   * 还没到第一个检查点、战役已通关、本局已结束（这些情况下连存储都不读）。
+   *
+   * 转入后台不是玩家自己选的存档，所以它不能让“从检查点重试 / 继续战役”比被它覆盖的那份检查点
+   * 更糟：存储里现有的检查点如果就在同一个位置（类型、关卡、波次都相同——这一波 / Boss 战 / 机库
+   * 开始时写的那份，或之后在这里重写的那份），写入的生命数取已存的与此刻的两者中较大的；其余
+   * （分数、导弹、升级、特殊武器与弹药、热焰弹、视角、统计）一律按此刻。存储里没有检查点、
+   * 读不出来，或者是别的位置：原样写此刻的状态。
+   * 检查点只有一个存档位，新开一局时清空、读档续玩时沿用，所以同一位置上已存的那份就是本局的。
+   */
+  public saveInBackground(): void {
+    const point = this.exitPoint;
+    if (!point || this.deps.session.isBossMode() || this.isRunOver()) return;
+    const stored = loadCampaignCheckpoint();
+    const storedLives =
+      stored &&
+      stored.checkpoint === point.kind &&
+      stored.level === point.level &&
+      stored.wave === point.wave
+        ? stored.lives
+        : undefined;
+    this.writeCheckpoint(point.kind, point.level, point.wave, false, storedLives);
+  }
+
+  /**
    * 读回来的检查点是不是这一次刚写的：存档时间不早于这次写入开始，位置和分数与写入的一致
    * （存储把分数取整，所以按“相差不到 1 分”比）。
    */
@@ -555,13 +582,15 @@ export class CampaignFlowController {
   /**
    * 写检查点（正常模式）。announce：显示存档提示（HUD + 存档音效）；机库“出击”时的重写不提示
    * （紧接着就是章节卡片）。'hangar' 的 level 是即将开始的那一关。
+   * minLives：只有后台存档给（见 saveInBackground）——快照里的生命数比它少时写它，其余不变。
    * 返回交给存储的那份快照；存储没有接受（Boss 模式、本局已结束、存储不可用或已满）时为 null。
    */
   private writeCheckpoint(
     kind: CheckpointKind,
     level: number,
     wave: number,
-    announce: boolean = true
+    announce: boolean = true,
+    minLives?: number
   ): CampaignCheckpointInput | null {
     const session = this.deps.session;
     if (session.isBossMode() || this.isRunOver()) return null;
@@ -569,6 +598,9 @@ export class CampaignFlowController {
     const data = this.deps.captureCheckpoint(kind, level, wave);
     data.stats = this.getRunStats();
     data.swiftJoined = this.swiftJoined;
+    if (minLives !== undefined && minLives > data.lives) {
+      data.lives = minLives;
+    }
     if (!saveCampaignCheckpoint(data)) return null;
     if (!announce) return data;
     let label: HudText;

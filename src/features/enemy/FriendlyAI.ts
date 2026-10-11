@@ -1,6 +1,38 @@
 import * as THREE from 'three';
 import { EnemyAI } from './EnemyAI';
-import { EnemyConfig } from './EnemyTypes';
+import { EnemyAIState, EnemyConfig, EnemyType, FRIENDLY_TRAIL_COLOR } from './EnemyTypes';
+
+/**
+ * 僚机的固定数值（战斗机级）：与敌机机型表脱钩——敌方机型怎么改，僚机都保持这一份。
+ * type 仍是 FIGHTER：机体工厂与血条标签（“友军战斗机”）按它取名。
+ */
+export const WINGMAN_CONFIG: Readonly<EnemyConfig> = {
+  type: EnemyType.FIGHTER,
+  name: { en: 'Fighter', zh: '战斗机' },
+  health: 100,
+  speed: 55,
+  damage: 7.5,
+  detectionRange: 100,
+  attackRange: 30,
+  attackCooldown: 0.5,
+  evasionChance: 0.15,
+  accuracy: 0.5,
+  fireSpreadAngle: 45,
+  turnSpeed: 2.0,
+  maxRollAngle: Math.PI / 4,
+  wanderRadius: 60,
+  stateProbabilities: {
+    [EnemyAIState.CHASE]: 0.325,
+    [EnemyAIState.FIXED_DIRECTION]: 0.475,
+    [EnemyAIState.CIRCLE]: 0.2,
+  },
+  stateDurationRange: [4, 8],
+  circleRadius: 120,
+  circleHeight: 40,
+  scoreValue: 100,
+  color: 0xff4444,
+  scale: 1.0,
+};
 
 /**
  * 编队位（玩家水平航向坐标系，米）：0 号在左、1 号在右，之后左右交替向外、向后错开。
@@ -131,7 +163,8 @@ export class FriendlyAI {
   private readonly playerHeading = new THREE.Vector3(0, 0, -1);
 
   constructor(mesh: THREE.Group, config: EnemyConfig, scene: THREE.Scene) {
-    this.enemy = new EnemyAI(mesh, config, scene);
+    // 不给条令：僚机保持旧的三状态行为与单发机炮，不随敌机条令变化；尾迹用友军淡蓝
+    this.enemy = new EnemyAI(mesh, config, scene, { trailColor: FRIENDLY_TRAIL_COLOR });
 
     mesh.userData.isFriendly = true;
 

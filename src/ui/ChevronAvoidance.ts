@@ -12,7 +12,9 @@ import {
  * - 雷达盘（#radar-minimap）；
  * - 触控布局下的摇杆（#joystick）和每个可见的按键（.touch-btn）；
  * - HUD 面板：得分 / 速度 / 强化 / 右上状态 / 生命条，以及顶部消息栈（#hud-top-stack）里
- *   正在显示的每一块（Boss 阶段条、简报、事件目标……）。
+ *   正在显示的每一块（Boss 阶段条、简报、事件目标……）；
+ * - 手机竖屏下正在显示的无线电面板（#radio-comms）：它在按键簇左侧、摇杆上方，正是箭头从
+ *   摇杆和按键簇移出来的落点。平板和横握的无线电面板照旧不算避让区。
  *
  * 约每秒量一次这些元素的位置（不逐帧读布局）；触摸按下 / 抬起时浮动摇杆会移位，另外补量一次。
  * 箭头连同距离标签碰到任何一块避让区（外扩 8px）时，朝屏幕中心移出去：沿屏幕边滑到空位，
@@ -27,12 +29,16 @@ const TOUCH_STICK_ID = 'joystick';
 const TOUCH_BUTTON_SELECTOR = '.touch-btn';
 const HUD_PANEL_IDS = ['hud-score', 'hud-speed', 'hud-upgrades', 'hud-status', 'hud-health'];
 const HUD_TOP_STACK_ID = 'hud-top-stack';
+const RADIO_ELEMENT_ID = 'radio-comms';
+const RADIO_PORTRAIT_DENSITY = 'touch-portrait';
+/** 手机档的屏宽上限：与 radioStyles 的手机竖屏规则（max-width: 699.98px）一致，再宽就是平板 */
+const PHONE_MAX_WIDTH_PX = 700;
 const AVOID_MARGIN_PX = 8;
 const AVOID_RECT_REFRESH_UPDATES = 30;
 /** 摇杆松手后缓动回原位（index.html：0.18 秒）：等这么多次刷新再量 */
 const AVOID_SETTLE_UPDATES = 15;
 /**
- * 雷达盘 + 摇杆 + 8 个按键 + 5 块 HUD 面板 + 顶部消息栈里的几块，留一点余量；
+ * 雷达盘 + 摇杆 + 8 个按键 + 5 块 HUD 面板 + 顶部消息栈里的几块 + 无线电面板，留一点余量；
  * 每块 4 个数（left, top, right, bottom）
  */
 const AVOID_MAX_RECTS = 24;
@@ -55,6 +61,13 @@ export type ChevronAvoidExit =
   | typeof EXIT_HORIZONTAL
   | typeof EXIT_VERTICAL;
 
+/** 避让区的来源（决定它怎么与别的块合并、怎么出） */
+const KIND_RADAR = 0;
+const KIND_STICK = 1;
+const KIND_BUTTON = 2;
+const KIND_PANEL = 3;
+type AvoidKind = typeof KIND_RADAR | typeof KIND_STICK | typeof KIND_BUTTON | typeof KIND_PANEL;
+
 const TOUCH_LAYOUT_EVENTS = ['touchstart', 'touchend', 'touchcancel'] as const;
 
 export class ChevronAvoidance {
@@ -69,8 +82,10 @@ export class ChevronAvoidance {
   private readonly rects = new Float32Array(AVOID_MAX_RECTS * 4);
   // 每块避让区是否优先横向出（1 = 雷达盘单独成块；与别的遮挡并成一块后为 0）
   private readonly sideways = new Uint8Array(AVOID_MAX_RECTS);
-  // 每块避让区是否含 HUD 面板（1 = 是）：这类块只在不多盖住空位时才与别的块合并
+  // 每块避让区是否含 HUD 面板（1 = 是）：这类块不并进单独成块的雷达盘
   private readonly panel = new Uint8Array(AVOID_MAX_RECTS);
+  // 每块避让区是否只由触控按键组成（1 = 是）：按键与按键总是并成一簇
+  private readonly button = new Uint8Array(AVOID_MAX_RECTS);
   private count: number = 0;
   private age: number = AVOID_RECT_REFRESH_UPDATES;
   // resolve 用：箭头中心的活动范围，以及已找到的最近空位的位移
@@ -133,27 +148,37 @@ export class ChevronAvoidance {
     }
     this.age = 0;
     this.count = 0;
-    this.addRect(document.getElementById(RADAR_ELEMENT_ID), true, false);
+    this.addRect(document.getElementById(RADAR_ELEMENT_ID), KIND_RADAR);
 
     const controls = document.getElementById(TOUCH_CONTROLS_ID);
     const controlsRect = controls?.getBoundingClientRect();
     if (controls && controlsRect && controlsRect.width > 0 && controlsRect.height > 0) {
-      this.addRect(document.getElementById(TOUCH_STICK_ID), false, false);
+      this.addRect(document.getElementById(TOUCH_STICK_ID), KIND_STICK);
       const buttons = controls.querySelectorAll(TOUCH_BUTTON_SELECTOR);
       for (let index = 0; index < buttons.length; index++) {
-        this.addRect(buttons[index], false, false);
+        this.addRect(buttons[index], KIND_BUTTON);
       }
     }
 
     for (let index = 0; index < HUD_PANEL_IDS.length; index++) {
-      this.addRect(document.getElementById(HUD_PANEL_IDS[index]), false, true);
+      this.addRect(document.getElementById(HUD_PANEL_IDS[index]), KIND_PANEL);
     }
     // 消息栈本身横跨一整行，只量里面正在显示的每一块
     const stackItems = document.getElementById(HUD_TOP_STACK_ID)?.children;
     if (stackItems) {
       for (let index = 0; index < stackItems.length; index++) {
-        this.addRect(stackItems[index], false, true);
+        this.addRect(stackItems[index], KIND_PANEL);
       }
+    }
+    // 手机竖屏的无线电面板：只在显示时有尺寸（不显示时 addRect 量到空矩形，跳过），
+    // 随台词逐行长高，跟着每次重量更新
+    const radio = document.getElementById(RADIO_ELEMENT_ID);
+    if (
+      radio &&
+      window.innerWidth < PHONE_MAX_WIDTH_PX &&
+      radio.getAttribute('data-density') === RADIO_PORTRAIT_DENSITY
+    ) {
+      this.addRect(radio, KIND_PANEL);
     }
     this.mergeRects();
   }
@@ -293,10 +318,10 @@ export class ChevronAvoidance {
 
   /**
    * 量一个元素并记为避让区（外扩留白，再向外取到整像素：箭头按整像素落位，留白不被小数吃掉）；
-   * 不存在、不显示（空矩形）或坐标非有限的跳过。sideways：这一块优先横向出；
-   * panel：这是一块 HUD 面板。
+   * 不存在、不显示（空矩形）或坐标非有限的跳过。kind：雷达盘（单独成块时优先横向出）/ 摇杆 /
+   * 触控按键 / HUD 面板。
    */
-  private addRect(element: Element | null, sideways: boolean, panel: boolean): void {
+  private addRect(element: Element | null, kind: AvoidKind): void {
     if (!element || this.count >= AVOID_MAX_RECTS) {
       return;
     }
@@ -314,22 +339,31 @@ export class ChevronAvoidance {
     this.rects[offset + 1] = Math.floor(rect.top - AVOID_MARGIN_PX);
     this.rects[offset + 2] = Math.ceil(rect.right + AVOID_MARGIN_PX);
     this.rects[offset + 3] = Math.ceil(rect.bottom + AVOID_MARGIN_PX);
-    this.sideways[this.count] = sideways ? 1 : 0;
-    this.panel[this.count] = panel ? 1 : 0;
+    this.sideways[this.count] = kind === KIND_RADAR ? 1 : 0;
+    this.panel[this.count] = kind === KIND_PANEL ? 1 : 0;
+    this.button[this.count] = kind === KIND_BUTTON ? 1 : 0;
     this.count += 1;
   }
 
   /**
    * 两块避让区之间的空隙放不下一枚箭头（含距离标签）就并成一块（取外接矩形）：
-   * 按键簇并成一整块，箭头不会从一个按键下面被推到另一个按键下面。
-   * HUD 面板排成一列 / 一行时同样并成一块；但面板沿屏幕的边和角分布，
-   * 并成外接矩形会多盖住一块放得下箭头的空角时（左列 + 顶部居中的卡片会盖住整块屏幕中部）
-   * 就不并，留给 resolve 逐块移出。
+   * 按键与按键总是并成一整簇，箭头不会从一个按键下面被推到另一个按键下面。
+   * 其余的块（摇杆、雷达盘、HUD 面板、已并好的按键簇）排成一列 / 一行时同样并成一块；
+   * 但并成外接矩形会多盖住一块放得下箭头的空角时就不并，留给 resolve 逐块移出：
+   * 左列面板 + 顶部居中的卡片会盖住整块屏幕中部，竖屏手机上摇杆 + 按键簇会盖住摇杆上方的空位。
    */
   private mergeRects(): void {
+    // 先把按键并成簇，再并其余的：摇杆、雷达盘、HUD 面板比的是整个按键簇，不是其中某一个按键
+    this.mergePass(true);
+    this.mergePass(false);
+  }
+
+  /** buttonsOnly：这一遍只并按键与按键（不看空角）；否则按上面的规则并所有的块 */
+  private mergePass(buttonsOnly: boolean): void {
     const rects = this.rects;
     const sideways = this.sideways;
     const panel = this.panel;
+    const button = this.button;
     let count = this.count;
     let merged = true;
     while (merged) {
@@ -346,10 +380,15 @@ export class ChevronAvoidance {
           ) {
             continue;
           }
-          // HUD 面板不并进单独成块的雷达盘（雷达盘照旧只横向出），也不并出多盖空角的外接矩形
-          if (
-            (panel[i] | panel[j]) === 1 &&
-            ((sideways[i] | sideways[j]) === 1 || this.mergeCoversFreeCorner(a, b))
+          if (buttonsOnly) {
+            if ((button[i] & button[j]) === 0) {
+              continue;
+            }
+          } else if (
+            // HUD 面板不并进单独成块的雷达盘（雷达盘照旧只横向出）
+            ((panel[i] | panel[j]) === 1 && (sideways[i] | sideways[j]) === 1) ||
+            // 任何两块都不并出多盖空角的外接矩形
+            this.mergeCoversFreeCorner(a, b)
           ) {
             continue;
           }
@@ -357,9 +396,10 @@ export class ChevronAvoidance {
           rects[a + 1] = Math.min(rects[a + 1], rects[b + 1]);
           rects[a + 2] = Math.max(rects[a + 2], rects[b + 2]);
           rects[a + 3] = Math.max(rects[a + 3], rects[b + 3]);
-          // 并进了别的遮挡就不再只横向出
+          // 并进了别的遮挡就不再只横向出，也不再是纯按键簇
           sideways[i] &= sideways[j];
           panel[i] |= panel[j];
+          button[i] &= button[j];
           // 用最后一块填掉 j 的位置
           count -= 1;
           const last = count * 4;
@@ -369,6 +409,7 @@ export class ChevronAvoidance {
           rects[b + 3] = rects[last + 3];
           sideways[j] = sideways[count];
           panel[j] = panel[count];
+          button[j] = button[count];
           merged = true;
           break;
         }

@@ -25,7 +25,8 @@ import type { GameSettings } from '@/ui/StartMenu';
  * 台架：GameCoordinator 整体依赖 WebGL，jsdom 里建不出来。这里沿用 CoordinatorWiring.test.ts 的
  * 办法——以真实的 GameCoordinator 原型为原型造一个对象，只把重量级的协作者换成替身：
  * - 真实运行的协调器方法：boot / bootWhenReady / ensurePresentationRuntime / applyGameSettings /
- *   setupEventListeners / createCampaignFlow / captureCheckpoint / resolveCheckpointRetry /
+ *   setupEventListeners（连同它挂上的页面事件监听）/ saveCampaignInBackground /
+ *   createCampaignFlow / captureCheckpoint / resolveCheckpointRetry /
  *   showMissionComplete / handleBossDestroy / handlePauseToggle / dispose，以及
  *   watchBossEncounter() 之后的 startBossEncounter / presentBossBriefing / launchWingmen；
  * - 真实的协作者：GameSessionState、GameState、PlayerStats、ResourceRegistry、InputHandler、
@@ -38,10 +39,12 @@ import type { GameSettings } from '@/ui/StartMenu';
 
 export type Stub = Record<string, unknown>;
 
+const STUB_METHODS = new WeakMap<object, Map<PropertyKey, unknown>>();
+
 /** 任意方法都是 vi.fn() 的替身；overrides 里给了的用给的 */
 export function stubWith(overrides: Stub = {}): Stub {
   const methods = new Map<PropertyKey, unknown>();
-  return new Proxy(overrides, {
+  const stub = new Proxy(overrides, {
     get: (target, key) => {
       if (key === 'then') return undefined;
       if (key in target) return target[key as string];
@@ -53,6 +56,18 @@ export function stubWith(overrides: Stub = {}): Stub {
       return method;
     },
   });
+  STUB_METHODS.set(stub, methods);
+  return stub;
+}
+
+/** 这个替身上被调用过的方法各调用了几次（overrides 里给的普通函数不计） */
+export function stubCallCounts(stub: unknown): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const [name, fn] of STUB_METHODS.get(stub as object) ?? []) {
+    const calls = (fn as Mock).mock.calls.length;
+    if (calls > 0) counts[String(name)] = calls;
+  }
+  return counts;
 }
 
 // ───────────────────────────── 存档 ─────────────────────────────
@@ -310,6 +325,70 @@ export async function waitUntil(done: () => boolean, rounds: number = 400): Prom
   }
 }
 
+// ───────────────────────────── 页面前后台 ─────────────────────────────
+
+/**
+ * 页面转入后台 / 回到前台 / 关闭时浏览器发的事件。jsdom 的 document.visibilityState 恒为
+ * 'visible'，这里换成可拨的；事件照浏览器的样子发在 document / window 上。
+ */
+export interface PageLifecycle {
+  /** 标签页转入后台：visibilityState 变成 hidden，document 上发 visibilitychange */
+  hide(): void;
+  /** 回到前台：visibilityState 变回 visible，document 上发 visibilitychange */
+  show(): void;
+  /** visibilityState 不变，只发一次 visibilitychange */
+  visibilityChange(): void;
+  /** window 的 pagehide（页面被卸载，或进入往返缓存） */
+  pageHide(): void;
+  /** window 的 pageshow（含从往返缓存恢复） */
+  pageShow(): void;
+  /** window 的 beforeunload（关闭 / 刷新页面） */
+  beforeUnload(): void;
+  /** 事件处理器里漏出来的异常（jsdom 把它们报在 window 的 error 事件上） */
+  errors(): unknown[];
+  /** 还原 visibilityState，摘掉 error 监听 */
+  restore(): void;
+}
+
+export function installPageLifecycle(): PageLifecycle {
+  let state: DocumentVisibilityState = 'visible';
+  Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => state });
+  const errors: unknown[] = [];
+  const onError = (event: ErrorEvent): void => {
+    errors.push(event.error ?? event.message);
+    event.preventDefault();
+  };
+  window.addEventListener('error', onError);
+  const changed = (): void => {
+    document.dispatchEvent(new Event('visibilitychange', { bubbles: true }));
+  };
+  return {
+    hide: () => {
+      state = 'hidden';
+      changed();
+    },
+    show: () => {
+      state = 'visible';
+      changed();
+    },
+    visibilityChange: changed,
+    pageHide: () => {
+      window.dispatchEvent(new Event('pagehide'));
+    },
+    pageShow: () => {
+      window.dispatchEvent(new Event('pageshow'));
+    },
+    beforeUnload: () => {
+      window.dispatchEvent(new Event('beforeunload', { cancelable: true }));
+    },
+    errors: () => errors,
+    restore: () => {
+      Reflect.deleteProperty(document, 'visibilityState');
+      window.removeEventListener('error', onError);
+    },
+  };
+}
+
 // ───────────────────────────── 协调器台架 ─────────────────────────────
 
 /** 宿主（main.ts）交给协调器的选项 */
@@ -398,6 +477,7 @@ export function createCoordinatorRig(Real: CoordinatorClass, options: HostOption
     options,
     showStartMenu: options.showStartMenu ?? false,
     isDisposed: false,
+    backgroundSaveDone: false,
     presentationRuntimeReady: false,
     presentationRuntimePromise: null,
     resourceRegistry: new ResourceRegistry(),

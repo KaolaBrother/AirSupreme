@@ -37,10 +37,12 @@ interface Launch {
   time: number;
 }
 
+/** 一架普通敌机：活着、没有隐身 */
 interface FakeEnemy {
   mesh: THREE.Object3D;
   alive: boolean;
   isAlive: () => boolean;
+  isCloaked: () => boolean;
   getMesh: () => THREE.Object3D;
 }
 
@@ -338,6 +340,7 @@ describe('player missile control (GameCoordinator)', () => {
         mesh,
         alive: true,
         isAlive: () => enemy.alive,
+        isCloaked: () => false,
         getMesh: () => mesh,
       };
       enemies.push(enemy);
@@ -610,7 +613,13 @@ describe('player missile control (GameCoordinator)', () => {
       const mesh = new THREE.Object3D();
       // 机头右侧 60 度方向
       mesh.position.copy(worldFromLocal(rig.pose, 520, 0, -300));
-      rig.enemies.push({ mesh, alive: true, isAlive: () => true, getMesh: () => mesh });
+      rig.enemies.push({
+        mesh,
+        alive: true,
+        isAlive: () => true,
+        isCloaked: () => false,
+        getMesh: () => mesh,
+      });
       rig.step(false, 2);
       expect(indicator.getSeeker().getTarget()).toBeNull();
 

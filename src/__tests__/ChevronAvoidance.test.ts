@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BossMissileIndicator } from '@/ui/BossMissileIndicator';
 import { EnemyHealthBars } from '@/ui/EnemyHealthBars';
 import { HUD } from '@/ui/HUD';
+import { RadioComms } from '@/ui/RadioComms';
 import {
   angleDelta,
   boxOf,
@@ -29,7 +30,9 @@ import { seedShippedMobileControls } from './touchTestUtils';
  * - #radar-minimap；
  * - 触控布局、#mobile-controls 显示时的 #joystick 和每个可见的 .touch-btn；
  * - HUD 面板 #hud-score、#hud-speed、#hud-upgrades、#hud-status、#hud-health，以及
- *   #hud-top-stack 的每个子元素（Boss 阶段条、目标卡……）。不显示的、空的不算。
+ *   #hud-top-stack 的每个子元素（Boss 阶段条、目标卡……）。不显示的、空的不算；
+ * - 手机竖屏（屏宽不到 700、竖屏版式）上显示着的无线电面板 #radio-comms：它画在两层箭头之上。
+ *   手机横握和平板上的无线电面板不算。
  *
  * 本来会落在遮挡上的箭头：整枚（40px 的箭头盒与它的距离标签）离每个遮挡至少 8px，留在视口内，
  * 指向和距离文字不变，不被推得更靠屏幕边，也不多挪。一个空位都够不着时留在贴边的位置（仍在
@@ -60,6 +63,15 @@ const PHONE_LANDSCAPE: Viewport = { name: 'phone, landscape', width: 844, height
 const PHONE_PORTRAIT: Viewport = { name: 'phone, portrait', width: 390, height: 844 };
 const DESKTOP: Viewport = { name: 'desktop', width: 1280, height: 800 };
 const TOUCH_VIEWPORTS = [TABLET_LANDSCAPE, TABLET_PORTRAIT, PHONE_LANDSCAPE, PHONE_PORTRAIT];
+/** 无线电面板的用例另外用到的几种手机 */
+const SMALL_PHONE_PORTRAIT: Viewport = { name: 'small phone, portrait', width: 375, height: 667 };
+const LARGE_PHONE_PORTRAIT: Viewport = { name: 'large phone, portrait', width: 430, height: 932 };
+const SMALL_PHONE_LANDSCAPE: Viewport = { name: 'small phone, landscape', width: 667, height: 375 };
+const NARROWEST_TABLET_PORTRAIT: Viewport = {
+  name: 'narrowest tablet, portrait',
+  width: 700,
+  height: 1000,
+};
 
 /** 规格里的留白 */
 const CLEARANCE_PX = 8;
@@ -157,6 +169,30 @@ function touchLayoutFor(viewport: Viewport, buttonCount: number): TouchLayout {
 
 function desktopRadar(viewport: Viewport): Rect {
   return { left: 16, top: viewport.height - 16 - 120, width: 120, height: 120 };
+}
+
+/**
+ * 手机竖屏、追尾视角的无线电面板，位置取自发布版样式（radioStyles.ts）：贴在按键簇左侧、静止摇杆
+ * 上方 14px，随正文行数向上长高——左 10，右沿 = 屏宽 − (20 + 210 + 14)，下沿 = 屏高 − (20 + 96 + 14)，
+ * 高 = 行数 × 16.9 + 8，屏高 ≥ 799 时再加一行呼号 18.6。
+ */
+function portraitRadioBox(viewport: Viewport, lines: number): Rect {
+  const height = lines * 16.9 + 8 + (viewport.height >= 799 ? 18.6 : 0);
+  const bottom = viewport.height - 130;
+  return { left: 10, top: bottom - height, width: viewport.width - 244 - 10, height };
+}
+
+/** 那块面板的正文最多几行：按屏高分档（同样取自 radioStyles.ts） */
+function maxRadioLines(viewport: Viewport): number {
+  const { height } = viewport;
+  if (height >= 867) return 8;
+  if (height >= 833) return 7;
+  if (height >= 799) return 6;
+  if (height >= 728) return 5;
+  if (height >= 666) return 4;
+  if (height >= 633) return 3;
+  if (height >= 599) return 2;
+  return 1;
 }
 
 type HudDensity = 'desktop' | 'touch-landscape' | 'touch-portrait';
@@ -310,6 +346,7 @@ describe('off-screen chevrons and the touch controls', () => {
   let bars: EnemyHealthBars | null;
   let indicator: BossMissileIndicator | null;
   let huds: HUD[];
+  let radios: RadioComms[];
   let camera: THREE.PerspectiveCamera;
   let targets: Target[];
   let inputs: HealthBarInputs;
@@ -408,6 +445,7 @@ describe('off-screen chevrons and the touch controls', () => {
     bars = null;
     indicator = null;
     huds = [];
+    radios = [];
     targets = [];
     inputs = [];
     missiles = [];
@@ -415,7 +453,7 @@ describe('off-screen chevrons and the touch controls', () => {
     installLayout();
   });
 
-  /** 拆掉当前的箭头层和 HUD（监听一并移除） */
+  /** 拆掉当前的箭头层、HUD 和无线电面板（监听一并移除） */
   function disposeScene(): void {
     bars?.dispose();
     bars = null;
@@ -423,6 +461,8 @@ describe('off-screen chevrons and the touch controls', () => {
     indicator = null;
     for (const hud of huds) hud.dispose();
     huds = [];
+    for (const radio of radios) radio.dispose();
+    radios = [];
   }
 
   afterEach(async () => {
@@ -567,6 +607,31 @@ describe('off-screen chevrons and the touch controls', () => {
     parent.appendChild(panel);
     rects.set(panel, rect);
     return panel;
+  }
+
+  interface Radio {
+    instance: RadioComms;
+    root: HTMLElement;
+  }
+
+  /**
+   * 真实的无线电面板，正显示着一句台词，摆在 rect。它的版式（data-density）是它自己按 HUD 的
+   * 布局密度定的，所以要在 mountHud 之后调用。
+   */
+  function mountRadio(rect: Rect): Radio {
+    const instance = new RadioComms();
+    radios.push(instance);
+    instance.enqueue({
+      id: 'chevron-test-line',
+      trigger: 'wave-start',
+      speaker: 'hq',
+      text: { en: 'Bandits inbound. Stay on my wing.', zh: '敌机来袭，跟紧我。' },
+    });
+    const root = document.getElementById('radio-comms');
+    expect(root, 'RadioComms creates #radio-comms once a line shows').toBeTruthy();
+    expect(isRendered(root as HTMLElement), 'the radio box is displayed').toBe(true);
+    rects.set(root as HTMLElement, rect);
+    return { instance, root: root as HTMLElement };
   }
 
   // ───────────────────────────── 夹具：场景 ─────────────────────────────
@@ -976,16 +1041,14 @@ describe('off-screen chevrons and the touch controls', () => {
   }
 
   /*
-   * FINDING（手机竖屏 390×844）：摇杆和按键簇之间只有约 46px，实现把两者并成一个外接矩形
-   * （x 12–371，y 578–832）。摇杆的上沿在 y = 728，它上方、按键簇左边那块约 142×142px 的空地
-   * 也被算成了遮挡：贴左边、y 在 581–776 之间的箭头全部被推到 y = 558——压在摇杆上的挪了
-   * 218px（挪 78px 就有空位），本来就离每个遮挡 8px 以上的也被挪走 23–120px。
-   * 规格说并成外接矩形会吞掉一块空角时不再合并；实现里这条只对含 HUD 面板的合并生效，
-   * 摇杆 + 按键簇不在其内。
+   * 手机竖屏 390×844：摇杆和按键簇之间只有约 46px，但两者不并成一块——并成外接矩形
+   * （x 12–371，y 578–832）会吞掉摇杆上方、按键簇左边那块约 142×142px 的空地。
+   * 曾经的缺陷（已修）：两者并成了一块，贴左边、y 在 581–776 之间的箭头全部被推到 y = 558——
+   * 压在摇杆上的挪了 218px（挪 78px 就有空位），本来就离每个遮挡 8px 以上的也被挪走 23–120px。
    */
   const FREE_CORNER_ABOVE_THE_STICK =
     'chevrons moved further than they needed to (phone portrait: the stick and the button ' +
-    'cluster are treated as one box, which swallows the free corner above the stick)';
+    'cluster must stay two blocks, or the free corner above the stick is swallowed)';
 
   /** 哪些箭头本来落在“摇杆和按键簇合起来的外接矩形”附近（8px 之内） */
   function byStickAndButtons(
@@ -1067,11 +1130,10 @@ describe('off-screen chevrons and the touch controls', () => {
      * 雷达盘是单独的一块，箭头只横着滑到它朝屏幕中心的一侧（另有用例），本来会落在雷达上的
      * 不在这里比。
      *
-     * 手机竖屏上这条不成立（FINDING，见 FREE_CORNER_ABOVE_THE_STICK）：这个场景里被挪动的
-     * 箭头都在摇杆和按键簇附近。
+     * 手机竖屏上被挪动的箭头都在摇杆和按键簇附近：这两块不并成一块才成立
+     * （见 FREE_CORNER_ABOVE_THE_STICK）。
      */
-    const noFurtherThanNeeded = target === PHONE_PORTRAIT ? it.fails : it;
-    noFurtherThanNeeded('moves a chevron no further than it needs to', () => {
+    it('moves a chevron no further than it needs to', () => {
       const free = unobstructed(target);
       const { controls, radar } = touchScene(target);
       const placed = drawnChevrons();
@@ -1654,14 +1716,12 @@ describe('off-screen chevrons and the touch controls', () => {
 
       /*
        * “不多挪”（见 leastMove）。按键簇按一整块算；本来会落在雷达上的不比（雷达盘是单独的一块，
-       * 箭头只横着滑开）。手机竖屏上，摇杆和按键簇合起来的外接矩形附近的箭头另见下一条。
+       * 箭头只横着滑开）。
        */
       it('moves a chevron no further than it needs to', () => {
         const { free, placed, blocks, radar, labels } = flightSurvey(wanted, target);
-        const aroundTheControls = byStickAndButtons(free, blocks);
         const compared = (index: number): boolean =>
-          clearanceOf(free[index], [radar]) >= CLEARANCE_PX - ROUNDING_PX &&
-          !(target === PHONE_PORTRAIT && aroundTheControls(index));
+          clearanceOf(free[index], [radar]) >= CLEARANCE_PX - ROUNDING_PX;
         expect(
           free.filter(
             (before, index) => compared(index) && moveOf(before, placed[index]) > MOVE_SLACK_PX
@@ -1681,11 +1741,45 @@ describe('off-screen chevrons and the touch controls', () => {
         ).toEqual([]);
       });
 
+      /*
+       * 按键与按键总是算成一簇：簇的外接矩形里离每个按键都够远的那一角，箭头也不停在里面
+       * （不会从一个按键下面被推到另一个按键下面）。两种横屏上，贴边的那一圈位置正好穿过这样的一角。
+       */
+      it('keeps every chevron out of the button cluster, even where no single button is near', () => {
+        const { free, placed, later, obstacles, blocks, labels } = flightSurvey(wanted, target);
+        const cluster = blocks.filter(([name]) => name === 'the button cluster');
+        expect(cluster, 'the button cluster').toHaveLength(1);
+        const notButtons = new Set(blocks.map(([name]) => name));
+        const buttons = obstacles.filter(([name]) => !notButtons.has(name)).map(([, rect]) => rect);
+        expect(buttons.length, 'touch buttons').toBeGreaterThan(5);
+
+        const inTheEmptyPart = free.filter(
+          (chevron) =>
+            clearanceOf(chevron, [cluster[0][1]]) < CLEARANCE_PX - ROUNDING_PX &&
+            clearanceOf(chevron, buttons) >= ROOMY_CLEARANCE_PX
+        );
+        if (target === TABLET_LANDSCAPE || target === PHONE_LANDSCAPE) {
+          expect(
+            inTheEmptyPart.length,
+            'chevrons inside the cluster that are clear of each button'
+          ).toBeGreaterThan(2);
+        }
+        expectClearOf(placed, cluster, labels);
+        expectClearOf(later, cluster, labels);
+      });
+
       if (target === PHONE_PORTRAIT) {
-        // FINDING：见 FREE_CORNER_ABOVE_THE_STICK
-        it.fails('leaves the free corner above the stick to the chevrons', () => {
+        // 见 FREE_CORNER_ABOVE_THE_STICK
+        it('leaves the free corner above the stick to the chevrons', () => {
           const { free, placed, blocks, labels } = flightSurvey(wanted, target);
           const aroundTheControls = byStickAndButtons(free, blocks);
+          expect(
+            free.filter(
+              (before, index) =>
+                aroundTheControls(index) && moveOf(before, placed[index]) > MOVE_SLACK_PX
+            ).length,
+            'moved chevrons around the stick and the buttons'
+          ).toBeGreaterThan(5);
           expect(
             overMoved(
               free,
@@ -1697,6 +1791,58 @@ describe('off-screen chevrons and the touch controls', () => {
             ),
             FREE_CORNER_ABOVE_THE_STICK
           ).toEqual([]);
+        });
+
+        /*
+         * 下面两条不靠逐像素找空位，直接看摇杆上方那一角：摇杆和按键簇合起来的外接矩形之内、
+         * 离每块遮挡都有余地的箭头不动；压在摇杆上的箭头只挪到摇杆正上方——还在按键簇上沿以下，
+         * 没有被当成“摇杆 + 按键簇”一整块推到簇的上面去。
+         */
+        it('leaves a chevron that stands in the corner above the stick where it was', () => {
+          const { free, placed, later, blocks, labels } = flightSurvey(wanted, target);
+          const inTheUnion = byStickAndButtons(free, blocks);
+          const all = blocks.map(([, rect]) => rect);
+          let standing = 0;
+          free.forEach((before, index) => {
+            if (!inTheUnion(index) || clearanceOf(before, all) < ROOMY_CLEARANCE_PX) return;
+            standing++;
+            expect(placed[index].centre, labels[index]).toEqual(before.centre);
+            expect(later[index].centre, `${labels[index]}, after flying on`).toEqual(before.centre);
+          });
+          expect(standing, 'chevrons standing in the corner above the stick').toBeGreaterThan(2);
+        });
+
+        it('moves a chevron off the stick to just above it, not above the whole button cluster', () => {
+          const { free, placed, blocks, labels } = flightSurvey(wanted, target);
+          const rectOf = (wantedName: string): Rect =>
+            (blocks.find(([name]) => name === wantedName) as [string, Rect])[1];
+          const stick = rectOf('#joystick');
+          const cluster = rectOf('the button cluster');
+          // 这个布局的前提：摇杆的上沿比按键簇的上沿低得多，簇在摇杆右边不远
+          expect(
+            stick.top - cluster.top,
+            'the cluster starts well above the stick'
+          ).toBeGreaterThan(LARGEST_CHEVRON_PX.height + 2 * CLEARANCE_PX);
+          expect(cluster.left - (stick.left + stick.width), 'gap between the two').toBeLessThan(
+            LARGEST_CHEVRON_PX.width
+          );
+
+          let onTheStick = 0;
+          free.forEach((before, index) => {
+            if (clearanceOf(before, [stick]) >= CLEARANCE_PX - ROUNDING_PX) return;
+            onTheStick++;
+            const after = placed[index];
+            expect(
+              clearanceOf(after, [stick]),
+              `${labels[index]}: clear of the stick`
+            ).toBeGreaterThan(CLEARANCE_PX - ROUNDING_PX);
+            expect(after.centre.y, `${labels[index]}: above the stick`).toBeLessThan(stick.top);
+            expect(
+              wholeOf(after).top,
+              `${labels[index]}: still below the top of the button cluster`
+            ).toBeGreaterThan(cluster.top);
+          });
+          expect(onTheStick, 'chevrons heading for the stick').toBeGreaterThan(5);
         });
       }
     });
@@ -2089,6 +2235,572 @@ describe('off-screen chevrons and the touch controls', () => {
           ).toBeLessThan(radar.left + radar.width + CLEARANCE_PX + MOVE_SLACK_PX);
         });
         expect(onTheRadar, 'chevrons that would land on the radar only').toBeGreaterThan(4);
+      });
+    });
+
+    // ───────────────────────────── 按键算一簇；别的块之间留着空角 ─────────────────────────────
+
+    /*
+     * 手机横屏右下角两块矩形，一高一低斜着摆：横向、纵向都只隔 40px（之间放不下箭头），
+     * 合起来的外接矩形右上、左下各空出一个放得下箭头的角，贴右边、贴下边的箭头正好经过这两个角。
+     * 两块都是触控按键时算一簇，两个角里的箭头都挪到外接矩形之外；换成别的东西
+     * （摇杆、雷达、HUD 面板，或其中之一配一个按键），空角留给箭头，角里的箭头不动。
+     */
+    describe('two blocks set diagonally, with a free corner between them', () => {
+      const FINE = { rings: [75, 110], rollStep: 5 };
+      const UPPER: Rect = { left: 600, top: 180, width: 80, height: 70 };
+      const LOWER: Rect = { left: 720, top: 290, width: 110, height: 90 };
+      const BOTH: Rect = { left: 600, top: 180, width: 230, height: 200 };
+      const PAIR: Array<[string, Rect]> = [
+        ['the upper block', UPPER],
+        ['the lower block', LOWER],
+      ];
+
+      /** 触控控件里只留下头 count 个按键，摇杆留在左下角原处 */
+      function mountButtons(count: number): Controls {
+        const controls = mountControls();
+        controls.buttons.forEach((button, index) => {
+          if (index >= count) button.style.display = 'none';
+        });
+        return controls;
+      }
+
+      /**
+       * 没有遮挡时站在两个空角里的箭头：压在外接矩形上，离两块都有余地，那个位置放得下最大的箭头。
+       * 贴右边的在右上角，贴下边的在左下角。
+       */
+      function inTheCorners(free: readonly DrawnChevron[]): {
+        upperRight: number[];
+        lowerLeft: number[];
+      } {
+        const upperRight: number[] = [];
+        const lowerLeft: number[] = [];
+        free.forEach((chevron, index) => {
+          if (
+            clearanceOf(chevron, [BOTH]) >= 0 ||
+            clearanceOf(chevron, [UPPER, LOWER]) < ROOMY_CLEARANCE_PX ||
+            isNarrowSlot(wholeOf(chevron), [boxOf(UPPER), boxOf(LOWER)])
+          ) {
+            return;
+          }
+          (chevron.centre.y < LOWER.top ? upperRight : lowerLeft).push(index);
+        });
+        expect(upperRight.length, 'chevrons in the free upper right corner').toBeGreaterThan(2);
+        expect(lowerLeft.length, 'chevrons in the free lower left corner').toBeGreaterThan(2);
+        return { upperRight, lowerLeft };
+      }
+
+      it('treats two touch buttons as one cluster: chevrons leave the corners too', () => {
+        kind = wanted;
+        const free = unobstructed(PHONE_LANDSCAPE, FINE);
+        let stick: Rect | undefined;
+        const placed = chevronsWith(
+          PHONE_LANDSCAPE,
+          () => {
+            const controls = mountButtons(2);
+            stick = controls.layout.stick;
+            rects.set(controls.buttons[0], UPPER);
+            rects.set(controls.buttons[1], LOWER);
+          },
+          FINE
+        );
+        const labels = labelsOfTargets();
+        const { upperRight, lowerLeft } = inTheCorners(free);
+        for (const index of [...upperRight, ...lowerLeft]) {
+          expect(placed[index].centre, `${labels[index]}: moved out of the corner`).not.toEqual(
+            free[index].centre
+          );
+        }
+        expect(tooClose(placed, [['the two buttons together', BOTH]], labels)).toEqual([]);
+        expectInsideViewport(placed, labels, PHONE_LANDSCAPE);
+        // 出去的路是最近的那条：右上角的往上、左下角的往左，刚好离开外接矩形
+        expect(
+          overMoved(free, placed, [BOTH, stick as Rect], PHONE_LANDSCAPE, labels),
+          'chevrons moved further than they needed to'
+        ).toEqual([]);
+      });
+
+      const OTHERS: Array<[name: string, mount: () => void]> = [
+        [
+          'the stick and a touch button',
+          () => {
+            const controls = mountButtons(1);
+            rects.set(controls.stick, UPPER);
+            rects.set(controls.buttons[0], LOWER);
+          },
+        ],
+        [
+          'a touch button and the stick',
+          () => {
+            const controls = mountButtons(1);
+            rects.set(controls.buttons[0], UPPER);
+            rects.set(controls.stick, LOWER);
+          },
+        ],
+        [
+          'the radar and a touch button',
+          () => {
+            const controls = mountButtons(1);
+            // 摇杆不占地方（量出来是空矩形）：这里只看雷达和按键
+            rects.delete(controls.stick);
+            mountRadar(UPPER);
+            rects.set(controls.buttons[0], LOWER);
+          },
+        ],
+        [
+          'two HUD panels',
+          () => {
+            mountPanel('hud-score', UPPER);
+            mountPanel('hud-status', LOWER);
+          },
+        ],
+        [
+          // 下面那一块由两个紧挨着的按键拼成：先并成一簇，再和面板比
+          'a HUD panel and a pair of touch buttons',
+          () => {
+            const controls = mountButtons(2);
+            rects.delete(controls.stick);
+            mountPanel('hud-status', UPPER);
+            rects.set(controls.buttons[0], { ...LOWER, width: 50 });
+            rects.set(controls.buttons[1], { ...LOWER, left: LOWER.left + 60, width: 50 });
+          },
+        ],
+      ];
+
+      it.each(OTHERS)('leaves both corners to the chevrons between %s', (_name, mount) => {
+        kind = wanted;
+        const free = unobstructed(PHONE_LANDSCAPE, FINE);
+        const placed = chevronsWith(PHONE_LANDSCAPE, mount, FINE);
+        const labels = labelsOfTargets();
+        const { upperRight, lowerLeft } = inTheCorners(free);
+        for (const index of [...upperRight, ...lowerLeft]) {
+          expect(placed[index].centre, `${labels[index]}: stays in the corner`).toEqual(
+            free[index].centre
+          );
+        }
+        // 两块本身照样避开
+        expect(tooClose(placed, PAIR, labels)).toEqual([]);
+        expect(
+          free.filter(
+            (chevron) => clearanceOf(chevron, [UPPER, LOWER]) < CLEARANCE_PX - ROUNDING_PX
+          ).length,
+          'chevrons heading for one of the two blocks'
+        ).toBeGreaterThan(3);
+        expectInsideViewport(placed, labels, PHONE_LANDSCAPE);
+      });
+
+      // “按键总是并成一簇”说的是挨着的按键：两个按键之间放得下一枚箭头时，那道空隙照样能用
+      it('still uses a gap between two touch buttons that is wide enough for a chevron', () => {
+        kind = wanted;
+        const free = unobstructed(PHONE_LANDSCAPE, FINE);
+        // 贴下边的两个按键，之间留 240px
+        const left: Rect = { left: 330, top: 300, width: 100, height: 80 };
+        const right: Rect = { left: 670, top: 300, width: 100, height: 80 };
+        const placed = chevronsWith(
+          PHONE_LANDSCAPE,
+          () => {
+            const controls = mountButtons(2);
+            rects.delete(controls.stick);
+            rects.set(controls.buttons[0], left);
+            rects.set(controls.buttons[1], right);
+          },
+          FINE
+        );
+        const labels = labelsOfTargets();
+        expect(
+          tooClose(
+            placed,
+            [
+              ['the left button', left],
+              ['the right button', right],
+            ],
+            labels
+          )
+        ).toEqual([]);
+
+        let inTheGap = 0;
+        free.forEach((before, index) => {
+          const whole = wholeOf(before);
+          if (
+            whole.left > left.left + left.width &&
+            whole.right < right.left &&
+            whole.bottom > left.top &&
+            clearanceOf(before, [left, right]) >= ROOMY_CLEARANCE_PX
+          ) {
+            inTheGap++;
+            expect(placed[index].centre, `${labels[index]}: stays in the gap`).toEqual(
+              before.centre
+            );
+          }
+        });
+        expect(inTheGap, 'chevrons standing in the gap').toBeGreaterThan(2);
+      });
+    });
+
+    // ───────────────────────────── 无线电面板 ─────────────────────────────
+
+    /*
+     * 手机竖屏上，无线电面板画在按键簇左侧、摇杆上方——正是从摇杆和按键簇移出来的箭头落脚的地方——
+     * 而且画在两层箭头之上：显示着的面板算遮挡，它随台词向上长高。不显示的面板不算。
+     * 手机横握和平板上的面板不算遮挡（那里箭头可以落在面板下面：已知，这里不作要求，
+     * 只要求结果与没有面板时一样）。
+     * 遮挡大约每秒量一次：面板刚出现、刚长高、刚收起的那一小段不在这里要求，只看下一次量过之后。
+     */
+    describe('the radio box', () => {
+      interface Shot {
+        placed: DrawnChevron[];
+        labels: string[];
+        obstacles: Array<[string, Rect]>;
+        blocks: Array<[string, Rect]>;
+        radar: Rect;
+        box: Rect;
+        /** 面板自己标的版式（data-density） */
+        density: string | null;
+        shown: boolean;
+      }
+
+      interface Stage {
+        controls: Controls | null;
+        radar: Rect;
+        hud: Hud;
+      }
+
+      /** 飞行中完整的一屏（桌面没有触控控件），还没有箭头 */
+      function stage(target: Viewport): Stage {
+        disposeScene();
+        document.body.innerHTML = '';
+        rects.clear();
+        setViewport(target);
+        const controls = target === DESKTOP ? null : mountControls();
+        const radar = controls ? controls.layout.radar : desktopRadar(target);
+        mountRadar(radar);
+        return { controls, radar, hud: mountHud() };
+      }
+
+      /**
+       * 这一屏再加一块显示着的无线电面板（摆在 boxFor 给的位置），第一次更新之后箭头摆在哪里。
+       * before：创建箭头之前对面板再做点什么（比如收起）。用完即弃。
+       */
+      function withRadio(
+        target: Viewport,
+        boxFor: (set: Stage) => Rect,
+        before: (radio: Radio) => void = () => undefined
+      ): Shot {
+        const set = stage(target);
+        const box = boxFor(set);
+        const radio = mountRadio(box);
+        before(radio);
+        createScene();
+        fly(1);
+        const shot: Shot = {
+          placed: drawnChevrons(),
+          labels: labelsOfTargets(),
+          obstacles: obstaclesOf(set.controls, set.radar, set.hud),
+          blocks: blocksOf(set.controls, set.radar, set.hud),
+          radar: set.radar,
+          box,
+          density: radio.root.getAttribute('data-density'),
+          shown: isRendered(radio.root),
+        };
+        disposeScene();
+        return shot;
+      }
+
+      /** 同一屏、没有无线电面板时：没有遮挡的位置、第一次更新之后、又飞了 45 次更新之后 */
+      function withoutRadio(target: Viewport): {
+        free: DrawnChevron[];
+        placed: DrawnChevron[];
+        later: DrawnChevron[];
+      } {
+        if (target !== DESKTOP) return flightSurvey(wanted, target);
+        const free = unobstructed(target);
+        stage(target);
+        createScene();
+        fly(1);
+        const placed = drawnChevrons();
+        fly(45);
+        const later = drawnChevrons();
+        disposeScene();
+        return { free, placed, later };
+      }
+
+      /**
+       * 这种屏幕上无线电面板大致画在哪里（radioStyles.ts）：手机竖屏见 portraitRadioBox（这里取
+       * 行数到顶的）；横握夹在摇杆和按键簇之间、贴着底边；平板竖屏是按键簇上方的一整行；
+       * 桌面在左下。后三种的高度是估的。
+       */
+      function usualRadioBox(target: Viewport, { controls }: Stage): Rect {
+        if (!controls) {
+          return { left: 156, top: target.height - 20 - 76, width: 520, height: 76 };
+        }
+        if (target.height > target.width && target.width < 700) {
+          return portraitRadioBox(target, maxRadioLines(target));
+        }
+        const { stick, buttons } = controls.layout;
+        const deckLeft = Math.min(...buttons.map((button) => button.left));
+        const deckTop = Math.min(...buttons.map((button) => button.top));
+        if (target.height > target.width) {
+          return { left: 10, top: deckTop - 8 - 76, width: target.width - 20, height: 76 };
+        }
+        const left = stick.left + stick.width + 14;
+        return {
+          left,
+          top: target.height - 12 - 64,
+          width: Math.min(560, deckLeft - 14 - left),
+          height: 64,
+        };
+      }
+
+      const SHOWN: Array<[name: string, target: Viewport, lines: (target: Viewport) => number]> = [
+        ['a one-line box on a 390×844 phone', PHONE_PORTRAIT, () => 1],
+        ['a full box on a 390×844 phone', PHONE_PORTRAIT, maxRadioLines],
+        ['a one-line box on a 375×667 phone', SMALL_PHONE_PORTRAIT, () => 1],
+        ['a full box on a 375×667 phone', SMALL_PHONE_PORTRAIT, maxRadioLines],
+        ['a full box on a 430×932 phone', LARGE_PHONE_PORTRAIT, maxRadioLines],
+      ];
+
+      /** 每种箭头、每个场景只摆一次，下面两组用例共用 */
+      const shots = new Map<string, Shot>();
+      function shownShot(name: string, target: Viewport, lines: number): Shot {
+        const key = `${wanted} | ${name}`;
+        let shot = shots.get(key);
+        if (!shot) {
+          shot = withRadio(target, () => portraitRadioBox(target, lines));
+          shots.set(key, shot);
+        }
+        return shot;
+      }
+
+      it.each(SHOWN)('ends no chevron under %s', (name, target, lines) => {
+        kind = wanted;
+        const without = withoutRadio(target);
+        const shot = shownShot(name, target, lines(target));
+        expect(shot.density, 'the radio box uses its portrait layout').toBe('touch-portrait');
+        const radio: Array<[string, Rect]> = [['#radio-comms', shot.box]];
+
+        // 前提：没有面板时，有箭头正落在面板要占的地方
+        expect(
+          without.placed.filter((chevron) => clearanceOf(chevron, [shot.box]) < 0).length,
+          'chevrons that end where the box will be'
+        ).toBeGreaterThan(1);
+
+        expect(tooClose(shot.placed, radio, shot.labels), 'chevrons under the radio box').toEqual(
+          []
+        );
+        // 照样离每个控件、每块 HUD 面板 8px 以上，留在屏幕内
+        expectClearOf(shot.placed, shot.obstacles, shot.labels);
+        expectInsideViewport(shot.placed, shot.labels, target);
+
+        const problems: string[] = [];
+        shot.placed.forEach((chevron, index) => {
+          const before = without.free[index];
+          if (chevron.rotation !== before.rotation || chevron.text !== before.text) {
+            problems.push(`${shot.labels[index]}: direction or distance text changed`);
+          }
+          // 不被面板推得更靠屏幕边。没有面板时就已经往外挪了的不算在面板头上：375 宽的手机上，
+          // 紧挨按键簇左沿的箭头被按键簇往左挪开几个像素（按键簇跨过了屏幕中线）。
+          const outward = (placed: DrawnChevron): boolean =>
+            outwardOf(placed.centre, target) > outwardOf(before.centre, target) + 0.002;
+          if (outward(chevron) && !outward(without.placed[index])) {
+            problems.push(
+              `${shot.labels[index]}: moved outward, from (${before.centre.x}, ` +
+                `${before.centre.y}) to (${chevron.centre.x}, ${chevron.centre.y})`
+            );
+          }
+        });
+        expect(problems).toEqual([]);
+      });
+
+      /*
+       * 多了这一块遮挡，照样不多挪（见 leastMove）。只比因为面板而换了位置的箭头：其余的与没有
+       * 面板时一模一样，另有用例；紧挨雷达的也不比（雷达盘只横着滑开）。
+       *
+       * FINDING（390×844 和 430×932 上行数到顶的面板）：面板的上沿比按键簇的上沿只高出 17px /
+       * 34px——放不下一枚箭头——实现把面板、摇杆、按键簇并成一块，整块的上沿取面板的上沿。
+       * 于是按键簇上方本来挪到簇的上沿之上就够的箭头被多推了一截：390×844 上 144 枚里 34 枚，
+       * 多 4–15px；430×932 上 30 枚，多 14–32px。其中各有一枚本来不用挪（离每块遮挡都有 20px
+       * 以上），也被挪了 4px / 29px。
+       * 只要面板上沿与按键簇上沿差不到一枚箭头的高度（约 48px）就会这样，哪边高都一样：这两种
+       * 屏幕上 4 行、5 行的面板也有（23–25 枚，多 14–31px）。1–3 行的、上沿与按键簇齐平的 6 行的
+       * 没有；375×667 上按键簇比面板高出 50px 以上，也没有。
+       */
+      const PUSHED_TOO_FAR = new Set([
+        'a full box on a 390×844 phone',
+        'a full box on a 430×932 phone',
+      ]);
+      for (const [name, target, lines] of SHOWN) {
+        const check = PUSHED_TOO_FAR.has(name) ? it.fails : it;
+        check(`moves a chevron no further than it needs to around ${name}`, () => {
+          kind = wanted;
+          const without = withoutRadio(target);
+          const shot = shownShot(name, target, lines(target));
+          const compared = (index: number): boolean =>
+            moveOf(without.placed[index], shot.placed[index]) > 0 &&
+            clearanceOf(without.free[index], [shot.radar]) >= CLEARANCE_PX + ROUNDING_PX;
+          expect(
+            without.free.filter(
+              (before, index) =>
+                compared(index) && moveOf(before, shot.placed[index]) > MOVE_SLACK_PX
+            ).length,
+            'chevrons that the box moved'
+          ).toBeGreaterThan(5);
+          expect(
+            overMoved(
+              without.free,
+              shot.placed,
+              [...shot.blocks, ['#radio-comms', shot.box] as [string, Rect]].map(
+                ([, rect]) => rect
+              ),
+              target,
+              shot.labels,
+              compared
+            ),
+            'chevrons moved further than they needed to'
+          ).toEqual([]);
+        });
+      }
+
+      const EVERY_LAYOUT = [
+        ...TOUCH_VIEWPORTS,
+        SMALL_PHONE_PORTRAIT,
+        SMALL_PHONE_LANDSCAPE,
+        DESKTOP,
+      ];
+
+      it.each(EVERY_LAYOUT)(
+        'takes no notice of a radio box that is not showing ($name, $width×$height)',
+        (target) => {
+          kind = wanted;
+          const without = withoutRadio(target);
+          // 说完一句收起了：元素还在，版式标记也还在，只是不显示
+          const shot = withRadio(
+            target,
+            (set) => usualRadioBox(target, set),
+            (radio) => radio.instance.clear()
+          );
+          expect(shot.shown, 'the radio box is hidden').toBe(false);
+          expect(shot.density, 'the hidden box keeps its layout mark').toBe(densityOf(target));
+          expect(shot.placed).toEqual(without.placed);
+        }
+      );
+
+      // 横握的小手机屏宽也不到 700；竖屏刚好 700 宽的算平板
+      const NOT_AVOIDED = [
+        PHONE_LANDSCAPE,
+        SMALL_PHONE_LANDSCAPE,
+        TABLET_LANDSCAPE,
+        TABLET_PORTRAIT,
+        NARROWEST_TABLET_PORTRAIT,
+        DESKTOP,
+      ];
+
+      it.each(NOT_AVOIDED)(
+        'does not count the radio box as an obstacle on a $name screen ($width×$height)',
+        (target) => {
+          kind = wanted;
+          const without = withoutRadio(target);
+          const shot = withRadio(target, (set) => usualRadioBox(target, set));
+          expect(shot.shown, 'the radio box is showing').toBe(true);
+          expect(shot.density).toBe(densityOf(target));
+          expect(shot.placed).toEqual(without.placed);
+          // 前提（不是要求）：面板确实摆在箭头落脚的地方——要是它算遮挡，上面的结果就不会一样
+          expect(
+            shot.placed.filter(
+              (chevron) => clearanceOf(chevron, [shot.box]) < CLEARANCE_PX - ROUNDING_PX
+            ).length,
+            'chevrons within 8 px of the box'
+          ).toBeGreaterThan(0);
+        }
+      );
+
+      it('keeps clear of the box as it grows, once the obstacles are measured again', () => {
+        kind = wanted;
+        const set = stage(PHONE_PORTRAIT);
+        const radio = mountRadio(portraitRadioBox(PHONE_PORTRAIT, 1));
+        createScene();
+        fly(1);
+        const labels = labelsOfTargets();
+        const tall = portraitRadioBox(PHONE_PORTRAIT, maxRadioLines(PHONE_PORTRAIT));
+        // 前提：台词多出来的那几行正好长到有箭头的地方
+        expect(
+          drawnChevrons().filter((chevron) => clearanceOf(chevron, [tall]) < 0).length,
+          'chevrons standing where the box grows'
+        ).toBeGreaterThan(1);
+
+        rects.set(radio.root, tall);
+        flyUntilMeasured();
+        const chevrons = drawnChevrons();
+        expect(tooClose(chevrons, [['#radio-comms', tall]], labels)).toEqual([]);
+        expectClearOf(chevrons, obstaclesOf(set.controls, set.radar, set.hud), labels);
+        expectInsideViewport(chevrons, labels, PHONE_PORTRAIT);
+      });
+
+      it('starts to avoid a box that shows up in mid-flight, once the obstacles are measured again', () => {
+        kind = wanted;
+        const without = withoutRadio(PHONE_PORTRAIT);
+        const set = stage(PHONE_PORTRAIT);
+        createScene();
+        fly(1);
+        expect(drawnChevrons()).toEqual(without.placed);
+
+        const box = portraitRadioBox(PHONE_PORTRAIT, 3);
+        mountRadio(box);
+        flyUntilMeasured();
+        const chevrons = drawnChevrons();
+        const labels = labelsOfTargets();
+        expect(tooClose(chevrons, [['#radio-comms', box]], labels)).toEqual([]);
+        expectClearOf(chevrons, obstaclesOf(set.controls, set.radar, set.hud), labels);
+        expectInsideViewport(chevrons, labels, PHONE_PORTRAIT);
+      });
+
+      /*
+       * 面板收起、遮挡重新量过之后，箭头回到没有面板时的地方。箭头不来回跳：两条出路差不多远时
+       * 沿用上一次走的那条（另一条近出 24px 以上才换），所以个别箭头会留在另一个同样空着的位置，
+       * 比没有面板时多挪不到 24px。
+       */
+      it('puts the chevrons back once the box is gone and the obstacles are measured again', () => {
+        kind = wanted;
+        const EXIT_SWITCH_MARGIN_PX = 24;
+        const without = withoutRadio(PHONE_PORTRAIT);
+        const set = stage(PHONE_PORTRAIT);
+        const box = portraitRadioBox(PHONE_PORTRAIT, maxRadioLines(PHONE_PORTRAIT));
+        const radio = mountRadio(box);
+        createScene();
+        fly(1);
+        const labels = labelsOfTargets();
+        expect(tooClose(drawnChevrons(), [['#radio-comms', box]], labels)).toEqual([]);
+
+        radio.instance.clear();
+        expect(isRendered(radio.root), 'the radio box is hidden').toBe(false);
+        // 与没有面板的那一次飞过同样多的更新（45 次）再比
+        const flown = flyUntilMeasured();
+        expect(flown).toBeLessThanOrEqual(45);
+        fly(45 - flown);
+        const chevrons = drawnChevrons();
+
+        let elsewhere = 0;
+        chevrons.forEach((chevron, index) => {
+          const usual = without.later[index];
+          if (chevron.centre.x === usual.centre.x && chevron.centre.y === usual.centre.y) {
+            expect(chevron, labels[index]).toEqual(usual);
+            return;
+          }
+          elsewhere++;
+          expect(
+            moveOf(without.free[index], chevron),
+            `${labels[index]}: kept its other way out, which is not much longer`
+          ).toBeLessThanOrEqual(
+            moveOf(without.free[index], usual) + EXIT_SWITCH_MARGIN_PX + MOVE_SLACK_PX
+          );
+        });
+        expect(elsewhere, 'chevrons that are not where they are without a box').toBeLessThan(6);
+        // 面板原来占着的地方又有箭头了
+        expect(
+          chevrons.filter((chevron) => clearanceOf(chevron, [box]) < 0).length,
+          'chevrons standing where the box was'
+        ).toBeGreaterThan(5);
+        expectClearOf(chevrons, obstaclesOf(set.controls, set.radar, set.hud), labels);
+        expectInsideViewport(chevrons, labels, PHONE_PORTRAIT);
       });
     });
 

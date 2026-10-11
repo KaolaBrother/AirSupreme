@@ -13,9 +13,13 @@ import { MusicSystem } from '@/core/Audio/MusicSystem';
 import { VoiceSystem } from '@/core/Audio/VoiceSystem';
 import type { ParticleSystem } from '@/features/effects/ParticleSystem';
 import { PlayerStats, UpgradeType } from '@/features/upgrade/UpgradeSystem';
-import { FriendlyAI } from '@/features/enemy/FriendlyAI';
+import { FriendlyAI, WINGMAN_CONFIG } from '@/features/enemy/FriendlyAI';
 import type { EnemyAI } from '@/features/enemy/EnemyAI';
-import { EnemyType, ENEMY_CONFIGS } from '@/features/enemy/EnemyTypes';
+import { EnemyType, isEliteEnemyType } from '@/features/enemy/EnemyTypes';
+import { JET_MISSILE_SPEC } from '@/features/enemy/EnemyWeapons';
+import type { IJetThreatProvider } from '@/features/enemy/JetThreat';
+import type { IJetMissileLauncher } from '@/features/enemy/MissileDirector';
+import type { ILockJamProvider } from '@/features/combat/MissileSeeker';
 import { PowerUpType, POWER_UP_CONFIGS } from '@/features/powerups/PowerUpSystem';
 import type { UpgradeMenu } from '@/ui/UpgradeMenu';
 import type { PauseMenu } from '@/ui/PauseMenu';
@@ -29,7 +33,12 @@ import type { BossMinionKind } from '@/features/boss/BossContracts';
 import { createPlayerMesh, createFriendlyMesh } from '@/features/aircraft/AircraftMeshFactory';
 import { getDifficultyProfile, getLevelScaling } from '@/core/Difficulty';
 import { Faction } from '@/core/Faction';
-import type { CombatTarget, DamageSource, SpecialWeaponId } from '@/core/CombatContracts';
+import {
+  getDeclaredHitRadius,
+  type CombatTarget,
+  type DamageSource,
+  type SpecialWeaponId,
+} from '@/core/CombatContracts';
 import { getLevelConfig, LevelWaveEventType } from '@/features/terrain/LevelConfig';
 import { WORLDSCAPE_WATER_Y } from '@/features/terrain/TerrainGenerator';
 import { LevelState } from '@/features/levels/LevelManager';
@@ -69,7 +78,9 @@ import { getCampaignChapter, getUnlockedWeaponsThrough } from '@/features/campai
 import { format, tr, type LocalizedText } from '@/i18n';
 import {
   DEFAULT_ONBOARDING_BEAT_PROFILE,
+  FIRST_CONTACT_HINT_HOLD_MS,
   ONBOARDING_TEXT_LIBRARY,
+  getFirstContactHints,
   type OnboardingMessageSource,
   type OnboardingWaveBeatProfile,
 } from '@/ui/OnboardingManager';
@@ -219,8 +230,8 @@ const TUTORIAL_OBJECTIVE_TEXT = {
 const WAVE_OBJECTIVE_TEXT = {
   eliteTitle: { en: 'Wave {wave} · Elite hunt', zh: '第 {wave} 波 · 精英歼灭' },
   eliteObjective: {
-    en: 'Take out heavies and aces first to shorten the danger window.',
-    zh: '优先打穿重型/王牌，压缩高威胁窗口。',
+    en: 'Take out the elite jets first to shorten the danger window.',
+    zh: '优先打掉精英敌机，压缩高威胁窗口。',
   },
   eliteClearedObjective: {
     en: 'Main threats down. Mop up the rest.',
@@ -286,6 +297,8 @@ export class GameCoordinator {
   private static readonly TUTORIAL_HINT_MED_MS = 1500;
   private static readonly TUTORIAL_HINT_LONG_MS = 1700;
   private static readonly WAVE_EVENT_START_COOLDOWN_MS = 1000;
+  /** 首次遭遇提示与前一条大字提示之间的间隔（毫秒） */
+  private static readonly FIRST_CONTACT_HINT_GAP_MS = 250;
   private static readonly WAVE_EVENT_COMPLETE_COOLDOWN_MS = 900;
   private static readonly RESPAWN_OVERLAY_MS = 2000;
   private static readonly UPGRADE_FEEDBACK: Record<
@@ -482,6 +495,8 @@ export class GameCoordinator {
   // ── 十关战役集成 ──
   /** 剧情卡片 / 结算 / 机库期间冻结模拟（渲染继续） */
   private storyHold: boolean = false;
+  /** 本次转入后台已经存过一次（见 saveCampaignInBackground）；页面重新可见时清除 */
+  private backgroundSaveDone: boolean = false;
   private combatRuntimeConfigured: boolean = false;
   private readonly enemyTargets = new WeakMap<EnemyAI, CombatTarget>();
   private readonly lockTargets: THREE.Object3D[] = [];
@@ -493,6 +508,57 @@ export class GameCoordinator {
     quaternion: new THREE.Quaternion(),
   };
   private readonly hitPosition = new THREE.Vector3();
+  /**
+   * 玩家对敌机的威胁（交给 EnemySystem）：导引头已锁定的目标、在飞的玩家导弹、机头方向、
+   * 是否可被攻击。敌机条令只看这个窄接口，不接触 HUD / 锁定指示器 / 导弹系统。
+   */
+  private readonly jetThreatProvider: IJetThreatProvider = {
+    getLockedTarget: () => {
+      // 表现层运行时按需加载：指示器还没到位时视为没有锁定
+      const indicator: LockOnIndicator | undefined = this.lockOnIndicator;
+      return indicator ? indicator.getSeeker().getLockedTarget() : null;
+    },
+    isMissileInbound: (target) =>
+      this.combatSystem?.getMissileSystem().hasActiveMissileToward(target) ?? false,
+    getPlayerForward: (out) => {
+      out.set(0, 0, -1).applyQuaternion(this.playerAircraft.quaternion);
+      return Number.isFinite(out.x) && Number.isFinite(out.y) && Number.isFinite(out.z);
+    },
+    isPlayerTargetable: () =>
+      this.playerAircraft.visible && !this.playerSystem.isPlayerRespawning(),
+  };
+  /** 敌机导弹的飞行参数（复用同一个对象；发射者标签逐发写入） */
+  private readonly jetMissileOptions = {
+    maxSpeed: JET_MISSILE_SPEC.MAX_SPEED,
+    turnRate: JET_MISSILE_SPEC.TURN_RATE,
+    life: JET_MISSILE_SPEC.LIFE,
+    launchSpeed: JET_MISSILE_SPEC.LAUNCH_SPEED,
+    source: '',
+  };
+  /**
+   * 敌机导弹的发射通道（交给 EnemySystem）：导弹进单位导弹池，HUD 的“锁定中 → 来袭”预警、
+   * 热焰弹、EMP、近防炮照常生效；伤害来源记为发射它的机型（jet:<机型>）。
+   */
+  private readonly jetMissileLauncher: IJetMissileLauncher = {
+    isAvailable: () => this.units.isReady(),
+    launch: (position, direction, source) => {
+      this.jetMissileOptions.source = source;
+      return this.units.launchJetMissile(
+        position,
+        direction,
+        JET_MISSILE_SPEC.DAMAGE,
+        this.jetMissileOptions
+      );
+    },
+    countInFlight: () => this.units.countJetMissilesInFlight(),
+    setLockWarning: (active) => this.units.setJetMissileLock(active),
+  };
+  /** 导引头受到的干扰（交给锁定指示器的导引头）：敌方干扰机在范围内时锁定时间加倍 */
+  private readonly lockJamProvider: ILockJamProvider = {
+    getLockTimeScale: () => this.enemySystem?.getLockTimeScale() ?? 1,
+  };
+  /** 画凝结尾的敌机（隐形中的除外），逐步复用 */
+  private readonly uncloakedEnemyBuffer: THREE.Object3D[] = [];
   /** 友机入场：玩家机头方向（之后复用为 lookAt 目标点）与入场航向 */
   private readonly friendlySpawnForward = new THREE.Vector3();
   private readonly friendlySpawnHeading = new THREE.Vector3();
@@ -634,6 +700,7 @@ export class GameCoordinator {
           this.lockOnIndicator.setLockCircleScale(
             this.playerStats.getMissileLockRadiusMultiplier()
           );
+          this.lockOnIndicator.setLockJamProvider(this.lockJamProvider);
           this.hud.setSettlementActions({
             onRetry: () => this.options.onRetry?.(),
             onExitToMenu: () => this.options.onExitToMenu?.(),
@@ -692,6 +759,8 @@ export class GameCoordinator {
         const enemySystem = new EnemySystem(this.gameScene.scene, this.sessionState);
         enemySystem.init();
         enemySystem.setDifficultyProfile(getDifficultyProfile(this.sessionState.getDifficulty()));
+        enemySystem.setThreatProvider(this.jetThreatProvider);
+        enemySystem.setMissileLauncher(this.jetMissileLauncher);
         this.enemySystem = enemySystem;
         return enemySystem;
       });
@@ -775,8 +844,26 @@ export class GameCoordinator {
 
     this.resourceRegistry.addUnsubscriber(
       EventBus.on(GameEventType.ENEMY_FIRED, ({ payload }) => {
-        this.audioManager.playShoot('enemy');
+        // 同一次齐射里的后续弹（高炮弹扇面）不再各响一声、各闪一次
+        if (payload.quiet) return;
+        if (payload.weapon === 'heavy-shell') {
+          this.audioManager.playTankCannon();
+        } else if (payload.weapon === 'lance') {
+          this.audioManager.playShoot('boss');
+        } else {
+          this.audioManager.playShoot('enemy');
+        }
         this.vfx.muzzleFlashNear(payload.position, payload.direction);
+      })
+    );
+
+    this.resourceRegistry.addUnsubscriber(
+      EventBus.on(GameEventType.ENEMY_TELL, ({ payload }) => {
+        if (payload.kind === 'lance-charge') {
+          this.audioManager.playLanceCharge(payload.duration);
+        } else if (payload.kind === 'decloak') {
+          this.audioManager.playDecloak(payload.duration);
+        }
       })
     );
 
@@ -847,6 +934,7 @@ export class GameCoordinator {
         this.audioManager.playWaveStart();
         this.handleWaveStartUnits(payload.level, payload.wave);
         this.campaign.handleWaveStart(payload.wave);
+        this.scheduleFirstContactHints(payload.level, payload.wave);
       })
     );
 
@@ -894,6 +982,8 @@ export class GameCoordinator {
         this.handlePowerUpExpired(payload.type);
       })
     );
+
+    this.setupBackgroundSave();
   }
 
   private handlePowerUpEffect(
@@ -1034,11 +1124,10 @@ export class GameCoordinator {
 
   /** 生成一架友军喷气机；先入场的友机按编队顺序领取僚机身份（血条显示呼号） */
   private spawnFriendlyJet(): { friendly: FriendlyAI; wingman: WingmanProfile | null } {
-    const enemyTypes = Object.values(EnemyType);
-    const randomType = enemyTypes[Math.floor(Math.random() * enemyTypes.length)];
-    const config = ENEMY_CONFIGS[randomType];
+    // 僚机用自己固定的一份数值（战斗机级），与敌机机型表脱钩：不再随机借用敌机机型
+    const config = WINGMAN_CONFIG;
 
-    // 友军僚机使用盟军涂装（同机体 / 同命中半径）
+    // 友军僚机使用盟军涂装与自己的机体
     const mesh = createFriendlyMesh(config);
     const enemySystem = this.enemySystem;
 
@@ -1210,7 +1299,8 @@ export class GameCoordinator {
       deltaTime,
       this.playerAircraft,
       this.playerAircraft.position,
-      enemyMeshes,
+      // 友军单位的索敌名单：隐形中的敌机不在其中（已经打出去的炮弹照样会命中）
+      this.collectUncloakedEnemyMeshes(),
       friendlyMeshes,
       this.enemySystem?.getLevelManager().areWaveJetsCleared() ?? false
     );
@@ -1277,7 +1367,7 @@ export class GameCoordinator {
       deltaTime,
       this.playerSystem.getHealth().getHealthPercent(),
       this.enemySystem?.getEnemies() ?? GameCoordinator.NO_ENEMIES,
-      enemyMeshes,
+      this.collectUncloakedEnemyMeshes(),
       friendlyMeshes
     );
     this.campaign.tick(deltaTime);
@@ -1308,6 +1398,19 @@ export class GameCoordinator {
     return buffer;
   }
 
+  /**
+   * 存活、没有隐形的敌机网格（复用数组）：画凝结尾的敌机（隐形机隐形时只留一条稀疏的粒子淡尾迹），
+   * 也是友军单位的索敌名单。
+   */
+  private collectUncloakedEnemyMeshes(): THREE.Object3D[] {
+    const buffer = this.uncloakedEnemyBuffer;
+    buffer.length = 0;
+    for (const enemy of this.enemySystem?.getEnemies() ?? GameCoordinator.NO_ENEMIES) {
+      if (enemy.isAlive() && !enemy.isCloaked()) buffer.push(enemy.getMesh());
+    }
+    return buffer;
+  }
+
   /** 存活友军僚机网格（复用数组；之后还会追加友军单位） */
   private collectFriendlyMeshes(): THREE.Object3D[] {
     const buffer = this.friendlyMeshBuffer;
@@ -1328,7 +1431,10 @@ export class GameCoordinator {
     this.view.setFlightState(speedRatio, boosting);
   }
 
-  /** 锁定候选：Boss 可受伤部件（隐形 / 护盾偏转体除外）与 Boss 导弹 → 敌机 → 敌方单位瞄准点 */
+  /**
+   * 锁定候选：Boss 可受伤部件（隐形 / 护盾偏转体除外）与 Boss 导弹 → 敌机（隐形中的除外：
+   * 隐形机一隐形就不在表里，已有的锁定随之丢弃）→ 敌方单位瞄准点
+   */
   private collectLockCandidates(): THREE.Object3D[] {
     const targetMeshes = this.lockTargets;
     targetMeshes.length = 0;
@@ -1340,7 +1446,7 @@ export class GameCoordinator {
       bossController.appendLockTargets(targetMeshes);
     }
     for (const enemy of this.enemySystem?.getEnemies() ?? []) {
-      if (enemy.isAlive()) targetMeshes.push(enemy.getMesh());
+      if (enemy.isAlive() && !enemy.isCloaked()) targetMeshes.push(enemy.getMesh());
     }
     this.units.collectLockTargets(targetMeshes);
     return targetMeshes;
@@ -1424,8 +1530,9 @@ export class GameCoordinator {
 
   /**
    * 机炮提前量：候选 = 存活敌机 + 敌方空中单位（可显示提前量标记），其后是敌方地面 / 海上单位
-   * （只参与触屏辅助）。触屏设备上把辅助方向交给 PlayerSystem（机炮十字画的是同一个方向，
-   * 见 renderAimHud），桌面不改变弹道。
+   * （只参与机炮辅助）。隐形中的敌机不在候选里：没有提前量标记，机炮辅助也不会吸过去。
+   * 辅助方向交给 PlayerSystem（机炮十字画的是同一个方向，见 renderAimHud）：
+   * 触屏设备（GameConfig.isMobile）用触屏锥角，键盘用更小的锥角（GAME_CONSTANTS.GUN_ASSIST）。
    */
   private updateGunAim(deltaTime: number): void {
     const targets = this.gunTargets;
@@ -1433,7 +1540,7 @@ export class GameCoordinator {
     targets.length = 0;
     surfaceTargets.length = 0;
     for (const enemy of this.enemySystem?.getEnemies() ?? []) {
-      if (enemy.isAlive()) targets.push(enemy.getMesh());
+      if (enemy.isAlive() && !enemy.isCloaked()) targets.push(enemy.getMesh());
     }
     const unitSystem = this.units.getSystem();
     if (unitSystem) {
@@ -1456,9 +1563,9 @@ export class GameCoordinator {
     const forward = this.gunForward.set(0, 0, -1).applyQuaternion(quaternion);
     // 炮口位置与 PlayerSystem.fire 一致：机体前方 2 米
     const muzzle = this.gunMuzzle.copy(this.playerSystem.getPosition()).addScaledVector(forward, 2);
-    const assist = GameConfig.isMobile;
-    this.gunLeadSolver.update(deltaTime, muzzle, forward, targets, airCount, assist);
-    // 没有辅助（含桌面端）时方向为 null：子弹沿机头方向发射
+    const assistCone = GameConfig.isMobile ? 'touch' : 'keyboard';
+    this.gunLeadSolver.update(deltaTime, muzzle, forward, targets, airCount, true, assistCone);
+    // 没有辅助时方向为 null：子弹沿机头方向发射
     this.playerSystem.setGunAimAssist(
       this.gunLeadSolver.getAssistDirection(),
       this.gunLeadSolver.getAssistWeight()
@@ -1747,10 +1854,10 @@ export class GameCoordinator {
 
     switch (this.waveEventState.type) {
       case LevelWaveEventType.ELITE_HUNT: {
-        const eliteAlive = aliveEnemies.filter((enemy) => {
-          const type = enemy.getConfig().type;
-          return type === EnemyType.HEAVY || type === EnemyType.ACE || type === EnemyType.SNIPER;
-        }).length;
+        // 精英名单见 ELITE_ENEMY_TYPES；在场的 + 本波还没现身的，开场第一秒就是本波的精英总数
+        const eliteAlive =
+          aliveEnemies.filter((enemy) => isEliteEnemyType(enemy.getConfig().type)).length +
+          (this.enemySystem?.getLevelManager().countEliteJetsToCome() ?? 0);
 
         return {
           title: tr(text.eliteTitle, { wave: waveNumber }),
@@ -2417,6 +2524,63 @@ export class GameCoordinator {
     return { detail: describeCheckpointText(save), onRetry: () => onContinue(save) };
   }
 
+  /**
+   * 后台存档：页面转入后台（切到别的标签页 / 应用、锁屏）或即将关闭时，把此刻的战役进度写进检查点。
+   * 后台标签页可能被浏览器整个丢弃（iPad 的 Safari 常见），丢弃时页面收不到任何事件，
+   * 所以在转入后台的那一刻写。
+   *
+   * 写法和暂停菜单的“保存并退出”一样（CampaignFlowController.saveInBackground：此刻的快照重写在
+   * 当前进度的检查点位置上，不显示存档提示），只是不退出——对局原样继续，回到页面时什么都没变；
+   * 之后“继续战役”与保存并退出之后一样，从那一波 / Boss 战 / 机库重新开始。
+   * 只在“保存并退出”会写的时候写：对局进行中（不在菜单，没有任务失败 / 任务完成），不是 Boss 模式，
+   * 已经到过第一个检查点且战役尚未通关。剧情卡片 / 结算 / 机库期间照样写（机库里买的升级不会丢）。
+   * 与“保存并退出”只差一条：转入后台不是玩家自己选的，所以覆盖同一位置的检查点时生命数不会
+   * 写得比已存的少（见 saveInBackground）。
+   *
+   * 一次转入后台只写一次（visibilitychange 与 pagehide 会前后脚到），页面重新可见后才有下一次。
+   * 不向外抛错：存储不可用（隐私模式）时不能打断页面的事件处理。
+   */
+  public saveCampaignInBackground(): void {
+    if (this.backgroundSaveDone) {
+      return;
+    }
+    this.backgroundSaveDone = true;
+    if (this.isDisposed || !this.sessionState.isPlaying()) {
+      return;
+    }
+    try {
+      this.campaign.saveInBackground();
+    } catch (error) {
+      console.error('Background campaign save failed', error);
+    }
+  }
+
+  /**
+   * 后台存档的页面事件。随协调器释放一起解除：每局一个协调器，重试 / 重新开局不会叠加监听。
+   * pagehide 也会记下“已存过”，所以页面再次显示（pageshow，含从往返缓存恢复）时同样清除。
+   */
+  private setupBackgroundSave(): void {
+    const onVisibilityChange = (): void => {
+      if (document.visibilityState === 'hidden') {
+        this.saveCampaignInBackground();
+      } else {
+        this.backgroundSaveDone = false;
+      }
+    };
+    const onPageHide = (): void => this.saveCampaignInBackground();
+    const onPageShow = (): void => {
+      this.backgroundSaveDone = false;
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    window.addEventListener('pagehide', onPageHide);
+    window.addEventListener('pageshow', onPageShow);
+    this.resourceRegistry.addUnsubscriber(() => {
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      window.removeEventListener('pagehide', onPageHide);
+      window.removeEventListener('pageshow', onPageShow);
+    });
+  }
+
   // ===========================================================================================
   // 特殊武器 / 单位 / 视觉反馈
   // ===========================================================================================
@@ -2470,7 +2634,8 @@ export class GameCoordinator {
       mesh,
       faction: Faction.ENEMY,
       kind: 'air',
-      hitRadius: 5,
+      // 机体工厂按机型大小声明 userData.hitRadius；没声明时沿用 5 米
+      hitRadius: getDeclaredHitRadius(mesh, 5),
       isAlive: () => enemy.isAlive() && mesh.visible,
       applyDamage: (amount: number, _source: DamageSource, hitPoint?: THREE.Vector3) => {
         if (!enemy.isAlive()) return;
@@ -2478,6 +2643,8 @@ export class GameCoordinator {
         this.requestPlayerHitMarker(hitPoint ?? mesh.position);
       },
       applyStun: (seconds: number) => enemy.applyStun(seconds),
+      // 隐形中：蜂群导弹的自动索敌选不到它（已经在飞的、范围伤害与光束照打）
+      isSeekable: () => !enemy.isCloaked(),
     };
     this.enemyTargets.set(enemy, target);
     return target;
@@ -2585,6 +2752,34 @@ export class GameCoordinator {
   }
 
   /** 开发构建专用的调试钩子（import.meta.env.DEV 为 false 时整段被裁剪） */
+  /**
+   * 开发钩子 startLevel：把战役放到第 level 关第 waveIndex 波（从 0 起），走读档续玩的同一条
+   * 入关路径（prepareLevel → startLevelCombat），并解锁到该关为止的武器。只在战斗中可用。
+   */
+  private devStartLevel(level: number, waveIndex: number): boolean {
+    const config = getLevelConfig(level);
+    if (
+      !import.meta.env.DEV ||
+      !config ||
+      !this.enemySystem ||
+      !this.sessionState.isPlaying() ||
+      this.sessionState.isBossMode()
+    ) {
+      return false;
+    }
+    const startWave = Number.isFinite(waveIndex)
+      ? Math.max(0, Math.min(config.totalWaves - 1, Math.floor(waveIndex)))
+      : 0;
+    const upgrades = this.playerStats.getUpgrades();
+    upgrades.setCampaignLevel(level);
+    upgrades.setUnlockedWeapons(getUnlockedWeaponsThrough(level));
+    void this.prepareLevel(level, startWave).then(() => {
+      if (this.isDisposed) return;
+      this.startLevelCombat(level, startWave, false);
+    });
+    return true;
+  }
+
   private installDevHooks(): void {
     if (import.meta.env.DEV) {
       void import('@/core/dev/DevHooks').then(({ installDevHooks }) => {
@@ -2641,6 +2836,7 @@ export class GameCoordinator {
           getMusic: () => this.musicSystem,
           playGenericRadio: (key) => this.presentation.genericRadio(key),
           onWingmanEvent: (id, event) => this.presentation.onWingmanEvent(id, event),
+          startLevel: (level, waveIndex) => this.devStartLevel(level, waveIndex),
         });
       });
     }
@@ -2980,6 +3176,41 @@ export class GameCoordinator {
     this.updatePlayerFacingObjective();
   }
 
+  /**
+   * 首次遭遇提示：某机型在战役里第一次出现的那一波开场时，用大字提示通道显示一行文字（无语音）。
+   * 排在本波的事件提示之后；只跟关卡和波次有关，所以读档重打这一波照样显示，别的波次不显示。
+   */
+  private scheduleFirstContactHints(level: number, wave: number): void {
+    if (this.sessionState.isBossMode() || this.sessionState.isInBossBattle()) {
+      return;
+    }
+    const hints = getFirstContactHints(level, wave);
+    if (hints.length === 0) {
+      return;
+    }
+    const beat = this.getCurrentWaveOnboardingBeat();
+    let delayMs =
+      Math.max(0, beat.eventPromptDelayMs) +
+      Math.max(0, beat.eventPromptHoldMs) +
+      GameCoordinator.FIRST_CONTACT_HINT_GAP_MS;
+    for (const hint of hints) {
+      this.scheduleTimeout(() => {
+        const levelManager = this.enemySystem?.getLevelManager();
+        if (
+          !this.sessionState.isPlaying() ||
+          this.sessionState.isInBossBattle() ||
+          this.sessionState.getLevel() !== level ||
+          levelManager?.getCurrentWaveIndex() !== wave ||
+          levelManager.getState() !== LevelState.WAVE_ACTIVE
+        ) {
+          return;
+        }
+        this.hud.showPowerUpBig('', hint, FIRST_CONTACT_HINT_HOLD_MS / 1000, true);
+      }, delayMs);
+      delayMs += FIRST_CONTACT_HINT_HOLD_MS + GameCoordinator.FIRST_CONTACT_HINT_GAP_MS;
+    }
+  }
+
   private handleWaveEventStart(eventType: LevelWaveEventType, wave: number): void {
     this.waveCompletionObjective = null;
     this.escortWaveState.active = false;
@@ -3242,10 +3473,10 @@ export class GameCoordinator {
         return {
           title: tr(text.eliteTitle, { wave: waveNumber }),
           objective: tr({
-            en: 'Take out heavies and aces first to break their attack.',
-            zh: '优先打穿重型与王牌，切断高威胁线。',
+            en: 'Take out the elite jets first to break their attack.',
+            zh: '优先打掉精英敌机，切断高威胁线。',
           }),
-          status: tr({ en: 'Priority: heavies / aces', zh: '优先：重型/王牌' }),
+          status: tr({ en: 'Priority: elite jets', zh: '优先：精英敌机' }),
         };
       case LevelWaveEventType.INTERCEPT:
         return {

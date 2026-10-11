@@ -1,0 +1,1081 @@
+import * as THREE from 'three';
+import { getDifficultyProfile } from '@/core/Difficulty';
+import { EventBus, GameEventType, type GameEventPayloads } from '@/core/EventBus';
+import { GameSessionState } from '@/core/GameSessionState';
+import { EnemySystem } from '@/core/systems/EnemySystem';
+import { createEnemyMesh } from '@/features/aircraft/AircraftMeshFactory';
+import { ProjectilePool } from '@/features/combat/ProjectilePool';
+import { AttackDirector } from '@/features/enemy/AttackDirector';
+import { EnemyAI } from '@/features/enemy/EnemyAI';
+import { ENEMY_CONFIGS, EnemyType, type EnemyConfig } from '@/features/enemy/EnemyTypes';
+import type { EnemyWeaponKind } from '@/features/enemy/EnemyWeapons';
+import type { IJetThreatProvider } from '@/features/enemy/JetThreat';
+import {
+  getJetMissileCap,
+  grantJetMissiles,
+  type IJetMissileLauncher,
+} from '@/features/enemy/MissileDirector';
+import { createJetDoctrine } from '@/features/enemy/doctrine/createJetDoctrine';
+
+/**
+ * 敌机机队测试台（批次 E-X）：真实的 EnemyAI + 机型条令 + 攻击令牌导演，脱离渲染器按固定步长推进。
+ *
+ * 每一步的顺序与 EnemySystem.updateWithPlayer 相同：玩家先动 → 把战场态势写给每架敌机 →
+ * 导演发放 / 收回令牌（攻击令牌与全队导弹令牌）→ 每架敌机 update。随机数全部来自按种子生成的
+ * 序列，时间由步长累加，不读系统时钟，所以同一个种子每次跑出同一场交战。
+ *
+ * 敌机导弹的发射通道（游戏里是单位导弹池）由 RigMissileChannel 代替：它只记账，不模拟导弹
+ * 的飞行与命中。
+ *
+ * 这里的几何工具（方位角、夹角）是测试自己的实现，不借用被测代码里的同名函数。
+ */
+
+/** 固定模拟步长（秒）：60 Hz */
+export const DT = 1 / 60;
+export const DEG = Math.PI / 180;
+
+/**
+ * 用到这个测试台的测试文件的单例超时（毫秒）：整场交战要算几万步，机器上同时跑着别的测试时
+ * 会慢上十几倍。各文件开头用 vi.setConfig({ testTimeout: SIM_TEST_TIMEOUT }) 设置。
+ */
+export const SIM_TEST_TIMEOUT = 60_000;
+
+/** 规格 §2 里写死的规则数值（不是可调的起始值） */
+export const SPEC = {
+  /** 拴绳距离（米） */
+  LEASH: 900,
+  /** 同时进攻的敌机，进入方位两两至少相隔（弧度） */
+  MIN_BEARING_GAP: 60 * DEG,
+  /** 招牌攻击的最短预警（秒） */
+  MIN_TELL: 0.7,
+  /** 油门范围：机型基础速度的倍数 */
+  MIN_THROTTLE: 0.6,
+  MAX_THROTTLE: 1.3,
+  /** 命中半径 = 这个系数 × 机体缩放 */
+  HIT_RADIUS_PER_SCALE: 2.5,
+} as const;
+
+/** 可复现的 0..1 随机数（mulberry32）；测试自己的实现 */
+export function seededRandom(seed: number): () => number {
+  let state = seed >>> 0;
+  return () => {
+    state = (state + 0x6d2b79f5) >>> 0;
+    let t = state;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/**
+ * 替换 Math.random 用的可复现随机数：游戏逻辑一条序列，three.js 给新对象生成 id
+ * （generateUUID，每个 id 取四个随机数）另一条序列。
+ *
+ * 不分开的话，一场交战拿到的随机数取决于这之前已经建过多少 three.js 对象——共享的几何体 /
+ * 材质只在第一次用到时创建，于是同一个种子在“本文件第一场”和“后面几场”打出来的不一样，
+ * 单跑一个用例和整个文件一起跑也不一样。按调用栈区分：栈里有 generateUUID 的走 id 序列。
+ */
+export function seededGameRandom(seed: number): () => number {
+  const game = seededRandom(seed);
+  const ids = seededRandom((seed ^ 0x5bd1e995) >>> 0);
+  return () => (calledFromIdGenerator() ? ids() : game());
+}
+
+/** V8 的调用栈接口（不在标准类型里） */
+interface StackSite {
+  getFunctionName(): string | null;
+}
+type StackAwareError = ErrorConstructor & {
+  stackTraceLimit?: number;
+  prepareStackTrace?: (error: Error, sites: StackSite[]) => unknown;
+};
+
+/**
+ * 当前调用是不是来自 three.js 的 generateUUID。只取最近几层的原始调用点、不生成栈文本
+ * （生成文本要走源码映射，很慢；粒子系统每帧要取上百个随机数）。
+ */
+function calledFromIdGenerator(): boolean {
+  const errors = Error as StackAwareError;
+  const limit = errors.stackTraceLimit;
+  const prepare = errors.prepareStackTrace;
+  let fromIds = false;
+  errors.stackTraceLimit = 8;
+  errors.prepareStackTrace = (_error, sites) => {
+    for (const site of sites) {
+      if (site.getFunctionName() === 'generateUUID') fromIds = true;
+    }
+    return '';
+  };
+  try {
+    // 读 stack 才会触发上面的回调
+    void new Error().stack;
+  } finally {
+    errors.prepareStackTrace = prepare;
+    errors.stackTraceLimit = limit;
+  }
+  return fromIds;
+}
+
+/** 方位角（弧度，绕世界 Y）：从 from 看 to；0 = +Z，π/2 = +X */
+export function bearingOf(from: THREE.Vector3, to: THREE.Vector3): number {
+  return Math.atan2(to.x - from.x, to.z - from.z);
+}
+
+/** 两个方位角之间的夹角（0..π） */
+export function bearingGap(a: number, b: number): number {
+  let diff = (a - b) % (Math.PI * 2);
+  if (diff > Math.PI) diff -= Math.PI * 2;
+  if (diff < -Math.PI) diff += Math.PI * 2;
+  return Math.abs(diff);
+}
+
+/** 两个向量的夹角（弧度，0..π） */
+export function angleBetween(a: THREE.Vector3, b: THREE.Vector3): number {
+  const lengths = a.length() * b.length();
+  if (!(lengths > 1e-12)) return Math.PI;
+  return Math.acos(Math.min(1, Math.max(-1, a.dot(b) / lengths)));
+}
+
+/** 水平单位向量：方位角 → (sin, 0, cos) */
+export function directionOf(bearing: number): THREE.Vector3 {
+  return new THREE.Vector3(Math.sin(bearing), 0, Math.cos(bearing));
+}
+
+export function isFiniteVector(vector: THREE.Vector3): boolean {
+  return Number.isFinite(vector.x) && Number.isFinite(vector.y) && Number.isFinite(vector.z);
+}
+
+/** 让出事件循环：长时间的同步模拟之间调用，避免工作线程超过 RPC 超时 */
+export function breathe(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+export interface RigPlayer {
+  position: THREE.Vector3;
+  /** 机头方向（单位向量） */
+  forward: THREE.Vector3;
+  /** 速率（米/秒） */
+  speed: number;
+  /** 本步的速度（forward × speed，由测试台写入） */
+  velocity: THREE.Vector3;
+}
+
+/** 玩家绕世界 Y 轴转向（弧度；正值从 +Z 转向 +X，即向左） */
+export function turnForward(player: RigPlayer, angle: number): void {
+  const { forward } = player;
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  const x = forward.x * cos + forward.z * sin;
+  const z = forward.z * cos - forward.x * sin;
+  forward.x = x;
+  forward.z = z;
+  forward.normalize();
+}
+
+export interface RigShot {
+  time: number;
+  step: number;
+  jet: EnemyAI;
+  type: EnemyType;
+  /** 条令开火才有；旧的三状态开火为 null */
+  weapon: EnemyWeaponKind | null;
+  speed: number | null;
+  quiet: boolean;
+  damage: number;
+  origin: THREE.Vector3;
+  direction: THREE.Vector3;
+  /** 本步导演发完令牌之后，这架敌机手里有没有令牌 */
+  hadToken: boolean;
+  /** 开火瞬间的玩家状态与距离 */
+  playerPosition: THREE.Vector3;
+  playerForward: THREE.Vector3;
+  playerVelocity: THREE.Vector3;
+  distance: number;
+  /** 开火瞬间敌机自己的飞行方向 */
+  jetForward: THREE.Vector3;
+}
+
+export interface RigTell {
+  time: number;
+  jet: EnemyAI;
+  kind: string;
+  duration: number;
+}
+
+export interface RigMissile {
+  time: number;
+  /** 发射者标签：'jet:<机型>' */
+  source: string;
+  position: THREE.Vector3;
+  direction: THREE.Vector3;
+}
+
+/**
+ * 敌机导弹发射通道的替身（游戏里由 GameCoordinator 用单位导弹池实现）：记录每次发射，
+ * 每枚导弹“在飞” flightSeconds 秒后自行消失；不模拟追踪、命中、热焰弹。
+ */
+export class RigMissileChannel implements IJetMissileLauncher {
+  /** 通道可用（游戏里 = 单位系统已加载） */
+  public available = true;
+  /** 每枚导弹在飞多久（秒） */
+  public flightSeconds = 6;
+  public readonly launches: RigMissile[] = [];
+  /** 敌机系统最近一次写入的“锁定中”预警状态 */
+  public lockWarning = false;
+  /** 每次发射时调用（测试台用它把发射记进 launchLog） */
+  public onLaunch: ((missile: RigMissile) => void) | null = null;
+  private readonly landings: number[] = [];
+
+  constructor(private readonly clock: () => number) {}
+
+  public isAvailable(): boolean {
+    return this.available;
+  }
+
+  public launch(position: THREE.Vector3, direction: THREE.Vector3, source: string): boolean {
+    const time = this.clock();
+    const missile: RigMissile = {
+      time,
+      source,
+      position: position.clone(),
+      direction: direction.clone(),
+    };
+    this.launches.push(missile);
+    this.landings.push(time + this.flightSeconds);
+    this.onLaunch?.(missile);
+    return true;
+  }
+
+  /** 把在飞的导弹全部清掉（玩家放了热焰弹 / 导弹都打完了） */
+  public clearInFlight(): void {
+    this.landings.length = 0;
+  }
+
+  public countInFlight(): number {
+    const now = this.clock();
+    let count = 0;
+    for (const landing of this.landings) {
+      if (landing > now) count++;
+    }
+    return count;
+  }
+
+  public setLockWarning(active: boolean): void {
+    this.lockWarning = active;
+  }
+}
+
+/** 一次导弹发射，连同发射那一步之前的锁定情况（两个测试台都记） */
+export interface RigLaunch {
+  time: number;
+  /** 发射者标签：'jet:<机型>' */
+  source: string;
+  /** 发射的敌机（EnemySystem 测试台按机型 + 位置找；找不到为 null） */
+  jet: EnemyAI | null;
+  /** 本步导演发完令牌之后，它手里有没有攻击令牌 */
+  hadToken: boolean;
+  /** 到上一步为止，它已经连续报告“锁定中”多少秒（0 = 上一步没有在锁定） */
+  lockedFor: number;
+  /** 到上一步为止，发射通道上的“锁定中”预警已经连续亮了多少秒 */
+  warnedFor: number;
+  /** 这次锁定开始的那一步，它离玩家多远（没有在锁定时为 NaN） */
+  lockStartDistance: number;
+  /** 发射点到玩家的距离 */
+  distance: number;
+  origin: THREE.Vector3;
+  direction: THREE.Vector3;
+  /** 发射瞬间敌机自己的位置 */
+  jetPosition: THREE.Vector3 | null;
+  /** 发射瞬间玩家的位置 */
+  playerPosition: THREE.Vector3;
+}
+
+/** 记每架敌机从哪一步开始连续“锁定中”，以及通道上的预警从哪一步开始亮 */
+class LockClock {
+  private readonly since = new Map<EnemyAI, number>();
+  private readonly startDistance = new Map<EnemyAI, number>();
+  private warningSince = Number.NaN;
+
+  /** 每步敌机更新之后调用；time 是这一步开始的时刻 */
+  public observe(
+    time: number,
+    jets: readonly EnemyAI[],
+    warning: boolean,
+    playerPosition: THREE.Vector3
+  ): void {
+    for (const jet of jets) {
+      if (jet.isMissileLocking()) {
+        if (!this.since.has(jet)) {
+          this.since.set(jet, time);
+          this.startDistance.set(jet, jet.getMesh().position.distanceTo(playerPosition));
+        }
+      } else {
+        this.since.delete(jet);
+      }
+    }
+    for (const jet of this.since.keys()) {
+      if (!jets.includes(jet)) this.since.delete(jet);
+    }
+    if (!warning) this.warningSince = Number.NaN;
+    else if (Number.isNaN(this.warningSince)) this.warningSince = time;
+  }
+
+  public lockedFor(jet: EnemyAI | null, now: number): number {
+    const since = jet ? this.since.get(jet) : undefined;
+    return since === undefined ? 0 : now - since;
+  }
+
+  public lockStartDistance(jet: EnemyAI | null): number {
+    const distance = jet && this.since.has(jet) ? this.startDistance.get(jet) : undefined;
+    return distance === undefined ? Number.NaN : distance;
+  }
+
+  public warnedFor(now: number): number {
+    return Number.isNaN(this.warningSince) ? 0 : now - this.warningSince;
+  }
+}
+
+export interface AddJetOptions {
+  /** 初始飞行方向（缺省朝向玩家） */
+  heading?: THREE.Vector3;
+  /** 覆盖机型配置里的个别字段（命中精度、提前量、开火节奏……） */
+  config?: Partial<EnemyConfig>;
+  /** 这架敌机条令的随机种子（缺省按加入顺序派生） */
+  seed?: number;
+}
+
+export interface FleetRigOptions {
+  /** 令牌数（缺省 2） */
+  capacity?: number;
+  /** 当前关卡（缺省 1） */
+  level?: number;
+  bossFight?: boolean;
+  seed?: number;
+  playerPosition?: THREE.Vector3;
+  playerForward?: THREE.Vector3;
+  /** 玩家速率（米/秒，缺省 45） */
+  playerSpeed?: number;
+}
+
+export class FleetRig {
+  public readonly scene = new THREE.Scene();
+  public readonly director = new AttackDirector();
+  public readonly jets: EnemyAI[] = [];
+  public readonly player: RigPlayer;
+  public readonly shots: RigShot[] = [];
+  public readonly tells: RigTell[] = [];
+  /** 敌机导弹的发射通道（缺省可用，和游戏里一样） */
+  public readonly missiles = new RigMissileChannel(() => this.time);
+  /** 每一次导弹发射，连同它之前的锁定情况 */
+  public readonly launchLog: RigLaunch[] = [];
+
+  public capacity: number;
+  public level: number;
+  public bossFight: boolean;
+  /** 玩家可以被攻击（false = 复活中：导演收回全部令牌） */
+  public playerTargetable = true;
+  /** 玩家导引头已锁定的敌机 */
+  public lockedJet: EnemyAI | null = null;
+  /** 有玩家导弹正飞向的敌机 */
+  public readonly missileTargets = new Set<EnemyAI>();
+  /** 每步在玩家移动之前调用：改 player.forward / player.speed 就是在“飞”玩家 */
+  public pilot: ((rig: FleetRig) => void) | null = null;
+
+  public time = 0;
+  public stepIndex = 0;
+
+  private readonly seed: number;
+  private added = 0;
+  private disposed = false;
+  private readonly holdersThisStep = new Set<EnemyAI>();
+  private readonly lockClock = new LockClock();
+
+  constructor(options: FleetRigOptions = {}) {
+    this.capacity = options.capacity ?? 2;
+    this.level = options.level ?? 1;
+    this.bossFight = options.bossFight ?? false;
+    this.seed = options.seed ?? 1;
+    const forward = (options.playerForward ?? new THREE.Vector3(0, 0, 1)).clone().normalize();
+    const speed = options.playerSpeed ?? 45;
+    this.player = {
+      position: (options.playerPosition ?? new THREE.Vector3(0, 300, 0)).clone(),
+      forward,
+      speed,
+      velocity: forward.clone().multiplyScalar(speed),
+    };
+  }
+
+  /** 加一架带机型条令的敌机；config 缺省为机型表里的基础数值 */
+  public addJet(type: EnemyType, position: THREE.Vector3, options: AddJetOptions = {}): EnemyAI {
+    const config: EnemyConfig = { ...ENEMY_CONFIGS[type], ...options.config };
+    const mesh = createEnemyMesh(config);
+    mesh.position.copy(position);
+    this.scene.add(mesh);
+    const seed = options.seed ?? this.seed * 7919 + this.added * 104729 + 13;
+    this.added++;
+    const jet = new EnemyAI(mesh, config, this.scene, {
+      doctrine: createJetDoctrine(type),
+      rng: seededRandom(seed),
+    });
+    const heading = (options.heading ?? this.player.position.clone().sub(position).setY(0)).clone();
+    if (heading.lengthSq() < 1e-9) heading.set(0, 0, 1);
+    jet.velocity.copy(heading.normalize().multiplyScalar(config.speed));
+    mesh.lookAt(position.clone().add(heading));
+
+    jet.onFire = (origin, direction, damage, shot) => {
+      this.shots.push({
+        time: this.time,
+        step: this.stepIndex,
+        jet,
+        type,
+        weapon: shot ? shot.weapon : null,
+        speed: shot ? shot.speed : null,
+        quiet: shot ? shot.quiet : false,
+        damage,
+        origin: origin.clone(),
+        direction: direction.clone(),
+        hadToken: this.holdersThisStep.has(jet),
+        playerPosition: this.player.position.clone(),
+        playerForward: this.player.forward.clone(),
+        playerVelocity: this.player.velocity.clone(),
+        distance: origin.distanceTo(this.player.position),
+        jetForward: jet.velocity.clone().normalize(),
+      });
+    };
+    jet.onTell = (cue, _position, duration) => {
+      this.tells.push({ time: this.time, jet, kind: cue, duration });
+    };
+    jet.onMissileLaunch = (origin, direction) => {
+      const source = `jet:${type}`;
+      this.launchLog.push({
+        time: this.time,
+        source,
+        jet,
+        hadToken: this.holdersThisStep.has(jet),
+        lockedFor: this.lockClock.lockedFor(jet, this.time),
+        warnedFor: this.lockClock.warnedFor(this.time),
+        lockStartDistance: this.lockClock.lockStartDistance(jet),
+        distance: origin.distanceTo(this.player.position),
+        origin: origin.clone(),
+        direction: direction.clone(),
+        jetPosition: jet.getMesh().position.clone(),
+        playerPosition: this.player.position.clone(),
+      });
+      this.missiles.launch(origin, direction, source);
+    };
+    this.jets.push(jet);
+    return jet;
+  }
+
+  /** 本步持有令牌的敌机（导演发完之后的状态） */
+  public holders(): EnemyAI[] {
+    return this.jets.filter((jet) => jet.hasAttackToken());
+  }
+
+  public distanceTo(jet: EnemyAI): number {
+    return jet.getMesh().position.distanceTo(this.player.position);
+  }
+
+  /** 从玩家看这架敌机的方位角 */
+  public bearingTo(jet: EnemyAI): number {
+    return bearingOf(this.player.position, jet.getMesh().position);
+  }
+
+  /** 玩家绕世界 Y 轴转向（弧度；正值从 +Z 转向 +X） */
+  public turnPlayer(angle: number): void {
+    turnForward(this.player, angle);
+  }
+
+  /** 推进一步 */
+  public step(): void {
+    // 超时的异步用例会在后台继续跑：测试台已经销毁就让它立刻停下，不去打扰下一个用例
+    if (this.disposed) throw new Error('FleetRig stepped after dispose');
+    this.pilot?.(this);
+    const { player } = this;
+    player.velocity.copy(player.forward).multiplyScalar(player.speed);
+    player.position.addScaledVector(player.velocity, DT);
+
+    for (const jet of this.jets) {
+      jet.setCombatSituation(
+        player.forward,
+        this.lockedJet === jet,
+        this.missileTargets.has(jet),
+        this.level,
+        this.bossFight
+      );
+    }
+    this.director.update(
+      DT,
+      this.jets,
+      this.playerTargetable ? player.position : null,
+      this.playerTargetable ? this.capacity : 0
+    );
+    this.holdersThisStep.clear();
+    for (const jet of this.jets) {
+      if (jet.hasAttackToken()) this.holdersThisStep.add(jet);
+    }
+    // 全队导弹令牌：和 EnemySystem 一样，在敌机更新之前发放
+    const launcherReady = this.missiles.isAvailable();
+    grantJetMissiles(
+      this.jets,
+      this.playerTargetable && launcherReady ? getJetMissileCap(this.level, this.bossFight) : 0,
+      launcherReady ? this.missiles.countInFlight() : 0
+    );
+
+    for (const jet of this.jets) {
+      jet.setTargetVelocity(player.velocity);
+      jet.update(DT, player.position, undefined, player.position);
+    }
+    this.missiles.setLockWarning(this.jets.some((jet) => jet.isMissileLocking()));
+    this.lockClock.observe(this.time, this.jets, this.missiles.lockWarning, this.player.position);
+    this.time += DT;
+    this.stepIndex++;
+  }
+
+  /**
+   * 推进 seconds 秒；each 在每步之后调用，返回 true 提前结束。返回实际走过的秒数。
+   */
+  public run(seconds: number, each?: (rig: FleetRig) => boolean | void): number {
+    const steps = Math.round(seconds / DT);
+    for (let i = 0; i < steps; i++) {
+      this.step();
+      if (each?.(this) === true) return (i + 1) * DT;
+    }
+    return steps * DT;
+  }
+
+  /** 推进到条件成立；超过 maxSeconds 仍不成立时返回 false */
+  public runUntil(predicate: (rig: FleetRig) => boolean, maxSeconds: number): boolean {
+    if (predicate(this)) return true;
+    let met = false;
+    this.run(maxSeconds, () => {
+      met = predicate(this);
+      return met;
+    });
+    return met;
+  }
+
+  public dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
+    for (const jet of this.jets) jet.dispose();
+    this.jets.length = 0;
+    this.director.reset();
+  }
+}
+
+// ---------------------------------------------------------------------------------------------
+// 交战记录的整理工具与脚本飞行员
+// ---------------------------------------------------------------------------------------------
+
+/** 水平分量（拷贝） */
+export function horizontal(vector: THREE.Vector3): THREE.Vector3 {
+  return new THREE.Vector3(vector.x, 0, vector.z);
+}
+
+/** 俯仰角（弧度，向上为正） */
+export function pitchOf(velocity: THREE.Vector3): number {
+  const length = velocity.length();
+  return length > 1e-9 ? Math.asin(Math.min(1, Math.max(-1, velocity.y / length))) : 0;
+}
+
+/**
+ * 把一串射击分组：同一架敌机、相邻两发间隔小于 gap 秒的算同一次点射 / 齐射。
+ * shots 需按时间排序（测试台记录的顺序就是）。
+ */
+export function groupBursts<T extends { time: number; jet: unknown }>(
+  shots: readonly T[],
+  gap = 0.5
+): T[][] {
+  const groups: T[][] = [];
+  const open = new Map<unknown, T[]>();
+  for (const shot of shots) {
+    const current = open.get(shot.jet);
+    if (current && shot.time - current[current.length - 1].time < gap) {
+      current.push(shot);
+    } else {
+      const next = [shot];
+      open.set(shot.jet, next);
+      groups.push(next);
+    }
+  }
+  return groups;
+}
+
+/** 一段朝同一侧的转向 */
+export interface TurnLeg {
+  /** 1 = 航向角增大（从 +Z 转向 +X），-1 = 反向 */
+  sign: number;
+  /** 这一段转过的角度（弧度） */
+  angle: number;
+  start: number;
+  end: number;
+}
+
+/**
+ * 按水平航向记录“转向段”：连续朝同一侧转算一段，换边或直飞超过 straightGap 秒就结束这一段。
+ * 用来数蛇形机动 / 剪刀机动里的换向次数，不依赖条令内部的阶段名。
+ */
+export class TurnTracker {
+  public readonly legs: TurnLeg[] = [];
+  /** 累计转过的角度（弧度） */
+  public total = 0;
+
+  private heading = Number.NaN;
+  private current: TurnLeg | null = null;
+  private straight = 0;
+
+  constructor(private readonly straightGap = 0.25) {}
+
+  public feed(time: number, velocity: THREE.Vector3): void {
+    if (velocity.x * velocity.x + velocity.z * velocity.z < 1e-9) return;
+    const heading = Math.atan2(velocity.x, velocity.z);
+    if (Number.isNaN(this.heading)) {
+      this.heading = heading;
+      return;
+    }
+    let delta = heading - this.heading;
+    if (delta > Math.PI) delta -= Math.PI * 2;
+    if (delta < -Math.PI) delta += Math.PI * 2;
+    this.heading = heading;
+    this.total += Math.abs(delta);
+    const sign = Math.abs(delta) < 1e-5 ? 0 : Math.sign(delta);
+    if (sign === 0) {
+      this.straight += DT;
+      if (this.current && this.straight > this.straightGap) this.close();
+      return;
+    }
+    this.straight = 0;
+    if (this.current && this.current.sign !== sign) this.close();
+    if (!this.current) this.current = { sign, angle: 0, start: time, end: time };
+    this.current.angle += Math.abs(delta);
+    this.current.end = time;
+  }
+
+  /** 结束当前这一段（统计之前调用） */
+  public close(): void {
+    if (this.current) this.legs.push(this.current);
+    this.current = null;
+  }
+
+  /** 至少转过 minAngle 的转向段里，相邻两段方向相反的次数 */
+  public reversals(minAngle: number): number {
+    this.close();
+    const big = this.legs.filter((leg) => leg.angle >= minAngle);
+    let count = 0;
+    for (let i = 1; i < big.length; i++) {
+      if (big[i].sign !== big[i - 1].sign) count++;
+    }
+    return count;
+  }
+
+  /**
+   * “急转之后紧接着反向急转”的次数：前后两段都至少转过 minAngle，中间直飞不超过 maxPause 秒。
+   */
+  public hardReversals(minAngle: number, maxPause = 0.3): number {
+    this.close();
+    let count = 0;
+    for (let i = 1; i < this.legs.length; i++) {
+      const before = this.legs[i - 1];
+      const after = this.legs[i];
+      if (
+        before.sign !== after.sign &&
+        before.angle >= minAngle &&
+        after.angle >= minAngle &&
+        after.start - before.end <= maxPause
+      ) {
+        count++;
+      }
+    }
+    return count;
+  }
+}
+
+/** 脚本飞行员：以有限角速度（弧度/秒）把机头水平转向某架敌机——“追着它打” */
+export function chasePilot(jet: EnemyAI, turnRate: number): (rig: FleetRig) => void {
+  return (rig) => {
+    const { player } = rig;
+    const want = bearingOf(player.position, jet.getMesh().position);
+    const have = Math.atan2(player.forward.x, player.forward.z);
+    let delta = want - have;
+    if (delta > Math.PI) delta -= Math.PI * 2;
+    if (delta < -Math.PI) delta += Math.PI * 2;
+    const limit = turnRate * DT;
+    rig.turnPlayer(Math.max(-limit, Math.min(limit, delta)));
+  };
+}
+
+/**
+ * 脚本飞行员：每一步都待在敌机的固定相对位置上，速度与它相同。
+ * back = 在它身后多少米（沿它的水平航向，负值 = 在它前方），right = 在它右侧多少米，
+ * up = 高出多少米。facing：'at-jet' 机头指向敌机（缺省），'with-jet' 与敌机同向飞行。
+ */
+export function shadowPilot(
+  jet: EnemyAI,
+  back: number,
+  right: number,
+  up: number,
+  facing: 'at-jet' | 'with-jet' = 'at-jet'
+): (rig: { player: RigPlayer }) => void {
+  return (rig) => {
+    const { player } = rig;
+    const forward = horizontal(jet.velocity);
+    if (forward.lengthSq() < 1e-9) forward.set(0, 0, 1);
+    forward.normalize();
+    // 前向 (x, z) 的右侧是 (-z, x)
+    const jetPosition = jet.getMesh().position;
+    player.position.set(
+      jetPosition.x - forward.x * back - forward.z * right,
+      jetPosition.y + up,
+      jetPosition.z - forward.z * back + forward.x * right
+    );
+    if (facing === 'with-jet') player.forward.copy(forward);
+    else player.forward.copy(jetPosition).sub(player.position).normalize();
+    player.speed = jet.velocity.length();
+    // 测试台随后会按速度把玩家往前挪一步：先退回去，这一步结束时正好在预定位置
+    player.position.addScaledVector(player.forward, -player.speed * DT);
+  };
+}
+
+/**
+ * 把测试台里敌机的开火接到真实的敌方子弹池，对一个代表玩家的网格做命中判定
+ * （命中半径 5 米：未声明 userData.hitRadius 时战斗代码的缺省值）。
+ */
+export class LiveFire {
+  public readonly pool: ProjectilePool;
+  public readonly playerMesh = new THREE.Group();
+  public readonly hits: Array<{ time: number; damage: number }> = [];
+
+  constructor(private readonly rig: FleetRig) {
+    this.pool = new ProjectilePool(rig.scene);
+    rig.scene.add(this.playerMesh);
+    for (const jet of rig.jets) this.attach(jet);
+  }
+
+  /** 接上一架敌机（构造之后才加入测试台的敌机要单独接） */
+  public attach(jet: EnemyAI): void {
+    const record = jet.onFire;
+    jet.onFire = (origin, direction, damage, shot) => {
+      record?.(origin, direction, damage, shot);
+      this.pool.fire(origin, direction, damage, jet.getMesh(), 'ENEMY', shot?.weapon);
+    };
+  }
+
+  /** 每个模拟步之后调用：子弹前进一步并判定是否打中玩家 */
+  public step(): void {
+    this.playerMesh.position.copy(this.rig.player.position);
+    this.playerMesh.updateMatrixWorld(true);
+    this.pool.update(DT);
+    this.pool.checkCollisions([this.playerMesh], (_target, _projectile, damage) => {
+      this.hits.push({ time: this.rig.time, damage });
+    });
+  }
+
+  public dispose(): void {
+    this.pool.dispose();
+  }
+}
+
+/** 带材质的可渲染对象（网格 / 精灵 / 线 / 点） */
+export type Renderable = THREE.Object3D & { material: THREE.Material | THREE.Material[] };
+
+/** 机体下所有带材质的可渲染对象 */
+export function renderablesOf(root: THREE.Object3D): Renderable[] {
+  const found: Renderable[] = [];
+  root.traverse((object) => {
+    const candidate = object as Partial<Renderable> & {
+      isMesh?: boolean;
+      isSprite?: boolean;
+      isLine?: boolean;
+      isPoints?: boolean;
+    };
+    if (!candidate.material) return;
+    if (candidate.isMesh || candidate.isSprite || candidate.isLine || candidate.isPoints) {
+      found.push(object as Renderable);
+    }
+  });
+  return found;
+}
+
+function materialsOf(object: Renderable): THREE.Material[] {
+  return Array.isArray(object.material) ? [...object.material] : [object.material];
+}
+
+/**
+ * 盯着一架敌机的机体材质：构造时记下每个部件用的材质和不透明度，之后可以问“现在比那时淡了多少”
+ * “是不是还用着原来那一份材质”“多出来了什么”。用来从外面看隐形机的淡出 / 淡入，不读条令内部状态。
+ *
+ * 不透明度的比值只在共享材质不做动画时可靠（FleetRig；EnemySystem 每步会驱动共享的信号灯闪烁）。
+ */
+export class HullWatch {
+  public readonly parts: Array<{
+    object: Renderable;
+    materials: THREE.Material[];
+    opacities: number[];
+    wasArray: boolean;
+  }>;
+
+  constructor(public readonly root: THREE.Object3D) {
+    this.parts = renderablesOf(root).map((object) => {
+      const materials = materialsOf(object);
+      return {
+        object,
+        materials,
+        opacities: materials.map((material) => material.opacity),
+        wasArray: Array.isArray(object.material),
+      };
+    });
+  }
+
+  /** 生成时的全部材质（去重） */
+  public originals(): THREE.Material[] {
+    return [...new Set(this.parts.flatMap((part) => part.materials))];
+  }
+
+  /**
+   * 现在的不透明度 ÷ 生成时的不透明度，各部件里最小与最大的比值
+   * （生成时不透明度不到 0.05 的部件不算：比值没有意义）。
+   */
+  public opacityRange(): { min: number; max: number } {
+    let min = Infinity;
+    let max = -Infinity;
+    for (const part of this.parts) {
+      const now = materialsOf(part.object);
+      for (let i = 0; i < part.opacities.length; i++) {
+        if (!(part.opacities[i] > 0.05)) continue;
+        const ratio = (now[i] ?? now[0]).opacity / part.opacities[i];
+        if (ratio < min) min = ratio;
+        if (ratio > max) max = ratio;
+      }
+    }
+    return { min, max };
+  }
+
+  /** 每个部件现在挂的是不是生成时那一份材质（同一个对象，数组还是数组） */
+  public usesOriginalMaterials(): boolean {
+    return this.parts.every((part) => {
+      const now = materialsOf(part.object);
+      return (
+        Array.isArray(part.object.material) === part.wasArray &&
+        now.length === part.materials.length &&
+        now.every((material, index) => material === part.materials[index])
+      );
+    });
+  }
+
+  /** 现在挂在这些部件上、但不是生成时那一份的材质（淡出用的克隆） */
+  public foreignMaterials(): THREE.Material[] {
+    const originals = new Set(this.originals());
+    const foreign = new Set<THREE.Material>();
+    for (const part of this.parts) {
+      for (const material of materialsOf(part.object)) {
+        if (!originals.has(material)) foreign.add(material);
+      }
+    }
+    return [...foreign];
+  }
+
+  /** 生成之后才挂上机体、现在可见的可渲染对象（现形眼灯等） */
+  public addedVisible(): Renderable[] {
+    const known = new Set<THREE.Object3D>(this.parts.map((part) => part.object));
+    return renderablesOf(this.root).filter((object) => !known.has(object) && object.visible);
+  }
+}
+
+/** 玩家前方 distance 米、方位偏 bearingOffset（弧度，正 = 右侧）处的一点，高度差 height */
+export function pointAround(
+  player: RigPlayer,
+  distance: number,
+  bearingOffset: number,
+  height = 0
+): THREE.Vector3 {
+  const heading = Math.atan2(player.forward.x, player.forward.z);
+  // 约定与开发钩子一致：0 = 正前方，+90° = 右侧（前向 (x, z) 的右侧是 (-z, x)）
+  const bearing = heading - bearingOffset;
+  return new THREE.Vector3(
+    player.position.x + Math.sin(bearing) * distance,
+    player.position.y + height,
+    player.position.z + Math.cos(bearing) * distance
+  );
+}
+
+// ---------------------------------------------------------------------------------------------
+// 整个敌机系统（EnemySystem + LevelManager + 导演）的测试台
+// ---------------------------------------------------------------------------------------------
+
+export type EnemyFiredPayload = GameEventPayloads[GameEventType.ENEMY_FIRED];
+export type EnemyTellPayload = GameEventPayloads[GameEventType.ENEMY_TELL];
+
+export interface SystemShot {
+  time: number;
+  payload: EnemyFiredPayload;
+  /** 开火的敌机（按 payload.owner 找到；找不到为 null） */
+  jet: EnemyAI | null;
+  /** 开火瞬间它手里有没有令牌，或上一步结束时有没有 */
+  hadToken: boolean;
+  distance: number;
+}
+
+export interface SystemRigOptions {
+  level?: number;
+  /** 难度档 1..5（3 = 普通） */
+  difficulty?: number;
+  bossFight?: boolean;
+  playerPosition?: THREE.Vector3;
+  playerForward?: THREE.Vector3;
+  playerSpeed?: number;
+}
+
+/**
+ * 真实的 EnemySystem：敌机走 Boss 召唤小兵的那条生成路径（spawnEnemyAt），每步调用
+ * updateWithPlayer；玩家威胁通过 setThreatProvider 喂进去，开火 / 预警从 EventBus 上收，
+ * 敌机导弹交给 RigMissileChannel（setMissileLauncher）。
+ * 敌机条令用的是 Math.random——需要可复现时由测试自己用 seededGameRandom 替换 Math.random。
+ */
+export class SystemRig {
+  public readonly scene = new THREE.Scene();
+  public readonly session = new GameSessionState();
+  public readonly system: EnemySystem;
+  public readonly player: RigPlayer;
+  public readonly shots: SystemShot[] = [];
+  public readonly tells: Array<{ time: number; payload: EnemyTellPayload }> = [];
+  /** 敌机导弹的发射通道（缺省可用，和游戏里一样） */
+  public readonly missiles = new RigMissileChannel(() => this.time);
+  /** 每一次导弹发射，连同它之前的锁定情况 */
+  public readonly launchLog: RigLaunch[] = [];
+  public playerTargetable = true;
+  public lockedMesh: THREE.Object3D | null = null;
+  public readonly missileTargets = new Set<THREE.Object3D>();
+  public pilot: ((rig: SystemRig) => void) | null = null;
+  public time = 0;
+
+  private readonly unsubscribe: Array<() => void> = [];
+  private readonly holdersLastStep = new Set<EnemyAI>();
+  private readonly lockClock = new LockClock();
+  private disposed = false;
+
+  constructor(options: SystemRigOptions = {}) {
+    this.session.setLevel(options.level ?? 1);
+    this.session.setInBossBattle(options.bossFight ?? false);
+    this.system = new EnemySystem(this.scene, this.session);
+    this.system.init();
+    this.system.setDifficultyProfile(getDifficultyProfile(options.difficulty ?? 3));
+    const forward = (options.playerForward ?? new THREE.Vector3(0, 0, 1)).clone().normalize();
+    const speed = options.playerSpeed ?? 45;
+    this.player = {
+      position: (options.playerPosition ?? new THREE.Vector3(0, 300, 0)).clone(),
+      forward,
+      speed,
+      velocity: forward.clone().multiplyScalar(speed),
+    };
+    const provider: IJetThreatProvider = {
+      getLockedTarget: () => this.lockedMesh,
+      isMissileInbound: (target) => this.missileTargets.has(target),
+      getPlayerForward: (out) => {
+        out.copy(this.player.forward);
+        return true;
+      },
+      isPlayerTargetable: () => this.playerTargetable,
+    };
+    this.system.setThreatProvider(provider);
+    this.system.setMissileLauncher(this.missiles);
+    this.missiles.onLaunch = (missile) => {
+      // 发射者：标签里那个机型的敌机里，离发射点最近的一架（导弹从机头前方几米处离架）
+      const type = missile.source.replace(/^jet:/, '');
+      let jet: EnemyAI | null = null;
+      let nearest = 40;
+      for (const candidate of this.system.getEnemies()) {
+        if (candidate.getConfig().type !== type) continue;
+        const gap = candidate.getMesh().position.distanceTo(missile.position);
+        if (gap < nearest) {
+          nearest = gap;
+          jet = candidate;
+        }
+      }
+      this.launchLog.push({
+        time: this.time,
+        source: missile.source,
+        jet,
+        hadToken: jet ? jet.hasAttackToken() || this.holdersLastStep.has(jet) : false,
+        lockedFor: this.lockClock.lockedFor(jet, this.time),
+        warnedFor: this.lockClock.warnedFor(this.time),
+        lockStartDistance: this.lockClock.lockStartDistance(jet),
+        distance: missile.position.distanceTo(this.player.position),
+        origin: missile.position.clone(),
+        direction: missile.direction.clone(),
+        jetPosition: jet ? jet.getMesh().position.clone() : null,
+        playerPosition: this.player.position.clone(),
+      });
+    };
+
+    this.unsubscribe.push(
+      EventBus.on(GameEventType.ENEMY_FIRED, ({ payload }) => {
+        const jet = this.system.getEnemies().find((enemy) => enemy.getMesh() === payload.owner);
+        this.shots.push({
+          time: this.time,
+          payload: {
+            ...payload,
+            position: payload.position.clone(),
+            direction: payload.direction.clone(),
+          },
+          jet: jet ?? null,
+          hadToken: jet ? jet.hasAttackToken() || this.holdersLastStep.has(jet) : false,
+          distance: payload.position.distanceTo(this.player.position),
+        });
+      }),
+      EventBus.on(GameEventType.ENEMY_TELL, ({ payload }) => {
+        this.tells.push({ time: this.time, payload });
+      })
+    );
+  }
+
+  public get jets(): EnemyAI[] {
+    return this.system.getEnemies();
+  }
+
+  public spawn(type: EnemyType, position: THREE.Vector3): EnemyAI {
+    this.system.spawnEnemyAt(type, position);
+    const jets = this.system.getEnemies();
+    return jets[jets.length - 1];
+  }
+
+  public holders(): EnemyAI[] {
+    return this.jets.filter((jet) => jet.isAlive() && jet.hasAttackToken());
+  }
+
+  public turnPlayer(angle: number): void {
+    turnForward(this.player, angle);
+  }
+
+  public step(): void {
+    // 超时的异步用例会在后台继续跑：测试台已经销毁就让它立刻停下，不去打扰下一个用例
+    if (this.disposed) throw new Error('SystemRig stepped after dispose');
+    this.pilot?.(this);
+    const { player } = this;
+    player.velocity.copy(player.forward).multiplyScalar(player.speed);
+    player.position.addScaledVector(player.velocity, DT);
+    this.system.updateWithPlayer(DT, player.position);
+    this.holdersLastStep.clear();
+    for (const jet of this.jets) {
+      if (jet.hasAttackToken()) this.holdersLastStep.add(jet);
+    }
+    this.lockClock.observe(this.time, this.jets, this.missiles.lockWarning, this.player.position);
+    this.time += DT;
+  }
+
+  public run(seconds: number, each?: (rig: SystemRig) => boolean | void): void {
+    const steps = Math.round(seconds / DT);
+    for (let i = 0; i < steps; i++) {
+      this.step();
+      if (each?.(this) === true) return;
+    }
+  }
+
+  public dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
+    for (const off of this.unsubscribe) off();
+    this.unsubscribe.length = 0;
+    this.system.dispose();
+  }
+}
