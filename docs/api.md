@@ -61,6 +61,39 @@ The enemy fleet round adds one event type and extends one payload (both optional
 
 Enemy type tables live in `src/features/enemy/EnemyTypes.ts`; per-type doctrine tuning sits next to each doctrine in `src/features/enemy/doctrine/`, and enemy weapon and jet-missile specs in `src/features/enemy/EnemyWeapons.ts`. Level terrain params live in `src/features/terrain/LevelConfig.ts`. Quality presets (`QualityPreset = 'auto' | 'performance' | 'balanced' | 'quality'`) and their per-device parameters live in `GameConfig` (`src/config.ts`).
 
+### Device profile, frame pacing and adaptive resolution
+
+Source: `src/config.ts`, `src/FramePacer.ts`, `src/core/GameLoop.ts`, `src/ui/menu/MenuHeroScene.ts`.
+
+```typescript
+// GameConfig
+public static isMobile: boolean; // mobile UA, viewport 768 px wide or narrower, or 'ontouchstart'
+/** 平板级设备（运行时性能档）：触控设备且设备屏幕短边 ≥ 600 CSS px；启动时判定一次，没有布局代码读它 */
+public static isTablet: boolean;
+public static getPixelRatio(): number; // min(devicePixelRatio, cap after adaptive resolution)
+/** 像素比档位（从高到低）：第一项是当前画质下的设备上限；平板 auto [1.5, 1.25, 1]，手机 auto [1.2, 1] */
+public static getPixelRatioSteps(): readonly number[];
+/** isMobile && 画质预设为 'auto' && 当前生效档为 'performance' */
+public static isAdaptiveResolutionActive(): boolean;
+public static getAdaptivePixelRatioLevel(): number; // steps below the device cap, 0 = none
+/** -1 降一档、+1 升一档；只在 isAdaptiveResolutionActive() 时生效；返回档位是否改变 */
+public static stepAdaptivePixelRatio(direction: -1 | 1): boolean;
+
+// src/FramePacer.ts
+export class FramePacer {
+  static readonly TARGET_FPS = 60;
+  reset(): void; // on (re)start: drop the interval samples, process every frame
+  /** 每个动画帧调用一次；false = 跳过这一帧（不模拟、不渲染）。enabled 为 false 时总是 true */
+  shouldProcess(timestamp: number, enabled: boolean): boolean;
+  getFrameInterval(): number; // n ≥ 1
+  getRefreshRate(): number; // estimated Hz, 0 until enough samples
+}
+```
+
+- **Tablet profile.** `isTablet` is true on a device with touch input (`'ontouchstart' in window` or `navigator.maxTouchPoints > 0`) that is `isMobile` and whose screen (`min(screen.width, screen.height)`, CSS px, not the viewport) is at least 600. It is decided once at startup and does not change with browser toolbars, rotation or full screen; the touch check itself does not use the user agent (an Android tablet in Chrome's desktop-site mode reports a Linux desktop UA and still counts). It drives only the runtime profile: `getTargetFPS()` / `getTargetFPSForPreset()` return 60 at every preset (the `GameLoop` simulation step), and under `auto` the pixel-ratio cap is 1.5 (`max` of the preset's mobile cap and 1.5). The touch layout does not read it: the `(min-width: 700px) and (min-height: 700px)` media queries in `index.html`, `radioStyles` and `hudExtrasStyles`, and `RadarMinimap`'s 700 px short-side rule, still follow the viewport. A desktop window 768 px wide or narrower without touch input is `isMobile` but not tablet-class.
+- **Frame pacing.** On `isMobile` devices `GameLoop` and `MenuHeroScene` each own a `FramePacer` and process only every n-th display frame. The refresh rate is the reciprocal of the median of the last 31 animation-frame intervals (intervals over 100 ms, non-positive or non-finite ones are ignored; with fewer than 8 samples every frame is processed), and `n = max(1, floor(refreshHz / 60 + 0.1))`: 60 / 90 Hz process every frame, 120 Hz every other frame (60 fps), 144 Hz every other frame (72 fps), evenly spaced. The window slides, so a panel switching between 120 and 60 Hz is followed within a fraction of a second. A skipped frame does nothing; the next processed frame advances by the real time since the last processed one, so simulation time follows real time. `GameLoop`'s frame statistics and auto quality count processed frames only (60 fps on a paced 120 Hz panel is full speed). On other devices `shouldProcess(…, false)` resets the pacer and returns `true` every frame.
+- **Adaptive resolution.** While `isAdaptiveResolutionActive()` (on mobile, `auto` always resolves to `performance`, so there is no preset left to drop), `GameLoop`'s auto-quality check steps the pixel ratio instead of the preset: once per `AUTO_QUALITY_CHECK_INTERVAL` (1 s), an average below `LOW_FPS_RATIO × 60` (0.82 × 60) steps down one level, and an average of at least `RECOVERY_FPS_RATIO × 60` (0.95 × 60) held for `RECOVERY_TIME_MS` (4 s) steps back up one level. The reference is the paced render rate `FramePacer.TARGET_FPS`, not the simulation step (phones simulate at 30 Hz but render at 60). The levels are tablet 1.5 → 1.25 → 1.0 and phone 1.2 → 1.0, never below 1.0 or above the device cap. `GameCoordinator.syncRuntimeQuality` compares `GameConfig.getPixelRatio()` with the last applied ratio as well as the preset and re-runs `applyQualityRuntime` → `GameScene.applyQualitySettings` when either changes. An explicitly chosen preset never changes the pixel ratio by itself, desktops are not affected, and `GameConfig.setQualityPreset` resets the level to 0.
+
 ## Logger
 
 ```typescript
@@ -174,17 +207,27 @@ Source: `src/features/terrain/environments/TerrainEnvironment.ts`, `TerrainGener
 ```typescript
 export interface TerrainSurfaceSample {
   y: number;
-  water: boolean;
+  water: boolean; // navigable for ships
+  land: boolean; // dry land for ground units
 }
 export type TerrainSurfaceKind =
   | 'water' | 'ground' | 'desert' | 'snow' | 'city' | 'lava' | 'ice' | 'rock' | 'cloud';
+/** 干地的最低局部高度（米，相对水位）：水面着色器在水深 ≥ -0.5 处绘制水面 */
+export const DRY_LAND_MIN_HEIGHT = 0.5;
+/** 环境干地判定：优先环境自身的 isLand，否则按通用规则 */
+export function environmentIsLand(
+  environment: TerrainEnvironment,
+  worldX: number,
+  worldZ: number,
+  waterY: number
+): boolean;
 
 // TerrainGenerator
 public sampleSurface(worldX: number, worldZ: number): TerrainSurfaceSample;
 public getSurfaceKind(worldX: number, worldZ: number): TerrainSurfaceKind;
 public getEnvironment(): TerrainEnvironment | null; // levels 6-10
 
-// LevelManager — fall back to { y: WORLDSCAPE_WATER_Y, water: false } / 'ground' until terrain loads
+// LevelManager — fall back to { y: WORLDSCAPE_WATER_Y, water: false, land: true } / 'ground' until terrain loads
 public getSurfaceSample(worldX: number, worldZ: number): TerrainSurfaceSample;
 public getSurfaceKind(worldX: number, worldZ: number): TerrainSurfaceKind;
 public getTerrainEnvironment(): TerrainEnvironment | null;
@@ -202,7 +245,21 @@ public getWaveGroupCenters(): IWaveGroupCenter[]; // copies; empty before the wa
 public countEliteJetsToCome(): number;
 ```
 
-`y` is the world-space surface (the water surface where `water` is true). Water exists on `LAKE`, `OCEAN`, `VOLCANO` (sea around the island), `ARCTIC` (open sea between ice) and the `CANYON` river. Environment modules implement `TerrainEnvironment` (`terrain`, `root`, `hasWater`, `build(ctx)`, `sampleHeight(worldX, worldZ)`, `isWater(worldX, worldZ)`, optional `surfaceKindAt(worldX, worldZ)` and `update(deltaTime, elapsed, focus)`, `dispose()`) on top of `EnvironmentBase`; `sampleEnvironmentSurface(environment, worldX, worldZ, waterY)` turns height + water into the `sampleSurface` result.
+`y` is the world-space surface (the water surface where `water` is true). Water exists on `LAKE`, `OCEAN`, `VOLCANO` (sea around the island), `ARCTIC` (open sea between ice) and the `CANYON` river. Environment modules implement `TerrainEnvironment` (`terrain`, `root`, `hasWater`, `build(ctx)`, `sampleHeight(worldX, worldZ)`, `isWater(worldX, worldZ)`, optional `surfaceKindAt(worldX, worldZ)`, `isLand(worldX, worldZ)` and `update(deltaTime, elapsed, focus)`, `dispose()`) on top of `EnvironmentBase`; `sampleEnvironmentSurface(environment, worldX, worldZ, waterY)` turns height + water into the `sampleSurface` result, with `land` from `environmentIsLand`.
+
+`land` marks dry land where ground units may spawn and drive: ground clearly above the water and not lava. Shallows (water you can see but too shallow for ships) and lava are neither `water` nor `land`. `water` keeps its meaning (navigable, used for sea-unit placement and the radar map's land / water underlay). The 0.5 m threshold `DRY_LAND_MIN_HEIGHT` matches the worldscape water shader, which draws water down to a depth of −0.5 m. Per level:
+
+- `LAKE` / `MOUNTAINS`: heightfield at least 0.5 m (the lake's −2 to 0.5 m shallows are neither).
+- `DESERT`: everything outside the oasis pond disc (36 m around (520, −360)).
+- `CITY`: everything outside the central park pond, judged with the pond shader's own depth function (land where the depth is below −0.5 m).
+- `OCEAN`: the islands only.
+- `VOLCANO`: basalt — `surfaceKindAt` is neither `'water'` (shallows included) nor `'lava'`.
+- `ARCTIC`: static ice (ice shelf, icebergs); open sea and drifting floes are not land.
+- `CANYON`: outside the river and with the solid surface at least 0.5 m above the water line.
+- `STRATOSPHERE`: everywhere (no ground units are deployed there).
+- `CITADEL`: everything except the lava rifts.
+
+An environment without its own `isLand` falls back to `environmentIsLand`'s general rule: not navigable water, surface kind neither `'water'` nor `'lava'`, and in an environment with water at least `DRY_LAND_MIN_HEIGHT` above `waterY`. Non-finite input gives `{ y: waterY, water: false, land: false }`; a generator with no terrain yet (and `LevelManager` before terrain loads) gives `land: true`.
 
 `LevelManager` also estimates the player's velocity each step (a jump faster than 250 m/s — respawn, checkpoint, dev teleport — resets it to zero) and hands it to every jet through `EnemyAI.setTargetVelocity`, so jets aim at a lead point (see [Enemy AI](#enemy-ai)). Each wave spawns its authored line-up (`LevelConfig.waves`, below) in order — there is no random type picking, and the wave event only sets the objective and the spawn interval (a trail wave spaces its jets at least `TRAIL_SPAWN_INTERVAL`, 2.5 s, apart; its first jet still comes on the event's interval). `planWaveGroupCenters(arrival, playerX, playerZ, limit, rng, out, drawOffset = 0)` (`src/features/levels/WaveArrival.ts`, pure; returns 1, or 2 for a pincer) places the group centres 600–800 m from the player, among directions that keep the whole group, including its 60 m spread, inside the battlefield; if none of 12 tries fits, a single centre goes toward the battlefield centre instead of being clamped onto the boundary next to the player. A pincer's two centres are 90–150° apart (`PINCER_MIN_ANGLE_DEG` / `PINCER_MAX_ANGLE_DEG`) as seen from the player when its jets appear: `LevelManager` passes, instead of the player's current position, the position predicted for the wave's mean arrival time — `SPAWN_PORTAL_SECONDS` (5 s, also the `SpawnPortal` lifetime) plus 0.5 s × (line-up length + 1) / 2 — extrapolated along an arc from the player's velocity estimate and turn rate (smoothed over 0.5 s) and clamped to the battlefield. The random tries draw the separation from 105–135° only (`PINCER_PLAN_MARGIN_DEG` 15 inside each end), leaving room for the player's turns and the spread of arrival times, and add `waveDrawOffset(levelId, waveIndex)` — a fixed 0..1 offset per level and wave — to the draw, so two waves started from the same random state get different angles. When 16 random tries fail it scans bearings in 5° steps at 600 m and takes the in-bounds pair closest to 120°. Each jet spawns near its own group's centre, and jets of one group share a group id (`EnemyAI.setGroupId(currentWave × 2 + side + 1)`; boss minions and dev spawns get 0).
 
@@ -1362,7 +1419,11 @@ export interface UnitUpdateContext {
   enemyAirMeshes: THREE.Object3D[];
   friendlyAirMeshes: THREE.Object3D[];
 }
-export type UnitSurfaceSampler = (x: number, z: number) => { y: number; water: boolean };
+/** water = 船只可航行，land = 干地（缺省按 !water）；UnitController 导出同形的类型 */
+export type UnitSurfaceSampler = (
+  x: number,
+  z: number
+) => { y: number; water: boolean; land?: boolean };
 export type UnitRouteProvider = (type: UnitType, domain: UnitDomain) => readonly THREE.Vector3[] | null;
 export type PlayerLockState = 'none' | 'locking' | 'incoming';
 export interface UnitEffectOverrides {
@@ -1462,6 +1523,30 @@ export class UnitSystem implements IGameSystem {
 ```
 
 Faction rules: damage from a player source (`cannon | missile | rocket | laser | swarm | railgun | emp`) counts as `byPlayer`; `applyAreaDamage` with a player source spares friendly units, and `'enemy-fire'` / `'boss'` spare enemy units. The system draws its own explosions — use `onExplosion` for camera shake and sound only. `UnitController` (`src/core/units/UnitController.ts`) is the runtime wrapper the coordinator talks to. `UnitMeshFactory.createUnitMesh` puts the unit's bilingual name on `mesh.userData.displayName` (`UNIT_CONFIGS[type].name`), which the HUD reads for the unit's health-bar label.
+
+Ground units stay on dry land. Placement and routes are pure functions in `UnitPlacement.ts`, driving lives in `UnitMotion.ts` and `UnitBehaviors.ts`, and `UnitSystem.ts` wires the sampler:
+
+```typescript
+// UnitPlacement.ts
+export interface SurfaceSample {
+  y: number;
+  water: boolean; // navigable water (sea units)
+  land: boolean; // dry land (ground units); shallows and lava are neither
+}
+/** 地面航线相邻航点之间沿直线检查干地的粗查间距（米）；通过后再按 2.5 米细查 */
+export const GROUND_ROUTE_CHECK_STEP = 20;
+/** 确定性外扩扫描：返回第一个干地点，整个战场都没有干地时返回 null；不消耗随机数 */
+export function scanForLand(ctx: PlacementContext): [number, number] | null;
+
+// UnitMotion.ts
+/** 地面单位的落点 (x, z) 不是干地时返回 false；海上 / 空中单位总是 true */
+export function canStepTo(unit: UnitEntity, world: UnitWorld, x: number, z: number): boolean;
+```
+
+- **Sampler.** `UnitSystem.surface` reads `land` from the sampler, or uses `!water` when the sampler gives none; with no sampler it is `domain !== 'sea'`. Without a sampler (tests, early start-up) every position counts as valid.
+- **Placement.** With a sampler a ground position must be `land` (sea positions must be `water`). The old unchecked fallback point 500 m ahead is gone. When the random tries fail, `scanForLand` walks rings around the player from 300 m outward every 40 m until the whole battlefield is covered, with a bearing about every 50 m of arc (at least every 5°), starting at the player's forward bearing and alternating left and right; the unit then scatters 25–110 m around the first land point it finds (or takes the point itself). The scan uses no random numbers: the same terrain, player position and heading always give the same land point. `pickClusterCenter` uses the scan as the fallback for ground `ahead` / `flank` centres, and `spawnForWave` skips an entry whose centre found neither water (sea) nor land (ground). A placed (non-route) ground unit is therefore skipped only when the whole battlefield has no land.
+- **Routes.** With a sampler `buildRoute` builds ground routes on land. Each random waypoint is moved onto land within 30–260 m (or dropped), and each leg is checked along its straight line (20 m coarse, then 2.5 m fine). A leg that crosses water, shallows or lava gets a detour point within 40–320 m of its middle with both halves on land; if none is found the waypoint is dropped. If fewer than two points remain, or the route is shorter than 300 m, a deterministic straight-line search replaces the old unchecked ±300 m fallback. It visits land centres in rings from 160 m out, tries 12 lines per centre (15° apart, starting along the route direction), and checks each line for land both ways (coarse, then fine). It stops once a line of at least 600 m is found, or after 24 centres, and takes the longest line found. A line under 60 m counts as a failure, and the route is then `[]`, so the caller skips the spawn. Route columns that fall between waypoints back off toward the route start 5 m at a time until they stand on land. Routes from the environment (`setRouteProvider`: the canyon convoy road, the citadel assault route) are used as before, without a land check.
+- **Driving.** `canTraverse` asks for `land` for ground units (`water` for sea units). `driveToward` stops a ground unit (speed 0, `traverseBlocked`) when its next step would leave land, and the detour steering takes over. `followRoute` tries deflections of ±0.3, ±0.6, ±0.9 and ±1.2 rad and stops if none stays on land. A stunned unit's coast also stops at the shore. Sea and air movement is unchanged.
 
 Enemy jet missiles (the Ace and the Striker) share the unit missile pool, so the HUD `locking` → `incoming` warning, flares, EMP and CIWS treat them like SAMs. `UnitMissileLaunchOptions` (`UnitMissiles.ts`) gains `source?: string` (`'jet:<TYPE>'`), which comes back as the fourth argument of `onPlayerDamaged` with cause `'jet-missile'`. `UnitController` wraps the three calls — `launchJetMissile(...)` (false while the unit system is not loaded), `countJetMissilesInFlight()` and `setJetMissileLock(active)` — and plays the same lock warning as a SAM: the locking tone when a jet lock starts, the HUD flash, tone and radio call (within its budget) on launch.
 
@@ -2479,7 +2564,7 @@ export function radioFollowOffset(
 export type RadarBlipKind =
   | 'enemy' | 'spawning' | 'ally' | 'boss' | 'pickup'
   | 'enemy-ground' | 'enemy-sea' | 'neutral' | 'ally-unit';
-/** 地表采样器：世界 (x, z) → 表面高度与是否为可航行水域（与 UnitSurfaceSampler 同形） */
+/** 地表采样器：世界 (x, z) → 表面高度与是否为可航行水域（UnitSurfaceSampler 的 y / water 部分；底图不读 land） */
 export type RadarTerrainSampler = (x: number, z: number) => { y: number; water: boolean };
 public setRangeMultiplier(multiplier: number): void;
 public getRangeMultiplier(): number;
@@ -2607,7 +2692,7 @@ Radar (`RadarMinimap`, `RadarLevelMap`, `radarGlyphs.ts`):
 - The dial (`#radar-minimap`) is heading-up: forward is up and a contact on the player's right is drawn on the right. `BASE_RANGE` is 800 m across the dial (about 400 m from the centre to the rim), scaled by `setRangeMultiplier` (0.25–4). Desktop: 120 px, bottom-left. Touch layouts: top-left under the status cabin, 84 px on phones and 132 px when the viewport's shorter side is at least 700 px, with a separate tap surface `#radar-tap-target` so touches on the dial do not start the stick.
 - In-range contacts are filled glyphs (`drawRadarBlip`); a contact beyond range is clamped to the rim and drawn by `drawRadarRimMarker` as a smaller, dimmer, hollow glyph of the same class with a short tick pointing outward.
 - A click or tap on the dial, or the N key (not with Ctrl / Meta / Alt, not while typing), toggles the level map (`#radar-map`); Esc closes it and is captured so it does not also pause. The map collapses on a level change and when radar updates stop for 1.5 s. It does not pause the game.
-- The level map is north-up (world −Z at the top) and fixed-scale: the battlefield boundary circle, 500 m and 1000 m rings around the player, the player's arrow rotated by heading, every radar contact with the same glyphs drawn larger, a legend, and a 64 × 64 land / water underlay sampled once per level from the `RadarTerrainSampler` (a plain grid without one). The panel is 72% of the viewport's shorter side (200–560 px), nearly opaque, redrawn at 20 Hz.
+- The level map is north-up (world −Z at the top) and fixed-scale: the battlefield boundary circle, 500 m and 1000 m rings around the player, the player's arrow rotated by heading, every radar contact with the same glyphs drawn larger, a legend, and a 64 × 64 land / water underlay sampled once per level from the `RadarTerrainSampler` (a plain grid without one); it follows `water` only, so the dry-land flag does not change it. The panel is 72% of the viewport's shorter side (200–560 px), nearly opaque, redrawn at 20 Hz.
 
 `ModelPreview` builds every boss from its own mesh factory through a lazy `Record<BossType, loader>` (bosses 6–10 from `MagmaColossusMesh`, `AbyssalLeviathanMesh`, `TempestZeppelinMesh`, `PhantomWingMesh`, `OraclePrimeMesh`), scales the visible geometry (hidden parts and sprites excluded) to a fixed bounding sphere — centred on the visible bounding box, its radius the farthest visible vertex from that centre, so the model stays inside it at every rotation — and disposes each previewed model's geometries, materials and instance buffers once, skipping shared resources. `hideSignalLights()` (`src/ui/menu/modelDisposal.ts`) first hides the jet factory's signal-light balls (`navLightPort`, `navLightStarboard`, `strobeLight`, `beaconLight`) on that instance, so they are neither drawn nor framed; `MenuHeroScene` does the same for the title screen's jet. The sphere is framed in the part of the canvas above the name label: after the name is written (and again on resize and on a language switch) `frameCamera()` reads the label's top from the DOM, keeps 8 px clear of it and of the canvas top (the region reaches at least halfway down the canvas), backs the camera off until the sphere's outline is 70% of the canvas's shorter side — the same size for every model — or, where the region is too small for that, until it fits the region's height or width with a margin, and moves the projection centre into the region with `setViewOffset`; before the canvas has a layout it frames the whole canvas. A model whose factory or chunk fails to load writes `Could not load: {name}` / `无法加载：{name}` into the name label and leaves the other models and the way back working; a failed import of the aircraft factory is not kept, so the next visit to that page imports it again (a browser whose module map remembers the failed download still needs a reload). If `show()` cannot create its renderer (no WebGL context) it calls `hide()`, which runs the `setOnBack` callback and so brings the menu back with focus on the Hangar button, and rethrows. The name label stays on one line when it fits (18 px type up to 600 px width); in a landscape viewport up to 520 px tall the header is compressed and the hint line hidden so the stand gets the height. The stand has 22 pages: the player jet, the allied wingman (category `'ally'`, built with `createFriendlyMesh`), the eight enemy jets in `EnemyType` order (pages 3–10), the ten bosses, the player missile and the boss missile. The menu calls this screen the **Hangar** (`#model-preview`, opened from `#preview-btn`): arrow buttons, the Left / Right keys or a horizontal swipe change model, a mouse drag rotates it, `#rotate-toggle` switches auto-rotate, and Esc or the back button returns to the menu. Its `WebGLRenderer` exists only while it is shown — created in `show()`, released with its context in `hide()` — so it never coexists with the title screen's hero renderer or a game's.
 
@@ -2738,6 +2823,8 @@ export function acquireSharedAudioContext(holder: object): AudioContext | null;
 export function releaseSharedAudioContext(holder: object): void;
 export function resumeSharedAudioContext(): void;
 export function unlockAudioFromUserGesture(): void;
+/** 页面级音频生命周期：启动时安装一次，重复调用不再加监听，监听永不移除 */
+export function installAudioLifecycle(): void;
 /** 共享输出总线入口（限幅器 + 软削波 → destination）；每个上下文只建一次 */
 export function getSharedOutputNode(context: BaseAudioContext): AudioNode;
 export function resetSharedAudioContextForTests(): void;
@@ -2747,9 +2834,12 @@ export function resetSharedAudioContextForTests(): void;
 - `acquireSharedAudioContext(holder)` — ref-counted get-or-create; last `releaseSharedAudioContext(holder)` closes the context.
 - `resumeSharedAudioContext()` — if the shared context is `suspended` or `interrupted`, calls `resume()`.
 - `unlockAudioFromUserGesture()` — create (if needed) and resume on the user-gesture stack. Unlock itself does not occupy a holder, so `AudioManager` / `MusicSystem` can take over later.
+- `installAudioLifecycle()` — recovery after the home screen, a screen lock or an app switch. It calls `resumeSharedAudioContext()` on `visibilitychange` (when the page becomes visible), `pageshow` and `focus`, and from permanent capture-phase `window` listeners for `pointerup`, `touchend`, `click` and `keydown`, synchronously inside the gesture (on touch screens `pointerdown` / `touchstart` are not activation gestures). So the first tap or key press on a silent screen (menu, pause, story card, hangar, debrief) brings the sound back. The listeners do not intercept the event, only resume an existing context that is `suspended` or `interrupted`, never create one, and do nothing while it is running or closed. Repeat calls add no listeners; nothing removes them.
 - `resetSharedAudioContextForTests()` — test isolation only: clear holders, close a live context, drop the singleton. Not a runtime API.
 
-Call sites: `StartMenu.launch()` and `src/main.ts` `bootGame` call `unlockAudioFromUserGesture()`; `MenuMusic` calls it after the first menu gesture; `AudioManager.resume()` / `MusicSystem.resume()` call `resumeSharedAudioContext()` after `initContext()`; both dispose paths call `releaseSharedAudioContext(this)`.
+Call sites: `StartMenu.launch()` and `src/main.ts` `bootGame` call `unlockAudioFromUserGesture()`; `MenuMusic` calls it after the first menu gesture; `src/main.ts` calls `installAudioLifecycle()` once at startup, right after `menuMusic.install()`; `AudioManager.resume()` / `MusicSystem.resume()` call `resumeSharedAudioContext()` after `initContext()`, and `VoiceSystem` calls it before starting a line on a context that is not running; both dispose paths call `releaseSharedAudioContext(this)`. `AudioManager.beginSound()` also calls `resume()`, but game sounds (the cannon included) start from the simulation step inside an animation frame, not inside a gesture handler, so that call is not a gesture recovery path.
+
+Engine drone (`AudioManager`): `startEngine()` records a wish (`isEngineWanted`) and starts the engine nodes only if the context is running. Otherwise the next `updateEngine(speed)` after the context runs again starts them. `stopEngine()` (pause, death, story hold, mission complete, stop) cancels the wish, so a later resume does not start the drone by itself. If building the engine graph throws, the wish is dropped instead of being retried every frame.
 
 ## Missile lock audio
 

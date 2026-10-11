@@ -399,7 +399,7 @@ Button labels follow the Language setting (Chinese labels in brackets):
 - **VIEW** (视角): toggle first-person / third-person
 - **PAUSE** (暂停): pause pod (even a very quick tap registers)
 - **Radar** (top-left): tap it to open the level map
-- **Tablets** (shorter screen side of 700 px or more, an iPad for example): the stick and the button cluster are larger and sit higher and further in from the screen edges, the radar is larger, and the simulation runs at 60 Hz at every quality preset
+- **Tablets**: when the browser viewport is at least 700 px in both width and height (an iPad, for example), the stick and the button cluster are larger and sit higher and further in from the screen edges, and the radar is larger. Touch devices whose screen has a shorter side of 600 px or more run the simulation at 60 Hz at every quality preset
 - A keyboard attached to a touch device works together with the touch controls
 
 ## 🚀 Quick Start
@@ -442,6 +442,7 @@ npm run test:run  # vitest, single run (npm run test = watch mode)
 - The fixes from an independent final audit (respawn safety, hangar checkpoint, radio warning budget, both wingmen, HUD layout on phones, boss previews, balance curve, terrain performance) are merged, followed by a polish pass (live relabelling of warnings, timers and centre callouts, flak and eye-bolt damage by difficulty, respawn wall escape, a boss-fight enemy counter, Model Preview framing above the name label, 教程 as the Chinese tutorial label); see `CHANGELOG.md` → *Unreleased* → *终验修复* (audit fixes) and *收尾打磨* (polish)
 - The controls and weapons round is merged on top: analog touch flight controls with a tablet layout, markers on hostile units and a level map, the always-on missile seeker with tap-to-fire, a lower cockpit, Save & Exit and the new main menu; see `CHANGELOG.md` → _Unreleased_ → _操控与武器体验_ (controls and weapons)
 - The enemy fleet round (`workflow/enemy-fleet`) adds eight enemy types with their own airframes and doctrines, attack tokens, jet missiles, jamming and cloaking, authored wave line-ups with first-contact tips, a retuned level curve, the wingman's own airframe, keyboard gun assist, background autosave and the portrait-phone radio box; see `CHANGELOG.md` → _Unreleased_ → _敌机舰队重做、键盘辅助瞄准、后台存档与手机竖屏布局_
+- The Android tablet round (`workflow/android-tablet`) resumes the sound after the home screen or a screen lock, picks the tablet runtime profile from the device screen, paces rendering on high-refresh touch screens with adaptive pixel ratio under `auto`, and keeps ground units on dry land; see `CHANGELOG.md` → _Unreleased_ → _安卓平板性能、切后台回来的声音与只在干地上的地面单位_
 - Tests live in `src/__tests__`; run `npm run test:run` for the current count and results
 - Known observations: the `vendor-three` chunk-size warning during build
 
@@ -582,7 +583,9 @@ Voice packs live outside `src/`, in `public/voice/` (`en/` and `zh/` MP3s named 
 | Post-processing | balanced / quality presets | off by default (performance preset) |
 | Camera | first / third person | first / third person |
 
-Tablets — touch devices whose shorter viewport side is at least 700 CSS px (`GameConfig.isTablet`, decided once at startup) — get the larger touch layout, a 60 Hz simulation step at every preset and a higher pixel-ratio cap (1.5) under `auto`.
+Tablet-class devices — touch devices whose screen has a shorter side of at least 600 CSS px (`GameConfig.isTablet`, decided once at startup from the device screen, not the viewport, so Android tablets in landscape Chrome count) — get a 60 Hz simulation step at every preset and a higher pixel-ratio cap (1.5) under `auto`. The larger touch layout is separate: it follows the viewport (width and height both at least 700 px).
+
+On touch devices with a 120 / 144 Hz screen the title screen and the game render every other display frame (60 / 72 fps, evenly spaced); game speed is unchanged. Under `auto`, when a touch device cannot keep up, the pixel ratio steps down (tablet 1.5 → 1.25 → 1.0, phone 1.2 → 1.0) and back up once the frame rate holds; an explicitly chosen preset is left alone.
 
 Per-preset particle budgets, pixel ratio and target FPS live in `GameConfig` (`src/config.ts`). The cap on enemy jets in the air at once is a gameplay rule, not a quality setting: 6 on desktop and 5 on mobile (`GameConfig.getMaxEnemies()`), plus 1 in chapters 4–6 and 2 in chapters 7–10 (`LevelManager.getMaxConcurrentEnemies()`).
 

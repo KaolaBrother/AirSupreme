@@ -528,7 +528,8 @@
 - [done] 重新审校关卡音乐与战斗音效平衡（第一轮）
 - [done] 战斗音效解锁：SFX 与 BGM 共用一个 `AudioContext`
   - 开始按钮 / 重试点击栈上同步 `unlockAudioFromUserGesture()`（任何 `await` 之前）
-  - `beginSound()` 在 `suspended` / `interrupted` 时补 `resume()`，开火手势可自救
+  - `beginSound()` 在 `suspended` / `interrupted` 时补 `resume()`；它跑在模拟步（动画帧）里、不在手势栈上，不能当作手势恢复（此处旧写的“开火手势可自救”不实）
+  - 手势恢复由 `installAudioLifecycle()` 负责（安卓平板轮次，`main.ts` 启动时安装一次）：页面可见 / `pageshow` / `focus` 时恢复，捕获阶段的 `pointerup` / `touchend` / `click` / `keydown` 在手势内同步 `resume()`，所以任何界面上松开一次触摸、点一下或按一个键（含开火）都能把声音找回来
   - 入口：`src/core/Audio/AudioContextHost.ts`
 - [later] 关卡完成 / Boss 击破 / 临界血量阶段增加更明确音乐动机
 
