@@ -115,8 +115,8 @@ const SPEC_HINTS: ReadonlyArray<readonly [EnemyType, LocalizedText]> = [
   [
     EnemyType.SNIPER,
     {
-      en: 'Red beam: a sniper is charging. When the beam freezes, change direction.',
-      zh: '红色光束是狙击机在蓄力，光束定住的瞬间立刻转向。',
+      en: 'Red beam: a sniper is charging. When the beam freezes, change direction. Missiles catch it.',
+      zh: '红色光束是狙击机在蓄力，光束定住的瞬间立刻转向。用导弹追它。',
     },
   ],
   [
