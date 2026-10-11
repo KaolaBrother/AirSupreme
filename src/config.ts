@@ -20,18 +20,33 @@ type DeviceQualityParams = {
 };
 
 export class GameConfig {
-  /** 平板判定阈值：视口短边（CSS px）。与 index.html 平板触控布局的媒体查询同一数值 */
-  private static readonly TABLET_MIN_SHORT_SIDE = 700;
+  /**
+   * 平板级设备判定阈值：设备屏幕（screen.width / screen.height，CSS px）的短边。
+   * 按屏幕而不是视口：横屏 Android Chrome 扣掉工具栏 / 状态栏 / 导航栏后视口高度常只剩
+   * 630-700 px；屏幕尺寸不随工具栏、旋转、全屏变化。手机屏幕短边都在 600 以下，iPad 都在 744 以上。
+   * 只决定运行时性能档；触控布局仍由 index.html 等处“视口短边 700 px”的媒体查询决定，与它无关。
+   */
+  private static readonly TABLET_MIN_SCREEN_SHORT_SIDE = 600;
   /** 平板的固定模拟步长（Hz）：所有画质档一致，不随 targetFPS 降到 30 */
   private static readonly TABLET_TARGET_FPS = 60;
   /** 平板在 auto 画质下的像素比上限（手机 auto 为 performance 档的 1.2） */
   private static readonly TABLET_AUTO_MAX_PIXEL_RATIO = 1.5;
+  /**
+   * 自适应分辨率在设备上限以下的像素比档位（从高到低，最低 1.0）：平板 1.5 → 1.25 → 1.0，
+   * 手机 1.2 → 1.0（高于设备上限的档位不用）。见 getPixelRatioSteps / GameLoop.evaluateAdaptiveResolution
+   */
+  private static readonly ADAPTIVE_PIXEL_RATIO_STEPS: readonly number[] = [1.25, 1];
 
   public static isMobile: boolean = this.detectMobile();
-  /** 平板：触控设备（isMobile）且视口短边 ≥ 700 CSS px；与 isMobile 一样只在启动时判定一次 */
+  /**
+   * 平板级设备（运行时性能档：60 Hz 模拟、auto 画质像素比上限 1.5）：触控设备且设备屏幕短边
+   * ≥ 600 CSS px；与 isMobile 一样只在启动时判定一次。没有布局代码读它。
+   */
   public static isTablet: boolean = this.detectTablet();
   private static qualityPreset: QualityPreset = 'auto';
   private static runtimeQualityOverride?: ResolvedQualityPreset;
+  /** 自适应分辨率当前比设备上限低几档（0 = 不降）；切换画质预设时归零 */
+  private static adaptivePixelRatioLevel = 0;
 
   /**
    * 同时在场的敌机上限（玩法规则，与画质无关）：以前随画质档 4-14 架浮动，
@@ -99,6 +114,7 @@ export class GameConfig {
 
   public static setQualityPreset(preset: QualityPreset): void {
     this.qualityPreset = preset;
+    this.adaptivePixelRatioLevel = 0;
     this.normalizeRuntimeQualityOverride();
   }
 
@@ -174,9 +190,20 @@ export class GameConfig {
       || ('ontouchstart' in window);
   }
 
+  /**
+   * 平板级：触控设备（isMobile，且确有触控输入：'ontouchstart' 或 maxTouchPoints > 0——
+   * 只因窗口窄被判成 isMobile 的桌面不算）且设备屏幕短边 ≥ 600 CSS px。
+   * 触控输入不依赖 UA：Chrome“桌面版网站”模式下 Android 平板报的是 Linux 桌面 UA，仍算平板级。
+   */
   private static detectTablet(): boolean {
-    const shortSide = Math.min(window.innerWidth, window.innerHeight);
-    return this.isMobile && Number.isFinite(shortSide) && shortSide >= this.TABLET_MIN_SHORT_SIDE;
+    const hasTouch =
+      'ontouchstart' in window ||
+      (typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0);
+    if (!this.isMobile || !hasTouch || typeof screen === 'undefined') {
+      return false;
+    }
+    const shortSide = Math.min(screen.width, screen.height);
+    return Number.isFinite(shortSide) && shortSide >= this.TABLET_MIN_SCREEN_SHORT_SIDE;
   }
 
   /** isTablet 只在触控设备上生效：isMobile 被改成 false 时一律按桌面取值 */
@@ -186,11 +213,81 @@ export class GameConfig {
 
   // 渲染设置
   public static getPixelRatio(): number {
-    let maxPixelRatio = this.getQualityProfile().maxPixelRatio;
+    return Math.min(window.devicePixelRatio, this.getMaxPixelRatio());
+  }
+
+  /**
+   * 像素比上限的档位（从高到低）：第一项是当前画质下的设备上限，其后是自适应分辨率可降到的档位。
+   * 平板 auto 画质为 [1.5, 1.25, 1]，手机 auto 画质为 [1.2, 1]
+   */
+  public static getPixelRatioSteps(): readonly number[] {
+    const deviceCap = this.getDevicePixelRatioCap();
+    return [deviceCap, ...this.ADAPTIVE_PIXEL_RATIO_STEPS.filter((step) => step < deviceCap)];
+  }
+
+  /** 当前画质下的设备像素比上限（自适应分辨率之前） */
+  private static getDevicePixelRatioCap(): number {
+    const maxPixelRatio = this.getQualityProfile().maxPixelRatio;
     if (this.isTabletDevice() && this.qualityPreset === 'auto') {
-      maxPixelRatio = Math.max(maxPixelRatio, this.TABLET_AUTO_MAX_PIXEL_RATIO);
+      return Math.max(maxPixelRatio, this.TABLET_AUTO_MAX_PIXEL_RATIO);
     }
-    return Math.min(window.devicePixelRatio, maxPixelRatio);
+    return maxPixelRatio;
+  }
+
+  /** 像素比上限：设备上限，自适应分辨率生效时再按当前档位往下取（每个模拟步都会读，不分配数组） */
+  private static getMaxPixelRatio(): number {
+    const deviceCap = this.getDevicePixelRatioCap();
+    if (this.adaptivePixelRatioLevel === 0 || !this.isAdaptiveResolutionActive()) {
+      return deviceCap;
+    }
+    let ratio = deviceCap;
+    let level = 0;
+    for (const step of this.ADAPTIVE_PIXEL_RATIO_STEPS) {
+      if (level >= this.adaptivePixelRatioLevel) {
+        break;
+      }
+      if (step < deviceCap) {
+        ratio = step;
+        level++;
+      }
+    }
+    return ratio;
+  }
+
+  /**
+   * 自适应分辨率是否生效：触控设备、画质预设为 auto、且当前已是 performance 档（画质档无处可降）。
+   * 显式选择的画质预设从不自动改像素比；桌面不受影响
+   */
+  public static isAdaptiveResolutionActive(): boolean {
+    return (
+      this.isMobile &&
+      this.qualityPreset === 'auto' &&
+      this.getEffectiveQualityPreset() === 'performance'
+    );
+  }
+
+  /** 自适应分辨率当前比设备上限低几档（0 = 不降） */
+  public static getAdaptivePixelRatioLevel(): number {
+    return this.adaptivePixelRatioLevel;
+  }
+
+  /**
+   * 自适应分辨率移动一档：direction = -1 降一档（更低像素比），+1 升一档。
+   * 只在 isAdaptiveResolutionActive() 时生效；不低于最后一档（1.0）、不高于设备上限。
+   * 返回档位是否改变（像素比由 GameScene.applyQualitySettings 经 GameCoordinator 重新应用）
+   */
+  public static stepAdaptivePixelRatio(direction: -1 | 1): boolean {
+    if (!this.isAdaptiveResolutionActive()) {
+      return false;
+    }
+    const lowestLevel = this.getPixelRatioSteps().length - 1;
+    const current = Math.min(this.adaptivePixelRatioLevel, lowestLevel);
+    const next = Math.max(0, Math.min(lowestLevel, current - direction));
+    if (next === this.adaptivePixelRatioLevel) {
+      return false;
+    }
+    this.adaptivePixelRatioLevel = next;
+    return true;
   }
 
   public static getShadowEnabled(): boolean {
