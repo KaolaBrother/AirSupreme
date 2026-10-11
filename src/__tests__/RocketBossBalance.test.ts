@@ -28,6 +28,8 @@ import {
  * 验收：第 2 关沙漠堡垒（普通 2800 血）一个 R2 弹匣满中最多掉 720 血；一枚火箭在多个部件间
  * 爆炸只改变一次 Boss 血量；高级 Boss 弱点倍率照常生效；轰炸机在第 5 / 10 关扛得住一轮 R5 齐射；
  * 坦克 / 护卫舰吃到的火箭伤害不变。
+ * 跟进：自带血池、不扣 Boss 主血池的子目标（利维坦水雷、神谕护盾塔）是独立目标——各自结算、
+ * 火箭 × 1.0；八爪鱼战舰的眼睛被特殊武器命中时扣的是主血池，所以仍算 Boss 部件。
  */
 
 const DT = 1 / 30;
@@ -340,7 +342,49 @@ describe('rockets vs an advanced boss (level 6 Magma Colossus)', () => {
   });
 });
 
-describe('rockets vs Leviathan mines (independent sub-targets of kind boss-part)', () => {
+/**
+ * 主血池之外的 Boss 子目标（C4 跟进决定）：只有扣 Boss 主血池的部件算“Boss”（一次爆炸只结算一次、
+ * 火箭 × 0.6）；自带血池、不扣主血池的子目标是独立目标——范围内每个都按自己的衰减结算，火箭 × 1.0。
+ * 测试只通过真实 Boss（BossBattleController 包装的目标）找这些子目标，不依赖实现怎么标记它们：
+ * 子目标靠真实网格名识别，血量靠 Boss 自己的公开接口（主血量、子目标血条、水雷是否还在）观察。
+ */
+const MINE_MESH_PREFIX = 'leviathan_mine_body';
+const PYLON_MESH_PREFIX = 'oracle_pylon_crystal';
+const EYE_MESH_PREFIX = 'boss_eye_';
+/** 利维坦水雷血量（AbyssalLeviathanAI mineSpec.health） */
+const MINE_HEALTH = 30;
+/** 预先把水雷打到“本次应受伤害 ± MARGIN”的余血，用是否被清除夹住实际伤害 */
+const MARGIN = 0.25;
+
+/** 第 6-10 关 Boss 的公开接口（IAdvancedBoss） */
+interface AdvancedBossView {
+  getDamageMultiplier(part: THREE.Object3D): number;
+  isInvulnerable(): boolean;
+}
+
+function isNamed(prefix: string): (target: CombatTarget) => boolean {
+  return (target) => target.mesh.name.startsWith(prefix);
+}
+
+/** 把真实部件挪到世界坐标 world（只改它自己的局部位置；之后测试不再推进 Boss AI） */
+function placeAt(target: CombatTarget, world: THREE.Vector3): void {
+  const mesh = target.mesh;
+  const parent = mesh.parent;
+  if (parent) {
+    parent.updateWorldMatrix(true, false);
+    mesh.position.copy(parent.worldToLocal(world.clone()));
+  } else {
+    mesh.position.copy(world);
+  }
+  mesh.updateMatrixWorld(true);
+}
+
+/** 只打直接目标：溅射半径 0 的蜂群命中（系数 1，不波及其他目标） */
+function hitOnly(rig: BossRig, target: CombatTarget, amount: number): void {
+  applySplashDamage(snapshotOf(rig.targets()), worldPosition(target), 0, amount, 'swarm', target);
+}
+
+describe('rockets vs Leviathan mines (own 30 HP pool, independent of the boss)', () => {
   let rig: BossRig | null = null;
   let randomSpy: MockInstance<() => number> | null = null;
 
@@ -351,66 +395,312 @@ describe('rockets vs Leviathan mines (independent sub-targets of kind boss-part)
     randomSpy = null;
   });
 
-  /** 第 7 关利维坦打到第二阶段（≤ 66% 血）后会布雷；推进 AI 直到第一枚水雷成为可命中目标 */
-  async function layMine(): Promise<{ leviathan: BossRig; mine: CombatTarget }> {
+  /**
+   * 第 7 关利维坦打到第二阶段（≤ 66% 血）后会一次布 6 枚雷；推进 AI 直到至少 count 枚水雷可命中、
+   * 且利维坦浮在水面（不在潜航无敌中，主血池部件可命中）。
+   */
+  async function layMines(count: number): Promise<{ leviathan: BossRig; mines: CombatTarget[] }> {
     randomSpy = vi.spyOn(Math, 'random').mockImplementation(seededRandom(7007));
     expect(getBossForLevel(7)).toBe(BossType.ABYSSAL_LEVIATHAN);
     const leviathan = await startBossRig(7, 3, SEA_SURFACE);
     rig = leviathan;
+    const view = leviathan.boss as unknown as AdvancedBossView;
     leviathan.boss.takeDamage(leviathan.boss.getHealth().max * 0.36);
-    let mine: CombatTarget | undefined;
-    for (let frame = 0; frame < 40 * 30 && !mine; frame++) {
+    let mines: CombatTarget[] = [];
+    for (let frame = 0; frame < 60 * 30; frame++) {
       leviathan.controller.update(1 / 30);
       // 新水雷要再过一帧才归控制器所有（isAlive 为 true）
-      mine = leviathan
-        .parts()
-        .find((part) => part.mesh.name.startsWith('leviathan_mine_body') && part.isAlive());
+      mines = leviathan.parts().filter((part) => isNamed(MINE_MESH_PREFIX)(part) && part.isAlive());
+      if (mines.length >= count && !view.isInvulnerable()) break;
     }
-    expect(mine, 'a phase 2 Leviathan lays a mine within 40 s').toBeDefined();
-    return { leviathan, mine: mine as CombatTarget };
+    expect(mines.length, `a phase 2 Leviathan lays ${count} mines`).toBeGreaterThanOrEqual(count);
+    expect(view.isInvulnerable(), 'the Leviathan is surfaced').toBe(false);
+    return { leviathan, mines };
   }
 
-  function burstOn(
+  /** 把水雷放在爆点 center 外 surface 米（表面距离），并预先打到余血 remaining */
+  function setMine(
     leviathan: BossRig,
     mine: CombatTarget,
-    damage: number,
-    source: 'rocket' | 'swarm'
+    center: THREE.Vector3,
+    direction: THREE.Vector3,
+    surface: number,
+    remaining: number
   ): void {
+    const distance = resolveTargetHitRadius(mine) + surface;
+    placeAt(mine, center.clone().addScaledVector(direction.clone().normalize(), distance));
+    hitOnly(leviathan, mine, MINE_HEALTH - remaining);
+    expect(mine.isAlive(), `${mine.mesh.name} alive at ${remaining.toFixed(2)} HP`).toBe(true);
+  }
+
+  it('a mine has 30 HP of its own and never drains the boss HP (29 leaves it, 30 clears it)', async () => {
+    const { leviathan, mines } = await layMines(1);
+    const mine = mines[0];
+    const bossBefore = bossHealth(leviathan);
+
+    hitOnly(leviathan, mine, MINE_HEALTH - 1);
+    expect(mine.isAlive(), 'mine survives 29').toBe(true);
+    hitOnly(leviathan, mine, 1);
+    expect(mine.isAlive(), 'mine cleared at 30').toBe(false);
+    expect(bossHealth(leviathan)).toBe(bossBefore);
+  });
+
+  it('one R2 rocket direct hit clears a 30 HP mine', async () => {
+    const { leviathan, mines } = await layMines(1);
+    const mine = mines[0];
     applySplashDamage(
       snapshotOf(leviathan.targets()),
       worldPosition(mine),
       R2.splashRadius,
-      damage,
-      source,
+      R2.damage,
+      'rocket',
       mine
     );
-  }
+    expect(mine.isAlive(), 'mine cleared by one R2 rocket').toBe(false);
+  });
 
-  it('a mine is a boss-part target with 30 HP of its own (29 swarm damage leaves it, 30 clears it)', async () => {
-    const { leviathan, mine } = await layMine();
-    expect(mine.kind).toBe('boss-part');
+  it('one rocket blast among four mines damages each mine by its own falloff, at × 1.0', async () => {
+    const { leviathan, mines } = await layMines(4);
     const bossBefore = bossHealth(leviathan);
+    // 爆点在第一枚水雷上空 60 米：远离利维坦本体，范围内只有水雷
+    const center = worldPosition(mines[0]).add(new THREE.Vector3(0, 60, 0));
+    const amountAt = (surface: number): number =>
+      R2.damage * splashFalloff(surface, R2.splashRadius);
+    // 前三枚预先打到“比本次应受伤害少一点”（应被清除），第四枚打到“多一点”（应幸存）
+    const layout: Array<[THREE.Vector3, number, number]> = [
+      [new THREE.Vector3(1, 0, 0), 2, amountAt(2) - MARGIN],
+      [new THREE.Vector3(0, 0, 1), 5, amountAt(5) - MARGIN],
+      [new THREE.Vector3(-1, 0, 0), 8, amountAt(8) - MARGIN],
+      [new THREE.Vector3(0, 0, -1), 5, amountAt(5) + MARGIN],
+    ];
+    layout.forEach(([direction, surface, remaining], index) =>
+      setMine(leviathan, mines[index], center, direction, surface, remaining)
+    );
+    const placed = mines.slice(0, 4);
+    const others = leviathan.parts().filter((part) => !placed.includes(part));
+    expect(
+      partsInRange(others, center, R2.damage, R2.splashRadius, null),
+      'only the four mines are in range'
+    ).toEqual([]);
 
-    expect(mine.isAlive(), 'fresh mine').toBe(true);
-    burstOn(leviathan, mine, 29, 'swarm');
-    expect(mine.isAlive(), 'mine survives 29').toBe(true);
-    burstOn(leviathan, mine, 1, 'swarm');
-    expect(mine.isAlive(), 'mine cleared at 30').toBe(false);
-    // 水雷有自己的血量：打水雷不扣 Boss 血
+    applySplashDamage(
+      snapshotOf(leviathan.targets()),
+      center,
+      R2.splashRadius,
+      R2.damage,
+      'rocket',
+      null
+    );
+
+    expect(mines[0].isAlive(), 'mine at 2 m took its full falloff').toBe(false);
+    expect(mines[1].isAlive(), 'mine at 5 m took its full falloff').toBe(false);
+    expect(mines[2].isAlive(), 'mine at 8 m took its full falloff').toBe(false);
+    expect(mines[3].isAlive(), 'mine at 5 m took no more than its falloff').toBe(true);
     expect(bossHealth(leviathan)).toBe(bossBefore);
   });
 
-  // FINDING: Leviathan mines are 'boss-part' combat targets with their own 30 HP pool and never drain
-  // the boss HP, so the boss-HP rationale behind contract point 2 does not apply to them; yet the
-  // kind-based × 0.6 also hits them. An R2-R5 rocket (30-40) then deals 18-24 to a mine, so no rocket
-  // at any upgrade clears a mine with one direct hit any more (on the base an R2+ rocket did). The
-  // same kind-based rules (× 0.6 and the one-part dedupe) also reach Oracle Prime shield pylons and
-  // Octopus Warship eyes, which have their own HP pools too.
-  it.fails('an R2 rocket direct hit still clears a Leviathan mine', async () => {
-    const { leviathan, mine } = await layMine();
-    expect(mine.isAlive(), 'fresh mine').toBe(true);
-    burstOn(leviathan, mine, R2.damage, 'rocket');
-    expect(mine.isAlive(), 'mine cleared by one R2 rocket').toBe(false);
+  it('a blast on a hull part beside two mines drains the boss once at × 0.6 and each mine at × 1.0', async () => {
+    const { leviathan, mines } = await layMines(2);
+    const view = leviathan.boss as unknown as AdvancedBossView;
+    const mainParts = leviathan.parts().filter((part) => !isNamed(MINE_MESH_PREFIX)(part));
+    const hull = mainParts.find((part) => part.mesh.name === 'leviathan_propulsor') ?? mainParts[0];
+    const center = worldPosition(hull);
+    // 前提：本体部件里不止一个在范围内，且直接命中的部件严格吃最多
+    const inRange = partsInRange(mainParts, center, R2.damage, R2.splashRadius, hull);
+    expect(inRange.length, 'main-pool parts in range').toBeGreaterThan(1);
+    for (const entry of inRange) {
+      if (entry.target === hull) continue;
+      expect(entry.amount, entry.target.mesh.name).toBeLessThan(R2.damage);
+    }
+    const multiplier = view.getDamageMultiplier(hull.mesh);
+    expect(multiplier).toBeGreaterThan(0);
+
+    const surface = 4;
+    const amount = R2.damage * splashFalloff(surface, R2.splashRadius);
+    setMine(leviathan, mines[0], center, new THREE.Vector3(0, 1, 0), surface, amount - MARGIN);
+    setMine(leviathan, mines[1], center, new THREE.Vector3(0, 1, 1), surface, amount + MARGIN);
+    const bossBefore = bossHealth(leviathan);
+
+    applySplashDamage(
+      snapshotOf(leviathan.targets()),
+      center,
+      R2.splashRadius,
+      R2.damage,
+      'rocket',
+      hull
+    );
+
+    expect(bossBefore - bossHealth(leviathan), 'main pool once at × 0.6').toBeCloseTo(
+      R2.damage * CONTRACT_ROCKET_FACTOR_BOSS * multiplier,
+      6
+    );
+    expect(mines[0].isAlive(), 'mine took its full falloff').toBe(false);
+    expect(mines[1].isAlive(), 'mine took no more than its falloff').toBe(true);
+  });
+});
+
+describe('rockets vs Oracle Prime shield pylons (own HP pools, independent of the boss)', () => {
+  let rig: BossRig | null = null;
+
+  afterEach(() => {
+    rig?.dispose();
+    rig = null;
+  });
+
+  async function startOracle(): Promise<{ oracle: BossRig; pylons: CombatTarget[] }> {
+    expect(getBossForLevel(10)).toBe(BossType.ORACLE_PRIME);
+    const oracle = await startBossRig(10);
+    rig = oracle;
+    const pylons = oracle.parts().filter(isNamed(PYLON_MESH_PREFIX));
+    expect(pylons.length, 'the fight opens with shield pylons').toBeGreaterThanOrEqual(2);
+    return { oracle, pylons };
+  }
+
+  /** 子目标血条（护盾塔）：网格 → 当前血量 */
+  function pylonHealth(oracle: BossRig): Map<THREE.Object3D, number> {
+    const bars = new Map<THREE.Object3D, number>();
+    oracle.controller.forEachSubTargetBar((mesh, current) => bars.set(mesh, current));
+    return bars;
+  }
+
+  function multiplierOf(oracle: BossRig, pylon: CombatTarget): number {
+    return (oracle.boss as unknown as AdvancedBossView).getDamageMultiplier(pylon.mesh);
+  }
+
+  it('a pylon has its own health bar and never drains the boss HP', async () => {
+    const { oracle, pylons } = await startOracle();
+    const bars = pylonHealth(oracle);
+    for (const pylon of pylons) expect(bars.has(pylon.mesh), pylon.mesh.name).toBe(true);
+    const bossBefore = bossHealth(oracle);
+    const pylonBefore = bars.get(pylons[0].mesh) ?? 0;
+
+    hitOnly(oracle, pylons[0], 10);
+
+    const pylonAfter = pylonHealth(oracle).get(pylons[0].mesh) ?? 0;
+    expect(pylonBefore - pylonAfter).toBeCloseTo(10 * multiplierOf(oracle, pylons[0]), 6);
+    expect(bossHealth(oracle)).toBe(bossBefore);
+  });
+
+  it('an R2 rocket direct hit on a pylon takes its full damage off that pylon (× 1.0)', async () => {
+    const { oracle, pylons } = await startOracle();
+    const pylon = pylons[0];
+    const multiplier = multiplierOf(oracle, pylon);
+    expect(multiplier).toBeGreaterThan(0);
+    const before = pylonHealth(oracle);
+    const bossBefore = bossHealth(oracle);
+
+    applySplashDamage(
+      snapshotOf(oracle.targets()),
+      worldPosition(pylon),
+      R2.splashRadius,
+      R2.damage,
+      'rocket',
+      pylon
+    );
+
+    const after = pylonHealth(oracle);
+    expect((before.get(pylon.mesh) ?? 0) - (after.get(pylon.mesh) ?? 0)).toBeCloseTo(
+      R2.damage * multiplier,
+      6
+    );
+    for (const other of pylons.slice(1)) {
+      expect(after.get(other.mesh), other.mesh.name).toBe(before.get(other.mesh));
+    }
+    expect(bossHealth(oracle)).toBe(bossBefore);
+  });
+
+  it('one R5 rocket blast between two pylons damages each by its own falloff, at × 1.0', async () => {
+    const { oracle, pylons } = await startOracle();
+    // 取距离最近的一对护盾塔，爆点在两者中点
+    let pair: [CombatTarget, CombatTarget] = [pylons[0], pylons[1]];
+    let closest = Infinity;
+    for (let i = 0; i < pylons.length; i++) {
+      for (let j = i + 1; j < pylons.length; j++) {
+        const distance = worldPosition(pylons[i]).distanceTo(worldPosition(pylons[j]));
+        if (distance < closest) {
+          closest = distance;
+          pair = [pylons[i], pylons[j]];
+        }
+      }
+    }
+    const center = worldPosition(pair[0]).add(worldPosition(pair[1])).multiplyScalar(0.5);
+    const expected = pair.map((pylon) => {
+      const surface = Math.max(
+        0,
+        worldPosition(pylon).distanceTo(center) - resolveTargetHitRadius(pylon)
+      );
+      expect(surface, `${pylon.mesh.name} within R5 splash`).toBeLessThanOrEqual(R5.splashRadius);
+      return R5.damage * splashFalloff(surface, R5.splashRadius) * multiplierOf(oracle, pylon);
+    });
+    const before = pylonHealth(oracle);
+    const bossBefore = bossHealth(oracle);
+
+    applySplashDamage(
+      snapshotOf(oracle.targets()),
+      center,
+      R5.splashRadius,
+      R5.damage,
+      'rocket',
+      null
+    );
+
+    const after = pylonHealth(oracle);
+    pair.forEach((pylon, index) => {
+      const dealt = (before.get(pylon.mesh) ?? 0) - (after.get(pylon.mesh) ?? 0);
+      expect(dealt, pylon.mesh.name).toBeCloseTo(expected[index], 6);
+    });
+    expect(bossHealth(oracle)).toBe(bossBefore);
+  });
+});
+
+describe('rockets vs Octopus Warship eyes (special-weapon hits drain the main pool)', () => {
+  let rig: BossRig | null = null;
+  let randomSpy: MockInstance<() => number> | null = null;
+
+  afterEach(() => {
+    rig?.dispose();
+    rig = null;
+    randomSpy?.mockRestore();
+    randomSpy = null;
+  });
+
+  async function startOctopus(): Promise<{ octopus: BossRig; eye: CombatTarget }> {
+    expect(getBossForLevel(3)).toBe(BossType.OCTOPUS_WARSHIP);
+    const octopus = await startBossRig(3, 3, SEA_SURFACE);
+    rig = octopus;
+    // 受击有 5% 概率瞬移（网格隐藏 + 定时器）：固定随机数，不让它瞬移
+    randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0.5);
+    const eye = octopus.parts().find(isNamed(EYE_MESH_PREFIX));
+    expect(eye, 'the octopus shows its eyes').toBeDefined();
+    return { octopus, eye: eye as CombatTarget };
+  }
+
+  it('special-weapon damage on an eye comes off the boss main HP (an eye is a main-pool part)', async () => {
+    const { octopus, eye } = await startOctopus();
+    const before = bossHealth(octopus);
+    hitOnly(octopus, eye, 10);
+    expect(before - bossHealth(octopus)).toBeCloseTo(10, 6);
+  });
+
+  it('a rocket on an eye beside the hull drains the main pool once at × 0.6', async () => {
+    const { octopus, eye } = await startOctopus();
+    const center = worldPosition(eye);
+    const inRange = partsInRange(octopus.parts(), center, R2.damage, R2.splashRadius, eye);
+    expect(inRange.length, 'eye and hull parts in range').toBeGreaterThan(1);
+    const takeDamage = vi.spyOn(octopus.boss, 'takeDamage');
+    const before = bossHealth(octopus);
+
+    applySplashDamage(
+      snapshotOf(octopus.targets()),
+      center,
+      R2.splashRadius,
+      R2.damage,
+      'rocket',
+      eye
+    );
+
+    expect(takeDamage).toHaveBeenCalledTimes(1);
+    expect(before - bossHealth(octopus)).toBeCloseTo(R2.damage * CONTRACT_ROCKET_FACTOR_BOSS, 6);
   });
 });
 
