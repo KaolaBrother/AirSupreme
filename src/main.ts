@@ -1,4 +1,4 @@
-import { unlockAudioFromUserGesture } from './core/Audio/AudioContextHost';
+import { installAudioLifecycle, unlockAudioFromUserGesture } from './core/Audio/AudioContextHost';
 import { getLogger } from './core/utils/Logger';
 import type { GameCoordinator } from './core/GameCoordinator';
 import { loadStartFlowSettings } from './core/SessionSettings';
@@ -227,6 +227,8 @@ function main(): void {
     // 菜单音乐：第一次用户手势后开始，进入战斗淡出，回到菜单恢复
     const menuMusic = new MenuMusic();
     menuMusic.install();
+    // 切后台 / 锁屏回来：页面可见或之后任意一次手势都把被挂起的 AudioContext 恢复
+    installAudioLifecycle();
     let game: GameCoordinator | null = null;
     let lastSettings: GameSettings | null = null;
     // bootGame 正在等游戏代码加载 / 启动：这期间再来的启动请求一律不理
