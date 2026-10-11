@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import { GameConfig } from '@/config';
+import { FramePacer } from '@/FramePacer';
 import {
   createPlayerMesh,
   updateAircraftSignals,
@@ -307,6 +309,8 @@ export class MenuHeroScene {
   private time = 0;
   private lastNow = 0;
   private frame = 0;
+  /** 触控设备按面板刷新率节流（120 / 144 Hz 面板隔帧渲染），与对局的 GameLoop 同一规则 */
+  private readonly framePacer = new FramePacer();
   private running = false;
   /** 首帧已经画过（之后尺寸变化时才需要补画） */
   private drawn = false;
@@ -682,6 +686,10 @@ export class MenuHeroScene {
       return;
     }
     this.frame = requestAnimationFrame(this.tick);
+    // 被节流跳过的显示帧不推进也不渲染；下一个处理的帧按距上次处理的真实时间推进
+    if (!this.framePacer.shouldProcess(now, GameConfig.isMobile)) {
+      return;
+    }
     const elapsed = (now - this.lastNow) / 1000;
     this.lastNow = now;
     // 切回前台后的第一帧间隔很长：钳住，避免画面跳变
@@ -705,6 +713,7 @@ export class MenuHeroScene {
     }
     this.running = true;
     this.lastNow = performance.now();
+    this.framePacer.reset();
     this.frame = requestAnimationFrame(this.tick);
   }
 

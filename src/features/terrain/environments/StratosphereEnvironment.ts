@@ -67,6 +67,11 @@ export class StratosphereEnvironment extends EnvironmentBase {
     return this.structures.sample(worldX, worldZ) > deck ? 'city' : 'cloud';
   }
 
+  /** 干地：没有水面也没有熔岩，云海甲板与天梯构件都可落脚（本关不部署地面单位） */
+  isLand(worldX: number, worldZ: number): boolean {
+    return Number.isFinite(worldX) && Number.isFinite(worldZ);
+  }
+
   build(ctx: TerrainEnvironmentContext): void {
     this.waterY = ctx.waterY;
     const tokens = ctx.tokens;

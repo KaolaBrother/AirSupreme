@@ -130,6 +130,45 @@ export function unlockAudioFromUserGesture(): void {
   resumeContext(context);
 }
 
+/**
+ * 永久手势恢复监听的事件。按 HTML 规范，触屏上的 pointerdown / touchstart 不算激活手势，
+ * pointerup / touchend / keydown 才算；click 兜底。
+ */
+const GESTURE_RECOVERY_EVENTS = ['pointerup', 'touchend', 'click', 'keydown'] as const;
+let lifecycleInstalled = false;
+
+/** 页面重新可见：恢复被系统挂起 / 打断的共享上下文 */
+function handleVisibilityChange(): void {
+  if (document.visibilityState === 'visible') {
+    resumeSharedAudioContext();
+  }
+}
+
+/** pageshow / focus / 用户手势：同步 resume（落在手势栈上），不拦截事件，也不新建上下文 */
+function handleAudioRecovery(): void {
+  resumeSharedAudioContext();
+}
+
+/**
+ * 页面级音频生命周期：启动时安装一次，重复调用不再加监听，监听永不移除。
+ * - 页面重新可见、pageshow、focus 时恢复被挂起 / 打断的共享 AudioContext；
+ * - 捕获阶段监听 pointerup / touchend / click / keydown，在手势栈上同步 resume。
+ *   切后台、锁屏回来后，菜单 / 暂停 / 剧情卡这类不播声的界面上第一次操作也能把声音找回来。
+ * 只恢复已存在的上下文，从不新建；已在运行或已关闭时什么也不做。
+ */
+export function installAudioLifecycle(): void {
+  if (lifecycleInstalled || typeof window === 'undefined' || typeof document === 'undefined') {
+    return;
+  }
+  lifecycleInstalled = true;
+  document.addEventListener('visibilitychange', handleVisibilityChange);
+  window.addEventListener('pageshow', handleAudioRecovery);
+  window.addEventListener('focus', handleAudioRecovery);
+  for (const type of GESTURE_RECOVERY_EVENTS) {
+    window.addEventListener(type, handleAudioRecovery, true);
+  }
+}
+
 const outputNodes = new WeakMap<BaseAudioContext, AudioNode>();
 
 /**

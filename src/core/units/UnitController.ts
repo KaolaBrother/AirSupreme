@@ -29,7 +29,11 @@ type UnitBridgeModule = typeof import('@/features/units/UnitEventBridge');
 type UnitDeploymentModule = typeof import('@/features/units/UnitDeployments');
 type UnitTypesModule = typeof import('@/features/units/UnitTypes');
 
-export type UnitSurfaceSampler = (x: number, z: number) => { y: number; water: boolean };
+/** 地表采样器：water = 船只可航行，land = 干地（缺省按 !water），见 UnitSystem 的同名类型 */
+export type UnitSurfaceSampler = (
+  x: number,
+  z: number
+) => { y: number; water: boolean; land?: boolean };
 
 export interface UnitControllerDeps {
   scene: THREE.Scene;

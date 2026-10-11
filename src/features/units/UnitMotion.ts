@@ -172,7 +172,7 @@ export function refreshSurface(unit: UnitEntity, world: UnitWorld, force = false
   unit.surfaceSampleZ = p.z;
 }
 
-/** 前方 probe 米处是否可通行（地面需陆地、海上需水面） */
+/** 前方 probe 米处是否可通行（地面需干地、海上需可航行水面） */
 export function canTraverse(
   unit: UnitEntity,
   world: UnitWorld,
@@ -186,8 +186,17 @@ export function canTraverse(
     return false;
   const sample = world.surface(x, z, unit.domain);
   if (unit.domain === 'sea') return sample.water;
-  if (unit.domain === 'ground') return !sample.water;
+  if (unit.domain === 'ground') return sample.land;
   return true;
+}
+
+/**
+ * 地面单位的硬性岸线：落点 (x, z) 不是干地（水面 / 浅滩 / 熔岩）时返回 false，调用方原地停车。
+ * 海上 / 空中单位总是返回 true（其运动不受影响）。
+ */
+export function canStepTo(unit: UnitEntity, world: UnitWorld, x: number, z: number): boolean {
+  if (unit.domain !== 'ground') return true;
+  return world.surface(x, z, 'ground').land;
 }
 
 /**
@@ -234,18 +243,28 @@ export function driveToward(
     targetSpeed = 0;
   }
   unit.speed += THREE.MathUtils.clamp(targetSpeed - unit.speed, -6 * deltaTime, 4 * deltaTime);
-  const stepX = Math.sin(unit.heading) * unit.speed * deltaTime;
-  const stepZ = Math.cos(unit.heading) * unit.speed * deltaTime;
-  p.x = THREE.MathUtils.clamp(
+  let stepX = Math.sin(unit.heading) * unit.speed * deltaTime;
+  let stepZ = Math.cos(unit.heading) * unit.speed * deltaTime;
+  const nextX = THREE.MathUtils.clamp(
     p.x + stepX,
     -UNIT_BATTLEFIELD_LIMIT - 100,
     UNIT_BATTLEFIELD_LIMIT + 100
   );
-  p.z = THREE.MathUtils.clamp(
+  const nextZ = THREE.MathUtils.clamp(
     p.z + stepZ,
     -UNIT_BATTLEFIELD_LIMIT - 100,
     UNIT_BATTLEFIELD_LIMIT + 100
   );
+  if ((stepX !== 0 || stepZ !== 0) && !canStepTo(unit, world, nextX, nextZ)) {
+    // 地面单位滑行到岸线（探测间隔内或减速滑行中）：原地停车，接下来按绕行逻辑转向
+    stepX = 0;
+    stepZ = 0;
+    unit.speed = 0;
+    unit.traverseBlocked = true;
+  } else {
+    p.x = nextX;
+    p.z = nextZ;
+  }
   if (deltaTime > 0) {
     unit.velocity.set(stepX / deltaTime, 0, stepZ / deltaTime);
   }
@@ -309,7 +328,9 @@ export function followRoute(
   if (unit.domain === 'air') {
     distance = flyToward(unit, deltaTime, waypoint.x, waypoint.y, waypoint.z, speed, 0.45, 8, 0.5);
   } else {
-    // 航线点之间已验证可通行，这里不再做前方探测，避免在狭窄水道里原地打转
+    // 航线点之间已验证可通行，这里不再做前方探测，避免在狭窄水道里原地打转；
+    // 地面单位仍有硬性岸线（转弯外摆或采样点之间的岸线细节）：下一步不是干地就小角度偏转绕过，
+    // 绕不过就停车，继续转向航点
     const dx = waypoint.x - p.x;
     const dz = waypoint.z - p.z;
     distance = Math.hypot(dx, dz);
@@ -318,8 +339,26 @@ export function followRoute(
     const headingError = Math.abs(wrapAngle(Math.atan2(dx, dz) - unit.heading));
     const targetSpeed = headingError > 0.9 ? speed * 0.4 : speed;
     unit.speed += THREE.MathUtils.clamp(targetSpeed - unit.speed, -5 * deltaTime, 3 * deltaTime);
-    const stepX = Math.sin(unit.heading) * unit.speed * deltaTime;
-    const stepZ = Math.cos(unit.heading) * unit.speed * deltaTime;
+    let stepX = Math.sin(unit.heading) * unit.speed * deltaTime;
+    let stepZ = Math.cos(unit.heading) * unit.speed * deltaTime;
+    if ((stepX !== 0 || stepZ !== 0) && !canStepTo(unit, world, p.x + stepX, p.z + stepZ)) {
+      const stepLength = Math.hypot(stepX, stepZ);
+      stepX = 0;
+      stepZ = 0;
+      // 依次尝试 ±0.3、±0.6、±0.9、±1.2 弧度的偏转
+      for (let j = 0; j < 8; j++) {
+        const heading = unit.heading + (j % 2 === 0 ? 1 : -1) * ((j >> 1) + 1) * 0.3;
+        const sx = Math.sin(heading) * stepLength;
+        const sz = Math.cos(heading) * stepLength;
+        if (canStepTo(unit, world, p.x + sx, p.z + sz)) {
+          stepX = sx;
+          stepZ = sz;
+          unit.heading = wrapAngle(heading);
+          break;
+        }
+      }
+      if (stepX === 0 && stepZ === 0) unit.speed = 0;
+    }
     p.x += stepX;
     p.z += stepZ;
     if (deltaTime > 0) unit.velocity.set(stepX / deltaTime, 0, stepZ / deltaTime);

@@ -1,15 +1,19 @@
 /**
  * 专业游戏循环
  * 使用固定时间步长 + 可变渲染
+ * 触控设备上按面板刷新率节流（FramePacer）：120 / 144 Hz 面板隔帧处理，被跳过的显示帧不模拟也不渲染
  */
 import { GameConfig, type QualityPreset } from '@/config';
+import { FramePacer } from '@/FramePacer';
 
 export class GameLoop {
   private static readonly QUALITY_ORDER = ['performance', 'balanced', 'quality'] as const;
 
   private lastRequestId?: number;
   private isRunning: boolean = false;
+  /** 上一个被处理（模拟 + 渲染）的帧的时间戳；被节流跳过的帧不更新它 */
   private lastTimestamp: number = 0;
+  private readonly framePacer = new FramePacer();
   private accumulator: number = 0;
   private frameTimeSamples: number[] = [];
   private fpsSamples: number[] = [];
@@ -74,6 +78,7 @@ export class GameLoop {
     this.lastTimestamp = performance.now();
     this.accumulator = 0;
     this.resetFrameStats();
+    this.framePacer.reset();
     this.autoQualityCheckTimer = 0;
     this.stablePerformanceTimer = 0;
     this.applyQualityProfile(this.currentEffectivePreset);
@@ -84,14 +89,23 @@ export class GameLoop {
       // 尽早请求下一帧（提高性能）
       this.lastRequestId = requestAnimationFrame(loop);
 
-      // 计算时间增量
+      // 触控设备按面板刷新率节流：跳过的显示帧什么都不做，经过的时间累到下一个处理的帧
+      if (!this.framePacer.shouldProcess(timestamp, GameConfig.isMobile)) {
+        return;
+      }
+
+      // 计算时间增量（距上一个处理的帧）；非有限值 / 时间倒退按 0 处理，时间戳无效时不更新基准
       const rawDeltaTime = timestamp - this.lastTimestamp;
-      this.lastTimestamp = timestamp;
-      this.recordFrameStats(rawDeltaTime);
-      this.evaluateAutoQuality(rawDeltaTime);
+      if (Number.isFinite(timestamp)) {
+        this.lastTimestamp = timestamp;
+      }
+      const frameDeltaTime = Number.isFinite(rawDeltaTime) && rawDeltaTime > 0 ? rawDeltaTime : 0;
+      // 帧率统计只算真正渲染的帧：120 Hz 面板隔帧渲染的 60 fps 就是满速
+      this.recordFrameStats(frameDeltaTime);
+      this.evaluateAutoQuality(frameDeltaTime);
 
       // 防止"死亡螺旋"（切换标签页后的大延迟）
-      const deltaTime = Math.min(rawDeltaTime, this.maxDeltaTime) * this.timeScale;
+      const deltaTime = Math.min(frameDeltaTime, this.maxDeltaTime) * this.timeScale;
 
       // 固定时间步长更新
       this.accumulator += deltaTime;
@@ -218,6 +232,13 @@ export class GameLoop {
     this.autoQualityCheckTimer = 0;
 
     const averageFPS = this.getAverageFPS();
+
+    // 触控设备 auto 画质已在 performance 档（无处可降）：改为逐档降 / 升像素比
+    if (GameConfig.isAdaptiveResolutionActive()) {
+      this.evaluateAdaptiveResolution(averageFPS);
+      return;
+    }
+
     const currentPreset = this.currentEffectivePreset;
     const downgradePreset = this.getAdjacentPreset(currentPreset, -1);
 
@@ -256,6 +277,35 @@ export class GameLoop {
     }
 
     this.stablePerformanceTimer = 0;
+  }
+
+  /**
+   * 自适应分辨率（GameConfig.isAdaptiveResolutionActive）：与画质降档同一套量度与计时——
+   * 每 AUTO_QUALITY_CHECK_INTERVAL 看一次渲染帧率均值，低于 LOW_FPS_RATIO × 60 降一档像素比；
+   * 不低于 RECOVERY_FPS_RATIO × 60 持续 RECOVERY_TIME_MS 升回一档。参照的是节流后的渲染帧率 60
+   * （FramePacer.TARGET_FPS），不是模拟步长：手机模拟 30 Hz，但画面仍按 60 fps 渲染。
+   * 像素比由 GameCoordinator.syncRuntimeQuality → GameScene.applyQualitySettings 应用。
+   */
+  private evaluateAdaptiveResolution(averageFPS: number): void {
+    if (averageFPS < FramePacer.TARGET_FPS * this.LOW_FPS_RATIO) {
+      GameConfig.stepAdaptivePixelRatio(-1);
+      this.stablePerformanceTimer = 0;
+      return;
+    }
+
+    if (
+      GameConfig.getAdaptivePixelRatioLevel() === 0 ||
+      averageFPS < FramePacer.TARGET_FPS * this.RECOVERY_FPS_RATIO
+    ) {
+      this.stablePerformanceTimer = 0;
+      return;
+    }
+
+    this.stablePerformanceTimer += this.AUTO_QUALITY_CHECK_INTERVAL;
+    if (this.stablePerformanceTimer >= this.RECOVERY_TIME_MS) {
+      GameConfig.stepAdaptivePixelRatio(1);
+      this.stablePerformanceTimer = 0;
+    }
   }
 
   private getTargetFPSForPreset(preset: Exclude<QualityPreset, 'auto'>): number {

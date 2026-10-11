@@ -5,6 +5,7 @@ import {
   UNIT_SUB_PERISCOPE_DEPTH,
   aimAngles,
   applyAttitude,
+  canStepTo,
   driveToward,
   getPart,
   getPartList,
@@ -126,8 +127,17 @@ function updateStunned(unit: UnitEntity, world: UnitWorld, deltaTime: number): v
     }
   } else {
     unit.speed = Math.max(0, unit.speed - 8 * deltaTime);
-    p.x += Math.sin(unit.heading) * unit.speed * deltaTime;
-    p.z += Math.cos(unit.heading) * unit.speed * deltaTime;
+    if (unit.speed > 0) {
+      const nextX = p.x + Math.sin(unit.heading) * unit.speed * deltaTime;
+      const nextZ = p.z + Math.cos(unit.heading) * unit.speed * deltaTime;
+      // 瘫痪滑行同样不越过岸线（地面单位落点须为干地）
+      if (canStepTo(unit, world, nextX, nextZ)) {
+        p.x = nextX;
+        p.z = nextZ;
+      } else {
+        unit.speed = 0;
+      }
+    }
     settleOnSurface(unit, world, deltaTime, unit.type === UnitType.SUBMARINE ? unit.altitude : 0);
     applyAttitude(unit);
   }

@@ -455,6 +455,8 @@ export class GameCoordinator {
 
   private lastAppliedQualityPreset: Exclude<QualityPreset, 'auto'> =
     GameConfig.getEffectiveQualityPreset();
+  /** 自适应分辨率（GameLoop）只改像素比、不改画质档：单独比对，变了也重新应用画质 */
+  private lastAppliedPixelRatio = GameConfig.getPixelRatio();
   private readonly previousCameraTargetPosition = new THREE.Vector3();
   private readonly currentCameraTargetPosition = new THREE.Vector3();
   private readonly interpolatedCameraTargetPosition = new THREE.Vector3();
@@ -3637,6 +3639,7 @@ export class GameCoordinator {
     this.sessionState.setQualityPreset(preset);
     this.gameLoop.setQualityPreset(preset);
     this.lastAppliedQualityPreset = GameConfig.getEffectiveQualityPreset();
+    this.lastAppliedPixelRatio = GameConfig.getPixelRatio();
     this.applyQualityRuntime();
   }
 
@@ -3650,11 +3653,16 @@ export class GameCoordinator {
 
   private syncRuntimeQuality(): void {
     const currentQualityPreset = GameConfig.getEffectiveQualityPreset();
-    if (currentQualityPreset === this.lastAppliedQualityPreset) {
+    const currentPixelRatio = GameConfig.getPixelRatio();
+    if (
+      currentQualityPreset === this.lastAppliedQualityPreset &&
+      currentPixelRatio === this.lastAppliedPixelRatio
+    ) {
       return;
     }
 
     this.lastAppliedQualityPreset = currentQualityPreset;
+    this.lastAppliedPixelRatio = currentPixelRatio;
     this.applyQualityRuntime();
   }
 

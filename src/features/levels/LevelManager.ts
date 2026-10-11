@@ -644,15 +644,17 @@ export class LevelManager {
 
   /**
    * 地表采样（地面单位 / 舰船 / Boss 落脚 / 命中特效）：委托 TerrainGenerator.sampleSurface；
-   * 地形分块尚未加载时回落到 { y: WORLDSCAPE_WATER_Y, water: false }。
+   * 地形分块尚未加载时回落到 { y: WORLDSCAPE_WATER_Y, water: false, land: true }
+   * （无地形信息，与 TerrainGenerator 未生成地形时一致）。
    */
   public getSurfaceSample(worldX: number, worldZ: number): TerrainSurfaceSample {
     if (this.terrainGenerator) {
       return this.terrainGenerator.sampleSurface(worldX, worldZ);
     }
-    this.fallbackSurfaceSample ??= { y: WORLDSCAPE_WATER_Y, water: false };
+    this.fallbackSurfaceSample ??= { y: WORLDSCAPE_WATER_Y, water: false, land: true };
     this.fallbackSurfaceSample.y = WORLDSCAPE_WATER_Y;
     this.fallbackSurfaceSample.water = false;
+    this.fallbackSurfaceSample.land = true;
     return this.fallbackSurfaceSample;
   }
 

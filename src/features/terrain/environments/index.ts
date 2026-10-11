@@ -39,4 +39,9 @@ export type {
   TerrainSurfaceKind,
   TerrainSurfaceSample,
 } from './TerrainEnvironment';
-export { environmentSurfaceKind, sampleEnvironmentSurface } from './TerrainEnvironment';
+export {
+  DRY_LAND_MIN_HEIGHT,
+  environmentIsLand,
+  environmentSurfaceKind,
+  sampleEnvironmentSurface,
+} from './TerrainEnvironment';

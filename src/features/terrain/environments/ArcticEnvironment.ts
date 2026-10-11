@@ -62,6 +62,14 @@ export class ArcticEnvironment extends EnvironmentBase {
     return this.isWater(worldX, worldZ) ? 'water' : 'ice';
   }
 
+  /** 干地：静态冰体（冰架 / 冰山）；开阔海面与漂移浮冰都不是 */
+  isLand(worldX: number, worldZ: number): boolean {
+    if (!Number.isFinite(worldX) || !Number.isFinite(worldZ)) {
+      return false;
+    }
+    return !this.field.isOpenWater(worldX, worldZ);
+  }
+
   override dispose(): void {
     if (this.water) {
       this.water.dispose();

@@ -178,7 +178,10 @@ describe('terrain environment modules (levels 6-10)', () => {
       [1400, -1400],
       [-1400, -1400],
     ] as const) {
-      expect(sampleEnvironmentSurface(environment, x, z, WORLDSCAPE_WATER_Y), `${x},${z}`).toEqual({
+      expect(
+        sampleEnvironmentSurface(environment, x, z, WORLDSCAPE_WATER_Y),
+        `${x},${z}`
+      ).toMatchObject({
         y: WORLDSCAPE_WATER_Y,
         water: true,
       });
@@ -214,7 +217,9 @@ describe('terrain environment modules (levels 6-10)', () => {
           expect(sample.y).toBeGreaterThanOrEqual(WORLDSCAPE_WATER_Y);
         }
       }
-      expect(sampleEnvironmentSurface(environment, Number.NaN, 0, WORLDSCAPE_WATER_Y)).toEqual({
+      expect(
+        sampleEnvironmentSurface(environment, Number.NaN, 0, WORLDSCAPE_WATER_Y)
+      ).toMatchObject({
         y: WORLDSCAPE_WATER_Y,
         water: false,
       });
@@ -245,7 +250,7 @@ describe('TerrainGenerator on the canyon level (one build)', () => {
   });
 
   it('puts the spawn point over the river, which is navigable water', () => {
-    expect(generator.sampleSurface(0, 0)).toEqual({ y: WORLDSCAPE_WATER_Y, water: true });
+    expect(generator.sampleSurface(0, 0)).toMatchObject({ y: WORLDSCAPE_WATER_Y, water: true });
     expect(generator.getSurfaceKind(0, 0)).toBe('water');
   });
 
@@ -263,8 +268,14 @@ describe('TerrainGenerator on the canyon level (one build)', () => {
   });
 
   it('answers non-finite input with the water level and no water', () => {
-    expect(generator.sampleSurface(Number.NaN, 0)).toEqual({ y: WORLDSCAPE_WATER_Y, water: false });
-    expect(generator.sampleSurface(0, Infinity)).toEqual({ y: WORLDSCAPE_WATER_Y, water: false });
+    expect(generator.sampleSurface(Number.NaN, 0)).toMatchObject({
+      y: WORLDSCAPE_WATER_Y,
+      water: false,
+    });
+    expect(generator.sampleSurface(0, Infinity)).toMatchObject({
+      y: WORLDSCAPE_WATER_Y,
+      water: false,
+    });
   });
 
   it('exposes the canyon environment and its convoy route', () => {
@@ -287,7 +298,7 @@ describe('TerrainGenerator on the canyon level (one build)', () => {
     generator.clearTerrain();
     expect(generator.getEnvironment()).toBeNull();
     expect(environment?.root.parent ?? null).toBeNull();
-    expect(generator.sampleSurface(0, 0)).toEqual({ y: WORLDSCAPE_WATER_Y, water: false });
+    expect(generator.sampleSurface(0, 0)).toMatchObject({ y: WORLDSCAPE_WATER_Y, water: false });
     expect(generator.getCrashSurfaceY(0, 0)).toBe(WORLDSCAPE_WATER_Y);
   });
 });

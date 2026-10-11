@@ -1,14 +1,27 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { GameConfig, type QualityPreset } from '@/config';
 import { GameLoop } from '@/core/GameLoop';
+import {
+  ANDROID_PHONE_UA,
+  ANDROID_TABLET_UA,
+  IPAD_UA,
+  LINUX_DESKTOP_UA,
+  WINDOWS_DESKTOP_UA,
+  restoreDevice,
+  stubDevice,
+  stubViewport,
+  type DeviceSpec,
+} from './deviceTestUtils';
 
 /**
- * 平板档（GameConfig，批次 T）：
- * - isTablet：触控设备且视口短边 ≥ 700 CSS px；
- * - 平板上所有画质档的模拟帧率都是 60，auto 画质的像素比上限是 1.5；
+ * 平板档（GameConfig，批次 T；Android 平板性能批次改了判定）：
+ * - 平板级设备：触控设备（'ontouchstart' in window / maxTouchPoints）且设备屏幕短边
+ *   Math.min(screen.width, screen.height) ≥ 600 CSS px。按屏幕而不是视口判定：工具栏、旋转、
+ *   全屏都不改变它（改动前是视口短边 ≥ 700）。这只决定运行档，触控布局仍按视口（见
+ *   TabletClassLayoutScope.test.ts）；
+ * - 平板级设备上所有画质档的模拟帧率都是 60，auto 画质的像素比上限是 1.5；
  * - 手机与桌面的取值与改动前（提交 6384e8f 之前的 src/config.ts）一致。
- * jsdom 默认是 1024×768 且带 ontouchstart，GameConfig.isTablet 默认为 true：
- * 每个用例显式设定设备状态，结束后恢复。
+ * jsdom 的 screen 是 0×0：每个用例显式设定设备状态，结束后恢复。
  * 最后一组用真实的 GameLoop 跑一帧，确认目标帧率确实成了固定模拟步长。
  */
 
@@ -110,13 +123,6 @@ describe('tablet tier (GameConfig)', () => {
     Object.defineProperty(window, name, { configurable: true, writable: true, value });
   }
 
-  function removeFromWindow(name: string): void {
-    if (!originalDescriptors.has(name)) {
-      originalDescriptors.set(name, Object.getOwnPropertyDescriptor(window, name));
-    }
-    Reflect.deleteProperty(window, name);
-  }
-
   function setDevice(device: Device): void {
     GameConfig.isMobile = device !== 'desktop';
     GameConfig.isTablet = device === 'tablet';
@@ -147,56 +153,202 @@ describe('tablet tier (GameConfig)', () => {
     vi.resetModules();
   });
 
-  describe('isTablet detection', () => {
-    /** 按给定视口重新加载 src/config.ts，读它启动时的判定结果 */
-    async function detect(
-      width: number,
-      height: number,
-      touch: boolean
-    ): Promise<{ isMobile: boolean; isTablet: boolean }> {
-      stubWindow('innerWidth', width);
-      stubWindow('innerHeight', height);
-      if (!touch) {
-        removeFromWindow('ontouchstart');
-      }
-      vi.resetModules();
-      const fresh = await import('@/config');
-      return { isMobile: fresh.GameConfig.isMobile, isTablet: fresh.GameConfig.isTablet };
+  describe('tablet-class detection (by the device screen)', () => {
+    /** 设备启动时判定出的运行档：是否触屏、各画质档的模拟帧率、auto 画质的像素比 */
+    interface RuntimeProfile {
+      touch: boolean;
+      simulationHz: Record<QualityPreset, number>;
+      autoPixelRatio: number;
     }
+
+    function simulationRates(
+      rates: readonly [number, number, number, number]
+    ): Record<QualityPreset, number> {
+      const [auto, performance, balanced, quality] = rates;
+      return { auto, performance, balanced, quality };
+    }
+
+    function tabletProfile(devicePixelRatio: number): RuntimeProfile {
+      return {
+        touch: true,
+        simulationHz: simulationRates([60, 60, 60, 60]),
+        autoPixelRatio: Math.min(devicePixelRatio, 1.5),
+      };
+    }
+
+    function phoneProfile(devicePixelRatio: number): RuntimeProfile {
+      return {
+        touch: true,
+        simulationHz: simulationRates([30, 30, 30, 45]),
+        autoPixelRatio: Math.min(devicePixelRatio, 1.2),
+      };
+    }
+
+    function desktopProfile(devicePixelRatio: number): RuntimeProfile {
+      return {
+        touch: false,
+        simulationHz: simulationRates([60, 45, 60, 75]),
+        autoPixelRatio: Math.min(devicePixelRatio, 2),
+      };
+    }
+
+    /** 读一份 GameConfig 现在给出的运行档（不改它最后的画质：读完回到 auto） */
+    function profileOf(config: typeof GameConfig): RuntimeProfile {
+      const simulationHz = simulationRates([0, 0, 0, 0]);
+      for (const preset of PRESETS) {
+        config.setQualityPreset(preset);
+        simulationHz[preset] = config.getTargetFPS();
+      }
+      config.setQualityPreset('auto');
+      return { touch: config.isMobile, simulationHz, autoPixelRatio: config.getPixelRatio() };
+    }
+
+    /** 扮演设备后重新加载 src/config.ts，返回它启动时判定的 GameConfig */
+    async function boot(device: DeviceSpec): Promise<typeof GameConfig> {
+      stubDevice(device);
+      vi.resetModules();
+      return (await import('@/config')).GameConfig;
+    }
+
+    function device(
+      userAgent: string,
+      screen: readonly [number, number],
+      viewport: readonly [number, number],
+      touch: boolean,
+      devicePixelRatio = HIGH_DPR
+    ): DeviceSpec {
+      return {
+        userAgent,
+        screen: { width: screen[0], height: screen[1] },
+        viewport: { width: viewport[0], height: viewport[1] },
+        touch,
+        devicePixelRatio,
+      };
+    }
+
+    afterEach(() => {
+      restoreDevice();
+    });
 
     it('is a boolean', () => {
       expect(typeof GameConfig.isTablet).toBe('boolean');
     });
 
-    it.each([
-      ['iPad landscape', 1024, 768],
-      ['iPad portrait', 768, 1024],
-      ['iPad mini portrait', 744, 1133],
-      ['iPad Air landscape', 1180, 820],
-      ['iPad Pro 12.9 landscape', 1366, 1024],
-      ['short side exactly 700 (landscape)', 1100, 700],
-      ['short side exactly 700 (portrait)', 700, 1100],
-    ])('%s (%i×%i, touch) is a tablet', async (_name, width, height) => {
-      expect(await detect(width, height, true)).toEqual({ isMobile: true, isTablet: true });
+    describe('an Android tablet with a 1280×800 screen is tablet-class at every viewport', () => {
+      it.each([
+        ['landscape, viewport filling the screen', 1280, 800],
+        ['landscape under the browser toolbars', 1280, 650],
+        ['landscape under the toolbars and the gesture bar', 1280, 620],
+        ['portrait', 800, 1280],
+        ['landscape, viewport 1138×712', 1138, 712],
+      ])('%s (%i×%i)', async (_name, width, height) => {
+        const config = await boot(device(ANDROID_TABLET_UA, [1280, 800], [width, height], true));
+        expect(profileOf(config)).toEqual(tabletProfile(HIGH_DPR));
+      });
+
+      it('with the screen reported in portrait (800×1280) as well', async () => {
+        const config = await boot(device(ANDROID_TABLET_UA, [800, 1280], [800, 1216], true));
+        expect(profileOf(config)).toEqual(tabletProfile(HIGH_DPR));
+      });
+    });
+
+    it('a 1200×800 screen at ×2.5 is tablet-class and capped at ×1.5', async () => {
+      const config = await boot(device(ANDROID_TABLET_UA, [1200, 800], [1200, 680], true, 2.5));
+      expect(profileOf(config)).toEqual(tabletProfile(2.5));
+      expect(config.getPixelRatio()).toBe(1.5);
+    });
+
+    it('an Android tablet in desktop-site mode (Linux x86_64 UA, touch, 1280×800 screen) is tablet-class', async () => {
+      const config = await boot(device(LINUX_DESKTOP_UA, [1280, 800], [1280, 686], true));
+      expect(profileOf(config)).toEqual(tabletProfile(HIGH_DPR));
     });
 
     it.each([
-      ['phone portrait', 390, 844],
-      ['phone landscape', 844, 390],
-      ['large phone portrait', 430, 932],
-      ['large phone landscape', 932, 430],
-      ['short side 699 (landscape)', 1100, 699],
-      ['short side 699 (portrait)', 699, 1100],
-    ])('%s (%i×%i, touch) is not a tablet', async (_name, width, height) => {
-      expect(await detect(width, height, true)).toEqual({ isMobile: true, isTablet: false });
+      ['landscape', [960, 600], [960, 528]],
+      ['portrait', [600, 960], [600, 888]],
+    ] as const)(
+      'a screen whose short side is exactly 600 is tablet-class (%s)',
+      async (_name, screen, viewport) => {
+        const config = await boot(device(ANDROID_TABLET_UA, screen, viewport, true));
+        expect(profileOf(config)).toEqual(tabletProfile(HIGH_DPR));
+      }
+    );
+
+    describe('every iPad stays tablet-class', () => {
+      it.each([
+        ['iPad Air 1180×820, landscape', [1180, 820], [1180, 820]],
+        ['iPad Air 1180×820, portrait', [1180, 820], [820, 1180]],
+        ['iPad mini 744×1133, portrait', [744, 1133], [744, 1133]],
+        ['iPad mini 744×1133, landscape', [744, 1133], [1133, 744]],
+        ['iPad Pro 12.9 1366×1024, landscape', [1366, 1024], [1366, 1024]],
+      ] as const)('%s', async (_name, screen, viewport) => {
+        const config = await boot(device(IPAD_UA, screen, viewport, true));
+        expect(profileOf(config)).toEqual(tabletProfile(HIGH_DPR));
+      });
+    });
+
+    describe('touch devices with a short screen side under 600 keep the phone profile', () => {
+      it.each([
+        ['portrait', 412, 915],
+        ['portrait under the toolbars', 412, 839],
+        ['landscape', 915, 412],
+      ])('an Android phone with a 412×915 screen, %s (%i×%i)', async (_name, width, height) => {
+        const config = await boot(device(ANDROID_PHONE_UA, [412, 915], [width, height], true));
+        expect(profileOf(config)).toEqual(phoneProfile(HIGH_DPR));
+      });
+
+      it('a 412×915 screen with a wide (980 px) layout viewport is still a phone', async () => {
+        const config = await boot(device(LINUX_DESKTOP_UA, [412, 915], [980, 1960], true));
+        expect(profileOf(config)).toEqual(phoneProfile(HIGH_DPR));
+      });
+
+      it.each([
+        ['landscape', [960, 599], [960, 527]],
+        ['portrait', [599, 960], [599, 888]],
+      ] as const)(
+        'a screen whose short side is 599 is not tablet-class (%s)',
+        async (_name, screen, viewport) => {
+          const config = await boot(device(ANDROID_PHONE_UA, screen, viewport, true));
+          expect(profileOf(config)).toEqual(phoneProfile(HIGH_DPR));
+        }
+      );
     });
 
     it.each([
-      ['desktop 1920×1080', 1920, 1080],
-      ['desktop 1366×768', 1366, 768],
-      ['desktop 2560×1440', 2560, 1440],
-    ])('%s without touch is not a tablet', async (_name, width, height) => {
-      expect(await detect(width, height, false)).toEqual({ isMobile: false, isTablet: false });
+      ['desktop 1920×1080', [1920, 1080]],
+      ['desktop 1366×768', [1366, 768]],
+      ['desktop 2560×1440', [2560, 1440]],
+    ] as const)('%s without touch keeps the desktop profile', async (_name, size) => {
+      const config = await boot(device(WINDOWS_DESKTOP_UA, size, size, false));
+      expect(profileOf(config)).toEqual(desktopProfile(HIGH_DPR));
+    });
+
+    describe('decided once, from the screen: the viewport changing later does not move it', () => {
+      it('a tablet stays tablet-class when the toolbars, rotation or fullscreen change the viewport', async () => {
+        const config = await boot(device(ANDROID_TABLET_UA, [1280, 800], [1280, 800], true));
+        for (const [width, height] of [
+          [1280, 620],
+          [800, 1280],
+          [1280, 800],
+        ]) {
+          stubViewport(width, height);
+          window.dispatchEvent(new Event('resize'));
+          window.dispatchEvent(new Event('orientationchange'));
+          expect(profileOf(config), `viewport ${width}×${height}`).toEqual(tabletProfile(HIGH_DPR));
+        }
+      });
+
+      it('a phone stays a phone when the viewport changes', async () => {
+        const config = await boot(device(ANDROID_PHONE_UA, [412, 915], [915, 412], true));
+        for (const [width, height] of [
+          [412, 915],
+          [915, 412],
+        ]) {
+          stubViewport(width, height);
+          window.dispatchEvent(new Event('resize'));
+          expect(profileOf(config), `viewport ${width}×${height}`).toEqual(phoneProfile(HIGH_DPR));
+        }
+      });
     });
   });
 
@@ -358,7 +510,7 @@ describe('tablet tier (GameConfig)', () => {
   });
 
   it('a device without touch never gets the tablet tier, even with isTablet left set', () => {
-    // jsdom 里 isTablet 默认为 true：只把 isMobile 改成 false 的用例仍应得到桌面取值
+    // isTablet 留着 true、只把 isMobile 改成 false 的用例仍应得到桌面取值
     GameConfig.isMobile = false;
     GameConfig.isTablet = true;
 

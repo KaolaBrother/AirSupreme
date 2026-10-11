@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { getDeclaredHitRadius, type CombatTarget, type DamageSource } from '@/core/CombatContracts';
 import { Faction } from '@/core/Faction';
+import { ROCKET_TARGET_DAMAGE_FACTORS } from './WeaponTypes';
 
 /**
  * 特殊武器的纯逻辑命中工具（无 DOM / WebGL 依赖，可在单元测试中直接使用）
@@ -275,7 +276,27 @@ function insertSorted(
 }
 
 /**
+ * 伤害进 Boss 主血量的部件：'boss-part' 中除去独立目标（水雷、护盾塔、护盾、诱饵，
+ * 见 CombatTarget.independentOfBossHealth）
+ */
+function drainsBossHealth(target: CombatTarget): boolean {
+  return target.kind === 'boss-part' && target.independentOfBossHealth !== true;
+}
+
+/** 伤害来源对该目标的伤害系数：只有火箭按目标类型打折（ROCKET_TARGET_DAMAGE_FACTORS） */
+function targetDamageFactor(source: DamageSource, target: CombatTarget): number {
+  if (source !== 'rocket') return 1;
+  if (target.kind === 'air') return ROCKET_TARGET_DAMAGE_FACTORS.air;
+  if (drainsBossHealth(target)) return ROCKET_TARGET_DAMAGE_FACTORS.boss;
+  return 1;
+}
+
+/**
  * 球形溅射伤害：直接命中目标吃满伤害，其余可伤害目标按表面距离线性衰减（边缘 40%）。
+ * - 火箭再按目标类型乘伤害系数（直接命中与溅射都算）；
+ * - 伤害进 Boss 主血量的部件都属于当前 Boss、共用一个血池：一次爆炸只结算其中伤害最高的
+ *   一个部件（并列时优先直接命中的部件，其次快照里靠前的），部件 / 弱点倍率照常由 Boss 结算；
+ * - 其余目标（含水雷、护盾塔等独立的 Boss 部件）各自独立结算。
  * 返回受伤目标数量。
  */
 export function applySplashDamage(
@@ -291,11 +312,15 @@ export function applySplashDamage(
     return 0;
   }
   let hits = 0;
+  let bossEntry: TargetSnapshot | null = null;
+  let bossAmount = 0;
+  let bossDirect = false;
   for (let i = 0; i < snapshot.size(); i++) {
     const entry = snapshot.get(i);
     if (!entry.damageable) continue;
+    const isDirect = entry.target === direct;
     let amount = 0;
-    if (entry.target === direct) {
+    if (isDirect) {
       amount = damage;
     } else if (splashRadius > 0) {
       const surface = Math.max(0, entry.position.distanceTo(center) - entry.radius);
@@ -304,9 +329,27 @@ export function applySplashDamage(
     } else {
       continue;
     }
+    amount *= targetDamageFactor(source, entry.target);
     if (!isTargetAlive(entry.target)) continue;
+    if (drainsBossHealth(entry.target)) {
+      // 先记下伤害最高的部件，循环结束后只结算它一次
+      if (
+        bossEntry === null ||
+        amount > bossAmount ||
+        (amount === bossAmount && isDirect && !bossDirect)
+      ) {
+        bossEntry = entry;
+        bossAmount = amount;
+        bossDirect = isDirect;
+      }
+      continue;
+    }
     if (!safeApplyDamage(entry.target, amount, source, center)) continue;
     onDamaged?.(entry, amount);
+    hits++;
+  }
+  if (bossEntry !== null && safeApplyDamage(bossEntry.target, bossAmount, source, center)) {
+    onDamaged?.(bossEntry, bossAmount);
     hits++;
   }
   return hits;

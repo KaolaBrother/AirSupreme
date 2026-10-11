@@ -321,6 +321,8 @@ export class AudioManager {
   private static readonly INCOMING_WARNING_NEAR_DIST = 40;
   private static readonly INCOMING_WARNING_FAR_DIST = 800;
   private isEnginePlaying: boolean = false;
+  /** 引擎声意愿：startEngine 之后、stopEngine 之前为 true；当时上下文未运行则由 updateEngine 补启动 */
+  private isEngineWanted: boolean = false;
   private isDisposed: boolean = false;
   private activeSoundCounts: Map<SoundType, number> = new Map();
   private lastSoundPlayTimes: Map<SoundType, number> = new Map();
@@ -685,11 +687,20 @@ export class AudioManager {
   }
 
   /**
-   * 播放引擎声（持续音效）
+   * 播放引擎声（持续音效）。
+   * 上下文此刻未运行（切后台 / 锁屏回来、resume 还没完成）时只记下意愿，
+   * 等上下文恢复 running 后由 updateEngine 补启动。
    */
   public startEngine(): void {
+    if (this.isDisposed) return;
+    this.isEngineWanted = true;
     this.initContext();
-    if (!this.canPlay() || this.isEnginePlaying) return;
+    this.startEngineIfWanted();
+  }
+
+  /** 引擎声被需要、还没在响且上下文正在运行时，建立并启动引擎声节点 */
+  private startEngineIfWanted(): void {
+    if (!this.isEngineWanted || this.isEnginePlaying || !this.canPlay()) return;
 
     try {
       const context = this.context;
@@ -759,6 +770,8 @@ export class AudioManager {
       this.engineTextureOscillator.start();
       this.isEnginePlaying = true;
     } catch {
+      // 建图本身失败不逐帧重试（保持原先的一次性语义）
+      this.isEngineWanted = false;
       log.warn('Failed to start engine sound');
     }
   }
@@ -768,6 +781,8 @@ export class AudioManager {
    */
   public updateEngine(speed: number): void {
     if (!this.canPlay()) return;
+    // 上下文恢复运行后的第一帧：补启动先前因上下文未运行而没能启动的引擎声
+    this.startEngineIfWanted();
     if (
       !this.engineOscillator ||
       !this.engineSubOscillator ||
@@ -914,9 +929,10 @@ export class AudioManager {
   }
 
   /**
-   * 停止引擎声
+   * 停止引擎声，并取消引擎声意愿（暂停 / 死亡 / 结束时上下文恢复也不会自己响起）
    */
   public stopEngine(): void {
+    this.isEngineWanted = false;
     const stopNode = (osc: OscillatorNode | null): void => {
       if (!osc) return;
       try {
