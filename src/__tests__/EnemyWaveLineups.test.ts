@@ -19,7 +19,7 @@ import {
  * 敌机舰队 M3：逐波写定的编成（规格 §4a）。
  *
  * 两层检查：
- * - 配置表（LEVELS）本身满足 §4a 的 8 条固定规则里能从表上看出来的部分；
+ * - 配置表（LEVELS）本身满足 §4a 的 9 条固定规则里能从表上看出来的部分；
  * - 真实的生成路径（LevelManager：开波 → 按出场间隔开传送门 → 敌机现身 → 清场 → 下一波）每一波
  *   带来的正是这一份编成，按写定的方式到场（一群 / 两路夹击 / 鱼贯而入）。整场战役从第 1 关
  *   第 1 波打到第 10 关最后一波（两波之间的间隔照常走完），另用不同的随机种子从读档入口逐波
@@ -227,6 +227,17 @@ const PER_WAVE_CAP: Partial<Record<EnemyType, number>> = {
 
 /** 规则 5：精英名单 */
 const ELITE_TYPES: readonly EnemyType[] = [HEAVY, ACE, SNIPER, STRIKER, JAMMER, WRAITH];
+
+/**
+ * 规则 9：会贴近玩家的机型。夹击里干扰机所在的那一路至少要有一架；只有打击机 / 狙击机的一路
+ * 不行（它们守在 380–700 米外）
+ */
+const CLOSING_TYPES: readonly EnemyType[] = [SCOUT, FIGHTER, HEAVY, ACE, WRAITH];
+
+/** 规格表里“夹击 + 有干扰机”的波次数（规则 9 的检查以它自检：一波都没漏） */
+const SPEC_PINCERS_WITH_JAMMER = Object.values(SPEC_LINEUPS)
+  .flat()
+  .filter((wave) => wave.arrival === 'P' && (wave.jets.get(JAMMER) ?? 0) > 0).length;
 
 const EVENT_LETTER: Record<LevelWaveEventType, EventLetter> = {
   [LevelWaveEventType.INTERCEPT]: 'I',
@@ -458,6 +469,39 @@ describe('the authored tables (spec §4a rules)', () => {
         });
       }
     );
+  });
+
+  describe('rule 9: in a pincer, the Jammer flies with a side that closes in', () => {
+    it('every pincer wave with a Jammer puts it on a side with a Scout, Fighter, Heavy, Ace or Wraith, never on a side of only Strikers and / or Snipers', () => {
+      expect(SPEC_PINCERS_WITH_JAMMER, 'pincer waves with a Jammer in the spec').toBeGreaterThan(0);
+      const problems: string[] = [];
+      let checked = 0;
+      for (const level of ALL_LEVELS) {
+        levelConfig(level).waves.forEach((wave, index) => {
+          if (wave.arrival !== 'pincer' || !wave.lineup.includes(JAMMER)) return;
+          checked++;
+          const sides = wave.sides ?? [];
+          expect(sides.length, where(level, index)).toBe(wave.lineup.length);
+          wave.lineup.forEach((type, slot) => {
+            if (type !== JAMMER) return;
+            const mates = wave.lineup.filter(
+              (_mate, other) => other !== slot && sides[other] === sides[slot]
+            );
+            const opposite = wave.lineup.filter((_mate, other) => sides[other] !== sides[slot]);
+            if (!mates.some((mate) => CLOSING_TYPES.includes(mate))) {
+              problems.push(
+                `${where(level, index)}: Jammer with ${describeTypes(mates) || 'nobody'} | ` +
+                  `other side ${describeTypes(opposite)}`
+              );
+            }
+          });
+        });
+      }
+      expect(checked, 'pincer waves with a Jammer, as many as in the spec table').toBe(
+        SPEC_PINCERS_WITH_JAMMER
+      );
+      expect(problems).toEqual([]);
+    });
   });
 
   describe('the starting line-ups of spec §4a (no deviations reported)', () => {
@@ -748,6 +792,85 @@ describe('the real spawn path (LevelManager)', () => {
         expect(describeTypes(strikerSide)).toBe('2 STRIKER');
         expect(describeTypes(otherSide)).toBe('1 FIGHTER + 2 SCOUT');
       }
+    });
+
+    /** 规则 9：夹击里干扰机身边（同一路）的机型，去掉它自己 */
+    function jammerMates(types: readonly EnemyType[]): EnemyType[] {
+      const mates = [...types];
+      mates.splice(mates.indexOf(JAMMER), 1);
+      return mates;
+    }
+
+    it('pincer with a Jammer: it comes out with the side that also brings a Scout, Fighter, Heavy, Ace or Wraith (rule 9)', () => {
+      const problems: string[] = [];
+      let checked = 0;
+      for (const record of allRecords()) {
+        const wave = levelConfig(record.level).waves[record.wave];
+        if (wave.arrival !== 'pincer' || !wave.lineup.includes(JAMMER)) continue;
+        checked++;
+        const groups = groupsOf(record).map((group) =>
+          group.map((index) => record.arrivals[index].type)
+        );
+        const own = groups.find((group) => group.includes(JAMMER)) ?? [JAMMER];
+        const mates = jammerMates(own);
+        if (!mates.some((type) => CLOSING_TYPES.includes(type))) {
+          problems.push(
+            `${where(record.level, record.wave)}: Jammer came out with ` +
+              `${describeTypes(mates) || 'nobody'}`
+          );
+        }
+      }
+      // 整场战役一遍、读档逐波一遍
+      expect(checked, 'pincer waves with a Jammer, both runs').toBe(2 * SPEC_PINCERS_WITH_JAMMER);
+      expect(problems).toEqual([]);
+    });
+
+    it('pincer with a Jammer: it gets the group number of the side it came out with, and that side holds a jet that closes in (rule 9)', async () => {
+      randomSpy = vi.spyOn(Math, 'random').mockImplementation(seededGameRandom(9191));
+      const problems: string[] = [];
+      let checked = 0;
+      for (const level of ALL_LEVELS) {
+        for (let wave = 0; wave < levelConfig(level).totalWaves; wave++) {
+          const config = levelConfig(level).waves[wave];
+          if (config.arrival !== 'pincer' || !config.lineup.includes(JAMMER)) continue;
+          const label = where(level, wave);
+          const rig = new WaveRig();
+          // 现身那一刻的编组号（敌机会回池复用，事后再读可能已被下一架改写）
+          const groupIds: number[] = [];
+          const recordArrival = rig.levels.onEnemySpawned;
+          rig.levels.onEnemySpawned = (jet) => {
+            recordArrival?.(jet);
+            groupIds.push(jet.getGroupId());
+          };
+          try {
+            rig.load(level, wave);
+            rig.start();
+            const record = await rig.playWave('on-arrival', 60);
+            expect(record.arrivals.length, label).toBe(config.lineup.length);
+            expect(groupIds.length, label).toBe(record.arrivals.length);
+            checked++;
+            const jammerAt = record.arrivals.findIndex((arrival) => arrival.type === JAMMER);
+            const ownId = groupIds[jammerAt];
+            expect(ownId, `${label}: the Jammer has a group number`).toBeGreaterThan(0);
+            const ownSide = groupsOf(record).find((group) => group.includes(jammerAt)) ?? [];
+            // 同一个编组号的，正是和它从同一个群中心现身的那几架
+            const sameId = record.arrivals
+              .map((_arrival, index) => index)
+              .filter((index) => groupIds[index] === ownId);
+            expect(sameId, `${label}: the Jammer's group is its side`).toEqual(
+              [...ownSide].sort((a, b) => a - b)
+            );
+            const mates = jammerMates(sameId.map((index) => record.arrivals[index].type));
+            if (!mates.some((type) => CLOSING_TYPES.includes(type))) {
+              problems.push(`${label}: the Jammer's group is ${describeTypes(mates) || 'nobody'}`);
+            }
+          } finally {
+            rig.dispose();
+          }
+        }
+      }
+      expect(checked, 'pincer waves with a Jammer').toBe(SPEC_PINCERS_WITH_JAMMER);
+      expect(problems).toEqual([]);
     });
 
     it('orders named in the spec: level 2 wave 2 Sniper last, level 4 wave 2 Striker behind', () => {
