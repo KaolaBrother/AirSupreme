@@ -182,6 +182,12 @@ HP 110.
   or leaving 800 m (the seeker reads the previous step's review; a one-step lag is accepted).
 - **A stunned Jammer does not jam.** While EMP stun lasts, that Jammer does not count toward
   the lock slowdown and the "JAMMED" tag; jamming resumes when the stun ends.
+- **Jammer station stays inside jam range** *(owner decision after the round's close-out)*: the
+  station the Jammer flies to is never more than 650 m from the player (3D distance). When its
+  group is so far out that "300–500 m behind" would put it beyond that, staying in jam range
+  wins: it sits closer behind its group, or level with it. Against a player flying straight at
+  cruise speed or turning gently, a Jammer with a group is within 800 m of the player at least
+  85 % of the time once it has reached its station.
 
 ## 4. Waves and end game (waves / balance batch)
 
@@ -238,13 +244,16 @@ E elite hunt, D escort defence.
    text is shown, in the current language, without voice. It shows again if that same wave is
    replayed from a checkpoint, and never in other waves. SCOUT has no hint (level 1 wave 1
    belongs to the existing onboarding).
+9. In a pincer, the Jammer flies with a side that holds at least one jet that closes in (SCOUT,
+   FIGHTER, HEAVY, ACE or WRAITH) — never with a side of only Strikers and / or Snipers, which
+   hold 380–700 m out *(owner decision after the round's close-out)*.
 
 ### Hint lines
 
 | Type | English | 中文 |
 |---|---|---|
 | FIGHTER | Fighters go for your tail. Turn into them to shake them off. | 战斗机会咬你的尾巴，朝它转过去就能甩开。 |
-| SNIPER | Red beam: a sniper is charging. When the beam freezes, change direction. | 红色光束是狙击机在蓄力，光束定住的瞬间立刻转向。 |
+| SNIPER | Red beam: a sniper is charging. When the beam freezes, change direction. Missiles catch it. | 红色光束是狙击机在蓄力，光束定住的瞬间立刻转向。用导弹追它。 |
 | HEAVY | Gunships fire slow shell fans. Attack from the side or below, not from behind. | 炮艇机打出慢速弹幕，从侧面或下方进攻，别跟在正后方。 |
 | ACE | Aces fire seeking missiles. On a missile warning, drop a flare and break. | 王牌机会发射追踪导弹，出现导弹警告就放干扰弹并急转。 |
 | STRIKER | Strikers launch missile pairs from far out. Close in while they reload. | 打击机在远处成对发射导弹，趁它装填时贴上去。 |
