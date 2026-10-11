@@ -16,6 +16,7 @@ AirSupreme 是一个基于 Three.js 和 TypeScript 的 3D 飞机战斗游戏。
 - 独立终验之后的两波修复已合并（`2e9941d..0cd1735`）：复活沿航迹后退 + 坠毁宽限、移动端暂停锁存、僚机编队整队出击与编队位、Boss 击破即存机库检查点、紧急告警配音限频与 Boss 收尾等完台词、HUD 可本地化文案与手机布局、Boss 导弹伤害随难度、热焰弹诱骗全部 Boss 导弹、关卡曲线与波次重调、地形静态合批与植被分块 LOD（见下文各节与 `CHANGELOG.md` 的「终验修复」）；随后的收尾打磨（`0cd1735..f6ce2d3`）让闪烁告警 / Boss 状态条 / 道具倒计时 / 中央大字提示随语言切换重绘、高炮与八爪鱼眼睛光弹伤害随难度缩放、复活时避开竖直结构、Boss 战敌人计数只计在场敌方、模型预览在名称标签上方取景，中文界面的教学改称「教程」（见「收尾打磨」）
 - 操控与武器体验一轮已合并（分支 `workflow/ipad-controls-weapons`）：触屏浮动摇杆、飞行辅助与平板档位，常开的导弹导引头（按一下发射一枚）与继承载机速度的导弹，机炮提前量标记与触屏瞄准辅助，敌方单位的目标标记与「当前目标」提示，机头朝上的雷达与关卡地图，压低的第一人称座舱，暂停菜单「保存并退出」，以及新的主菜单（标题画面、设置与操作说明面板、机库）（见下文「操控、瞄准与导弹」「HUD、雷达与移动端」「主菜单」与 `CHANGELOG.md` 的「操控与武器体验」）
 - 其后已完成的几项（分支 `workflow/enemy-fleet`）：敌机舰队重做——八种敌机（新增电子干扰机、导弹攻击机、幽灵机）各有机体、大小与命中半径，每种一套条令，攻击令牌限制同时进攻的敌机数，王牌与导弹攻击机发射追踪导弹（全队上限），电子干扰拖慢玩家锁定，幽灵机周期性隐形，每一波的敌机编成写定（一群同来 / 两路夹击 / 鱼贯而入）并在新机型登场的那一波显示首次遭遇提示，关卡曲线按实测重调（压力逐关上升、第 10 关最难），僚机换成自己的机体与固定数值（见上文「敌人AI系统」与下文「平衡与难度曲线」）；键盘端也有机炮辅助瞄准（锥角是触屏的一半）；页面转入后台或关闭时写一次检查点（后台存档）；手机竖屏追尾视角的无线电面板改为按键簇左侧、摇杆上方的紧凑小框，放不下的台词像字幕一样逐行上移，屏外箭头在手机竖屏时避开它；没有任何代码读取的 JSON 配置（`public/config/game-config.json`、`ConfigLoader`）已删除（见下文「操控、瞄准与导弹」「存档」「HUD、雷达与移动端」「配置系统」与 `CHANGELOG.md`）
+- 安卓平板一轮（分支 `workflow/android-tablet`）：回到桌面 / 锁屏回来后，页面重新可见或之后任意一次手势都恢复被挂起的共享 `AudioContext`，引擎声在上下文恢复运行后补启动；平板性能档改按设备屏幕判定（触屏且屏幕短边 ≥ 600 CSS 像素），高刷触屏隔帧渲染（`FramePacer`），`auto` 画质在性能档之下逐级降像素比；地表采样新增 `land`（干地），地面单位只在干地上出生、走航线与行驶（见下文「关卡与地形环境」「地面 / 海上 / 空中单位」「操控、瞄准与导弹」「音乐与音效」与 `CHANGELOG.md`）
 - 测试：位于 `src/__tests__`；测试数量与结果以 `npm run test:run` 的实际输出为准
 
 ### 技术栈
@@ -227,8 +228,8 @@ AirSupreme 是一个基于 Three.js 和 TypeScript 的 3D 飞机战斗游戏。
 | 9 天梯之巅 | `STRATOSPHERE` | `clear` | 无（云海为坠毁面） | `StratosphereEnvironment`：云海、天梯 |
 | 10 神谕核心 | `CITADEL` | `ash` | 无 | `CitadelEnvironment`：陨石坑黑曜城堡 |
 
-- 环境模块：`TERRAIN_ENVIRONMENT_FACTORIES`（`src/features/terrain/environments/index.ts`）按 `TerrainType` 创建；继承 `EnvironmentBase`，实现 `build` / `sampleHeight` / `isWater`，可选 `surfaceKindAt` / `update`；`sampleEnvironmentSurface` 把高度与水面组合成 `sampleSurface` 结果。第 1-5 关仍由 `TerrainGenerator` 内部的专用生成函数负责。
-- 采样：`TerrainGenerator.sampleSurface(x, z)` → `{ y, water }`（可航行水面 `y` 为水位 `WORLDSCAPE_WATER_Y`）；`getSurfaceKind` → `'water' | 'ground' | 'desert' | 'snow' | 'city' | 'lava' | 'ice' | 'rock' | 'cloud'`；`getCrashSurfaceY` 在第 6-10 关委托环境模块。`LevelManager.getSurfaceSample` / `getSurfaceKind` 包装二者，地形加载前回落到水面 / `'ground'`。
+- 环境模块：`TERRAIN_ENVIRONMENT_FACTORIES`（`src/features/terrain/environments/index.ts`）按 `TerrainType` 创建；继承 `EnvironmentBase`，实现 `build` / `sampleHeight` / `isWater`，可选 `surfaceKindAt` / `isLand` / `update`；`sampleEnvironmentSurface` 把高度与水面组合成 `sampleSurface` 结果（`land` 来自 `environmentIsLand`：优先环境自身的 `isLand`，否则材质不是水 / 熔岩、有水的环境还要高出水位 0.5 米）。第 1-5 关仍由 `TerrainGenerator` 内部的专用生成函数负责。
+- 采样：`TerrainGenerator.sampleSurface(x, z)` → `{ y, water, land }`（可航行水面 `y` 为水位 `WORLDSCAPE_WATER_Y`）。`water` 仍指船只可航行（海上单位放置 / 航行、雷达地图的陆地 / 水面底图）；`land` 指干地（地面单位可出生 / 行驶）：地面明显高出水面且不是熔岩，浅滩（看得见水但不够船走）与熔岩两者都不是。阈值 `DRY_LAND_MIN_HEIGHT` 为 0.5 米，与 worldscape 水面着色器在水深 ≥ -0.5 处画水一致。各关：湖泊 / 山地高度场 ≥ 0.5 米；沙漠除绿洲水塘（(520, -360) 周围 36 米）外、城市除中央公园池塘（与池塘着色器同一水深函数）外全为干地；海洋仅岛屿；第 6 关玄武岩（不是水含浅滩、也不是熔岩）；第 7 关静态冰体（冰架 / 冰山，开阔海面与漂移浮冰不算）；第 8 关河道之外且固体表面至少高出水位 0.5 米；第 9 关全域（本关不部署地面单位）；第 10 关除熔岩裂谷外全部。非有限输入返回 `land: false`，地形未生成时 `land: true`；`getSurfaceKind` → `'water' | 'ground' | 'desert' | 'snow' | 'city' | 'lava' | 'ice' | 'rock' | 'cloud'`；`getCrashSurfaceY` 在第 6-10 关委托环境模块。`LevelManager.getSurfaceSample` / `getSurfaceKind` 包装二者，地形加载前回落到 `{ y: WORLDSCAPE_WATER_Y, water: false, land: true }` / `'ground'`。
 - 环境扩展：峡谷 `getConvoyRoute()` 与城堡 `getAssaultRoute()`（地面车队航线，经 `UnitSystem.setRouteProvider`）；城堡 `getCoreArena()`（神谕主宰决战区）与 `setCoreState('online' | 'exposed' | 'overload' | 'offline')`（核心光柱随 Boss 阶段变化）。
 - 每关 `postFx`（曝光 / 对比度 / 饱和度 / 泛光 / 暗角）随关卡环境交给后处理调色。
 - 静态合批（`src/features/terrain/worldscape/staticBatch.ts`）：`StaticBatcher` 按「材质 + renderOrder」分桶，把零件几何按世界矩阵烘焙后每桶合并为一个网格（`add` / `addObject` / `flush`；顶点色材质的零件可带各自颜色，楼体墙色因此共用一个材质）；`addObject` 把无法合批的可渲染对象（InstancedMesh、多材质网格、点 / 线 / 精灵、灯光）连同子树原样交还，由 `TerrainGenerator.flushStaticBatch` 按世界变换挂回地形组。城区楼群、道路、地标、悬索桥、高架与灯带，湖畔村落与码头，沙丘、干河床、仙人掌、枯树、拱石与绿洲棕榈，海岛都在暂存组里拼好后合批；会动的部分（车流、列车、探照灯、闪烁的信标与塔吊、霓虹、体育场光环）保留各自材质照常动画；透明薄片单遍绘制（`forceSinglePass`），玻璃塔与高架列车的实例化盒体用 `consolidateMaterialGroups` 从 6 个材质分组降到 2 个；鸟群改为两个 InstancedMesh（机身 / 双翼）。实测第 5 关（平衡画质）绘制调用约 1,126 → 225。
@@ -243,6 +244,7 @@ AirSupreme 是一个基于 Three.js 和 TypeScript 的 3D 飞机战斗游戏。
 - 阵营：敌方 `Faction.ENEMY`、友军 `Faction.FRIENDLY`、平民 `Faction.CIVILIAN`（`areHostile` 对平民恒为 false）。
 - 行为：坦克追踪开炮；地空导弹车锁定 → 发射（导弹有能量模型，会被热焰弹诱骗）；高炮提前量弹幕，玩家不在射界时转打友军战机；雷达站旋转并提高敌机精度；炮艇蛇形高速机动并开火；护卫舰垂发 + 近防；潜艇潜航 / 上浮锁定发射（潜航时不可命中）；武装直升机贴地侧滑扫射、被击落时自旋坠落；轰炸机高空直线航路轰炸友军地面 / 海上单位、尾炮自卫；自杀无人机编队巡航后俯冲撞击；友军护卫舰近防拦截导弹、对空对舰射击；友军预警机盘旋；护送目标与平民沿航线行进，抵达或驶出后离场。EMP 瘫痪时停火、停车、锁定中断，无人机断电坠落。
 - 部署：`getWaveDeployment(level, waveIndex)` 返回本波 `UnitSpawnSpec[]`（放置方式 `ahead` / `flank` / `around` / `water` / `route` / `high-altitude`）；无水地形不部署海上单位；本关会部署的模型在关卡加载时预热。
+- 地面单位只在干地上（`UnitPlacement.ts` / `UnitMotion.ts` / `UnitSystem.ts` / `UnitBehaviors.ts`）：有采样器时地面单位的位置必须是 `land`（采样器不给 `land` 时按 `!water`），原先玩家前方 500 米、不做检查的兜底点已去掉。随机尝试失败后做确定性外扩扫描 `scanForLand`：从 300 米起每 40 米一圈直到覆盖整个战场，弧长约 50 米一个方位（至少每 5° 一个），从玩家前向开始左右交替，取第一个干地点再在其周围 25-110 米散开；不消耗随机数，同一地形、位置与朝向总得到同一点。`ahead` / `flank` 的地面集群中心同样以它兜底，`spawnForWave` 找不到集群中心（海上无水、地面无干地）时跳过整个条目；整个战场都没有干地时才放弃该单位。地面航线（`buildRoute`）逐点修正到干地，每一段沿直线先按 20 米（`GROUND_ROUTE_CHECK_STEP`）粗查、再按 2.5 米细查，穿过水面 / 浅滩 / 熔岩的航段先在中点 40-320 米内找绕行点，找不到就丢掉该航点；随机航线不足两点或短于 300 米时，以确定性直线搜索代替原先不做检查的 ±300 米兜底航线（玩家周围由近到远的干地中心，每个中心 12 条直线、相隔 15°，找到 ≥ 600 米或试满 24 个中心后取最长者，短于 60 米视为失败、跳过生成）；纵列车辆落在航点之间不是干地时每次 5 米向航线起点回退。环境提供的航线（峡谷车队土路、城堡突击路线）照旧使用。行驶：`canTraverse` 对地面单位要求 `land`；`driveToward` 下一步不是干地就原地停车（`traverseBlocked`）再按绕行逻辑转向，`followRoute` 依次试 ±0.3 / ±0.6 / ±0.9 / ±1.2 弧度的偏转、都不行就停车，瘫痪滑行同样停在岸边（`canStepTo`）；海上与空中单位不变。
 - 波次门控：`LevelManager.setWaveHoldProvider(() => units.getWaveHoldCount())`——存活敌方单位（含潜航潜艇）拖住波次；敌机清空后残留单位拖住超过时限则放行。时限 `WAVE_STALL_LIMIT_SECONDS` 为 60 秒（按游戏时间），玩家每次击伤敌方单位都重新计时，正在进攻的玩家不会被打断；放行时闪烁「残余目标脱离战区」。
 - 当前目标：敌机清空而敌方单位仍拖住波次期间 `UnitController.isObjectiveActive()` 为真——每波发一次提示（按剩下的是地面 / 海上 / 空中 / 混合目标或潜航的潜艇措辞，经 `presentation.flashWarning`），`CombatHudFeed` 把这些单位的血条快照标为 `objective`，`EnemyHealthBars` 换成目标样式（见下文「HUD、雷达与移动端」）。`forEachHostileMarker` 只给出此刻可以命中的敌方单位：潜航的潜艇仍拖住波次，但没有标记。
 - 命中：玩家子弹逐颗做半径命中（瞄准点 `userData.aimPoint` + `hitRadius`）；锁定导弹对单位瞄准点判定；玩家火力穿过友军单位、会误伤平民；敌方子弹经 `applyHostileFireToUnit` 命中友军单位。
@@ -266,7 +268,9 @@ AirSupreme 是一个基于 Three.js 和 TypeScript 的 3D 飞机战斗游戏。
 
 - 输入（`src/core/Input/InputHandler.ts`）：`getState()` 除布尔方向外带模拟量 `pitchAxis` / `yawAxis`（-1..1）与 `flightAssist`。触屏摇杆是浮动的——拇指落在 `#touch-stick-zone`（视口左侧 42%、从 38% 高度往下）里的任意位置，摇杆底座就移到落点；位移经径向死区（`TOUCH_STICK_TUNING.DEAD_ZONE` 0.12）与指数曲线（`EXPO` 1.7，`shapeStickMagnitude`）整形。触屏设备上键盘与触屏输入合并：每个轴取绝对值较大的一路，按键相或。开火 / 导弹的按下锁存到下一次 `getState()`，短于一个模拟步长的轻触也不会丢（被 `touchcancel` 取消的那一下不算按过，也不抹掉此前已经记下的轻触）；BOOST 是开关式锁存；窗口失焦或页面隐藏时释放全部按住的输入。
 - 飞行辅助（`src/features/player/PlayerController.ts`）：手指在摇杆上、且没有按下俯仰 / 偏航 / 滚转键时 `flightAssist` 为真，走 `applyAssistedAttitude`——偏航绕世界竖直轴，俯仰相对地平线不超过 `ASSIST_PITCH_LIMIT`（75°），坡度趋向 `-yawAxis × ASSIST_MAX_BANK`（45°），摇杆回中即改平。键盘仍走原来的机体轴操纵（`applyManualAttitude`）。
-- 设备档位（`GameConfig`）：`isMobile`（触屏设备）与 `isTablet`（触屏且视口短边不小于 700 CSS 像素），启动时判定一次。平板在各画质档下的目标帧率（`getTargetFPS()` / `getTargetFPSForPreset()`，`GameLoop` 的模拟步长由它决定）都是 60，`auto` 画质的像素比上限为 1.5。
+- 设备档位（`GameConfig`）：`isMobile`（触屏设备）与 `isTablet`（平板级：确有触控输入——`'ontouchstart'` 或 `maxTouchPoints > 0`——且设备屏幕 `min(screen.width, screen.height)` 不小于 600 CSS 像素），启动时判定一次。按屏幕而不是视口：横屏 Android Chrome 扣掉工具栏 / 状态栏 / 导航栏后视口高度常只剩 630-700 像素，屏幕尺寸不随工具栏、旋转、全屏变化。`isTablet` 只决定运行时性能档：平板在各画质档下的目标帧率（`getTargetFPS()` / `getTargetFPSForPreset()`，`GameLoop` 的模拟步长由它决定）都是 60，`auto` 画质的像素比上限为 1.5。触控布局不读它：`index.html`、`radioStyles`、`hudExtrasStyles` 的 700 像素媒体查询与 `RadarMinimap` 的 700 像素短边仍按视口。宽度不超过 768 像素、没有触控输入的桌面窗口是 `isMobile`，但不再算平板级。
+- 帧节奏（`src/FramePacer.ts`）：`isMobile` 时 `GameLoop` 与标题画面的 `MenuHeroScene` 各持有一个 `FramePacer`，用最近 31 个动画帧间隔的中位数估算刷新率（超过 100 毫秒的间隔不计，样本少于 8 个时每帧都处理），每 n 个显示帧处理一帧，`n = max(1, floor(刷新率 / 60 + 0.1))`：60 / 90 Hz 每帧都处理，120 Hz 隔一帧（60 fps），144 Hz 隔一帧（72 fps），间隔均匀；窗口滑动，面板在 120 / 60 Hz 之间切换时零点几秒内跟上。被跳过的显示帧不模拟也不渲染，下一个处理的帧按距上次处理的真实时间推进，模拟时间仍跟随真实时间；`GameLoop` 的帧率统计与自动画质只算处理的帧。
+- 自适应分辨率：`GameConfig.isAdaptiveResolutionActive()`（`isMobile`、画质预设为 `auto` 且当前已是 `performance` 档——移动端 `auto` 本来就是 `performance`，画质档无处可降）时，`GameLoop` 的自动画质改为逐档调像素比：每秒（`AUTO_QUALITY_CHECK_INTERVAL`）看一次渲染帧率均值，低于 `LOW_FPS_RATIO × 60`（0.82 × 60）降一档，不低于 `RECOVERY_FPS_RATIO × 60`（0.95 × 60）持续 `RECOVERY_TIME_MS`（4 秒）升回一档；参照的是节流后的渲染帧率 60（`FramePacer.TARGET_FPS`），不是模拟步长。档位 `getPixelRatioSteps()`：平板 1.5 → 1.25 → 1.0，手机 1.2 → 1.0（`stepAdaptivePixelRatio` / `getAdaptivePixelRatioLevel`）。`GameCoordinator.syncRuntimeQuality` 同时比对画质档与 `GameConfig.getPixelRatio()`，任一变化都经 `applyQualityRuntime` → `GameScene.applyQualitySettings` 重新应用；显式选择的画质预设从不自动改像素比，桌面不受影响，`setQualityPreset` 把档位归零。
 - 导引头（`src/features/combat/MissileSeeker.ts`，纯逻辑，由 `LockOnIndicator` 持有）：只要有导弹就一直工作，没有「按住锁定」这一步。准星是机头轴线前方 600 米（`GUN_ASSIST.REFERENCE_RANGE`）那一点的屏幕位置；捕获环以它为圆心，半径 = 视口短边 × `LOCK_RING_RATIO`（0.13）× 锁定范围升级倍率（下限 44 像素，上限为短边的 30%）。环内离准星最近的候选成为跟踪目标；目标在捕获环内时进度按 `1 / 锁定时间` 增长（锁定时间来自升级线：基础 1.0 秒，每级减 0.05 秒；受干扰时再乘 `ILockJamProvider.getLockTimeScale()`，敌方干扰机在 800 米内时为 2，见「电子干扰与隐形」），在捕获环与保持环（捕获环的 1.6 倍）之间按 `LOCK_DECAY_RATE` 回落，完成的锁定在保持环内一直保持；出了保持环、转到相机后方或超过 `MAX_LOCK_DISTANCE`（1200 米）时，经 0.5 秒宽限后丢锁；不在候选表里的目标（被击毁 / 回收 / 隐形）立即丢弃。候选表每步由 `GameCoordinator.collectLockCandidates()` 重建：Boss 战中的 Boss 锁定目标、存活敌机（隐形中的除外）、敌方单位瞄准点（`UnitController.collectLockTargets`）。
 - 发射（`GameCoordinator.handleMissileInput`）：一次按键只发射一枚。已锁定时按下立即发射，锁定保留，下一枚要再按一次且间隔不少于 `LOCK_REARM_TIME`（0.35 秒）；锁定完成前按下并按住，则在锁定完成的那一刻发射；环内没有目标、或锁定完成前松手，提示「未锁定」（NO LOCK）；没有导弹时提示「无导弹」（NO MSL）。「快速射击」道具（`PowerUpType.MULTISHOT`）生效时一次按键齐射至多三枚（间隔 0.1 秒）。导弹从左右翼下挂架交替离架，载机当前速度作为 `launcherSpeed` 交给 `MissileSystem.fire(position, direction, target?, launcherSpeed)`。
 - 导弹飞行（`src/features/combat/MissileSystem.ts`）：离架初速 = 载机速度 + 20 米/秒，按 200 米/秒² 加速到巡航速度 `max(200, 载机速度 + 80)` 米/秒；先沿机头方向直飞 0.2 秒再制导，按目标的估计速度取前置量，转向速度 5.0 弧度/秒；命中判定按每一步扫过的线段计算，未声明命中半径的目标用 6 米近炸半径；寿命 12 秒、最大飞行距离 2400 米。伤害 80（再乘伤害倍率）；开局与复活后 3 枚，上限 5 枚。
@@ -321,6 +325,7 @@ AirSupreme 是一个基于 Three.js 和 TypeScript 的 3D 飞机战斗游戏。
 - 刺激音对齐下一拍并移调到当前调性，播放时闪避主音乐；`boss-defeated` / `level-complete` / `game-over` / `campaign-complete` 接管并结束当前曲目；曲目切换使用交叉淡化。
 - 调用时机：章节卡片 → 剧情曲 + 章节重音 + 打字音；入关 → 关卡曲 + `chapter-start`；波次检查点 → `checkpoint`；清场 → `level-complete`；Boss → Boss 曲；阶段切换 → 警报 + `phase-change`；击破 → `boss-defeated`；结算 → 胜利曲 + 计数音；结局 → 剧情曲；失败 → `game-over`；通关 → `campaign-complete` + 胜利曲；暂停 → `pauseMusic` + `stopSustainedSounds`，继续 → `resumeMusic`。
 - 菜单音乐：`MenuMusic` 在第一次用户手势后播放，进入战斗淡出，回到菜单恢复。
+- 切后台 / 锁屏回来：`main.ts` 启动时调用一次 `installAudioLifecycle()`（`AudioContextHost`）。页面重新可见（`visibilitychange`）、`pageshow` 与 `focus` 时恢复被挂起 / 打断（`suspended` / `interrupted`）的共享上下文；捕获阶段永久监听 `pointerup` / `touchend` / `click` / `keydown`，在手势栈上同步 `resume()`，菜单、暂停、剧情卡、机库、结算这类不播声的界面上第一次操作也能把声音找回来。只恢复已存在的上下文，从不新建，不拦截事件，监听不移除。`AudioManager.beginSound()` 里的 `resume()` 跑在模拟步（动画帧）里，不在手势栈上。引擎声：`startEngine()` 记下意愿，上下文当时未运行就由恢复运行后的第一次 `updateEngine` 补启动；`stopEngine()`（暂停 / 阵亡 / 剧情卡 / 任务完成 / 停止）取消意愿。
 - 音效：`AudioManager` 新增特殊武器、热焰弹、单位、界面、叙事与 Boss 效果音效（声部在 `src/core/Audio/sfx/SfxLibrary.ts`），音效总线带压缩器；`CampaignSfxRouter` 按距离静音并限流远处单位事件，把 Boss 效果提示映射到熔岩喷发、声呐、汽笛、雷击、护盾受击、阶段警报等音效。敌机：`ENEMY_FIRED` 按弹种出声——高炮弹用 `playTankCannon`、长枪弹用 `playShoot('boss')`、其余 `playShoot('enemy')`，`quiet` 的后续弹不出声；`ENEMY_TELL` 的狙击机蓄力调用 `playLanceCharge(duration)`（`SoundType.LANCE_CHARGE`，在蓄力时长内升高的啸叫），幽灵机现形调用 `playDecloak(duration)`（`SoundType.WRAITH_DECLOAK`，高音下滑加低音嗡鸣）。
 
 ### VFX 与后处理
@@ -340,7 +345,7 @@ AirSupreme 是一个基于 Three.js 和 TypeScript 的 3D 飞机战斗游戏。
 - 无线电面板的位置（`#radio-comms`，`src/ui/theme/radioStyles.ts`）：按布局与视角摆放，避开准星与雷达。桌面贴屏幕底边、紧挨雷达右侧；手机横握夹在摇杆与按键簇之间贴底，告警栏同时显示两行（HUD 在 `<html>` 上记 `data-hud-warning-rows='2'`）时收成一行正文、不显示头像与呼号行；竖屏第一人称是消息栈下方的整行（跟随 `--hud-stack-bottom`）；竖屏追尾视角（准星就在消息栈下方那一带）放到按键簇左侧、静止摇杆上方，平板与手机都在这一处。手机竖屏（视口宽度小于 700 像素）下这个框是紧凑的：不显示头像、军衔姓名与信号格，左右内边距 6 像素，告警栏显示几行它都不变；正文行数上限随视口高度分档——不足 599 像素 1 行、不足 633 像素 2 行、不足 666 像素 3 行、其上 4 行，728 像素起 5 行、799 像素起 6 行、833 像素起 7 行、867 像素起 8 行；从 6 行那一档起显示呼号行（只有呼号，用说话方的强调色）。台词比框里放得下的行数多时，正文像字幕一样逐行上移（`radioFollowOffset`，`src/ui/RadioComms.ts`，用 `transform: translateY`）：逐字显示结束之前不动；开头停 `min(0.8 秒, 总时长 / 4)`，剩下的显示时间平分给每一行，第 k 行在「开头停留 + k × 每行时间」滑出上沿，滑动 `min(0.25 秒, 每行时间 / 2)`，静止时总是整行，位置只增不减；面板只算放得下的整行（高度不是整行数时向下取整），尺寸或时间不是有限的正数时不滚；配音开口把显示时间拉长时，正在滑的那一行先按原来的节奏滑完、停在整行上，再换新的节奏；减少动态效果时不滑动、一次跳一整行。只用于手机竖屏（宽度小于 700 像素）追尾视角的紧凑框，座舱视角、横屏与平板不跟读。各档按「框到了上限，上沿离两行告警的下沿仍至少 12 像素」推算（屏宽 430 像素以内；5 行及以上的档按底部有 34 像素安全区算，4 行及以下按没有安全区算）。
 - 雷达：`RadarBlipKind` 新增 `enemy-ground`（红色方块）、`enemy-sea`（红色菱形）、`ally-unit`（金色三角）、`neutral`（灰色空心圆）；`setRangeMultiplier` 由友军预警机驱动；`CombatHudFeed` 用池化对象生成雷达点（20 Hz）与血条快照（含第 6-10 关 Boss 子目标与可命中的敌方单位）。雷达盘（`#radar-minimap`）机头朝上：前方在上，右侧的目标画在右侧（原先左右画反）；`BASE_RANGE` 800 米是整个盘面的跨度（圆心到盘缘约 400 米）；量程外的目标贴在盘缘，画成同类的空心小符号并带一道朝外的短线（`drawRadarRimMarker`）。桌面端 120 像素、位于左下角；触屏布局在左上角状态舱下方，手机 84 像素、视口短边 ≥ 700 像素时 132 像素，并有单独的点按面 `#radar-tap-target`（点雷达不会带出摇杆）。
 - 关卡地图（`RadarLevelMap`，`#radar-map`，由 `RadarMinimap` 持有）：点击 / 轻触雷达或按 N 键开合，Esc 关闭（被雷达截获，不会同时暂停）；换关或雷达停止更新 1.5 秒后自动收起；打开时游戏不暂停。地图北向朝上、比例固定：战场边界圆、以玩家为圆心的 500 / 1000 米距离环、按航向旋转的玩家箭头、全部雷达目标（与雷达盘共用 `radarGlyphs.ts` 的符号，画得更大）、图例，以及每关采样一次的 64 × 64 陆地 / 水面底图（`CombatHudFeed` 把 `UnitController.getSurfaceSampler()` 交给 `PresentationController.setRadarTerrainSource`；没有采样器时只画网格）。面板为视口短边的 72%（200-560 像素），20 Hz 重绘。
-- 移动端：`index.html` 拇指弧按键簇新增 `#special-button`、`#flare-button`、`#cycle-button`、`#camera-button`；按键文字默认英文（FIRE / MSL / SPEC / FLARE / BOOST / SWAP / VIEW / PAUSE），`main.ts` 按语言改写（中文为 开火 / 导弹 / 特武 / 热焰 / 加速 / 切换 / 视角 / 暂停）；HUD 写入按钮的武器代号、外圈进度（`--tc-meter`）、空弹 / 告警状态（`data-alert`）与视角状态，以及导弹键的余量（`data-count`）与装填外圈；`LockOnIndicator` 把锁定状态写成导弹键的样式类。摇杆是浮动式的（触摸区 `#touch-stick-zone`，见「操控、瞄准与导弹」）；BOOST（`#throttle-button`）是开关式锁存，带 `aria-pressed`。视口宽高都不小于 700 像素时（与 `GameConfig.isTablet` 同一阈值）摇杆与按键簇放大并抬离底边，尺寸都是 `:root` 上的 CSS 变量（`--touch-stick-size`、`--touch-deck-scale` 等）。暂停键（`#upgrade-button`）与其他单击键一样在 `touchstart` 时锁存，直到 `InputHandler.isPauseToggled()` 读取（`resetPauseState()` 清除），低帧率下短于一个模拟步长的轻触也不会丢；桌面 Esc / P 仍取按下沿。
+- 移动端：`index.html` 拇指弧按键簇新增 `#special-button`、`#flare-button`、`#cycle-button`、`#camera-button`；按键文字默认英文（FIRE / MSL / SPEC / FLARE / BOOST / SWAP / VIEW / PAUSE），`main.ts` 按语言改写（中文为 开火 / 导弹 / 特武 / 热焰 / 加速 / 切换 / 视角 / 暂停）；HUD 写入按钮的武器代号、外圈进度（`--tc-meter`）、空弹 / 告警状态（`data-alert`）与视角状态，以及导弹键的余量（`data-count`）与装填外圈；`LockOnIndicator` 把锁定状态写成导弹键的样式类。摇杆是浮动式的（触摸区 `#touch-stick-zone`，见「操控、瞄准与导弹」）；BOOST（`#throttle-button`）是开关式锁存，带 `aria-pressed`。视口宽高都不小于 700 像素时摇杆与按键簇放大并抬离底边（按视口，与按设备屏幕判定的 `GameConfig.isTablet` 无关），尺寸都是 `:root` 上的 CSS 变量（`--touch-stick-size`、`--touch-deck-scale` 等）。暂停键（`#upgrade-button`）与其他单击键一样在 `touchstart` 时锁存，直到 `InputHandler.isPauseToggled()` 读取（`resetPauseState()` 清除），低帧率下短于一个模拟步长的轻触也不会丢；桌面 Esc / P 仍取按下沿。
 - 血条：友军 AI 战机的 `mesh.userData.displayName`（僚机呼号）优先于按名称缓存的标签，没有呼号的友军战机统一显示「友军僚机」（Allied Wingman）；喷气机血条的参考点在机体中心上方 `2 × 命中半径 / 5` 米（5 米命中半径时 2 米），大机体的血条与名称不再落在机身里；隐形中的敌机不进血条快照（血条、名称、目标框与屏外箭头一起消失）；敌机显示机型，Boss 显示名称，单位显示自己的型号名（`UnitMeshFactory` 写入的 `userData.displayName`，没有时退回阵营通用名），都按当前语言，切换语言时所有血条立即改名。三种尺寸：Boss 本体 120 × 10 像素（带名称）、Boss 部件 44 × 5 像素（深色底槽）、其他目标 60 × 6 像素（带名称）；视野内的 Boss 部件只有离准星最近的一个显示名称（带滞回：新部件离准星的距离须小于当前焦点的 80% 才切换），部件不再各自产生屏外箭头；名称标签用样式居中，不再逐次测量文字宽度。可命中的敌方地面 / 海上 / 空中单位也进入血条（`CombatHudFeed` 经 `UnitController.forEachHostileMarker`）：在屏幕上小于约 22 像素时加一个威胁色的目标角标并标出距离（取整到 10 米，大于 28 像素时收起）；快照带 `objective` 时换成目标样式——角标常显、加粗并脉动，屏外箭头闪烁（减少动态效果时不做动画）。屏外箭头（`OffscreenChevron`）的距离文字保持水平；敌方目标箭头与 Boss 导弹箭头（`BossMissileIndicator`）各持有一个 `ChevronAvoidance`（`src/ui/ChevronAvoidance.ts`），用同一套避让规则：避开雷达盘与 HUD 面板（得分 / 速度 / 强化 / 右上状态 / 生命条，以及顶部消息栈里正在显示的每一块），触屏布局下还避开摇杆与每个可见的触控按键；手机竖屏（视口宽度小于 700 像素、`data-density="touch-portrait"`）下，正在显示的无线电面板也算避让区（它正好在箭头从摇杆和按键簇移出来的落点上），平板与横握时不算。避让区约每秒量一次，无线电面板随台词长高也跟着更新。相距太近、中间放不下一枚箭头的避让区并成一块：按键先彼此并成一整簇；其余的块只有在外接矩形不会多盖住一块放得下箭头的空角时才并（竖屏手机上摇杆上方的空位因此留得住），HUD 面板不并进单独成块的雷达盘。箭头移出一块又碰到下一块时接着移，最多连移三步，取位移最小的走法。
 - 机库（模型预览）：主菜单的「机库」就是 `ModelPreview`（`#model-preview`），共 22 页：玩家机、友军僚机（类别 `ally`，`createFriendlyMesh`）、八种敌机（第 3-10 页，按 `EnemyType` 顺序，新机型在第 8-10 页）、十个 Boss、玩家导弹与 Boss 导弹。它经 `Record<BossType, loader>` 按需导入每个 Boss 自己的网格工厂（第 6-10 关来自 `MagmaColossusMesh` / `AbyssalLeviathanMesh` / `TempestZeppelinMesh` / `PhantomWingMesh` / `OraclePrimeMesh`），把可见几何（排除隐藏部件与精灵）缩放到固定半径的包围球（球心取可见包围盒的中心，半径取离它最远的可见顶点，模型怎么转都不出球），切换模型时逐一释放几何体、材质与实例缓冲（跳过共享资源）。战机工厂按包围盒摆放的信号灯小球（`navLightPort` / `navLightStarboard` / `strobeLight` / `beaconLight`）先由 `hideSignalLights()`（`src/ui/menu/modelDisposal.ts`）隐藏，不显示也不参与取景；标题画面的战机同样处理。取景只用名称标签上方的区域：写入名称后（以及改变窗口大小、切换语言时）`frameCamera()` 从 DOM 读取标签上沿，与标签、画布上沿各留 8 像素（区域至少延伸到画布一半高度），相机后退到包围球的轮廓直径等于画布短边的 70%（各个模型大小一致），区域放不下这个直径时缩到放得进区域的高与宽并留边，再用 `setViewOffset` 把投影中心移到区域中心；画布尚未布局时按整个画布取景。模型的工厂或代码块加载失败时，名称标签写明「无法加载：{name}」（英文 `Could not load: {name}`），其余模型与返回照常可用，战机工厂模块导入失败的那一次不保留，下次翻到这一页会重新导入；`show()` 创建不了渲染器（浏览器不给 WebGL 上下文）时调用 `hide()`（经 `setOnBack` 的回调让主菜单回来，焦点落回「机库」按钮）并照常抛出错误。名称标签放得下时单行显示（宽度 600 像素以下字号 18 像素）；横屏且高度不超过 520 像素的视口压缩页眉并隐藏提示行，把高度留给展台。左右箭头按钮、左 / 右方向键或横向滑动切换模型，鼠标拖动旋转，`#rotate-toggle` 开关自动旋转，Esc 或返回按钮回到主菜单。渲染器只在显示期间存在（`show()` 创建，`hide()` 连同 WebGL 上下文一起释放）。
 
@@ -362,7 +367,8 @@ src/
 ├── i18n/                         # 本地化核心：LocalizedText、tr / localize / format、getLocale / setLocale / onLocaleChange
 ├── Game.ts                       # 向后兼容导出（re-export GameCoordinator）
 ├── Game.legacy.ts                # 旧实现（已废弃）
-├── config.ts                     # GameConfig（设备 / 画质预设）与 GAME_CONSTANTS
+├── config.ts                     # GameConfig（设备 / 画质预设、自适应分辨率）与 GAME_CONSTANTS
+├── FramePacer.ts                 # 触控设备的渲染节流（GameLoop 与 MenuHeroScene 共用）
 ├── core/
 │   ├── GameCoordinator.ts        # 主协调器
 │   ├── BossBattleController.ts   # Boss 生命周期与第 1-5 关 Boss
@@ -385,7 +391,7 @@ src/
 ├── features/
 │   ├── campaign/                 # CampaignData（导入入口）、CampaignTypes、CampaignCast、CampaignChapters、CampaignRadio、CampaignStory、ChapterTitles
 │   ├── enemy/                    # EnemyAI、FriendlyAI（WINGMAN_CONFIG）、EnemyTypes、AttackDirector、MissileDirector、JetThreat、EnemyWeapons、doctrine/（各机型条令、JetDoctrine、MissileRack、DoctrineMath）、effects/（LanceBeam、CloakFade）、EnemyFSM（旧版，已废弃）
-│   ├── units/                    # UnitTypes、UnitDeployments、UnitSystem、UnitBehaviors、UnitBehaviorsAir、UnitMesh*、UnitMissiles、UnitProjectiles、UnitEventBridge …
+│   ├── units/                    # UnitTypes、UnitDeployments、UnitSystem、UnitPlacement、UnitMotion、UnitBehaviors、UnitBehaviorsAir、UnitMesh*、UnitMissiles、UnitProjectiles、UnitEventBridge …
 │   ├── weapons/                  # WeaponTypes、WeaponSystem、CountermeasureSystem、控制器与特效
 │   ├── boss/                     # BossTypes、BossContracts、BossAI、各关 Boss AI / Mesh / 特效、BossMissileSystem、BossAim
 │   ├── camera/                   # CameraRig、CockpitModel、CockpitDisplays、CameraShake、ThirdPersonCamera
@@ -408,6 +414,14 @@ public/voice/                     # 配音包：en/、zh/（<台词 id>.mp3）�
 
 ## 最近更新记录
 
+### 2026-10: 安卓平板性能、切后台回来的声音与只在干地上的地面单位
+
+**主要变更**（分支 `workflow/android-tablet`，逐项见 `CHANGELOG.md` 的同名一节）:
+
+1. **音频恢复** - `installAudioLifecycle()`（`src/core/Audio/AudioContextHost.ts`，`main.ts` 启动时安装一次）：页面可见 / `pageshow` / `focus` 时恢复共享 `AudioContext`，捕获阶段永久监听 `pointerup` / `touchend` / `click` / `keydown` 在手势栈上同步 `resume()`，只在 `suspended` / `interrupted` 时动作、从不新建上下文；`AudioManager` 记住引擎声意愿，上下文恢复运行后由 `updateEngine` 补启动，`stopEngine` 取消
+2. **安卓平板性能** - `GameConfig.isTablet` 改为「确有触控输入且设备屏幕短边 ≥ 600 CSS 像素」（按屏幕不按视口，只决定 60 Hz 模拟与 `auto` 像素比上限 1.5，触控布局仍按视口 700 像素）；新增 `src/FramePacer.ts`，`isMobile` 时 `GameLoop` 与 `MenuHeroScene` 每 n 个显示帧处理一帧（`n = max(1, floor(刷新率 / 60 + 0.1))`）；`GameConfig.getPixelRatioSteps` / `isAdaptiveResolutionActive` / `getAdaptivePixelRatioLevel` / `stepAdaptivePixelRatio` 与 `GameLoop.evaluateAdaptiveResolution`：`auto` 画质在 `performance` 档之下逐级降像素比（平板 1.5 → 1.25 → 1.0，手机 1.2 → 1.0），`GameCoordinator.syncRuntimeQuality` 同时比对像素比
+3. **地面单位只在干地** - `TerrainSurfaceSample` 新增 `land`（`water` 仍指可航行，雷达陆 / 水底图不变），`DRY_LAND_MIN_HEIGHT`（0.5 米）、`environmentIsLand` 与各环境的 `isLand`（熔岩、裂谷熔岩与河道都不是干地）；`UnitSurfaceSampler` 加可选的 `land`；地面放置去掉不做检查的兜底点，改为确定性外扩扫描 `scanForLand`，找不到干地就跳过；地面航线逐段检查（20 米粗查 + 2.5 米细查）并以确定性直线搜索代替 ±300 米兜底航线；`canTraverse` 用 `land`，`canStepTo` 让地面单位在岸边停车
+
 ### 2026-10: 敌机舰队重做、键盘辅助瞄准、后台存档与手机竖屏布局
 
 **主要变更**（分支 `workflow/enemy-fleet`，逐项见 `CHANGELOG.md` 的同名一节）:
@@ -428,7 +442,7 @@ public/voice/                     # 配音包：en/、zh/（<台词 id>.mp3）�
 
 **主要变更**（分支 `workflow/ipad-controls-weapons`，逐项见 `CHANGELOG.md` 的「操控与武器体验」）:
 
-1. **触屏操控** - 浮动摇杆（径向死区 + 指数曲线）、`InputState.pitchAxis` / `yawAxis` / `flightAssist` 与飞行辅助（`PlayerController.applyAssistedAttitude`）、开火 / 导弹点按锁存、BOOST 开关式锁存、键盘与触屏输入合并、窗口失焦 / 页面隐藏时释放按住的输入、平板档位（`GameConfig.isTablet`：60 Hz 模拟步长、放大的摇杆与按键簇）
+1. **触屏操控** - 浮动摇杆（径向死区 + 指数曲线）、`InputState.pitchAxis` / `yawAxis` / `flightAssist` 与飞行辅助（`PlayerController.applyAssistedAttitude`）、开火 / 导弹点按锁存、BOOST 开关式锁存、键盘与触屏输入合并、窗口失焦 / 页面隐藏时释放按住的输入、平板档位（`GameConfig.isTablet`：60 Hz 模拟步长）与平板布局（视口宽高都不小于 700 像素时放大的摇杆与按键簇；`isTablet` 的判定后来在安卓平板一轮改为按设备屏幕）
 2. **导弹** - 常开的导引头 `MissileSeeker`（捕获环 / 保持环 / 宽限 / 进度回落）取代「按住锁定」；按一下发射一枚；`MissileSystem.fire` 新增 `launcherSpeed`，导弹继承载机速度并加速到巡航速度（不低于 200 米/秒，原为 80）、带前置量与近炸；左右挂架交替离架；伤害 50 → 80、转向 2.0 → 5.0 弧度/秒、初始 2 → 3 枚；基础锁定时间 1.0 秒（升级到 0.5 秒）
 3. **机炮** - `GunLeadSolver`：提前量标记与触屏瞄准辅助（`GAME_CONSTANTS.GUN_ASSIST`、`PlayerSystem.setGunAimAssist`），机炮十字每个渲染帧对准弹道
 4. **目标与雷达** - 敌方单位的血条、目标角标与「当前目标」提示，波次放行时限 150 → 60 秒且击伤敌方单位即重新计时；雷达改为机头朝上（修正左右画反）、盘缘标记量程外目标；关卡地图 `RadarLevelMap`（N 键 / 点雷达）
@@ -728,6 +742,7 @@ npm run test:run   # Vitest 单次运行（npm run test 为监听模式）
 3. 手机竖屏 390×844 / 430×932 上，无线电面板显示满行数时，一部分屏外箭头会比必要的位置多让出 4-32 像素（`ChevronAvoidance` 把无线电面板、摇杆与按键簇并成一块来避让）
 4. 后台存档的两处限制：从第 1 关以外开局的第一次机库期间转入后台不会存档；同一检查点位置上的生命数在后台存档之间只增不减（见「存档」一节的「后台存档」）
 5. 敌机条令与规格（`docs/enemy-fleet-spec.md`）之间尚未修复的偏差记录为 `it.fails` 用例（带 `FINDING:` 注释，在 `src/__tests__`），修复后改回普通用例
+6. 宽度不超过 768 像素、没有触控输入的桌面窗口仍被判为 `isMobile`（手机画质参数、隔帧渲染与自适应分辨率照常生效），但不再算平板级（以前视口宽高都 ≥ 700 时算平板）
 
 ### 技术债
 
@@ -756,7 +771,7 @@ npm run test:run   # Vitest 单次运行（npm run test 为监听模式）
 
 ## 配置系统
 
-运行时常量在 `src/config.ts`：`GAME_CONSTANTS`（玩家、子弹、机炮辅助、相机、世界、道具、关卡、导弹）与 `GameConfig`（设备 / 画质档位）。没有外部配置文件，启动时也不请求任何配置文件：敌机、Boss、关卡、升级等数值表都在各自的 TypeScript 源文件里（如 `EnemyTypes.ts`、`BossTypes.ts`、`LevelConfig.ts`、`UpgradeSystem.ts`）。
+运行时常量在 `src/config.ts`：`GAME_CONSTANTS`（玩家、子弹、机炮辅助、相机、世界、道具、关卡、导弹）与 `GameConfig`（设备 / 画质档位、自适应分辨率档位）。没有外部配置文件，启动时也不请求任何配置文件：敌机、Boss、关卡、升级等数值表都在各自的 TypeScript 源文件里（如 `EnemyTypes.ts`、`BossTypes.ts`、`LevelConfig.ts`、`UpgradeSystem.ts`）。
 
 ---
 
