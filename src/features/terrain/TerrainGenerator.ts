@@ -36,6 +36,7 @@ import { injectWindSway } from './worldscape/shadermods';
 import { CloudField } from './worldscape/clouds';
 import { StaticBatcher, consolidateMaterialGroups } from './worldscape/staticBatch';
 import {
+  DRY_LAND_MIN_HEIGHT,
   createTerrainEnvironment,
   environmentSurfaceKind,
   sampleEnvironmentSurface,
@@ -52,6 +53,22 @@ const log = getLogger('TerrainGenerator');
 export const WORLDSCAPE_WATER_Y = -48;
 /** 旧版地面基准（-50）与 worldscape 水位基准的差值 */
 const WORLDSCAPE_BASE_OFFSET = WORLDSCAPE_WATER_Y - -50;
+/**
+ * 第 2 关绿洲水塘：中心与覆盖半径（米）。水塘是 createIrregularShape(baseRadius 27、jitter 5)
+ * 的不规则形，最大半径约 35.8 米，sampleSurface 把整个圆盘视为非干地。
+ */
+const DESERT_OASIS = { x: 520, z: -360, pondRadius: 36 } as const;
+/** 第 5 关中央公园池塘：水面中心（世界坐标）与平均岸线半径（米） */
+const CITY_PARK_POND = { x: 62, z: -46, radius: 52 } as const;
+
+/** 公园池塘的局部水深（正 = 水下深度，负 = 旱地高出水面），按角度抖动出不规则岸线 */
+function cityParkPondDepth(localX: number, localZ: number): number {
+  const angle = Math.atan2(localZ, localX);
+  const rim =
+    CITY_PARK_POND.radius + Math.sin(angle * 2.8 + 0.5) * 7.5 + Math.cos(angle * 4.4 + 1.1) * 5;
+  return (rim - Math.hypot(localX, localZ)) * 0.3;
+}
+
 const TRANSPARENT_LAYER_RENDER_ORDER = {
   water: 0,
   clouds: 0,
@@ -1185,8 +1202,8 @@ export class TerrainGenerator {
   /** 绿洲焦点：小水塘、环绿带与一圈棕榈 */
   private createDesertOasis(): void {
     const tokens = this.designTokens;
-    const oasisX = 520;
-    const oasisZ = -360;
+    const oasisX = DESERT_OASIS.x;
+    const oasisZ = DESERT_OASIS.z;
     const groundY = -50 + this.sampleDesertGroundHeight(oasisX, oasisZ);
 
     // 绿带（外圈植被环）
@@ -1819,8 +1836,8 @@ export class TerrainGenerator {
       { x: 660, z: -700, radius: 80 },
       { x: 920, z: 480, radius: 70 },
     ];
-    const pondX = 62;
-    const pondZ = -46;
+    const pondX = CITY_PARK_POND.x;
+    const pondZ = CITY_PARK_POND.z;
     const color = new THREE.Color();
 
     // 风吹草簇
@@ -3276,16 +3293,10 @@ export class TerrainGenerator {
 
     // 公园池塘：worldscape 波浪着色器水面（第 1 关湖水同款：深 0x16555e / 浅 0x39a08c），
     // 深度按角度抖动出不规则岸线，岸边自带动态浪沫
-    const pondRadius = 52;
     const pondWater = buildWorldscapeWater({
       size: 170,
       grid: 40,
-      depthAt: (x, z) => {
-        const angle = Math.atan2(z, x);
-        const rim =
-          pondRadius + Math.sin(angle * 2.8 + 0.5) * 7.5 + Math.cos(angle * 4.4 + 1.1) * 5;
-        return (rim - Math.hypot(x, z)) * 0.3;
-      },
+      depthAt: cityParkPondDepth,
       deepColor: tokens.waterDeep,
       shallowColor: tokens.water,
       skyTint: 0xbcd6da,
@@ -3294,7 +3305,7 @@ export class TerrainGenerator {
       sunIntensity: 0.55,
     });
     pondWater.mesh.name = 'cityParkPondWater';
-    pondWater.mesh.position.set(62, -48.92, -46);
+    pondWater.mesh.position.set(CITY_PARK_POND.x, -48.92, CITY_PARK_POND.z);
     pondWater.mesh.renderOrder = TRANSPARENT_LAYER_RENDER_ORDER.water;
     this.terrainGroup.add(pondWater.mesh);
     this.animatedProps.push((_deltaTime, time) => {
@@ -4879,13 +4890,17 @@ export class TerrainGenerator {
    * 地表采样（地面单位 / 舰船 / Boss 落脚用）：
    * - y：世界表面高度；可航行水域返回水面高度 WORLDSCAPE_WATER_Y
    * - water：船只是否可在此航行
-   * 规则：LAKE 仅湖内（水深 ≥ 2m）、OCEAN 除岛屿外全域、VOLCANO 岛外海域、ARCTIC 冰间开阔海面、
+   * - land：干地（地面单位可出生 / 行驶）：地面明显高出水面且不是熔岩
+   * water 规则：LAKE 仅湖内（水深 ≥ 2m）、OCEAN 除岛屿外全域、VOLCANO 岛外海域、ARCTIC 冰间开阔海面、
    * CANYON 主峡谷河道为水；DESERT / MOUNTAINS / CITY / STRATOSPHERE / CITADEL 全域 water = false。
-   * 非有限输入或地形未生成时返回 { y: WORLDSCAPE_WATER_Y, water: false }。
+   * land 规则：LAKE / MOUNTAINS 高度场 ≥ 0.5 米（水面着色器在更低处画水，含 -2..0.5 的浅滩）；
+   * DESERT / CITY 除绿洲水塘 / 公园池塘外全为干地；OCEAN 仅岛屿；第 6-10 关见各环境的 isLand。
+   * 非有限输入返回 { y: WORLDSCAPE_WATER_Y, water: false, land: false }；
+   * 地形未生成时返回 { y: WORLDSCAPE_WATER_Y, water: false, land: true }（无地形信息，沿用 !water）。
    */
   public sampleSurface(worldX: number, worldZ: number): TerrainSurfaceSample {
     if (!Number.isFinite(worldX) || !Number.isFinite(worldZ)) {
-      return { y: WORLDSCAPE_WATER_Y, water: false };
+      return { y: WORLDSCAPE_WATER_Y, water: false, land: false };
     }
     if (this.environment) {
       return sampleEnvironmentSurface(this.environment, worldX, worldZ, WORLDSCAPE_WATER_Y);
@@ -4896,30 +4911,49 @@ export class TerrainGenerator {
     switch (this.activeTerrain) {
       case TerrainType.LAKE: {
         if (safeFieldHeight < -2) {
-          return { y: WORLDSCAPE_WATER_Y, water: true };
+          return { y: WORLDSCAPE_WATER_Y, water: true, land: false };
         }
-        return { y: WORLDSCAPE_WATER_Y + Math.max(0, safeFieldHeight), water: false };
+        return {
+          y: WORLDSCAPE_WATER_Y + Math.max(0, safeFieldHeight),
+          water: false,
+          land: safeFieldHeight >= DRY_LAND_MIN_HEIGHT,
+        };
       }
       case TerrainType.MOUNTAINS:
-        return { y: WORLDSCAPE_WATER_Y + Math.max(0, safeFieldHeight), water: false };
+        return {
+          y: WORLDSCAPE_WATER_Y + Math.max(0, safeFieldHeight),
+          water: false,
+          land: safeFieldHeight >= DRY_LAND_MIN_HEIGHT,
+        };
       case TerrainType.DESERT:
-        // 沙漠网格放在 -50 基准（见 generateDesertTerrain）
-        return { y: -50 + safeFieldHeight, water: false };
+        // 沙漠网格放在 -50 基准（见 generateDesertTerrain）；沙海无水面，只有绿洲水塘
+        return {
+          y: -50 + safeFieldHeight,
+          water: false,
+          land:
+            Math.hypot(worldX - DESERT_OASIS.x, worldZ - DESERT_OASIS.z) > DESERT_OASIS.pondRadius,
+        };
       case TerrainType.CITY:
-        // 城市地面网格位于 y = -50
-        return { y: -50, water: false };
+        // 城市地面网格位于 y = -50；公园池塘按水面着色器同一水深函数判定（水深 ≥ -0.5 处可见水面）
+        return {
+          y: -50,
+          water: false,
+          land:
+            cityParkPondDepth(worldX - CITY_PARK_POND.x, worldZ - CITY_PARK_POND.z) <
+            -DRY_LAND_MIN_HEIGHT,
+        };
       case TerrainType.OCEAN: {
         for (const mound of this.oceanIslandMounds) {
           const distance = Math.hypot(worldX - mound.x, worldZ - mound.z);
           if (distance < mound.radius * 0.8) {
             const rise = 1 - distance / (mound.radius * 0.8);
-            return { y: WORLDSCAPE_WATER_Y + 2 + rise * 8, water: false };
+            return { y: WORLDSCAPE_WATER_Y + 2 + rise * 8, water: false, land: true };
           }
         }
-        return { y: WORLDSCAPE_WATER_Y, water: true };
+        return { y: WORLDSCAPE_WATER_Y, water: true, land: false };
       }
       default:
-        return { y: WORLDSCAPE_WATER_Y, water: false };
+        return { y: WORLDSCAPE_WATER_Y, water: false, land: true };
     }
   }
 

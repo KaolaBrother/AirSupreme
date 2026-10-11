@@ -97,6 +97,14 @@ export class CitadelEnvironment extends EnvironmentBase {
     return this.field?.isRiftLava(worldX, worldZ) ? 'lava' : 'rock';
   }
 
+  /** 干地：除熔岩裂谷外全部可落脚（城堡结构与崩落巨石盖住的裂谷也算干地） */
+  isLand(worldX: number, worldZ: number): boolean {
+    if (!Number.isFinite(worldX) || !Number.isFinite(worldZ)) {
+      return false;
+    }
+    return this.surfaceKindAt(worldX, worldZ) !== 'lava';
+  }
+
   /**
    * 最终决战区中心（核心井上空，世界坐标）：四座导能尖碑环绕、能量馈线汇聚于其上方。
    * 建议神谕主宰锚定于此（或把 (px, 160, pz+280) 的出生点向此处收拢）。

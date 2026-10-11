@@ -79,6 +79,15 @@ export class VolcanoEnvironment extends EnvironmentBase {
     return this.field.groundHeight(worldX, worldZ) < 0 ? 'water' : 'rock';
   }
 
+  /** 干地：玄武岩（surfaceKindAt 既不是水含浅滩、也不是熔岩）；坦克不在熔岩上出生或行驶 */
+  isLand(worldX: number, worldZ: number): boolean {
+    if (!Number.isFinite(worldX) || !Number.isFinite(worldZ)) {
+      return false;
+    }
+    const kind = this.surfaceKindAt(worldX, worldZ);
+    return kind !== 'water' && kind !== 'lava';
+  }
+
   override dispose(): void {
     if (this.water) {
       this.water.dispose();

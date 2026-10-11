@@ -15,7 +15,11 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { TerrainType } from '../LevelConfig';
-import type { TerrainEnvironmentContext, TerrainSurfaceKind } from './TerrainEnvironment';
+import {
+  DRY_LAND_MIN_HEIGHT,
+  type TerrainEnvironmentContext,
+  type TerrainSurfaceKind,
+} from './TerrainEnvironment';
 import { EnvironmentBase } from './EnvironmentBase';
 import {
   CANYON_PLATEAU,
@@ -107,6 +111,17 @@ export class CanyonEnvironment extends EnvironmentBase {
     if (rock > ground) return 'rock';
     if (this.field?.isRiver(worldX, worldZ)) return 'water';
     return local < 14 ? 'ground' : 'rock';
+  }
+
+  /**
+   * 干地：不在河道内，且固体表面（谷底 / 岩体 / 塔架取高者）至少高出水位 0.5 米——
+   * 河面带状网格铺在水位 +0.02 米，比它低的谷底看得见水。
+   */
+  isLand(worldX: number, worldZ: number): boolean {
+    if (!Number.isFinite(worldX) || !Number.isFinite(worldZ) || this.isWater(worldX, worldZ)) {
+      return false;
+    }
+    return this.sampleHeight(worldX, worldZ) >= this.waterY + DRY_LAND_MIN_HEIGHT;
   }
 
   /**
