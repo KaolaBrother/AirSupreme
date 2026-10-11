@@ -130,8 +130,8 @@ type StatTable = {
 /**
  * 集束火箭按目标类型的伤害系数（直接命中与溅射都乘它；只作用于伤害来源 'rocket'）：
  * - air：敌机与空中单位（含战略轰炸机）×0.5；
- * - boss：Boss 部件 ×0.6；
- * - 其余（地面 / 海上单位、可拦截导弹）×1.0。
+ * - boss：伤害进 Boss 主血量的部件 ×0.6；
+ * - 其余（地面 / 海上单位、可拦截导弹、水雷 / 护盾塔等独立的 Boss 部件）×1.0。
  * 蜂群导弹与其他武器不打折。
  */
 export const ROCKET_TARGET_DAMAGE_FACTORS: Readonly<{ air: number; boss: number }> = {
@@ -144,7 +144,8 @@ export const ROCKET_TARGET_DAMAGE_FACTORS: Readonly<{ air: number; boss: number 
  * Boss 1400-14500 血）
  * - 火箭：对地 / 对海的齐射武器，单次齐射满中约 144-480 伤害（6-12 枚 × 24-40），
  *   专打地面 / 海上编队；对敌机与空中单位 ×0.5、对 Boss ×0.6
- *   （ROCKET_TARGET_DAMAGE_FACTORS），且一次爆炸的溅射最多结算 Boss 的一个部件
+ *   （ROCKET_TARGET_DAMAGE_FACTORS），且一次爆炸的溅射最多结算 Boss 主体的一个部件
+ *   （水雷、护盾塔等独立部件照常各自结算）
  * - 激光：70-125 DPS，持续约 4-5.7 秒后过热
  * - 蜂群：每轮 6-12 枚自动分配目标，清理成群的小目标
  * - 轨道炮：满蓄力 260-430 穿透伤害，对 Boss 与直线编队最有效
