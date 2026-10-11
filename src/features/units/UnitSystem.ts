@@ -74,7 +74,14 @@ export interface UnitUpdateContext {
   friendlyAirMeshes: THREE.Object3D[];
 }
 
-export type UnitSurfaceSampler = (x: number, z: number) => { y: number; water: boolean };
+/**
+ * 地表采样器（TerrainGenerator.sampleSurface 同形）：water = 船只可航行，land = 干地（地面单位可出生 / 行驶）。
+ * land 缺省时按 !water 处理（兼容只给出 y / water 的采样器）。
+ */
+export type UnitSurfaceSampler = (
+  x: number,
+  z: number
+) => { y: number; water: boolean; land?: boolean };
 
 /**
  * 可选的外部航线（地形环境提供，例如峡谷车队土路 / 城堡突击路线，世界坐标）；
@@ -199,7 +206,7 @@ export class UnitSystem implements IGameSystem {
   private decoys: readonly DecoyPoint[] = EMPTY_DECOYS;
   private accuracyBonus = 0;
   private readonly jetTracks = new Map<THREE.Object3D, JetTrack>();
-  private readonly surfaceResult: SurfaceSample = { y: 0, water: false };
+  private readonly surfaceResult: SurfaceSample = { y: 0, water: false, land: true };
 
   // ── 预分配 ──
   private readonly tmpA = new THREE.Vector3();
@@ -288,7 +295,8 @@ export class UnitSystem implements IGameSystem {
       }
       const center =
         spec.placement === 'around' ? null : pickClusterCenter(ctx, spec.placement, domain);
-      if (!center && spec.placement !== 'around' && domain === 'sea' && this.sampler) continue;
+      // 集群中心找不到水面（海上）或干地（地面，含确定性外扩扫描）：整个条目跳过
+      if (!center && spec.placement !== 'around' && domain !== 'air' && this.sampler) continue;
       const swarmId = spec.type === UnitType.DRONE ? ++this.swarmCounter : -1;
       for (let i = 0; i < count; i++) {
         const position = pickUnitPosition(ctx, spec.type, domain, spec.placement, center);
@@ -327,8 +335,15 @@ export class UnitSystem implements IGameSystem {
           : Math.min((count - 1) * spacing, routeLength(route) * 0.4);
       }
       if (route.length < 2) continue;
-      const along = separateRoutes ? 0 : Math.max(0, columnStart - i * spacing);
+      let along = separateRoutes ? 0 : Math.max(0, columnStart - i * spacing);
       const position = pointAlongRoute(route, along, new THREE.Vector3());
+      if (domain === 'ground' && this.sampler) {
+        // 纵列位置落在航点之间：不是干地就每次 5 米向航线起点回退（起点航点已校验为干地）
+        while (along > 0 && !ctx.surface(position.x, position.z, domain).land) {
+          along = Math.max(0, along - 5);
+          pointAlongRoute(route, along, position);
+        }
+      }
       const remaining = route.filter(
         (_point, index) => index > 0 && routeDistanceTo(route, index) > along
       );
@@ -456,7 +471,7 @@ export class UnitSystem implements IGameSystem {
       hasSampler: this.sampler !== null,
       surface: (x, z, domain) => {
         const sample = this.surface(x, z, domain);
-        return { y: sample.y, water: sample.water };
+        return { y: sample.y, water: sample.water, land: sample.land };
       },
       random: Math.random,
     };
@@ -603,6 +618,7 @@ export class UnitSystem implements IGameSystem {
         if (sample && Number.isFinite(sample.y)) {
           result.y = sample.y;
           result.water = sample.water === true;
+          result.land = typeof sample.land === 'boolean' ? sample.land : !result.water;
           return result;
         }
       } catch {
@@ -611,6 +627,7 @@ export class UnitSystem implements IGameSystem {
     }
     result.y = domain === 'sea' ? UNIT_WATER_Y : 0;
     result.water = domain === 'sea';
+    result.land = domain !== 'sea';
     return result;
   }
 

@@ -21,11 +21,24 @@
 import type * as THREE from 'three';
 import type { LevelConfig, SceneDesignTokens, TerrainType } from '../LevelConfig';
 
-/** sampleSurface 的返回值：y 为世界表面高度（水域为水面高度），water 表示船只可航行 */
+/**
+ * sampleSurface 的返回值：
+ * - y：世界表面高度（水域为水面高度）
+ * - water：船只可航行（海上单位的放置 / 航行、雷达地图的水陆底图）
+ * - land：干地——地面明显高出水面且不是熔岩（地面单位的放置 / 行驶）。
+ *   浅滩（看得见水但不够船走）与熔岩既不是 water 也不是 land。
+ */
 export interface TerrainSurfaceSample {
   y: number;
   water: boolean;
+  land: boolean;
 }
+
+/**
+ * 干地的最低局部高度（米，相对水位）：worldscape 水面着色器在水深 ≥ -0.5 处绘制水面
+ * （water.ts：`if (vDepth < -0.5) discard`），所以地面要高出水位 0.5 米才看不见水。
+ */
+export const DRY_LAND_MIN_HEIGHT = 0.5;
 
 /**
  * 地表材质（命中特效 / 音效选型用）：与 ParticleSystem 的 SurfaceImpactType
@@ -75,6 +88,11 @@ export interface TerrainEnvironment {
   isWater(worldX: number, worldZ: number): boolean;
   /** (x, z) 处地表材质（可选；缺省时水面为 'water'，其余为 'rock'） */
   surfaceKindAt?(worldX: number, worldZ: number): TerrainSurfaceKind;
+  /**
+   * (x, z) 处是否为干地（地面单位可出生 / 行驶），见 TerrainSurfaceSample.land。
+   * 可选；缺省时按 environmentIsLand 的通用规则（材质不是水 / 熔岩，有水的环境还要高出水位 0.5 米）。
+   */
+  isLand?(worldX: number, worldZ: number): boolean;
   /** 每帧动画（可选）：elapsed 为关卡累计时间，focus 为玩家最近位置 */
   update?(deltaTime: number, elapsed: number, focus: THREE.Vector3): void;
   /** 移除 root 并释放全部 GPU 资源 */
@@ -86,9 +104,10 @@ export type TerrainEnvironmentFactory = () => TerrainEnvironment;
 
 /**
  * 把环境的高度/水面采样组合成 sampleSurface 语义：
- * - 可航行水面 → { y: waterY, water: true }
- * - 其余 → 固体表面高度；有水的环境中低于水位的浅滩被钳到水面（不可航行）
- * 输入或采样结果非有限值时回落到 waterY。
+ * - 可航行水面 → { y: waterY, water: true, land: false }
+ * - 其余 → 固体表面高度；有水的环境中低于水位的浅滩被钳到水面（不可航行）；
+ *   land 见 environmentIsLand
+ * 输入非有限值时返回 { y: waterY, water: false, land: false }；采样结果非有限值时 y 回落到 waterY。
  */
 export function sampleEnvironmentSurface(
   environment: TerrainEnvironment,
@@ -97,14 +116,48 @@ export function sampleEnvironmentSurface(
   waterY: number
 ): TerrainSurfaceSample {
   if (!Number.isFinite(worldX) || !Number.isFinite(worldZ)) {
-    return { y: waterY, water: false };
+    return { y: waterY, water: false, land: false };
   }
   if (environment.hasWater && environment.isWater(worldX, worldZ)) {
-    return { y: waterY, water: true };
+    return { y: waterY, water: true, land: false };
   }
   const ground = environment.sampleHeight(worldX, worldZ);
   const y = Number.isFinite(ground) ? ground : waterY;
-  return { y: environment.hasWater ? Math.max(y, waterY) : y, water: false };
+  return {
+    y: environment.hasWater ? Math.max(y, waterY) : y,
+    water: false,
+    land: environmentIsLand(environment, worldX, worldZ, waterY),
+  };
+}
+
+/**
+ * 环境干地判定：优先环境自身的 isLand；否则材质不是水 / 熔岩，
+ * 且有水的环境中固体表面至少高出水位 DRY_LAND_MIN_HEIGHT（看不见水）。
+ */
+export function environmentIsLand(
+  environment: TerrainEnvironment,
+  worldX: number,
+  worldZ: number,
+  waterY: number
+): boolean {
+  if (!Number.isFinite(worldX) || !Number.isFinite(worldZ)) {
+    return false;
+  }
+  if (environment.isLand) {
+    return environment.isLand(worldX, worldZ);
+  }
+  if (environment.hasWater && environment.isWater(worldX, worldZ)) {
+    return false;
+  }
+  const kind = environmentSurfaceKind(environment, worldX, worldZ);
+  if (kind === 'water' || kind === 'lava') {
+    return false;
+  }
+  if (!environment.hasWater) {
+    return true;
+  }
+  const ground = environment.sampleHeight(worldX, worldZ);
+  return Number.isFinite(ground) && ground >= waterY + DRY_LAND_MIN_HEIGHT;
 }
 
 /** 环境地表材质：优先环境自身的 surfaceKindAt，否则按可航行水面 / 岩石区分 */
