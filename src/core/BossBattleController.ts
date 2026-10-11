@@ -56,6 +56,21 @@ const NO_OBJECTS: Object3D[] = [];
 
 const DEG = Math.PI / 180;
 
+/**
+ * 伤害不进 Boss 主血量的部件（由各 Boss 网格在 userData 上标记）：第 7 关水雷（bossHazardTarget，
+ * 独立 30 血）、第 9 关诱饵（bossDecoy，一击即散）、第 10 关护盾塔（bossPylon，独立血量）与
+ * 护盾偏转体（bossDeflector，只播涟漪）。特殊武器把它们当独立目标结算。
+ */
+function isIndependentBossPart(part: Object3D): boolean {
+  const data = part.userData;
+  return (
+    data.bossHazardTarget === true ||
+    data.bossDecoy === true ||
+    data.bossPylon === true ||
+    data.bossDeflector === true
+  );
+}
+
 /** 玩家在战场边缘朝外飞、Boss 前方放不下时的提示（HUD 显示时按当前语言取值） */
 const RETURN_TO_ARENA_PROMPT: LocalizedText = {
   en: 'Return to the combat zone · Boss incoming',
@@ -1014,6 +1029,7 @@ export class BossBattleController {
       faction: Faction.ENEMY,
       kind: 'boss-part',
       hitRadius: getDeclaredHitRadius(part, 5),
+      independentOfBossHealth: isIndependentBossPart(part),
       isAlive: () =>
         this.currentBoss === boss &&
         boss.isAlive() &&

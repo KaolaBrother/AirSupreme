@@ -49,6 +49,12 @@ export interface CombatTarget {
   readonly kind: CombatTargetKind;
   /** 命中判定半径（米，世界坐标系） */
   readonly hitRadius: number;
+  /**
+   * 只对 'boss-part' 有意义：true 表示这个部件的伤害不进 Boss 主血量（水雷、护盾塔、护盾、诱饵），
+   * 特殊武器把它当独立目标结算——不参与“一次爆炸只结算 Boss 一个部件”，火箭也不乘 Boss 系数。
+   * 省略 = 普通 Boss 部件（伤害进 Boss 主血量）。
+   */
+  readonly independentOfBossHealth?: boolean;
   isAlive(): boolean;
   /** hitPoint 为命中点世界坐标（可选，用于命中特效贴近表面） */
   applyDamage(amount: number, source: DamageSource, hitPoint?: Vector3): void;

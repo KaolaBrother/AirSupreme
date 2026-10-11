@@ -744,6 +744,8 @@ function buildPylon(
   crystal.name = `oracle_pylon_crystal_${index}`;
   crystal.scale.set(0.95 * s, 2.7 * s, 0.95 * s);
   crystal.userData.hitRadius = 2.5 * s;
+  // 护盾塔有独立血量、不计入 Boss 血量：特殊武器把它当独立目标结算（见 BossBattleController）
+  crystal.userData.bossPylon = true;
   spinner.add(crystal);
   parts.push(crystal);
 
