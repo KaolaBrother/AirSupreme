@@ -365,6 +365,8 @@ export interface CombatTarget {
   readonly kind: CombatTargetKind;
   /** 命中判定半径（米，世界坐标系） */
   readonly hitRadius: number;
+  /** 只对 'boss-part'：true = 伤害不进 Boss 主血量（水雷、护盾塔、护盾、诱饵），按独立目标结算 */
+  readonly independentOfBossHealth?: boolean;
   isAlive(): boolean;
   applyDamage(amount: number, source: DamageSource, hitPoint?: Vector3): void;
   applyStun?(seconds: number): void;
@@ -1598,6 +1600,8 @@ export interface SpecialWeaponStats {
   radius: number; // EMP radius
 }
 export const SPECIAL_WEAPON_MAX_UPGRADE_LEVEL = 5;
+/** 火箭（伤害来源 'rocket'）按目标类型的系数：air ×0.5，进 Boss 主血量的部件 ×0.6，其余 ×1.0 */
+export const ROCKET_TARGET_DAMAGE_FACTORS: Readonly<{ air: number; boss: number }>; // { air: 0.5, boss: 0.6 }
 export const SPECIAL_WEAPON_CONFIGS: Record<SpecialWeaponId, SpecialWeaponConfig>;
 export function getSpecialWeaponStats(id: SpecialWeaponId, upgradeLevel: number): SpecialWeaponStats;
 export function clampWeaponUpgradeLevel(level: number): number;
@@ -1681,6 +1685,8 @@ export class WeaponSystem {
 ```
 
 Targeting: hits only damage `Faction.ENEMY` and `Faction.CIVILIAN` targets (civilian penalties are applied by the target wrappers); `FRIENDLY` and the player are never damaged. Swarm missiles auto-target `ENEMY` targets only, and only seekable ones: `TargetSnapshot.seekable` (from `isTargetSeekable`, true unless `isSeekable()` returns false) is checked by `acquireConeTargets` when a salvo is assigned and by the seeker when a swarm missile re-acquires — a cloaked enemy jet is skipped; the EMP, proximity fuzes and area damage ignore the flag. The EMP calls `applyStun?.(stunSeconds)` on every enemy target in radius and damages `kind === 'projectile'` targets and drones; `onEmpPulse` lets the coordinator stun units, destroy unit / boss missiles and decloak the Phantom Wing. Railgun releases below `RAILGUN_MIN_CHARGE` (`EnergyWeaponControllers.ts`) cancel through `onDryFire('railgun')`.
+
+Splash (`applySplashDamage`, `WeaponTargeting.ts`; rockets and swarm missiles): the direct hit takes full damage and other targets fall off linearly with surface distance to 40 % at the edge. Rocket damage, direct and splash, is then multiplied by `ROCKET_TARGET_DAMAGE_FACTORS` by target: `kind === 'air'` ×0.5, a `'boss-part'` that drains the boss's main pool ×0.6, everything else ×1.0. All main-pool boss parts share one health pool, so one detonation applies damage to only one of them: the highest amount, with ties going to the direct hit. The boss still applies its part and weak-point multipliers. Boss parts with `independentOfBossHealth: true` (Leviathan mines, Oracle pylons and shield proxy, Phantom decoys) are separate targets: no dedupe and no boss factor. The railgun's pierce does not use this rule.
 
 ## Flares
 
@@ -2044,7 +2050,7 @@ Bosses 6–10 — every class has the constructor `(mesh: THREE.Group, config: B
 | `PHANTOM_WING` | `PhantomWingAI` | `createPhantomWingMesh(config)` | `setGroundSampler`, `setDeathSequenceEnabled`, `isDying`, `applyEmpPulse(center, radius, seconds): boolean`, `isCloaked(): boolean`, `getCloakLevel(): number`, `getDecoyMeshes(): readonly THREE.Object3D[]`, `onEffectCue` (`PhantomWingCue`) |
 | `ORACLE_PRIME` | `OraclePrimeAI` | `createOraclePrimeMesh(config)` | `setGroundSampler`, `setDeathSequenceEnabled`, `isDying`, `getDeathProgress(): number`, `getStage(): OraclePrimeStage`, `getMusicIntensity(): number`, `onEffectCue` (`OraclePrimeCue`) |
 
-Shared extras: `setGroundSampler(sampler: (x: number, z: number) => number): void`, `setDeathSequenceEnabled(enabled: boolean): void` (the controller enables it; `onDestroy` then fires after the death sequence) and `isDying(): boolean`. Parts the lock-on skips carry `userData.bossDeflector` (Oracle's shield proxy) or `userData.bossHazardTarget` (Leviathan mines); Phantom decoys carry `userData.bossDecoy`. `AdvancedBossController` / `AdvancedBossInstance` (`src/core/boss/AdvancedBossController.ts`) and the spawn / cooldown / decoy helpers in `src/core/boss/AdvancedBossSupport.ts` (`resolveAdvancedBossSpawn`, `resolveLegacyBossSpawn`, `HazardCooldownTracker`, `BossFlareDecoyRedirector`, `mapOracleStageToCoreState`) implement the controller side.
+Shared extras: `setGroundSampler(sampler: (x: number, z: number) => number): void`, `setDeathSequenceEnabled(enabled: boolean): void` (the controller enables it; `onDestroy` then fires after the death sequence) and `isDying(): boolean`. Parts the lock-on skips carry `userData.bossDeflector` (Oracle's shield proxy) or `userData.bossHazardTarget` (Leviathan mines); Phantom decoys carry `userData.bossDecoy`; Oracle's pylon crystals carry `userData.bossPylon`. `BossBattleController` marks the special-weapon targets for all four flags with `independentOfBossHealth: true`, because their damage does not reach the boss's main health ([Special weapons](#special-weapons) splash rule). `AdvancedBossController` / `AdvancedBossInstance` (`src/core/boss/AdvancedBossController.ts`) and the spawn / cooldown / decoy helpers in `src/core/boss/AdvancedBossSupport.ts` (`resolveAdvancedBossSpawn`, `resolveLegacyBossSpawn`, `HazardCooldownTracker`, `BossFlareDecoyRedirector`, `mapOracleStageToCoreState`) implement the controller side.
 
 Boss missiles, flak and aim (`BossMissileSystem.ts`, `FlakCannonSystem.ts`, `BossAim.ts`, `AdvancedBossSupport.ts`):
 

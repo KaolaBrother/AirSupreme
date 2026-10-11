@@ -168,7 +168,7 @@ Special weapons unlock with the story and are fired with **F**; select one with 
 
 | Key | Weapon | Code | How it fires | Unlocks |
 | --- | ------ | ---- | ------------ | ------- |
-| 1 | 🚀 Cluster Rockets | `RKT` | press F: a salvo of unguided rockets that burst on impact, by proximity or at max range — splash damage against armoured columns | Chapter 2 |
+| 1 | 🚀 Cluster Rockets | `RKT` | press F: a salvo of unguided rockets that burst on impact, by proximity or at max range — splash damage against armoured columns and ships; half damage against aircraft, reduced against bosses | Chapter 2 |
 | 2 | 🔆 Pulse Laser | `LSR` | hold F: a continuous beam that burns the first target on the line; heat builds, and an overheat locks the laser until it has fully cooled | Chapter 4 |
 | 3 | 🐝 Swarm Missiles | `SWM` | press F: a volley of micro-missiles auto-assigned to different enemy targets in a forward cone — no lock needed | Chapter 6 |
 | 4 | ☄️ Railgun | `RLG` | hold F to charge, release to fire a slug that pierces every target on its line; more charge, more damage; releasing too early cancels without spending ammo | Chapter 7 |
