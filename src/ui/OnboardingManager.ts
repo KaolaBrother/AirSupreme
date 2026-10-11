@@ -229,8 +229,8 @@ export const FIRST_CONTACT_HINTS: Readonly<Partial<Record<EnemyType, LocalizedTe
     zh: '战斗机会咬你的尾巴，朝它转过去就能甩开。',
   },
   [EnemyType.SNIPER]: {
-    en: 'Red beam: a sniper is charging. When the beam freezes, change direction.',
-    zh: '红色光束是狙击机在蓄力，光束定住的瞬间立刻转向。',
+    en: 'Red beam: a sniper is charging. When the beam freezes, change direction. Missiles catch it.',
+    zh: '红色光束是狙击机在蓄力，光束定住的瞬间立刻转向。用导弹追它。',
   },
   [EnemyType.HEAVY]: {
     en: 'Gunships fire slow shell fans. Attack from the side or below, not from behind.',

@@ -15,6 +15,17 @@ export const JAMMER_TUNING = {
   BEHIND_MAX: 500,
   BEHIND_DISTANCE: 350,
   /**
+   * 站位点离玩家至多这么远（米，三维距离）：编队在远处（狙击机、打击机守在 380–700 米外）时，
+   * “身后 300–500 米”会出干扰半径，留在干扰半径内优先——站位点沿“玩家 → 站位点”连线收近，
+   * 它就贴在编队身后更近处，或与编队齐平
+   */
+  STATION_MAX_RANGE: 650,
+  /**
+   * 本机离玩家（水平）超过这个距离（米）时，先保证不再被拉远（见 holdRange）：在站位点上限与
+   * 干扰半径之间，留出一段让它照常追站位点
+   */
+  HOLD_RANGE: 750,
+  /**
    * 跟着站位点飞：编队中心与站位点的速度都取相邻两步之差、按 VELOCITY_SMOOTHING（秒）平滑；
    * 一步跳过 JUMP_SPEED（米/秒）以上算编队成员变了（击落 / 补位），不计入速度。想要的速度 =
    * 编队的速度 + 站位点随编队方位转动多出来的那部分 + 朝站位点的修正（每米 CLOSE_GAIN 米/秒，
@@ -44,7 +55,8 @@ const tmpTurn = new Vector3();
 
 /**
  * JAMMER — 电子战机：没有武器、飞得慢。始终躲在自己编队身后 300–500 米处，让编队挡在它和
- * 玩家之间；从不申请攻击令牌。干扰效果（玩家导弹锁定变慢）由 EnemySystem 按距离判定，
+ * 玩家之间；站位点离玩家不超过 STATION_MAX_RANGE（编队在远处时留在干扰半径内优先，贴近
+ * 编队或与之齐平）。从不申请攻击令牌。干扰效果（玩家导弹锁定变慢）由 EnemySystem 按距离判定，
  * 不在条令里。
  *
  * 阶段：trail（赶往 / 守在编队身后的站位点；站位点换到了玩家另一侧时绕着玩家兜过去）；
@@ -103,6 +115,8 @@ export class JammerDoctrine extends JetDoctrine {
     tmpAxis.normalize();
     this.smoothAxis(context.dt);
     tmpStation.copy(context.groupCenter).addScaledVector(tmpAxis, JAMMER_TUNING.BEHIND_DISTANCE);
+    // 站位点不出干扰半径：之后的绕行、速度跟随与高度都用收近后的站位点
+    clampToRange(tmpStation, context.playerPosition, JAMMER_TUNING.STATION_MAX_RANGE);
     this.trackVelocities(context.groupCenter, context.dt);
 
     // 站位点在玩家的另一侧（编队刚从玩家身边掠过）：绕着玩家兜过去，不从玩家身边直穿
@@ -131,10 +145,9 @@ export class JammerDoctrine extends JetDoctrine {
       tmpVelocity.z -= (dz / gap) * closing;
     }
     tmpTurn.subVectors(this.stationVelocity, this.groupVelocity);
-    tmpVelocity.addScaledVector(
-      tmpTurn,
-      followShare(tmpVelocity, tmpTurn, DOCTRINE_RULES.MAX_THROTTLE * context.baseSpeed)
-    );
+    const limit = DOCTRINE_RULES.MAX_THROTTLE * context.baseSpeed;
+    tmpVelocity.addScaledVector(tmpTurn, followShare(tmpVelocity, tmpTurn, limit));
+    holdRange(tmpVelocity, context, limit);
     const wanted = Math.hypot(tmpVelocity.x, tmpVelocity.z);
     const minSpeed = DOCTRINE_RULES.MIN_THROTTLE * context.baseSpeed;
     if (wanted >= minSpeed || gap > JAMMER_TUNING.ARRIVE_DISTANCE) {
@@ -187,6 +200,51 @@ export class JammerDoctrine extends JetDoctrine {
     this.lastStation.copy(tmpStation);
     this.hasLast = true;
   }
+}
+
+/** point 离 center 超过 range（三维距离）时，沿“center → point”连线把它收到 range 处 */
+function clampToRange(point: Vector3, center: Readonly<Vector3>, range: number): void {
+  const dx = point.x - center.x;
+  const dy = point.y - center.y;
+  const dz = point.z - center.z;
+  const distance = Math.hypot(dx, dy, dz);
+  if (!(distance > range)) return;
+  const scale = range / distance;
+  point.set(center.x + dx * scale, center.y + dy * scale, center.z + dz * scale);
+}
+
+/**
+ * 本机离玩家（水平）超过 HOLD_RANGE 时——落在站位点后面追不上，例如编队绕着快速直飞的玩家
+ * 转、站位点沿 650 米的圆甩到另一边——先保证不再被拉远：相对玩家的径向速度至少是向内的修正
+ * （和朝站位点的修正同一套 CLOSE_GAIN / CLOSE_SPEED），速率上限 limit 剩下的部分才给原来
+ * 想要的横向部分。velocity 为想要的水平速度，原地改写
+ */
+function holdRange(velocity: Vector3, context: DoctrineContext, limit: number): void {
+  const rx = context.position.x - context.playerPosition.x;
+  const rz = context.position.z - context.playerPosition.z;
+  const distance = Math.hypot(rx, rz);
+  const excess = distance - JAMMER_TUNING.HOLD_RANGE;
+  if (!(excess > 0)) return;
+  const ux = rx / distance;
+  const uz = rz / distance;
+  // 先按速率上限缩放，再看径向：缩放后向外漂才需要改
+  const speed = Math.hypot(velocity.x, velocity.z);
+  if (speed > limit) velocity.multiplyScalar(limit / speed);
+  const inward = Math.min(JAMMER_TUNING.CLOSE_SPEED, excess * JAMMER_TUNING.CLOSE_GAIN);
+  const maxRadial = context.playerVelocity.x * ux + context.playerVelocity.z * uz - inward;
+  const radial = velocity.x * ux + velocity.z * uz;
+  if (radial <= maxRadial) return;
+  let tx = velocity.x - radial * ux;
+  let tz = velocity.z - radial * uz;
+  const room = limit * limit - maxRadial * maxRadial;
+  const tangential = Math.hypot(tx, tz);
+  const allowed = room > 0 ? Math.sqrt(room) : 0;
+  if (tangential > allowed) {
+    tx *= allowed / tangential;
+    tz *= allowed / tangential;
+  }
+  velocity.x = maxRadial * ux + tx;
+  velocity.z = maxRadial * uz + tz;
 }
 
 /** 把 (point − last) / dt 并入平滑速度 velocity（水平）；一步跳得太远（编队成员变了）不计入 */
