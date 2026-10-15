@@ -7,5 +7,10 @@ coverage/
 .env.local
 kaola-workflow/.ledger/
 
-# 预告片 1080p 母版超过 GitHub 单文件 100 MB 上限，只在本地保留；仓库收录 720p 版
-trailer/*_1080p.mp4
+# 视频不进 Git（预告片等只在本地保留）
+*.mp4
+*.mov
+*.m4v
+*.webm
+*.mkv
+*.avi
