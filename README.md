@@ -663,7 +663,24 @@ Development builds log everything from `debug` up; every other build (production
 
 ## 📄 License
 
-MIT License
+**Source available · Free for non-commercial use · Commercial use requires the author's permission**\
+源码公开 · 非商业免费 · 商业使用须经作者授权
+
+AirSupreme is licensed under the [PolyForm Noncommercial License 1.0.0](LICENSE) (SPDX:
+`PolyForm-Noncommercial-1.0.0`). It is a source-available license, not an OSI-approved open-source
+license.
+
+- ✅ For any noncommercial purpose you may play, study, modify and share the game: personal use,
+  hobby projects, teaching, research, and use by charities, schools and public institutions.
+- ❌ Commercial use — for example selling the game or a modified version, or putting it in a paid
+  or monetized product or service — requires the author's permission. To ask for a commercial
+  license, contact [KaolaBrother](https://github.com/KaolaBrother) on GitHub or
+  [open an issue](https://github.com/KaolaBrother/AirSupreme/issues).
+- When you share the game or a modified version, include the [LICENSE](LICENSE) file: it holds the
+  license text and the `Required Notice:` copyright line.
+
+Third-party components (for example the packages under `node_modules/`, including three.js) keep
+their own licenses.
 
 ---
 

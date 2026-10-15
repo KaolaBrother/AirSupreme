@@ -672,7 +672,18 @@ log.error('错误');
 
 ## 📄 许可证
 
-MIT License
+**源码公开 · 非商业免费 · 商业使用须经作者授权**\
+Source available · Free for non-commercial use · Commercial use requires the author's permission
+
+AirSupreme 采用 [PolyForm Noncommercial License 1.0.0](LICENSE)（SPDX：`PolyForm-Noncommercial-1.0.0`）。
+这是源码公开（source-available）许可证，不属于 OSI 认定的开源许可证。
+
+- ✅ 非商业用途可以自由游玩、学习、修改与分享：个人使用、业余项目、教学、研究，以及慈善机构、学校与公共机构使用。
+- ❌ 任何商业用途——例如出售本游戏或其修改版，或把它放进收费、盈利的产品与服务——须事先获得作者授权。
+  需要商业授权请在 GitHub 上联系 [KaolaBrother](https://github.com/KaolaBrother)，或[提交 Issue](https://github.com/KaolaBrother/AirSupreme/issues)。
+- 分享本游戏或修改版时，请附上 [LICENSE](LICENSE) 文件：其中包含许可证全文与 `Required Notice:` 版权声明。
+
+第三方组件（例如 `node_modules/` 中的依赖，包括 three.js）仍适用各自的许可证。许可证以 LICENSE 中的英文原文为准。
 
 ---
 

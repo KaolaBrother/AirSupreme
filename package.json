@@ -20,8 +20,8 @@
     "flight",
     "combat"
   ],
-  "author": "",
-  "license": "MIT",
+  "author": "KaolaBrother (https://github.com/KaolaBrother)",
+  "license": "PolyForm-Noncommercial-1.0.0",
   "dependencies": {
     "three": "^0.160.0"
   },

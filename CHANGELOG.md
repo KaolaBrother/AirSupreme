@@ -4,6 +4,11 @@
 
 - Initialized Kaola-Workflow documentation structure.
 
+### 许可证改为 PolyForm Noncommercial 1.0.0，新增预告片
+
+- 许可证由 MIT 改为 PolyForm Noncommercial 1.0.0：源码公开，非商业用途（个人、业余、教学、研究、公益与公共机构）可以自由使用、修改与分享，任何商业用途须事先获得作者授权（通过 GitHub 联系 KaolaBrother）。新增 `LICENSE` 文件（许可证全文与 `Required Notice:` 版权声明），`package.json` 与中英文 README 同步更新；第三方组件仍适用各自的许可证
+- 新增 2 分 26 秒预告片 `trailer/AirSupreme_Trailer_720p.mp4`：全部为实机画面与游戏内音效，中英双语配音与双语字幕，几场 Boss 战，结尾留下最终 Boss 的神秘轮廓，并附仓库地址与许可证说明
+
 ### 安卓平板性能、切后台回来的声音、只在干地上的地面单位与集束火箭平衡（`workflow/android-tablet`）
 
 #### 声音
