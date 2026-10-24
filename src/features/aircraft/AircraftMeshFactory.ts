@@ -25,6 +25,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { Faction } from '@/core/Faction';
 import { EnemyType, ENEMY_CONFIGS } from '@/features/enemy/EnemyTypes';
+import { StaticBatcher } from '@/features/terrain/worldscape/staticBatch';
 
 type EnemyConfig = (typeof ENEMY_CONFIGS)[EnemyType];
 
@@ -1156,7 +1157,7 @@ export function updatePlayerAfterburner(
  * 创建玩家飞机模型 - F-22 风格五代战斗机
  * 旋成体融合机身、鸭蛋舱盖、菱形主翼、外倾双垂尾、二元矢量喷口
  */
-export function createPlayerMesh(): THREE.Group {
+export function createPlayerMesh(batchOpaqueParts = false): THREE.Group {
   const group = new THREE.Group();
 
   const bodyMaterial = createAircraftMaterial(0xe8e8e8, 0.82, 0.24, 0.02);
@@ -1504,7 +1505,47 @@ export function createPlayerMesh(): THREE.Group {
   // 玩家机机头朝 -Z，机尾在 +Z
   addNavigationLights(group, 1, playerSignalLights);
 
+  if (batchOpaqueParts) batchPlayerOpaqueParts(group);
+
   return group;
+}
+
+/**
+ * 对局玩家机的不透明静态零件在创建时合批；玻璃、信号灯、动态尾焰保持原对象。
+ * 只处理工厂已知的根直属、无命名、默认图层/绘制顺序零件，避免吞掉可独立驱动的对象。
+ * StaticBatcher 复制几何并修复镜像翼面的绕序；不释放仍被其他飞机复用的源资源。
+ */
+function batchPlayerOpaqueParts(group: THREE.Group): void {
+  const parts = group.children.filter(
+    (child): child is THREE.Mesh<THREE.BufferGeometry, THREE.Material> =>
+      child instanceof THREE.Mesh &&
+      !Array.isArray(child.material) &&
+      !child.material.transparent &&
+      child.children.length === 0 &&
+      child.name === '' &&
+      child.visible &&
+      child.layers.mask === 1 &&
+      child.renderOrder === 0 &&
+      child.castShadow &&
+      child.receiveShadow
+  );
+  const batcher = new StaticBatcher();
+  for (const part of parts) {
+    part.updateMatrix();
+    batcher.add(part.geometry, part.material, part.matrix, {
+      castShadow: part.castShadow,
+      receiveShadow: part.receiveShadow,
+    });
+  }
+  const output = new THREE.Group();
+  const merged = batcher.flush(output, 'playerOpaqueBatch');
+  // 合并失败时保留完整旧模型，不让部分零件消失。
+  if (merged.length !== new Set(parts.map((part) => part.material)).size) {
+    for (const mesh of merged) mesh.geometry.dispose();
+    return;
+  }
+  group.remove(...parts);
+  group.add(...merged);
 }
 
 // ---------------------------------------------------------------------------

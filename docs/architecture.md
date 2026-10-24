@@ -180,6 +180,16 @@ Save & Exit: every checkpoint write also records the run's _exit point_ (`{ kind
 
 Background save: the same checkpoint is also rewritten when the page is hidden or about to close, so a tab the browser discards in the background does not take the run with it. `GameCoordinator.setupBackgroundSave()` listens for `visibilitychange` and `pagehide` (released with the coordinator), `src/main.ts` calls `saveCampaignInBackground()` from `beforeunload` before disposing the game, and the coordinator forwards to `CampaignFlowController.saveInBackground()` once per hide. It writes where and when Save & Exit would — not in Boss mode, not before the first checkpoint, not after the campaign is complete or the run is over — shows nothing and changes nothing in the running game. Unlike Save & Exit it never stores fewer lives than the checkpoint already at that save point holds. Limits and details: [api.md → Campaign flow](api.md#campaign-flow).
 
+### Player model batching
+
+The gameplay player model is shared across every chapter. `GameCoordinator` passes
+`GameConfig.isAndroid` to `createPlayerMesh(batchOpaqueParts = false)`. The opt-in path reuses
+`StaticBatcher` for the player's static opaque parts, retaining material identity and mirrored
+geometry winding; glass, lights and animated exhaust remain separate. Apple and unknown platforms,
+plus menu model callers, keep the default model path. This changes neither camera modes nor quality
+settings. The owner waived physical-device UAT for this delivery; measured device performance and
+visual equivalence remain unverified, as recorded in Issue #15.
+
 ### Bosses
 
 All bosses satisfy `IBossCore`; bosses 6–10 also implement `IAdvancedBoss` (`src/features/boss/BossContracts.ts`). The controller creates and positions the mesh, adds it to the scene, then constructs the AI; it routes every hit through `takeDamageAt(part, rawDamage)` (the boss applies weak-point / armour multipliers and sub-target HP itself; a rocket or swarm detonation reaches at most one main-pool part, while parts with their own health — mines, pylons, decoys, the shield proxy — are flagged `independentOfBossHealth` and are hit separately, see [api.md → Special weapons](api.md#special-weapons)), calls `checkHazard(position, radius)` every frame for the player and each wingman with a ~0.6 s per-target cooldown, and maps `onSpawnMinion` kinds to enemy jets or unit drones. `onPhaseChange` → `presentation.onBossPhaseChange`, `onHazardWarning` → `presentation.flashWarning` (both labels are bilingual `HudText`), `onEffectCue` → `presentation.onBossCue` (sounds) plus camera shake for heavy cues. Oracle Prime spawns at the citadel core arena and drives the citadel's core state and the music intensity. Boss weapon damage — cannon / flak, missiles and the Octopus Warship's eye bolts — is scaled by the difficulty in `GameCoordinator.getAdjustedBossConfig` and handed to each weapon system ([api.md → Bosses](api.md#bosses)).

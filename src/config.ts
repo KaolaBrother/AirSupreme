@@ -38,6 +38,12 @@ export class GameConfig {
   private static readonly ADAPTIVE_PIXEL_RATIO_STEPS: readonly number[] = [1.25, 1];
 
   public static isMobile: boolean = this.detectMobile();
+  /** 仅明确的 Android/HarmonyOS UA 开启专属优化；Apple 与未知平台保持原路径。 */
+  public static readonly isAndroid: boolean =
+    typeof navigator !== 'undefined' &&
+    !/iPhone|iPad|iPod|Macintosh/i.test(navigator.userAgent) &&
+    !/Mac|iPhone|iPad|iPod/i.test(navigator.platform) &&
+    /Android|HarmonyOS/i.test(navigator.userAgent);
   /**
    * 平板级设备（运行时性能档：60 Hz 模拟、auto 画质像素比上限 1.5）：触控设备且设备屏幕短边
    * ≥ 600 CSS px；与 isMobile 一样只在启动时判定一次。没有布局代码读它。

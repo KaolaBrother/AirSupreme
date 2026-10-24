@@ -68,6 +68,7 @@ Source: `src/config.ts`, `src/FramePacer.ts`, `src/core/GameLoop.ts`, `src/ui/me
 ```typescript
 // GameConfig
 public static isMobile: boolean; // mobile UA, viewport 768 px wide or narrower, or 'ontouchstart'
+public static readonly isAndroid: boolean; // explicit Android/HarmonyOS UA, excluding Apple UA/platform
 /** 平板级设备（运行时性能档）：触控设备且设备屏幕短边 ≥ 600 CSS px；启动时判定一次，没有布局代码读它 */
 public static isTablet: boolean;
 public static getPixelRatio(): number; // min(devicePixelRatio, cap after adaptive resolution)

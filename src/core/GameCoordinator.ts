@@ -610,7 +610,7 @@ export class GameCoordinator {
     this.voiceSystem.setVolume(loadStartFlowSettings().voiceVolume);
     this.playerStats = new PlayerStats();
 
-    this.playerAircraft = createPlayerMesh();
+    this.playerAircraft = createPlayerMesh(GameConfig.isAndroid);
     this.gameScene.scene.add(this.playerAircraft);
     this.syncCameraInterpolationState();
 

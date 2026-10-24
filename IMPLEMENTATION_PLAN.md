@@ -1,6 +1,6 @@
 # AirSupreme - 持续实施计划
 
-最后更新: `2026-10-10`
+最后更新: `2026-10-24`
 状态: `进行中`
 用途: 这是当前项目后续开发的单一计划源。后续非 trivial 改动，应优先对齐这份文件，并在完成重要阶段后更新状态。
 
@@ -16,6 +16,17 @@
 - `[next]` 接下来 1-2 轮应优先处理
 - `[later]` 中期或后期处理
 - `[watch]` 已有结果，但需要持续验收或调参
+
+## Issue #15：Android/Huawei 全章节帧平滑度
+
+- [done] Yanlei 2026-10-24 授权 Host 承担主要诊断、设计和实现；后续明确批准合并 `workflow/issue-15` 到 main 并 push，跳过本次真机 UAT，不等待缺失的 Devin/Opus Fusion 复核。此授权不包含线上服务或部署配置变更。
+- [done] 全 1–10 章共用玩家模型入口；明确 Android/HarmonyOS 平台才启用静态不透明部件合批。iOS、未知平台和菜单保持原路径；不调整画质、DPR、帧率或相机。优先减轻 TP 提交开销，不降低 FP 性能拉平差距。
+- [done] Host 独占实现 `src/config.ts`、`src/core/GameCoordinator.ts`、`src/features/aircraft/AircraftMeshFactory.ts` 并集成文档；复用已有 StaticBatcher。模型从 96 个 Mesh 降至 26 个，透明部件仍为 17，三角形仍为 3732；这些是结构测量，不是设备 FPS 改善结论。
+- [done] 基线 `65ae78de00dd700813a24f5d9067df1bcd0cc9b0`；独立 Worker 提供准备与测量探针，Host 在 Worker 容量失败后完成 30 个桌面基线窗口、8 个开销窗口、GL 计数核对及长帧保留检查；临时服务及 Worker 已回收。
+- [done] 候选相同源码哈希的 `npx tsc --noEmit`、`npm run lint`、`npm run test:run`、`npm run build` 全通过：169 个测试文件、8072 测试通过、2 跳过。Host 最终源码核对确认 CameraRig 在模型创建后将整棵机体分配到外观层，FP 隐藏逻辑保持不变。复用有效结果，不重复全套测试。
+- [watch] 新增平台门控/玩家合批组合的独立行为测试尚未补齐；实现者未自写其测试。既有测试与 Host 源码核对支持本次发布判断，缺失覆盖保留在 #15，不再等待不可用 Worker 才合并。
+- [watch] 真机 FP/TP 性能及画面比较按 owner 本次决定跳过；Android/Huawei 实测收益和 iOS 实机无回退仍未验证，不把桌面或结构数据宣称为真机通过。
+- 文档：CHANGELOG、docs/architecture.md、docs/api.md 已同步；详细原始证据在 main `.kaola/run/android-smoothness/`，发布验收边界收录于 Workflow 归档。保留既有 main 缓存改动和其他工作区。
 
 ## 并行批次模板
 

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Android/HarmonyOS 对局中的玩家机静态不透明部件按材质合批，减少第三人称机体的绘制提交；所有章节共用此路径。玻璃、灯光、尾焰及画质设置保留。iOS、未知平台和菜单模型继续使用原模型路径。本次按 owner 授权跳过真机 UAT；设备性能收益及画面对照未实测。
+
 - Initialized Kaola-Workflow documentation structure.
 
 ### 许可证改为 PolyForm Noncommercial 1.0.0
